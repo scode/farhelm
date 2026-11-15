@@ -32,7 +32,7 @@ fn hosts() -> CollectionState {
 /// The helm's pinned host-list fixture's hosts at `positions`, in that order, as the hosts collection. The fixture's
 /// first three are host1 (connected), host2 (connecting) and host3 (unreachable); the eleventh, host11, is owned by a
 /// disposable environment.
-pub(super) fn fixture_hosts(positions: &[usize]) -> CollectionState {
+pub(crate) fn fixture_hosts(positions: &[usize]) -> CollectionState {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../farhelm-helm/http-contract/host-list.json"
     ))

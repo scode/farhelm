@@ -1,0 +1,371 @@
+//! The quick-launch dispatcher: what every template shortcut does once it knows which templates it names.
+//!
+//! SPEC.md, "Creation": "Quick launch", "Template number shortcuts" and "Quick-launch sequences" share one path, and
+//! "Keyboard focus" says what a launch's completion may do once the user has moved on. Ported from the old app's
+//! `quick_launch` in `list/view.rs`, `QuickLaunchOrigin` and `PartialTemplateBanner` in `launch_sequence.rs`, and the
+//! auto-launch and shortcut-batch parts of `list/create_form.rs`, at reference commit `24bc0580`. The old dispatcher's
+//! worker queue, press snapshots, opening generations, modal epochs and fresh template reads are not ported: GPUI hands
+//! each press over in order on one thread, templates and bindings come from the store the helm pushes, and the UI
+//! channel's ordering keeps a launch from overtaking a template save sent before it.
+//!
+//! Here's the TLDR. Every shortcut piece calls [`dispatch`] with its [`Origin`] and the [`Reference`]s it names, from
+//! the handler of the user's press, which is the answer the launch's completion counts from:
+//!
+//! - **Where the press lands.** In the session launcher, when it is the dialog holding the keyboard, the press applies
+//!   to its draft and leaves Launch to the user. On the page it launches or opens New. Under any other dialog or menu
+//!   it does nothing (SPEC.md: "Other visible dialogs keep the keyboard"), and while the launcher is busy (a quick
+//!   launch being prepared, a launch pending, a refused launch waiting behind its notice, a host change in flight) it is
+//!   taken and changes nothing.
+//! - **Resolving.** Each reference becomes the template the store holds under that name now. On the page, a ⚡ or number
+//!   key with nothing usable bound opens Templates with its hint, and a name the store no longer has opens New with a
+//!   refusal saying so; in the launcher both are refusals shown there, and nothing opens. While the helm reports its
+//!   templates unavailable, every press is refused with the old app's words for a failed read. Every refusal, a
+//!   sequence's included, is a [`Refusal`] routed by one function ([`refused`]).
+//! - **Applying.** The templates are applied all or nothing, through [`super::apply`], the only path by which a template
+//!   changes a draft, and always against the model catalog the launcher read: in the launcher to its draft, each press
+//!   or completed sequence its own refusal unit; on the page to New's prefill, in a launcher prepared out of sight
+//!   while its catalog read runs (`launcher::view::prepare_unseen`).
+//! - **Launching or showing** (the page). When the templates together supply what their launch kind needs (the shared
+//!   `stacked_quick_launch_eligible` fold), the draft is started without drawing the launcher, through its ordinary
+//!   submit path; otherwise New is shown with the draft and the banner the origin calls for ([`incomplete_banner`]). A
+//!   refusal shows New on its prefill saying why. From the submit on, the outcome is the launcher's: success opens the
+//!   session unless the user moved on, and a refusal brings the launcher back with its draft or offers it in a notice.
+//!   Nothing here watches the reply.
+//!
+//! The one read a press waits for is the catalog, and only on the page; presses that land in the launcher while its
+//! catalog read is out wait for it in order (`Launcher::apply_batch`). The templates and bindings are resolved at the
+//! press; the hosts, remembered wrapper prefixes and default folders they are applied against are read from the store
+//! when they apply, which for a press that waited is a frame or two later and fresher.
+//!
+//! NOTE: The number-key banner's six-second expiry (SPEC.md, "Template number shortcuts") is not built: it comes with
+//! the number keys, and until then every banner stays until the draft is edited.
+
+use farhelm_proto::launcher::{LaunchTemplate, stacked_quick_launch_eligible};
+use farhelm_proto::ui_channel::{Availability, Collection, HostView, PREFERENCES_KEY, Preferences};
+use gpui::{App, Entity, Window};
+
+use super::sequence::{self, Binding, Refusal};
+use super::shortcuts::Bindings;
+use super::summary::Part;
+use super::{SEQUENCE_PREFIX_NAME, apply};
+use crate::focus::Mark;
+use crate::host_text::{HostSentence, HostText};
+use crate::launcher::draft::{Catalog, LaunchDraft};
+use crate::launcher::view::{Launcher, Note, Prepared};
+use crate::launcher::{self, entry};
+use crate::{layers, local_state, session};
+
+/// Where a quick launch came from. It decides only the banner New shows when the templates cannot launch on their own:
+/// a number key's explains the sequence prefix, a sequence's speaks of the combined setup (it already used the prefix),
+/// and the rest say the template needs more choices (SPEC.md; the old `QuickLaunchOrigin::incomplete_banner`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// The ⚡ chord.
+    Mark,
+    /// A number key's chord.
+    NumberKey,
+    /// A quick-launch sequence's Enter.
+    Sequence,
+    /// A pick in the Cmd+J template list.
+    TemplateList,
+    /// The quick switcher's Quick launch row.
+    Switcher,
+}
+
+/// One template a quick launch names, in the order it applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reference {
+    /// The template holding ⚡, as the store says now.
+    Mark,
+    /// The template holding this number key, named by its digit as the bindings map spells it, as the store says now.
+    Key(String),
+    /// The template of exactly this name: a sequence's resolved word or captured binding, or a list's pick. A name the
+    /// store no longer has is refused rather than standing in for anything else.
+    Name(String),
+}
+
+/// Quick launch `references`, pressed from `origin`, in `window`: the module docs' path. Call it from the handler of the
+/// user's press (or a sequence's Enter, or a list's pick).
+pub fn dispatch(origin: Origin, references: &[Reference], window: &mut Window, cx: &mut App) {
+    if references.is_empty() || refused_unavailable(window, cx) {
+        return;
+    }
+    if let Some(launcher) = entry::open_launcher(window, cx) {
+        in_launcher(&launcher, references, window, cx);
+    } else if on_page(window, cx) {
+        on_the_page(origin, references, window, cx);
+    }
+}
+
+/// Show `refusal` where the shortcut was pressed, changing no draft: in the open launcher as its refusal with
+/// [`Refusal::launcher_sentence`] (SPEC.md: "A missing mark or failed read shows its refusal where `tl:` does, without
+/// opening Templates"); on the page, Templates with the binding hint when [`Refusal::hint`] names one, otherwise New
+/// on its prefill with "Not launched." and [`Refusal::sentence`]. Call it from the press's handler. Nothing happens
+/// where [`dispatch`] would do nothing.
+pub(super) fn refused(refusal: &Refusal, window: &mut Window, cx: &mut App) {
+    if let Some(launcher) = entry::open_launcher(window, cx) {
+        let sentence = sentence(LAUNCHER_REFUSAL, &refusal.launcher_sentence());
+        launcher.update(cx, |launcher, cx| {
+            launcher.apply_batch(move |_, _, _| Err(sentence), window, cx)
+        });
+    } else if on_page(window, cx) {
+        if let Some(hint) = refusal.hint() {
+            let mark = Mark::take(cx);
+            super::open_with_hint(hint, &mark, window, cx);
+        } else {
+            let note = Note::Refusal(not_launched(&refusal.sentence()));
+            if let Some(draft) = entry::new_prefill(cx) {
+                entry::open_with(draft, Some(note), window, cx);
+            }
+        }
+    }
+}
+
+/// Refuse a template shortcut because the helm reports its templates unavailable, if it does ([`refused`] with
+/// [`Refusal::Unavailable`]: the old app's "Couldn't load templates:" in the launcher and "Couldn't prepare quick
+/// launch:" on the page, with the helm's words). Returns whether it refused, which a sequence's Enter asks first, so
+/// that a word is never reported unknown only because the templates could not be read. Before the first snapshot the
+/// window is inert, and nothing is refused here.
+pub(super) fn refused_unavailable(window: &mut Window, cx: &mut App) -> bool {
+    let unavailable = session::current_store(cx).and_then(|store| {
+        match &store
+            .read(cx)
+            .collections()
+            .meta(Collection::Templates)?
+            .availability
+        {
+            Availability::Unavailable { error } => Some(error.clone()),
+            Availability::Available => None,
+        }
+    });
+    let Some(error) = unavailable else {
+        return false;
+    };
+    refused(&Refusal::Unavailable(error), window, cx);
+    true
+}
+
+/// The banner New shows when `templates`, applied for a quick launch from `origin`, do not make a launch on their own, in
+/// the old app's words. A number key and the ⚡ chord, Cmd+J and the switcher name their one template; a sequence speaks
+/// of the whole setup, however many templates it queued.
+pub fn incomplete_banner(origin: Origin, templates: &[LaunchTemplate]) -> Vec<Part> {
+    let name = || {
+        Part::Host(
+            templates
+                .first()
+                .map(|template| template.name.clone())
+                .unwrap_or_default(),
+        )
+    };
+    match origin {
+        Origin::Sequence => vec![Part::Words(
+            "This sequence doesn't make a complete setup; complete it below.".to_owned(),
+        )],
+        Origin::NumberKey => vec![
+            name(),
+            Part::Words(format!(
+                " cannot launch on its own. Use {SEQUENCE_PREFIX_NAME} to combine template keys, then Enter to \
+                 launch, or complete this setup below."
+            )),
+        ],
+        Origin::Mark | Origin::TemplateList | Origin::Switcher => vec![
+            name(),
+            Part::Words(" needs more choices before it can launch; complete it below.".to_owned()),
+        ],
+    }
+}
+
+/// The element ids of a refusal: one shown on New opened from the page, one shown in the open launcher.
+const PAGE_REFUSAL: &str = "quick-launch-refusal";
+const LAUNCHER_REFUSAL: &str = "launcher-shortcut-refusal";
+
+// ---- The page --------------------------------------------------------------------------------------------------------
+
+/// Whether a quick launch pressed now may act on the page: a UI session is connected, no dialog or menu keeps the
+/// keyboard, and the launcher is free ([`entry::quick_launch_available`]). A refused press is still taken by its
+/// handler; it only changes nothing.
+fn on_page(window: &Window, cx: &mut App) -> bool {
+    session::current_store(cx).is_some()
+        && !layers::focus_layer_open(window, cx)
+        && entry::quick_launch_available(cx)
+}
+
+/// The page's half of [`dispatch`]: resolve, then prepare New's prefill out of sight, apply once the catalog is read,
+/// and launch unseen or show New saying why not.
+fn on_the_page(origin: Origin, references: &[Reference], window: &mut Window, cx: &mut App) {
+    let templates = match resolve(references, &Bindings::current(cx), &stored_templates(cx)) {
+        Ok(templates) => templates,
+        Err(refusal) => return refused(&refusal, window, cx),
+    };
+    let Some(draft) = entry::new_prefill(cx) else {
+        return;
+    };
+    let launches = stacked_quick_launch_eligible(templates.iter().map(|template| &template.fields));
+    let finish = move |draft: &mut LaunchDraft, catalog: Catalog<'_>, cx: &App| {
+        match apply_from_store(draft, &templates, catalog, cx) {
+            // The draft is untouched: New shows its prefill.
+            Err(refusal) => Prepared::Show {
+                note: Note::Refusal(not_launched(&[Part::Host(refusal)])),
+                notice: None,
+            },
+            Ok(applied) if launches => Prepared::Launch {
+                notice: applied.notice.flatten(),
+            },
+            Ok(applied) => Prepared::Show {
+                note: Note::Banner(sentence(
+                    "quick-launch-banner",
+                    &incomplete_banner(origin, &templates),
+                )),
+                notice: applied.notice.flatten(),
+            },
+        }
+    };
+    launcher::view::prepare_unseen(draft, Mark::take(cx), finish, window, cx);
+}
+
+// ---- The open launcher -----------------------------------------------------------------------------------------------
+
+/// The launcher's half of [`dispatch`]: `references` applied to the open `launcher`'s draft as one batch, or refused
+/// there with the launcher's words, changing nothing (SPEC.md: "Consecutive presses apply in order; a refusal changes
+/// nothing from that press and does not discard a later press"). The references are resolved at the press; the
+/// templates are checked against the catalog the launcher has read, once it has, and the store as it is then.
+fn in_launcher(
+    launcher: &Entity<Launcher>,
+    references: &[Reference],
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let resolved = resolve(references, &Bindings::current(cx), &stored_templates(cx));
+    launcher.update(cx, |launcher, cx| {
+        launcher.apply_batch(
+            move |draft, catalog, cx| {
+                let templates = resolved
+                    .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &refusal.launcher_sentence()))?;
+                apply_from_store(draft, &templates, catalog, cx)
+                    .map(|applied| applied.notice)
+                    .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &[Part::Host(refusal)]))
+            },
+            window,
+            cx,
+        )
+    });
+}
+
+// ---- Resolving and applying ------------------------------------------------------------------------------------------
+
+/// The templates `references` name, in order, from `templates` (the store's) and `bindings` (the store's ⚡ mark and
+/// number keys), or why not, as the refusal a sequence would give.
+///
+/// A missing name wins over any unusable binding, as in the old dispatcher, which looked for one before falling back to
+/// the binding hint; among unusable bindings the first in order is reported, named alone when it was the whole batch. A
+/// ⚡ or key bound to a name no template has is as unusable as an unbound one: SPEC.md's "With no usable mark it opens
+/// Templates with an explanation". Names match exactly; a binding names one template, never a case variant of it.
+pub(super) fn resolve(
+    references: &[Reference],
+    bindings: &Bindings,
+    templates: &[LaunchTemplate],
+) -> Result<Vec<LaunchTemplate>, Refusal> {
+    let find = |name: &str| templates.iter().find(|template| template.name == name);
+    let mut unbound = None;
+    let mut found = Vec::with_capacity(references.len());
+    for reference in references {
+        let (bound, unusable) = match reference {
+            Reference::Name(name) => match find(name) {
+                Some(template) => {
+                    found.push(template.clone());
+                    continue;
+                }
+                None => return Err(Refusal::Missing(name.clone())),
+            },
+            Reference::Mark => (bindings.marked.as_deref(), sequence::Reference::Mark),
+            Reference::Key(key) => (
+                bindings.keys.get(key).map(String::as_str),
+                sequence::Reference::Key(key.clone()),
+            ),
+        };
+        match bound.and_then(find) {
+            Some(template) => found.push(template.clone()),
+            None => {
+                unbound.get_or_insert(unusable);
+            }
+        }
+    }
+    match unbound {
+        Some(reference) => Err(Refusal::Unbound(Binding {
+            reference,
+            alone: references.len() == 1,
+        })),
+        None => Ok(found),
+    }
+}
+
+/// Every template the store holds, in the helm's order; none without a UI session.
+fn stored_templates(cx: &App) -> Vec<LaunchTemplate> {
+    session::current_store(cx)
+        .map(|store| {
+            store
+                .read(cx)
+                .collections()
+                .ordered::<LaunchTemplate>()
+                .into_iter()
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Apply `templates` to `draft` with [`apply::apply`], against `catalog` and what the store holds now: the hosts, the
+/// remembered wrapper prefixes, and New's folder for a host a template switches to. All of them or, with its refusal
+/// sentence, none.
+fn apply_from_store(
+    draft: &mut LaunchDraft,
+    templates: &[LaunchTemplate],
+    catalog: Catalog<'_>,
+    cx: &App,
+) -> Result<apply::Applied, String> {
+    let Some(store) = session::current_store(cx) else {
+        // A reset retired the UI session, and the launcher this batch was for goes with it.
+        return Err("The window lost its connection to the helm".to_owned());
+    };
+    let collections = store.read(cx).collections();
+    let hosts: Vec<HostView> = collections
+        .ordered::<HostView>()
+        .into_iter()
+        .cloned()
+        .collect();
+    let remembered_wrappers = collections
+        .get::<Preferences>(PREFERENCES_KEY)
+        .map(|preferences| preferences.remembered_wrapper_prefixes.clone())
+        .unwrap_or_default();
+    let selected = local_state::selected(cx);
+    let default_folder = |host| entry::default_folder(collections, selected.as_deref(), host);
+    let context = apply::Context {
+        hosts: &hosts,
+        catalog,
+        remembered_wrappers: &remembered_wrappers,
+        default_folder: &default_folder,
+    };
+    apply::apply(draft, templates, &context)
+}
+
+/// `parts` as a host sentence under `id`: the app's words as words, template names, values and the helm's words as host
+/// text, so they are drawn escaped (an [`apply::apply`] refusal names its template, so it goes in as host text whole).
+fn sentence(id: &'static str, parts: &[Part]) -> HostSentence {
+    extended(HostSentence::new(id), parts)
+}
+
+/// A refusal shown on New opened from the page, "Not launched." first: the quick launch did not start.
+fn not_launched(parts: &[Part]) -> HostSentence {
+    extended(
+        HostSentence::new(PAGE_REFUSAL).text("Not launched. "),
+        parts,
+    )
+}
+
+/// `sentence` with `parts` appended, as [`sentence`] reads them.
+fn extended(sentence: HostSentence, parts: &[Part]) -> HostSentence {
+    parts.iter().fold(sentence, |sentence, part| match part {
+        Part::Words(words) => sentence.text(words.clone()),
+        Part::Host(text) | Part::Mono(text) => sentence.host(&HostText::from_host(text.clone())),
+    })
+}

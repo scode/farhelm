@@ -8011,62 +8011,92 @@ reader's skip-and-log policy.
 
 ### Launch templates
 
-Direct quick-launch shortcuts resolve their digit/bolt references from fresh preferences. A completed sequence first
-captures the names in its indicator's preference snapshot at Enter; an unbound reference stays unbound even if a later
-read finds a binding. Typed references retain the entered word, or Tab's full name, separately from exact-name
-references. The dispatcher resolves every typed reference against its fresh template read before resolving captured
-bindings, so an unknown or ambiguous word wins over an unbound key. Matching prefers case-sensitive exact, then unique
-Unicode-lowercase exact, then unique lowercase prefix; ambiguity reports every competitor in the winning tier. Existing
-exact-name references keep their missing-template refusal: a renamed or deleted captured binding cannot select a
-different template. Typed references, including Tab's completed spelling, still use the matching rules at Enter. Both
-paths resolve current template definitions as one all-or-none request. Dispatch takes a shared keyboard-context and
-modal-opening-epoch snapshot before and after that read check, so a dialog that appears during the read cannot receive
-its result after closing. It hands the captured definitions to ordinary New, replaying one through the existing
-template/search acceptance path per effect pass. A refusal stops the remaining replay. Automatic submission waits for a
-render after the final replay, so its captured readiness and refusal describe the resulting draft. A coarse fold over
-launch kind, agent and command decides whether to attempt direct launch; the mounted form retains full validation,
-catalog, host and admission authority. That fold lives in the protocol crate and also judges a single template for ⚡
-marking, its hints, and agent writes. Only the active kind counts: Agent needs an agent, Command a nonblank command, and
-omitted kind starts on Agent.
+In the GPUI app every template shortcut ends in one dispatcher (`templates/dispatch.rs`), given an origin (the ⚡ chord,
+a number key, a sequence, the Cmd+J list or the quick switcher) and an ordered list of references (the ⚡ mark, a number
+key, or an exact name). Direct shortcuts read the mark, the number keys and the templates from the store the helm
+pushes, at the press: every change reaches the store as the helm sees it, and a change this window makes is pushed
+before its reply, so the store is SPEC.md's fresh read. A completed sequence resolves through its own copy of the
+bindings, taken when the prefix was accepted, so an unbound reference stays unbound even if a binding has appeared
+since. Typed references keep the entered word, or Tab's full name, apart from exact-name references, and every typed
+word is resolved before any binding, so an unknown or ambiguous word wins over an unbound key. Matching prefers
+case-sensitive exact, then unique Unicode-lowercase exact, then unique lowercase prefix; ambiguity reports every
+competitor in the winning tier. An exact-name reference whose template is gone is refused: a renamed or deleted captured
+binding cannot select a different template. In the open launcher a press applies there (next paragraph). On the page it
+acts only while no dialog or menu holds the keyboard and the launcher is free (no quick launch being prepared, no launch
+pending, no refused launch waiting behind its notice, no host change in flight), and is otherwise taken without effect.
+While the helm reports its templates unavailable, every press is refused with the old app's words for a failed read:
+"Couldn't load templates:" in the open launcher and "Couldn't prepare quick launch:" on New opened from the page, each
+with the helm's words. A ⚡ or number key with no usable template opens Templates with its hint, and a missing exact
+name opens New with the refusal. Otherwise New's prefill (`launcher::entry::new_prefill`) goes into a launcher made out
+of sight and held in the launch slot as being prepared while it reads its model catalog
+(`launcher::view::prepare_unseen`); New, the template shortcuts and the sequence prefix treat the launcher as busy
+meanwhile, and the page's pointer input is not blocked. Once the read answers (a failed read leaves the catalog unread,
+as for a launcher opened by hand), the batch is applied to that draft through the one application path below, all or
+none, against the catalog, so a model-only template picks the one agent type that offers its model and a model the
+chosen agent type does not offer is refused; a refusal shows New on its prefill with it. A coarse fold over launch kind,
+agent and command (`stacked_quick_launch_eligible`) then decides whether to start the draft through the launcher's own
+submit path without drawing it or to show it with the origin's banner and the agent choices' notice the batch left; a
+New opened before any templates apply goes through `launcher::entry::open_with`, the same path as New's button, with its
+refusal; the launcher's check, catalog, host and admission keep their authority, and a draft its own check refuses is
+shown at once with that reason. That fold lives in the protocol crate and also judges a single template for ⚡ marking,
+its hints, and agent writes. Only the active kind counts: Agent needs an agent, Command a nonblank command, and omitted
+kind starts on Agent. A launcher started unseen is marked as a quick launch never shown until it is first drawn, which
+is the fact quick-launch naming reads; from the submit on, the outcome is the launcher's, and the dispatcher watches no
+reply. Templates and bindings are read from the store at the press, and the hosts, remembered wrapper prefixes and
+default folders when the batch applies; the catalog is the one read a press waits for; there is no snapshot of the
+keyboard context or of the modal epoch: GPUI handles presses in order on one thread, a shown launcher's moved-on rule
+decides whether a prepared launch opens anything, and the UI channel's ordering keeps a launch from overtaking a
+template save sent before it. A launcher prepared out of sight shown after the user moved on waits behind the launch
+notice, as a refused launch does.
 
-The same dispatch serializes fresh reads when shortcuts arrive in the visible session launcher, including restart mode.
-Each press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation
-and the shared modal context and epoch. The form validates the whole batch against one draft snapshot, then replays its
-templates synchronously through the draft owner's search acceptance operation and private template replay. A refusal
-drops only that batch before it changes the draft, leaving later presses queued. Shortcut batches do not enter the
-opening replay's loading or auto-submit predicates, and their acceptance keeps the query and focus in place. If a
-template unmounts the focused control, a deferred check restores the launcher's normal search target only while that
-same launcher is still the sole visible modal. Busy launch and template-save states consume and drop a press.
+While the session launcher is the dialog holding the keyboard (`launcher::entry::open_launcher`: a weak slot the
+launcher sets each time it is shown, checked against the layer stack's topmost layer that takes focus, never a downcast
+of the dialog's view), a press or a completed sequence applies to its draft instead and leaves Launch to the user
+(`Launcher::apply_batch`). Each is its own batch through the application path below, against the catalog the launcher
+has read, after which the launcher puts its text fields back in step with the draft; a batch that arrives while the
+launcher's catalog read is out waits in a plain ordered list and is applied when the read answers, or dropped if a press
+of Launch sends the draft first. A refusal changes nothing and is shown in the launcher's notices region as its own
+alert, at the top, above a press's reason, the helm's words or the YOLO question, none of which it hides, until the next
+press of Launch or edit, where the composer search's refusals will be once that search exists; a missing mark or an
+unbound key refuses there without opening Templates. Focus stays where it is, and a control the edits remove hands focus
+on through the focus coordinator, not yet to the search. While the YOLO question's host write is out a press changes
+nothing; a launch in flight hides the launcher, so a press then lands on the page and is taken without effect.
 
 In the GPUI app a sequence is one model with no GPUI types (`templates/sequence.rs`): the ordered references, the
 unfinished word and the sequence's own copy of the ⚡ mark and number keys, taken from the store when the prefix is
 accepted. The pill shows that copy and Enter resolves it, so the two cannot disagree and no press snapshot, hidden relay
 or generation fence is needed. The prefix is an action bound in the app's key context. A text field keeps the chord (on
 Linux through a `NoAction` row in GPUI Kit's input context, on a Mac through Kit's own Cut binding), a focused terminal
-hands it on as an app shortcut, and the prefix is refused while a dialog holds the keyboard, the launcher included until
-the launcher can say it is open. While armed, the actions module's key capture slot hands every key-down to the sequence
-ahead of the terminal, the bindings and the physical-key rows (`templates/armed.rs`): a printable character with nothing
-but Shift held, a bare main-row digit by physical key with the character it prints, the number and ⚡ chords, Space, Tab
-and Backspace feed the model; Escape and a second prefix cancel and are consumed; anything else, including a keypad
-digit and a key that types nothing (a dead key, a key mid-composition), cancels and goes on to its normal target. Held
-repeats of a sequence key are taken and add nothing. A press anywhere in the window (one window-wide listener), the
-window going inactive, a reset (the slot's reset callback) and, at the next key, a dialog that opened since the prefix
-also cancel. Input-method text that arrives without a key-down is not refused yet; that falls to the terminal's input
-handler. The pill is the layer manager's display-only pill, anchored to the main pane in every connected state and drawn
-by the component layer's sequence pill from the old stylesheet's amber tokens and halo, 9 pixels lower in the Mac window
-while a session is open. Its candidates read the store's template names on every draw; Tab and the candidates have none
-while the templates collection is unavailable, and Enter resolves against whatever the store holds. The old 200 ms
-entrance is not drawn, because GPUI's one-shot animations are banned in the GUI crates without a lint exception. Enter
-queues the word, ends the capture and resolves the model: an empty sequence opens nothing, an unbound reference outside
-the launcher opens Templates with its binding hint, and every other outcome waits for the quick-launch dispatcher.
+hands it on as an app shortcut, and the prefix is refused while a dialog other than the launcher holds the keyboard, and
+while the launcher is busy with a launch or a host change. Under the launcher it arms the launcher's form, whose pill
+says "apply" and sits at the bottom of the main area; the launcher's text fields keep the chord whatever their
+selection, since catching GPUI Kit's Cut for an unselected launcher field is not built. While armed, the actions
+module's key capture slot hands every key-down to the sequence ahead of the terminal, the bindings and the physical-key
+rows (`templates/armed.rs`): a printable character with nothing but Shift held, a bare main-row digit by physical key
+with the character it prints, the number and ⚡ chords, Space, Tab and Backspace feed the model; Escape and a second
+prefix cancel and are consumed; anything else, including a keypad digit and a key that types nothing (a dead key, a key
+mid-composition), cancels and goes on to its normal target. Held repeats of a sequence key are taken and add nothing. A
+press anywhere in the window (one window-wide listener), the window going inactive, a reset (the slot's reset callback)
+and, at the next key, a dialog that opened since the prefix also cancel. Input-method text that arrives without a
+key-down is not refused yet; that falls to the terminal's input handler. The pill is the layer manager's display-only
+pill, anchored to the main pane in every connected state and drawn by the component layer's sequence pill from the old
+stylesheet's amber tokens and halo, 9 pixels lower in the Mac window while a session is open. Its candidates read the
+store's template names on every draw; Tab and the candidates have none while the templates collection is unavailable,
+and Enter resolves against whatever the store holds. The old 200 ms entrance is not drawn, because GPUI's one-shot
+animations are banned in the GUI crates without a lint exception. Enter queues the word, ends the capture and resolves
+the model: an empty sequence opens nothing, an unbound reference outside the launcher opens Templates with its binding
+hint, any other refusal opens New with its sentence, and resolved names go to the dispatcher with the sequence origin;
+in the launcher every refusal, an unbound key's included, is shown there with its launcher wording.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
 passes a number-key banner to New for a prominent alert explaining the prefix. Dispatch carries an explicit origin:
 number key, bolt chord, template list, quick switcher, or sequence. Incomplete bolt/list/switcher choices instead say
-the template needs more choices; any incomplete sequence says its combined setup is incomplete. The form starts one
-component-owned six-second expiry only after initial application finishes, so a slow catalog read cannot spend the
-viewing interval. Form input, changes and deliberate search choices dismiss the hint; Clone/Replace reseeding withdraws
-it. Nothing stores the hint or changes launch admission.
+the template needs more choices; any incomplete sequence says its combined setup is incomplete
+(`templates::dispatch::incomplete_banner`). New opens with it, or with a quick launch's refusal, as a field the launcher
+draws at the top of its notices region (`launcher::view::Note`: the banner in the old banner's look, the refusal as its
+own refusal alert with "Not launched." first) until the draft is next edited. The number-key banner's one six-second
+expiry, started only once application has finished so that a slow catalog read cannot spend the viewing interval, comes
+with the number keys; until then every banner stays until an edit. Nothing stores the hint or changes launch admission.
 
 A template is stored by the helm in `helm.db` (schema 38, table `launch_templates`): its unique name, and its fields as
 the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because
