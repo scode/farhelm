@@ -1086,7 +1086,8 @@ async fn changes_of(ws: &mut WsTestClient, collection: Collection) -> Collection
 /// routes serve it: the session rows decode as the proto type under their
 /// served ids, hosts are keyed by registry id, preferences and the
 /// announcement queue are one entry each, and the empty lists (approvals,
-/// templates, notices, host progress) are available, empty collections.
+/// templates, notices, host progress, recipes and their places) are
+/// available, empty collections.
 #[farhelm_testtrace::test]
 async fn the_snapshot_on_open_holds_every_collection_as_served() {
     let mut harness = rest_harness::helm_listing(vec![
@@ -1111,6 +1112,8 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
             Collection::Notices,
             Collection::Announcements,
             Collection::HostProgress,
+            Collection::Recipes,
+            Collection::RecipePlaces,
         ]
     );
     let sessions = &collections[0];
@@ -1141,7 +1144,7 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
     let local = rest_harness::local_id(&harness.store).await;
     assert_eq!(collections[1].meta.order, [local.to_string()]);
     assert_eq!(collections[2].meta.order, [PREFERENCES_KEY]);
-    for empty in [3, 4, 5, 7] {
+    for empty in [3, 4, 5, 7, 8, 9] {
         assert_eq!(
             collections[empty].meta.availability,
             Availability::Available,
@@ -1582,6 +1585,192 @@ async fn a_container_check_reaches_the_connected_ui_when_it_starts_and_when_it_e
         [["uname", "-s"]],
         "the check ran only its first command"
     );
+}
+
+/// Stand-in commands for the helm's Podman check that record every command
+/// and refuse it, so a test can show that nothing it did started a check.
+#[derive(Default)]
+struct RecordedPlaceCommands {
+    seen: std::sync::Mutex<Vec<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl crate::environment::podman_probe::PlaceCommands for RecordedPlaceCommands {
+    async fn run(
+        &self,
+        _route: &crate::access::BaseRoute,
+        argv: &[String],
+    ) -> anyhow::Result<String> {
+        self.seen.lock().unwrap().push(argv.to_vec());
+        anyhow::bail!("this test runs no Podman check")
+    }
+}
+
+/// A helm as production assembles its recipe places (the production Podman
+/// provider over the helm's own check cache, here with recorded commands),
+/// holding recipe `dev`, with the local host's actor settled first so no
+/// connection change bumps the feed meanwhile, and a GUI channel past its
+/// snapshot, which is returned with the rest.
+async fn recipes_helm() -> (
+    rest_harness::Harness,
+    Arc<RecordedPlaceCommands>,
+    crate::store::HostId,
+    WsTestClient,
+    Vec<CollectionState>,
+) {
+    let commands = Arc::new(RecordedPlaceCommands::default());
+    let mut harness = rest_harness::FleetBuilder::new()
+        .await
+        .place_commands(commands.clone())
+        .production_podman()
+        .start()
+        .await;
+    crate::tensorlake::recipes::tests_support::create(&harness.store, "dev").await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness
+        .await_state(local, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    (harness, commands, local, ws, collections)
+}
+
+/// The entry filed under `key` among `entries`, decoded as the GUI decodes it.
+fn entry_of<T: serde::de::DeserializeOwned>(entries: &[KeyedEntry], key: &str) -> T {
+    let entry = entries
+        .iter()
+        .find(|entry| entry.key == key)
+        .unwrap_or_else(|| panic!("{key} is among the entries sent: {entries:?}"));
+    serde_json::from_value(entry.value.clone()).expect("the entry decodes as its proto type")
+}
+
+/// The snapshot's entries of `collection`.
+fn snapshot_entries(collections: &[CollectionState], collection: Collection) -> &[KeyedEntry] {
+    &collections
+        .iter()
+        .find(|state| state.collection == collection)
+        .unwrap_or_else(|| panic!("{collection:?} is in the snapshot"))
+        .entries
+}
+
+/// Settings → Recipes follows each place's build, which takes minutes, and
+/// the recipe places list used to be a query, so a connected GUI saw a step
+/// only when it read the list again. The list is now pushed, and a place job
+/// bumps the feed at each change its entry shows.
+///
+/// Specified, with the job started outside the channel through the shared
+/// build registry (so only feed bumps can bring its changes) and its work
+/// held between changes: the snapshot lists recipe `dev` at the local host,
+/// not building; admitting the job pushes that entry building with no step;
+/// the work's step (published as a real image build publishes it) pushes the
+/// step; the job's end pushes the entry neither building nor with a step.
+/// Each bump comes once the state it announces is in place: seen from inside
+/// each bump, the job is admitted at the first two and gone at the last. The
+/// channel cannot see that order (no await point separates removing the job
+/// from announcing it), so the bump observer is what pins it.
+#[farhelm_testtrace::test]
+async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
+    use farhelm_proto::{Place, RecipePlaceView};
+    let (harness, _commands, local, mut ws, collections) = recipes_helm().await;
+    let key = RecipePlaceView::key("dev", Place::PodmanHost(local));
+    let before: RecipePlaceView = entry_of(
+        snapshot_entries(&collections, Collection::RecipePlaces),
+        &key,
+    );
+    assert!(
+        !before.building && before.step.is_none(),
+        "premise: {before:?}"
+    );
+
+    let builds = Arc::clone(harness.state.recipe_builds());
+    let events = Arc::clone(harness.manager.events());
+    let at_bumps = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (observed, record) = (Arc::clone(&builds), Arc::clone(&at_bumps));
+    events.observe_bumps(move || {
+        let admitted = observed.podman_job_active("dev", local);
+        record.lock().unwrap().push(admitted);
+    });
+    let (step, finish) = (
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+    let (step_gate, finish_gate, steps) = (step.clone(), finish.clone(), events.clone());
+    builds
+        .start_podman("dev", local, true, events, move |progress, _| async move {
+            step_gate.notified().await;
+            crate::environment::podman::enter_build_step(&progress, &steps, "Installing packages");
+            finish_gate.notified().await;
+            anyhow::bail!("the test ends the job here")
+        })
+        .expect("the job is admitted");
+
+    let admitted: RecipePlaceView = entry_of(
+        &changes_of(&mut ws, Collection::RecipePlaces).await.upsert,
+        &key,
+    );
+    assert!(admitted.building && admitted.step.is_none(), "{admitted:?}");
+    step.notify_one();
+    let stepped: RecipePlaceView = entry_of(
+        &changes_of(&mut ws, Collection::RecipePlaces).await.upsert,
+        &key,
+    );
+    assert!(stepped.building, "{stepped:?}");
+    assert_eq!(stepped.step.as_deref(), Some("Installing packages"));
+    finish.notify_one();
+    let ended: RecipePlaceView = entry_of(
+        &changes_of(&mut ws, Collection::RecipePlaces).await.upsert,
+        &key,
+    );
+    assert!(!ended.building && ended.step.is_none(), "{ended:?}");
+    assert_eq!(
+        *at_bumps.lock().unwrap(),
+        [true, true, false],
+        "each bump shows the state it announces"
+    );
+}
+
+/// The recipe catalog is pushed too, so an edit made outside the channel
+/// reaches a connected GUI through the save's feed bump. And re-reading
+/// either recipe collection must start nothing: it runs after every bump,
+/// and the launcher's place list (`/api/environment-places`) is not pushed
+/// precisely because reading it starts Podman checks.
+///
+/// Specified: the snapshot holds `dev` with its two packages; a save outside
+/// the channel pushes `dev` with the saved package list; and after the
+/// snapshot's and that push's reads, the local host's Podman check is neither
+/// running nor recorded, no check command ran, and no build or place job is
+/// admitted for the recipe.
+#[farhelm_testtrace::test]
+async fn a_recipe_edit_reaches_the_connected_ui_and_the_reads_start_nothing() {
+    use farhelm_proto::recipes::RecipeView;
+    let (harness, commands, local, mut ws, collections) = recipes_helm().await;
+    let before: RecipeView = entry_of(snapshot_entries(&collections, Collection::Recipes), "dev");
+    assert_eq!(before.packages, ["git", "ripgrep"], "premise");
+
+    let mut save = crate::tensorlake::recipes::tests_support::save();
+    save.packages.push("jq".into());
+    let body = serde_json::to_value(&save).unwrap();
+    let status = http(&harness, "PUT", "/api/tensorlake/recipes/dev", body).await;
+    assert_eq!(status, StatusCode::OK);
+    let edited: RecipeView = entry_of(
+        &changes_of(&mut ws, Collection::Recipes).await.upsert,
+        "dev",
+    );
+    assert_eq!(edited.packages, ["git", "ripgrep", "jq"]);
+
+    let hosts = harness.store.list_hosts().await.unwrap();
+    let row = hosts.iter().find(|row| row.id == local).unwrap();
+    let check = harness.state.podman_places.view(row).unwrap();
+    assert!(!check.refreshing && check.checked_at.is_none(), "{check:?}");
+    assert!(
+        commands.seen.lock().unwrap().is_empty(),
+        "no check command ran"
+    );
+    let builds = harness.state.recipe_builds();
+    assert!(!builds.is_building("dev") && !builds.podman_job_active("dev", local));
 }
 
 /// A preference write sent as a command comes back as a change to the
@@ -2370,4 +2559,14 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
     let runs = served(&harness, "/api/provisioning").await;
     let run: farhelm_proto::provisioning::ProvisioningView = round_trip(&runs["runs"][0]);
     assert_eq!(run.host_id, host);
+
+    // This helm has only the Tensorlake provider, so `dev`'s one place is the
+    // Tensorlake account, unusable without a key: its reason is set.
+    crate::tensorlake::recipes::tests_support::create(&harness.store, "dev").await;
+    let recipes = served(&harness, "/api/tensorlake/recipes").await;
+    let recipe: farhelm_proto::recipes::RecipeView = round_trip(&recipes["recipes"][0]);
+    assert_eq!(recipe.name, "dev");
+    let places = served(&harness, "/api/recipe-places").await;
+    let place: farhelm_proto::RecipePlaceView = round_trip(&places[0]);
+    assert!(place.reason.is_some(), "{place:?}");
 }

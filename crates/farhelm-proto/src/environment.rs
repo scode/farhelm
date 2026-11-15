@@ -53,6 +53,15 @@ impl Place {
             Self::PodmanHost(_) => ProviderKind::Podman,
         }
     }
+    /// The place's part of a pushed entry's key ([`RecipePlaceView::key`]):
+    /// the wire `kind`, then the host id for a host-backed place. Distinct per
+    /// place, and free of `:` apart from the separator before a host id.
+    pub fn key(self) -> String {
+        match self {
+            Self::TensorlakeAccount => "tensorlake_account".to_owned(),
+            Self::PodmanHost(host) => format!("podman_host:{host}"),
+        }
+    }
 }
 
 /// Whether a failed status read leaves the connection path worth trying.
@@ -128,6 +137,16 @@ pub struct RecipePlaceView {
     pub prepared_at: Option<i64>,
     pub step: Option<String>,
     pub cleanup_pending: bool,
+}
+
+impl RecipePlaceView {
+    /// The key the recipe places collection files this entry under (see
+    /// `ui_channel::Collection::RecipePlaces`): the recipe's name, `:`, then
+    /// [`Place::key`]. A recipe name never holds a `:` (`check_recipe_name`),
+    /// so two (recipe, place) pairs never share a key.
+    pub fn key(recipe: &str, place: Place) -> String {
+        format!("{recipe}:{}", place.key())
+    }
 }
 
 /// Cached availability is safe to display while background probes settle.

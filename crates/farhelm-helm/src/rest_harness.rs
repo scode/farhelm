@@ -1153,6 +1153,9 @@ pub(crate) struct FleetBuilder {
     /// The commands the helm's Podman check runs, when a test scripts them;
     /// `None` keeps the production commands.
     place_commands: Option<Arc<dyn crate::environment::podman_probe::PlaceCommands>>,
+    /// Fill the providers' Podman slot with the production provider
+    /// ([`Self::production_podman`]).
+    production_podman: bool,
 }
 
 impl FleetBuilder {
@@ -1208,6 +1211,20 @@ impl FleetBuilder {
         self.place_commands = Some(commands);
         self
     }
+    /// Put a production Podman provider in the providers' Podman slot, the
+    /// one actors, lifecycle dispatch and the recipe and environment place
+    /// lists ask, built over this helm's own store, place cache (scripted by
+    /// [`Self::place_commands`], if set), credential delivery, recipe registry
+    /// and environment installer. So recipe places list the container-capable
+    /// hosts as they do in production. Only that slot is filled: the helm
+    /// state's own Podman handle (`AppState::podman`, behind the Containers
+    /// routes) stays unset. It cannot be combined with [`Self::podman`], which
+    /// fills the same slot; `start` refuses the pair. A test that never builds
+    /// lets it run no command.
+    pub(crate) fn production_podman(mut self) -> Self {
+        self.production_podman = true;
+        self
+    }
     /// A fresh helm.db with only its reserved local row, and a local host
     /// scripted UNREACHABLE.
     ///
@@ -1250,6 +1267,7 @@ impl FleetBuilder {
             sandboxes: None,
             podman: None,
             place_commands: None,
+            production_podman: false,
         }
     }
 
@@ -1397,8 +1415,22 @@ impl FleetBuilder {
         } else {
             crate::environment::Providers::with_tensorlake(Arc::new(tensorlake.clone()))
         };
+        let had_podman = self.podman.is_some();
         if let Some(podman) = self.podman {
             providers.set_test_podman(podman);
+        }
+        if self.production_podman {
+            assert!(
+                !had_podman,
+                "production_podman() and podman(..) fill the same slot; pick one"
+            );
+            providers.set_test_podman(Arc::new(crate::environment::podman::Podman::new(
+                self.store.clone(),
+                sources.delivery.places(),
+                Arc::clone(&sources.delivery),
+                Arc::clone(tensorlake.builds()),
+                sources.environment_preparer(&state_dir),
+            )));
         }
         let manager = if let Some(client) = self.ntfy_client {
             ConnectionManager::start_with_ntfy_and_providers(

@@ -17,6 +17,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 mod build;
+/// A job's step entry, for tests that drive a place job's progress through
+/// the same publication a real build uses.
+#[cfg(test)]
+pub(crate) use build::enter as enter_build_step;
 
 #[cfg(test)]
 // The command model is shared with provisioning's private fixture assembly.
@@ -1015,14 +1019,18 @@ impl EnvironmentProvider for Podman {
         );
         let owner = self.clone();
         let recipe_name = name.to_owned();
-        self.0
-            .builds
-            .start_podman(name, place, true, move |progress, cancel| async move {
+        self.0.builds.start_podman(
+            name,
+            place,
+            true,
+            Arc::clone(&events),
+            move |progress, cancel| async move {
                 owner.0.places.fresh(&owner.0.store, place).await?;
                 owner
                     .prepare_images(&recipe_name, &recipe, place, progress, events, cancel, true)
                     .await
-            })?;
+            },
+        )?;
         Ok(())
     }
 
@@ -1085,6 +1093,7 @@ impl EnvironmentProvider for Podman {
                     name,
                     place,
                     false,
+                    Arc::clone(&events),
                     move |view, cancel| async move {
                         owner
                             .prepare_images(

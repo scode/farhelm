@@ -208,10 +208,13 @@ pub(crate) struct Projected {
 /// rule those enforce (staleness marking, owner routing, the listing cap)
 /// holds here too. Every one of them reads helm-local state (the store, the
 /// manager's snapshots, in-memory approvals, the provisioning service's
-/// in-memory runs, whose lock no holder keeps across host I/O) and never
-/// waits on a host, so
-/// the snapshot sent when a channel opens never waits on one either. A
-/// collection added here must keep that true.
+/// in-memory runs and the recipe build registry, whose locks no holder keeps
+/// across host I/O, and the Podman check's cache) and never waits on a host,
+/// so the snapshot sent when a channel opens never waits on one either. A
+/// collection added here must keep that true, and its read must start
+/// nothing: it runs after every bump, so a read that schedules work (as
+/// `/api/environment-places` schedules Podman checks) would start it over and
+/// over.
 #[derive(Clone, Copy)]
 pub(crate) struct CollectionSpec {
     pub(crate) collection: Collection,
@@ -287,7 +290,48 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
             split: |body| split_keyed_array(body, "runs", "host_id"),
             selected: None,
         },
+        // Both recipe reads are pure projections of the store and the build
+        // registry: unlike `/api/environment-places`, neither starts a Podman
+        // check, so re-reading them on every bump starts nothing.
+        CollectionSpec {
+            collection: Collection::Recipes,
+            path: |_| "/api/tensorlake/recipes".to_string(),
+            split: |body| split_keyed_array(body, "recipes", "name"),
+            selected: None,
+        },
+        CollectionSpec {
+            collection: Collection::RecipePlaces,
+            path: |_| "/api/recipe-places".to_string(),
+            split: split_recipe_places,
+            selected: None,
+        },
     ]
+}
+
+/// `GET /api/recipe-places`, a bare array rather than an object, keyed by
+/// recipe and place. The key comes from the decoded entry through the proto's
+/// own spelling ([`farhelm_proto::RecipePlaceView::key`]) so the GUI can look
+/// an entry up by the same pair; the entry itself travels as served.
+fn split_recipe_places(body: Value) -> Result<Projected, String> {
+    let Value::Array(items) = body else {
+        return Err("expected an array of recipe places".to_string());
+    };
+    let entries = items
+        .into_iter()
+        .map(|item| {
+            let view: farhelm_proto::RecipePlaceView = serde_json::from_value(item.clone())
+                .map_err(|error| format!("a recipe place does not decode: {error}"))?;
+            Ok((
+                farhelm_proto::RecipePlaceView::key(&view.recipe, view.place),
+                item,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(Projected {
+        entries,
+        counts: None,
+        selected_outside_query: None,
+    })
 }
 
 /// `GET /api/sessions` with this channel's query. Absent fields are left out,

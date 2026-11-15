@@ -430,7 +430,11 @@ pub(super) fn proxy_exports(values: &BTreeMap<String, String>) -> String {
 }
 
 /// Retain one bounded named step; package and installer captures stay private.
-fn enter(progress: &tokio::sync::watch::Sender<PodmanProgress>, events: &FleetEvents, line: &str) {
+pub(crate) fn enter(
+    progress: &tokio::sync::watch::Sender<PodmanProgress>,
+    events: &FleetEvents,
+    line: &str,
+) {
     progress.send_modify(|view| view.line = crate::manager::diagnostic_excerpt(line, 2000));
     events.bump();
 }
