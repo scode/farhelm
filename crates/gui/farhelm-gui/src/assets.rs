@@ -175,6 +175,10 @@ pub enum Icon {
     /// Two links of a chain: a tunnel from this Mac to a remote host's loopback (the old app's Tunnel glyph, on its
     /// open-tunnels pill and the tunnel warning).
     Tunnel,
+    /// A magnifier with a minus: smaller terminal text (the old app's ZoomOut glyph, on its text size group).
+    ZoomOut,
+    /// A magnifier with a plus: larger terminal text (the old app's ZoomIn glyph).
+    ZoomIn,
     /// An eye: mark a session's latest output as seen, or as unseen again (the old app's mark-seen glyph, on its Mark
     /// read and Mark unread command).
     MarkSeen,
@@ -315,6 +319,8 @@ impl Icon {
         Icon::HostLaptop,
         Icon::ChevronDown,
         Icon::Tunnel,
+        Icon::ZoomOut,
+        Icon::ZoomIn,
         Icon::MarkSeen,
         Icon::Settings,
         Icon::Sessions,
@@ -395,6 +401,8 @@ impl Icon {
             Icon::HostLaptop => "icons/host-laptop.svg",
             Icon::ChevronDown => "icons/chevron-down.svg",
             Icon::Tunnel => "icons/tunnel.svg",
+            Icon::ZoomOut => "icons/zoom-out.svg",
+            Icon::ZoomIn => "icons/zoom-in.svg",
             Icon::MarkSeen => "icons/mark-seen.svg",
             Icon::Settings => "icons/settings.svg",
             Icon::Sessions => "icons/sessions.svg",
@@ -490,6 +498,8 @@ impl Assets {
             "icons/host-laptop.svg" => Some(include_bytes!("../assets/icons/host-laptop.svg")),
             "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
             "icons/tunnel.svg" => Some(include_bytes!("../assets/icons/tunnel.svg")),
+            "icons/zoom-out.svg" => Some(include_bytes!("../assets/icons/zoom-out.svg")),
+            "icons/zoom-in.svg" => Some(include_bytes!("../assets/icons/zoom-in.svg")),
             "icons/mark-seen.svg" => Some(include_bytes!("../assets/icons/mark-seen.svg")),
             "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
             "icons/sessions.svg" => Some(include_bytes!("../assets/icons/sessions.svg")),

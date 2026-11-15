@@ -389,12 +389,12 @@ paths in `docs/gpui/foundation-ownership.md`), which is not a device-local prefe
 The window itself, its size included, is not part of the UI session and is untouched. The settings the old app kept per
 device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new app,
 so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no
-longer calls the sidebar width or appearance per device; it still calls the others per device until the changes that
-move them. The store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open
-dialogs and menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus would close
-anyway with the ground they are anchored to, but a dialog closes only when its opener or its subject says so, and one
-left open would keep its veil over the inert window, taking the clicks and Tab presses meant for Take back or Retry.
-Work the helm accepted continues independently of the reset.
+longer calls the sidebar width, appearance or terminal text size per device; it still calls the others per device until
+the changes that move them. The store fed by the channel holds only helm state. Half-typed drafts do not survive, and
+neither do open dialogs and menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus
+would close anyway with the ground they are anchored to, but a dialog closes only when its opener or its subject says
+so, and one left open would keep its veil over the inert window, taking the clicks and Tab presses meant for Take back
+or Retry. Work the helm accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
@@ -457,12 +457,17 @@ whole grid, which the wrapper's comparison of computed inputs cannot express. Th
 (`crates/gui/farhelm-gui/src/terminal.rs`) owns its grid model, is never cached, and notifies itself through the methods
 that change what it shows; render-count tests pin that shown output redraws it and output it does not show does not.
 
-The sidebar's width is the one value a view shows ahead of the store (decided by the migration's orchestrator on
-2026-11-14; `crates/gui/farhelm-gui/src/sidebar.rs`). It covers only the width the user is moving, and only until its
+The sidebar's width is the first of two values a view shows ahead of the store (decided by the migration's orchestrator
+on 2026-11-14; `crates/gui/farhelm-gui/src/sidebar.rs`). It covers only the width the user is moving, and only until its
 write's reply: during a drag, and from each divider write until the helm replies to it, the sidebar shows the width the
 user set rather than the stored one, because falling back to the stored width for the round trip would snap the sidebar
 back and resize the terminal twice, and a second arrow press would step from the stale width. Only the latest write's
-reply ends it, a refused write falls back to the stored width, and a reset forgets it. No other view keeps such a copy.
+reply ends it, a refused write falls back to the stored width, and a reset forgets it. The terminal text size is the
+second such value, held the same way and for the same reasons (decided by the migration's orchestrator on 2026-11-14;
+`crates/gui/farhelm-gui/src/terminal/text_size.rs`): a step, from a button or a held shortcut, is shown at once and held
+until the helm replies to the latest `terminal_text_size` write, because falling back for the round trip would refit
+every terminal twice per step and a held chord would step from a stale size. The two holds are separate code on purpose
+for now: one shared mechanism waits until a third such value needs it. No other view keeps such a copy.
 
 The session list builds only the rows in view and a few beyond its edges (GPUI's variable-height `list`), because an
 uncached view re-renders on every window redraw and the running pulse and the terminal's cursor blink redraw the window

@@ -229,6 +229,18 @@ impl Render for MainView {
             .on_action(cx.listener(|main, _: &BeginSequence, window, cx| {
                 templates::begin_sequence(main.pane_anchor.clone(), window, cx)
             }))
+            // The terminal text size shortcut works wherever focus is while a terminal is open (SPEC.md, "Terminal
+            // experience"); the terminal area steps every open terminal together.
+            .on_action(|_: &crate::actions::IncreaseTerminalTextSize, _, cx| {
+                if crate::terminal::text_size::any_terminal_open(cx) {
+                    crate::terminal::text_size::step(1, cx);
+                }
+            })
+            .on_action(|_: &crate::actions::DecreaseTerminalTextSize, _, cx| {
+                if crate::terminal::text_size::any_terminal_open(cx) {
+                    crate::terminal::text_size::step(-1, cx);
+                }
+            })
             .size_full()
             .flex()
             .flex_col()
