@@ -34,6 +34,7 @@ mod menu_separator;
 mod option_row;
 mod pulse;
 mod radio_group;
+mod scroll_box;
 mod scrollbar;
 mod select;
 mod sequence_pill;
@@ -62,6 +63,7 @@ pub use menu_separator::menu_separator;
 pub use option_row::OptionRow;
 pub use pulse::pulse_opacity;
 pub use radio_group::{RadioGroup, RadioOption};
+pub use scroll_box::ScrollBox;
 pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
 pub use select::{Select, SelectOption};
 pub use sequence_pill::{SequenceChip, SequencePill};
@@ -73,12 +75,15 @@ pub use transition::{ENTRANCE, entrance};
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, ElementId, InteractiveElement, KeyDownEvent, SharedString,
-    StatefulInteractiveElement, Window,
+    App, ClickEvent, Div, ElementId, InteractiveElement, KeyDownEvent, ParentElement as _, Pixels,
+    ScrollHandle, SharedString, Stateful, StatefulInteractiveElement, Styled as _, Window, div,
+    point, prelude::FluentBuilder as _, px,
 };
 
+use crate::focus;
 use crate::host_text::{HostSentence, Line};
 use crate::layers::{self, Help, TooltipOwner};
+use crate::theme;
 
 /// What a control says when the user hovers it or asks assistive technology about it.
 ///
@@ -333,4 +338,109 @@ pub(crate) fn on_enter_choice<E: InteractiveElement>(
     element.on_key_down(move |event, window, cx| {
         enter_choice(event, Some(&main), &apply, window, cx);
     })
+}
+
+/// The scroll handle kept under `key` for as long as its owner (a frame, a scroll box) is drawn in consecutive frames,
+/// so a scrolled body stays where it was. `key` must differ from the scrolling element's own id, because GPUI keys
+/// element state by path and type.
+fn scroll_handle(key: String, window: &mut Window, cx: &mut App) -> ScrollHandle {
+    window
+        .use_keyed_state(ElementId::Name(key.into()), cx, |_, _| ScrollHandle::new())
+        .read(cx)
+        .clone()
+}
+
+/// WebKit's scroll by one line for an arrow key (`Scrollbar::pixelsPerLineStep`), a scroll stop's Up and Down.
+const LINE_STEP: Pixels = px(40.);
+
+/// WebKit's scroll by one page, as a share of the visible height (`Scrollbar::minFractionToStepWhenPaging`), a scroll
+/// stop's Page Up, Page Down and Space.
+const PAGE_SHARE: f32 = 0.875;
+
+/// Where a scroll stop draws its ring: `inset` from the stop's padding box (negative to cover a border), with corners
+/// of `radius`.
+pub(crate) struct Ring {
+    pub(crate) inset: Pixels,
+    pub(crate) radius: Pixels,
+}
+
+/// Make `stop`, the box drawn under `id` around the scrolling element whose scroll state is `scroll`, a scroll stop: a
+/// tab stop with `role` and `label` as its accessible role and name, the ring while the keyboard has put focus on it,
+/// and the scroll keys. The rule both of a region's stops share, the scroll box's and the dialog body's, so their keys,
+/// ring and Tab reach cannot drift apart; `scroll_box.rs`'s module docs say what it does and why the stop wraps the
+/// scrolling element rather than being it. Its focus handle is its own, kept under `id`.
+///
+/// It handles no hover help: the box takes its own, as its constructor does, while a dialog body takes none, since a
+/// tooltip over a whole body would cover what the user is reading.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one stop's parts, each drawn once; a struct would only repeat them"
+)]
+pub(crate) fn scroll_stop(
+    stop: Stateful<Div>,
+    id: &SharedString,
+    scroll: &ScrollHandle,
+    role: Role,
+    label: SharedString,
+    ring: Ring,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let focus = focus::control_handle(ElementId::Name(format!("{id}-focus").into()), window, cx);
+    let palette = theme::palette(cx);
+    let keys = scroll.clone();
+    let focused = focus.clone();
+    let stop = stop
+        .relative()
+        .role(role)
+        .aria_label(label)
+        .when(focus::shows_ring(&focus, window), |stop| {
+            stop.child(
+                div()
+                    .debug_selector(|| format!("{id}-ring"))
+                    .absolute()
+                    .top(ring.inset)
+                    .left(ring.inset)
+                    .right(ring.inset)
+                    .bottom(ring.inset)
+                    .border_2()
+                    .border_color(theme::color(palette.accent))
+                    .rounded(ring.radius),
+            )
+        })
+        // GPUI hands a key to every element on the focused element's path, so a control inside the stop (a link in a
+        // box) would scroll it too: the keys are the stop's only while the stop itself holds focus.
+        .on_key_down(move |event, window, cx| {
+            if !focused.is_focused(window) {
+                return;
+            }
+            if let Some(top) = scrolled_to(event, &keys) {
+                cx.stop_propagation();
+                keys.set_offset(point(keys.offset().x, top));
+                window.refresh();
+            }
+        });
+    focus::track(stop, &focus, focus::OnPress::Focus)
+}
+
+/// Where `event`, a key pressed on a scroll stop, puts the scrolling content's offset (zero at the top, negative
+/// further down, as GPUI counts it), within what there is to scroll; `None` for a key that does not scroll, or one
+/// pressed with a modifier. Held repeats scroll too.
+fn scrolled_to(event: &KeyDownEvent, scroll: &ScrollHandle) -> Option<Pixels> {
+    if event.keystroke.modifiers.modified() {
+        return None;
+    }
+    let top = scroll.offset().y;
+    let bottom = -scroll.max_offset().y;
+    let page = scroll.bounds().size.height * PAGE_SHARE;
+    let to = match event.keystroke.key.as_str() {
+        "up" => top + LINE_STEP,
+        "down" => top - LINE_STEP,
+        "pageup" => top + page,
+        "pagedown" | "space" => top - page,
+        "home" => px(0.),
+        "end" => bottom,
+        _ => return None,
+    };
+    Some(to.clamp(bottom, px(0.)))
 }

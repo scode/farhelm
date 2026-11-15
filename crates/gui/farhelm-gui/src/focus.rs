@@ -80,7 +80,10 @@
 //!   does not scroll (browsers do not either, and it would move what the user is clicking), and neither does pointer
 //!   hover in a menu; but when the pressed control then goes away, the recovery that moves focus to the closest
 //!   remaining one scrolls that one into view, as any recovery does. Virtualized lists keep their own reveal: their
-//!   rows are not all drawn, so a row Tab has not reached may have no position to scroll to.
+//!   rows are not all drawn, so a row Tab has not reached may have no position to scroll to. A region whose content
+//!   holds nothing focusable has nothing for this to reveal; it gets a stop of its own from the component layer
+//!   (`components::ScrollBox`, `components::DialogFrame::scroll_stop`), which a region can tell whether it needs
+//!   ([`ScrollRegion::report`]).
 //!
 //!   A control focused before it is first drawn (a layer's start, or a control [`focus_control`] focuses in the same
 //!   update that shows it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A
@@ -383,6 +386,10 @@ pub struct WindowFocus {
     /// The [`scroll_region`]s around the element being prepared, innermost last. Filled and emptied within each region's
     /// own prepaint, so it is empty between frames; a control recorded while it is not empty sits in its last entry.
     regions_open: Vec<ScrollHandle>,
+    /// How many tab stops [`record`] has seen, ever: a region that reports ([`ScrollRegion::report`]) reads it before
+    /// and after preparing its content, and a difference means its content holds a tab stop. Wraps rather than
+    /// overflows; only a difference within one prepaint is ever read.
+    recorded: u64,
     /// Where a closing layer last returned focus ([`return_to`]), and the user's input as of that return: a press that
     /// closed a menu on its way to a dialog's empty space moved focus to the menu's opener, and [`press_was_taken`]
     /// must not read that move as the press giving focus to a control. Compared by mark, so it speaks for the press (or
@@ -469,6 +476,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         last_focused: None,
         returned: None,
         regions_open: Vec::new(),
+        recorded: 0,
         pending: None,
     });
     let id = window.window_handle().window_id();
@@ -909,6 +917,7 @@ fn record(
         .upgrade()
         .is_some_and(|handle| handle.is_focused(window));
     state.update(cx, |state, _| {
+        state.recorded = state.recorded.wrapping_add(1);
         if focused {
             state.last_focused = Some((control.clone(), bounds));
         }
@@ -996,8 +1005,16 @@ where
     ScrollRegion {
         handle: handle.clone(),
         child: container.track_scroll(handle).into_any_element(),
+        report: None,
     }
 }
+
+/// Where a region that reports ([`ScrollRegion::report`]) keeps, across frames, whether a tab stop was recorded inside
+/// it the last time it was prepared ([`track`], [`record_position`]): a control with a tab stop, through which the
+/// keyboard reaches the region too. A button counts whatever [`TabReach`] says, as SPEC.md's "button-only regions need
+/// no extra stop" has it. A disabled control is not tracked, so it does not count. Kept in keyed element
+/// state, like the region's scroll handle; it starts `false`, before the region has been prepared.
+pub type RegionReport = Rc<Cell<bool>>;
 
 /// A container drawn through [`scroll_region`]. Its only work is during prepaint: while its content is prepared, it is
 /// the innermost open region, so every control recorded inside it (by [`track`] or [`record_position`]) notes it, and
@@ -1007,6 +1024,26 @@ where
 pub struct ScrollRegion {
     handle: ScrollHandle,
     child: AnyElement,
+    report: Option<RegionReport>,
+}
+
+impl ScrollRegion {
+    /// Have the region write into `report`, at each prepaint, whether its content holds a tab stop, for an owner that
+    /// draws something only while it holds none (`components::DialogFrame::scroll_stop`).
+    ///
+    /// That is known only once the frame is laid out, after its owner has rendered, so the owner draws from the
+    /// previous frame's answer. When the answer changes, the region asks for one more frame (deferred until this one is
+    /// done, since GPUI ignores a redraw asked for while it draws), so the owner catches up without waiting for
+    /// something else to redraw an idle window. What the owner draws from it must not change it, or the frames would
+    /// never settle: a stop of the region's own must record its focus outside the region, or it would count as a
+    /// control the region holds and switch itself off.
+    ///
+    /// A view replayed from GPUI's cache inside the region would record no controls in that frame, and the region would
+    /// report none; no view is cached in production (`cache.rs`).
+    pub fn report(mut self, report: &RegionReport) -> Self {
+        self.report = Some(report.clone());
+        self
+    }
 }
 
 impl IntoElement for ScrollRegion {
@@ -1050,6 +1087,7 @@ impl Element for ScrollRegion {
         cx: &mut App,
     ) {
         let state = state(window, cx);
+        let before = state.as_ref().map(|state| state.read(cx).recorded);
         if let Some(state) = &state {
             let handle = self.handle.clone();
             state.update(cx, |state, _| state.regions_open.push(handle));
@@ -1057,6 +1095,13 @@ impl Element for ScrollRegion {
         self.child.prepaint(window, cx);
         if let Some(state) = &state {
             state.update(cx, |state, _| state.regions_open.pop());
+        }
+        // Every tab stop inside has recorded itself by now.
+        if let (Some(report), Some(state)) = (&self.report, &state) {
+            let holds_stops = Some(state.read(cx).recorded) != before;
+            if report.replace(holds_stops) != holds_stops {
+                window.defer(cx, |window, _| window.refresh());
+            }
         }
     }
 

@@ -17,8 +17,10 @@
 //!
 //! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
 //! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
-//! sending keys and then drawing a frame, holding a key down for its repeats, and reading what an element's subtree
-//! painted. A fixture that one component's tests use stays in that component's file.
+//! sending keys and then drawing a frame, holding a key down for its repeats, reading what an element's subtree
+//! painted, and pressing every key a scroll stop takes; and the two fixtures the scroll box's and the dialog body's
+//! scroll stop tests share (numbered lines of content, and an element's role and name). A fixture that one
+//! component's tests use stays in that component's file.
 
 mod button;
 mod checkbox;
@@ -32,6 +34,7 @@ mod mark_toggle;
 mod menu_item;
 mod option_row;
 mod radio_group;
+mod scroll_box;
 mod scrollbar;
 mod select;
 mod sequence_pill;
@@ -40,10 +43,15 @@ mod tab_strip;
 mod text_input;
 mod transition;
 
-use gpui::VisualTestContext;
+use gpui::{
+    Div, InteractiveElement as _, ParentElement as _, Pixels, SharedString, VisualTestContext, div,
+    px,
+};
+
+use crate::components::Role;
 
 use crate::layers;
-use crate::test_support::{advance, check, keys, redraw};
+use crate::test_support::{advance, bounds, check, frame, keys, redraw};
 
 /// The text of the tooltip showing now, if any.
 fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
@@ -136,4 +144,54 @@ pub(super) fn painted_under(nodes: &[gpui::DriverNode], id: &str) -> (Vec<String
         .filter(|node| node.type_name.ends_with("Svg"))
         .count();
     (texts, glyphs)
+}
+
+/// Press each key a focused scroll stop takes, checking how far each one scrolls the element drawn under `line` at the
+/// top of the scrolling content: Down a little and Up back to the start, Page Down further than Down and Page Up back,
+/// Space as far as Page Down, End further still, and Home back to the start. The stop must hold focus with its content
+/// at the top, and the content must run several pages past the region, or End would land where Page Down does.
+///
+/// Every key is checked through the drawn position of the content, after only the frame the key itself asks for, so a
+/// key that scrolled without redrawing fails too.
+fn each_scroll_key_scrolls(cx: &mut VisualTestContext, line: &'static str) {
+    let start = bounds(cx, line).top();
+    let moved = |cx: &mut VisualTestContext, key: &str| -> Pixels {
+        keys(cx, key);
+        start - bounds(cx, line).top()
+    };
+    let down = moved(cx, "down");
+    assert!(down > px(0.), "Down scrolled the content up: {down:?}");
+    assert_eq!(moved(cx, "up"), px(0.), "Up scrolled back to the start");
+    let page = moved(cx, "pagedown");
+    assert!(
+        page > down,
+        "Page Down scrolled further than Down: {page:?}"
+    );
+    assert_eq!(moved(cx, "pageup"), px(0.), "Page Up scrolled back");
+    assert_eq!(
+        moved(cx, "space"),
+        page,
+        "Space scrolled a page, as Page Down"
+    );
+    let end = moved(cx, "end");
+    assert!(end > page, "End scrolled furthest: {end:?}");
+    assert_eq!(moved(cx, "home"), px(0.), "Home scrolled back to the start");
+}
+
+/// `count` lines of text, each `text` followed by its number from 1, drawn under `line-0`, `line-1` and so on.
+fn lines(count: usize, text: &'static str) -> Div {
+    div().children((0..count).map(move |index| {
+        div()
+            .debug_selector(move || format!("line-{index}"))
+            .child(format!("{text} {}", index + 1))
+    }))
+}
+
+/// The role and accessible name drawn under element id `id` in a fresh frame.
+fn role_and_name(cx: &mut VisualTestContext, id: &str) -> (Option<Role>, Option<SharedString>) {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| (node.role, node.label))
+        .unwrap_or_default()
 }

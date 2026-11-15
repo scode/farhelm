@@ -42,6 +42,7 @@ use std::cell::Cell;
 use farhelm_proto::DeleteGuard;
 
 use crate::assets::Icon;
+use crate::components::ScrollBox;
 use crate::components::{
     Button, Checkbox, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
 };
@@ -599,6 +600,32 @@ fn press_tab(window: &mut Window, cx: &mut App) {
         }),
         cx,
     );
+}
+
+/// The scroll box twice, as an agent approval's card draws its commands, in the monospace face: one taller than its
+/// box, which the setup's Tab focuses, so the golden pins its ring two pixels in over the border, and a short one at
+/// rest, held to its least height.
+fn scroll_boxes(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = || HoverHelp::tooltip("Golden scene control");
+    let command = |count: usize| {
+        div().children((1..=count).map(|n| div().child(format!("--option-{n} value"))))
+    };
+    let column = |scroll_box: ScrollBox| div().w(px(220.)).child(scroll_box);
+    div()
+        .flex()
+        .gap(px(16.))
+        .child(column(
+            ScrollBox::new("long", "Command", help(), Role::Region, command(12))
+                .monospace()
+                .max_height(px(96.)),
+        ))
+        .child(column(
+            ScrollBox::new("short", "Resume command", help(), Role::Region, command(1))
+                .monospace()
+                .min_height(px(48.))
+                .max_height(px(96.)),
+        ))
+        .into_any_element()
 }
 
 /// The tab strip as the launcher draws it: Agent chosen, Command not (`.launch-kind-tabs`).
@@ -4022,6 +4049,12 @@ static SCENES: &[Scene] = &[
         size: (640., 600.),
         draw: empty,
         setup: host_update_refusal_setup,
+    },
+    Scene {
+        name: "scroll-box",
+        size: (520., 136.),
+        draw: scroll_boxes,
+        setup: focus_ring_setup,
     },
 ];
 

@@ -1,5 +1,6 @@
 //! Tests of the dialog frame: a long body scrolls with the answers in view, a frame too tall for the window scrolls as
-//! a whole, the answers wrap in a narrow window, and the header's Close comes first in Tab's order.
+//! a whole, the answers wrap in a narrow window, the header's Close comes first in Tab's order, and a body given a
+//! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -10,7 +11,9 @@ use gpui::{
 };
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
-use crate::test_support::{bounds, check, click, keys, open, redraw};
+use crate::test_support::{bounds, check, click, focused_id, keys, open, redraw};
+
+use super::{each_scroll_key_scrolls, lines, role_and_name};
 
 /// In a short window a long dialog body scrolls while the answers stay inside the visible frame. The old app lost
 /// answers below the window edge more than once before its frame guaranteed this; the frame now does it for every
@@ -272,4 +275,108 @@ fn the_dialog_close_comes_first_in_tab_order_and_runs_its_handler(cx: &mut TestA
     redraw(cx);
     click(cx, "rename-close");
     assert_eq!(closed.get(), 3, "a disabled Close ignored the click");
+}
+
+/// An announcement-like dialog under `news`, its body `count` lines (`line-0` on) under a link-tier button `link` while
+/// `link` holds (the body's only control), with a Close answer focused through `close`, and its body given the stop
+/// "Announcement content".
+fn announcement(count: usize, link: bool, close: &FocusHandle) -> DialogFrame {
+    let body = div()
+        .children(link.then(|| {
+            Button::new(
+                "link",
+                "Read more",
+                HoverHelp::tooltip("Open the link"),
+                Role::Link,
+            )
+            .tier(Tier::Link)
+        }))
+        .child(lines(count, "Announcement line"));
+    let close = Button::new("close", "Close", HoverHelp::tooltip("Close"), Role::Button)
+        .tier(Tier::Neutral)
+        .focus(close);
+    DialogFrame::new("news", "Announcements", body, vec![close]).scroll_stop("Announcement content")
+}
+
+/// Whether the body's stop is drawn: an element with the region role named "Announcement content".
+fn body_stop_drawn(cx: &mut VisualTestContext) -> bool {
+    role_and_name(cx, "news-body-stop") == (Some(Role::Region), Some("Announcement content".into()))
+}
+
+/// Why this matters: SPEC.md, "Reaching everything by keyboard", gives a region with nothing focusable in it its own
+/// named tab stop. A long announcement without a link, or a list whose every action is disabled, has no other way in
+/// for the keyboard; a body with a control is reached through it, so a stop there would only cost a Tab press. As in
+/// the old app, the stop does not wait for the body to overflow. Whether the body holds a control is read from its last
+/// drawn frame, so when the control goes, nothing but the stop's own request would draw the frame that shows the stop.
+///
+/// Specified, in a dialog whose short body (it fits) has the stop and a Close answer: while a link is in the body there
+/// is no stop and Tab reaches the link; once the link is gone, with focus on Close (one redraw, the stop asking for the
+/// frame after it), the body's stop is a region named by its label, and Tab reaches it.
+#[gpui::test]
+fn a_dialog_body_has_its_own_stop_whenever_it_holds_nothing_to_focus(cx: &mut TestAppContext) {
+    let link = Rc::new(Cell::new(true));
+    let close = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let drawn_link = link.clone();
+    let cx = open(cx, move |_, _| {
+        announcement(3, drawn_link.get(), &close).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    assert!(
+        bounds(cx, "line-2").bottom() < bounds(cx, "news-body").bottom(),
+        "the premise: the short body fits"
+    );
+    assert!(!body_stop_drawn(cx), "a body holding a link has no stop");
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("link"),
+        "Tab reaches the link"
+    );
+    // Off the link before it goes: a focused control going away redraws for its own reasons (the focus coordinator's
+    // recovery), which would hide a stop that did not ask for the frame that shows it.
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("close"),
+        "the premise: Close holds focus"
+    );
+
+    link.set(false);
+    redraw(cx);
+    // Tab before anything else draws: the role check below draws a frame of its own, which would show a stop that
+    // never asked for one.
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("news-body-stop"),
+        "Tab reached the body's stop"
+    );
+    assert!(body_stop_drawn(cx), "a region named by its label");
+}
+
+/// Why this matters: a stop the keys do not scroll leaves the body as unreadable as no stop at all; GPUI scrolls nothing
+/// from the keyboard by itself. The keys are the scroll box's (one function draws both stops), and this pins that the
+/// dialog's stop is wired to the body's own scroll rather than to some other container.
+///
+/// Specified: with focus on the stop of a body that overflows by several pages, every scroll key moves the body's
+/// content (each_scroll_key_scrolls).
+#[gpui::test]
+fn the_scroll_keys_scroll_a_dialog_body_through_its_stop(cx: &mut TestAppContext) {
+    let close = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let drawn = close.clone();
+    let cx = open(cx, move |_, _| {
+        announcement(80, false, &drawn).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("news-body-stop"),
+        "the premise: Tab put focus on the body's stop"
+    );
+    each_scroll_key_scrolls(cx, "line-0");
 }
