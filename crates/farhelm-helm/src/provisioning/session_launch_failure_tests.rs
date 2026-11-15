@@ -245,6 +245,12 @@ impl Fixture {
             .await
     }
 
+    /// The helm's state over this fixture's manager, provider and store, for
+    /// tests that call a route's handler the way the router does.
+    pub(crate) fn state(&self) -> Arc<crate::AppState> {
+        self.harness.state.clone()
+    }
+
     /// Keep the actual accepted request fields and trusted target assignment in
     /// start_session_environment. No alternate launch helper is under test.
     async fn start(
@@ -760,4 +766,94 @@ async fn missing_preparation_payload_refuses_publication_and_cleans_helper() {
             .iter()
             .any(|row| row.id == accepted.host_id)
     );
+}
+
+/// Removing a container host deletes its container first, and each Podman
+/// command may wait 30 seconds on the place host, so the GUI's ordered channel
+/// needs the reply within the host reply bound while the user's confirmed
+/// deletion still finishes. Specified: for a registered session container
+/// whose `podman rm` is held, with the clock paused, `DELETE /api/hosts/{id}`
+/// answers 504 at `HOST_REPLY_BOUND` (to the timer's millisecond) saying the
+/// removal carries on, with the row still registered and the container still
+/// there. Released, the removal deletes the container and forgets the row on
+/// its own.
+#[farhelm_testtrace::test]
+async fn a_container_host_removal_answers_at_the_reply_bound_and_finishes_after() {
+    const CONTAINER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let f = Fixture::new().await;
+    let host = f
+        .store
+        .register_session_container(crate::store::NewPodmanHost {
+            name: "farhelm-sess-removal".into(),
+            recipe: "dev".into(),
+            place_host: f.place,
+            user: "ubuntu".into(),
+            home: "/home/ubuntu".into(),
+            uid: 1000,
+        })
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .set_podman_container_id(host, CONTAINER)
+            .await
+            .unwrap()
+    );
+    f.commands.plant_session(CONTAINER, "farhelm-sess-removal");
+    f.commands.gate_removal();
+    let registered = |f: &Fixture| {
+        let store = f.store.clone();
+        async move {
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
+        }
+    };
+
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    // Bounded from outside too, so a removal that ignored its bound fails here with a message rather than waiting
+    // for the held `rm` forever and hanging the test.
+    let response = tokio::time::timeout(
+        crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(1),
+        crate::hosts::remove_host(axum::extract::State(f.state()), axum::extract::Path(host)),
+    )
+    .await
+    .expect("answered by the host reply bound");
+    let waited = started.elapsed();
+    assert!(
+        waited >= crate::sessions::HOST_REPLY_BOUND
+            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
+        "the removal answered after {waited:?}"
+    );
+    assert!(
+        f.commands.removal_sent(),
+        "premise: the removal reached the held host"
+    );
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("the removal carries on"));
+    assert!(
+        registered(&f).await,
+        "the row stays while the container is held"
+    );
+    assert!(f.commands.container_ids().contains(&CONTAINER.to_owned()));
+
+    f.commands.release_removal();
+    // The clock runs again for the wait below: this loop never idles, so on a paused clock its timeout could never
+    // fire and a removal that never finished would spin forever.
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while registered(&f).await {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the removal finished after its reply");
+    assert_eq!(f.commands.removed_containers(), vec![CONTAINER.to_owned()]);
 }

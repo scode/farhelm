@@ -3675,6 +3675,17 @@ pub(crate) async fn rename_session(
 /// Trash rather than the session list, while a late answer's refusal reasons
 /// reach nobody (`list_checkout_trash`, `delete_checkout_trash`).
 ///
+/// So are Settings → Containers' routes and host removal (decided by the
+/// migration's orchestrator on 2026-11-15, under its rule that every
+/// host-waiting route the GUI sends is bounded): the leftover listing asks
+/// the container hosts concurrently and drops its read at the bound, a
+/// leftover's cleanup runs on past the bound and shows in the list's next
+/// read, and removing a host whose removal deletes its machine carries on,
+/// the host leaving the hosts list once it succeeds and staying listed, with
+/// the reason only in the log, if it fails
+/// (`environment::podman::list_leftovers` and `delete_leftover`,
+/// `hosts::remove_host`).
+///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
 /// `do_replace_session`, the restart's, `create_session_request` and
@@ -3771,11 +3782,13 @@ async fn log_late_failure(task: tokio::task::JoinHandle<axum::response::Response
 ///
 /// The read counterpart of [`within_host_reply_bound`], for the launcher's
 /// host lookups (browse and the folder check, the checkout preview, the
-/// repository scan). A read leaves nothing to finish, so it is dropped rather
-/// than moved to a task of its own: the routes that use this sit in the
-/// router's cancellable group, where dropping the handler is already the
-/// contract. Bounding it keeps a host that never answers from holding every
-/// later command on the GUI's ordered channel behind it (SPEC_impl.md, "The UI
+/// repository scan) and Settings → Containers' leftover listing. A read
+/// leaves nothing to finish, so it is dropped rather than moved to a task of
+/// its own: the routes that use this sit in the router's cancellable group,
+/// where dropping the handler is already the contract, or are GETs, which the
+/// owned group runs inline, so dropping one abandons nothing it owns.
+/// Bounding it keeps a host that never answers from holding every later
+/// command on the GUI's ordered channel behind it (SPEC_impl.md, "The UI
 /// channel").
 pub(crate) async fn within_host_read_bound<T>(
     read: impl std::future::Future<Output = anyhow::Result<T>>,

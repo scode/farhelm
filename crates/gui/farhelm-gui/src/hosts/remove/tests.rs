@@ -24,9 +24,9 @@ use crate::session;
 use crate::settings::Refused;
 use crate::test_support::{any_open, click, focused_id, frame, keys, meta, settle};
 
-/// The helm's refusal of a host whose setup, update or uninstall is running, in its own words.
-const BUSY: &str =
-    "host 2 is busy with a setup, update or uninstall; remove it after that finishes";
+/// The helm's refusal of a host whose setup, update or uninstall, or an earlier removal, is running, in its own words.
+const BUSY: &str = "host 2 is busy with another operation, such as a setup, update or uninstall, or an earlier removal \
+                    that is still finishing; try again after it finishes";
 
 /// The preference row with "Remove hosts without asking" set to `on`.
 fn preferences(on: bool) -> CollectionState {
