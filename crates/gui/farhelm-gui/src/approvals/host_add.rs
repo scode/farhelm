@@ -30,17 +30,6 @@ use crate::operations::{NotStarted, OpKey, Outcome, Settled};
 use crate::session;
 use crate::theme::{self, metrics};
 
-/// Why the card's Add host action did not open the dialog while another dialog is open. The old app queued the open
-/// behind the current dialog; this port refuses it and keeps both the open dialog and the request (a recorded
-/// deviation), so the user can finish or close what is open and act on the card again.
-pub const ANOTHER_DIALOG_OPEN: &str =
-    "Another dialog is open. Close it, then open this request's Add host again.";
-
-/// Why the card's Add host action did not open the dialog while another host is being probed, set up or removed. The
-/// old app held the open until such work was over, so that an ordinary add's refused setup could still reopen its
-/// draft; this port refuses it with a reason, like [`ANOTHER_DIALOG_OPEN`].
-pub const HOST_CHANGE_IN_FLIGHT: &str = "Another host change is still in progress. Open this request's Add host again once it has finished.";
-
 /// What the dialog's error line says when the helm answered an Allow with anything but its bodiless acceptance (the 204
 /// it sends only once the waiting add received the destination): the old dialog's words. Nothing is probed then, since
 /// only that receipt says the agent's add will go on with what the user approved.
@@ -81,76 +70,6 @@ pub enum Answered {
     Refused(HostText),
     /// An Allow's reply was a success with a body or a 202, not the add's receipt ([`NOT_CONFIRMED`]). Never a Deny's.
     Unconfirmed,
-}
-
-/// An agent's request as the Add host dialog holds it: the request, and whether the helm accepted the dialog's Allow.
-///
-/// The dialog asks it what an agent's add changes about the ordinary one: whether Add must answer first
-/// ([`AgentAdd::pending`]), whether Add is busy, and whether the dialog's subject is gone. Kept here rather than in the
-/// dialog so the Add host dialog only calls into it.
-pub struct AgentAdd {
-    request: AgentRequest,
-    /// The helm accepted the dialog's Allow: from here on the add is ordinary and answers nothing more.
-    accepted: bool,
-}
-
-impl AgentAdd {
-    pub fn new(request: AgentRequest) -> Self {
-        AgentAdd {
-            request,
-            accepted: false,
-        }
-    }
-
-    /// The request, for its labels, whatever the dialog's answers did.
-    pub fn request(&self) -> &AgentRequest {
-        &self.request
-    }
-
-    /// The request while Add and Cancel still answer it: until the helm accepted the dialog's Allow.
-    pub fn pending(&self) -> Option<&AgentRequest> {
-        (!self.accepted).then_some(&self.request)
-    }
-
-    /// The helm accepted the dialog's Allow: the add is ordinary from here on.
-    pub fn accept(&mut self) {
-        self.accepted = true;
-    }
-
-    /// Whether an answer to the pending request is in flight, from the dialog or the card: Add reads "Checking…".
-    pub fn answering(&self, cx: &App) -> bool {
-        self.pending().is_some_and(|request| request.answering(cx))
-    }
-
-    /// Whether Add is busy for the pending request: an answer to it is in flight, or the answer bar is paused (the old
-    /// dialog's Add was busy through the pause too).
-    pub fn busy(&self, cx: &App) -> bool {
-        self.pending()
-            .is_some_and(|request| request.answering(cx) || request.paused(cx))
-    }
-
-    /// Whether the dialog's subject is gone: the pending request stopped waiting, with no answer to it out to say what
-    /// came of it. The old dialog closed then, since an Add could only be refused.
-    pub fn subject_gone(&self, cx: &App) -> bool {
-        self.pending()
-            .is_some_and(|request| !request.answering(cx) && !request.waiting(cx))
-    }
-}
-
-/// Post the cards' late-answer notice for an Allow of the dialog's that found its request gone: the dialog closes, so
-/// the notice is where the user learns that nothing was added.
-pub fn late_allow(cx: &mut App) {
-    answers::post_late(false, cx);
-}
-
-/// Whether a host is being probed, set up or removed anywhere: the card's open of an agent's Add host waits for that
-/// ([`HOST_CHANGE_IN_FLIGHT`]).
-pub fn host_change_in_flight(cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations
-            .read(cx)
-            .any_in_flight(|work| work.changes_host_registry())
-    })
 }
 
 impl AgentRequest {

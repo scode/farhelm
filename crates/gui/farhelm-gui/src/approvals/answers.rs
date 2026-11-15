@@ -208,8 +208,9 @@ pub(super) fn settle(always: bool, settled: &Settled, cx: &mut App) {
 }
 
 /// Post the late-answer notice, in its Always-allow form after an Always allow, replacing the other form if it shows.
-/// The Add host dialog posts it too when its own Allow was late, since it closes then ([`super::host_add`]).
-pub(super) fn post_late(always: bool, cx: &mut App) {
+/// The Add host dialog posts it too when its own Allow was late, since it closes then and the notice is where the user
+/// learns that nothing was added ([`crate::hosts::add`]).
+pub(crate) fn post_late(always: bool, cx: &mut App) {
     notices::withdraw(Notice::LateAnswer { always: !always }, cx);
     notices::post(Notice::LateAnswer { always }, cx);
 }

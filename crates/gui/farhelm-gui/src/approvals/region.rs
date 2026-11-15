@@ -37,7 +37,7 @@ use gpui::{
 
 use super::answers::{self, Arming};
 use super::card::{self, CardMeasure, CardState, MAX_WIDTH};
-use super::host_add::{self, AgentRequest};
+use super::host_add::AgentRequest;
 use super::model::{self, Card};
 use super::tunnel;
 use crate::components::{Button, HoverHelp, Role, Tier};
@@ -347,8 +347,8 @@ impl Region {
     }
 
     /// An answer button was pressed on `approval`'s card. A host add's Allow opens the Add host dialog instead
-    /// ([`host_add`]), and Tunnel and open asks the tunnel warning first when it must ([`tunnel`]); every other answer
-    /// is sent as it is. Each checks the answer bar's pause when the press arrives.
+    /// ([`super::host_add`]), and Tunnel and open asks the tunnel warning first when it must ([`tunnel`]); every other
+    /// answer is sent as it is. Each checks the answer bar's pause when the press arrives.
     fn answer(
         &mut self,
         approval: &PendingApproval,
@@ -366,11 +366,9 @@ impl Region {
                 };
                 let opener = window.focused(cx).unwrap_or_else(|| self.home.clone());
                 let refused =
-                    match crate::hosts::add::open_for_agent(request, &opener, &mark, window, cx) {
-                        Ok(_) | Err(NotOpened::Nothing) => None,
-                        Err(NotOpened::AnotherDialog) => Some(host_add::ANOTHER_DIALOG_OPEN),
-                        Err(NotOpened::HostChangeInFlight) => Some(host_add::HOST_CHANGE_IN_FLIGHT),
-                    };
+                    crate::hosts::add::open_for_agent(request, &opener, &mark, window, cx)
+                        .err()
+                        .and_then(NotOpened::reason);
                 // The app's own words, drawn as text on the card's refusal line like the helm's.
                 self.refused = refused.map(|words| (id, HostText::from_host(words)));
             }
