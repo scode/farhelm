@@ -28,6 +28,7 @@ use crate::test_support::{
     self, any_open, bounds, click, focused, focused_id, frame, keys, meta, settle, started,
 };
 use crate::{layers, root, session, theme};
+use farhelm_input_mapping::Platform;
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -768,13 +769,15 @@ fn link_row(word: &str) -> Preferences {
 /// SPEC.md, "Session list": Terminal chooses between three link behaviors, and "The latter two choices explain the risk
 /// of a second browser tab and that a program without mouse reporting cannot act on a click". Assistive technology and
 /// the test bridge find the choice by the group's name and role, as the old browser test did ("terminal link segments
-/// keep native keys and descriptions"). The tunnel switch waits for the terminal area's consent question and the
-/// file-types field for file downloads, so neither may be drawn. Specified: Terminal shows a radio group named
-/// "Terminal web links" whose three options are radio buttons in the old order, Intercept chosen when the helm stores
-/// none, each risk sentence on screen, and no tunnel switch or file-types field.
+/// keep native keys and descriptions"). The file-types field waits for file downloads, so it may not be drawn.
+/// Specified: Terminal shows a radio group named "Terminal web links" whose three options are radio buttons in the old
+/// order, Intercept chosen when the helm stores none, each risk sentence on screen, and no file-types field; below the
+/// group, the switch "Allow tunnels from remote sessions" (a switch, off while the helm stores no consent) with its old
+/// help under it. Decided for the Mac, the one platform that draws the switch.
 #[gpui::test]
 fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    on_the_mac(cx);
     open_settings(cx);
     click(cx, "settings-section-terminal");
     assert_eq!(heading(cx).as_deref(), Some("Terminal"));
@@ -817,10 +820,32 @@ fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAp
     ] {
         assert!(text.contains(risk), "the risk is explained: {risk}: {text}");
     }
-    assert!(!text.contains("tunnels"), "no tunnel switch yet: {text}");
     assert!(
         !text.contains("File types"),
         "no file-types field yet: {text}"
+    );
+    assert_eq!(
+        role_and_name(super::terminal::TUNNEL_ID),
+        Some((
+            Some(Role::Switch),
+            Some("Allow tunnels from remote sessions".to_string())
+        ))
+    );
+    assert_eq!(
+        switch_on(cx, super::terminal::TUNNEL_ID),
+        Some(false),
+        "unset reads as off"
+    );
+    assert!(
+        bounds(cx, super::terminal::TUNNEL_ID).top() >= program.bottom(),
+        "the switch is below the link choices"
+    );
+    assert!(
+        text.contains(
+            "Open a remote session's localhost links through this Mac. Turning this off closes every open tunnel. \
+             The next tunnel asks again. This choice applies to this helm."
+        ),
+        "the switch's help is on screen: {text}"
     );
 }
 
@@ -899,6 +924,270 @@ fn an_unset_or_unknown_link_choice_reads_as_intercept() {
     assert_eq!(stored(Some(&link_row("hover"))), LinkClick::Intercept);
     assert_eq!(stored(Some(&link_row("both"))), LinkClick::Both);
     assert_eq!(stored(Some(&link_row("program"))), LinkClick::Program);
+}
+
+// ---- Tunnel consent ------------------------------------------------------------------------------------------------
+
+/// The tunnel switch's element id, short for the tests below.
+const TUNNELS: &str = super::terminal::TUNNEL_ID;
+
+/// The preference row storing `consent` as the tunnel consent.
+fn consent_row(consent: bool) -> Preferences {
+    Preferences {
+        tunnel_consent: Some(consent),
+        ..Preferences::default()
+    }
+}
+
+/// Whether the tunnel warning is up: its Allow is drawn (Settings itself is an open layer too, so `any_open` cannot
+/// tell).
+fn warning_up(cx: &mut VisualTestContext) -> bool {
+    drawn(cx, "prompt-confirm")
+}
+
+/// The tunnel switch's failure line, by its role and accessible name, if drawn.
+fn tunnel_failure(cx: &mut VisualTestContext) -> Option<(Option<Role>, Option<String>)> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(super::terminal::TUNNEL_ERROR_ID))
+        .map(|node| (node.role, node.label.map(|label| label.to_string())))
+}
+
+/// Decide Settings' tunnel switch for the Mac, the platform that draws it, whatever machine runs the test. Takes effect
+/// at the next draw.
+fn on_the_mac(cx: &mut VisualTestContext) {
+    cx.update(|_, cx| cx.set_global(super::TunnelsPlatform(Platform::Mac)));
+}
+
+/// Settings at Terminal over a row storing `preferences`, decided for the Mac, with the tunnel switch drawn.
+fn show_terminal<'a>(
+    cx: &'a mut TestAppContext,
+    preferences: &Preferences,
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let (helm, cx, _gear) = open_rail(cx, preferences);
+    on_the_mac(cx);
+    open_settings(cx);
+    click(cx, section_button(Section::Terminal));
+    assert!(drawn(cx, TUNNELS), "the premise: the switch is drawn");
+    (helm, cx)
+}
+
+/// Only the Mac opens tunnels (SPEC.md: "In the Mac app, a loopback link in a remote session's terminal offers
+/// Cmd-click to tunnel"), and the switch, its help and its warning all speak of this Mac, so elsewhere the switch would
+/// be a control for nothing with words about another machine. Specified: decided for Linux, Terminal draws the link
+/// choices and no tunnel switch, and no word of its help; decided for the Mac, it draws the switch.
+#[gpui::test]
+fn the_tunnel_switch_is_drawn_only_on_the_mac(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.update(|_, cx| cx.set_global(super::TunnelsPlatform(Platform::Linux)));
+    open_settings(cx);
+    click(cx, section_button(Section::Terminal));
+    assert!(
+        drawn(cx, super::terminal::ID),
+        "the premise: Terminal is shown"
+    );
+    assert!(!drawn(cx, TUNNELS), "no switch on Linux");
+    let text = painted(cx);
+    assert!(!text.contains("tunnel"), "nor its words: {text}");
+
+    on_the_mac(cx);
+    click(cx, section_button(Section::Sessions));
+    click(cx, section_button(Section::Terminal));
+    assert!(drawn(cx, TUNNELS), "the switch on the Mac");
+}
+
+/// SPEC.md: tunnel consent "is off until they accept the warning", so the switch must never grant it on its own, and
+/// with no optimistic copy it must not claim consent the helm has not stored. Specified: a click on the off switch
+/// sends nothing and puts up the warning; Cancel sends nothing, leaves the switch off with no failure line and hands
+/// focus back to what held it when the warning opened, here the switch, which the click focused under the test's Linux
+/// click rule (on a Mac a click leaves a checkbox unfocused, so focus goes back to what held it before); a second click and Allow send `PUT /api/preferences` with only `{"tunnel_consent": true}`
+/// under the preference row's key, and the switch stays off while that save is in flight; once the helm pushes the
+/// stored consent and answers, the switch is on.
+#[gpui::test]
+fn the_tunnel_switch_turns_on_only_through_the_warning(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &Preferences::default());
+    click(cx, TUNNELS);
+    assert!(warning_up(cx), "the click asked the warning");
+    assert_eq!(sent(&mut helm), [], "and sent nothing yet");
+
+    click(cx, "prompt-cancel");
+    assert!(!warning_up(cx), "Cancel closed the warning");
+    assert_eq!(sent(&mut helm), [], "Cancel saved nothing");
+    assert_eq!(switch_on(cx, TUNNELS), Some(false));
+    assert_eq!(tunnel_failure(cx), None, "a declined warning says nothing");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(TUNNELS),
+        "focus is back on the switch"
+    );
+
+    click(cx, TUNNELS);
+    click(cx, "prompt-confirm");
+    let (id, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "tunnel_consent": true }));
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    assert_eq!(
+        switch_on(cx, TUNNELS),
+        Some(false),
+        "no optimistic copy while Allow's save is in flight"
+    );
+
+    push(&mut helm, &consent_row(true), cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(
+        switch_on(cx, TUNNELS),
+        Some(true),
+        "the stored consent shows"
+    );
+    assert_eq!(tunnel_failure(cx), None);
+}
+
+/// A refused consent save must not look like consent (SPEC.md, "Errors and diagnostics": a failed save is reported
+/// beside its control), and the old switch showed the helm's own words. Specified: Allow's save refused leaves the
+/// switch off with the helm's words under it as an alert; the next click, which asks again, takes the line away.
+#[gpui::test]
+fn a_refused_allow_leaves_the_switch_off_with_the_helms_words(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &Preferences::default());
+    click(cx, TUNNELS);
+    click(cx, "prompt-confirm");
+    let (id, _) = one_save(&mut helm);
+    helm.reply(id, 503, Some(json!("fixture consent refusal")));
+    settle(cx);
+    assert_eq!(switch_on(cx, TUNNELS), Some(false));
+    assert_eq!(
+        tunnel_failure(cx),
+        Some((
+            Some(Role::Alert),
+            Some("fixture consent refusal".to_string())
+        ))
+    );
+    assert!(
+        bounds(cx, super::terminal::TUNNEL_ERROR_ID).top() >= bounds(cx, TUNNELS).bottom(),
+        "the line is below the switch"
+    );
+
+    click(cx, TUNNELS);
+    assert!(warning_up(cx), "the premise: the click asked again");
+    assert_eq!(tunnel_failure(cx), None, "the new press took the line away");
+}
+
+/// SPEC.md: Settings "can turn it off, closing existing tunnels", with no warning; and the goal's rule for every saved
+/// control, that a failed save restores the stored value with an adjacent error, so a refused withdrawal never shows
+/// tunnels off while the helm still allows them. Specified: with consent stored, a click sends `PUT /api/preferences`
+/// with only `{"tunnel_consent": false}` at once, with no warning, and the switch shows off while it is in flight;
+/// refused, the switch shows on again with the helm's words under it; a second click whose save the helm stores shows
+/// off and takes the line away.
+#[gpui::test]
+fn turning_tunnels_off_saves_at_once_and_a_refusal_restores_on(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &consent_row(true));
+    assert_eq!(switch_on(cx, TUNNELS), Some(true), "the premise: on");
+    click(cx, TUNNELS);
+    assert!(!warning_up(cx), "no warning to turn tunnels off");
+    let (id, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "tunnel_consent": false }));
+    assert_eq!(
+        switch_on(cx, TUNNELS),
+        Some(false),
+        "the pending value shows"
+    );
+
+    helm.reply(id, 503, Some(json!("fixture withdrawal refused")));
+    settle(cx);
+    assert_eq!(
+        switch_on(cx, TUNNELS),
+        Some(true),
+        "the stored value is back"
+    );
+    assert_eq!(
+        tunnel_failure(cx),
+        Some((
+            Some(Role::Alert),
+            Some("fixture withdrawal refused".to_string())
+        ))
+    );
+
+    click(cx, TUNNELS);
+    let (id, _) = one_save(&mut helm);
+    assert_eq!(
+        tunnel_failure(cx),
+        None,
+        "a started save took the line away"
+    );
+    push(&mut helm, &consent_row(false), cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(switch_on(cx, TUNNELS), Some(false));
+}
+
+/// Allow's save goes under the preference row's key, which every Settings save holds, so a warning asked while another
+/// save is in flight could only end in a refusal after the user accepted it. Specified: with another switch's save in
+/// flight, a click on the tunnel switch puts up no warning, sends nothing and draws the busy line under the switch;
+/// once that save is answered, a click asks the warning and the line is gone.
+#[gpui::test]
+fn a_tunnel_press_during_another_save_asks_nothing_and_says_why(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &Preferences::default());
+    click(cx, BOTH);
+    let (id, _) = one_save(&mut helm);
+    click(cx, TUNNELS);
+    assert!(!warning_up(cx), "no warning while the key is held");
+    assert_eq!(sent(&mut helm), []);
+    assert_eq!(busy_line(cx, TUNNELS), busy_alert());
+
+    helm.reply(id, 204, None);
+    settle(cx);
+    click(cx, TUNNELS);
+    assert!(warning_up(cx), "the key is free: the warning is up");
+    assert_eq!(busy_line(cx, TUNNELS), None, "the press went through");
+}
+
+/// Turning tunnels off saves under the same key, so a press that meets another save must say why it sent nothing, as
+/// any switch's does, and leave the consent shown as stored. Specified: with consent stored and a link choice's save in
+/// flight, a click on the switch sends nothing, still shows it on and draws the busy line under it.
+#[gpui::test]
+fn turning_tunnels_off_during_another_save_sends_nothing_and_says_why(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &consent_row(true));
+    click(cx, BOTH);
+    let _ = one_save(&mut helm);
+    click(cx, TUNNELS);
+    assert_eq!(sent(&mut helm), [], "the key held the press back");
+    assert_eq!(
+        switch_on(cx, TUNNELS),
+        Some(true),
+        "the stored consent shows"
+    );
+    assert_eq!(busy_line(cx, TUNNELS), busy_alert());
+}
+
+/// The press checks the key before asking, but a save can still start while the warning is up, and Allow's own save is
+/// then refused before it is sent: the user accepted the warning, so the switch must say that nothing was saved rather
+/// than nothing at all. Specified: with the warning up and a save started on the preference row's key meanwhile, Allow
+/// sends nothing and the terminal's busy words show under the switch as an alert, the switch still off.
+#[gpui::test]
+fn an_allow_whose_save_meets_another_says_so_under_the_switch(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &Preferences::default());
+    click(cx, TUNNELS);
+    assert!(warning_up(cx), "the premise: the warning is up");
+    let started = cx.update(|_, cx| {
+        let operations = session::current_operations(cx).expect("the premise: a UI session");
+        let command = super::terminal::tunnels_off_command().expect("the path builds");
+        operations.update(cx, |operations, cx| {
+            operations.start(&OpKey::preferences(), command, cx, |_, _| {})
+        })
+    });
+    assert!(started.is_ok(), "the premise: another save holds the key");
+    let _ = one_save(&mut helm);
+
+    click(cx, "prompt-confirm");
+    assert_eq!(sent(&mut helm), [], "Allow's save could not start");
+    assert_eq!(switch_on(cx, TUNNELS), Some(false));
+    assert_eq!(
+        tunnel_failure(cx),
+        Some((
+            Some(Role::Alert),
+            Some("Another change to the preferences is still being saved; try again".to_string())
+        ))
+    );
 }
 
 // ---- Appearance ----------------------------------------------------------------------------------------------------

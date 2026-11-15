@@ -30,7 +30,9 @@
 //!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field
 //!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
 //!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
-//!   explicitly, a view of its own ([`ntfy`]).
+//!   explicitly, a view of its own ([`ntfy`]). Terminal's tunnel switch saves like a switch only when turned off;
+//!   turned on, it asks the terminal's tunnel warning, whose Allow saves the consent, and shows the stored choice until
+//!   the helm pushes it ([`terminal`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -66,6 +68,7 @@ mod terminal;
 mod tests;
 
 use farhelm_helm_client::PathError;
+use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
@@ -91,7 +94,7 @@ pub use checkout_field::{CheckoutField, FolderScope, Saved};
 /// The line saying why a press sent nothing, shared with the host settings dialog, whose saves share a host's key the way
 /// Settings' share the preference row's.
 pub(crate) use refused::Refused;
-use terminal::LinkClick;
+use terminal::{LinkClick, TunnelConsent};
 
 /// Hands the helm's stored appearance to the theme, for the main view's subscription to the current UI session. It
 /// lives with the section that saves the choice, so the start hook's rule and the reading of the row's word are area
@@ -267,6 +270,24 @@ pub(crate) fn skip_host_remove_command()
     Choice::SkipHostRemoveConfirmation.command(true)
 }
 
+/// The platform Settings decides the tunnel switch for ([`terminal::shown_on`]): this build's, except where a test or a
+/// golden chose one with [`TunnelsPlatform`], so that the Mac's Terminal section is covered on any machine.
+fn tunnels_platform(cx: &App) -> Platform {
+    #[cfg(test)]
+    if let Some(chosen) = cx.try_global::<TunnelsPlatform>() {
+        return chosen.0;
+    }
+    let _ = cx;
+    crate::actions::THIS_PLATFORM
+}
+
+/// The platform tests and goldens decide Settings' tunnel switch for, in place of this machine's ([`tunnels_platform`]).
+#[cfg(test)]
+pub(crate) struct TunnelsPlatform(pub(crate) Platform);
+
+#[cfg(test)]
+impl gpui::Global for TunnelsPlatform {}
+
 /// The helm's preference row, if it pushed one.
 fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Preferences> {
     collections.get::<Preferences>(PREFERENCES_KEY)
@@ -372,6 +393,9 @@ pub(crate) struct SettingsDialog {
     /// Terminal's link choice: like a switch's draft, it holds the value being saved and the last refusal, and its
     /// loaded value never reaches the screen ([`terminal::links`]).
     link_click: Draft<LinkClick>,
+    /// Terminal's tunnel switch: its off save, the last failure in either direction and its focus handle
+    /// ([`terminal::tunnel_switch`]).
+    tunnels: TunnelConsent,
     /// Agent trust's switches, in [`TrustAgent::ALL`]'s order. What they know comes from the read the section sends
     /// the first time it is shown in this opening; `trust_read` says whether it was sent.
     trust: Vec<Trust>,
@@ -390,8 +414,8 @@ pub(crate) struct SettingsDialog {
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
     /// The control here whose press sent nothing last because another save held the preference row's key: the
-    /// switches, Appearance, Terminal's link choice, the spare switch and the trust switches ([`refused`]). Checkouts'
-    /// fields and the ntfy form, views of their own, keep their own.
+    /// switches, Appearance, Terminal's link choice and tunnel switch, the spare switch and the trust switches
+    /// ([`refused`]). Checkouts' fields and the ntfy form, views of their own, keep their own.
     refused: Refused,
 }
 
@@ -428,6 +452,7 @@ impl SettingsDialog {
             switches,
             appearance: Draft::load(Preference::System),
             link_click: Draft::load(LinkClick::Intercept),
+            tunnels: TunnelConsent::new(cx),
             trust: TrustAgent::ALL
                 .iter()
                 .map(|&agent| Trust {
@@ -636,6 +661,94 @@ impl SettingsDialog {
         );
     }
 
+    /// The user turned the tunnel switch on: whether to ask the warning. Not when another save holds the preference
+    /// row's key (the off save among them), since Allow's save could not start: the press asks nothing and the busy
+    /// line says why, as for any switch. Otherwise the press goes through, so the last failure and any busy line under
+    /// the switch go, and the caller asks.
+    fn may_ask_tunnel_consent(&mut self, cx: &mut Context<Self>) -> bool {
+        let busy = session::current_operations(cx).is_some_and(|operations| {
+            operations
+                .read(cx)
+                .in_flight(&OpKey::preferences())
+                .is_some()
+        });
+        if busy {
+            self.refused.refuse(terminal::TUNNEL_ID);
+        } else {
+            self.tunnels.failure = None;
+            self.refused.clear(terminal::TUNNEL_ID);
+        }
+        cx.notify();
+        !busy
+    }
+
+    /// The user turned the tunnel switch off: save `tunnel_consent: false` at once, as a switch saves
+    /// ([`SettingsDialog::save_choice`]), with the helm's words under the switch if it refuses. No warning: withdrawing
+    /// consent narrows what a remote page can do, and the helm closes the open tunnels when it stores it.
+    fn turn_tunnels_off(&mut self, cx: &mut Context<Self>) {
+        if !self.tunnels.off.edit(false) {
+            self.refused.refuse(terminal::TUNNEL_ID);
+            cx.notify();
+            return;
+        }
+        let started = drafts::save(
+            self,
+            |dialog: &mut SettingsDialog| &mut dialog.tunnels.off,
+            &OpKey::preferences(),
+            |_| terminal::tunnels_off_command(),
+            cx,
+            |dialog, settled, _| {
+                if let Outcome::Refused(refusal) = &settled.outcome {
+                    dialog.tunnels.failure = Some(refusal.words.clone());
+                }
+            },
+        );
+        self.refused.record(terminal::TUNNEL_ID, &started);
+        match started {
+            Ok(()) => self.tunnels.failure = None,
+            Err(not_started) => tracing::debug!(?not_started, "tunnel consent not withdrawn"),
+        }
+        cx.notify();
+    }
+
+    /// The tunnel switch, wired to this dialog: on asks the terminal's warning with a mark taken at the press, off
+    /// saves at once (see [`terminal`]'s module docs).
+    fn tunnel_switch(&self, preferences: Option<&Preferences>, cx: &Context<Self>) -> AnyElement {
+        let weak = cx.weak_entity();
+        terminal::tunnel_switch(
+            &self.tunnels,
+            preferences,
+            &self.refused,
+            move |on, window, cx| {
+                if !on {
+                    let _ = weak.update(cx, |dialog, cx| dialog.turn_tunnels_off(cx));
+                    return;
+                }
+                let mark = Mark::take(cx);
+                if !weak
+                    .update(cx, |dialog, cx| dialog.may_ask_tunnel_consent(cx))
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+                // Asked from the press, not from inside an update of the dialog, since the layer manager may ask the
+                // dialog things as the warning opens over it. Allow's success needs nothing here: the helm pushes the
+                // stored consent, and the switch follows it.
+                let dialog = weak.clone();
+                crate::terminal::tunnels::ask_consent(&mark, window, cx, move |saved, cx| {
+                    if let Err(reason) = saved {
+                        let _ = dialog.update(cx, |dialog, cx| {
+                            dialog.tunnels.failure = Some(reason);
+                            cx.notify();
+                        });
+                    }
+                });
+            },
+            cx,
+        )
+        .into_any_element()
+    }
+
     /// `choice`'s switch with its help and failure line, toggling through this dialog.
     fn switch(
         &self,
@@ -698,7 +811,7 @@ impl SettingsDialog {
             ],
             Section::Terminal => {
                 let weak = cx.weak_entity();
-                terminal::links(
+                let mut body: Vec<AnyElement> = terminal::links(
                     &self.link_click,
                     preferences,
                     &self.refused,
@@ -709,7 +822,12 @@ impl SettingsDialog {
                 )
                 .into_iter()
                 .map(IntoElement::into_any_element)
-                .collect()
+                .collect();
+                // Below the link choices, as in the old desktop app, and only where tunnels open.
+                if terminal::shown_on(tunnels_platform(cx)) {
+                    body.push(self.tunnel_switch(preferences, cx));
+                }
+                body
             }
             Section::Checkouts => {
                 let weak = cx.weak_entity();
