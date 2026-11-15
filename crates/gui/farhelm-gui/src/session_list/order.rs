@@ -52,10 +52,10 @@
 //! The order state belongs to the UI session (`super::Current`), an entity so the drafts' saves can reach it when the
 //! reply arrives and the open menu can read it while it draws: a reset starts it over, with the helm's channel.
 //!
-//! NOTE: Not ported yet: placing the menu beside the sidebar with a pointer notch (the layer manager places it below
-//! its anchor, as for a row's menu); and `aria-haspopup`, which GPUI cannot report. Tab stays inside the open menu, as
-//! SPEC.md's "Keyboard focus" has every menu keep focus, where the old Tab on an item closed the menu (a parity
-//! deviation).
+//! NOTE: Not ported yet: placing the menu beside the sidebar with a pointer notch (it opens below its anchor, the layer
+//! manager's default placement, and the layer manager draws no notch); and `aria-haspopup`, which GPUI cannot report.
+//! Tab stays inside the open menu, as SPEC.md's "Keyboard focus" has every menu keep focus, where the old Tab on an
+//! item closed the menu (a parity deviation).
 
 #[cfg(test)]
 mod tests;
