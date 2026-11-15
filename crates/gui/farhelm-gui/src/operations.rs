@@ -302,6 +302,8 @@ enum Key {
     /// One terminal tab of a session, by the session's id and the tab's: apart from the session's own key and from its
     /// sibling tabs', so a tab closes beside the others and never makes the session's lifecycle actions busy.
     Tab(String, String),
+    /// A recipe of the helm's shared catalog, by its name, which the helm never changes after creation.
+    Recipe(String),
 }
 
 impl OpKey {
@@ -374,6 +376,25 @@ impl OpKey {
     /// ([`Work::TabClose`]).
     pub fn tab(session: &str, tab: &str) -> OpKey {
         OpKey(Key::Tab(session.to_owned(), tab.to_owned()))
+    }
+
+    /// A recipe of the helm's shared catalog, by its name: the key names the recipe the work acts on (a snapshot build
+    /// asked from its row; later its editor's saves and Delete), one request at a time, as a credential's key does, and
+    /// nothing on it is supersedable. A recipe not created yet takes the key of the name it is being created under,
+    /// which the helm keeps unique.
+    ///
+    /// The key is shared, and so is its one refusal record. Settings → Recipes' build uses it now and draws any refusal
+    /// recorded on it as the last build's, under the recipe's row; the editor's saves and Delete will share it. So the
+    /// editor must forget each refusal it shows itself ([`Operations::forget`]), or a refused save would show under the
+    /// row as a build refusal once the editor closes.
+    ///
+    /// Forgetting does not cover every refusal. One that lands after the user left the editor opens nothing, so by
+    /// [`Operations::forget`]'s rule it stays on the key, and the row draws it under the build button; the first push
+    /// of the catalog that shows the recipe building then drops whatever refusal the key holds (`settings/recipes.rs`,
+    /// `settle_refusals`). The editor decides knowingly whether that is right for its refusals, or tells them apart by
+    /// [`Failure::work`] after giving builds a kind of work of their own.
+    pub fn recipe(name: &str) -> OpKey {
+        OpKey(Key::Recipe(name.to_owned()))
     }
 }
 

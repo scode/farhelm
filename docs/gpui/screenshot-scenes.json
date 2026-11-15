@@ -1233,7 +1233,7 @@
     },
     {
       "golden": "settings-sessions",
-      "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Credentials, Terminal, Checkouts, Agent trust and Notifications are listed so far)",
+      "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Recipes, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications are listed so far)",
       "reference": "settings-sessions"
     },
     {
@@ -1245,6 +1245,16 @@
       "golden": "settings-hosts",
       "title": "Settings at Hosts, automatic remote-host updates on",
       "reference": "settings-hosts"
+    },
+    {
+      "golden": "settings-recipes",
+      "title": "Settings at Recipes with no recipes (no New recipe yet: it opens the recipe editor, which comes later)",
+      "reference": "settings-recipes"
+    },
+    {
+      "golden": "settings-recipes-rows",
+      "title": "Settings at Recipes with rows in three states: built with changed packages and rebuilding at step 5 of 9, failed with Retry, and a container base Tensorlake cannot run",
+      "reference": "settings-recipes"
     },
     {
       "golden": "settings-containers",
