@@ -23,6 +23,10 @@
 //! without Farhelm goes on to the setup confirmation and the setup's submission ([`setup`]); a setup the helm refused
 //! after the user moved on from it shows at the top of the panel, since it has no row.
 //!
+//! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
+//! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
+//! lands); Add host opens it for the destination typed there.
+//!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
 //! ## What it shows
@@ -62,6 +66,7 @@ mod menu;
 pub(crate) mod offers;
 mod settings;
 pub(crate) mod setup;
+pub mod ssh_help;
 
 pub use menu::open_menu;
 pub use settings::open_settings;
@@ -615,6 +620,20 @@ fn detail_line(kind: Kind, line: HostSentence, palette: &Palette) -> AnyElement 
         .text_size(metrics::TEXT_SM)
         .line_height(px(DETAIL_LINE))
         .text_color(theme::color(ink))
+        .child(line)
+        .into_any_element()
+}
+
+/// A host dialog's error line (`.create-session-error`): `line`, which names the helm's or a host's words through the
+/// sentence's host parts, at 12 pixels in the danger ink, padded as the old line was. Add host's line and SSH help's
+/// refusals and unavailable connections share it, so the two dialogs' errors cannot drift apart.
+fn problem_line(line: HostSentence, palette: &Palette) -> AnyElement {
+    div()
+        .pt(px(2.))
+        .px(px(14.))
+        .pb(px(8.))
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.danger))
         .child(line)
         .into_any_element()
 }

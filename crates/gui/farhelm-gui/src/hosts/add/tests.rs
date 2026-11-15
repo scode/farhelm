@@ -12,7 +12,7 @@
 //! view draws the Hosts panel beside Add host for them, since a setup refused after the user moved on shows there.
 
 use farhelm_helm_client::Method;
-use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{CollectionState, HostView};
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render,
@@ -27,8 +27,10 @@ use crate::focus::{self, Mark};
 use crate::hosts::HostsPanel;
 use crate::hosts::tests::{aliased, connected, host, hosts};
 use crate::operations::Work;
-use crate::test_support::{self, click, focused, focused_id, frame, keys, settle, started};
-use crate::{layers, root, session};
+use crate::test_support::{
+    self, any_open, click, focused, focused_id, keys, label, one_command, settle, started,
+};
+use crate::{root, session};
 
 /// The dialog [`super::open`] opened last, recorded in test builds only, so a test (or a golden scene) can reach its
 /// fields and its key.
@@ -121,10 +123,6 @@ pub(crate) fn open_dialog(cx: &mut VisualTestContext) {
     );
 }
 
-pub(crate) fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
-}
-
 /// Type `text` into the focused field.
 pub(crate) fn type_text(cx: &mut VisualTestContext, text: &str) {
     cx.simulate_input(text);
@@ -134,14 +132,6 @@ pub(crate) fn type_text(cx: &mut VisualTestContext, text: &str) {
 /// The one command sent since the last call, which must be a probe: its id and body.
 pub(crate) fn one_probe(helm: &mut FakeHelm) -> (u64, Value) {
     one_command(helm, Method::Post, "/api/hosts/probe")
-}
-
-/// The one command sent since the last call, which must be `method` on `path`: its id and body.
-pub(crate) fn one_command(helm: &mut FakeHelm, method: Method, path: &str) -> (u64, Value) {
-    let sent: Vec<FakeCommand> = helm.commands();
-    assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
-    assert_eq!((sent[0].method, sent[0].path.as_str()), (method, path));
-    (sent[0].id, sent[0].body.clone().unwrap_or_default())
 }
 
 /// The open dialog's destination field as it reads now; panics if no dialog was opened.
@@ -174,14 +164,6 @@ pub(crate) fn probe_work(cx: &mut VisualTestContext) -> Option<Work> {
         let key = cx.global::<Opened>().0.upgrade()?.read(cx).key.clone();
         session::current_operations(cx)?.read(cx).in_flight(&key)
     })
-}
-
-/// The accessible name of what is drawn under `id`, if anything is.
-pub(crate) fn label(cx: &mut VisualTestContext, id: &str) -> Option<String> {
-    frame(cx)
-        .into_iter()
-        .find(|node| node.element_id.as_deref() == Some(id))
-        .and_then(|node| node.label.map(|label| label.to_string()))
 }
 
 /// Whether the open dialog's alias field holds focus.
@@ -505,4 +487,199 @@ fn an_answer_after_the_user_moved_on_opens_nothing_and_moves_no_focus(cx: &mut T
     settle(cx);
     assert!(!any_open(cx), "nothing opened for the late plan");
     assert!(focused(cx, &add), "focus stayed on Add host");
+}
+
+// ---- SSH help ------------------------------------------------------------------------------------------------------
+
+/// SPEC.md, "Feedback": "Add host also links to this dialog with commands for its typed destination; closing it returns
+/// to the intact draft. An empty draft asks for a destination". The link must send the draft as typed, never register
+/// anything, and leave the user where they were (`ssh-help.spec.ts`, "add host opens ssh help for its draft without
+/// losing the form"). Run under macOS's click rule, where the click leaves the link unfocused, so focus gets back to it
+/// only because SSH help names it as where closing returns focus. Specified: with the draft empty, the link sends
+/// `{"destination": ""}`, SSH help opens over Add host with focus on its Close, and a reply with no extra asks "Enter
+/// an SSH destination in Add host first."; Escape closes SSH help alone, Add host stays with focus on the link; with
+/// `dev@newbox` typed, the link sends it, the helm's section for it ("The host you're adding") shows its destination
+/// and both its commands (and no registered host's section), and Close returns focus to the link with `dev@newbox`
+/// still in the field; no probe was sent at any point.
+#[gpui::test]
+fn the_ssh_help_link_shows_the_drafts_commands_and_closing_returns_to_the_draft(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _add) = open_rail(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    open_dialog(cx);
+    let link = ssh_help_link(cx);
+    assert_eq!(
+        label(cx, "add-host-ssh-help").as_deref(),
+        Some("Start its connections yourself first.")
+    );
+
+    click(cx, "add-host-ssh-help");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/ssh-connections");
+    assert_eq!(
+        body,
+        json!({ "destination": "" }),
+        "the empty draft as typed"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("ssh-help-done"),
+        "SSH help opened with focus on its Close"
+    );
+    helm.reply(
+        id,
+        200,
+        Some(json!({ "unavailable": [], "hosts": [], "extra": null })),
+    );
+    settle(cx);
+    assert_eq!(
+        label(cx, "ssh-help-no-destination").as_deref(),
+        Some("Enter an SSH destination in Add host first.")
+    );
+    keys(cx, "escape");
+    assert!(any_open(cx), "Add host is still open");
+    assert_eq!(label(cx, "ssh-help-done"), None, "SSH help closed");
+    assert!(focused(cx, &link), "focus went back to the link");
+
+    // Back into the destination field to type, as the user would.
+    keys(cx, "shift-tab shift-tab");
+    assert!(
+        field_focused(cx, |dialog| &dialog.destination),
+        "the premise: focus is in the destination field"
+    );
+    type_text(cx, "dev@newbox");
+    click(cx, "add-host-ssh-help");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/ssh-connections");
+    assert_eq!(body, json!({ "destination": "dev@newbox" }));
+    helm.reply(
+        id,
+        200,
+        Some(json!({
+            "unavailable": [],
+            "hosts": [],
+            "extra": {
+                "name": "The host you're adding", "destination": "dev@newbox",
+                "sessions": "ssh -N -f -- dev@newbox", "setup": "ssh -N -f -- dev@newbox",
+            },
+        })),
+    );
+    settle(cx);
+    assert_eq!(
+        label(cx, "ssh-help-extra-name").as_deref(),
+        Some("The host you're adding")
+    );
+    assert_eq!(
+        label(cx, "ssh-help-extra-destination").as_deref(),
+        Some("dev@newbox")
+    );
+    for kind in ["sessions", "setup"] {
+        let id = format!("ssh-help-extra-{kind}");
+        assert_eq!(
+            label(cx, &id).as_deref(),
+            Some("ssh -N -f -- dev@newbox"),
+            "the typed destination's {kind} command is drawn"
+        );
+    }
+    assert_eq!(
+        label(cx, "ssh-help-host-0-name"),
+        None,
+        "no host is registered"
+    );
+    click(cx, "ssh-help-done");
+    assert_eq!(label(cx, "ssh-help-done"), None, "SSH help closed");
+    assert!(any_open(cx), "Add host is still open");
+    assert!(focused(cx, &link), "focus went back to the link");
+    assert_eq!(destination(cx), "dev@newbox", "the draft is intact");
+    assert_eq!(helm.commands(), [], "no probe was sent");
+}
+
+/// The SSH help link's focus handle in the open Add host dialog, which closing SSH help returns focus to.
+fn ssh_help_link(cx: &mut VisualTestContext) -> FocusHandle {
+    cx.update(|_, cx| {
+        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        dialog.read(cx).ssh_help.clone()
+    })
+}
+
+/// The link stays live while a probe is out, and its click counts as moving on from Add, so a plan that comes back
+/// must not open the setup confirmation over the user's SSH help or take its focus (SPEC.md, "Keyboard focus"), and a
+/// probe that registers the host closes Add host with SSH help above it. The old app had the same race
+/// (`ssh-help.spec.ts`, "ssh help returns focus when a setup offer replaced its opener"), where the offer replaced the
+/// hidden form's link. Run under macOS's click rule, so focus reaching the link proves it was named as the return
+/// target. Specified: with `dev@newbox`'s probe out, the link sends the SSH help read and SSH help takes focus on its
+/// Close; a `provisionable` reply then opens no confirmation, focus stays on SSH help's Close, and Add host's line says
+/// the user moved on; closing SSH help returns focus to the link. A second probe, with SSH help opened again over it,
+/// answered `discovered`, closes both dialogs, and focus goes back to the rail's Add host.
+#[gpui::test]
+fn a_probe_answered_while_ssh_help_is_open_opens_nothing_over_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, add) = open_rail(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    open_dialog(cx);
+    let link = ssh_help_link(cx);
+    type_text(cx, "dev@newbox");
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    assert_eq!(
+        probe_work(cx),
+        Some(Work::Probe),
+        "the premise: the probe is out"
+    );
+
+    click(cx, "add-host-ssh-help");
+    let (read, _) = one_command(&mut helm, Method::Post, "/api/ssh-connections");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("ssh-help-done"),
+        "the premise: SSH help opened with focus on its Close"
+    );
+    helm.reply(
+        probe,
+        200,
+        Some(json!({
+            "result": "provisionable", "probe_id": "p-1", "plan": {}, "confirmation": "the plan",
+            "steps": { "lead": "lead", "steps": [], "kept": null },
+        })),
+    );
+    settle(cx);
+    assert_eq!(
+        label(cx, "setup-title"),
+        None,
+        "no setup confirmation opened"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("ssh-help-done"),
+        "SSH help keeps focus"
+    );
+    assert_eq!(
+        error_line(cx).as_deref(),
+        Some(crate::hosts::setup::MOVED_ON)
+    );
+    helm.reply(
+        read,
+        200,
+        Some(json!({ "unavailable": [], "hosts": [], "extra": null })),
+    );
+    settle(cx);
+    click(cx, "ssh-help-done");
+    assert!(any_open(cx), "Add host is still open");
+    assert!(focused(cx, &link), "focus went back to the link");
+
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    click(cx, "add-host-ssh-help");
+    let _ = one_command(&mut helm, Method::Post, "/api/ssh-connections");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("ssh-help-done"),
+        "the premise: SSH help is open again"
+    );
+    helm.reply(
+        probe,
+        200,
+        Some(json!({ "result": "discovered", "host_id": 3, "build_version": "0.16.0", "host_identity": null })),
+    );
+    settle(cx);
+    assert!(!any_open(cx), "Add host closed, and SSH help with it");
+    assert!(focused(cx, &add), "focus went back to the rail's Add host");
 }

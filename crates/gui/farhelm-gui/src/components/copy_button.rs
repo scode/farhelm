@@ -3,10 +3,10 @@
 //! The old app had a copy button in a few places only (SPEC.md and the migration's decisions keep exactly those): the
 //! host setup confirmation's Copy plan, SSH help's two commands, the Tensorlake key command and the uninstall notice's
 //! path. Each copies text frozen when the button was drawn, so what lands on the clipboard is what the user was shown.
-//! One shared control so they cannot drift apart; the first consumer is Copy plan.
+//! One shared control so they cannot drift apart; Copy plan and SSH help's commands use it.
 //!
-//! NOTE: No "copied" confirmation. The old Copy plan showed none (reference commit `24bc0580`); a consumer whose old
-//! button did (SSH help) adds it here, through the ticker, when it is ported.
+//! NOTE: No "copied" confirmation. Neither the old Copy plan nor SSH help's Copy showed one (reference commit
+//! `24bc0580`); a consumer whose old button did adds it here, through the ticker, when it is ported.
 
 use gpui::{ClipboardItem, SharedString};
 
