@@ -273,6 +273,9 @@ actions!(
         ZoomWindow,
         /// Enter or leave native fullscreen (the Mac app menu's Toggle Full Screen, Ctrl+Cmd+F).
         ToggleFullScreen,
+        /// Open the Open-Source Notices window, or bring the open one forward (the Mac app menu's Open-Source Notices,
+        /// which has no key; on Linux the `?` menu's item). Handled app-wide by the desktop module.
+        OpenSourceNotices,
     ]
 );
 

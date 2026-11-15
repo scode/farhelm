@@ -1,5 +1,5 @@
-//! Tests of the desktop module: the Mac menu bar's description and its commands, and the main window's close quitting
-//! the app.
+//! Tests of the desktop module: the Mac menu bar's description and its commands, the main window's close quitting the
+//! app, the main window's frame, the macOS title band and the Open-Source Notices window.
 //!
 //! They run on GPUI's fake platform, under Linux too: the menu bar is installed with `mac` set, which records the menus
 //! exactly as macOS would receive them. What only a real macOS window shows (the bar itself, AppKit's handling of the
@@ -15,8 +15,8 @@ use super::{
     title_band, when_closed,
 };
 use crate::actions::{
-    DeleteSession, HideApp, HideOtherApps, MinimizeWindow, Quit, ShowAllApps, TEXT_INPUT_CONTEXT,
-    ToggleFullScreen, ZoomWindow,
+    DeleteSession, HideApp, HideOtherApps, MinimizeWindow, OpenSourceNotices, Quit, ShowAllApps,
+    TEXT_INPUT_CONTEXT, ToggleFullScreen, ZoomWindow,
 };
 use crate::test_support;
 
@@ -96,6 +96,8 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
                     item("Show All", ShowAllApps.name(), None),
                     item("Zoom", ZoomWindow.name(), None),
                     item("Minimize", MinimizeWindow.name(), None),
+                    Item::Separator,
+                    item("Open-Source Notices", OpenSourceNotices.name(), None),
                     Item::Separator,
                     item("Quit Farhelm", Quit.name(), None),
                 ],
@@ -525,8 +527,8 @@ fn a_window_within_two_points_of_the_visible_area_fills_it() {
 /// The press decision is the band's whole gesture contract (the old `decide_press` table at reference commit
 /// `24bc0580`): a primary press on empty background drags, a repeat zooms only with a paired predecessor and never
 /// drags, a repeat without one does nothing at all, and presses on what the row's contents claimed, presses with
-/// another button and anything in fullscreen do nothing. A wrong row here either moves the window from under a button or
-/// leaves the band dead.
+/// another button and anything in fullscreen do nothing. A wrong row here either moves the window from under a button
+/// or leaves the band dead.
 #[test]
 fn the_press_decision_drags_zooms_or_leaves_the_press_alone() {
     use title_band::{PressAction, decide};
@@ -1067,8 +1069,8 @@ mod mac {
         );
     }
 
-    /// What the band decided for a primary press at `at` that then moves a few points, with the window's real rows (the decisions
-    /// are recorded instead of performed: GPUI's test platform cannot move or zoom a window).
+    /// What the band decided for a primary press at `at` that then moves a few points, with the window's real rows (the
+    /// decisions are recorded instead of performed: GPUI's test platform cannot move or zoom a window).
     fn press_at(cx: &mut VisualTestContext, at: gpui::Point<Pixels>) -> Option<(Row, PressAction)> {
         cx.update(|_, cx| cx.set_global(title_band::Decisions::default()));
         cx.simulate_event(gpui::MouseDownEvent {
@@ -1156,4 +1158,174 @@ mod mac {
             Some((Row::EmptyPane, PressAction::Drag))
         );
     }
+}
+
+// ---- The Open-Source Notices window --------------------------------------------------------------------------------
+
+/// The window draws lines of one fixed height that cannot wrap, so the notices are wrapped before they are drawn, and
+/// the notices are legal text: a wrap that dropped or reordered a character would misquote a license. Specified: a line
+/// of at most [`licenses::COLUMNS`] characters (an empty one included) stays as it is; a longer one is cut into lines
+/// of at most that many, after the last space that fits, or at the column where there is no space, and its parts
+/// joined give it back; a tab becomes the spaces that reach the next stop eight columns on.
+#[test]
+fn the_notices_are_wrapped_at_the_column_and_keep_every_character() {
+    use super::licenses::{COLUMNS, wrap};
+    assert_eq!(wrap("short\n\nlines"), ["short", "", "lines"]);
+    let words = "word ".repeat(50);
+    let cut = wrap(&words);
+    assert!(cut.len() > 1, "the premise: a line over the column");
+    assert!(cut.iter().all(|line| line.chars().count() <= COLUMNS));
+    assert!(
+        cut[..cut.len() - 1].iter().all(|line| line.ends_with(' ')),
+        "cut after a space, never inside a word"
+    );
+    assert_eq!(cut.concat(), words);
+    let run = "x".repeat(COLUMNS * 2 + 5);
+    let cut = wrap(&run);
+    assert_eq!(
+        cut.iter().map(|line| line.len()).collect::<Vec<_>>(),
+        [COLUMNS, COLUMNS, 5]
+    );
+    assert_eq!(cut.concat(), run);
+    let space_at_the_column = format!("{} {}", "a".repeat(COLUMNS - 1), "bbbbb");
+    assert_eq!(
+        wrap(&space_at_the_column),
+        [format!("{} ", "a".repeat(COLUMNS - 1)), "bbbbb".to_string()],
+        "a space that ends the column stays within it"
+    );
+    let word_to_the_column = format!("{} y", "x".repeat(COLUMNS));
+    let cut = wrap(&word_to_the_column);
+    assert!(
+        cut.iter().all(|line| line.chars().count() <= COLUMNS),
+        "a space just past the column never makes a part longer than it"
+    );
+    assert_eq!(cut.concat(), word_to_the_column);
+    assert_eq!(wrap("a\tb\n\tc"), ["a       b", "        c"]);
+}
+
+/// Stand-in notices for the window tests: far more lines than a window shows, each numbered, so a test can tell which
+/// part of the text is drawn.
+fn many_notices() -> String {
+    (0..3000)
+        .map(|line| format!("notice line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The notices window as the maintainer decided it (2026-11-13), on GPUI's fake platform: the menu item's action opens
+/// one plain window showing the host's notices, drawn as a virtualized list (the first lines are drawn, the last of
+/// 3,000 is not), so the near-megabyte real text never lays out whole; choosing it again brings that same window
+/// forward rather than opening a second, also when the choice comes from the notices window itself (on a Mac, the menu
+/// acts on the key window, and the action is then dispatched from inside that window's own update, where GPUI cannot
+/// update it); and once it has closed, choosing it opens a new one. A second window per choice, or one that never came
+/// back after its close, are the failures this guards.
+#[gpui::test]
+fn the_notices_item_opens_one_window_and_brings_it_forward(cx: &mut TestAppContext) {
+    use super::licenses;
+    test_support::install(cx);
+    cx.update(|cx| super::keep_licenses(many_notices, cx));
+    let (_, main) = test_support::open_view(cx, |_, _| Blank);
+    let windows = |main: &mut gpui::VisualTestContext| main.update(|_, cx| cx.windows().len());
+    let main_handle = main.update(|window, _| window.window_handle());
+    main.dispatch_action(OpenSourceNotices);
+    main.run_until_parked();
+    assert_eq!(windows(main), 2, "the notices window opened");
+    let opened = main.update(|_, cx| licenses::window(cx));
+    let Some(handle) = opened else {
+        panic!("the notices window was not kept");
+    };
+    let mut notices = gpui::VisualTestContext::from_window(handle, &main.cx);
+    test_support::settle(&mut notices);
+    let nodes = test_support::frame(&mut notices);
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.label.as_deref() == Some(licenses::TITLE)),
+        "the text is one region named for the window"
+    );
+    let painted = crate::session_list::tests::painted(&nodes);
+    assert!(painted.iter().any(|text| text == "notice line 0"));
+    assert!(painted.iter().any(|text| text == "notice line 10"));
+    assert!(
+        !painted.iter().any(|text| text == "notice line 2999"),
+        "only the lines in view are drawn"
+    );
+
+    notices.update(|window, _| window.activate_window());
+    notices.run_until_parked();
+    assert_eq!(
+        main.update(|_, cx| cx.active_window()),
+        Some(handle),
+        "the premise: the notices window is the key window"
+    );
+    notices.dispatch_action(OpenSourceNotices);
+    notices.run_until_parked();
+    assert_eq!(
+        windows(main),
+        2,
+        "a choice made in the notices window opens no second one"
+    );
+
+    main.update(|window, _| window.activate_window());
+    main.run_until_parked();
+    assert_eq!(
+        main.update(|_, cx| cx.active_window()),
+        Some(main_handle),
+        "the premise: the main window is in front"
+    );
+    main.dispatch_action(OpenSourceNotices);
+    main.run_until_parked();
+    assert_eq!(windows(main), 2, "a second choice opens no second window");
+    assert_eq!(main.update(|_, cx| licenses::window(cx)), Some(handle));
+    assert_eq!(
+        main.update(|_, cx| cx.active_window()),
+        Some(handle),
+        "it brings the open one forward"
+    );
+
+    notices.update(|window, _| window.remove_window());
+    main.run_until_parked();
+    assert_eq!(windows(main), 1, "the premise: it closed");
+    main.dispatch_action(OpenSourceNotices);
+    main.run_until_parked();
+    assert_eq!(
+        windows(main),
+        2,
+        "after its close, a choice opens a new one"
+    );
+    assert_ne!(main.update(|_, cx| licenses::window(cx)), Some(handle));
+}
+
+/// The window is an ordinary one, titled for what it shows (macOS lists it by that title under the app menu's open
+/// windows), and never narrower than the wrapped text, which a fixed-height line cannot reflow: its options carry the
+/// title and the platform's own title bar (not the main window's transparent one), and its minimum width fits
+/// [`licenses::COLUMNS`] characters of the bundled terminal font at the window's text size, as the real text system
+/// measures them. A font whose advance grew past the width the window assumes would cut every wrapped line short.
+#[test]
+fn the_notices_window_is_titled_and_fits_its_column() {
+    use super::licenses;
+    use crate::{assets, theme::metrics};
+    let mut cx = match test_support::headless() {
+        Ok(cx) => cx,
+        Err(error) => panic!("no headless app: {error:#}"),
+    };
+    cx.update(|cx| {
+        let text_system = cx.text_system();
+        let id = text_system.resolve_font(&gpui::font(assets::TERMINAL_FONT));
+        let advance = text_system
+            .advance(id, metrics::TEXT_SM, 'W')
+            .map(|advance| f32::from(advance.width))
+            .ok();
+        assert!(
+            advance.is_some_and(|advance| advance <= licenses::CHAR_WIDTH + 1e-3),
+            "the bundled font's advance is {advance:?}, wider than the {} the window assumes",
+            licenses::CHAR_WIDTH
+        );
+        let options = licenses::options(cx);
+        let titlebar = options.titlebar.unwrap_or_default();
+        assert_eq!(titlebar.title.as_deref(), Some(licenses::TITLE));
+        assert!(!titlebar.appears_transparent);
+        let min = options.window_min_size.map(|min| f32::from(min.width));
+        assert!(min.is_some_and(|width| width >= licenses::COLUMNS as f32 * licenses::CHAR_WIDTH));
+    });
 }
