@@ -9,7 +9,10 @@
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
-use farhelm_proto::ui_channel::Availability;
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionChanges, CollectionMeta, KeyedEntry, PREFERENCES_KEY,
+    Preferences,
+};
 use farhelm_proto::{LaunchEffort, LaunchHarness};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
@@ -928,4 +931,320 @@ fn a_wrapper_prefix_that_does_not_parse_refuses_save(cx: &mut TestAppContext) {
     assert!(saves(&mut helm).is_empty(), "nothing was saved");
     assert!(drawn(cx, "templates-editor-status"), "the reason is said");
     assert!(painted(cx).contains("Wrapper prefix"), "{}", painted(cx));
+}
+
+// ---- Rename and Duplicate ------------------------------------------------------------------------------------------
+
+/// The helm stores and pushes the preferences holding `marked` as the ⚡ template and `keys` as the number keys.
+fn push_preferences(
+    helm: &mut FakeHelm,
+    marked: Option<&str>,
+    keys: &[(&str, &str)],
+    cx: &mut VisualTestContext,
+) {
+    let preferences = Preferences {
+        quick_launch_template: marked.map(str::to_owned),
+        template_shortcuts: keys
+            .iter()
+            .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
+            .collect(),
+        ..Preferences::default()
+    };
+    helm.push(CollectionChanges {
+        collection: Collection::Preferences,
+        meta: test_support::meta(&[PREFERENCES_KEY]),
+        upsert: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: serde_json::to_value(&preferences).expect("preferences encode"),
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+}
+
+/// The one command sent since the last call, which must be `method` on `path`: its id and body.
+fn one(helm: &mut FakeHelm, method: Method, path: &str) -> (u64, Value) {
+    let sent = helm.commands();
+    assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
+    assert_eq!((sent[0].method, sent[0].path.as_str()), (method, path));
+    (sent[0].id, sent[0].body.clone().unwrap_or_default())
+}
+
+/// `templates()` with `codex-deep` renamed to `codex-deeper` (the new name added, the old one still there or gone).
+fn renamed(old_kept: bool) -> Vec<LaunchTemplate> {
+    let mut list = templates();
+    let mut new = list[0].clone();
+    new.name = "codex-deeper".into();
+    list.insert(1, new);
+    if !old_kept {
+        list.remove(0);
+    }
+    list
+}
+
+/// SPEC.md: "a rename saves that draft under the new name and then deletes the old one", "Renaming repoints the mark
+/// before deleting the old name", "Rename keeps a key". The order matters: deleting first would clear the mark and the
+/// key through the helm's delete path, and a failure between steps must leave the old template. Specified: renaming the
+/// ⚡ template that holds key 1 writes, one after another and each once the one before has settled, the template under
+/// its new name, the mark naming it, the whole key map with key 1 moved and key 2 left alone, and the old name's
+/// deletion; a Save press mid-rename sends nothing; afterwards the editor holds the new name, clean, with its row
+/// pressed.
+#[gpui::test]
+fn a_rename_saves_moves_the_mark_and_key_then_deletes_the_old_name(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), Some("codex-deep"));
+    push_preferences(
+        &mut helm,
+        Some("codex-deep"),
+        &[("1", "codex-deep"), ("2", "webbuilder")],
+        cx,
+    );
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    cx.simulate_input("er");
+    settle(cx);
+    click(cx, "templates-save");
+    let (id, body) = one(&mut helm, Method::Put, "/api/templates/codex-deeper");
+    assert_eq!(
+        body,
+        json!({"kind": "agent", "agent": "codex", "model": "gpt-6.1-sol", "effort": "high"})
+    );
+    push(&mut helm, &renamed(true), Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+
+    let (id, body) = one(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(body, json!({"quick_launch_template": "codex-deeper"}));
+    click(cx, "templates-save");
+    assert!(
+        helm.commands().is_empty(),
+        "Save is busy while the rename runs"
+    );
+    push_preferences(
+        &mut helm,
+        Some("codex-deeper"),
+        &[("1", "codex-deep"), ("2", "webbuilder")],
+        cx,
+    );
+    helm.reply(id, 204, None);
+    settle(cx);
+
+    let (id, body) = one(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(
+        body,
+        json!({"template_shortcuts": {"1": "codex-deeper", "2": "webbuilder"}})
+    );
+    push_preferences(
+        &mut helm,
+        Some("codex-deeper"),
+        &[("1", "codex-deeper"), ("2", "webbuilder")],
+        cx,
+    );
+    helm.reply(id, 204, None);
+    settle(cx);
+
+    let (id, _) = one(&mut helm, Method::Delete, "/api/templates/codex-deep");
+    let remaining = renamed(false);
+    let state = super::dialog_tests::templates_state(&remaining, Availability::Available);
+    helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: vec!["codex-deep".into()],
+    });
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert!(helm.commands().is_empty(), "the rename is done");
+    let text = painted(cx);
+    assert!(!text.contains("Unsaved changes"), "{text}");
+    assert!(text.contains("Edit template"), "{text}");
+    assert_eq!(pressed(cx, "template-open-codex-deeper"), Some(true));
+}
+
+/// A template that holds neither the mark nor a key has nothing to move: its rename is the save under the new name and
+/// the old name's deletion, with no preference write between them.
+#[gpui::test]
+fn a_rename_with_nothing_bound_goes_straight_to_the_deletion(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    cx.simulate_input("er");
+    settle(cx);
+    click(cx, "templates-save");
+    let (id, _) = one(&mut helm, Method::Put, "/api/templates/codex-deeper");
+    push(&mut helm, &renamed(true), Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    one(&mut helm, Method::Delete, "/api/templates/codex-deep");
+}
+
+/// A rename that fails between its steps must say so and keep the old template, which still holds the mark (the old
+/// dialog's words: "the old template was kept"), and the rename's own preference write must not be reported by the
+/// list's refusal line as one of the list's. Specified: after a number-key write from the list succeeded (so the list
+/// has a write of its own on record), a rename whose mark move is refused says the new name was saved but the mark could
+/// not be moved and the old template was kept; the list's "was not saved" line stays hidden; nothing more is sent, the
+/// old name is not deleted, and the draft stays unsaved.
+#[gpui::test]
+fn a_refused_mark_move_stops_the_rename_and_keeps_the_old_template(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), Some("codex-deep"));
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    click(cx, "template-key-webbuilder");
+    click(cx, "templates-key-5-item");
+    let (id, body) = one(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(
+        body,
+        json!({"template_shortcuts": {"5": "webbuilder"}}),
+        "the premise: the list wrote a key of its own"
+    );
+    push_preferences(&mut helm, Some("codex-deep"), &[("5", "webbuilder")], cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    click(cx, "templates-name");
+    retype(cx, "codex-deeper");
+    click(cx, "templates-save");
+    let (id, _) = one(&mut helm, Method::Put, "/api/templates/codex-deeper");
+    push(&mut helm, &renamed(true), Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    let (id, _) = one(&mut helm, Method::Put, "/api/preferences");
+    helm.reply(id, 503, Some(json!("fixture preference save refused")));
+    settle(cx);
+    let text = painted(cx);
+    assert!(
+        text.contains(
+            "The new name was saved, but the quick launch mark could not be moved; the old template was kept"
+        ),
+        "{text}"
+    );
+    assert!(
+        !text.contains("was not saved"),
+        "the list's own refusal line does not take the editor's write for its own: {text}"
+    );
+    assert!(text.contains("Unsaved changes"), "{text}");
+    assert!(helm.commands().is_empty(), "the old name was not deleted");
+}
+
+/// Moving the old name's number key is a step of its own, and its refusal must stop the rename before the old name is
+/// deleted, since the helm's delete clears the old name's key. Specified: renaming a template that holds key 1 but not
+/// ⚡, with the key map's write refused, says its number key could not be moved and the old template was kept, and
+/// sends no deletion.
+#[gpui::test]
+fn a_refused_key_move_stops_the_rename_and_keeps_the_old_template(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    push_preferences(&mut helm, None, &[("1", "codex-deep")], cx);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    cx.simulate_input("er");
+    settle(cx);
+    click(cx, "templates-save");
+    let (id, _) = one(&mut helm, Method::Put, "/api/templates/codex-deeper");
+    push(&mut helm, &renamed(true), Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    let (id, body) = one(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(body, json!({"template_shortcuts": {"1": "codex-deeper"}}));
+    helm.reply(id, 503, Some(json!("fixture preference save refused")));
+    settle(cx);
+    let text = painted(cx);
+    assert!(
+        text.contains(
+            "The new name was saved, but its number key could not be moved; the old template was kept"
+        ),
+        "{text}"
+    );
+    assert!(helm.commands().is_empty(), "the old name was not deleted");
+}
+
+/// Without the shortcut bindings the rename cannot tell whether the old name holds ⚡ or a key, and deleting it would
+/// lose them through the helm's delete path, so it stops (the old dialog's "shortcut bindings could not be read").
+/// Specified: when the helm reports its preferences unavailable by the time the new name is saved, the status line
+/// says the bindings could not be read and the old template was kept, with the helm's reason, and nothing more is sent.
+#[gpui::test]
+fn unreadable_bindings_stop_the_rename_before_any_move(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), Some("codex-deep"));
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    cx.simulate_input("er");
+    settle(cx);
+    click(cx, "templates-save");
+    let (id, _) = one(&mut helm, Method::Put, "/api/templates/codex-deeper");
+    push(&mut helm, &renamed(true), Availability::Available, cx);
+    helm.push(CollectionChanges {
+        collection: Collection::Preferences,
+        meta: CollectionMeta {
+            availability: Availability::Unavailable {
+                error: "database is locked".into(),
+            },
+            ..test_support::meta(&[PREFERENCES_KEY])
+        },
+        upsert: Vec::new(),
+        remove: Vec::new(),
+    });
+    helm.reply(id, 200, None);
+    settle(cx);
+    let text = painted(cx);
+    assert!(
+        text.contains(
+            "The new name was saved, but shortcut bindings could not be read; the old template was kept: database is locked"
+        ),
+        "{text}"
+    );
+    assert!(
+        helm.commands().is_empty(),
+        "no move and no deletion was sent"
+    );
+}
+
+/// The old dialog showed only the helm's words when deleting the old name was refused, and so does this one (recorded
+/// in the parity file). Specified: renaming a template that holds neither ⚡ nor a key, with the deletion of the old
+/// name refused, shows the helm's words in the status line and leaves the draft unsaved.
+#[gpui::test]
+fn a_refused_delete_of_the_old_name_shows_the_helms_words(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    cx.simulate_input("er");
+    settle(cx);
+    click(cx, "templates-save");
+    let (id, _) = one(&mut helm, Method::Put, "/api/templates/codex-deeper");
+    push(&mut helm, &renamed(true), Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    let (id, _) = one(&mut helm, Method::Delete, "/api/templates/codex-deep");
+    helm.reply(id, 409, Some(json!("fixture delete refused")));
+    settle(cx);
+    let text = painted(cx);
+    assert!(text.contains("fixture delete refused"), "{text}");
+    assert!(text.contains("Unsaved changes"), "{text}");
+    assert!(helm.commands().is_empty(), "nothing more was sent");
+}
+
+/// SPEC.md: "Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free". The copy
+/// is of the saved template, not of edits the user has not saved (the old dialog copied its baseline), and it is a new
+/// template that needs Save. Specified: with `codex-deep-copy` taken and an unsaved model edit, Duplicate opens a new
+/// template named `codex-deep-copy-2` holding the stored model, unsaved, with focus on its name and no Duplicate of its
+/// own; its Save writes it under that name.
+#[gpui::test]
+fn duplicate_opens_an_unsaved_copy_of_the_saved_template(cx: &mut TestAppContext) {
+    let mut list = templates();
+    let mut taken = list[0].clone();
+    taken.name = "codex-deep-copy".into();
+    list.insert(1, taken);
+    let (mut helm, cx) = open_header(cx, &list, None);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    click(cx, "templates-suggestion-gpt-6-luna");
+    assert!(
+        painted(cx).contains("Unsaved changes"),
+        "the premise: an unsaved edit"
+    );
+    click(cx, "templates-duplicate");
+    settle(cx);
+    let copy = draft(cx);
+    assert_eq!(copy.name, "codex-deep-copy-2");
+    assert_eq!(copy.fields.model, Some(Some("gpt-6.1-sol".into())));
+    let text = painted(cx);
+    assert!(text.contains("New template"), "{text}");
+    assert!(text.contains("Unsaved changes"), "{text}");
+    assert!(name_focused(cx));
+    assert!(
+        !drawn(cx, "templates-duplicate"),
+        "a new template has no Duplicate"
+    );
+    assert!(helm.commands().is_empty(), "Duplicate sends nothing");
+    click(cx, "templates-save");
+    one(&mut helm, Method::Put, "/api/templates/codex-deep-copy-2");
 }

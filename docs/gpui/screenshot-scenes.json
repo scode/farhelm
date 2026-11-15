@@ -859,7 +859,7 @@
     },
     {
       "golden": "template-editor",
-      "title": "The Templates dialog with codex-deep open in its editor: name, switch, agent type, model with its suggestions, effort, Save (no Duplicate or Delete yet)",
+      "title": "The Templates dialog with codex-deep open in its editor: name, switch, agent type, model with its suggestions, effort, Duplicate and Save (no Delete yet)",
       "reference": "template-editor"
     },
     {
