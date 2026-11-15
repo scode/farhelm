@@ -738,9 +738,8 @@ fn delete_all_sends_one_frozen_delete_per_reachable_host(cx: &mut TestAppContext
 
 /// Why this matters: a host's own Delete all must ask inside that host's card, not elsewhere in the dialog (SPEC.md:
 /// "Per-host confirmations stay inside their host sections"), and must delete only that host's archives. Specified:
-/// build-box's "Delete all on" asks in place, its words drawn within build-box's card, naming one checkout of 46.0 MiB
-/// on build-box; the rows it moved pause their Deletes for the settle pause, as any move does; confirming closes the
-/// dialog and sends one delete, for build-box only, naming `c`.
+/// build-box's "Delete all on" asks in place, in a band within build-box's card, naming one checkout of 46.0 MiB on
+/// build-box; confirming closes the dialog and sends one delete, for build-box only, naming `c`.
 #[gpui::test]
 fn a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there(cx: &mut TestAppContext) {
     let (mut helm, _, cx) = opened(cx);
@@ -761,11 +760,9 @@ fn a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there(cx: &mut TestA
         "the question is inside build-box's card"
     );
     assert!(
-        !enabled(&nodes, "trash-entry-delete-2-c"),
-        "the question moved build-box's rows, which pauses their Deletes"
+        cx.debug_bounds("trash-host-confirmation-2").is_some(),
+        "drawn in its band"
     );
-    test_support::advance(cx, SETTLE);
-    assert!(enabled(&frame(cx), "trash-entry-delete-2-c"));
     test_support::click(cx, "prompt-confirm");
     assert!(!test_support::any_open(cx));
     assert_eq!(
@@ -829,21 +826,20 @@ fn delete_all_waits_for_every_reachable_host(cx: &mut TestAppContext) {
 
 /// Why this matters: cancelling must leave the keyboard user where they were (SPEC.md: "cancelling returns focus to
 /// Delete all"), also on macOS, where a click does not focus the button it presses, so the dialog has to put focus on
-/// the asking button itself; and the trash control must never run two deletes of its own at once ("the trash control
-/// prevents overlapping deletes of its own"), which the confirmation itself has to refuse, since an entry's Delete stays
-/// available while a question is up. Specified: under the macOS click rule, Escape on the global question cancels it,
-/// keeps the dialog open and returns focus to Delete all, and the question is gone; Cancel on build-box's question,
-/// reached and pressed by keyboard, returns focus to its "Delete all on". Under the Linux rule, a global question
-/// confirmed after an entry's Delete went out sends nothing, leaves the dialog open, and returns focus to Delete all,
-/// now busy.
+/// the asking button itself, and the question's band must go with it. Specified, under the macOS click rule: Escape on
+/// the global question cancels it, keeps the dialog open and returns focus to Delete all, and the question and the
+/// footer's notices region are gone; Cancel on build-box's question, reached and pressed by keyboard, returns focus to
+/// its "Delete all on", and its band is gone.
 #[gpui::test]
-fn cancelling_returns_focus_to_the_asking_button_and_overlaps_send_nothing(
-    cx: &mut TestAppContext,
-) {
-    let (mut helm, _, cx) = opened(cx);
+fn cancelling_returns_focus_to_the_asking_button_and_takes_the_band_away(cx: &mut TestAppContext) {
+    let (_helm, _, cx) = opened(cx);
     cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
     test_support::click(cx, "trash-delete-all");
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    assert!(
+        cx.debug_bounds("trash-global-confirmation").is_some(),
+        "the premise: the band is drawn"
+    );
     test_support::keys(cx, "escape");
     assert!(
         test_support::any_open(cx),
@@ -851,6 +847,10 @@ fn cancelling_returns_focus_to_the_asking_button_and_overlaps_send_nothing(
     );
     assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
     assert!(node(&frame(cx), "trash-confirm-checkouts").is_none());
+    assert!(
+        cx.debug_bounds("checkout-trash-dialog-notices").is_none(),
+        "no notices region is left behind"
+    );
 
     test_support::click(cx, "trash-host-delete-2");
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
@@ -859,28 +859,101 @@ fn cancelling_returns_focus_to_the_asking_button_and_overlaps_send_nothing(
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
     test_support::keys(cx, "enter");
     assert_eq!(focused_id(cx).as_deref(), Some("trash-host-delete-2"));
+    assert!(cx.debug_bounds("trash-host-confirmation-2").is_none());
+}
 
-    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+/// Why this matters: the old dialog held still while its band asked: no entry could be deleted under the question, and
+/// Close or Escape dismissed the band before the dialog, so a stray Escape never closed the dialog over an unanswered
+/// question; and a host's question closing moves the rows back, which must pause the entries' Deletes as any move
+/// does. Specified: with the global question open, past the settle pause, an entry's Delete is unavailable and a press
+/// on it sends nothing; the footer's Close dismisses the question, keeps the dialog open and returns focus to Delete
+/// all; the entries' Deletes stay unavailable for the settle pause that the closing started, and then are available;
+/// with build-box's question open the header's close does the same, focus going back to its "Delete all on"; with the
+/// global question open and focus moved off it to the footer's Close, Escape dismisses the question, not the dialog;
+/// with no question open, Escape closes the dialog.
+#[gpui::test]
+fn an_open_question_holds_the_dialog_and_close_or_escape_dismisses_it_first(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, _, cx) = opened(cx);
     test_support::click(cx, "trash-delete-all");
-    // Opening the question restarted the settle pause.
     test_support::advance(cx, SETTLE);
+    assert!(!enabled(&frame(cx), "trash-entry-delete-1-a"), "held");
     test_support::click(cx, "trash-entry-delete-1-a");
-    let _ = one_delete(&mut helm);
+    assert!(take(&mut helm).is_empty(), "the held Delete sent nothing");
+
+    test_support::click(cx, "trash-close");
+    assert!(
+        test_support::any_open(cx),
+        "Close dismissed only the question"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+    assert!(cx.debug_bounds("trash-global-confirmation").is_none());
+    assert!(
+        !enabled(&frame(cx), "trash-entry-delete-1-a"),
+        "the closing restarted the settle pause"
+    );
+    test_support::advance(cx, SETTLE);
+    assert!(enabled(&frame(cx), "trash-entry-delete-1-a"));
+
+    test_support::click(cx, "trash-host-delete-2");
+    test_support::click(cx, "checkout-trash-dialog-close");
+    assert!(test_support::any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-host-delete-2"));
+    assert!(cx.debug_bounds("trash-host-confirmation-2").is_none());
+
+    test_support::click(cx, "trash-delete-all");
+    test_support::keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("trash-close"),
+        "the premise: focus left the question for the footer's Close"
+    );
+    test_support::keys(cx, "escape");
+    assert!(
+        test_support::any_open(cx),
+        "Escape dismissed only the question"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+    test_support::keys(cx, "escape");
+    assert!(
+        !test_support::any_open(cx),
+        "with no question, Escape closes the dialog"
+    );
+}
+
+/// Why this matters: a confirmation authorizes only what its question showed, on the connection the host had then
+/// (SPEC_impl.md, "Archived-checkout trash": confirmations freeze "observed host incarnations"), and a refusal at the
+/// press must not close the dialog over a delete that never went out. Specified: with build-box's question open, the
+/// helm reports build-box on a new connection; Delete permanently then sends no delete, the dialog stays open, and the
+/// question and its band are gone.
+#[gpui::test]
+fn a_confirmation_the_guards_refuse_sends_nothing_and_keeps_the_dialog(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-host-delete-2");
+    assert!(
+        cx.debug_bounds("trash-host-confirmation-2").is_some(),
+        "the premise: build-box's question is open"
+    );
+    let mut reconnected = remote();
+    reconnected.incarnation = 2;
+    push_hosts(&mut helm, &[local(), reconnected, down()]);
+    test_support::settle(cx);
+    let _ = take(&mut helm);
     test_support::click(cx, "prompt-confirm");
     assert!(
-        take(&mut helm).is_empty(),
-        "the overlapping confirmation sent nothing"
+        deletes(&take(&mut helm)).is_empty(),
+        "nothing was sent for the old connection"
     );
-    assert!(test_support::any_open(cx));
-    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+    assert!(test_support::any_open(cx), "the dialog stays open");
+    assert!(cx.debug_bounds("trash-host-confirmation-2").is_none());
 }
 
 /// Why this matters: Delete all can become unavailable while its question is up, and a cancelled question returns
 /// focus to it; a button that could not take focus then would drop the keyboard user out of the dialog (the old app
 /// fell back to Close for this). Specified: with the global question open, a pushed trash epoch sends a read of the
 /// local host, which makes Delete all unavailable; Escape then cancels the question and focus is on Delete all, drawn
-/// busy, and stays there once the read is answered and Delete all is available again. An entry's Delete pressed while
-/// the question is open does the same: Cancel then returns focus to Delete all, busy while that delete runs.
+/// busy, and stays there once the read is answered and Delete all is available again.
 #[gpui::test]
 fn cancelling_returns_focus_to_delete_all_while_it_is_unavailable(cx: &mut TestAppContext) {
     let (mut helm, _, cx) = opened(cx);
@@ -899,16 +972,5 @@ fn cancelling_returns_focus_to_delete_all_while_it_is_unavailable(cx: &mut TestA
     answer_reads(&mut helm, archives);
     test_support::advance(cx, SETTLE);
     assert!(pressable(&frame(cx), "trash-delete-all"));
-    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
-
-    test_support::click(cx, "trash-delete-all");
-    test_support::advance(cx, SETTLE);
-    test_support::click(cx, "trash-entry-delete-1-a");
-    let _ = one_delete(&mut helm);
-    test_support::click(cx, "prompt-cancel");
-    assert!(
-        !pressable(&frame(cx), "trash-delete-all"),
-        "the premise: busy"
-    );
     assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
 }

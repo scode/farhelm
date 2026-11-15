@@ -1186,12 +1186,12 @@
     },
     {
       "golden": "checkout-trash-confirm-all",
-      "title": "The Trash dialog over the reference trash asking before Delete all: the loud question in the bounded region above the footer, naming three checkouts on this machine and build-box with their partial size and the warning that uncommitted or unpushed work is lost, then Cancel and Delete permanently",
+      "title": "The Trash dialog over the reference trash asking before Delete all: the question in its red band in the bounded region above the footer, naming three checkouts on this machine and build-box with their partial size and the warning that uncommitted or unpushed work is lost, then Cancel and Delete permanently",
       "reference": null
     },
     {
       "golden": "checkout-trash-confirm-host",
-      "title": "The Trash dialog over the reference trash asking before build-box's Delete all on: the loud question inside build-box's card under its header, naming its one checkout and its size, then Cancel and Delete permanently",
+      "title": "The Trash dialog over the reference trash asking before build-box's Delete all on: the question in its red band inside build-box's card under its header, naming its one checkout and its size, then Cancel and Delete permanently",
       "reference": null
     },
     {
