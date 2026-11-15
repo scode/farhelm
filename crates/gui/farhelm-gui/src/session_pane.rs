@@ -54,14 +54,15 @@
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
 //! NOTE: Not ported yet: terminal tabs (the top row's left region holds only the terminal's open-tunnels pill until the
-//! terminal area brings them), the details bar's managed-checkout mark and copy buttons, the details bar of a session
-//! the list does not show (it waits for the helm to keep the open session in the listing; see [`details`]), and the
-//! card a session without terminal contents shows instead. With no tabs, the scrim covers the agent terminal only,
+//! terminal area brings them), the details bar's managed-checkout mark and copy buttons, and the card a session without
+//! terminal contents shows instead. With no tabs, the scrim covers the agent terminal only,
 //! where the old one covered every pane.
 
 pub(crate) mod details;
 pub(crate) mod header;
 
+#[cfg(test)]
+mod carried_tests;
 #[cfg(test)]
 mod details_tests;
 #[cfg(test)]
@@ -328,8 +329,9 @@ impl Render for SessionPane {
 }
 
 impl SessionPane {
-    /// The details bar for the open session filed under `key`, or `None` when the session list does not show it (see
-    /// [`details`]'s module docs) or the window has no UI session. Takes or drops the pulse and clock handles the bar
+    /// The details bar for the open session filed under `key`, read from the store by key whether or not the list
+    /// shows it, or `None` when the store holds no row for it (see [`details`]'s module docs) or the window has no UI
+    /// session. Takes or drops the pulse and clock handles the bar
     /// needs for this frame, as the session list does for its rows.
     fn details_bar(
         &mut self,

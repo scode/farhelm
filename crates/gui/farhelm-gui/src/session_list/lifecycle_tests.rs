@@ -377,10 +377,12 @@ fn a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actio
     test_support::click(cx, "prompt-cancel");
     test_support::click(cx, "session-row-a");
     assert_eq!(selected(cx).as_deref(), Some("a"));
-    // The opening's writes wait behind a's Stop, so they are read, not answered.
+    // The opening's writes (and the session query naming a) wait behind a's Stop, so they are read, not answered.
     for (path, _) in sent(&mut fake) {
         assert!(
-            path == "/api/preferences" || path == "/api/sessions/a/seen",
+            path == "/api/preferences"
+                || path == "/api/sessions/a/seen"
+                || path == farhelm_proto::ui_channel::SESSION_QUERY_PATH,
             "only the opening's writes were sent: {path}"
         );
     }

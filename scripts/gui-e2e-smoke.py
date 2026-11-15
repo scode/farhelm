@@ -13,7 +13,8 @@ rail's Add host; 42, the session list's status segments; 43, the settings-and-ho
 and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's
 Help menu and SSH help; 46, the session list's order menu; 47, the settings-and-hosts area's host Update, its
 progress, failure and rerun; 48, the other-dialogs area's Send feedback, up to but never including Send; 49, the
-session list header's Trash). The behavior itself is specified and tested in process
+session list header's Trash; 50, the session view's open session that a status filter hides, named and
+renamed). The behavior itself is specified and tested in process
 (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
 `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`); nothing here checks layout or wording beyond the names
 it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
@@ -1240,6 +1241,53 @@ class Smoke(unittest.TestCase):
         self.assertRegex(
             self.ok("snapshot", "-i"), r'button "Checkout trash, [^"]*" \[focused\]', "focus is back on Trash"
         )
+
+    # ---- The session view's hidden open session (50), on a session of its own ----------------------------------------
+
+    def test_50_a_status_filter_that_hides_the_open_session_keeps_its_pane_and_rename(self) -> None:
+        """Hiding the open session with a filter changes neither the selection nor its terminal (SPEC.md, "Session
+        list"), and Rename's shortcut renames it "including when its row is filtered out" ("Desktop window chrome").
+        Only the real helm shows that this holds end to end: the window's query names the open session, and the helm
+        keeps that session in the pushed collection outside the list, so the pane reads its current state. Specified,
+        on a replayed fake agent this step seeds to hold an idle screen, under a title of its own, once the helm lists
+        it idle: with it open, a click on Running takes its row (and its actions button) out of the list while its
+        title stays on screen in the details bar; the platform's Rename chord opens "Rename session", and a new title
+        saved there closes it, makes the helm list the session under that title and shows the new title, still with no
+        row for it. The step leaves All chosen, as it found it."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        tag = uuid.uuid4().hex[:8]
+        work = RUN / "work"
+        work.mkdir(exist_ok=True)
+        transcript = work / f"hidden-{tag}-idle.txt"
+        transcript.write_text(gui_agent.transcript(1, "idle"))
+        body = gui_agent.seed_body(1, gui_agent.SESSION_CWD, fixtures, "idle", transcript)
+        title = body["title"] = f"Hidden {tag}"
+        id = gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"]
+        gui_agent.wait_for_statuses(lambda: gui_agent.listed_states(RUN), {id: "idle"})
+        row_actions = f'"Session actions for {title}"'
+        renamed = f"Hidden renamed {tag}"
+        try:
+            self.ok("click", f"text:{title}")
+            eventually(lambda: last_selected() == id, "premise: the helm remembering the session as selected")
+            self.ok("click", "id:session-status-Running")
+            eventually(lambda: row_actions not in self.ok("snapshot"), "the idle session's row leaving the list")
+            self.assertIn(title, self.ok("snapshot"), "the details bar still names the hidden open session")
+
+            self.ok("press", "cmd-l" if sys.platform == "darwin" else "ctrl-shift-l")
+            self.ok("wait", "--text", "Rename session")
+            self.ok("fill", "text:New session title", renamed)
+            self.ok("click", "text:Save")
+            self.ok("wait", "--gone", "Rename session")
+            eventually(lambda: listed_titles().get(id) == renamed, "the helm listing the hidden session renamed")
+            self.ok("wait", "--text", renamed)
+            self.assertNotIn(f'"Session actions for {renamed}"', self.ok("snapshot"), "still no row for it")
+        finally:
+            # Whether the step is already failing: then its own error is the report, and the cleanup must not replace
+            # it with an error of its own.
+            failing = sys.exc_info()[0] is not None
+            result = agent("click", "id:session-status-All")
+            if result.returncode != 0 and not failing:
+                self.fail(f"choosing All again failed:\n{result.stdout}{result.stderr}")
 
 
 def trash_close_focused(snapshot: str) -> bool:

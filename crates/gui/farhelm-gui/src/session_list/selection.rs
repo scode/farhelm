@@ -12,7 +12,9 @@
 //! - **A selection stays until it is proven gone.** A selected session missing from the listing is dropped only when
 //!   the listing proves it gone ([`crate::session::listing_proves_gone`], the rule a confirmation about a session uses
 //!   too); a truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user
-//!   had open. When it is proven gone, the automatic choice picks the next one, never the one that just went.
+//!   had open. One more thing proves it: this window's own Delete of it succeeded and the store no longer holds it
+//!   (`delete`'s "This window's own Delete is evidence"), since a filtered listing never would. When it is proven gone,
+//!   the automatic choice picks the next one, never the one that just went.
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
@@ -26,8 +28,10 @@
 //!   "Status", as the old app did). The memory of what was stamped is keyed on the session, its activity and its
 //!   eligibility, never on the stamp itself:
 //!   that is what makes a manual mark-unread of the open session stick until new output arrives or the user opens
-//!   another session. A listing that hides the open session leaves the memory alone ([`Open::Hidden`]). A failed mark is silent (SPEC.md, "Errors and diagnostics"): it costs a dot that is one visit
-//!   behind, and the next mark corrects it.
+//!   another session. The open session is read by key, so one the helm carries outside a filtered or cut list is
+//!   marked like a listed one, and a moment with no row for it leaves the memory alone ([`Open::Hidden`]). A failed
+//!   mark is silent (SPEC.md, "Errors and diagnostics"): it costs a dot that is one visit behind, and the next mark
+//!   corrects it.
 //! - **A Delete holds the automatic choice back.** While any Delete the list sent is in flight, no session is opened
 //!   automatically, and a selection proven gone is cleared rather than replaced ([`hold_for_deletes`]); the choice is
 //!   made once every Delete has settled. SPEC.md: "Automatic selection after Delete waits until every admitted Delete
@@ -50,7 +54,8 @@ use crate::focus::Mark;
 use crate::local_state;
 use crate::{operations, session_pane};
 
-/// One listed session: the key the helm files it under, and its row.
+/// One session with its row: the key the helm files it under, and the row. A listed session, or the open session the
+/// helm carries outside the list.
 #[derive(Clone, Copy)]
 pub(crate) struct Listed<'a> {
     pub(crate) key: &'a str,
@@ -169,10 +174,12 @@ pub(crate) struct Stamped(Option<(String, i64, bool)>);
 pub(crate) enum Open<'a> {
     /// No session is open.
     Nothing,
-    /// The session filed under this key is open but the listing does not show it: the helm's cap cut it, or a filter
-    /// (a chosen host, say) leaves it out, and the store then holds no row for it. Its activity is unknown, not gone.
+    /// The session filed under this key is open but the store holds no row for it. The helm carries the open session
+    /// even when a filter or its cap leaves it out of the list, so this is the gap before the query naming it is
+    /// answered, or a key that names no session. Its activity is unknown, not gone.
     Hidden(&'a str),
-    /// The open session, listed.
+    /// The open session with its row, listed or carried outside the list ([`crate::session_list::filters`], "The query
+    /// names the open session").
     Shown(Listed<'a>),
 }
 

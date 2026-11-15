@@ -29,16 +29,27 @@
 //! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
 //! with nothing alive, as SPEC.md's header Delete does.
+//!
+//! **This window's own Delete is evidence.** The selection rules drop a selected session only once a complete,
+//! unfiltered listing proves it gone (`session::listing_proves_gone`), and a filtered one never does. The open session
+//! a filter hides can still be deleted from its header or with the Delete shortcut, and the helm then stops carrying
+//! it, which no filtered listing proves; without more, the pane would stay on the deleted session for good. So a Delete
+//! this window sent that the helm did ([`deleted_here`]), with the session gone from the store, counts as that proof:
+//! the selection moves on as after a complete listing without it. A deletion made elsewhere is still inferred only from
+//! a complete listing (SPEC.md), so a Rename editor or a question about a hidden session deleted by another client
+//! stays open, and the helm refuses what it then sends.
 
+use std::collections::HashSet;
 use std::f32::consts::TAU;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Role, SharedString, StatefulInteractiveElement as _,
-    Styled, Subscription, Svg, Transformation, Window, div, px, radians, svg,
+    App, AppContext as _, BorrowAppContext as _, Context, ElementId, Entity, FontWeight, Global,
+    Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, Role, SharedString,
+    StatefulInteractiveElement as _, Styled, Subscription, Svg, Transformation, Window, div, px,
+    radians, svg,
 };
 
 use super::{SessionList, menu};
@@ -46,8 +57,9 @@ use crate::assets::Icon;
 use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, OpKey, Work};
+use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
+use crate::session::PerSession;
 use crate::theme::{self, metrics};
 use crate::{session, ticker};
 
@@ -167,8 +179,9 @@ pub(super) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
 impl SessionList {
     /// The user asked to delete `key` (its row's Delete) at `mark`: delete it at once when nothing shows alive or
     /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in the list's view
-    /// and centered when it is not (scrolled away). Nothing happens for a session that is not listed, or that has any
-    /// request in flight. Visible to the crate for the screenshot goldens, which ask the question without a click.
+    /// and centered when it is not (scrolled away). Nothing happens for a session the store holds no row for, or that
+    /// has any request in flight. Visible to the crate for the screenshot goldens, which ask the question without a
+    /// click.
     pub(crate) fn delete(
         &mut self,
         key: &str,
@@ -252,12 +265,39 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
         tracing::warn!("a session key that cannot be a path segment was not deleted");
         return;
     };
+    let deleted = key.to_owned();
     let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, |_, _| {})
+        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
+            if let Outcome::Done(_) = settled.outcome {
+                cx.update_default_global::<DeletedHere, _>(|here, cx| {
+                    here.0.current(cx).insert(deleted);
+                });
+            }
+        })
     });
     if let Err(refused) = started {
         tracing::debug!(?refused, "a Delete was not sent");
     }
+}
+
+/// The sessions this window deleted under the current UI session: every Delete it sent that the helm did (a 2xx other
+/// than 202). Per UI session, since a reset's new store is read afresh and a key from an earlier one proves nothing about
+/// it. Kept app-wide like the selection itself ([`crate::local_state`]), which assumes one window.
+#[derive(Default)]
+struct DeletedHere(PerSession<HashSet<String>>);
+
+impl Global for DeletedHere {}
+
+/// Whether this window's own Delete of `key` succeeded under the current UI session (the module docs' "This window's
+/// own Delete is evidence"). It says nothing about whether the session is still in the store: the selection rules pair
+/// it with the store holding no row for `key`.
+///
+/// NOTE: The list's settle on the Delete's own settling sees the record only because GPUI runs the operation store's
+/// observers when the update that settled the Delete returns, after its completion recorded the key here.
+/// `session_pane/carried_tests.rs`'s `this_windows_delete_of_a_hidden_open_session_opens_the_next_session` fails if
+/// that order changes.
+pub(crate) fn deleted_here(key: &str, cx: &mut App) -> bool {
+    cx.update_default_global::<DeletedHere, _>(|here, cx| here.0.current(cx).contains(key))
 }
 
 // ---- What the row shows ----------------------------------------------------------------------------------------------

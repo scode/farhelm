@@ -139,7 +139,8 @@ pub(crate) fn command(session: &str, guard: SessionStopRequest) -> Result<Comman
 impl SessionList {
     /// The user asked to stop `key` (its row's Stop) at `mark`: stop it at once when the row lists no tabs or
     /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is drawn and centered
-    /// when it is not. Nothing happens for a session that is not listed, or that has any request in flight.
+    /// when it is not. Nothing happens for a session the store holds no row for, or that has any request in
+    /// flight.
     pub(crate) fn stop(
         &mut self,
         key: &str,

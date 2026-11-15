@@ -1,8 +1,8 @@
 //! Tests of the open session's top row: the actions' order, labels and hover help, Restart's offer and its request,
 //! that Stop, Replace and Delete from the header ask the row's questions and send the row's preconditions, a pending
-//! Delete and Stop, exclusion, a session the list does not show, where Escape and Cancel leave focus, the row's
-//! layout at the 650-pixel floor with the real text system, and the terminal text size group at the start of the
-//! actions (its steps, readout, range, shortcut, and the size a terminal opens at).
+//! Delete and Stop, exclusion, where Escape and Cancel leave focus, the row's layout at the 650-pixel floor with the
+//! real text system, and the terminal text size group at the start of the actions (its steps, readout, range, shortcut,
+//! and the size a terminal opens at). The header of an open session the list does not show is `carried_tests.rs`'s.
 //!
 //! Everything but the layout test runs in the real main view over the helm client's fake, as the session list's own
 //! lifecycle tests do (whose fixtures these share), and reads what the window sent from the fake and what it drew from
@@ -29,7 +29,7 @@ use gpui_component::Root;
 use serde_json::{Value, json};
 
 use super::SessionPane;
-use super::header::{Action, TABS_SLOT, unlisted_help};
+use super::header::{Action, TABS_SLOT};
 use crate::actions::{DELETE_SESSION_CHORD, DELETE_SESSION_SHORTCUT_NAME};
 use crate::focus::Mark;
 use crate::main_view::MainView;
@@ -651,41 +651,6 @@ fn a_request_from_the_row_leaves_the_headers_actions_unavailable(cx: &mut TestAp
         fake.commands().iter().all(|command| !is_lifecycle(command)),
         "nothing more was sent"
     );
-}
-
-/// The header acts on the open session's listed row; a session the list does not show (a filter, or the list's cap,
-/// which proves nothing about it being gone) has no row to ask from, so its actions are drawn unavailable and say why.
-/// Specified: with a open, a truncated listing pushed without a keeps a open; each action's hover help is its unlisted
-/// help; a click on Replace or Delete opens nothing.
-#[gpui::test]
-fn an_unlisted_open_session_draws_its_actions_unavailable_and_says_why(cx: &mut TestAppContext) {
-    let (mut fake, cx) = open_main(
-        cx,
-        snapshot_of(
-            vec![entry(&session("a"), 0), entry(&session("b"), 0)],
-            false,
-        ),
-    );
-    pending(&mut fake);
-    fake.push(change(listing_meta(&["b"], 2, true), &[], &["a"]));
-    test_support::settle(cx);
-    assert_eq!(
-        selected(cx).as_deref(),
-        Some("a"),
-        "the premise: a stays open"
-    );
-    for action in Action::ALL {
-        assert_eq!(
-            hover(cx, action.id()),
-            Some(unlisted_help(action)),
-            "{action:?}"
-        );
-    }
-    for action in [Action::Replace, Action::Delete] {
-        test_support::click(cx, action.id());
-        assert!(!any_layer(cx), "{action:?} asks nothing");
-    }
-    assert_eq!(pending(&mut fake), []);
 }
 
 /// The old `session-view-claims.spec.ts`: another client deleting the open session while its header Restart question
