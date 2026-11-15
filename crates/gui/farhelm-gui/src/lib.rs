@@ -46,6 +46,8 @@
 //!   frame, its title band and decorations, and the open-source notices.
 //! - [`update_readout`]: the desktop updater's state as the words and marks the version readout shows, pure so its
 //!   rules are tested without a window.
+//! - [`sounds`]: the status sounds as plain Rust: the rules for which one an observation plays, and the three sounds
+//!   synthesized into WAV bytes; observing the store and playing them come later.
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -86,6 +88,7 @@ pub mod session_list;
 pub mod session_pane;
 pub mod settings;
 pub mod sidebar;
+pub mod sounds;
 pub mod store;
 pub mod templates;
 pub mod terminal;
