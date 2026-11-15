@@ -2596,16 +2596,18 @@ fn keyboard_shortcuts_dialog_setup(state: &SceneState, window: &mut Window, cx: 
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-credentials`, `settings-terminal`,
-/// `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`): focus on the section's
-/// first switch (on the dialog itself at Appearance, Credentials, Terminal, Checkouts, Agent trust and Notifications),
-/// naming on because the row stores no choice for it, and automatic remote-host updates turned on so the Hosts picture
-/// shows a switch in each state. Agent trust's reads of each agent's trust, sent as it opens, are answered at once with
-/// the trust off and the hint not dismissed, Checkouts' reads as the reference stack had them: no default folder, no
-/// post-clone command, and a checkout kept ready, Notifications' read of the ntfy settings with the helm's defaults
-/// (off, `https://ntfy.sh`, no topic, Default priority, no token), and Credentials' read with an empty catalog; nothing
-/// else is answered. The opener is the scene's ring handle, which stands in for the gear. The fake and the connection
-/// are kept for the scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-containers`, `settings-credentials`,
+/// `settings-terminal`, `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`):
+/// focus on the section's first switch (on the dialog itself at Appearance, Containers, Credentials, Terminal,
+/// Checkouts, Agent trust and Notifications), naming on because the row stores no choice for it, and automatic
+/// remote-host updates turned on so the Hosts picture shows a switch in each state. Agent trust's reads of each agent's
+/// trust, sent as it opens, are answered at once with the trust off and the hint not dismissed, Checkouts' reads as the
+/// reference stack had them: no default folder, no post-clone command, and a checkout kept ready, Notifications' read
+/// of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic, Default priority, no token),
+/// Credentials' read with an empty catalog, and Containers' reads with the reference's three container hosts, all
+/// ready, and no leftovers; nothing else is answered, so the checks Containers then asks for stay unanswered and the
+/// rows keep the first read's state. The opener is the scene's ring handle, which stands in for the gear. The fake and
+/// the connection are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -2650,6 +2652,12 @@ fn settings_scene(
                     "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
                     "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
                     "/api/credentials" => serde_json::json!([]),
+                    "/api/environment-places" => serde_json::json!([
+                        { "place": { "kind": "podman_host", "host": 1 }, "name": "this machine", "reason": null, "refreshing": false },
+                        { "place": { "kind": "podman_host", "host": 2 }, "name": "build-box", "reason": null, "refreshing": false },
+                        { "place": { "kind": "podman_host", "host": 3 }, "name": "gpu-1", "reason": null, "refreshing": false },
+                    ]),
+                    "/api/container-orphans" => serde_json::json!([]),
                     "/api/ntfy-alerts" => {
                         match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
                             Ok(defaults) => defaults,
@@ -3009,6 +3017,12 @@ fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Window, cx: &mut
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
     keep.push(Box::new(watch));
+}
+
+/// Settings at Containers: the reference's three container hosts, each Ready, and no containers left behind, as in the
+/// reference. Focus starts on the dialog itself (`Section::first`), so no ring shows.
+fn settings_containers_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Containers, window, cx);
 }
 
 /// Settings at Checkouts, its fields empty and the spare switch on, as in the reference. Focus starts on the dialog
@@ -4339,6 +4353,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_terminal_setup,
+    },
+    Scene {
+        name: "settings-containers",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_containers_setup,
     },
     Scene {
         name: "settings-checkouts",

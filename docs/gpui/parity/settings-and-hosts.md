@@ -33,18 +33,20 @@ it; the sidebar's row keeps the cases that draw it.
 | `tests/ssh-help.spec.ts`             | 4     | ssh help displays and copies both registered-host commands                       | ported (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `tests/workspace-trust.spec.ts`      | 3     | managed-checkout trust switches persist independently of Claude's legacy route   | partly (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `tests/appearance.spec.ts`           | 4     | ${initial.name} before application mount                                         | partly (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `tests/podman-environments.spec.ts`  | 10    | Containers Settings keeps failed cleanup explicit                                | partly (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## `tests/settings.spec.ts`, partly
 
-The dialog's shell and its Sessions, Appearance, Hosts, Credentials, Terminal, Checkouts, Agent trust, Notifications and
-App sections are ported; the cases about the other sections (Recipes, Tensorlake and Containers) wait for them.
-Credentials' own cases are in `tests/credentials-settings.spec.ts` and `tests/credential-delivery.spec.ts`, below. App,
-listed only in the installed desktop app (where its updater runs), had no browser spec, since the web interface never
-showed it. Notifications' own cases are in `tests/ntfy-settings.spec.ts`, below; of this spec's, the navigation case's
-Notifications half (the "ntfy alerts" group under its 16-pixel sub-heading, below the 18-pixel section heading) is the
-golden `settings-notifications`, and its Sounds half waits for the Sounds sub-heading (Deviations). Appearance's own
-cases are in `tests/appearance.spec.ts`, below. Agent trust's are split between `tests/workspace-trust.spec.ts` (below)
-and this spec, whose hint-switch cases are mapped in the Agent trust bullet.
+The dialog's shell and its Sessions, Appearance, Hosts, Containers, Credentials, Terminal, Checkouts, Agent trust,
+Notifications and App sections are ported; the cases about the other sections (Recipes and Tensorlake) wait for them.
+Containers' own cases are in `tests/podman-environments.spec.ts`, and Credentials' in
+`tests/credentials-settings.spec.ts` and `tests/credential-delivery.spec.ts`, below. App, listed only in the installed
+desktop app (where its updater runs), had no browser spec, since the web interface never showed it. Notifications' own
+cases are in `tests/ntfy-settings.spec.ts`, below; of this spec's, the navigation case's Notifications half (the "ntfy
+alerts" group under its 16-pixel sub-heading, below the 18-pixel section heading) is the golden
+`settings-notifications`, and its Sounds half waits for the Sounds sub-heading (Deviations). Appearance's own cases are
+in `tests/appearance.spec.ts`, below. Agent trust's are split between `tests/workspace-trust.spec.ts` (below) and this
+spec, whose hint-switch cases are mapped in the Agent trust bullet.
 
 NOTE: Terminal shows the link choice and the tunnel consent switch. Its **File types to open with Cmd-click** field
 governs opening downloaded files, so it waits for the terminal area's downloads, which are not on `main` yet; until they
@@ -615,6 +617,35 @@ Not ported here: the two hint-band cases ("... trust hint stays scoped to its ma
 "Pi and command launches do not borrow a workspace trust hint") and the rest of `claude-trust.spec.ts` belong to the
 band, which the session view draws.
 
+## `tests/podman-environments.spec.ts`, partly
+
+Settings → Containers is ported (`crates/gui/farhelm-gui/src/settings/containers.rs`). Of the spec's ten tests, two are
+Settings': "Containers Settings keeps failed cleanup explicit", and the `recipes` surface of "refreshes recipe places
+after a delayed probe without a fleet notice", which is Settings → Recipes' and waits for it. The other eight, and the
+`launcher` surface of the delayed-probe test, are the launcher's (new container placement, recents, quick launch) or the
+session view's (a connected container's Delete), and are listed in those areas' parity files as they are ported.
+
+Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs`:
+
+- "Containers Settings keeps failed cleanup explicit":
+  `a_leftover_delete_asks_sends_its_place_and_id_and_shows_a_refusal` (the region lists the leftover, Delete asks
+  "Delete container?" with its consequence and sends nothing, Cancel sends nothing, Delete container sends the place and
+  canonical id, the helm's refusal shows and the row stays) and
+  `a_leftover_with_a_host_row_is_deleted_through_host_removal`; the spec's Container hosts region holding "Build
+  machine" is `containers_reads_the_hosts_and_leftovers_once_then_checks_each_container_host`, which also checks that
+  each container host is checked again on showing, as the old section did on mount.
+- With no old case: `a_running_check_is_read_again_once_after_the_follow_up_delay`,
+  `a_refresh_drops_the_older_rounds_answers_and_later_read` and `closing_settings_or_a_reset_cancels_the_later_read`
+  (the later read in Deviations, Containers) and `failed_container_reads_show_their_reasons_and_never_none_found` (the
+  old reader's "a failed discovery must stay an error").
+- The look: the golden `settings-containers` (`crates/gui/farhelm-gui/src/goldens.rs`).
+
+The helm answers the listing and a Delete within its host reply bound (decided by the migration's orchestrator on
+2026-11-15, under its rule that every host-waiting route the GUI sends is bounded); its tests are in
+`crates/farhelm-helm/src/environment/podman/tests.rs` (the listing and the leftover Delete against a stalled container
+host, and the listing asking its hosts concurrently) and
+`crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs` (removing a container host).
+
 ## The host menu and host settings
 
 A Hosts panel row's ⋯ opens the host's actions menu beside it, and its Settings opens the host settings dialog. The
@@ -794,6 +825,34 @@ Where the port does not match the old app, and why. Each stays until the work na
   `DraftInput` per text field, because `DraftInput` saves only its own field. The migration's settings-and-hosts area
   decided on 2026-11-14 to keep this exception until a second whole-form save makes it worth building into the drafts
   module.
+
+### Containers
+
+- **A finished check shows after one later read, not by itself.** The old section re-read the hosts on every fleet
+  notice, and polled them while any host's check was running, so "· Refreshing…" went away by itself. The helm pushes
+  nothing when a check finishes (`PodmanPlaces::refresh` publishes only to its own cache, and no pushed collection
+  carries a check's state), and this app reads what is not pushed once per opening. So after the read that follows the
+  checks, if a host is still refreshing, the section reads the hosts once more 30 seconds later
+  (`containers::FOLLOW_UP`, how long a container launch waits for a host's check) and then stops: a check that takes
+  longer keeps "· Refreshing…" until the next Refresh or opening. Chosen by the migration's orchestrator on 2026-11-15
+  as an interim, while the helm change that would push finished checks is requested; when that lands, the section
+  re-reads the hosts on that push instead and this entry goes.
+- **The leftovers are not re-read on fleet notices.** The old section re-read **Containers not on this helm** on every
+  fleet notice too. Here they are read once per opening, on Refresh and after a done Delete, under this app's rule that
+  what the helm does not push is read once per opening, and pushing finished checks would not change that. The visible
+  case: after a Delete the helm answered at its 20-second bound, the container may be gone a moment later, but its row
+  stays until the user presses Refresh, as the reply's own words say ("the list shows whether the container is gone when
+  it is read again"); the old app cleared the row by itself.
+- **The hosts show before their checks are asked for.** The old section showed nothing new until it had asked for every
+  host's check and read the hosts again; here the first read shows at once, then the checks go out, then the second read
+  replaces it. Both reads answer without waiting on a host.
+- **The Delete question starts on Cancel.** The old inline question left focus on the Delete that opened it. Here it is
+  the prompt's inline question, which takes focus, and starts on Cancel since deleting a container cannot be undone
+  (SPEC.md, "Opening and closing").
+- **A Delete or listing that waits on a host gives up after 20 seconds.** The old routes waited for every Podman
+  command; the helm now answers within its host reply bound, so a container host that stops answering shows "did not
+  answer within 20 seconds" where the list or the refusal would be, and a Delete carries on and shows in the list's next
+  read.
 
 ### Credentials
 
