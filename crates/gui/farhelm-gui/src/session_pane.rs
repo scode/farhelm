@@ -56,12 +56,22 @@
 //! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
-//! NOTE: Not ported yet: the card a session without terminal contents shows instead. The scrim covers whichever
-//! terminal is shown, as the old one covered every pane; a Delete holds back the notices of all of them.
+//! - **The interrupted card.** A session whose agent a host reboot or a Farhelm update ended has no terminal left, so
+//!   the pane mounts none for it and draws the interrupted card ([`card`]) where the terminals would be, between the
+//!   top row and the details bar, with the card as home. That is the one thing the pane learns from the store rather
+//!   than from the selection and the connection: when the open session goes into its card the pane drops its
+//!   terminals (their streams with them), and when it comes out (restarted, from here or anywhere) it mounts new ones
+//!   under a new lease, as a fresh view would ([`card::Follow`] tells it when).
+//!
+//! NOTE: The scrim covers whichever terminal is shown, as the old one covered every pane; a Delete holds back the
+//! notices of all of them.
 
+pub(crate) mod card;
 pub(crate) mod details;
 pub(crate) mod header;
 
+#[cfg(test)]
+mod card_tests;
 #[cfg(test)]
 mod carried_tests;
 #[cfg(test)]
@@ -75,7 +85,7 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, FontWeight, Global,
+    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, FontWeight, Global,
     InteractiveElement as _, IntoElement, ParentElement, Render, Role, Stateful,
     StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
@@ -84,8 +94,9 @@ use crate::components::{Spinner, spinner_icon};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
+use crate::prompt::Inline;
 use crate::session::{self, PerSession, UiSession};
-use crate::session_list::{age, delete};
+use crate::session_list::{age, delete, replace};
 use std::rc::Rc;
 
 use crate::terminal::CellMetrics;
@@ -148,53 +159,95 @@ pub struct SessionPane {
     /// rows' ages and no timer of the pane's own (SPEC_impl.md, "Animation time: the ticker"). Worked out at the top of
     /// each frame like `spinner`.
     clock: Option<ticker::Clock>,
-    /// Act on a change of the selection, of the user's choice and of the connection.
+    /// Tells the pane when the open session goes into or out of its interrupted card ([`card::Follow`]).
+    _card: Entity<card::Follow>,
+    /// Act on a change of the selection, of the user's choice, of the connection and of the open session's card.
     _observing: Vec<Subscription>,
 }
 
-/// The terminals the pane shows (the session's agent terminal and its tabs), the session they are for, and that
-/// session's details bar's copy confirmations, which are made and dropped with the terminals (the old view's keyed
-/// remount reset them the same way).
+/// What the pane keeps for the open session: the session's key, the terminals it shows (the session's agent terminal
+/// and its tabs) unless the session shows its interrupted card, the card's focus handle and the Replace question the
+/// card asked, and the details bar's copy confirmations. All of it is made and dropped with the selection (the old
+/// view's keyed remount reset it the same way); the terminals and the card's question also go when the session goes
+/// into or out of its card.
 struct Mounted {
     key: String,
-    set: Entity<TerminalSet>,
+    /// `None` while the session shows its interrupted card (or when the terminal font could not be measured).
+    set: Option<Entity<TerminalSet>>,
     /// Keeps home on the set's shown terminal as the user chooses tabs and tabs come and go.
     _home: Option<Subscription>,
     copies: details::Copies,
+    /// The interrupted card's focus handle, a tab stop: home while the card shows.
+    card_focus: FocusHandle,
+    /// The Replace question the interrupted card asked, which the card draws while it is open.
+    question: Option<Inline<replace::Frozen>>,
+    /// The row the interrupted card was last drawn from, kept only to go on drawing the card while the store holds no
+    /// row for the session at all: between the helm removing a confirmed Replace's source and its reply, the selection
+    /// stays on the source (`session_list::selection`), and the card stays up with the Replace's wait line until the
+    /// reply opens the replacement, as the old view, which kept its own copy of the session, did. Never drawn while the
+    /// store has a row, so it cannot show anything the store contradicts. Kept with the key it was read under and drawn
+    /// only for that key. A `Mounted` belongs to one session anyway (`sync` makes a new one whenever the selection's key
+    /// changes, and `render` draws the key of the `Mounted` it holds), so the key only states that in the value, and
+    /// `render` asserts it in debug builds.
+    card_row: Option<(String, SessionRow)>,
 }
 
 impl Mounted {
-    /// The terminals of the session filed under `key` ([`TerminalSet`]: the agent terminal and its tabs, under one
-    /// lease of their own), made for `session`, at the text size every open terminal is drawn at now
-    /// ([`crate::terminal::text_size::current`]). `None` when the text system cannot measure the terminal font, which
-    /// is logged: the pane then stays blank, and the next change it observes tries again, most likely with the same
-    /// result.
+    /// What the pane keeps for the session filed under `key` under `session`, with its terminals when `terminal` says
+    /// so ([`terminals`]). `None` when it wants terminals and they cannot be made: the pane then stays blank, and the
+    /// next change it observes tries again.
     fn new(
         session: &Entity<UiSession>,
         key: String,
+        terminal: bool,
         cx: &mut Context<SessionPane>,
     ) -> Option<Self> {
-        // At the size every open terminal is drawn at now, so a new one does not start at the default and jump.
-        let Some(metrics) = CellMetrics::measure(crate::terminal::text_size::current(cx), cx)
-        else {
-            tracing::warn!(
-                "could not measure the terminal font; the session's terminal is not shown"
-            );
-            return None;
+        let set = if terminal {
+            Some(terminals(session, &key, cx)?)
+        } else {
+            None
         };
-        let deleting = key.clone();
-        // Asked while the terminals draw, from the current UI session's operation store, which notifies when a request
-        // starts or settles. A terminal outlives no UI session (it retires with its own), so the store it reads is
-        // always the one its Delete went through.
-        let hold: SharedHold = Rc::new(move |cx| delete::in_flight(&deleting, cx).is_some());
-        let set = cx.new(|cx| TerminalSet::new(session, key.clone(), metrics, hold, cx));
         Some(Mounted {
             key,
             set,
             _home: None,
             copies: details::Copies::new(cx),
+            card_focus: cx.focus_handle().tab_stop(true),
+            question: None,
+            card_row: None,
         })
     }
+
+    /// Where focus rests for this session: the set's shown terminal, or the card while `card` says it shows. `None` with
+    /// neither (terminals that could not be made), rather than a handle nothing draws.
+    fn home(&self, card: bool, cx: &App) -> Option<FocusHandle> {
+        match &self.set {
+            Some(set) => set.read(cx).home(cx),
+            None => card.then(|| self.card_focus.clone()),
+        }
+    }
+}
+
+/// The terminals of the session filed under `key` ([`TerminalSet`]: the agent terminal and its tabs, under one lease of
+/// their own), made for `session`, at the text size every open terminal is drawn at now
+/// ([`crate::terminal::text_size::current`]). `None` when the text system cannot measure the terminal font, which is
+/// logged.
+fn terminals(
+    session: &Entity<UiSession>,
+    key: &str,
+    cx: &mut Context<SessionPane>,
+) -> Option<Entity<TerminalSet>> {
+    // At the size every open terminal is drawn at now, so a new one does not start at the default and jump.
+    let Some(metrics) = CellMetrics::measure(crate::terminal::text_size::current(cx), cx) else {
+        tracing::warn!("could not measure the terminal font; the session's terminal is not shown");
+        return None;
+    };
+    let deleting = key.to_owned();
+    // Asked while the terminals draw, from the current UI session's operation store, which notifies when a request
+    // starts or settles. A terminal outlives no UI session (it retires with its own), so the store it reads is always
+    // the one its Delete went through.
+    let hold: SharedHold = Rc::new(move |cx| delete::in_flight(&deleting, cx).is_some());
+    Some(cx.new(|cx| TerminalSet::new(session, key.to_owned(), metrics, hold, cx)))
 }
 
 impl SessionPane {
@@ -205,14 +258,17 @@ impl SessionPane {
             cx.observe_global_in::<LocalState>(window, Self::sync),
             cx.observe_global_in::<Chosen>(window, Self::sync),
         ];
-        // The pane follows the connection alone, never the store: what it mounts depends only on the UI session and
-        // the selection. So it does not use `session::observe_current`, which would replace nothing here and add a
-        // sync on every pushed change, and whose callback gets no window, which every focus move of `sync` needs.
+        // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
+        // and on the store only for whether the open session shows its interrupted card, which the card's follower
+        // reports when it changes. So it does not use `session::observe_current` itself, which would add a sync on
+        // every pushed change, and whose callback gets no window, which every focus move of `sync` needs.
         if let Some(connection) = session::connection(cx) {
             observing.push(cx.observe_in(&connection, window, |pane, _, window, cx| {
                 pane.sync(window, cx)
             }));
         }
+        let follow = cx.new(card::Follow::new);
+        observing.push(cx.observe_in(&follow, window, |pane, _, window, cx| pane.sync(window, cx)));
         // After the window's first frame exists rather than during its construction, as the focus coordinator's own
         // first recovery is: the terminal becomes home, and home takes focus.
         cx.defer_in(window, Self::sync);
@@ -223,50 +279,67 @@ impl SessionPane {
             header: header::Header::default(),
             pulse: None,
             clock: None,
+            _card: follow,
             _observing: observing,
         }
     }
 
     /// Bring the pane up to date: terminals for the selected session under the current UI session (none when nothing is
-    /// selected or the window is inert), the shown one made home every time, and the user's latest choice acted on.
+    /// selected, while the window is inert, or while the session shows its interrupted card), the shown terminal or the
+    /// card made home every time, and the user's latest choice acted on.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session =
             session::connection(cx).and_then(|connection| connection.read(cx).session().cloned());
         let wanted = session.as_ref().and_then(|_| local_state::selected(cx));
+        let card = wanted.as_deref().is_some_and(|key| card::shows(key, cx));
+        let reachable = wanted.as_deref().is_none_or(|key| card::reachable(key, cx));
         let mounted = self.mounted.current(cx);
         if mounted.as_ref().map(|mounted| &mounted.key) != wanted.as_ref() {
             // The old terminals go with this assignment, and their streams with them.
             *mounted = session
                 .zip(wanted)
-                .and_then(|(session, key)| Mounted::new(&session, key, cx));
-            // Home follows the shown terminal: a tab the user chooses (the set has already focused it) or the agent
-            // terminal when the chosen tab goes, which takes focus if the tab held it. Only while the set is still the
-            // one mounted under the current UI session: a set a reset left behind must not pull home back to its
-            // retired terminals.
-            if let Some(mounted) = mounted.as_mut() {
-                mounted._home =
-                    Some(
-                        cx.observe_in(&mounted.set, window, |pane, set, window, cx| {
-                            let current = pane
-                                .mounted
-                                .current(cx)
-                                .as_ref()
-                                .is_some_and(|mounted| mounted.set == set);
-                            if current {
-                                let home = set.read(cx).home(cx);
-                                focus::set_home(home.as_ref(), window, cx);
-                            }
-                        }),
-                    );
-            }
+                .and_then(|(session, key)| Mounted::new(&session, key, !card, cx));
             cx.notify();
+        } else if let (Some(mounted), Some(session)) = (mounted.as_mut(), session.as_ref())
+            && ((mounted.set.is_some() && card) || (mounted.set.is_none() && !card && reachable))
+        {
+            // The open session went into its card (its terminals go, streams and all) or came out of it (new ones,
+            // under a new lease, since the reboot took the old terminal). Out of it means on a host the helm reaches:
+            // a card whose host drops away mounts nothing, since the terminal is gone there too. The card's question
+            // goes either way.
+            mounted.set = if card {
+                None
+            } else {
+                terminals(session, &mounted.key, cx)
+            };
+            mounted._home = None;
+            mounted.question = None;
+            cx.notify();
+        }
+        // Home follows the shown terminal: a tab the user chooses (the set has already focused it) or the agent
+        // terminal when the chosen tab goes, which takes focus if the tab held it. Only while the set is still the one
+        // mounted under the current UI session: a set a reset left behind must not pull home back to its retired
+        // terminals.
+        if let Some(mounted) = mounted.as_mut()
+            && mounted._home.is_none()
+            && let Some(set) = &mounted.set
+        {
+            mounted._home = Some(cx.observe_in(set, window, |pane, set, window, cx| {
+                let current = pane
+                    .mounted
+                    .current(cx)
+                    .as_ref()
+                    .is_some_and(|mounted| mounted.set.as_ref() == Some(&set));
+                if current {
+                    let home = set.read(cx).home(cx);
+                    focus::set_home(home.as_ref(), window, cx);
+                }
+            }));
         }
         // Every time, not only when the pane mounted something else: a reset drops the mounted terminals when `mounted`
         // is next reached (above) while the selection stays, so the key compares equal, and home would otherwise keep
         // naming a terminal that is gone.
-        let home = mounted
-            .as_ref()
-            .and_then(|mounted| mounted.set.read(cx).home(cx));
+        let home = mounted.as_ref().and_then(|mounted| mounted.home(card, cx));
         focus::set_home(home.as_ref(), window, cx);
         self.act_on_choice(window, cx);
     }
@@ -277,7 +350,7 @@ impl SessionPane {
         self.mounted
             .current(cx)
             .as_ref()
-            .map(|mounted| mounted.set.clone())
+            .and_then(|mounted| mounted.set.clone())
     }
 
     /// The key of the session whose terminal the pane shows, under the current UI session.
@@ -301,12 +374,13 @@ impl SessionPane {
         let Some((key, mark)) = chosen.latest.clone() else {
             return;
         };
+        let card = card::shows(&key, cx);
         let home = self
             .mounted
             .current(cx)
             .as_ref()
             .filter(|mounted| mounted.key == key)
-            .and_then(|mounted| mounted.set.read(cx).home(cx));
+            .and_then(|mounted| mounted.home(card, cx));
         if let Some(handle) = home {
             focus::choose_terminal(&handle, &mark, window, cx);
         }
@@ -322,9 +396,11 @@ impl Render for SessionPane {
                 mounted.key.clone(),
                 mounted.set.clone(),
                 mounted.copies.clone(),
+                mounted.card_focus.clone(),
+                mounted.question.clone(),
             )
         });
-        let Some((key, terminals, copies)) = shown else {
+        let Some((key, terminals, copies, card_focus, question)) = shown else {
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
@@ -338,13 +414,62 @@ impl Render for SessionPane {
         }
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
         let header = self.header_row(&key, step, window, cx);
-        let lines = self.header_lines(&key, step, cx);
+        // Read from the store, not from whether terminals are mounted, so a frame drawn before `sync` has caught up
+        // with a push already shows what the session is now.
+        let stored = session::current_store(cx).and_then(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<SessionRow>(&key)
+                .cloned()
+        });
+        // The store's row whenever it has one (remembered while it shows the card); the card's last row only while it
+        // has none (see `Mounted::card_row`).
+        let held = self
+            .mounted
+            .current(cx)
+            .as_mut()
+            .and_then(|mounted| match &stored {
+                Some(row) => {
+                    mounted.card_row =
+                        card::shows_row(&key, row, cx).then(|| (key.clone(), row.clone()));
+                    None
+                }
+                None => {
+                    let (held, row) = mounted.card_row.clone()?;
+                    debug_assert_eq!(
+                        held, key,
+                        "a held card row is drawn only for its own session"
+                    );
+                    (held == key).then_some(row)
+                }
+            });
+        let row = stored.or(held);
+        let shows_card = row
+            .as_ref()
+            .is_some_and(|row| card::shows_row(&key, row, cx));
+        let lines = self.header_lines(&key, step, shows_card, cx);
         let bar = self.details_bar(&key, &copies, window, cx);
-        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then the terminal,
-        // which takes the rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines
-        // show only while there is something to say), then the details bar. The bar comes last in drawing order as
-        // well as on screen, so its controls follow the top row and the terminal in Tab's order (SPEC.md: "Keyboard
-        // order follows the top row, terminal, then bottom bar").
+        let area: Option<AnyElement> = match row.as_ref() {
+            Some(row) if shows_card => Some(card::draw(
+                card::Drawn {
+                    key: &key,
+                    row,
+                    focus: &card_focus,
+                    question,
+                    step,
+                },
+                cx.weak_entity(),
+                window,
+                cx,
+            )),
+            _ => terminals.map(IntoElement::into_any_element),
+        };
+        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then the terminal
+        // (or the interrupted card in its place), which takes the rest of the height (SPEC.md: "The terminal loses no
+        // height in the steady state"; the lines show only while there is something to say), then the details bar. The
+        // bar comes last in drawing order as well as on screen, so its controls follow the top row and the terminal in
+        // Tab's order (SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar").
         div()
             .flex()
             .flex_col()
@@ -356,7 +481,7 @@ impl Render for SessionPane {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .child(terminals)
+                    .children(area)
                     .children(deleting.map(|guard| delete_scrim(guard, step, cx)))
                     // The approval region starts its cards below this box's top, clear of the tabs and the lines
                     // above the terminal, as the old cards started below `.terminal-panes`.

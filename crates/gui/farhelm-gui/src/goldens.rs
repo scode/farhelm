@@ -3,23 +3,22 @@
 //! feature-drawn body, a header tile and a footer note, and the prompt anchored to a row's menu button), the keyboard
 //! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
 //! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
-//! the open session's details bar (every status and host it draws differently, and a narrow one, and once more with a
-//! copy confirmed and its hidden-characters warning), the session list (a
-//! fleet of every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu,
-//! a row's notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the
-//! Send feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
-//! drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at
-//! Appearance, at Hosts, at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
-//! host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a
-//! host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the
-//! host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
-//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
-//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
-//! itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty,
-//! full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
-//! appearances, compared pixel for pixel.
-//! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
-//! around it differs.)
+//! the interrupted card in its place (with Restart and Replace, and with Replace alone), the open session's details bar
+//! (every status and host it draws differently, and a narrow one, and once more with a copy confirmed and its
+//! hidden-characters warning), the session list (a fleet of every status a row draws, the open row on a host the helm
+//! cannot reach, an empty fleet, a row's open menu, a row's notification list, a row's Delete question, and a pending
+//! and a refused Delete), the Rename editor, the Send feedback dialog (as it opens, and with a remembered contact), the
+//! select closed and open, the YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer,
+//! the Settings dialog at Sessions, at Appearance, at Hosts, at Credentials, at Terminal and at Agent trust, the Hosts
+//! panel (closed, with Details, with a host failing to connect, with a host's setup running and failed, with outdated
+//! hosts' inline Update, and with a host's Update running), the Add host dialog and the setup confirmation it leads to,
+//! a host's actions menu, the host settings dialog at its top and scrolled to its end, the host refusal dialog for a
+//! refused Update, the version readout while an updater runs (the check button at rest, lit, warned and focused; work
+//! in progress; a check's outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the
+//! Linux window draws for itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the
+//! Trash button empty, full and freeing space, and the Trash dialog, alone and asking to delete everything or one
+//! host's archives, in both appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it
+//! draws identically in both pictures; only the scene's ground around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -1929,6 +1928,45 @@ fn session_details_copy_warning(state: &SceneState, _: &mut Window, cx: &mut App
         .w(px(620.))
         .pt(px(48.))
         .children(shown.map(|details| bar(details, &copies, 0, cx)))
+        .into_any_element()
+}
+
+/// The interrupted card the session pane draws in place of an interrupted session's terminals, for a session that can
+/// resume its conversation (Restart and Replace) and for one whose conversation Farhelm never captured (Replace alone,
+/// and why), each in a box the size of a narrow window's terminal area, as the old `.interrupted-card` filled it.
+fn session_interrupted_cards(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let row = |offer: &str| -> farhelm_proto::ui_channel::SessionRow {
+        let mut entry = session("a")
+            .status(serde_json::json!({"state": "interrupted"}))
+            .entry();
+        entry.value["restart_offer"] = serde_json::json!(offer);
+        entry.value["agent_kind"] = serde_json::json!("claude");
+        serde_json::from_value(entry.value).unwrap_or_else(|error| panic!("a session row: {error}"))
+    };
+    let cards = ["resume", "not_captured"].map(|offer| {
+        let row = row(offer);
+        let drawn = crate::session_pane::card::Drawn {
+            key: "a",
+            row: &row,
+            focus: &state.ring,
+            question: None,
+            step: 0,
+        };
+        div()
+            .w(px(500.))
+            .h(px(300.))
+            .child(crate::session_pane::card::draw(
+                drawn,
+                gpui::WeakEntity::new_invalid(),
+                window,
+                cx,
+            ))
+    });
+    div()
+        .flex()
+        .flex_row()
+        .gap(px(12.))
+        .children(cards)
         .into_any_element()
 }
 
@@ -4320,6 +4358,12 @@ static SCENES: &[Scene] = &[
         size: (444., 174.),
         draw: terminal_delete_scrim,
         setup: terminal_delete_scrim_setup,
+    },
+    Scene {
+        name: "session-interrupted-card",
+        size: (1036., 324.),
+        draw: session_interrupted_cards,
+        setup: no_setup,
     },
     Scene {
         name: "session-details-bar",
