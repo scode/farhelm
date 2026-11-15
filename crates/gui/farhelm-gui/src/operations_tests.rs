@@ -4,7 +4,7 @@
 //! are in flight at once and each settles on its own reply; which reply comes first is the order the helm admitted
 //! them. The fake-helm helpers come from the shared test harness (`test_support.rs`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use farhelm_helm_client::fake::FakeHelm;
@@ -461,6 +461,116 @@ fn a_partial_result_shows_where_a_refusal_does_until_the_next_start(cx: &mut Tes
         None,
         "the retired store recorded nothing"
     );
+}
+
+/// Forget the record on `key`, as a feature does once it has shown the refusal somewhere else.
+fn forget(operations: &Entity<Operations>, key: &OpKey, cx: &mut TestAppContext) {
+    cx.update(|cx| operations.update(cx, |operations, cx| operations.forget(key, cx)));
+}
+
+/// Settings shows a refused Update plan in a dialog while the user is still where they pressed, and the old app showed
+/// that refusal only there; were the store's record left on the host's key, the host's row would report the one
+/// refusal a second time. Specified: forgetting a key's recorded refusal removes it and notifies the store's observers
+/// once; a refusal recorded on another key stays as it was; and forgetting a key with no record (the one just
+/// forgotten, and one that never had any) changes nothing and does not notify.
+#[gpui::test]
+fn forgetting_a_refusal_drops_that_keys_record_alone_and_notifies(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&[], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    let (shown, kept, never) = (OpKey::host("a"), OpKey::host("b"), OpKey::host("c"));
+    for (key, id) in [(&shown, "a"), (&kept, "b")] {
+        let save = save_on(&["hosts", id], "PUT /api/hosts/[host]");
+        start_on(&operations, key, save, "save", &delivered, cx).unwrap();
+    }
+    cx.run_until_parked();
+    let sent = fake.commands();
+    fake.reply(sent[0].id, 409, Some(json!("the plan is stale")));
+    fake.reply(sent[1].id, 422, Some(json!("the host is busy")));
+    cx.run_until_parked();
+    let failure = |key: &OpKey, cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            operations
+                .read(cx)
+                .failure(key)
+                .map(|failure| failure.message.clone())
+        })
+    };
+    let busy = Some(HostText::from_host("the host is busy"));
+    assert_eq!(
+        failure(&shown, cx),
+        Some(HostText::from_host("the plan is stale")),
+        "the premise: the first host's refusal is recorded"
+    );
+    assert_eq!(failure(&kept, cx), busy, "the premise: so is the second's");
+
+    let notified = Rc::new(Cell::new(0));
+    let counted = notified.clone();
+    let _observing =
+        cx.update(|cx| cx.observe(&operations, move |_, _| counted.set(counted.get() + 1)));
+    forget(&operations, &shown, cx);
+    cx.run_until_parked();
+    assert_eq!(failure(&shown, cx), None, "the forgotten record is gone");
+    assert_eq!(failure(&kept, cx), busy, "another key's refusal stays");
+    assert_eq!(notified.get(), 1, "forgetting a record notifies observers");
+
+    forget(&operations, &shown, cx);
+    forget(&operations, &never, cx);
+    cx.run_until_parked();
+    assert_eq!(notified.get(), 1, "forgetting nothing redraws nothing");
+    assert_eq!(failure(&kept, cx), busy, "and changes nothing");
+}
+
+/// Forgetting answers a refusal the feature already showed. It must not reach work still out on the same key: that
+/// work's busy state is what refuses a second request meanwhile, and its own refusal, which nothing has shown yet, must
+/// still be recorded. Specified: with a save in flight on a host's key, a note made beside it (the one way a record
+/// sits next to work in flight) is forgotten and the save is still in flight; the save then settles through its
+/// completion, refused, and its refusal is recorded on the key.
+#[gpui::test]
+fn forgetting_leaves_work_in_flight_on_the_key_alone(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&[], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    let key = OpKey::host("a");
+    let save = save_on(&["hosts", "a"], "PUT /api/hosts/[host]");
+    start_on(&operations, &key, save, "save", &delivered, cx).unwrap();
+    let state = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            let operations = operations.read(cx);
+            let words = operations
+                .failure(&key)
+                .map(|failure| failure.message.clone());
+            (operations.in_flight(&key), words)
+        })
+    };
+    let out = Some(Work::Save);
+    let left_over = HostText::from_host("left over");
+    cx.update(|cx| {
+        operations.update(cx, |operations, cx| {
+            operations.note(&key, Work::Save, left_over.clone(), cx)
+        })
+    });
+    let premise = "the premise: a record sits beside the work in flight";
+    assert_eq!(state(cx), (out, Some(left_over)), "{premise}");
+    forget(&operations, &key, cx);
+    assert_eq!(state(cx), (out, None), "only the record went");
+
+    cx.run_until_parked();
+    let sent = fake.commands();
+    assert_eq!(sent.len(), 1, "the premise: one save reached the helm");
+    fake.reply(sent[0].id, 409, Some(json!("refused")));
+    cx.run_until_parked();
+    let statuses: Vec<_> = delivered
+        .borrow()
+        .iter()
+        .map(|(label, settled)| match &settled.outcome {
+            Outcome::Refused(refusal) => (*label, refusal.status),
+            other => panic!("{label} settled as {other:?}, not refused"),
+        })
+        .collect();
+    assert_eq!(statuses, [("save", 409)], "the save's completion ran");
+    let words = Some(HostText::from_host("refused"));
+    assert_eq!(state(cx), (None, words), "and its refusal is recorded");
 }
 
 /// A reset drops the UI's waiting, never the helm's work: SPEC_impl.md says dropping a waiter never cancels work the
