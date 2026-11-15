@@ -20,6 +20,7 @@
 
 pub mod attached;
 mod disclosure;
+pub(crate) mod files;
 pub(crate) mod set;
 mod style;
 #[cfg(test)]
@@ -575,16 +576,20 @@ impl TerminalView {
         matches!(self.shown.get(usize::from(row)), Some(ShownRow::Notice))
     }
 
-    /// The link the pointer rests on, if any: a program's hyperlink (OSC 8) of any scheme, or a web address printed as
-    /// text, as the grid model finds them.
+    /// The link the pointer rests on, if any: a program's hyperlink (OSC 8) of any scheme, a web address printed as
+    /// text, or a file path printed as text, as the grid model finds them ([`TerminalView::link_at`]).
     pub fn hovered_link(&self) -> Option<&TerminalLink> {
         self.hovered_link.as_ref()
     }
 
     /// The link at `position` in the current text, whatever the pointer rests on: a click's release checks it is
-    /// still the link its press was on.
+    /// still the link its press was on, which for a printed path re-recognizes it from the live text, as the old app's
+    /// `pathCurrent` did. A program's hyperlink or a printed web address owns its cells first; only text that is
+    /// neither can be a printed path (the grid model's `path_link_at`).
     pub fn link_at(&self, position: Position) -> Option<TerminalLink> {
-        self.model.link_at(position)
+        self.model
+            .link_at(position)
+            .or_else(|| self.model.path_link_at(position))
     }
 
     /// What the destination display of `link` shows, as the grid model judges it now; `None` for a link that is not a
@@ -622,7 +627,7 @@ impl TerminalView {
         if self.row_is_notice(row) {
             return None;
         }
-        self.model.link_at(Position {
+        self.link_at(Position {
             line: self.line_at_row(row)?,
             col,
         })

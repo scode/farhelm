@@ -1072,6 +1072,11 @@
       "reference": "terminal-detached-banner"
     },
     {
+      "golden": "terminal-file-disclosures",
+      "title": "A terminal file link's hover display: checking, the three size tiers, the 100 MB refusal in red, a folder and a failed check",
+      "reference": null
+    },
+    {
       "golden": "sequence-pill",
       "title": "The quick-launch sequence pill outside the launcher: chips, the word in progress and its candidates (compared with the old stylesheet; there is no reference picture)",
       "reference": null

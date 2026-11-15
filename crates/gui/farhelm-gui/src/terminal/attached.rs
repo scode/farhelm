@@ -121,7 +121,7 @@ use farhelm_proto::grid::{GridInput, MouseEventKind};
 use farhelm_proto::host_appearance::HostColor;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
+    AnyElement, AnyView, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
     DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
     InteractiveElement, IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render,
@@ -129,6 +129,7 @@ use gpui::{
     UTF16Selection, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
+use super::files::FileLinks;
 use super::tunnels::{self, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
 use crate::actions::{self, KeyOwner};
@@ -276,6 +277,11 @@ pub struct AttachedTerminal {
     /// Cmd-click opens through ([`super::tunnels`]). One per session: a tab shares its agent terminal's
     /// ([`AttachedTerminal::sharing`]).
     tunnels: Entity<Tunnels>,
+    /// The terminal's file links: the host check behind a hovered printed path or `file://` hyperlink, and the
+    /// destination display it fills ([`super::files`]).
+    files: Entity<FileLinks>,
+    /// Redraws the terminal when a file check answers, since a printed path shows the pointing hand only then.
+    _files: Subscription,
     /// The platform the tunnel offer is decided for: this one, except in tests, which decide it for the Mac on any
     /// machine ([`AttachedTerminal::set_platform`]).
     platform: Platform,
@@ -392,6 +398,9 @@ impl AttachedTerminal {
         let tunnels =
             tunnels.unwrap_or_else(|| cx.new(|cx| Tunnels::new(target.session.clone(), cx)));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
+        let transfers = session.read(cx).transfers().cloned();
+        let files = cx.new(|_| FileLinks::new(target.session.clone(), transfers));
+        let files_watch = cx.observe(&files, |_, _, cx| cx.notify());
         let tunnel_reads =
             session::observe_current(cx, |owner: &mut Self, cx| owner.follow_store(cx));
         // A text size step this client sent is held before the helm answers, outside the store, so the store observer
@@ -428,6 +437,8 @@ impl AttachedTerminal {
             refusal: None,
             refusal_raised: false,
             tunnels,
+            files,
+            _files: files_watch,
             platform: actions::THIS_PLATFORM,
             reporting: 0,
             mouse_dedupe: MouseDeduper::default(),
@@ -1688,10 +1699,7 @@ impl Render for AttachedTerminal {
                 .children(refusal)
                 .children(tunnel_notice)
         });
-        let hovering_link = self
-            .committed
-            .as_ref()
-            .is_some_and(|view| view.read(cx).hovered_link().is_some());
+        let hovering_link = self.points_at_link(cx);
         // The grid's area is what takes focus and keys, not the whole pane: the status line above it holds a Take
         // control button, whose own Tab and Escape the terminal's key context would otherwise give to the program
         // (`actions::TERMINAL_KEYS` binds them to nothing there), leaving a focused button with no way off it.
@@ -1917,6 +1925,9 @@ struct LinkPress {
     /// Whether the link was offered a tunnel at the press, so a Cmd-click tunnels only an address whose display the
     /// admission checked (a tunnel read answering between press and release changes nothing).
     hinted: bool,
+    /// Whether a file link's check had found a ready file at the press, so a check answering between the press and
+    /// the release leaves the click silent rather than reading as a hidden display ([`FileLinks::clicked`]).
+    file_ready: bool,
 }
 
 /// The web address a click on `link` opens: a printed address by the strict rule for text, a program's hyperlink by
@@ -2025,7 +2036,9 @@ impl AttachedTerminal {
     /// (SPEC.md) unless the link choice leaves clicks to the program. A link that has a destination display (a
     /// program's hyperlink, or a printed address with a tunnel hint) opens only while that display is fully visible;
     /// otherwise the click is refused, and says why at the top of the terminal. On a Mac, Cmd alone on a link that was
-    /// offered a tunnel at the press opens it through one ([`super::tunnels`]) instead of as printed.
+    /// offered a tunnel at the press opens it through one ([`super::tunnels`]) instead of as printed. A click on a file
+    /// link (a printed path, or a program's `file://` hyperlink) goes to its host check instead ([`super::files`]),
+    /// whatever the link choice, and never reaches the browser.
     fn link_released(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(press) = self.link_press.take() else {
             return;
@@ -2040,13 +2053,34 @@ impl AttachedTerminal {
         let still = self
             .link_position(event.position, cx)
             .and_then(|cell| view.read(cx).link_at(cell));
-        if still.as_ref() != Some(&press.link)
-            || view.read(cx).selected_text().is_some()
-            || LinkClick::current(cx) == LinkClick::Program
-        {
+        if still.as_ref() != Some(&press.link) || view.read(cx).selected_text().is_some() {
             return;
         }
-        // A link that is not a web address (a program's `file://` hyperlink, say) opens nothing, and says nothing.
+        // A file link goes to its check ([`FileLinks::clicked`]) whatever the link choice, and its press was not
+        // withheld from a program under mouse reporting ([`AttachedTerminal::withholds_press`] asks about web links
+        // only): both as in the old app at the reference commit. There the release activated whatever link the press
+        // was on, reporting or not (grid-terminal.js:1684-1688, the press reported at :1787 unless withheld); only a
+        // web link could be withheld (terminal.js:4338-4342 passes `link.web`, which `interceptLinkPress` in
+        // terminal-links.js:171-172 requires, and a file link's `web` is false, terminal.js:1033 and :1089); and a file
+        // link's activation downloaded without reading the link choice (terminal.js:1050 and :1104), which only
+        // `activateWeb` passed on (terminal.js:1012).
+        if press.link.file_path().is_some() {
+            let visible = self.disclosure_fully_visible(&press.link);
+            let refusal = self.files.update(cx, |files, _| {
+                files.clicked(&press.link, press.admitted, press.file_ready, visible)
+            });
+            if let Some(refusal) = refusal {
+                self.refusal = Some(refusal.into());
+                self.refusal_raised = true;
+                cx.notify();
+            }
+            return;
+        }
+        if LinkClick::current(cx) == LinkClick::Program {
+            return;
+        }
+        // A link that is neither a web address nor a file (a program's hyperlink to another scheme) opens nothing,
+        // and says nothing.
         let Some(target) = link_web_target(&press.link) else {
             return;
         };
@@ -2090,10 +2124,10 @@ const DISCLOSURE_OFFSET_X: f32 = 12.;
 const DISCLOSURE_ABOVE: f32 = 4.;
 const DISCLOSURE_BELOW: f32 = 12.;
 
-/// The destination display of the link the pointer rests on: a program's hyperlink, or a printed address offered a
-/// tunnel.
+/// The destination display of the link the pointer rests on: a program's hyperlink, a printed address offered a
+/// tunnel, or a file link, whose display shows its host check ([`super::files`]).
 struct Disclosure {
-    /// The link it is for: a program's hyperlink, or a printed address offered a tunnel.
+    /// The link it is for: a program's hyperlink, a printed address offered a tunnel, or a file link.
     link: TerminalLink,
     /// The tunnel hint it ends with, for a remote host's loopback link on a Mac.
     hint: Option<HostSentence>,
@@ -2119,10 +2153,13 @@ impl AttachedTerminal {
     /// The hovered link when it gets a destination display, with the tunnel hint the display ends with: a program's
     /// hyperlink to a web address always, since its text need not resemble where it goes; a printed web address only
     /// when the session's tunnels offer it a hint (a remote host's loopback address on a Mac), since otherwise what it
-    /// shows is what opens.
+    /// shows is what opens. A file link always, since its display is its host check ([`super::files`]).
     fn disclosed_link(&self, cx: &App) -> Option<(TerminalLink, Option<HostSentence>)> {
         let view = self.committed.as_ref()?.read(cx);
         let link = view.hovered_link()?;
+        if link.file_path().is_some() {
+            return Some((link.clone(), None));
+        }
         link_web_target(link)?;
         let hint = self.tunnel_hint(link, cx);
         (matches!(link.kind, LinkKind::Osc { .. }) || hint.is_some()).then(|| (link.clone(), hint))
@@ -2271,6 +2308,12 @@ impl AttachedTerminal {
         self.platform = platform;
     }
 
+    /// The terminal's file links, for tests: they hand in the fake transfers and read the clicks a check admitted.
+    #[cfg(test)]
+    pub(crate) fn files(&self) -> &Entity<FileLinks> {
+        &self.files
+    }
+
     /// The session's tunnels: tests answer their reads and check their notice, and the terminal set hands the agent
     /// terminal's to its tabs.
     pub(crate) fn tunnels(&self) -> &Entity<Tunnels> {
@@ -2332,6 +2375,13 @@ impl AttachedTerminal {
                 });
             }
             let opening = self.disclosure.as_ref().map(|shown| shown.generation);
+            // The file links follow every change of display: a new file link's display starts its check, and any
+            // other change (no display, another link) drops the old check ([`FileLinks::follow`]).
+            let file_hover = self
+                .disclosure
+                .as_ref()
+                .map(|shown| (shown.link.clone(), shown.drawn.clone()));
+            let (files, platform) = (self.files.clone(), self.platform);
             let mark = Mark::take(cx);
             let owner = cx.weak_entity();
             window.defer(cx, move |window, cx| {
@@ -2340,6 +2390,7 @@ impl AttachedTerminal {
                 if let Some(old) = old {
                     layers::close(old, window, cx);
                 }
+                files.update(cx, |files, cx| files.follow(file_hover, platform, cx));
                 if let Some(generation) = opening {
                     let _ = owner.update(cx, |owner, cx| {
                         owner.open_disclosure(generation, &mark, window, cx)
@@ -2420,10 +2471,16 @@ impl AttachedTerminal {
         let shown = self.disclosure.as_ref()?;
         let view = self.committed.clone()?;
         let anchor = self.disclosure_anchor.clone()?;
-        let text = view.read(cx).link_disclosure(&shown.link)?;
-        let drawn = shown.drawn.clone();
-        let hint = shown.hint.clone();
-        let content = cx.new(|_| super::disclosure::DisclosureView::new(&text, hint, drawn));
+        // A file link's display is its file links' own view, which shows the check `follow` started for it.
+        let content: AnyView = if shown.link.file_path().is_some() {
+            self.files.clone().into()
+        } else {
+            let text = view.read(cx).link_disclosure(&shown.link)?;
+            let drawn = shown.drawn.clone();
+            let hint = shown.hint.clone();
+            cx.new(|_| super::disclosure::DisclosureView::new(&text, hint, drawn))
+                .into()
+        };
         layers::open_popover(
             Popover::floating(content, cx.focus_handle(), anchor),
             mark,
@@ -2437,23 +2494,42 @@ impl AttachedTerminal {
     /// may; a program's hyperlink, or a printed address whose display carries a tunnel hint, only while its destination
     /// display, for this very link, is open and was fully visible (inside the window) when last drawn (SPEC.md: the
     /// hover display counts as disclosing the target only while fully visible, and this applies to Cmd-click tunnel
-    /// opens too).
+    /// opens too); a file link only on those terms and once its host check found a ready file.
     fn click_admitted(&self, link: &TerminalLink, window: &Window, cx: &App) -> bool {
         let disclosed = match link.kind {
             LinkKind::Text => self.tunnel_hint(link, cx).is_some(),
-            LinkKind::Osc { .. } => true,
-            // A printed path needs a shown disclosure (its file hover's check), which no path link gets yet, so it
-            // is never admitted. The view does not hand the terminal one yet either: `link_at` finds no paths.
-            LinkKind::Path => true,
+            LinkKind::Osc { .. } | LinkKind::Path => true,
         };
-        !disclosed
-            || self.disclosure.as_ref().is_some_and(|shown| {
-                shown.link == *link
-                    && shown
-                        .layer
-                        .is_some_and(|layer| layers::is_open(layer, window, cx))
-                    && super::disclosure::fully_visible(&shown.drawn)
-            })
+        let open = self.disclosure.as_ref().is_some_and(|shown| {
+            shown.link == *link
+                && shown
+                    .layer
+                    .is_some_and(|layer| layers::is_open(layer, window, cx))
+        });
+        let shown = !disclosed || (open && self.disclosure_fully_visible(link));
+        // A file link also needs its check to admit it ([`FileLinks::admits`]).
+        if link.file_path().is_some() {
+            return self.files.read(cx).admits(link, shown);
+        }
+        shown
+    }
+
+    /// Whether the pointer rests on a link that shows the pointing hand, which the grid's area then draws: every link
+    /// does, except a printed path whose check has not found a ready file yet ([`FileLinks::shows_pointer`]).
+    pub(crate) fn points_at_link(&self, cx: &App) -> bool {
+        self.committed
+            .as_ref()
+            .and_then(|view| view.read(cx).hovered_link())
+            .is_some_and(|link| self.files.read(cx).shows_pointer(link))
+    }
+
+    /// Whether the destination display for `link` was fully visible (inside the window) when last drawn: the press's
+    /// admission and a file link's release ask the same question. A display not drawn since it opened, or since its
+    /// file check answered, counts as not visible.
+    fn disclosure_fully_visible(&self, link: &TerminalLink) -> bool {
+        self.disclosure.as_ref().is_some_and(|shown| {
+            shown.link == *link && super::disclosure::fully_visible(&shown.drawn)
+        })
     }
 
     /// The refused click's explanation, drawn at the top of the grid's area until the next press there (the old app's
@@ -2771,6 +2847,7 @@ impl AttachedTerminal {
         let admitted = std::mem::take(&mut self.press_admitted);
         self.link_press = link.clone().map(|link| LinkPress {
             hinted: self.tunnel_hint(&link, cx).is_some(),
+            file_ready: link.file_path().is_some() && self.files.read(cx).admits(&link, true),
             link,
             at: event.position,
             admitted,
