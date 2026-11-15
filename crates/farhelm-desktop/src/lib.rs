@@ -19,10 +19,12 @@
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::rc::Rc;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -156,6 +158,10 @@ pub fn run() -> anyhow::Result<()> {
     agent::publish_helm(&desktop)?;
     let quit_requested = quit_on_signal()?;
     let helm_shutdown = desktop.shutdown_requester();
+    let frame = Rc::new(RefCell::new(window_state::FrameKeeper::load(
+        desktop.state_dir().join(window_state::WINDOW_STATE_FILE),
+    )));
+    let quit_frame = Rc::clone(&frame);
     farhelm_gui::bootstrap::run(farhelm_gui::bootstrap::Host {
         quit_requested: Box::pin(async move {
             // A sender dropped without sending means the signal thread failed, not that anyone asked to quit, so the
@@ -164,7 +170,13 @@ pub fn run() -> anyhow::Result<()> {
                 std::future::pending::<()>().await;
             }
         }),
-        on_quit: Box::new(move || helm_shutdown.request()),
+        // The helm first, since only its stop takes time; then the frame change still pending, one small file.
+        on_quit: Box::new(move || {
+            helm_shutdown.request();
+            if let Ok(mut frame) = quit_frame.try_borrow_mut() {
+                frame.flush();
+            }
+        }),
         // Exits the process: no window opened, so the refusal is the only way the user hears why (a machine with no
         // usable graphics driver is the realistic case). The helm dies with the process, as on any other refusal.
         on_startup_failure: Box::new(|error| {
@@ -176,13 +188,66 @@ pub fn run() -> anyhow::Result<()> {
         helm: Some(desktop.helm_endpoint()),
         reduced_motion: reduced_motion::read(),
         licenses: licenses_text,
-        window_frame: None,
+        window_frame: Some(frame_host(frame)),
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");
     drop(desktop);
     tracing::info!("the embedded helm stopped");
     Ok(())
+}
+
+/// The window's frame host over `keeper`: the window asks it where to open, tells it every change, and says when it
+/// has settled, which is when the keeper writes the record (`window_state`; the quit handler flushes it too). The
+/// callbacks run on the main thread, as the quit handler does, so the keeper is shared through a `RefCell`; a borrow
+/// that is somehow busy skips that one call rather than panicking inside an AppKit callback.
+fn frame_host(keeper: Rc<RefCell<window_state::FrameKeeper>>) -> farhelm_gui::desktop::FrameHost {
+    use farhelm_gui::desktop::{FrameFacts, FrameRect, Placement};
+    use window_state::WindowRect;
+    let to_window = |rect: FrameRect| WindowRect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    };
+    let displays = move |facts: &FrameFacts| -> Vec<WindowRect> {
+        facts.displays.iter().copied().map(to_window).collect()
+    };
+    let (restored, observed) = (Rc::clone(&keeper), Rc::clone(&keeper));
+    farhelm_gui::desktop::FrameHost {
+        restore: Box::new(move |facts| {
+            let mut keeper = restored.try_borrow_mut().ok()?;
+            let (frame, maximized) = keeper.placement(
+                &displays(&facts),
+                facts.positions_trusted,
+                facts.default_size,
+            )?;
+            Some(Placement {
+                frame: FrameRect {
+                    x: frame.x,
+                    y: frame.y,
+                    width: frame.width,
+                    height: frame.height,
+                },
+                maximized,
+            })
+        }),
+        observe: Box::new(move |facts, seen| {
+            if let Ok(mut keeper) = observed.try_borrow_mut() {
+                let seen = window_state::Observed {
+                    frame: to_window(seen.frame),
+                    maximized: seen.maximized,
+                    fullscreen: seen.fullscreen,
+                };
+                keeper.observe(seen, &displays(&facts), facts.positions_trusted);
+            }
+        }),
+        settled: Box::new(move || {
+            if let Ok(mut keeper) = keeper.try_borrow_mut() {
+                keeper.flush();
+            }
+        }),
+    }
 }
 
 /// Turn SIGTERM and SIGINT into one quit request for the GPUI app.

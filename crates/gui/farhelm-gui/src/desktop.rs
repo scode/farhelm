@@ -29,7 +29,14 @@
 //! Nothing in the bootstrap interprets what passes through these calls: the host's frame callbacks reach this module
 //! as they are, and the conversion between the host's frames and GPUI's window bounds lives here.
 
-use gpui::{AnyWindowHandle, App, Global, Subscription, WindowBounds, WindowOptions};
+use std::time::Duration;
+
+use gpui::{
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Global, Pixels, Size, Subscription,
+    Window, WindowBounds, WindowOptions, point, px, size,
+};
+
+use crate::ticker;
 
 pub(crate) mod menu;
 #[cfg(test)]
@@ -86,40 +93,66 @@ fn when_closed(main: AnyWindowHandle, quit: impl Fn(&mut App) + 'static, cx: &mu
 pub fn keep_licenses(_licenses: fn() -> String, _cx: &mut App) {}
 
 // ---- The main window's frame ----------------------------------------------------------------------------------------
+//
+// SPEC.md, "Desktop window chrome": the app remembers its last ordinary window frame and whether it was maximized, and
+// restores the frame only when it fits a connected display. The rules are the desktop crate's (its `window_state`); the
+// window side only reports what the window is and puts the window where the host says.
 
-/// A rectangle in physical pixels, the unit the host saves frames in: a saved frame must mean the same thing on
-/// displays with different scale factors, which logical pixels do not.
+/// A rectangle in GPUI's logical pixels: a window's frame (its origin and content size, [`observed`]) or a display's
+/// bounds, in the coordinates GPUI places windows in (on macOS, relative to the primary display; see [`facts`]).
 ///
-/// NOTE: Before a window exists GPUI reports displays in logical pixels only (`PlatformDisplay::bounds` and its
-/// siblings) and gives no scale factor; `Window::scale_factor` is the only one, and it needs a window. So a
-/// physical-pixel frame cannot be converted exactly before the window opens. Saving logical pixels with a display id,
-/// or correcting the frame once the window exists, are the ways around it; the unit here is the area's choice.
+/// Logical, not physical: before a window exists GPUI reports displays in logical pixels only
+/// (`PlatformDisplay::bounds` and its siblings) and gives no scale factor, and a window's scale factor applies to one
+/// display only, so a frame saved in physical pixels could not be converted back before the window opens, nor across
+/// displays with different scales. Rounded to whole pixels, which is all a saved frame needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PhysicalRect {
+pub struct FrameRect {
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
 }
 
+impl FrameRect {
+    /// `bounds`, rounded to whole pixels (a negative size, which no window or display has, reads as zero).
+    fn of(bounds: Bounds<Pixels>) -> Self {
+        let whole = |value: Pixels| f32::from(value).round();
+        FrameRect {
+            x: whole(bounds.origin.x) as i32,
+            y: whole(bounds.origin.y) as i32,
+            width: whole(bounds.size.width).max(0.) as u32,
+            height: whole(bounds.size.height).max(0.) as u32,
+        }
+    }
+
+    /// The same rectangle as GPUI bounds.
+    fn bounds(self) -> Bounds<Pixels> {
+        Bounds {
+            origin: point(px(self.x as f32), px(self.y as f32)),
+            size: size(px(self.width as f32), px(self.height as f32)),
+        }
+    }
+}
+
 /// What the host needs to know to place or remember the window, as plain values so no GPUI type crosses into the
 /// host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameFacts {
-    /// The connected displays, primary first.
-    pub displays: Vec<PhysicalRect>,
-    /// The outer frame size the window opens at when the host restores nothing.
+    /// The displays the window is placed among: on macOS the primary display only, on Linux every display, largest
+    /// first ([`facts`]).
+    pub displays: Vec<FrameRect>,
+    /// The size the window opens at when the host restores nothing.
     pub default_size: (u32, u32),
-    /// Whether the platform reports global window positions at all. False on Wayland, where every position this
-    /// module reports is meaningless and the host keeps its prior one.
+    /// Whether the position reported now means anything: false on Linux (Wayland reports none), and on macOS while the
+    /// window is on a display other than the primary one ([`facts`]); the host then keeps its prior position.
     pub positions_trusted: bool,
 }
 
-/// Where the host wants the window to open: its outer frame, and whether it starts maximized (with `frame` the size
-/// it restores to).
+/// Where the host wants the window to open: its frame (origin and content size, as [`Observed`] reports it), and
+/// whether it starts maximized (with `frame` the frame it restores to).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Placement {
-    pub frame: PhysicalRect,
+    pub frame: FrameRect,
     pub maximized: bool,
 }
 
@@ -127,8 +160,10 @@ pub struct Placement {
 /// must not replace the last ordinary one).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Observed {
-    /// The outer frame.
-    pub frame: PhysicalRect,
+    /// The window's frame while it is neither maximized nor fullscreen: its origin and its content size, which is what
+    /// it opens at again ([`observed`]). Not meaningful while it is maximized or fullscreen; the host keeps its last
+    /// ordinary frame then.
+    pub frame: FrameRect,
     pub maximized: bool,
     pub fullscreen: bool,
 }
@@ -137,9 +172,18 @@ pub struct Observed {
 /// default frame centered on the primary display.
 pub type RestoreFrame = Box<dyn FnOnce(FrameFacts) -> Option<Placement>>;
 
-/// Called on the main thread whenever the main window's frame, maximized or fullscreen state changes. It must return
-/// quickly: the host throttles its own writes.
+/// Called on the main thread whenever the main window's frame, maximized or fullscreen state changes, on every pixel of
+/// a drag. It must return quickly, and should only remember: [`Settled`] says when to save.
 pub type ObserveFrame = Box<dyn FnMut(FrameFacts, Observed)>;
+
+/// Called on the main thread once the main window has stopped changing for [`SETTLE`]: the moment to save what the
+/// observer was last told.
+pub type Settled = Box<dyn FnMut()>;
+
+/// How long the main window must stay unchanged before the host hears that it settled: long enough that a drag or a
+/// resize in progress (whose reports come many times a second) is one change, short enough that a crash soon after
+/// loses little.
+pub const SETTLE: Duration = Duration::from_secs(1);
 
 /// The host's half of the window frame (`Host::window_frame`): how a launch reads the saved frame, and how the host
 /// hears about every change to it. A host with nowhere to save a frame (tests, any host without a state directory)
@@ -147,33 +191,211 @@ pub type ObserveFrame = Box<dyn FnMut(FrameFacts, Observed)>;
 pub struct FrameHost {
     pub restore: RestoreFrame,
     pub observe: ObserveFrame,
+    pub settled: Settled,
 }
 
 /// What [`restore_frame`] hands on to [`follow_frame`] across the window's opening: opaque to the bootstrap, which
 /// only carries it from one call to the other.
 pub struct FrameFollow {
-    _observe: Option<ObserveFrame>,
+    observe: Option<(ObserveFrame, Settled)>,
+}
+
+/// The facts of the moment, as seen from `window` once it is open: the displays the window is placed among, the default
+/// frame's size, and whether a position means anything right now.
+///
+/// NOTE: GPUI's displays and positions differ by platform, and this is where that is absorbed. On macOS it reports
+/// every display at the origin, gives a window's bounds relative to the display the window is on, and opens a window on
+/// the primary display unless told otherwise (the bootstrap names no display). So on macOS only the primary display is
+/// reported, and a position counts only while the window is on it: a window last moved to another display reopens on
+/// the primary one, at the last place it had there or centered (a recorded deviation from the old app, which saved
+/// global positions). On Linux the app runs only on Wayland (shipped builds compile no X11), which reports no positions
+/// and no primary display, so every position is untrusted and the displays come largest first, which is the one a
+/// fallback frame is sized for.
+fn facts(window: Option<&Window>, cx: &App) -> FrameFacts {
+    let primary = cx.primary_display();
+    let primary_id = primary.as_ref().map(|display| display.id());
+    let (displays, positions_trusted) = if cfg!(target_os = "linux") {
+        let mut all: Vec<_> = cx
+            .displays()
+            .into_iter()
+            .map(|display| FrameRect::of(display.bounds()))
+            .collect();
+        all.sort_by_key(|rect| std::cmp::Reverse(u64::from(rect.width) * u64::from(rect.height)));
+        (all, false)
+    } else {
+        let on_primary = window
+            .is_none_or(|window| window.display(cx).map(|display| display.id()) == primary_id);
+        (
+            primary
+                .into_iter()
+                .map(|display| FrameRect::of(display.bounds()))
+                .collect(),
+            on_primary,
+        )
+    };
+    let default = FrameRect::of(Bounds {
+        origin: point(px(0.), px(0.)),
+        size: crate::bootstrap::DEFAULT_WINDOW_SIZE,
+    });
+    FrameFacts {
+        displays,
+        default_size: (default.width, default.height),
+        positions_trusted,
+    }
+}
+
+/// What the main window reports about its frame now. The frame is the window's origin with its content size: the
+/// content size is what a window opens at (on macOS GPUI opens a window by its content rectangle, so saving the outer
+/// size would grow the window by its title bar on every launch until the title band makes the two equal; on Wayland
+/// they are the same). While the window is maximized or fullscreen the host keeps the ordinary frame it had before, so
+/// the frame reported then is not used.
+fn observed(window: &Window, cx: &App) -> Observed {
+    let frame = Bounds {
+        origin: window.bounds().origin,
+        size: window.viewport_size(),
+    };
+    Observed {
+        frame: FrameRect::of(frame),
+        maximized: maximized(window, cx),
+        fullscreen: window.is_fullscreen(),
+    }
+}
+
+/// How far a macOS window's size may be from its display's visible area and still count as zoomed ([`maximized`]).
+const ZOOM_SLACK: Pixels = px(2.);
+
+/// Whether the window is maximized (zoomed, on macOS).
+///
+/// On macOS GPUI answers this by comparing the window's size with the display's visible area exactly, and a window GPUI
+/// itself zoomed as it opened (a launch restoring a maximized window) comes out a point short of that area, so it read
+/// as not maximized, and the next save forgot that it was (seen on the test Mac, 2026-11-14: 1024 by 681 points on a
+/// 1024 by 682 visible area). Within [`ZOOM_SLACK`] of the visible area counts as zoomed here. The cost: a window the
+/// user sizes by hand to fill the display within a point or two is remembered as zoomed, which reopens it the same
+/// size. Elsewhere GPUI's own answer stands.
+fn maximized(window: &Window, cx: &App) -> bool {
+    let gpui_says = window.is_maximized();
+    if gpui_says || !cfg!(target_os = "macos") {
+        return gpui_says;
+    }
+    window
+        .display(cx)
+        .is_some_and(|display| fills(window.bounds().size, display.visible_bounds().size))
+}
+
+/// Whether a window of `size` fills a display's visible area of `area`, within [`ZOOM_SLACK`] each way ([`maximized`]).
+pub(crate) fn fills(size: Size<Pixels>, area: Size<Pixels>) -> bool {
+    let near = |a: Pixels, b: Pixels| (f32::from(a) - f32::from(b)).abs() <= f32::from(ZOOM_SLACK);
+    near(size.width, area.width) && near(size.height, area.height)
+}
+
+/// The GPUI bounds a host's placement opens the window at.
+fn bounds_of(placement: Placement) -> WindowBounds {
+    let bounds = placement.frame.bounds();
+    if placement.maximized {
+        WindowBounds::Maximized(bounds)
+    } else {
+        WindowBounds::Windowed(bounds)
+    }
 }
 
 /// Ask the host where the main window opens: the bounds GPUI opens it at, or `None` for the default frame, and the
 /// follower [`follow_frame`] takes once the window exists. The bootstrap calls this once, before the window opens,
 /// with the host's frame as it came.
-///
-/// The stub never calls `restore` and answers `None`.
 pub fn restore_frame(
     frame: Option<FrameHost>,
-    _cx: &mut App,
+    cx: &mut App,
 ) -> (Option<WindowBounds>, FrameFollow) {
-    let follow = FrameFollow {
-        _observe: frame.map(|frame| frame.observe),
+    let Some(FrameHost {
+        restore,
+        observe,
+        settled,
+    }) = frame
+    else {
+        return (None, FrameFollow { observe: None });
     };
-    (None, follow)
+    let placement = restore(facts(None, cx));
+    (
+        placement.map(bounds_of),
+        FrameFollow {
+            observe: Some((observe, settled)),
+        },
+    )
 }
 
-/// Report every change to `main`'s frame to the host, for as long as the window exists.
+/// The entity that holds the host's callbacks and the subscription to the main window's bounds: GPUI hands bounds
+/// changes only to an entity's observer, so the follower is one, kept alive by [`Following`] for the app's life.
+struct Follower {
+    observe: ObserveFrame,
+    settled: Settled,
+    /// The settled call, waiting; every change moves it later, and dropping it cancels it.
+    settling: Option<ticker::Deadline>,
+    _bounds: Option<Subscription>,
+}
+
+impl Follower {
+    /// Report what `window` is now, and tell the host it settled once it has stayed so for [`SETTLE`].
+    fn report(&mut self, window: &Window, cx: &mut Context<Self>) {
+        (self.observe)(facts(Some(window), cx), observed(window, cx));
+        let handle = window.window_handle();
+        let follower = cx.weak_entity();
+        self.settling = Some(ticker::after(SETTLE, cx, move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = follower.update(cx, |follower, cx| follower.settle(window, cx));
+            });
+        }));
+    }
+
+    /// The window has stayed unchanged for [`SETTLE`]: report what it is now, read afresh rather than taken from its
+    /// last change, then tell the host. Defensive: a window's maximized or fullscreen state is not guaranteed to come
+    /// with a bounds change, and the frame saved should be the window's state when it settled, whatever event last
+    /// reported it.
+    fn settle(&mut self, window: &Window, cx: &mut Context<Self>) {
+        (self.observe)(facts(Some(window), cx), observed(window, cx));
+        (self.settled)();
+    }
+}
+
+/// Keeps the main window's follower alive: dropping it would silently stop the host from hearing about the frame.
+struct Following {
+    _follower: gpui::Entity<Follower>,
+}
+
+impl Global for Following {}
+
+/// Report every change to `main`'s frame to the host, for as long as the window exists: GPUI calls its bounds
+/// observers on every move and resize, which covers maximizing, leaving it and fullscreen too, since each changes the
+/// window's bounds. The window's state at the moment it is followed is reported too, so the host starts from the frame
+/// the window really opened at.
 ///
-/// The stub drops the follower without calling the host.
-pub fn follow_frame(_main: AnyWindowHandle, _follow: FrameFollow, _cx: &mut App) {}
+/// Once the window has stopped changing for [`SETTLE`], the host hears that it settled, once (a later change starts the
+/// wait again): the desktop app saves the frame then, so a drag is written once, when it ends.
+pub fn follow_frame(main: AnyWindowHandle, follow: FrameFollow, cx: &mut App) {
+    let Some((observe, settled)) = follow.observe else {
+        return;
+    };
+    let follower = cx.new(|_| Follower {
+        observe,
+        settled,
+        settling: None,
+        _bounds: None,
+    });
+    let followed = main.update(cx, |_, window, cx| {
+        follower.update(cx, |follower, cx| {
+            follower._bounds =
+                Some(cx.observe_window_bounds(window, |follower, window, cx| {
+                    follower.report(window, cx)
+                }));
+            follower.report(window, cx);
+        })
+    });
+    if followed.is_err() {
+        tracing::warn!("the main window was gone before its frame could be followed");
+        return;
+    }
+    cx.set_global(Following {
+        _follower: follower,
+    });
+}
 
 // ---- The title band and decorations ---------------------------------------------------------------------------------
 
