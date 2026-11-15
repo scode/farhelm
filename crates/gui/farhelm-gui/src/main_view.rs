@@ -139,6 +139,7 @@ impl Render for MainView {
         render_count::record("main", cx);
         let palette = theme::palette(cx);
         let list = self.session_list.downgrade();
+        let new_list = list.clone();
         let state = session::connection(cx)
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
@@ -226,9 +227,10 @@ impl Render for MainView {
             })
             // Taken whatever New does with it, as a once-per-press shortcut's handler must be (`actions.rs`). New
             // itself refuses while a dialog or menu is open, a launch is pending or a host change is in flight
-            // (SPEC.md: "unless a modal is open or New is disabled").
-            .on_action(|_: &NewSession, window, cx| {
-                launcher::entry::open_new(window, cx);
+            // (SPEC.md: "unless a modal is open or New is disabled"); through the list, so that an accepted New
+            // leaves the Hosts panel for Sessions, as the heading's New and the switcher's row do.
+            .on_action(move |_: &NewSession, window, cx| {
+                session_list::open_new(&new_list, None, window, cx);
             })
             // Taken whatever the sequence does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &BeginSequence, window, cx| {

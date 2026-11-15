@@ -761,16 +761,18 @@ systemd or SSH substrate ran.
   it, and the Rename shortcut renames it in the helm's listing; from the Help menu, Send feedback opens its dialog, a
   typed contact brings up Re-use for future feedback, and Cancel closes it with focus back on the ? button, never
   pressing Send; and a click on the session list header's Trash opens its dialog with focus on Close and, once the helm
-  has read the local host's trash, says the trash is empty, and Escape closes it with focus back on Trash. A failed run
-  keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still
-  stops its app run, for which the recorder's `--termination-grace` leaves it time. Its 24 steps took 62 s on a build
-  worker on 2026-11-14 (4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first unless given
-  `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a
-  logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row menu,
-  session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick switcher, host rail (Add host
-  among its entries) and its foot (Hosts and the Settings gear), status segments, host menu, Remove host and host
-  Update, Help menu or Send feedback dialog, Trash button and dialog, sidebar width or divider, terminal attach, paste,
-  text input or scrollback, the order menu, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  has read the local host's trash, says the trash is empty, and Escape closes it with focus back on Trash; and on a
+  session of its own, the list heading's New opens the launcher, and the quick switcher's `New session named` row for a
+  typed name opens it with that name in its Name field, neither starting a session. A failed run keeps its run directory
+  under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, for
+  which the recorder's `--termination-grace` leaves it time. Its 24 steps took 62 s on a build worker on 2026-11-14 (4,
+  18 and 23 s with fewer steps), plus the app's start; it builds the app first unless given `--no-build`. Needs what
+  `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same
+  user on a Mac). CI does not run it. Run it when the app's session list, row menu, session header, Delete, Rename,
+  Stop, Restart, Replace, Mark read and Mark unread, quick switcher, host rail (Add host among its entries) and its foot
+  (Hosts and the Settings gear), status segments, host menu, Remove host and host Update, Help menu or Send feedback
+  dialog, Trash button and dialog, sidebar width or divider, terminal attach, paste, text input or scrollback, the order
+  menu, the heading's New, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

@@ -1,11 +1,11 @@
 //! Tests of the list's heading: the order's title and its menu, the order's write and its silent refusal, the count's
-//! words, and the Templates button.
+//! words, the Templates button, and New.
 //!
 //! Like the rest of the list's tests, these run the real main view over the helm client's fake, which hands the test
 //! every command the window sent, and read controls from GPUI's driver record of the frame by their ids: the title is
-//! `session-order`, the menu `session-order-menu`, its items `session-order-<word>`, the count `session-count`, and the
-//! Templates button `templates-button`. They share the rail's fixtures (`host_rail/tests.rs`): sessions a and b on host
-//! 2, a open, over three hosts, with no order stored.
+//! `session-order`, the menu `session-order-menu`, its items `session-order-<word>`, the count `session-count`, the
+//! Templates button `templates-button`, and New `new-session-button` ([`NEW_ID`]). They share the rail's fixtures
+//! (`host_rail/tests.rs`): sessions a and b on host 2, a open, over three hosts, with no order stored.
 //!
 //! GPUI's driver record does not carry a button's expanded state, so whether the title reports its menu open is read
 //! where the title takes it from ([`SessionList::order_menu_open`]).
@@ -19,10 +19,12 @@ use gpui::{Role, TestAppContext, Toggled, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::{Order, TITLE_ID};
+use crate::actions::NewSession;
+use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::main_view::MainView;
-use crate::session_list::COUNT_ID;
 use crate::session_list::host_rail::tests::{hover_help, label, node, snapshot, texts_within};
-use crate::session_list::tests::{change, listing_meta, painted, selected, sent};
+use crate::session_list::tests::{change, launcher_drawn, listing_meta, painted, selected, sent};
+use crate::session_list::{COUNT_ID, NEW_ID};
 use crate::test_support::{self, click, focused_id, frame, keys, meta, started};
 use crate::{focus, layers, templates};
 
@@ -410,4 +412,108 @@ fn templates_opens_its_dialog_and_closing_returns_focus_to_the_button(cx: &mut T
     keys(cx, "escape");
     assert!(!cx.update(|window, cx| layers::any_open(window, cx)));
     assert_eq!(focused_id(cx).as_deref(), Some("templates-button"));
+}
+
+// ---- New -----------------------------------------------------------------------------------------------------------
+
+/// Start Add host's probe, which makes New unavailable, and return its envelope id, to answer it by.
+fn probe_in_flight(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
+    let path = start_host_change(cx, HostChange::Probe);
+    fake.commands()
+        .into_iter()
+        .find(|command| command.path == path)
+        .expect("the premise: the probe is in flight")
+        .id
+}
+
+/// The heading's New is the window's way into the launcher without a shortcut, and the sidebar's one filled control
+/// (SPEC.md, "Session list": "Trash with its count, Templates and New are compact icon buttons beside the title ... New
+/// remains the sidebar's one filled control"). Its words are the old button's, which a screen reader user hears in
+/// place of the plus. Specified: the button is named "New session", sits right of Templates, takes clicks and focus,
+/// and its hover help is New's help word for word ("New session: start an agent or a command on any host", with " (⌘N)"
+/// on a Mac); under the Linux click rule a click on it opens the launcher, and Escape closes the launcher with focus
+/// back on the button.
+#[gpui::test]
+fn new_opens_the_launcher_and_closing_returns_focus_to_the_button(cx: &mut TestAppContext) {
+    let (_fake, _main, cx) = open(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, NEW_ID), "New session");
+    let new = node(&nodes, NEW_ID).unwrap();
+    assert!(
+        new.bounds.left() > node(&nodes, "templates-button").unwrap().bounds.right(),
+        "New sits after Templates"
+    );
+    assert!(new.flags.focusable && new.flags.click, "enabled");
+    let expected = if cfg!(target_os = "macos") {
+        "New session: start an agent or a command on any host (⌘N)"
+    } else {
+        "New session: start an agent or a command on any host"
+    };
+    assert_eq!(hover_help(cx, NEW_ID).as_deref(), Some(expected));
+
+    click(cx, NEW_ID);
+    assert!(launcher_drawn(cx), "the click opened the launcher");
+    keys(cx, "escape");
+    assert!(!cx.update(|window, cx| layers::any_open(window, cx)));
+    assert_eq!(focused_id(cx).as_deref(), Some(NEW_ID));
+}
+
+/// New is unavailable while a launch is pending or a host change is in flight (SPEC.md, "Creation": "Launches and
+/// changes to the host registry still exclude each other"), and the old button said so by being disabled; a button
+/// that looked ready and did nothing would read as broken. A host probe stands in for both, since it is the cheaper to
+/// stage and the button reads the one answer for either (`launcher::entry::new_available`). Specified: with Add host's
+/// probe in flight the button takes neither focus nor clicks, and a click on it opens nothing; once the probe is
+/// answered the button takes both again.
+#[gpui::test]
+fn new_is_disabled_while_a_host_change_is_in_flight(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    let probe = probe_in_flight(&mut fake, cx);
+    let new = node(&frame(cx), NEW_ID).cloned().expect("New is drawn");
+    assert!(!new.flags.focusable && !new.flags.click, "disabled");
+    click(cx, NEW_ID);
+    assert!(
+        !launcher_drawn(cx),
+        "a click on the disabled button opens nothing"
+    );
+
+    fake.reply(probe, 200, Some(json!({})));
+    test_support::settle(cx);
+    let new = node(&frame(cx), NEW_ID).cloned().expect("New is drawn");
+    assert!(new.flags.focusable && new.flags.click, "enabled again");
+}
+
+/// New is reached from the heading only while Sessions shows, but the New shortcut works with the Hosts panel open too,
+/// and SPEC.md wants an accepted New to bring Sessions back ("All or a host avatar returns to Sessions, as does an
+/// accepted quick-switcher pick or New handoff; a refused handoff leaves the panel as it was"). Specified: with the
+/// Hosts panel shown and a probe in flight, the New action opens nothing and the panel stays; once the probe is
+/// answered, the action opens the launcher and the list's column shows again in place of the panel.
+#[gpui::test]
+fn the_new_action_leaves_the_hosts_panel_only_when_new_opens(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    click(cx, "hosts-panel-toggle");
+    assert!(
+        node(&frame(cx), "hosts-panel").is_some(),
+        "the premise: the Hosts panel shows"
+    );
+    let probe = probe_in_flight(&mut fake, cx);
+    cx.dispatch_action(NewSession);
+    test_support::settle(cx);
+    assert!(!launcher_drawn(cx), "New was refused");
+    assert!(
+        node(&frame(cx), "hosts-panel").is_some(),
+        "a refused New leaves the panel as it was"
+    );
+
+    fake.reply(probe, 200, Some(json!({})));
+    test_support::settle(cx);
+    cx.dispatch_action(NewSession);
+    test_support::settle(cx);
+    assert!(launcher_drawn(cx), "New opened");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "hosts-panel").is_none(), "the panel went");
+    assert!(
+        node(&nodes, NEW_ID).is_some(),
+        "and the heading shows again"
+    );
 }
