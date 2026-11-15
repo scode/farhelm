@@ -183,7 +183,8 @@ struct TestRoutes {
 
 /// A router of test routes, standing in for the helm's: a save that waits on
 /// a gate the test opens, a read of what it saved, an add to the pushed list,
-/// and the pushed list itself.
+/// the pushed list itself, and a refusal marked with helm-only headers
+/// ([`marked`]).
 fn test_router(routes: Arc<TestRoutes>) -> axum::Router {
     async fn save(AxState(routes): AxState<Arc<TestRoutes>>, body: String) -> StatusCode {
         let gate = routes.save_gate.lock().unwrap().take();
@@ -218,8 +219,45 @@ fn test_router(routes: Arc<TestRoutes>) -> axum::Router {
     axum::Router::new()
         .route("/api/test/value", get(read).put(save))
         .route("/api/test/items", get(items).post(add))
+        .route("/api/test/marked/{which}", axum::routing::post(marked))
         .fallback(unrouted)
         .with_state(routes)
+}
+
+/// `POST /api/test/marked/{which}`: a 409 refusal whose headers are chosen by
+/// `which`, standing in for a route that marks its refusal. `none` sets no
+/// marker header; a number sets exactly the header of that marker in
+/// [`HelmMarker::ALL`]; `all` sets every one; `foreign` sets every marker's
+/// header with a value no marker has, plus a helm header that is not a marker.
+/// The route is the only place a header is chosen: the channel under test is
+/// told nothing about it.
+async fn marked(
+    axum::extract::Path(which): axum::extract::Path<String>,
+) -> axum::response::Response {
+    let markers: Vec<HelmMarker> = match which.as_str() {
+        "none" | "foreign" => Vec::new(),
+        "all" => HelmMarker::ALL.to_vec(),
+        index => vec![HelmMarker::ALL[index.parse::<usize>().expect("a marker's index")]],
+    };
+    let mut response = (StatusCode::CONFLICT, "refused").into_response();
+    let headers = response.headers_mut();
+    for marker in markers {
+        let (name, value) = marker.header();
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    if which == "foreign" {
+        for marker in HelmMarker::ALL {
+            headers.insert(
+                marker.header().0,
+                HeaderValue::from_static("something-else"),
+            );
+        }
+        headers.insert(
+            farhelm_proto::http::BUILD_STAMP_HEADER,
+            HeaderValue::from_static("0.0.0-test"),
+        );
+    }
+    response
 }
 
 /// The one collection the ordering tests push: the test routes' list.
@@ -442,6 +480,68 @@ async fn an_encoded_separator_is_refused_without_being_routed() {
         panic!("the next command still runs");
     };
     assert_eq!((reply.id, reply.status), (2, 200));
+}
+
+/// The reply to the next command, skipping any changes pushed before it.
+async fn next_reply(driven: &mut Driven) -> Reply {
+    loop {
+        if let ServerMessage::Reply(reply) = next(driven).await {
+            return reply;
+        }
+    }
+}
+
+/// The GUI branches on facts only the helm's own code states, in headers
+/// (the launcher's YOLO question, a launch waiting out a busy host, the
+/// environment Delete's escalation), and a reply that dropped them left it
+/// matching the refusal's words, which can quote a supervisor. The channel
+/// must carry them with one lookup over the closed set of helm-only headers,
+/// whatever route set them. Specified against a stand-in route the channel
+/// knows nothing about: a refusal with exactly one marker's header carries
+/// exactly that marker, for every marker; one with all of them carries all,
+/// in `HelmMarker::ALL`'s order; one with every marker header holding a
+/// foreign value, plus a helm header that is no marker, carries none; one
+/// with none carries none; and the status and body travel unchanged
+/// throughout.
+#[farhelm_testtrace::test]
+async fn each_helm_marker_header_reaches_the_reply_and_nothing_else_does() {
+    let routes = Arc::new(TestRoutes::default());
+    let (mut driven, _snapshot) = drive(routes).await;
+    let mut id = 0;
+    for (index, marker) in HelmMarker::ALL.into_iter().enumerate() {
+        id += 1;
+        let markers = marked_reply(&mut driven, id, &index.to_string()).await;
+        assert_eq!(markers, [marker], "{marker:?} alone");
+    }
+    let markers = marked_reply(&mut driven, id + 1, "all").await;
+    assert_eq!(markers, HelmMarker::ALL, "every marker, in order");
+    let markers = marked_reply(&mut driven, id + 2, "foreign").await;
+    assert_eq!(
+        markers,
+        Vec::<HelmMarker>::new(),
+        "a foreign value is no marker"
+    );
+    let markers = marked_reply(&mut driven, id + 3, "none").await;
+    assert_eq!(markers, Vec::<HelmMarker>::new(), "no header, no marker");
+}
+
+/// Send command `id` to the [`marked`] route for `which`, check that its
+/// reply relays the route's status and body, and return the reply's markers.
+async fn marked_reply(driven: &mut Driven, id: u64, which: &str) -> Vec<HelmMarker> {
+    let path = format!("/api/test/marked/{which}");
+    driven
+        .to_channel
+        .send(command(id, "POST", &path, None))
+        .await
+        .unwrap();
+    let reply = next_reply(driven).await;
+    assert_eq!(reply.id, id, "{which}");
+    assert_eq!(
+        reply.status, 409,
+        "the status travels beside the markers: {which}"
+    );
+    assert_eq!(reply.body, Some(Value::String("refused".into())), "{which}");
+    reply.markers
 }
 
 /// Commands run one at a time, so a GUI that keeps sending while one is stuck
@@ -1559,6 +1659,56 @@ async fn the_session_query_filters_the_pushed_list_and_refusals_keep_the_old_one
         panic!("a refused query sends no changes");
     };
     assert_eq!((reply.id, reply.status), (2, 400));
+}
+
+/// The markers come off the real router's responses, middleware and all, not
+/// only off stand-in routes: an ask-first YOLO launch sent over a real channel
+/// is refused 409 carrying the YOLO marker and the never-accepted marker the
+/// helm sets beside it. That pair is what lets the launcher ask its YOLO
+/// question, and know the launch did not start, instead of reading the
+/// refusal's words.
+#[farhelm_testtrace::test]
+async fn a_yolo_launch_refused_over_a_real_channel_carries_its_markers() {
+    let mut harness = rest_harness::idle_helm().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let host = harness
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|host| host.id == local)
+        .expect("the local host is registered");
+    assert!(
+        !host.yolo_without_asking,
+        "premise: the local host asks before YOLO launches"
+    );
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ws).await;
+    send_message(
+        &mut ws,
+        &command(
+            1,
+            "POST",
+            "/api/sessions",
+            Some(serde_json::json!({
+                "cwd": "/project",
+                "command": { "command": "sleep 300", "yolo": true },
+            })),
+        ),
+    )
+    .await;
+    let reply = loop {
+        if let ServerMessage::Reply(reply) = recv_message(&mut ws).await {
+            break reply;
+        }
+    };
+    assert_eq!((reply.id, reply.status), (1, 409), "{:?}", reply.body);
+    assert_eq!(
+        reply.markers,
+        [HelmMarker::CreateUnaccepted, HelmMarker::YoloConfirmation]
+    );
 }
 
 /// The served ids of a snapshot's session list, in served order.

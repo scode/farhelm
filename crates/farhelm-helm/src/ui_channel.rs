@@ -27,7 +27,9 @@
 //! credential, so the same handlers, validation, authentication and request
 //! ownership apply: work behind `own_state_change` finishes even if the
 //! channel goes away, and the cancellable routes are dropped with it, exactly
-//! as for an HTTP caller that disconnects.
+//! as for an HTTP caller that disconnects. A reply relays the routed
+//! response's status and body, plus the helm-only headers it set as markers
+//! ([`markers`]), found the same way for every route.
 //!
 //! The channel is also the seat ([`UiSeat`]): a helm serves one GUI, and a new
 //! channel displaces the old one.
@@ -48,8 +50,8 @@ use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
 use axum::response::IntoResponse;
 use farhelm_proto::ui_channel::{
     ANNOUNCEMENTS_KEY, Availability, ClientMessage, Collection, CollectionChanges, CollectionMeta,
-    CollectionState, Command, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply, SESSION_QUERY_PATH,
-    ServerMessage, SessionQuery,
+    CollectionState, Command, HelmMarker, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply,
+    SESSION_QUERY_PATH, ServerMessage, SessionQuery,
 };
 // `Method` alone is axum's, the router's method; this is the command's.
 use farhelm_proto::ui_channel::Method as WireMethod;
@@ -489,7 +491,7 @@ impl Channel {
         let request = self
             .request(Method::GET, &(spec.path)(query), None)
             .map_err(|error| format!("this list's read could not be built: {error}"))?;
-        let (status, body) = route(self.router.clone(), request).await;
+        let Routed { status, body, .. } = route(self.router.clone(), request).await;
         if !status.is_success() {
             return Err(format!(
                 "reading this list failed ({status}): {}",
@@ -534,7 +536,7 @@ impl Channel {
         }
         let stored = match self.request(Method::GET, "/api/preferences", None) {
             Ok(request) => {
-                let (status, body) = route(self.router.clone(), request).await;
+                let Routed { status, body, .. } = route(self.router.clone(), request).await;
                 status
                     .is_success()
                     .then(|| serde_json::from_slice::<Value>(&body).ok())
@@ -616,6 +618,7 @@ impl Channel {
                 Reply {
                     id,
                     status: StatusCode::BAD_REQUEST.as_u16(),
+                    markers: Vec::new(),
                     body: Some(Value::String(message)),
                 }
             })
@@ -633,14 +636,7 @@ impl Channel {
             Err(error) => return refused(format!("the command cannot be sent: {error}")),
         };
         let router = self.router.clone();
-        Box::pin(async move {
-            let (status, body) = route(router, request).await;
-            Reply {
-                id,
-                status: status.as_u16(),
-                body: reply_body(&body),
-            }
-        })
+        Box::pin(async move { route(router, request).await.reply(id) })
     }
 
     /// The channel-local [`SESSION_QUERY_PATH`] command. The new query is
@@ -651,6 +647,7 @@ impl Channel {
         let reply = |status: StatusCode, body: Option<Value>| Reply {
             id: command.id,
             status: status.as_u16(),
+            markers: Vec::new(),
             body,
         };
         if command.method != WireMethod::Put {
@@ -675,9 +672,9 @@ impl Channel {
                 return (Vec::new(), reply(StatusCode::BAD_REQUEST, Some(body)));
             }
         };
-        let (status, body) = route(self.router.clone(), request).await;
-        if !status.is_success() {
-            return (Vec::new(), reply(status, reply_body(&body)));
+        let routed = route(self.router.clone(), request).await;
+        if !routed.status.is_success() {
+            return (Vec::new(), routed.reply(command.id));
         }
         // A query that names a sort takes the order over from the stored
         // preference; a later one without a sort (the GUI clearing a filter,
@@ -691,20 +688,70 @@ impl Channel {
     }
 }
 
+/// What the router answered one request with: everything of the response
+/// that a [`Reply`] relays. Its other headers stay behind.
+struct Routed {
+    status: StatusCode,
+    /// The helm-only markers among the response's headers ([`markers`]).
+    markers: Vec<HelmMarker>,
+    body: Bytes,
+}
+
+impl Routed {
+    /// The reply to command `id` that relays this response.
+    fn reply(self, id: u64) -> Reply {
+        Reply {
+            id,
+            status: self.status.as_u16(),
+            markers: self.markers,
+            body: reply_body(&self.body),
+        }
+    }
+}
+
 /// Run one request through the router and collect its reply.
-async fn route(router: axum::Router, request: Request<Body>) -> (StatusCode, Bytes) {
+///
+/// A body too large to relay turns the reply into a 500 of the channel's own,
+/// which carries no markers: they described the response that was dropped.
+async fn route(router: axum::Router, request: Request<Body>) -> Routed {
     let response = match router.oneshot(request).await {
         Ok(response) => response,
         Err(infallible) => match infallible {},
     };
     let status = response.status();
+    let markers = markers(response.headers());
     match to_bytes(response.into_body(), MAX_REPLY_BODY).await {
-        Ok(body) => (status, body),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Bytes::from(format!("the reply could not be relayed: {error}")),
-        ),
+        Ok(body) => Routed {
+            status,
+            markers,
+            body,
+        },
+        Err(error) => Routed {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            markers: Vec::new(),
+            body: Bytes::from(format!("the reply could not be relayed: {error}")),
+        },
     }
+}
+
+/// The helm-only markers a routed response's headers state, in
+/// [`HelmMarker::ALL`]'s order.
+///
+/// One lookup for every route: the channel knows the closed set of helm-only
+/// headers, not which route sets which, so a route that starts marking its
+/// refusals reaches the GUI unchanged (SPEC_impl.md, "The UI channel": no
+/// second, typed command API). A header counts only with the one value its
+/// marker names; any other value is not that marker. The router's responses
+/// are the helm's own, and a supervisor's words only ever reach a body, so
+/// nothing a host says can set one of these.
+fn markers(headers: &HeaderMap) -> Vec<HelmMarker> {
+    HelmMarker::ALL
+        .into_iter()
+        .filter(|marker| {
+            let (name, value) = marker.header();
+            headers.get(name).is_some_and(|sent| sent == value)
+        })
+        .collect()
 }
 
 /// A reply body as the GUI receives it: JSON when it parses, text otherwise,

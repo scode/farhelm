@@ -226,7 +226,8 @@ binary's crate or the helm client stops denying `unwrap_used` and `expect_used`.
 Owner: the UI channel, one WebSocket per UI. It carries everything except bulk data, in one ordered stream:
 
 - commands from the GUI, each an envelope of `{id, method, path, body}`;
-- the helm's reply to each command, with its status and body: done, refused, or accepted (for long work);
+- the helm's reply to each command, with its status and body: done, refused, or accepted (for long work), plus the
+  helm-only markers among the routed response's headers (`farhelm_proto::ui_channel::HelmMarker`);
 - state the helm pushes: a full snapshot of the pushed collections when the channel opens, then changes per collection.
 
 The channel is the WebSocket `GET /api/ui` (`farhelm_proto::ui_channel::UI_CHANNEL_PATH`), and its wire types live in
@@ -246,10 +247,14 @@ stand. Environment and sandbox deletes, Suspend, Resume and the uninstall plan a
 take the accepted form, when the work that ports them needs it.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
-and authentication middleware as an HTTP request. There is no second, typed command API. A route that genuinely cannot
-work this way is recorded as a decision with the reason. The router's existing contracts hold: the cancellable group in
-`api_router` is dropped when its caller goes away, as today, and work behind `own_state_change` finishes after a reset
-(see "Who owns an accepted action").
+and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
+status and body; of its headers, only the helm-only ones in `farhelm_proto::http` that the helm's own code sets from its
+typed refusals (a YOLO launch to confirm, a busy host, a stale connection and the like) cross, as markers, found by one
+lookup over that closed set for every route. A supervisor's text only ever reaches a body, so no host can set one, and a
+route that starts marking a refusal with one of these headers needs no change to the channel; a new helm-only header
+needs a new `HelmMarker` variant. A route that genuinely cannot work this way is recorded as a decision with the reason.
+The router's existing contracts hold: the cancellable group in `api_router` is dropped when its caller goes away, as
+today, and work behind `own_state_change` finishes after a reset (see "Who owns an accepted action").
 
 The router has one client. After the browser UI is gone, only the GUI calls the HTTP API, plus terminal streams and file
 transfers. The command line and agents reach the helm through the supervisor relay and the shared `do_*` handler
@@ -672,17 +677,19 @@ preferences, or a launch or a host being added, neither of which has its id yet.
 keys of different kinds never collide, so a host and a session that share an id string stay independent. The command
 itself is built by the feature that sends it, with its route's API semantics; the store knows no routes. A reply settles
 as done, refused, or accepted (202: long work the helm carries on with; the store keeps no result for it, and for host
-setup, Update and Uninstall the result arrives in the hosts' pushed progress). An accepted save leaves its draft
-touched, since the stored value has not changed yet.
+setup, Update and Uninstall the result arrives in the hosts' pushed progress). A refusal reaches its completion with the
+reply's status and helm markers beside its words, so a feature that answers a refusal (the YOLO question, a wait for a
+busy host, a launch whose host timed out while the work goes on) branches on those, never on words written for people;
+the key keeps only the words. An accepted save leaves its draft touched, since the stored value has not changed yet.
 
 A read (a GET for something the helm does not push) is not work on a key: it changes nothing, so it has no busy state
 and leaves no refusal on a key. A feature's read goes through the store's one read helper, which words a refusal exactly
 as an operation's is worded, so a failed read and a failed save say the helm's reason the same way; the feature shows
 the result itself. Some writes are not work on a key either: nothing draws them busy and the store records no refusal
 for them (a remembered preference, the automatic seen mark, the session list's filter query). They go through the
-store's keyless send, which words a refusal the same way and hands the caller the reply's body or its refusal; the
-caller decides what, if anything, to show. The read helper is that send plus a decode. A reset drops the wait of a read
-or a keyless send like any other.
+store's keyless send, which words a refusal the same way and hands the caller the reply's body or its refusal's words;
+the caller decides what, if anything, to show. The read helper is that send plus a decode. A reset drops the wait of a
+read or a keyless send like any other.
 
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that

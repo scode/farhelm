@@ -21,7 +21,7 @@ pub mod terminal;
 
 use std::collections::VecDeque;
 
-use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, Reply};
+use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, HelmMarker, Reply};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -123,8 +123,22 @@ impl FakeHelm {
         taken
     }
 
-    /// Answer a command returned by [`FakeHelm::commands`]. Answers must follow command order, as the helm's do.
+    /// Answer a command returned by [`FakeHelm::commands`]. Answers must follow command order, as the helm's do. The
+    /// reply carries no helm markers, like most of the helm's; [`FakeHelm::reply_marked`] answers with some.
     pub fn reply(&mut self, id: u64, status: u16, body: Option<Value>) {
+        self.reply_marked(id, status, Vec::new(), body);
+    }
+
+    /// Answer a command as [`FakeHelm::reply`] does, with `markers` among the reply's helm markers: what the real
+    /// helm sends when the routed response set the helm-only headers they stand for (a 409 asking to confirm a YOLO
+    /// launch, say). Like the real helm, the fake does not check that the status and markers belong together.
+    pub fn reply_marked(
+        &mut self,
+        id: u64,
+        status: u16,
+        markers: Vec<HelmMarker>,
+        body: Option<Value>,
+    ) {
         let position = self.unanswered.front().map(|(front, _)| *front);
         assert_eq!(
             position,
@@ -136,9 +150,13 @@ impl FakeHelm {
             reason = "the fake is a test double: a panic here is how it reports a broken test, never a GUI behavior"
         )]
         let (_, done) = self.unanswered.pop_front().unwrap();
-        let _ = self
-            .items
-            .send(Item::Complete(done, Ok(Reply { id, status, body })));
+        let reply = Reply {
+            id,
+            status,
+            markers,
+            body,
+        };
+        let _ = self.items.send(Item::Complete(done, Ok(reply)));
     }
 
     /// The connection broke: the GUI sees `Reconnecting`, then its unanswered commands fail with

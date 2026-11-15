@@ -129,7 +129,7 @@ impl<T: Clone + PartialEq> Draft<T> {
         match outcome {
             Outcome::Done(_) => self.touched = false,
             Outcome::Accepted(_) => {}
-            Outcome::Refused(message) => self.refusal = Some(message.clone()),
+            Outcome::Refused(refusal) => self.refusal = Some(refusal.words.clone()),
         }
     }
 }
@@ -351,9 +351,11 @@ mod tests {
         let mut draft = Draft::load("old".to_owned());
         assert!(draft.edit("bad\ntitle".to_owned()));
         draft.saving = true;
-        draft.settle(&Outcome::Refused(HostText::from_host(
-            "titles are one line",
-        )));
+        draft.settle(&Outcome::Refused(crate::operations::Refusal {
+            words: HostText::from_host("titles are one line"),
+            status: 400,
+            markers: Vec::new(),
+        }));
         assert_eq!(draft.value(), "bad\ntitle");
         assert!(draft.is_touched() && !draft.is_saving());
         assert_eq!(

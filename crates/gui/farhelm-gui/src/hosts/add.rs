@@ -285,7 +285,7 @@ impl Problem {
 /// body.
 pub(super) fn read_reply(outcome: &Outcome) -> Reply {
     let body = match outcome {
-        Outcome::Refused(words) => return Reply::Show(Problem::Helm(words.clone())),
+        Outcome::Refused(refusal) => return Reply::Show(Problem::Helm(refusal.words.clone())),
         Outcome::Done(body) | Outcome::Accepted(body) => body.as_ref().unwrap_or(&Value::Null),
     };
     // The plan is the helm's own and never read here (`ProbeReply`'s docs): the setup confirmation shows the steps and
