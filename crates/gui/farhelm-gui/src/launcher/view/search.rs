@@ -26,10 +26,21 @@
 //!   said why a template did not apply. While the helm cannot give its templates, `tl:` shows the helm's words in
 //!   the results instead of rows.
 //!
+//! - **Rows from the chosen host's launch history.** A saved folder becomes the folder as a pick from the folder list
+//!   does (leaving a managed checkout, keeping the tab). A model from a past launch chooses the agent type it ran with
+//!   and the model as that type's custom id. A recent setup fills the draft as a click on the strip's row does
+//!   ([`Launcher::take_recent`]), drawn on two lines, and never launches, from Enter either: the old search row only
+//!   filled, and SPEC.md's Enter that launches is the strip's focused row. A setup carrying a retired container choice,
+//!   or a folder or setup from a history that is no longer the chosen host's, is refused above the box in the old
+//!   words.
+//!
 //! What the box holds besides the draft (the open results, the highlight, the last refusal) is the launcher's alone;
 //! what is typed is the field's own text, read when the rows are needed, never copied.
 
+use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::ui_channel::HostView;
+use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
@@ -37,9 +48,13 @@ use gpui::{
 };
 
 use super::Launcher;
+use super::host_name_with_phase;
+use super::recents::RecentRefusal;
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::focus::{self, Mark};
+use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, Tab};
+use crate::launcher::recents::{destination_label, permission_value, summary_before_permissions};
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::theme::{self, metrics};
@@ -52,6 +67,8 @@ pub(super) const SEARCH_PLACEHOLDER: &str = "Search names, hosts, folders, harne
 const LIST_MAX_HEIGHT: f32 = 260.;
 const LIST_PAD: f32 = 6.;
 const LIST_GAP: f32 = 2.;
+/// Why a saved folder or recent setup from an earlier host's history changed nothing, as the old launcher said it.
+const STALE_ROW: &str = "That result belongs to an earlier host; choose a current result";
 
 /// What the search box holds besides the draft and its own text. None of it is shared with another surface.
 #[derive(Default)]
@@ -87,6 +104,13 @@ impl Launcher {
         } else {
             Ok(Vec::new())
         };
+        // The chosen host's history rows name that host as its own field does, phase included.
+        let placement = self
+            .draft
+            .host
+            .and_then(|id| hosts.iter().find(|host| host.id == id))
+            .map(host_name_with_phase);
+        let history = self.launch_history(cx).zip(placement.as_ref());
         search(&Inputs {
             query: &query,
             tab: self.draft.tab,
@@ -96,7 +120,15 @@ impl Launcher {
             catalog_pending: self.catalog.is_none() && self.catalog_error.is_none(),
             hosts: &hosts,
             templates: templates.as_deref(),
+            history,
         })
+    }
+
+    /// Highlight the row the box's text names again, as typing does: the rows have changed under the highlight (a
+    /// history answer adds or drops rows), so the index the arrows left would now point at a row they never reached,
+    /// and Enter would take it.
+    pub(super) fn reset_search_highlight(&mut self, cx: &App) {
+        self.search_box.active = self.search_results(cx).default;
     }
 
     /// Whether the results are open: opened by the box and not since closed by the layer manager.
@@ -167,15 +199,8 @@ impl Launcher {
     /// fixed, else make its one edit, empty the box, close the results and keep focus in the box (Custom's flags take
     /// it instead).
     fn take_search_row(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(field) = self.held_by_row(&row) {
-            // Only Replace with and Restart with hold fields; New and Clone never get here.
-            let mode = match self.draft.mode {
-                Mode::ReplaceWith { .. } => "replace",
-                Mode::New | Mode::Clone | Mode::RestartWith(_) => "restart",
-            };
-            self.search_box.refusal = Some(format!(
-                "{field} cannot change here: this dialog keeps {field} fixed for {mode}"
-            ));
+        if let Some(refusal) = self.search_row_refusal(&row, cx) {
+            self.search_box.refusal = Some(refusal);
             // The results would cover the reason; closing them keeps the query, and Enter opens them again.
             self.close_search(window, cx);
             cx.notify();
@@ -195,6 +220,44 @@ impl Launcher {
         cx.notify();
     }
 
+    /// Why taking `row` would change nothing, in the old launcher's words: a field this launcher holds fixed
+    /// ([`Self::held_by_row`]), a recent setup carrying a retired container choice, or a saved folder or recent setup
+    /// from a history that is no longer the chosen host's (the host changed after the row was drawn).
+    fn search_row_refusal(&self, row: &Row, cx: &App) -> Option<String> {
+        if let Some(field) = self.held_by_row(row) {
+            // Only Replace with and Restart with hold fields; New and Clone never get here.
+            let mode = match self.draft.mode {
+                Mode::ReplaceWith { .. } => "replace",
+                Mode::New | Mode::Clone | Mode::RestartWith(_) => "restart",
+            };
+            return Some(format!(
+                "{field} cannot change here: this dialog keeps {field} fixed for {mode}"
+            ));
+        }
+        let stale = match row {
+            Row::Recent { entry, .. } => match self.recent_refusal(entry, cx)? {
+                RecentRefusal::Retired => return Some(RETIRED_CONTAINER_REASON.to_owned()),
+                RecentRefusal::Stale => true,
+                // Not reached: `held_by_row` refused above what Restart with holds.
+                RecentRefusal::Held => {
+                    debug_assert!(
+                        false,
+                        "a held destination is refused before the setup is looked at"
+                    );
+                    false
+                }
+            },
+            Row::Folder(path) => !self.launch_history(cx).is_some_and(|history| {
+                history
+                    .folders
+                    .iter()
+                    .any(|folder| folder.display_cwd == *path)
+            }),
+            _ => false,
+        };
+        stale.then(|| STALE_ROW.to_owned())
+    }
+
     /// The field, in the old refusal's words, that taking `row` would change while this launcher holds it fixed: any
     /// agent type (a model too, unless it is one of the held agent type's own on the Agent tab), host, folder or name,
     /// even one naming the current value (SPEC.md, "Restart with": "Search results and recent setups that set a held
@@ -202,17 +265,25 @@ impl Launcher {
     fn held_by_row(&self, row: &Row) -> Option<&'static str> {
         let (field, words) = match row {
             Row::Harness(_) => (Field::AgentType, "agent type"),
-            Row::Model { harness, .. }
+            Row::Model { harness, .. } | Row::HistoryModel { harness, .. }
                 if self.draft.tab != Tab::Agent || self.draft.agent.harness != Some(*harness) =>
             {
                 (Field::AgentType, "agent type")
             }
             Row::Host { .. } => (Field::Host, "host"),
-            Row::UsePath(_) => (Field::Destination, "destination"),
+            // A recent setup sets the agent type too, but the old refusal named the destination, which every mode that
+            // holds the agent type also holds.
+            Row::UsePath(_) | Row::Folder(_) | Row::Recent { .. } => {
+                (Field::Destination, "destination")
+            }
             Row::Name(_) => (Field::Name, "session name"),
             // A template's own fields are checked against what the launcher holds when it applies, which removes the
             // ones repeating a held value and refuses the rest (`crate::templates::apply`).
-            Row::Model { .. } | Row::Effort(_) | Row::Permission(_) | Row::Template(_) => {
+            Row::Model { .. }
+            | Row::HistoryModel { .. }
+            | Row::Effort(_)
+            | Row::Permission(_)
+            | Row::Template(_) => {
                 return None;
             }
         };
@@ -261,16 +332,33 @@ impl Launcher {
                 );
                 self.chose(edit, window, cx);
             }
+            // A model from a past launch, owned as a custom id by the agent type it ran with.
+            Row::HistoryModel { id, harness } => {
+                self.draft.choose_tab(Tab::Agent);
+                let wrapper = self.remembered_wrapper(harness, cx);
+                let edit = self.draft.choose_history_model(
+                    harness,
+                    &id,
+                    self.catalog.as_deref(),
+                    wrapper.as_deref(),
+                );
+                self.chose(edit, window, cx);
+            }
             Row::Effort(effort) => self.choose_effort(effort, cx),
             Row::Permission(permission) => {
                 self.choose_permissions(permission.permission(), window, cx)
             }
-            Row::UsePath(path) => {
+            Row::UsePath(path) | Row::Folder(path) => {
                 // A folder taken from search is a pick, not typing: the folder list shows every recent folder again.
                 self.folder_picked();
                 self.draft.edit_folder(path);
                 self.sync_fields(window, cx);
                 self.changed(cx);
+            }
+            // The strip's fill, as a click on its row makes it: it never launches, from Enter here either (the old
+            // search row did not). `search_row_refusal` has already said why a setup cannot be taken.
+            Row::Recent { entry, .. } => {
+                let _ = self.take_recent(&entry, window, cx);
             }
         }
     }
@@ -511,18 +599,16 @@ impl Render for SearchRows {
                 );
                 let weak = self.launcher.clone();
                 let taken = row.clone();
+                let content = match row {
+                    Row::Recent { entry, placement } => {
+                        recent_lines(&id, entry, placement, index == active, palette)
+                    }
+                    _ => words.into_any_element(),
+                };
                 children.push(
                     OptionRow::new(id, label, help, Role::ListBoxOption)
                         .selected(index == active)
-                        // The highlighted row's words take the fill's ink, as the old selected row did.
-                        .child(if index == active {
-                            div()
-                                .text_color(theme::color(palette.on_fill))
-                                .child(words)
-                                .into_any_element()
-                        } else {
-                            words.into_any_element()
-                        })
+                        .child(content)
                         .on_click(move |_, window, cx| {
                             let row = taken.clone();
                             let _ = weak.update(cx, |launcher, cx| {
@@ -541,4 +627,62 @@ impl Render for SearchRows {
         }
         list.children(children)
     }
+}
+
+/// A recent setup's row content, on two lines as the old search row drew it: "Recent setup: " with where it started (in
+/// the terminal font unless it is a repository) and the host, then, smaller and quieter, its model, effort and
+/// permissions, with YOLO in the danger ink. The agent type is in the row's name and hover help, not drawn, as in the old
+/// row. Both lines cut their text short rather than wrap.
+fn recent_lines(
+    id: &str,
+    entry: &LaunchHistoryEntry,
+    placement: &HostText,
+    selected: bool,
+    palette: &theme::Palette,
+) -> AnyElement {
+    let part = |name: &str| SharedString::from(format!("{id}-{name}"));
+    let selection = &entry.selection;
+    let yolo =
+        selection.harness.request_permission(selection.permissions) == Some(LaunchPermission::Yolo);
+    let destination = HostText::from_host(destination_label(entry));
+    let first = HostSentence::new(part("destination")).text("Recent setup: ");
+    let first = if entry.github_repo.is_none() {
+        first.mono(&destination)
+    } else {
+        first.host(&destination)
+    };
+    let first = first.text(" · ").host(placement);
+    // The old second line's `--fg-1`, and `--on-accent-dim` on the selected row's fill.
+    let quiet = if selected {
+        palette.on_accent_dim
+    } else {
+        palette.fg_1
+    };
+    div()
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .child(div().min_w_0().truncate().child(first))
+        .child(
+            div()
+                .flex()
+                .min_w_0()
+                .truncate()
+                .mt(px(2.))
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(quiet))
+                // A custom model id is host-supplied text, so the line is drawn escaped.
+                .child(
+                    HostSentence::new(part("selection"))
+                        .host(&HostText::from_host(summary_before_permissions(selection)))
+                        .text(" · Permissions: "),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .when(yolo, |word| word.text_color(theme::color(palette.danger)))
+                        .child(permission_value(selection)),
+                ),
+        )
+        .into_any_element()
 }

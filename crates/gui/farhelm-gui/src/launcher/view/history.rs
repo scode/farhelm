@@ -72,8 +72,9 @@ impl Launcher {
         }
         self.history.asked = key;
         self.history.answered = None;
-        // The folder list's rows follow the history, so a highlight on the old rows goes with it.
+        // The folder list's and the search's rows follow the history, so a highlight on the old rows goes with it.
         self.drop_folder_highlight();
+        self.reset_search_highlight(cx);
         if let Some(key) = key {
             self.send_history_read(key, cx);
         }
@@ -102,8 +103,9 @@ impl Launcher {
                         launcher
                             .observe_checkout_config_revision(reply.checkout_config_revision, cx);
                         launcher.history.answered = Some((key, reply));
-                        // The new recents shift the folder list's rows under any highlight.
+                        // The new recents shift the folder list's and the search's rows under any highlight.
                         launcher.drop_folder_highlight();
+                        launcher.reset_search_highlight(cx);
                         cx.notify();
                     }
                 });

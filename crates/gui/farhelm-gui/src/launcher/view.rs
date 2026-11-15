@@ -386,6 +386,9 @@ fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
                         Ok(catalog) => launcher.catalog = Some(catalog),
                         Err(error) => launcher.catalog_error = Some(error),
                     }
+                    // The catalog's models, and which past models it lists, change the search's rows under the
+                    // highlight.
+                    launcher.reset_search_highlight(cx);
                     cx.notify();
                     std::mem::take(&mut launcher.waiting_batches)
                 })

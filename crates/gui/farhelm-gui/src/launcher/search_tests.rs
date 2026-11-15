@@ -1,14 +1,15 @@
 //! Tests of the composer search's rules: what a query means, which rows it offers in which order, which row is
 //! preselected and what an empty result says. Ported from the old app's `launch_composer.rs` search tests at reference
-//! commit `24bc0580` (named in each test's docs), minus the rows whose data the app does not read yet (recent setups,
-//! folder history, history models, repositories).
+//! commit `24bc0580` (named in each test's docs), minus the rows whose data the app does not read yet (Browse and
+//! repositories).
 //!
 //! Every test calls [`search`] with plain inputs, no window: the search is a function of the query and the draft's
 //! values, so the view's tests only need to show that a row it draws applies.
 
 use farhelm_proto::launcher::LaunchCatalogModel;
+use farhelm_proto::session_requests::{FolderHistoryEntry, LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostView;
-use farhelm_proto::{LaunchEffort, LaunchHarness};
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 use super::draft::Tab;
 use super::search::{
@@ -59,8 +60,8 @@ fn hosts() -> Vec<HostView> {
 }
 
 /// What a search reads: the tab, the chosen agent type and model, the catalog and whether its read is still out, the
-/// registry's hosts and the templates' rows. The constructors start from [`catalog`] as read and [`hosts`], with no
-/// model chosen and no templates.
+/// registry's hosts, the templates' rows and the chosen host's launch history. The constructors start from [`catalog`]
+/// as read and [`hosts`], with no model chosen, no templates and no history read.
 struct Draft {
     tab: Tab,
     harness: Option<LaunchHarness>,
@@ -69,6 +70,7 @@ struct Draft {
     catalog_pending: bool,
     hosts: Vec<HostView>,
     templates: Result<Vec<TemplateRow>, HostSentence>,
+    history: Option<LaunchHistoryReply>,
 }
 
 impl Draft {
@@ -81,6 +83,7 @@ impl Draft {
             catalog_pending: false,
             hosts: hosts(),
             templates: Ok(Vec::new()),
+            history: None,
         }
     }
 
@@ -92,6 +95,7 @@ impl Draft {
     }
 
     fn search(&self, query: &str) -> Results {
+        let placement = placement();
         search(&Inputs {
             query,
             tab: self.tab,
@@ -101,6 +105,7 @@ impl Draft {
             catalog_pending: self.catalog_pending,
             hosts: &self.hosts,
             templates: self.templates.as_deref(),
+            history: self.history.as_ref().zip(Some(&placement)),
         })
     }
 
@@ -647,6 +652,326 @@ fn a_path_offers_use_this_path() {
             model("org/model", LaunchHarness::Codex),
             Row::UsePath("org/".to_owned())
         ]
+    );
+}
+
+// ---- The launch history: saved folders, recent setups and past models ----------------------------------------------
+
+/// The chosen host as the history rows name it.
+fn placement() -> HostText {
+    HostText::from_host("Local (this machine)")
+}
+
+/// A launch of `harness` with `model` (else its default) in the folder `cwd`, every other choice left to its default.
+fn launch(cwd: &str, harness: LaunchHarness, model: Option<&str>) -> LaunchHistoryEntry {
+    LaunchHistoryEntry {
+        host: 1,
+        target: None,
+        github_repo: None,
+        canonical_cwd: Some(cwd.to_owned()),
+        cwd: cwd.to_owned(),
+        selection: LaunchSelection {
+            harness,
+            model: model.map(str::to_owned),
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            workspace_trust: None,
+            wrapper_prefix: None,
+            container: None,
+        },
+        created_at: 0,
+        creation_seq: None,
+    }
+}
+
+/// A saved folder, as typed.
+fn folder(display: &str) -> FolderHistoryEntry {
+    FolderHistoryEntry {
+        host: 1,
+        canonical_cwd: display.to_owned(),
+        canonical_proven: true,
+        display_cwd: display.to_owned(),
+        created_at: 0,
+        creation_seq: None,
+    }
+}
+
+/// A draft on the Agent tab with `harness` chosen, whose host's history holds `launches` and `folders`, newest first.
+fn with_history(
+    harness: Option<LaunchHarness>,
+    launches: Vec<LaunchHistoryEntry>,
+    folders: &[&str],
+) -> Draft {
+    Draft {
+        history: Some(LaunchHistoryReply {
+            launches,
+            folders: folders.iter().map(|path| folder(path)).collect(),
+            checkout_config_revision: 1,
+        }),
+        ..Draft::agent(harness)
+    }
+}
+
+fn recent(entry: LaunchHistoryEntry) -> Row {
+    Row::Recent {
+        entry: Box::new(entry),
+        placement: placement(),
+    }
+}
+
+fn history_model(id: &str, harness: LaunchHarness) -> Row {
+    Row::HistoryModel {
+        id: id.to_owned(),
+        harness,
+    }
+}
+
+/// A typed path offers "Use this path" first, then every saved folder holding the text, in the history's order
+/// (newest first) and uncapped. Why: the typed path is what Enter takes, and the saved folders are the next best
+/// guesses (old `path_search_groups_explicit_actions_before_folder_history`, less its Browse row, which is not built).
+#[test]
+fn a_typed_path_comes_before_the_saved_folders() {
+    let draft = with_history(
+        None,
+        Vec::new(),
+        &["~/work/helm", "/srv/other", "~/work/helm-old"],
+    );
+    assert_eq!(
+        draft.rows("~/work/helm"),
+        vec![
+            Row::UsePath("~/work/helm".to_owned()),
+            Row::Folder("~/work/helm".to_owned()),
+            Row::Folder("~/work/helm-old".to_owned()),
+        ]
+    );
+    // A word that is not a path still finds saved folders, and is not taken as a session name.
+    assert_eq!(
+        draft.rows("srv"),
+        vec![Row::Folder("/srv/other".to_owned())]
+    );
+}
+
+/// `folder:` alone lists every saved folder and `recent:` alone every recent setup, while an empty unlabelled box
+/// offers nothing and `gh:` offers nothing local. Why: a bare label is how to browse one kind, and an empty box must not
+/// cover the launcher (old `scoped_search_empty_kinds_are_bounded_and_gh_is_local_free`).
+#[test]
+fn a_bare_label_lists_its_whole_kind() {
+    let codex = launch("/a", LaunchHarness::Codex, None);
+    let draft = with_history(None, vec![codex.clone()], &["/a", "/b"]);
+    assert_eq!(
+        draft.rows("folder:"),
+        vec![Row::Folder("/a".to_owned()), Row::Folder("/b".to_owned())]
+    );
+    assert_eq!(draft.rows("RECENT:"), vec![recent(codex)]);
+    assert!(draft.rows("").is_empty());
+    assert!(draft.rows("gh:/a").is_empty());
+}
+
+/// `folder:` offers only folders and `recent:` only recent setups, while unlabelled text offers both. Why: a label
+/// narrows the search to one kind; a setup that started in a folder is not a folder (old
+/// `folder_scope_does_not_broaden_into_unlabelled_recent_search`).
+#[test]
+fn a_label_does_not_broaden_into_the_other_history_kind() {
+    let codex = launch("/home/u/project", LaunchHarness::Codex, None);
+    let draft = with_history(None, vec![codex.clone()], &["/home/u/project"]);
+    let saved = Row::Folder("/home/u/project".to_owned());
+    assert_eq!(draft.rows("folder:project"), vec![saved.clone()]);
+    assert_eq!(draft.rows("recent:project"), vec![recent(codex.clone())]);
+    assert_eq!(draft.rows("project"), vec![saved, recent(codex)]);
+}
+
+/// Saved folders and recent setups match the folder as it was typed, so the visible `<U+202E>` spelling of a hidden
+/// character matches only a folder that literally holds that text. Why: what is drawn escaped must not stand for the
+/// character it hides, or typing the escape would find a folder whose name reads differently (old
+/// `folder_and_recent_search_match_raw_paths`).
+#[test]
+fn history_rows_match_the_raw_folder() {
+    let hidden = launch("/tmp/\u{202e}x", LaunchHarness::Codex, None);
+    let literal = launch("/tmp/<U+202E>y", LaunchHarness::Codex, None);
+    let draft = with_history(
+        None,
+        vec![hidden, literal.clone()],
+        &["/tmp/\u{202e}x", "/tmp/<U+202E>y"],
+    );
+    assert_eq!(
+        draft.rows("folder:<u+202e>"),
+        vec![Row::Folder("/tmp/<U+202E>y".to_owned())]
+    );
+    assert_eq!(draft.rows("recent:<u+202e>"), vec![recent(literal)]);
+    assert_eq!(
+        draft.rows("folder:\u{202e}"),
+        vec![Row::Folder("/tmp/\u{202e}x".to_owned())],
+        "the hidden character itself finds the folder holding it"
+    );
+}
+
+/// A recent setup matches on where it started, its agent type and its model, but not on its effort or permissions,
+/// and it sits last, after the agent types and models the same word finds. Why: each row is one kind of choice, and a
+/// word naming an agent type should offer the type itself before whole setups (old `search_keeps_choice_kinds_separate`).
+#[test]
+fn recent_setups_match_their_place_agent_and_model() {
+    let mut claude = launch("/w", LaunchHarness::Claude, None);
+    claude.selection.effort = Some(LaunchEffort::Max);
+    let draft = with_history(None, vec![claude.clone()], &[]);
+    assert_eq!(
+        draft.rows("clau"),
+        vec![
+            Row::Harness(LaunchHarness::Claude),
+            model("claude", LaunchHarness::Claude),
+            recent(claude),
+        ]
+    );
+    let recents = |query: &str| {
+        draft
+            .rows(query)
+            .into_iter()
+            .filter(|row| row.group() == Group::RecentSetups)
+            .count()
+    };
+    assert_eq!(recents("recent:max"), 0, "the effort is not matched");
+    assert_eq!(recents("recent:/w"), 1);
+    let custom = launch("/v", LaunchHarness::Codex, Some("zz-model"));
+    let by_model = with_history(None, vec![custom.clone()], &[]);
+    assert_eq!(
+        by_model.rows("recent:zz"),
+        vec![recent(custom)],
+        "the model is matched"
+    );
+}
+
+/// Recent setups in search are every setup the history holds, in the strip's order (most launched, then newest),
+/// neither capped at the strip's three nor narrowed by the draft's choices. Why: the strip shows the likely few, and
+/// search is how to reach the rest (old `search_and_ordinary_recents_share_complete_ranking_before_the_cap`).
+#[test]
+fn recent_setups_are_ranked_and_uncapped() {
+    let newest = launch("/1", LaunchHarness::Codex, None);
+    let often = launch("/2", LaunchHarness::Claude, None);
+    let older = launch("/3", LaunchHarness::Codex, None);
+    let oldest = launch("/4", LaunchHarness::Codex, None);
+    let draft = with_history(
+        // A chosen Codex narrows the strip, not these rows.
+        Some(LaunchHarness::Codex),
+        vec![
+            newest.clone(),
+            often.clone(),
+            older.clone(),
+            often.clone(),
+            oldest.clone(),
+        ],
+        &[],
+    );
+    assert_eq!(
+        draft.rows("recent:/"),
+        vec![recent(often), recent(newest), recent(older), recent(oldest)]
+    );
+}
+
+/// A model an earlier launch used that the catalog does not list is offered after the catalog's models, with the agent
+/// type it ran with, once however often it ran, and only for the chosen agent type when one is chosen. A model the
+/// catalog lists (in either spelling) is offered only as the catalog's. Why: a custom model id typed once should not
+/// have to be typed again, and a selected agent type narrows every model row (old
+/// `search_offers_a_used_custom_model_with_its_harness` and `search_models_follow_the_selected_harness`).
+#[test]
+fn past_models_follow_the_catalogs() {
+    let launches = vec![
+        launch("/a", LaunchHarness::Codex, Some("release/candidate.42")),
+        launch("/a", LaunchHarness::Claude, Some("candidate-x")),
+        launch("/b", LaunchHarness::Codex, Some("release/candidate.42")),
+        launch("/a", LaunchHarness::Codex, Some("gpt-fast")),
+        launch("/a", LaunchHarness::OpenCode, Some("big")),
+    ];
+    let models = |draft: &Draft, query: &str| -> Vec<Row> {
+        draft
+            .rows(query)
+            .into_iter()
+            .filter(|row| row.group() == Group::Models)
+            .collect()
+    };
+    let any = Draft {
+        catalog: Some(
+            catalog()
+                .into_iter()
+                .chain([LaunchCatalogModel {
+                    id: "opencode/big".into(),
+                    harness: LaunchHarness::OpenCode,
+                    efforts: vec![],
+                }])
+                .collect(),
+        ),
+        ..with_history(None, launches.clone(), &[])
+    };
+    assert_eq!(
+        models(&any, "candidate"),
+        vec![
+            history_model("release/candidate.42", LaunchHarness::Codex),
+            history_model("candidate-x", LaunchHarness::Claude),
+        ]
+    );
+    assert_eq!(
+        models(&any, "model:gpt-fast"),
+        vec![model("gpt-fast", LaunchHarness::Codex)],
+        "a catalog model is not offered twice"
+    );
+    assert_eq!(
+        models(&any, "model:big"),
+        vec![model("opencode/big", LaunchHarness::OpenCode)],
+        "the catalog's spelling of a past model is the catalog's row"
+    );
+    let codex = with_history(Some(LaunchHarness::Codex), launches, &[]);
+    assert_eq!(
+        models(&codex, "model:candidate"),
+        vec![history_model("release/candidate.42", LaunchHarness::Codex)]
+    );
+}
+
+/// Without a history read (none yet, or none for this host), no saved folder, recent setup or past model is offered,
+/// and a `folder:` word that is not a path says it has no match. Why: these rows belong to the chosen host's history
+/// only; offering a stale one would fill another host's folder.
+#[test]
+fn no_history_offers_no_history_rows() {
+    let draft = Draft::agent(None);
+    assert!(draft.rows("recent:").is_empty());
+    assert!(draft.rows("folder:").is_empty());
+    assert_eq!(
+        draft.search("folder:src").message,
+        Some(Message {
+            text: "No folder matches",
+            warning: true
+        })
+    );
+}
+
+/// A recent setup's row names the whole setup, host values escaped, and its hover help says the same without the
+/// lead; a saved folder reads as a typed path does. Why: the row's accessible name is what a screen reader and the old
+/// end-to-end tests found it by (old `.launch-composer-search-recent` `aria-label` and `search_result_tooltip`).
+#[test]
+fn history_row_words() {
+    let mut codex = launch("/w\u{202e}", LaunchHarness::Codex, Some("model\u{202e}one"));
+    codex.selection.effort = Some(LaunchEffort::High);
+    codex.selection.permissions = Some(LaunchPermission::Yolo);
+    let row = recent(codex);
+    assert_eq!(
+        row.words("w").accessible_name().as_ref(),
+        "Recent setup: /w<U+202E> · Local (this machine) · Codex · Model: model<U+202E>one · Effort: High · Permissions: YOLO"
+    );
+    assert_eq!(
+        row.help(None, "h").accessible_name().as_ref(),
+        "/w<U+202E> · Local (this machine) · Codex · Model: model<U+202E>one · Effort: High · Permissions: YOLO"
+    );
+    assert_eq!(
+        Row::Folder("/srv".to_owned())
+            .words("w")
+            .accessible_name()
+            .as_ref(),
+        "Use this path: /srv"
+    );
+    assert_eq!(
+        history_model("custom", LaunchHarness::Claude)
+            .words("w")
+            .accessible_name()
+            .as_ref(),
+        "Model: custom (Claude)"
     );
 }
 
