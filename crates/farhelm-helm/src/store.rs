@@ -1269,6 +1269,9 @@ pub struct CachedSlice {
 /// dimensions belong to which half. The split below follows the
 /// shape of the data rather than the wording:
 ///
+/// - **session — EXACT.** One session by its key, which the UI channel uses
+///   to carry the GUI's open session past the rest of its query. Not one of
+///   SPEC.md's dimensions, and no control offers it.
 /// - **host, parent, status — EXACT.** Each is an identifier or a value
 ///   chosen from a finite set the client already has in hand (the hosts
 ///   list, the status vocabulary), so a substring match would only ever
@@ -1282,6 +1285,7 @@ pub struct CachedSlice {
 ///   ASCII-only) on both needle and haystack.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFilter {
+    session: Option<SessionKey>,
     host: Option<HostId>,
     parent: Option<SessionKey>,
     directory: Option<Folded>,
@@ -1699,6 +1703,13 @@ where
 }
 
 impl SessionFilter {
+    /// Narrow to the one session `key` names, on its own host entry: an equal
+    /// bare ID on another entry is a different session and does not match.
+    pub fn session(mut self, key: &SessionKey) -> SessionFilter {
+        self.session = Some(key.clone());
+        self
+    }
+
     /// Narrow to one host.
     pub fn host(mut self, host: HostId) -> SessionFilter {
         self.host = Some(host);
@@ -1758,6 +1769,11 @@ impl SessionFilter {
     /// question about a row, and there is no row this can fail to answer
     /// for.
     pub fn matches(&self, host: HostId, info: &SessionInfo) -> bool {
+        if let Some(key) = &self.session
+            && (key.host != host || info.id != key.session_id)
+        {
+            return false;
+        }
         if let Some(wanted) = self.host
             && wanted != host
         {
@@ -22057,6 +22073,23 @@ mod tests {
                 .host(2)
                 .parent(&SessionKey::new(1, "parent-7"))
                 .matches(2, &info)
+        );
+        // One session, on its own entry only: an equal bare ID on another
+        // host entry is a different session.
+        assert!(
+            SessionFilter::default()
+                .session(&SessionKey::new(1, "s-1"))
+                .matches(1, &info)
+        );
+        assert!(
+            !SessionFilter::default()
+                .session(&SessionKey::new(1, "s-1"))
+                .matches(2, &info)
+        );
+        assert!(
+            !SessionFilter::default()
+                .session(&SessionKey::new(1, "s-2"))
+                .matches(1, &info)
         );
 
         // Dimensions AND: adding one can only ever narrow.

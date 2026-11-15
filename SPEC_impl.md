@@ -306,6 +306,17 @@ the stored word), so its first snapshot, a reset's included, is already in the u
 GUI. Until a query from the GUI names a sort of its own, the channel keeps following that preference, so a change made
 elsewhere reorders the open list. Collections carry their metadata: completeness or unavailability, counts and order.
 
+The query also names the session the GUI has open, because a host or status filter, or the cap, can leave that session
+out of the list while the selection and its terminal stay, and its pane, header actions, details bar and Rename still
+need its current state. When the list leaves it out, the helm reads that one session as well (the list route narrowed to
+its id, so no filter or cap applies) and carries it in the collection, named in the metadata (`selected_outside_query`)
+and kept out of the order, so the list does not draw it while the store finds it by key. It counts toward none of
+`total`, `matching` and `truncated`, which stay the query's own, and it is diffed like any entry: it arrives when
+selected, loses the mark when the filter comes to match it, and goes when the selection moves or the session is deleted.
+A selected key that names no session carries nothing. Rejected: the GUI reading the open session with
+`GET /api/sessions/{id}`, which would be pushed state fetched (stale between reads), and which waits on the host without
+a bound.
+
 Changes are sent per collection, keyed by id, and an entry is always replaced whole; there are no field-level patches.
 The GUI applies every collection's changes with one generic piece of code, not code per kind. The helm finds changes by
 re-running the collections' existing GET handlers in process, after every fleet feed bump and after each command's
@@ -429,6 +440,11 @@ state. Shared state changes only through store methods that notify. Caching a vi
 computes the view's inputs from the store and redraws only when they differ, so a forgotten notification cannot leave a
 cached view stale. A child view talks to its parent only by emitting events that the parent subscribes to; a child never
 holds a parent handle to call `update` on it (see the re-entrancy trap below).
+
+The sessions collection can hold one entry its list does not show: the open session, carried outside the session query
+(see "What is pushed, and how changes are found"). A view that draws the collection's order skips it, and a view that
+looks a session up by key finds it, so the open session's pane reads the store like any other view (the collection's
+metadata names it, as `selected_outside_query`).
 
 A session terminal is the one deliberate exception to store-fed, wrapper-cached views (the migration's orchestrator
 decided this on 2026-11-13): its grid is bulk data streamed for one attachment, not shared state, and its inputs are the

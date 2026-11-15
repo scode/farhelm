@@ -78,7 +78,8 @@ pub(crate) use sandbox::{create_environment_session, create_sandbox_session, sto
 /// Session list section): the reply is the whole list.
 ///
 /// The filter parameters are SPEC.md's session-list dimensions: host,
-/// parent, directory, status, and title. Their match semantics live on
+/// parent, directory, status, and title, plus `id`, which no control offers:
+/// it is the UI channel's read of the open session. Their match semantics live on
 /// [`store::SessionFilter`], which is also where both the persisted and the
 /// in-memory sources read them from, so there is one definition rather than
 /// one per source. A parameter present but EMPTY is treated as absent
@@ -91,6 +92,13 @@ pub(crate) use sandbox::{create_environment_session, create_sandbox_session, sto
 /// such a client's paging is silently inert rather than loudly rejected.
 #[derive(Deserialize)]
 pub(crate) struct ListQuery {
+    /// Only the session with this full id (a session reference, as rows
+    /// serve it). The UI channel reads the GUI's open session this way when
+    /// the channel's query leaves it out (`crate::ui_channel`), so the read is
+    /// filter-free and never cut by the cap. Resolved like `parent`: a
+    /// reference that does not parse is a 400, one whose host entry is gone a
+    /// 404, and one whose entry exists but holds no such session an empty list.
+    id: Option<String>,
     /// Only sessions on this registered host (a `HostView::id`).
     host: Option<store::HostId>,
     /// Only direct children of this session id.
@@ -729,6 +737,10 @@ async fn list_filter(state: &AppState, q: &ListQuery) -> anyhow::Result<store::S
             .map(str::to_string)
     };
     let mut filter = store::SessionFilter::default();
+    if let Some(id) = present(&q.id) {
+        let key = resolve_session_ref(state, &id).await?;
+        filter = filter.session(&key);
+    }
     if let Some(host) = q.host {
         filter = filter.host(host);
     }
