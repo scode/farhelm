@@ -1,5 +1,5 @@
-//! Launching: what happens to a New, Clone or Replace with from the press of Launch on a complete draft until its reply
-//! has been dealt with, and to a quick launch prepared out of sight before it is started or shown.
+//! Launching: what happens to a New, Clone, Replace with or Restart with from the press of Launch on a complete draft
+//! until its reply has been dealt with, and to a quick launch prepared out of sight before it is started or shown.
 //!
 //! SPEC.md, "Creation" (the paragraphs after the launcher layout) and "Keyboard focus", "Who may move focus". Ported
 //! from the old app's submit path in `list/create_form.rs` and the reply handling in `list/view.rs` at reference commit
@@ -7,8 +7,9 @@
 //! store replaced them. Here's the TLDR:
 //!
 //! - **One submit path.** [`start`] sends the draft's [`Request`] through the operation store and hides the launcher:
-//!   a create under a fresh launch key and [`Work::Launch`], or a Replace with under its source's own key and
-//!   [`Work::Replace`], the plain Replace's route, key and work, so the source's row and header treat both alike. One
+//!   a create under a fresh launch key and [`Work::Launch`], or a Replace with or Restart with under its source's own
+//!   key with [`Work::Replace`] or [`Work::Restart`], the plain operation's route, key and work, so the source's row
+//!   and header treat both alike. One
 //!   intended launch yields one session or a clear error: the launcher is not drawn while the request is out, so nothing
 //!   can press Launch again or edit the draft it sent.
 //! - **Hidden, not closed.** The launcher's dialog layer closes, which gives the page back to the user (SPEC.md: "its
@@ -47,7 +48,7 @@
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
-use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody};
+use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody, RestartSessionBody};
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
 use super::pill::{self, ProgressPill, StartedReport};
@@ -248,7 +249,9 @@ fn hold(held: Option<Held>, cx: &mut App) {
 /// What a launcher's main action sends: a create (New and Clone), or Replace with's create followed by its source's
 /// delete, which goes through the source's own Replace route and key so that the source's row and header show it as
 /// they show a plain Replace (SPEC.md: Replace with has "exactly Replace's create-then-delete contract and failure
-/// reporting").
+/// reporting"), or Restart with's restart of its source with the edited launch, through the source's own Restart route
+/// and key for the same reason ("Restart with and Replace with share the sidebar's pending states on the row and
+/// header").
 pub(super) enum Request {
     Create(CreateSessionBody),
     Replace {
@@ -256,15 +259,33 @@ pub(super) enum Request {
         source: String,
         body: ReplaceSessionBody,
     },
+    Restart {
+        /// The source session's key.
+        source: String,
+        body: RestartSessionBody,
+    },
 }
 
 impl Request {
-    /// The operation store's key: a fresh launch key for a create, the source's own key for a Replace with, which
-    /// shares that key's one-request-at-a-time rule and its failure line with the row's plain Replace.
+    /// The operation store's key: a fresh launch key for a create, the source's own key for a Replace with or Restart
+    /// with, which shares that key's one-request-at-a-time rule and its failure line with the plain Replace and
+    /// Restart.
     fn key(&self) -> OpKey {
         match self {
             Request::Create(_) => OpKey::new_launch(),
-            Request::Replace { source, .. } => OpKey::session(source),
+            Request::Replace { source, .. } | Request::Restart { source, .. } => {
+                OpKey::session(source)
+            }
+        }
+    }
+
+    /// The operation store's work: the sidebar's own Replace and Restart work for the source's requests, so the
+    /// source's row and header read them as they read the plain ones.
+    fn work(&self) -> Work {
+        match self {
+            Request::Create(_) => Work::Launch,
+            Request::Replace { .. } => Work::Replace,
+            Request::Restart { .. } => Work::Restart,
         }
     }
 
@@ -286,14 +307,23 @@ impl Request {
                 Some(serde_json::to_value(body).ok()?),
                 "POST /api/sessions/[session]/replace",
             )),
+            Request::Restart { source, body } => Some(Command::new(
+                Work::Restart,
+                Method::Post,
+                ApiPath::api(&["sessions", source.as_str(), "restart"]).ok()?,
+                Some(serde_json::to_value(body).ok()?),
+                "POST /api/sessions/[session]/restart",
+            )),
         }
     }
 
-    /// The session name the request carries, for the progress pill.
+    /// The session name the request carries, for the progress pill. A restart keeps its session's name and names none,
+    /// as the old restart's pill named only the host.
     fn title(&self) -> Option<String> {
         match self {
             Request::Create(body) => body.title.clone(),
             Request::Replace { body, .. } => body.with.as_ref().and_then(|with| with.title.clone()),
+            Request::Restart { .. } => None,
         }
     }
 
@@ -302,14 +332,17 @@ impl Request {
         match self {
             Request::Create(_) => "Launching",
             Request::Replace { .. } => "Replacing",
+            Request::Restart { .. } => "Restarting",
         }
     }
 
-    /// The source a Replace with replaces; `None` for a create.
+    /// The source a Replace with replaces or a Restart with restarts; `None` for a create.
     fn source(&self) -> Option<String> {
         match self {
             Request::Create(_) => None,
-            Request::Replace { source, .. } => Some(source.clone()),
+            Request::Replace { source, .. } | Request::Restart { source, .. } => {
+                Some(source.clone())
+            }
         }
     }
 }
@@ -320,11 +353,11 @@ impl Request {
 /// the press of Launch (a quick launch's shortcut press), or of the YOLO question's answer whose host write this request
 /// waited for. `host` is the target host's name as the launcher shows it now, which the progress pill keeps for the
 /// request's life. Returns whether the request went out; it does not without a UI session, with a request that will
-/// not encode (see [`Request::command`]), or while the source of a Replace with has another request in flight, which
-/// the launcher refuses before pressing gets here (`SOURCE_BUSY` in the view).
+/// not encode (see [`Request::command`]), or while the source of a Replace with or Restart with has another request in
+/// flight, which the launcher refuses before pressing gets here (`SOURCE_BUSY` in the view).
 ///
-/// A Replace with also starts the source's waiting line on its row and header (`outcome::start_clock`), as plain
-/// Replace does.
+/// A Replace with or Restart with also starts the source's waiting line on its row and header
+/// (`outcome::start_clock`), as the plain Replace and Restart do.
 ///
 /// The caller closes the launcher's layer once this returns `true`; the launcher stays alive here.
 pub(super) fn start(
@@ -345,11 +378,14 @@ pub(super) fn start(
     let handle = window.window_handle();
     let settling = launcher.clone();
     let key = request.key();
-    let refusal_key = key.clone();
-    let replacing = request.source();
+    let sent = Sent {
+        key: key.clone(),
+        source: request.source(),
+        work: request.work(),
+    };
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
-            settle(settling, refusal_key, replacing, handle, mark, settled, cx)
+            settle(settling, sent, handle, mark, settled, cx)
         })
     });
     if let Err(refused) = started {
@@ -359,7 +395,7 @@ pub(super) fn start(
         return false;
     }
     if let Some(source) = request.source() {
-        outcome::start_clock(&source, Work::Replace, cx);
+        outcome::start_clock(&source, request.work(), cx);
     }
     let shows = arm_progress(&launcher, handle, request.verb(), host, request.title(), cx);
     hold(
@@ -431,21 +467,28 @@ fn hide_progress(window: AnyWindowHandle, cx: &mut App) {
     }
 }
 
-/// `launcher`'s request, sent under `key`, settled; `replacing` names the source of a Replace with. `mark` is the
-/// user's answer the launch counts from (the press of Launch, or the YOLO question's answer), which also reopens the
-/// launcher: the layer manager refuses a mark the user moved on from.
+/// What a sent request's reply is settled against: the key it went under, the session a Replace with or Restart with
+/// acts on, and its work.
+struct Sent {
+    key: OpKey,
+    source: Option<String>,
+    work: Work,
+}
+
+/// `launcher`'s request (`sent`) settled. `mark` is the user's answer the launch counts from (the press of Launch, or the YOLO
+/// question's answer), which also reopens the launcher: the layer manager refuses a mark the user moved on from.
 ///
 /// A Replace with's success is plain Replace's ([`replace::settle`]): the source's delete notice goes onto the
 /// replacement, which opens only while its source is still the open session (SPEC.md, "Creation": "Replace with opens
-/// its replacement only while its source is still selected"); no "Started" report. Its refusals come back in the
-/// launcher as a create's do, and the operation store keeps the same words on the source's row.
+/// its replacement only while its source is still selected"); no "Started" report. A Restart with's success does
+/// nothing more ("Restart with never navigates"): the pushed list shows the session running again. Their refusals come
+/// back in the launcher as a create's do, and the operation store keeps the same words on the source's row.
 ///
 /// A launcher the slot no longer holds is left alone: nothing else lets go of a waiting launcher today, but its reply
 /// must not act for a launcher something else has since taken over.
 fn settle(
     launcher: Entity<Launcher>,
-    key: OpKey,
-    replacing: Option<String>,
+    sent: Sent,
     window: AnyWindowHandle,
     mark: Mark,
     settled: &Settled,
@@ -454,6 +497,7 @@ fn settle(
     if waiting(&launcher, cx) != Some(Waiting::Reply) {
         return;
     }
+    let Sent { key, source, work } = sent;
     hide_progress(window, cx);
     // The store counts from when it sent the create; `mark` from the answer that asked for it, which for a create sent
     // after the YOLO question's host write is earlier, and presses made during that write count too.
@@ -461,28 +505,30 @@ fn settle(
     match &settled.outcome {
         Outcome::Done(body) => {
             hold(None, cx);
-            match replacing {
-                Some(source) => {
+            match source {
+                Some(source) if work == Work::Replace => {
                     let settled = Settled {
                         outcome: settled.outcome.clone(),
                         user_moved_on,
                     };
                     replace::settle(&source, &settled, cx);
                 }
+                Some(_) => {}
                 None => opened(body.clone(), user_moved_on, window, cx),
             }
         }
-        // Neither a create nor a Replace is accepted as long work, so this cannot arrive. If it did, nothing failed, and
+        // None of these requests is accepted as long work, so this cannot arrive. If it did, nothing failed, and
         // the pushed list shows what the helm made of it.
         Outcome::Accepted(_) => hold(None, cx),
         // The host asks before YOLO launches: not a failure but a follow-up question, which comes back the way a
         // refusal does (SPEC.md: "A failure or follow-up question restores the same launcher").
         Outcome::Refused(refusal) if refusal.has(HelmMarker::YoloConfirmation) => {
-            // The operation store recorded the question's refusal under the request's key, which for a Replace with is
-            // the source's own: left there, the source's row and header would show it as a failed Replace, and keep it
-            // after a Cancel. The question is the launcher's to show (the old app's "Replace with YOLO cancellation
-            // leaves no source failure" case). A create's key is its own, and nothing else reads it.
-            if replacing.is_some()
+            // The operation store recorded the question's refusal under the request's key, which for a Replace with or
+            // Restart with is the source's own: left there, the source's row and header would show it as a failed
+            // Replace or Restart, and keep it after a Cancel. The question is the launcher's to show (the old app's
+            // "with YOLO cancellation leaves no source failure" cases). A create's key is its own, and nothing else
+            // reads it.
+            if source.is_some()
                 && let Some(operations) = session::current_operations(cx)
             {
                 operations.update(cx, |operations, cx| operations.forget(&key, cx));
@@ -505,11 +551,7 @@ fn settle(
                 refusal.status == 504 && !refusal.has(HelmMarker::CreateUnaccepted);
             let refused_launch = RefusedLaunch {
                 key,
-                work: if replacing.is_some() {
-                    Work::Replace
-                } else {
-                    Work::Launch
-                },
+                work,
                 may_still_start,
             };
             refused(launcher, refused_launch, window, mark, user_moved_on, cx);

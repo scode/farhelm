@@ -29,6 +29,7 @@ use gpui::{
     Styled as _, WeakEntity, Window, div, px,
 };
 
+use super::changed::Changed;
 use super::{Launcher, choices::status_line, row};
 use crate::components::{HoverHelp, OptionRow, Role, TextInput, Vertical};
 use crate::focus::Mark;
@@ -157,8 +158,8 @@ impl Launcher {
     }
 
     /// Enter in the field: apply what the open list's highlighted row or the typed text means, then, in Restart with,
-    /// press the main action.
-    pub(super) fn model_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// press the main action, unless the Enter is `held` (an auto-repeat): "A held Enter never launches" (SPEC.md).
+    pub(super) fn model_enter(&mut self, held: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.model_list_open(window, cx) {
             let typed = self.model_input.text(cx);
             let target = model_enter_target(
@@ -185,7 +186,7 @@ impl Launcher {
                 }
             }
         }
-        if matches!(self.draft.mode, Mode::RestartWith(_)) && !self.held_enter.get() {
+        if matches!(self.draft.mode, Mode::RestartWith(_)) && !held {
             self.press(window, cx);
         }
         cx.notify();
@@ -330,6 +331,7 @@ impl Launcher {
             );
         let mut rows =
             vec![row("launcher-model-row", "Model", control, palette).into_any_element()];
+        rows.extend(self.changed_marker(Changed::Model, palette));
         if let Some(error) = &self.model_field.error {
             rows.push(
                 status_line("launcher-model-error", error.clone(), palette).into_any_element(),

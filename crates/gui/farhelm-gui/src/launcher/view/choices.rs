@@ -28,6 +28,7 @@ use gpui::{
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use super::changed::Changed;
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, row};
 use crate::components::{
     Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, TextInput,
@@ -173,8 +174,10 @@ impl Launcher {
         let harness = self.draft.agent.harness;
         if harness.is_none_or(LaunchHarness::offers_effort) {
             rows.push(self.effort_row(harness, palette, cx));
+            rows.extend(self.changed_marker(Changed::Effort, palette));
         }
         rows.push(self.permission_row(harness, palette, cx));
+        rows.extend(self.changed_marker(Changed::Permissions, palette));
         rows
     }
 

@@ -110,7 +110,7 @@ fn replace_with_prefills_the_source_and_holds_its_host(cx: &mut TestAppContext) 
 fn replace_with_warns_about_a_running_source_and_sends_its_guard(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(replace_with(cx, "a"));
-    let warning = name_of(cx, "launcher-replace-warning").unwrap_or_default();
+    let warning = name_of(cx, "launcher-source-warning").unwrap_or_default();
     // The fixture's row lists one open tab, which the warning names first, as plain Replace's question does.
     assert!(
         warning.contains("still running — replacing kills the agent")
@@ -147,11 +147,11 @@ fn replace_with_follows_the_source_and_sends_the_guard_it_shows(cx: &mut TestApp
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(replace_with(cx, "a"));
     assert!(
-        name_of(cx, "launcher-replace-warning").is_some(),
+        name_of(cx, "launcher-source-warning").is_some(),
         "the premise: a runs"
     );
     a_exits(&mut helm, cx);
-    assert_eq!(name_of(cx, "launcher-replace-warning"), None);
+    assert_eq!(name_of(cx, "launcher-source-warning"), None);
     let body = pressed(&mut helm, cx).body.expect("a body");
     assert_eq!(body["only_if_nothing_alive"], json!(true));
 }
@@ -243,7 +243,7 @@ fn the_yolo_question_of_a_replace_with_leaves_no_failure_on_the_source(cx: &mut 
         "the premise: it asks the question"
     );
     assert!(
-        name_of(cx, "launcher-replace-warning").is_some(),
+        name_of(cx, "launcher-source-warning").is_some(),
         "the warning stays beside the question"
     );
     let line = |cx: &mut VisualTestContext| {
