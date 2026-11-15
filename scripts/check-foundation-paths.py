@@ -25,9 +25,10 @@ A rule admits a shape of change, not its content, so review still checks that an
 the table describes.
 
 The check also prints as `reported`, never refusing, each module an area's file newly imports from another area with
-no row, and each one in no area and no row as unassigned, for the rule in the file's "What is not a foundation", whose
-area table it reads (`cross_area_imports` has the details). That part is advisory: any failure in it, a malformed area
-table included, prints that cross-area imports were not checked and leaves the exit status to the rest of the check.
+no row (through a `use crate::` or a `crate::` path written out in its code), and each one in no area and no row as
+unassigned, for the rule in the file's "What is not a foundation", whose area table it reads (`cross_area_imports`
+has the details). That part is advisory: any failure in it, a malformed area table included, prints that cross-area
+imports were not checked and leaves the exit status to the rest of the check.
 
 Renames are not detected (`--no-renames`): a rename is the deletion of its old path and the addition of its new one,
 which is what the rules care about.
@@ -340,6 +341,10 @@ def judge(change: Change, foundations: list[Foundation]) -> Verdict | None:
 
 USE = re.compile(r"\buse\s+crate::([^;]*);")
 
+# A path written out in code rather than imported (`crate::list::menu::skips(..)`), outside a `use`. The lookbehind
+# keeps out `$crate::`, a macro's own crate, and any identifier that merely ends in `crate`.
+FULL_PATH = re.compile(r"(?<![\w$])crate::(\w+(?:::\w+)*)")
+
 
 def is_test_path(path: str) -> bool:
     """Whether `path` is a test file, skipped on both ends of an import: `*_tests.rs`, `tests.rs`, or anything under a
@@ -374,19 +379,27 @@ def use_paths(spec: str) -> list[list[str]]:
 
 
 def imported_modules(source: str, src: str, tree: set[str]) -> dict[str, str]:
-    """The module files `source`'s `use crate::...` statements import, each mapped to the first path naming it.
+    """The module files `source` reaches through `crate::` paths, each mapped to the first path naming it: those its
+    `use crate::...` statements import, then those its code names in full outside a `use`.
+
+    The full paths count because a call such as `crate::list::menu::skips(..)` depends on another module exactly as an
+    import does, and a check reading only `use` lines cannot see it: three such uses reached main without a row.
+    `use` paths come first so that a module both imported and called is named by its import.
 
     A path resolves to its deepest prefix that is a module file in `tree` (`a/b.rs` or `a/b/mod.rs` under `src`), since
-    its last segments may be items rather than modules. Line comments are dropped first, so a commented-out `use` or a
-    doc example does not count; a path that resolves to no file (a macro, a module declared inline) is skipped.
+    its last segments may be items rather than modules. Line comments are dropped first, so a commented-out `use`, a
+    doc example or an intra-doc link does not count; a path that resolves to no file (a macro, a module declared
+    inline) is skipped. String literals and block comments are not stripped, so a `crate::` path inside one counts.
     """
+    code = re.sub(r"//[^\n]*", "", source)
+    paths = [segments for match in USE.finditer(code) for segments in use_paths(match.group(1))]
+    paths += [match.group(1).split("::") for match in FULL_PATH.finditer(USE.sub("", code))]
     modules = {}
-    for match in USE.finditer(re.sub(r"//[^\n]*", "", source)):
-        for segments in use_paths(match.group(1)):
-            prefixes = ["/".join(segments[:n]) for n in range(1, len(segments) + 1)]
-            found = [src + p + tail for p in prefixes for tail in (".rs", "/mod.rs") if src + p + tail in tree]
-            if found:
-                modules.setdefault(found[-1], "crate::" + "::".join(segments))
+    for segments in paths:
+        prefixes = ["/".join(segments[:n]) for n in range(1, len(segments) + 1)]
+        found = [src + p + tail for p in prefixes for tail in (".rs", "/mod.rs") if src + p + tail in tree]
+        if found:
+            modules.setdefault(found[-1], "crate::" + "::".join(segments))
     return modules
 
 
