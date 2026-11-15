@@ -13,11 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use farhelm_helm_client::fake::FakeHelm;
-use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
-use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_input_mapping::Platform;
-use farhelm_proto::grid::GridOutput;
 use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
@@ -28,7 +24,6 @@ use gpui::{
     NativeKey, NativeKeyIdentity, ParentElement as _, Styled as _, TestAppContext,
     VisualTestContext, div, px,
 };
-use serde_json::json;
 
 use super::armed::{Key, PillView, armed_sequence, classify, is_armed};
 use super::sequence::{Entry, Input, Sequence};
@@ -36,9 +31,8 @@ use super::shortcuts::Bindings;
 use crate::actions::{self, BeginSequence, SEQUENCE_PREFIX_CHORD};
 use crate::components::{ENTRANCE, HoverHelp, TextInput, TextInputState};
 use crate::layers::{self, Anchor, Pill, PillPlacement};
-use crate::main_view::MainView;
 use crate::session_list::tests::{listing, painted, preferences_state, session};
-use crate::test_support::{self, advance, bounds, frame, keys, meta, settle, started};
+use crate::test_support::{self, advance, bounds, frame, keys, meta, settle};
 use crate::ticker;
 
 // ---- Sorting keys ----------------------------------------------------------------------------------------------------
@@ -242,87 +236,30 @@ fn change(state: CollectionState) -> CollectionChanges {
     }
 }
 
-/// The real main view over the fake helm, and the fake terminals its pane opened.
-struct Main<'a> {
-    cx: &'a mut VisualTestContext,
-    helm: FakeHelm,
-    terminals: Rc<RefCell<Vec<FakeTerminal>>>,
-}
+/// The real main view over the fake helm ([`test_support::MainWindow`]), with this module's steps.
+type Main<'a> = test_support::MainWindow<'a>;
 
 /// The main view connected with session a open (or no sessions at all), [`TEMPLATES`] and [`bindings`], its pane's
 /// terminal live and focused when there is one.
 fn open_main(cx: &mut TestAppContext, with_session: bool) -> Main<'_> {
-    let (mut helm, connection) = started(cx);
-    let terminals: Rc<RefCell<Vec<FakeTerminal>>> = Rc::default();
-    let record = terminals.clone();
-    cx.update(|cx| {
-        connection.update(cx, |connection, _| {
-            connection.serve_terminals(move |attach: TerminalAttach| {
-                let (terminal, handle, events) = FakeTerminal::open(&attach);
-                record.borrow_mut().push(terminal);
-                (handle, events)
-            })
-        })
-    });
     let sessions = if with_session {
         listing(&["a"], &[session("a")])
     } else {
         listing(&[], &[])
     };
-    helm.connect(vec![
+    let snapshot = vec![
         sessions,
         bindings("my-codex"),
         templates(&TEMPLATES, Availability::Available),
-    ]);
-    cx.run_until_parked();
-    let (_, cx) = test_support::open_view(cx, MainView::new);
-    let mut main = Main {
-        cx,
-        helm,
-        terminals,
-    };
+    ];
+    let mut main = test_support::open_main(cx, snapshot);
     if with_session {
         main.terminal_live();
-        assert!(
-            test_support::terminal_focused(main.cx),
-            "the premise: a's terminal has focus"
-        );
-        main.program_input();
     }
     main
 }
 
 impl Main<'_> {
-    /// The pane's terminal attaches and replays a complete screen, so it goes live and takes input.
-    fn terminal_live(&mut self) {
-        {
-            let mut terminals = self.terminals.borrow_mut();
-            let terminal = &mut terminals[0];
-            let asked = terminal.attach();
-            let screen = [
-                json!({"t":"hello","cols":asked.cols,"rows":asked.rows,"history_cap":0}),
-                json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
-                    "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
-                json!({"t":"frame","rev":1,"cols":asked.cols,"rows":asked.rows,
-                    "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
-            ];
-            for message in screen {
-                terminal.output(serde_json::from_value::<GridOutput>(message).unwrap());
-            }
-            terminal.replay_complete();
-        }
-        settle(self.cx);
-    }
-
-    /// How many input requests the terminal's program was sent since the last call.
-    fn program_input(&mut self) -> usize {
-        self.terminals.borrow_mut()[0]
-            .received()
-            .into_iter()
-            .filter(|request| matches!(request, FakeTerminalRequest::Input { .. }))
-            .count()
-    }
-
     /// Press the prefix, which must arm a sequence.
     fn arm(&mut self) {
         keys(self.cx, SEQUENCE_PREFIX_CHORD);
