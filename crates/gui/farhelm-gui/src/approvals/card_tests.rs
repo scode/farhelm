@@ -217,6 +217,12 @@ fn the_card_paints_its_badge_heading_count_from_line_facts_and_answers(cx: &mut 
         ["claude"],
         "the command's box holds the command"
     );
+    // The box is a named tab stop the keyboard scrolls (the old labelled box), named for its label.
+    let command = node(&nodes, "approval-req-1-box-0");
+    assert_eq!(
+        (command.role, command.label.as_deref()),
+        (Some(Role::Region), Some("Command"))
+    );
     assert_eq!(
         texts.iter().filter(|text| *text == "claude").count(),
         2,
