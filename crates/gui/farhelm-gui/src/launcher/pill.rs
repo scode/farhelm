@@ -27,9 +27,8 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use crate::components::dialog_shadow;
+use crate::components::{Spinner, dialog_shadow, spinner_icon};
 use crate::host_text::{HostSentence, HostText};
-use crate::session_list::delete::{Spinner, spinner_icon};
 use crate::theme::{self, metrics};
 use crate::ticker;
 
@@ -56,7 +55,7 @@ pub(super) struct ProgressPill {
     /// The session name the request carries; `None` for a request that leaves the name to the helm.
     title: Option<HostText>,
     sent: SystemTime,
-    /// Held only while the window is active, as every spinner is (`session_list::delete::Spinner`): a live spinner
+    /// Held only while the window is active, as every spinner is (`components::Spinner`): a live spinner
     /// keeps the ticker's timer firing ten times a second, which a window behind others has no use for. The seconds
     /// clock below runs either way, since a wait is about the user's time.
     spinner: Option<Spinner>,

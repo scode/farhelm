@@ -80,6 +80,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
 
+use crate::components::{Spinner, spinner_icon};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
@@ -135,7 +136,7 @@ pub struct SessionPane {
     /// line shows in an active window, and worked out at the top of each frame as the session list works out its own:
     /// everything that decides it (the operation store, the shared clocks, the selection, the window's activation)
     /// redraws the window when it changes.
-    spinner: Option<delete::Spinner>,
+    spinner: Option<Spinner>,
     /// Where the top row's buttons were last drawn, and the question it opened ([`header::Header`]).
     header: header::Header,
     /// The pulse's ticks for the details bar's running mark, held exactly while the bar shows one in an active window,
@@ -298,7 +299,7 @@ impl Render for SessionPane {
         let spins =
             (deleting.is_some() || Self::header_spins(&key, cx)) && ticker::is_active(window, cx);
         if spins != self.spinner.is_some() {
-            self.spinner = spins.then(|| delete::Spinner::start(window, cx));
+            self.spinner = spins.then(|| Spinner::start(window, cx));
         }
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
         let header = self.header_row(&key, step, window, cx);
@@ -386,7 +387,7 @@ pub(crate) fn delete_scrim(guard: DeleteGuard, step: u8, cx: &App) -> Stateful<D
         .text_size(px(15.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(ink)
-        .child(delete::spinner_icon(step, px(16.), ink))
+        .child(spinner_icon(step, px(16.), ink))
         .child(label);
     // No listener, no focus tracking and no occlusion, so GPUI gives it no hitbox: the terminal below keeps every
     // press, and with it focus (see the module docs).

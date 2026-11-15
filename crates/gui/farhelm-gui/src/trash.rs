@@ -690,7 +690,7 @@ impl Render for TrashButton {
 }
 
 /// The bob's ticks: a small entity of its own that the ticker notifies on every tick, counting them, which the button
-/// observes to redraw. The same shape as the session list's spinner (`session_list::delete::Spinner`).
+/// observes to redraw. The same shape as the component layer's spinner (`components::Spinner`).
 struct Bob {
     turn: Entity<Turn>,
     _redraw: Subscription,
