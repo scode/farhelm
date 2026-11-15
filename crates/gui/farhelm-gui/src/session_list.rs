@@ -217,6 +217,10 @@ pub struct SessionList {
     /// Each listed session's row focus handle (see the module docs), owned here so it outlives a frame in which the
     /// row is not drawn and stays the same across rebuilds; dropped once the session is no longer listed.
     row_focus: HashMap<String, FocusHandle>,
+    /// The heading's Templates button's focus handle, owned here so it outlives a frame: the Templates dialog names it
+    /// as where closing returns focus (on macOS a click leaves the button unfocused, so what held focus before the
+    /// click is not where SPEC.md returns it).
+    templates_focus: FocusHandle,
     /// The list's width when its rows were last given their height estimate; see [`SessionList::sync_rows`].
     hinted_width: Option<Pixels>,
     /// What held the window's focus when [`SessionList::reveal_focused`] last looked, so it acts once per focus move.
@@ -303,6 +307,7 @@ impl SessionList {
             rows: ListState::new(0, ListAlignment::Top, px(ROW_OVERDRAW)),
             entries: Rc::from([]),
             row_focus: HashMap::new(),
+            templates_focus: cx.focus_handle().tab_stop(true),
             hinted_width: None,
             focus_seen: None,
             all_focus: cx.focus_handle().tab_stop(true),
@@ -639,7 +644,7 @@ impl Render for SessionList {
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
                 .child(
-                    list.child(heading(title, None, cx))
+                    list.child(heading(title, None, &self.templates_focus, cx))
                         .child(filter_row)
                         .children(refused)
                         .child(status_line("Loading sessions…")),
@@ -655,6 +660,7 @@ impl Render for SessionList {
                 CountLine::Count(count) => Some(count.clone()),
                 CountLine::Cut(_) => None,
             },
+            &self.templates_focus,
             cx,
         );
         let truncated = match count {
@@ -763,7 +769,12 @@ fn draw_row(
 /// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
 /// the heading's actions at its right edge (`.session-heading-actions`), of which only Templates is ported (the module
 /// docs' NOTE).
-fn heading(title: AnyElement, count: Option<String>, cx: &App) -> impl IntoElement {
+fn heading(
+    title: AnyElement,
+    count: Option<String>,
+    templates_focus: &FocusHandle,
+    cx: &App,
+) -> impl IntoElement {
     let palette = theme::palette(cx);
     let templates = IconButton::new(
         "templates-button",
@@ -774,9 +785,13 @@ fn heading(title: AnyElement, count: Option<String>, cx: &App) -> impl IntoEleme
     )
     .tier(Tier::Neutral)
     .square(px(HEADING_ICON_SIDE))
-    .on_click(|_, window, cx| {
-        let mark = Mark::take(cx);
-        let _ = templates::open(&mark, window, cx);
+    .focus(templates_focus)
+    .on_click({
+        let opener = templates_focus.clone();
+        move |_, window, cx| {
+            let mark = Mark::take(cx);
+            let _ = templates::open(&opener, &mark, window, cx);
+        }
     });
     div()
         .flex()

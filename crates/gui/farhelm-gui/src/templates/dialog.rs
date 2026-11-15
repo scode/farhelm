@@ -11,9 +11,18 @@
 //!   header's Close, 960 pixels wide at most. Its body holds the help paragraph, an optional hint line (set when a
 //!   shortcut opened the dialog, [`Hint`]), the two panes and the list's unavailable line. There is no footer: the
 //!   editor carries its own action row.
-//! - **The list.** Every template the helm pushed, in its order (by name), each drawn as its name over its summary
-//!   ([`super::summary`]); a count under the list. Names and the values a summary shows are host-supplied text, since
-//!   an agent may have written them, so they are drawn through the host-text element.
+//! - **The list.** "+ New template", then every template the helm pushed, in its order (by name), each drawn as its
+//!   name over its summary ([`super::summary`]); a count under the list. Each row is a button that opens its template
+//!   in the editor, drawn pressed while the editor holds that template; opening the row the editor already holds does
+//!   nothing, so its edits stay. Names and the values a summary shows are host-supplied text, since an agent may have
+//!   written them, so they are drawn through the host-text element.
+//! - **The editor** ([`super::editor`]) beside the list: "Choose a template to edit, or make a new one." until a row or
+//!   "+ New template" opens one. Focus goes to its name field when it opens. What it refuses or the helm refuses of a
+//!   save is said in the status line under the panes. Opening another template while one has unsaved changes discards
+//!   them for now.
+//! - **Writes, one at a time.** A save and a ⚡ or number-key write are never in flight together: while one is, the
+//!   rows, "+ New template", the bolts, the keys and Save wait (busy, keeping focus), and neither Escape nor Close
+//!   closes the dialog, so the write's refusal can still be reported.
 //! - **Reading.** Everything comes from the store as the helm pushes it; the dialog keeps no copy. A template that
 //!   changes or appears while the dialog is open shows up at once. When the helm could not read its templates the list
 //!   says so with the helm's words, and keeps showing the last templates it had.
@@ -22,10 +31,9 @@
 //!   template holds it. Both write the helm's shared preferences, one write at a time, and show what the store holds,
 //!   never what was just clicked. A refused write is said under the panes in the helm's words.
 //!
-//! NOTE: Built in pieces. Not here yet, each with its own piece: the editor and its "+ New template" (until it lands
-//! the rows' names are not buttons, since there is nothing for them to open), the leave question, and delete. The old
-//! list's Retry beside a failed read is not ported: the helm pushes its templates again whenever they change, so there
-//! is nothing for the dialog to ask for (recorded in the parity file).
+//! NOTE: Built in pieces. Not here yet, each with its own piece: the leave question, and delete. The old list's Retry
+//! beside a failed read is not ported: the helm pushes its templates again whenever they change, so there is nothing
+//! for the dialog to ask for (recorded in the parity file).
 //!
 //! NOTE: The old dialog scrolled as one piece, header included. Here the frame keeps its header (title and Close) on
 //! screen and scrolls the body, as every other dialog of the app does; at a window too short even for the header, the
@@ -34,7 +42,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use farhelm_proto::launcher::LaunchTemplate;
+use farhelm_helm_client::ApiPath;
+use farhelm_proto::launcher::{LaunchCatalogModel, LaunchTemplate};
 use farhelm_proto::ui_channel::{Availability, Collection};
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, FontWeight, InteractiveElement as _,
@@ -42,14 +51,15 @@ use gpui::{
     WeakEntity, Window, div, px, svg,
 };
 
+use super::editor::Editor;
 use super::shortcuts::{self, Bindings, KEYS};
 use super::summary::{self, Part};
 use crate::assets::Icon;
-use crate::components::{Button, DialogFrame, HoverHelp, IconButton, MenuItem, Tier};
+use crate::components::{Button, DialogFrame, HoverHelp, IconButton, MenuHeader, MenuItem, Tier};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, Dismissal, LayerId, Popover};
-use crate::operations::{Command, OpKey};
+use crate::operations::{self, Command, OpKey};
 use crate::session;
 use crate::theme::{self, metrics};
 
@@ -64,9 +74,8 @@ const LIST_COLUMN_GAP: f32 = 12.;
 const LIST_COLUMN_PAD_RIGHT: f32 = 18.;
 /// `.templates-content`: the gap between the body's blocks.
 const CONTENT_GAP: f32 = 14.;
-/// `.templates-list`: the gap between rows, and a row's padding (`.templates-row`: 10 pixels by 12).
+/// `.templates-list`: the gap between rows. A row's padding is its button's ([`Tier::TemplateRow`]).
 const ROW_GAP: f32 = 6.;
-const ROW_PAD: (f32, f32) = (10., 12.);
 /// `.templates-row`: the gap between a row's name and its summary.
 const ROW_LINE_GAP: f32 = 4.;
 /// `.templates-hint` and `.templates-row-summary`: 12-pixel text at a 1.5 line height.
@@ -130,15 +139,32 @@ pub struct TemplatesDialog {
     /// The line saying why a shortcut opened the dialog, if one did.
     hint: Option<Hint>,
     /// Each row's number-key button, by template name, as last drawn: what its menu is anchored to when the button is
-    /// clicked. A template gone from the list leaves its entry behind, which holds only a weak reference and is
-    /// harmless.
-    key_anchors: HashMap<String, Anchor>,
+    /// clicked, and the button's focus handle, where closing the menu returns focus. A template gone from the list leaves
+    /// its entry behind, which holds only a weak reference and a handle nothing draws, and is harmless.
+    key_anchors: HashMap<String, (Anchor, FocusHandle)>,
     /// The number-key menu that is open, if one is: its template's name and its layer.
     key_menu: Option<(String, LayerId)>,
     /// What this dialog last wrote to the preferences, so a refusal on that key is worded as the write it answers. A
     /// refusal there that some other dialog's write left (a Settings switch) is not this dialog's to show.
     last_write: Option<Write>,
+    /// "+ New template"'s focus handle: where focus starts, as the old dialog started it there.
+    new_focus: FocusHandle,
+    /// The open template, once a row or "+ New template" opened one.
+    pub(super) editor: Option<Editor>,
+    /// The model catalog for the editor's effort choices and model suggestions, once read; read when the first
+    /// editor opens, as nothing before needs it.
+    catalog: Option<Vec<LaunchCatalogModel>>,
+    /// Whether the catalog read was sent, so it is sent once per dialog. A failed read is not retried: without a
+    /// catalog the editor refuses no effort and suggests no model, as the old editor did.
+    catalog_requested: bool,
 }
+
+/// The dialog last opened, for tests that reach into its editor and the screenshot goldens that open a row or a menu.
+#[cfg(test)]
+pub(crate) struct Opened(pub(crate) WeakEntity<TemplatesDialog>);
+
+#[cfg(test)]
+impl gpui::Global for Opened {}
 
 /// A preference write this dialog sends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,51 +183,57 @@ impl Write {
     }
 }
 
-/// Open the Templates dialog, with `hint`'s line when a shortcut opened it rather than the Templates button. `mark` is
-/// the [`Mark`] the opener took when the user acted; nothing opens when the user has moved on since, or while the
-/// window is inert (it has no store to draw templates from). Closing returns focus to what held it when the dialog
-/// opened.
+/// Open the Templates dialog, with `hint`'s line when a shortcut opened it rather than the Templates button. `returns_to`
+/// is where closing returns focus: the Templates button's [`ReturnTo::Control`], since on macOS a click leaves a button
+/// unfocused, and what held focus before the click is not where the old app returned it (the Templates button, by
+/// name); [`ReturnTo::Opener`] for a shortcut, a key press that moved no focus. `mark` is the [`Mark`] the opener took
+/// when the user acted; nothing opens when the user has moved on since, or while the window is inert (it has no store to
+/// draw templates from).
+///
+/// Focus starts on "+ New template", as the old dialog started it (`DialogFocus::remembered(".templates-new", ..)`).
 ///
 /// Returns the dialog's layer, or `None` when nothing opened.
-pub fn open(hint: Option<Hint>, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+pub fn open(
+    returns_to: ReturnTo,
+    hint: Option<Hint>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     session::current_store(cx)?;
     if focus::has_moved_on(mark, cx) {
         return None;
     }
+    let new_focus = cx.focus_handle().tab_stop(true);
     let dialog = cx.new(|_| TemplatesDialog {
         layer: None,
         hint,
         key_anchors: HashMap::new(),
         key_menu: None,
         last_write: None,
+        new_focus: new_focus.clone(),
+        editor: None,
+        catalog: None,
+        catalog_requested: false,
     });
     let container = cx.focus_handle();
     let layer = layers::open_dialog(
         Dialog {
             view: dialog.clone().into(),
-            container: container.clone(),
-            // Focus starts on the dialog itself until the editor's "+ New template" exists, where the old dialog
-            // started (`DialogFocus::remembered(".templates-new", ..)`).
-            start: container,
+            container,
+            start: new_focus,
             subject: None,
             // The dialog has no one main action: Enter on the dialog itself does nothing, as in the old app.
             main_action: None,
             keeps_focus_on_empty_click: false,
-            returns_to: ReturnTo::Opener,
-            // Stay while this dialog's preference write is in flight, as the old dialog held its Close while busy: closing
-            // then would lose the line that reports the write if it is refused (SPEC.md, "One GUI at a time": a failed
-            // save is reported). The editor's leave question joins this hook with its own piece.
+            returns_to,
+            // Asked on Escape and the header Close ([`TemplatesDialog::dismissal`]).
             on_dismiss: Some(Rc::new({
                 let dialog = dialog.downgrade();
-                move |_: &mut Window, cx: &mut App| {
-                    let writing = dialog
-                        .upgrade()
-                        .is_some_and(|dialog| dialog.read(cx).writing(cx));
-                    if writing {
-                        Dismissal::Stay
-                    } else {
-                        Dismissal::Close
-                    }
+                move |window: &mut Window, cx: &mut App| {
+                    dialog
+                        .update(cx, |dialog, cx| dialog.dismissal(window, cx))
+                        .unwrap_or(Dismissal::Close)
                 }
             })),
             placement: layers::DialogPlacement::Centered,
@@ -212,16 +244,31 @@ pub fn open(hint: Option<Hint>, mark: &Mark, window: &mut Window, cx: &mut App) 
         cx,
     )?;
     dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
+    #[cfg(test)]
+    cx.set_global(Opened(dialog.downgrade()));
     Some(layer)
 }
 
-/// What the header's Close does: dismiss the dialog through the layer manager, so its dismissal hook (once the editor
-/// has one) decides, exactly as Escape does.
+/// What the header's Close does: dismiss the dialog through the layer manager, so its dismissal hook decides, as for
+/// Escape. An open "+ Add field" menu is forgotten first, so the hook closes the dialog: only Escape closes that menu on
+/// its own, as in the old dialog, whose Close left the editor whatever was open in it. While a write is in flight the
+/// hook keeps the dialog open, so the menu is left alone too: forgetting it then, with no redraw, would make it vanish
+/// later from under the user.
 fn dismiss(
     dialog: WeakEntity<TemplatesDialog>,
 ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
     move |_, window, cx| {
-        let layer = dialog.upgrade().and_then(|dialog| dialog.read(cx).layer);
+        let layer = dialog
+            .update(cx, |dialog, cx| {
+                if !dialog.writing(cx)
+                    && let Some(editor) = dialog.editor.as_mut()
+                {
+                    editor.forget_add_menu();
+                }
+                dialog.layer
+            })
+            .ok()
+            .flatten();
         if let Some(layer) = layer {
             layers::dismiss(layer, window, cx);
         }
@@ -267,15 +314,139 @@ const KEY_TEXT: f32 = 10.;
 const KEY_MENU_WIDTH: f32 = 260.;
 
 impl TemplatesDialog {
-    /// Whether a preference write this dialog sent is in flight.
+    /// Whether a write this dialog sent is in flight: a ⚡ or number-key write, or the editor's save.
     fn writing(&self, cx: &App) -> bool {
-        self.last_write.is_some()
+        let preferences = self.last_write.is_some()
             && session::current_operations(cx).is_some_and(|operations| {
                 operations
                     .read(cx)
                     .in_flight(&OpKey::preferences())
                     .is_some()
-            })
+            });
+        preferences || self.editor.as_ref().is_some_and(Editor::is_writing)
+    }
+
+    /// Whether the number-key button of `name` has been drawn, so its menu has an anchor to open on (the screenshot
+    /// goldens wait for it).
+    #[cfg(test)]
+    pub(crate) fn key_button_drawn(&self, name: &str) -> bool {
+        self.key_anchors.contains_key(name)
+    }
+
+    /// What Escape and the header Close do. The dialog stays while one of its writes is in flight, as the old dialog
+    /// held its Close while busy: closing then would lose the line that reports the write if it is refused (SPEC.md,
+    /// "One GUI at a time": a failed save is reported). An open "+ Add field" menu closes first, focus going back to
+    /// "+ Add field", as the old dialog's Escape closed it before the dialog. The editor's leave question joins this
+    /// hook with its own piece.
+    fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
+        if self.writing(cx) {
+            return Dismissal::Stay;
+        }
+        if let Some(editor) = self.editor.as_mut()
+            && editor.close_add_menu(window, cx)
+        {
+            cx.notify();
+            return Dismissal::Stay;
+        }
+        Dismissal::Close
+    }
+
+    /// Open the stored template `name` in the editor, with focus on its name field. Opening the template the editor
+    /// already holds does nothing, so its unsaved edits stay (the old dialog's rule); opening another discards them for
+    /// now, until the leave question asks first. Nothing opens while a write is in flight.
+    pub(crate) fn open_template(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.writing(cx)
+            || self
+                .editor
+                .as_ref()
+                .is_some_and(|editor| editor.previous() == Some(name))
+        {
+            return;
+        }
+        let Some(template) = session::current_store(cx).and_then(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<LaunchTemplate>(name)
+                .cloned()
+        }) else {
+            return;
+        };
+        let mark = Mark::take(cx);
+        let editor = Editor::open(&template, window, cx);
+        self.show_editor(editor, &mark, window, cx);
+    }
+
+    /// The editor's Save, with the dialog's model catalog to judge the draft's effort by.
+    /// Nothing while any write of the dialog's is in flight (a ⚡ or number-key write included): the dialog's writes go
+    /// one at a time, and Save's busy look only reaches the screen with the next frame.
+    pub(super) fn save_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing(cx) {
+            return;
+        }
+        if let Some(editor) = self.editor.as_mut() {
+            editor.save(self.catalog.as_deref(), window, cx);
+        }
+    }
+
+    /// "+ New template": an empty new draft in the editor, with focus on its name field.
+    fn new_template(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing(cx) {
+            return;
+        }
+        let mark = Mark::take(cx);
+        let editor = Editor::new_template(window, cx);
+        self.show_editor(editor, &mark, window, cx);
+    }
+
+    /// Put `editor` in the pane, move focus to its name field for the action marked `mark` (the field is drawn in
+    /// the next frame, which the focus coordinator waits for), and read the catalog if no editor has yet.
+    fn show_editor(
+        &mut self,
+        editor: Editor,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = editor.name_focus(cx);
+        self.editor = Some(editor);
+        if let Some(name) = name {
+            focus::focus_in_layer(&name, mark, window, cx);
+        }
+        self.read_catalog(cx);
+        cx.notify();
+    }
+
+    /// Read the release's model catalog (`GET /api/launch-catalog`), once per dialog, for the editor's effort choices
+    /// and model suggestions. The helm does not push it, so it is read, as the launcher reads it.
+    fn read_catalog(&mut self, cx: &mut Context<Self>) {
+        if self.catalog_requested {
+            return;
+        }
+        let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
+            return;
+        };
+        self.catalog_requested = true;
+        let weak = cx.weak_entity();
+        operations::read::<Vec<LaunchCatalogModel>>(
+            path,
+            "GET /api/launch-catalog",
+            cx,
+            move |answer, cx| {
+                let Ok(catalog) = answer else {
+                    return;
+                };
+                let _ = weak.update(cx, |dialog, cx| {
+                    dialog.catalog = Some(catalog);
+                    cx.notify();
+                });
+            },
+        );
     }
 
     /// One row of the list (`li` of `.templates-list`): the bolt, the number-key button, and the template's name over
@@ -294,6 +465,7 @@ impl TemplatesDialog {
         let eligible = shortcuts::may_mark(template);
         let bound = bindings.key_of(&template.name);
         let weak = cx.weak_entity();
+        let weak_open = weak.clone();
 
         let bolt_name = template.name.clone();
         let bolt = IconButton::new(
@@ -324,8 +496,15 @@ impl TemplatesDialog {
         // The anchor's element state lives only while it is asked for in every frame, so it is built afresh on each
         // draw and the latest kept for the menu to open on.
         let anchor = Anchor::for_element(format!("template-anchor-{}", template.name), window, cx);
+        // The button's focus handle is element state too, so its menu can name the button as where closing returns
+        // focus.
+        let key_focus = focus::control_handle(
+            format!("template-key-{}-focus-handle", template.name),
+            window,
+            cx,
+        );
         self.key_anchors
-            .insert(template.name.clone(), anchor.clone());
+            .insert(template.name.clone(), (anchor.clone(), key_focus.clone()));
         let key_name = template.name.clone();
         let key = Button::new(
             format!("template-key-{}", template.name),
@@ -351,6 +530,7 @@ impl TemplatesDialog {
         .expanded(self.key_menu.as_ref().is_some_and(|(open, layer)| {
             *open == template.name && layers::is_open(*layer, window, cx)
         }))
+        .focus(&key_focus)
         .busy(busy)
         .on_click(move |_, window, cx| {
             let _ = weak.update(cx, |dialog, cx| {
@@ -358,22 +538,26 @@ impl TemplatesDialog {
             });
         });
 
+        // The row the editor holds is drawn pressed, its summary in the accent family's quieter ink (the name takes
+        // the button's own ink, which pressing turns inverse).
+        let open = self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.previous() == Some(template.name.as_str()));
         let mut lines = div()
             .flex_1()
             .min_w_0()
             .flex()
             .flex_col()
             .gap(px(ROW_LINE_GAP))
-            .py(px(ROW_PAD.0))
-            .px(px(ROW_PAD.1))
             .child(
                 div()
                     .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_size(metrics::TEXT_MD)
+                    .line_height(px(SMALL_LINE_HEIGHT))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
                     .child(host_text::element(&name).truncate()),
             )
             .child(
@@ -383,7 +567,11 @@ impl TemplatesDialog {
                     .whitespace_nowrap()
                     .text_size(metrics::TEXT_SM)
                     .line_height(px(SMALL_LINE_HEIGHT))
-                    .text_color(theme::color(palette.fg_1))
+                    .text_color(theme::color(if open {
+                        palette.on_accent_dim
+                    } else {
+                        palette.fg_1
+                    }))
                     .child(summary_line(template)),
             );
         if marked {
@@ -395,6 +583,28 @@ impl TemplatesDialog {
                     .child(super::QUICK_LAUNCH_SHORTCUT_NAME),
             );
         }
+        let open_name = template.name.clone();
+        let opener = Button::new(
+            format!("template-open-{}", template.name),
+            HostSentence::new("template-open-label")
+                .host(&name)
+                .accessible_name(),
+            HoverHelp::sentence(
+                HostSentence::new("template-open-help")
+                    .text("Edit template ")
+                    .host(&name),
+            ),
+            Role::Button,
+        )
+        .tier(Tier::TemplateRow)
+        .pressed(open)
+        .busy(busy)
+        .content(lines)
+        .on_click(move |_, window, cx| {
+            let _ = weak_open.update(cx, |dialog, cx| {
+                dialog.open_template(&open_name, window, cx)
+            });
+        });
 
         div()
             .id(gpui::ElementId::Name(
@@ -424,7 +634,7 @@ impl TemplatesDialog {
                     .child(key)
                     .child(anchor.track()),
             )
-            .child(lines)
+            .child(div().flex_1().min_w_0().child(opener))
             .into_any_element()
     }
 
@@ -474,7 +684,12 @@ impl TemplatesDialog {
 
     /// The key button of `name` was clicked: open its menu, or close it if it is open. Focus starts on the key the
     /// template holds, or on No shortcut.
-    fn toggle_key_menu(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_key_menu(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A menu still open closes first; a second click on its own button only closes it.
         if let Some((open, layer)) = self.key_menu.take()
             && layers::is_open(layer, window, cx)
@@ -485,7 +700,7 @@ impl TemplatesDialog {
                 return;
             }
         }
-        let Some(anchor) = self.key_anchors.get(name).cloned() else {
+        let Some((anchor, button)) = self.key_anchors.get(name).cloned() else {
             return;
         };
         let mark = Mark::take(cx);
@@ -512,7 +727,9 @@ impl TemplatesDialog {
                 container: cx.focus_handle(),
                 start: Some(focus[start].clone()),
                 anchor,
-                returns_to: ReturnTo::Opener,
+                // The key button, not what held focus before: on macOS the click that opened the menu left the button
+                // unfocused, and the old menu returned focus to its button when it closed.
+                returns_to: ReturnTo::Control(button),
                 traps_tab: true,
             },
             &mark,
@@ -554,28 +771,13 @@ impl KeyMenu {
 
 impl Render for KeyMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = theme::palette(cx);
         let bindings = Bindings::current(cx);
         let name = HostText::from_host(self.name.clone());
-        let header = div()
-            .px(px(10.))
-            .py(px(6.))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .text_size(metrics::TEXT_MD)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .min_w_0()
-                    .child(host_text::element(&name).truncate()),
-            )
-            .child(
-                div()
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.fg_1))
-                    .child("Number shortcut"),
-            );
+        // The template's name over "Number shortcut", as the old flyout's header named its subject.
+        let header = MenuHeader::new(
+            &name,
+            HostSentence::new("templates-key-menu-summary").text("Number shortcut"),
+        );
         let none = MenuItem::new(
             "templates-key-none",
             Icon::Templates,
@@ -613,15 +815,23 @@ impl Render for KeyMenu {
             .text("Number key for ")
             .host(&name)
             .accessible_name();
+        // The header comes before the element with the menu role, so it is read as the menu's subject, not as one of
+        // its commands (the shared header's rule).
         layers::panel(cx)
             .id("templates-key-menu")
             .debug_selector(|| "templates-key-menu".into())
-            .role(Role::Menu)
-            .aria_label(label)
             .w(px(KEY_MENU_WIDTH))
             .child(header)
-            .child(none)
-            .children(keys)
+            .child(
+                div()
+                    .id("templates-key-menu-items")
+                    .role(Role::Menu)
+                    .aria_label(label)
+                    .flex()
+                    .flex_col()
+                    .child(none)
+                    .children(keys),
+            )
     }
 }
 
@@ -638,9 +848,9 @@ impl Render for TemplatesDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let bindings = Bindings::current(cx);
-        // One preference write at a time: while one is in flight every bolt and key button waits, as the old list's
-        // controls did while it was busy.
-        let (busy, refused) = match session::current_operations(cx) {
+        // One write at a time: while a preference write or the editor's save is in flight every row, bolt and key
+        // button waits, as the old list's controls did while it was busy.
+        let (preferences_busy, refused) = match session::current_operations(cx) {
             Some(operations) => {
                 let operations = operations.read(cx);
                 let refused = self
@@ -658,6 +868,7 @@ impl Render for TemplatesDialog {
             }
             None => (false, None),
         };
+        let busy = preferences_busy || self.editor.as_ref().is_some_and(Editor::is_writing);
         let store = session::current_store(cx);
         let (templates, unavailable) = match &store {
             Some(store) => {
@@ -687,7 +898,20 @@ impl Render for TemplatesDialog {
                 .child(text)
         };
 
-        // `aside.templates-sidebar`: the rows, then the count pushed to the column's foot.
+        // `aside.templates-sidebar`: "+ New template", the rows, then the count pushed to the column's foot.
+        let weak_new = cx.weak_entity();
+        let new_template = Button::new(
+            "templates-new",
+            "+ New template",
+            HoverHelp::tooltip("Start a new template; unsaved changes ask before leaving"),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .focus(&self.new_focus)
+        .busy(busy)
+        .on_click(move |_, window, cx| {
+            let _ = weak_new.update(cx, |dialog, cx| dialog.new_template(window, cx));
+        });
         let list = div()
             .id("templates-list")
             .role(Role::List)
@@ -710,6 +934,7 @@ impl Render for TemplatesDialog {
             .pr(px(LIST_COLUMN_PAD_RIGHT))
             .border_r_1()
             .border_color(theme::color(palette.border_dialog))
+            .child(new_template)
             .child(list)
             .child(
                 div()
@@ -717,13 +942,27 @@ impl Render for TemplatesDialog {
                     .debug_selector(|| "templates-count".into())
                     .child(small(count_text(templates.len()))),
             );
-        // `section.templates-editor`, until the editor exists: an empty pane where it will be.
-        let editor = div()
-            .id("templates-editor")
-            .role(Role::Region)
-            .aria_label("Template editor")
-            .flex_1()
-            .min_w_0();
+        // `section.templates-editor`: the open template, or what to do to open one.
+        let weak = cx.weak_entity();
+        let editor = match &self.editor {
+            Some(editor) => editor.render(busy, &bindings, self.catalog.as_deref(), &weak, cx),
+            None => div()
+                .id("templates-editor")
+                .role(Role::Region)
+                .aria_label("Template editor")
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .debug_selector(|| "templates-empty".into())
+                        .text_color(theme::color(palette.fg_1))
+                        .child("Choose a template to edit, or make a new one."),
+                )
+                .into_any_element(),
+        };
         let panes = div()
             .flex()
             .gap(px(PANES_GAP))
@@ -756,6 +995,19 @@ impl Render for TemplatesDialog {
                     .child(refused),
             );
         }
+        if let Some(status) = self.editor.as_ref().and_then(Editor::status) {
+            // The editor's status line (`.templates-error[role=status]`): why a save was refused, in the app's or the
+            // helm's words, until the next save or another template opens.
+            body = body.child(
+                div()
+                    .id("templates-editor-status")
+                    .debug_selector(|| "templates-editor-status".into())
+                    .role(Role::Status)
+                    .text_size(metrics::TEXT_SM)
+                    .text_color(theme::color(palette.warn))
+                    .child(status.clone()),
+            );
+        }
         if let Some(error) = unavailable {
             // `.templates-error`: the helm's own words, in the warning color, below both panes.
             body = body.child(
@@ -772,7 +1024,6 @@ impl Render for TemplatesDialog {
         }
 
         let writing = self.writing(cx);
-        let weak = cx.weak_entity();
         DialogFrame::new("templates", "Templates", body, Vec::new())
             .summary(SUMMARY)
             .tile(

@@ -762,12 +762,15 @@ must not undo a change an agent or the command line made" needs them. The two co
 (templates and number keys, SPEC.md 2026-10-21) stay. A failed save is reported, never retried, and never treated as
 saved; whether the field reverts or keeps its text for editing follows that editor's SPEC rule (several explicit-save
 editors keep the draft). A save is work in the operation store under the key of what it saves, so an editor of any kind
-(a session's title, a template, the preferences, a host's settings) saves the same way. A text field over a draft is one
-binding owned by the drafts module, not wiring each editor repeats: it mirrors the user's edits into the draft, shows a
-pushed value only while the draft follows it, is read-only while its save is in flight, and after a refused save takes
-up the last pushed value if the user had not touched it. While a save is in flight its Save button is busy rather than
-disabled: it keeps focus and its place in Tab's order and ignores presses, as the old app's Save did, because a disabled
-button gives up focus.
+(a session's title, a template, the preferences, a host's settings) saves the same way. A text field over a draft saved
+on its own is one binding owned by the drafts module, not wiring each editor repeats: it mirrors the user's edits into
+the draft, shows a pushed value only while the draft follows it, is read-only while its save is in flight, and after a
+refused save takes up the last pushed value if the user had not touched it. An editor that saves a whole object in one
+request (the template editor, whose fields are typed and come and go) instead keeps one draft for the object with plain
+inputs it binds itself, and in such an editor an untouched field need not follow a pushed change while it is open, since
+the save replaces the object anyway (decided by the GPUI migration's coordinator on 2026-11-14). While a save is in
+flight its Save button is busy rather than disabled: it keeps focus and its place in Tab's order and ignores presses, as
+the old app's Save did, because a disabled button gives up focus.
 
 Enforced by draft tests that push a change under a touched field, by save tests that load, save untouched and compare,
 by a save under a template's key, by tests of the bound field (a push under a touched field, a push and a keystroke
@@ -8098,19 +8101,22 @@ removed. Fields need not form a complete launch, because another stacked templat
 Opening another row, new, duplicate, close and Escape share a pending departure and the same inline
 save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
 copy with a free name. A rename saves the new name before deleting the old one, so a failure in between leaves both;
-saving under a name another template already has is refused in the panel rather than overwriting that template. A
-pending or failed name-list read cannot prove a new name is free. Delete checks the stored snapshot, not the unsaved
-draft, against the existing template shape rules. If it fails, the control says "Delete permanently" and deletion clears
-any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete retains the stored template
-client-side for about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The two
-delete kinds have separate, always-mounted buttons, switched with `hidden`, whose handlers each carry a fixed kind.
-Native listener updates can precede a webview paint, so reusing one button could change the Undo promise before its new
-label appears. A Delete with no usable reply reports that deletion may have happened, clears Undo, and refreshes only
-the template list; helm refusals retain their existing error. This is a local stopgap, not lost-reply reconciliation.
-The notice and its timer belong to this mounted dialog, with a generation guarding against an earlier timer expiring a
-later deletion. Writes are serialized and disable navigation until their outcome is known. API last-write-wins semantics
-remain unchanged; name checks do not acquire an atomic cross-client reservation. The launcher reads templates when it
-opens and again whenever the Templates dialog closes, using the existing revision bump and focus return.
+saving under a name another template already has is refused in the panel rather than overwriting that template. The GPUI
+editor checks a new or changed name against the pushed templates collection, which already holds a save's result when
+its reply arrives (the UI channel pushes a command's changes before its reply); while the helm reports that collection
+unavailable, or before its first snapshot, a new name cannot be proven free and the save is refused. Delete checks the
+stored snapshot, not the unsaved draft, against the existing template shape rules. If it fails, the control says "Delete
+permanently" and deletion clears any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete
+retains the stored template client-side for about ten seconds; undo freshly reads the names before restoring and refuses
+a taken name. The two delete kinds have separate, always-mounted buttons, switched with `hidden`, whose handlers each
+carry a fixed kind. Native listener updates can precede a webview paint, so reusing one button could change the Undo
+promise before its new label appears. A Delete with no usable reply reports that deletion may have happened, clears
+Undo, and refreshes only the template list; helm refusals retain their existing error. This is a local stopgap, not
+lost-reply reconciliation. The notice and its timer belong to this mounted dialog, with a generation guarding against an
+earlier timer expiring a later deletion. Writes are serialized and disable navigation until their outcome is known. API
+last-write-wins semantics remain unchanged; name checks do not acquire an atomic cross-client reservation. The launcher
+reads templates when it opens and again whenever the Templates dialog closes, using the existing revision bump and focus
+return.
 
 ### Agent launches from the CLI
 

@@ -854,8 +854,18 @@
     },
     {
       "golden": "templates-dialog",
-      "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key (no editor yet)",
+      "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key, the editor not opened yet",
       "reference": "templates-dialog"
+    },
+    {
+      "golden": "template-editor",
+      "title": "The Templates dialog with codex-deep open in its editor: name, switch, agent type, model with its suggestions, effort, Save (no Duplicate or Delete yet)",
+      "reference": "template-editor"
+    },
+    {
+      "golden": "template-number-menu",
+      "title": "codex-deep's number-key menu over the open editor, under the shared menu header",
+      "reference": "template-number-menu"
     },
     {
       "golden": "settings-sessions",

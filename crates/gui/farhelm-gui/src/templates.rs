@@ -10,6 +10,7 @@
 //! - [`fields`]: the template editor's model: which fields a template sets, adding and removing them, and why a draft
 //!   cannot be saved. No GPUI types.
 //! - [`dialog`]: the Templates dialog beside New, with each template's ⚡ and number-key buttons.
+//! - [`editor`]: the dialog's editor pane, where a template is opened, edited and saved.
 //! - [`shortcuts`]: which template holds ⚡ and each number key, and how a change to them is written.
 //! - [`sequence`]: the quick-launch sequence's state, its keys' rules, what its pill shows and what Enter resolves it
 //!   to. No GPUI types.
@@ -25,6 +26,7 @@
 
 pub mod apply;
 pub mod dialog;
+pub mod editor;
 pub mod fields;
 pub mod sequence;
 pub mod shortcuts;
@@ -35,6 +37,8 @@ mod apply_tests;
 #[cfg(test)]
 mod dialog_tests;
 #[cfg(test)]
+mod editor_tests;
+#[cfg(test)]
 mod fields_tests;
 #[cfg(test)]
 mod sequence_tests;
@@ -44,10 +48,10 @@ mod shortcuts_tests;
 mod summary_tests;
 
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
-use gpui::{App, Window};
+use gpui::{App, FocusHandle, Window};
 
 use crate::components::HoverHelp;
-use crate::focus::Mark;
+use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::LayerId;
 use crate::session;
@@ -83,22 +87,29 @@ pub fn number_key_name(key: &str) -> String {
     }
 }
 
-/// Open the Templates dialog for the list header's Templates button. `mark` is the [`Mark`] taken in the button's click
-/// handler. Nothing opens when the user has moved on since, or while the window is inert. Closing returns focus to what
-/// held it when the dialog opened.
-pub fn open(mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
-    dialog::open(None, mark, window, cx)
+/// Open the Templates dialog for the list header's Templates button. `opener` is the button's focus handle, where
+/// closing returns focus on every platform (on macOS a click leaves the button unfocused), and `mark` the [`Mark`] taken
+/// in the button's click handler. Nothing opens when the user has moved on since, or while the window is inert.
+pub fn open(
+    opener: &FocusHandle,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    dialog::open(ReturnTo::Control(opener.clone()), None, mark, window, cx)
 }
 
 /// Open the Templates dialog because a shortcut found nothing to launch, with `hint`'s line saying why (SPEC.md: "With
-/// no usable mark it opens Templates with an explanation"; "Unbound keys open Templates with a binding hint").
+/// no usable mark it opens Templates with an explanation"; "Unbound keys open Templates with a binding hint"). Closing
+/// returns focus to what held it when the dialog opened: a shortcut is a key press, which moved no focus, so that is
+/// where the user was.
 pub fn open_with_hint(
     hint: Hint,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    dialog::open(Some(hint), mark, window, cx)
+    dialog::open(ReturnTo::Opener, Some(hint), mark, window, cx)
 }
 
 /// The Templates button's hover help: it advertises the ⚡ chord and the marked template (SPEC.md: "Templates' hover and

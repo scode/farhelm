@@ -4,12 +4,12 @@ Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
 sections: Creation (the Templates dialog, quick launch, number keys, launcher sequences and the Cmd+J template list).
 
-| Old spec                                    | Tests | Covers                                                              | Status                                                                                                                                                                                                             |
-| ------------------------------------------- | ----- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark | partly: the list, summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, leaving, deleting, `tl:` and Save as template are still to come |
-| `tests/quick-launch.spec.ts`                | 30    | quick launch submits the wrapper prefix saved in its agent template | not yet ported                                                                                                                                                                                                     |
-| `tests/launcher-template-shortcuts.spec.ts` | 8     | back-to-back bolt and number chords stack on New without submitting | not yet ported                                                                                                                                                                                                     |
-| `tests/template-list-shortcut.spec.ts`      | 4     | Cmd-J exact name launches through the fresh quick-launch path       | not yet ported                                                                                                                                                                                                     |
+| Old spec                                    | Tests | Covers                                                              | Status                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------- | ----- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark | partly: the list, summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields and Save (`templates::editor_tests`, `templates::fields_tests`); rename, duplicate, leaving, deleting, `tl:` and Save as template are still to come |
+| `tests/quick-launch.spec.ts`                | 30    | quick launch submits the wrapper prefix saved in its agent template | not yet ported                                                                                                                                                                                                                                                                                                    |
+| `tests/launcher-template-shortcuts.spec.ts` | 8     | back-to-back bolt and number chords stack on New without submitting | not yet ported                                                                                                                                                                                                                                                                                                    |
+| `tests/template-list-shortcut.spec.ts`      | 4     | Cmd-J exact name launches through the fresh quick-launch path       | not yet ported                                                                                                                                                                                                                                                                                                    |
 
 ## Template cases of specs in other areas' files
 
@@ -59,10 +59,9 @@ orchestrator.
 - **The ⚡ and key buttons show a hover fill.** The old buttons showed only an edge under the pointer; the GPUI button
   component draws the ghost tier's hover fill, the nearest look it has.
 
-- **The number-key menu's own header and labels.** The menu draws its header (the template's name, cut short when long,
-  over "Number shortcut") itself rather than through the shared menu header, which does not exist yet, and its key
-  labels are in the interface face, not the old monospace. Disabled controls fade to half opacity, the component
-  layer's, not the old 40%.
+- **The number-key menu's labels.** The menu's header (the template's name over "Number shortcut") is the shared menu
+  header the session and host menus draw, but its key labels are in the interface face, not the old monospace. Disabled
+  controls fade to half opacity, the component layer's, not the old 40%.
 - **The ⚡ and key buttons while a write is in flight.** The old list dimmed them to 40% while busy; here they keep
   their look and focus and ignore presses (the button component's busy state), since a dimmed, disabled button gives up
   focus, which would fall to the dialog and lose the user's place. Tested by
@@ -74,6 +73,45 @@ orchestrator.
   and an unbound ⚡ in a sequence, the old app opened Templates with both hint lines; the GPUI dialog opens with one
   hint, for whichever unbound reference came first in the queue. Tested by
   `templates::sequence_tests::key_refusals_choose_a_hint_and_a_launcher_sentence`.
+- **Names come from the pushed list.** The editor checks a new or changed name against the templates the helm pushed,
+  not a list it read itself, so the old refusal "The template list is still loading" is gone. A name is refused as
+  unprovable only while the helm reports the templates unavailable or before its first snapshot, never for an empty
+  list, and the refusal now reads "The template list could not be read, so Farhelm cannot check that no other template
+  has this name; save again once it is back" in place of the old "could not be loaded ... retry loading it above", since
+  there is no Retry to press. Tested by
+  `templates::editor_tests::a_new_name_is_refused_while_the_templates_are_unavailable` and
+  `save_refusals_come_in_the_old_order_and_send_nothing`.
+- **No list reload after a save.** The old dialog reloaded its list after a save, and a reload that raced the save could
+  lack the template just saved. The helm pushes the changes a command causes before that command's reply
+  (`ui_channel::run` in `crates/farhelm-helm/src/ui_channel.rs` sends a command's changes and then its reply, pinned by
+  `ui_channel_tests::the_changes_a_command_causes_arrive_before_its_reply`), so the list already holds the saved
+  template when the editor learns the save is done. Tested by
+  `templates::editor_tests::save_writes_the_whole_template_once_and_keeps_focus`.
+- **While a save is in flight.** The old editor disabled every control while it was busy and made the dialog itself a
+  Tab stop. Here the text fields turn read-only, the buttons (Save, the rows, "+ New template", ✕, "+ Add field") turn
+  busy, keeping focus and ignoring presses, and the choices ignore presses without changing their look, so focus never
+  falls out of the control the user was on.
+- **The editor's small controls.** The model suggestions are neutral buttons with the neutral fill where the old ones
+  had none, and the add menu's entries have the template rows' padding (10 by 12 pixels) where the old ones had 8.
+  "Replace name" has hover help ("Clear the name so a new one can be typed"), which the old button lacked and every
+  control here needs.
+- **Where focus returns from a Templates opened by a shortcut.** The old dialog returned focus to the marked-menu toggle
+  or the Templates button by name, whoever opened it. A Templates the ⚡ or a number key opens with a hint returns focus
+  to what held it before it opened (usually the terminal), under SPEC.md's general rule that closing something returns
+  focus to where it was before it opened: a shortcut is a key press that moved no focus, and the GPUI dialog has no
+  handle on the sidebar's Templates button. Opened from the Templates button, it still returns focus to that button.
+  Tested by `templates::dialog_tests::closing_a_hint_opened_dialog_returns_focus_where_it_was` and
+  `closing_returns_focus_to_the_templates_button`.
+- **Host names in the Host select.** The select's options are the app's own words, so a host's name is shown as its
+  escaped presentation (hidden characters as `<U+…>`) but is not direction-isolated from the words around it, as host
+  text elsewhere is; the select has no host-text option labels yet.
+- **A stored environment placement.** The old Host field offered environments beside hosts. Environment placements come
+  with the launcher's environments work, so the Host select offers hosts only; a template that stores a recipe and place
+  shows "Choose a host" with the line "This template places sessions in an environment, which this editor cannot show
+  yet. It stays as stored unless you choose a host or remove this field.", and the placement is saved unchanged until a
+  host is chosen or the field removed.
+- **The editor's screenshot.** The `template-editor` golden has no Duplicate or Delete in its footer yet: those come
+  with their pieces.
 
 ## Superseded
 
