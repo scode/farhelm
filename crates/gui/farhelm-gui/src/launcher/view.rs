@@ -16,24 +16,25 @@
 //! - **The main action.** Launch (Replace, Restart for those modes) is drawn retired while [`LaunchDraft::refusal`]
 //!   names a reason, and the reason is its hover text; a press, or Enter on the dialog, a single-line field or a
 //!   choice, shows the reason beside it in the bordered alert, "Not launched." first ("Restart error." in Restart
-//!   with). A press of a complete New, Clone or Replace with launches it ([`super::launch`]): the dialog closes, and
-//!   the same launcher comes back with the helm's words in that alert if the helm refuses. Replace with also says
-//!   beside it what replacing stops while the source has anything alive. Its accessible name keeps the
+//!   with). A press of a complete New, Clone, Replace with or Restart with launches it ([`super::launch`]): the
+//!   dialog closes, and the same launcher comes back with the helm's words in that alert if the helm refuses. Replace
+//!   with also says beside it what replacing stops while the source has anything alive, and Restart with that it stops
+//!   a working agent first, its action then reading "Stop and restart"; Restart with marks each edited setting
+//!   ([`changed`]). Its accessible name keeps the
 //!   operation and its target, as the old one did.
 //! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), including a quick
 //!   launch's prepared out of sight ([`prepare_unseen`]), and again on Retry after a failed read. A template batch that
 //!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: sending a Restart with (until then a press of a complete
-//! draft there does nothing); marking the folder field when the helm refuses the folder; Restart with's
-//! markers for changed settings; the composer search; recent setups, Browse and the folder
-//! check, with its warning on the folder field; managed checkouts, with their folder and name placeholders; the escaped
-//! display of a prompt, wrapper prefix, Custom flags, seeded model, command line or resume command holding invisible
-//! characters, with Clear wrapper prefix, Clear agent command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it overflowed;
-//! today's refusals are one or two lines). The model field is `model_field`, the host picker `host_picker`.
+//! NOTE: Not built yet, each with the piece that brings it: marking the folder field when the helm refuses the folder;
+//! the composer search; recent setups, Browse and the folder check, with its warning on the folder field; managed
+//! checkouts, with their folder and name placeholders; the escaped display of a prompt, wrapper prefix, Custom flags,
+//! seeded model, command line or resume command holding invisible characters, with Clear wrapper prefix, Clear agent
+//! command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it
+//! overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
+//! `host_picker`, Restart with's "● Changed" markers `changed`.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use farhelm_helm_client::ApiPath;
@@ -42,7 +43,8 @@ use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use farhelm_proto::{
-    DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix,
+    DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, SessionStatus,
+    split_wrapper_prefix,
 };
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity,
@@ -70,7 +72,9 @@ use crate::session_list::replace;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};
+use changed::Changed;
 
+mod changed;
 mod choices;
 mod host_picker;
 mod model_field;
@@ -390,8 +394,6 @@ pub(crate) struct Launcher {
     /// still happen, which the store does not keep. Shown beside the main action until the draft changes or Launch is
     /// pressed again (`launch`).
     refused: Option<launch::RefusedLaunch>,
-    /// Whether the keystroke being handled is a held Enter, which never launches. See where it is made, in `new`.
-    pub(super) held_enter: Rc<Cell<bool>>,
     pub(super) folder: TextInputState,
     pub(super) name: TextInputState,
     conversation: TextInputState,
@@ -497,7 +499,7 @@ impl Launcher {
             cx,
             |launcher: &mut Self, event, window, cx| match event {
                 TextInputEvent::Changed => launcher.model_typed(window, cx),
-                TextInputEvent::Submitted { .. } => launcher.model_enter(window, cx),
+                TextInputEvent::Submitted { held } => launcher.model_enter(held, window, cx),
             },
         );
         // GPUI runs focus listeners inside the frame's focus phase, where a redraw request is dropped (`focus.rs` works
@@ -523,50 +525,37 @@ impl Launcher {
                 cx.notify();
             });
         });
-        let mut fields: Vec<Subscription> =
-            [
-                (&folder, Input::Folder),
-                (&name, Input::Name),
-                (&conversation, Input::Conversation),
-                (&wrapper, Input::Wrapper),
-                (&prompt, Input::Prompt),
-                (&flags, Input::Flags),
-                (&command, Input::Command),
-                (&resume, Input::Resume),
-            ]
-            .into_iter()
-            .map(|(state, which)| {
-                let input = state.clone();
-                state.subscribe(window, cx, move |launcher: &mut Self, event, window, cx| {
-                    match event {
-                        TextInputEvent::Changed => {
-                            launcher.edited(which, input.text(cx).to_string(), cx)
-                        }
-                        TextInputEvent::Submitted { .. } => {
-                            if !launcher.held_enter.get() {
-                                launcher.press(window, cx);
-                            }
+        let mut fields: Vec<Subscription> = [
+            (&folder, Input::Folder),
+            (&name, Input::Name),
+            (&conversation, Input::Conversation),
+            (&wrapper, Input::Wrapper),
+            (&prompt, Input::Prompt),
+            (&flags, Input::Flags),
+            (&command, Input::Command),
+            (&resume, Input::Resume),
+        ]
+        .into_iter()
+        .map(|(state, which)| {
+            let input = state.clone();
+            state.subscribe(window, cx, move |launcher: &mut Self, event, window, cx| {
+                match event {
+                    TextInputEvent::Changed => {
+                        launcher.edited(which, input.text(cx).to_string(), cx)
+                    }
+                    // SPEC.md: "A held Enter never launches". A single-line field reports Submitted on every
+                    // auto-repeat of Enter, and its `held` says which (buttons, the choices and the dialog's own
+                    // Enter already ignore a held key).
+                    TextInputEvent::Submitted { held } => {
+                        if !held {
+                            launcher.press(window, cx);
                         }
                     }
-                })
+                }
             })
-            .collect();
-        // SPEC.md: "A held Enter never launches". A single-line field reports Submitted on every auto-repeat of Enter
-        // (its `held` says which; the launcher still keeps its own note of it, below), so this notes, before each
-        // keystroke is dispatched, whether it is a held Enter; the fields' Submitted and the model field's Enter read
-        // it while that keystroke is handled. Buttons, the choices and the dialog's own Enter already ignore a held
-        // key.
-        let held_enter = Rc::new(Cell::new(false));
-        let noting = held_enter.clone();
-        let held_watch = cx.intercept_keystrokes(move |event, _, _| {
-            noting.set(
-                event
-                    .key_down
-                    .as_ref()
-                    .is_some_and(|down| down.is_held && down.keystroke.key == "enter"),
-            );
-        });
-        fields.extend([model_events, model_focus, model_blur, host_blur, held_watch]);
+        })
+        .collect();
+        fields.extend([model_events, model_focus, model_blur, host_blur]);
         Launcher {
             draft,
             store: store.clone(),
@@ -575,7 +564,6 @@ impl Launcher {
             notice: None,
             pressed: false,
             refused: None,
-            held_enter,
             folder,
             name,
             conversation,
@@ -809,17 +797,24 @@ impl Launcher {
         Some(row.map_or((None, DeleteGuard::NothingAlive), replace::launcher_warning))
     }
 
-    /// Replace with's warning about its source as a line for the notices region, under any refusal or YOLO question, as
-    /// the old launcher's footer notices had it (`.launch-composer-replace-warning`): the launch button is the
-    /// confirmation of the source's delete, so what it stops is said beside it, following the source while the launcher
-    /// stays open. A polite status, so a change is announced without interrupting. `None` when there is nothing to say.
-    fn replace_warning_line(&self, palette: &theme::Palette, cx: &App) -> Option<Stateful<Div>> {
-        let (warning, _) = self.replace_warning(cx)?;
-        let warning = warning?;
+    /// What the main action stops of its source, as a line for the notices region, first in it as the old launcher's
+    /// footer notices had it: Replace with's warning (`.launch-composer-replace-warning`), since the launch button is
+    /// the confirmation of the source's delete, or Restart with's while its agent works. Either follows the source while
+    /// the launcher stays open. A polite status, so a change is announced without interrupting. `None` when there is
+    /// nothing to say.
+    fn source_warning_line(&self, palette: &theme::Palette, cx: &App) -> Option<Stateful<Div>> {
+        // Restart with's warning while its source works, in the same place and look: the old launcher's
+        // `.launch-composer-restart-warning`, worded as it was.
+        let warning = if self.source_working(cx) {
+            "The agent is working. This action stops it before restarting.".to_owned()
+        } else {
+            let (warning, _) = self.replace_warning(cx)?;
+            warning?
+        };
         Some(
             div()
-                .id("launcher-replace-warning")
-                .debug_selector(|| "launcher-replace-warning".into())
+                .id("launcher-source-warning")
+                .debug_selector(|| "launcher-source-warning".into())
                 .role(Role::Status)
                 .aria_label(SharedString::from(warning.clone()))
                 .text_size(metrics::TEXT_SM)
@@ -831,13 +826,10 @@ impl Launcher {
     /// The main action was pressed (the button, or Enter on the dialog, a single-line field or a choice): launch, or
     /// show why it cannot.
     ///
-    /// A complete New or Clone sends its create, and a complete Replace with its source's Replace with this draft's
-    /// create ([`launch::start`]); either hides: the layer closes, and the launcher waits for the reply out of sight.
-    /// The press is the user's answer the reply's moved-on check counts from, so this runs in the handler of that
-    /// press, never deferred.
-    ///
-    /// NOTE: Restart with sends nothing yet; it comes with the piece that ports it, and until then a press of a
-    /// complete draft there does nothing.
+    /// A complete New or Clone sends its create, a complete Replace with its source's Replace with this draft's create,
+    /// and a complete Restart with its source's restart with the edited launch ([`launch::start`]); each hides: the
+    /// layer closes, and the launcher waits for the reply out of sight. The press is the user's answer the reply's
+    /// moved-on check counts from, so this runs in the handler of that press, never deferred.
     pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
         // without consent beside the one the answer sends with it.
@@ -887,7 +879,22 @@ impl Launcher {
                             body,
                         }
                     }),
-                Mode::RestartWith(_) => None,
+                // The press is the consent to stop a working agent exactly when the action read "Stop and restart",
+                // read from the same store state as the label.
+                Mode::RestartWith(restart) => self
+                    .draft
+                    .restart_body(
+                        target,
+                        self.live_launch(cx).as_ref(),
+                        self.source_working(cx),
+                    )
+                    .map(|mut body| {
+                        body.confirm_yolo = confirm_yolo;
+                        Request::Restart {
+                            source: restart.source.clone(),
+                            body,
+                        }
+                    }),
             }
         };
         // The progress pill's host, captured now for the request's life: the registry's display name, without the
@@ -1078,13 +1085,31 @@ impl Launcher {
         }
     }
 
-    /// The main action's visible word: Launch, Replace or Restart.
-    fn verb(&self) -> &'static str {
+    /// The main action's visible words: Launch, Replace or Restart, and "Stop and restart" while Restart with's source
+    /// reads working (SPEC.md, "Restart with": its primary action reads "Restart", or "Stop and restart" while the shown
+    /// agent is working).
+    fn verb(&self, cx: &App) -> &'static str {
         match self.draft.mode {
+            Mode::RestartWith(_) if self.source_working(cx) => "Stop and restart",
             Mode::RestartWith(_) => "Restart",
             Mode::ReplaceWith { .. } => "Replace",
             Mode::New | Mode::Clone => "Launch",
         }
+    }
+
+    /// Whether Restart with's source reads working (status Running) in the store now: then its main action is "Stop and
+    /// restart", the warning beside it says the agent is stopped first, and a press is the user's consent to that stop
+    /// (the request's `stop_if_running`), as the plain Restart's question is. A live agent in any other status is
+    /// stopped without asking, by the supervisor's own rule. `false` outside Restart with.
+    fn source_working(&self, cx: &App) -> bool {
+        let Mode::RestartWith(restart) = &self.draft.mode else {
+            return false;
+        };
+        self.store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(&restart.source)
+            .is_some_and(|row| row.info.status == SessionStatus::Running)
     }
 
     /// What the draft would start, in the old footer's words: "Command" on the Command tab, the agent type (on the Agent
@@ -1241,9 +1266,9 @@ impl Launcher {
 
     /// The main action's accessible name: the operation and its target, as the old one had ("Launch Codex · Local (this
     /// machine) · ~/src"), so a screen reader hears what a press would start, not only "Launch".
-    fn action_name(&self, target: &TargetWords) -> SharedString {
+    fn action_name(&self, target: &TargetWords, cx: &App) -> SharedString {
         let sentence = target.sentence("launcher-action-name");
-        format!("{} {}", self.verb(), sentence.accessible_name()).into()
+        format!("{} {}", self.verb(cx), sentence.accessible_name()).into()
     }
 
     /// The Agent tab's fields that exist so far, in the old order: the harness, effort and permission choices (with a
@@ -1479,6 +1504,7 @@ impl Launcher {
             )
             .into_any_element(),
         ];
+        fields.extend(self.changed_marker(Changed::Command, palette));
         let (on_yolo, on_enter) = (weak.clone(), weak.clone());
         fields.push(
             row(
@@ -1521,6 +1547,7 @@ impl Launcher {
             )
             .into_any_element(),
         );
+        fields.extend(self.changed_marker(Changed::Yolo, palette));
         // The declared agent type (old `.launch-command-agent`): which agent the command runs, if any, so Farhelm can
         // track and resume it. Restart with holds it, so there it is not drawn; the footer still names it.
         if !self.draft.holds(Field::AgentType) {
@@ -1629,6 +1656,7 @@ impl Launcher {
                     .into_any_element(),
                 );
             }
+            fields.extend(self.changed_marker(Changed::Resume, palette));
         }
         fields
     }
@@ -1773,13 +1801,14 @@ impl Render for Launcher {
             _ => None,
         };
         let alert = alert.map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
-        // What a press of Launch has to say, in the old footer's order: Replace with's warning about its source first,
-        // then the YOLO question while it is up, else the refusal. The warning comes first so that a tall question,
+        // What a press of Launch has to say, in the old footer's order: the warning about what it stops of its source
+        // first (Replace with's, or Restart with's while the agent works), then the YOLO question while it is up, else
+        // the refusal. The warning comes first so that a tall question,
         // which scrolls in the notices region, cannot push it out of sight: the question's answers launch with the
         // warning's guard, so the warning must be on screen at that click. This launcher's note (a quick launch's
         // banner or refusal, a shortcut's refusal) comes right after the warning, as its own element: it answers what
         // the user did last, and the question or alert below it still shows.
-        let warning = self.replace_warning_line(palette, cx);
+        let warning = self.source_warning_line(palette, cx);
         let note = self.note_element(palette);
         let question = self.yolo_inline().cloned();
         let notices =
@@ -1829,8 +1858,12 @@ impl Render for Launcher {
                 .on_click(on_launcher(weak.clone(), Launcher::reset_choices)),
             );
         }
-        let verb = self.verb();
+        let verb = self.verb(cx);
         let help = refusal.clone().unwrap_or_else(|| match self.draft.mode {
+            // The old stop-first wording while the agent works, so the help never contradicts "Stop and restart".
+            Mode::RestartWith(_) if self.source_working(cx) => {
+                "Stop and restart: stop the working agent, then relaunch this session with these settings".to_owned()
+            }
             Mode::RestartWith(_) => "Restart: relaunch this session with these settings".to_owned(),
             Mode::ReplaceWith { .. } => {
                 "Replace: start this session, then delete the old one and its state".to_owned()
@@ -1840,7 +1873,7 @@ impl Render for Launcher {
         answers.push(
             Button::new(
                 "launcher-launch",
-                self.action_name(&target),
+                self.action_name(&target, cx),
                 HoverHelp::tooltip(help),
                 Role::Button,
             )

@@ -140,7 +140,7 @@ fn not_captured_clause(kind: AgentKind, ended: bool) -> String {
 /// The invitation to send feedback when an uncaptured conversation's Restart never arrives, after the explanation's own
 /// period; empty for every other offer. The app cannot tell a report still coming from one that never will, so it says
 /// what normally happens and asks to hear about it when that is wrong (SPEC.md, "Terminal experience").
-fn feedback_note(offer: RestartOffer, ended: bool) -> &'static str {
+pub(crate) fn feedback_note(offer: RestartOffer, ended: bool) -> &'static str {
     match (offer, ended) {
         (RestartOffer::NotCaptured, false) => {
             " (If Restart doesn't become available, please send feedback from the Help (?) menu.)"

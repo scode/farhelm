@@ -1,6 +1,7 @@
 //! The launcher's entry points: the ordinary public functions other surfaces call to open New (the session list's New
 //! button, the quick switcher's "New session named X" row, Cmd+N), Clone and Replace with (the row menu and the session
-//! header), what those surfaces need to draw their triggers, the YOLO question the sidebar's plain Replace asks
+//! header), Restart with (the header's Restart menu, with [`restart_with_unavailable`] for its greyed entry), what
+//! those surfaces need to draw their triggers, the YOLO question the sidebar's plain Replace asks
 //! ([`ask_yolo_for_replace`]), and what a quick launch needs: New's prefill as a draft, which it applies templates to
 //! before deciding whether to show it ([`new_prefill`]), New opened on a draft with a banner or a refusal
 //! ([`open_with`]), and the open launcher, whose draft a shortcut applies to ([`open_launcher`]).
@@ -36,10 +37,12 @@ use farhelm_proto::ui_channel::{
 };
 use std::rc::Rc;
 
-use farhelm_proto::SessionLaunch;
+use farhelm_proto::{
+    RETIRED_CONTAINER_REASON, ReadinessWording, RestartOffer, SessionInfo, SessionLaunch,
+};
 use gpui::{App, Entity, Window};
 
-use super::draft::{LaunchDraft, remembered_permission};
+use super::draft::{LaunchDraft, harness_label, remembered_permission};
 use super::launch;
 use super::view::yolo_question::{self, replace_owner};
 use super::view::{Launcher, Note, Shown, open, open_noted};
@@ -47,6 +50,7 @@ use crate::focus::Mark;
 use crate::host_text::HostText;
 use crate::hosts::offers::HostKind;
 use crate::prompt;
+use crate::session_list::restart;
 use crate::{layers, local_state, session};
 
 /// New's hover text, for the button that opens it: it names the shortcut in the Mac app only, since the Linux app has
@@ -242,6 +246,143 @@ pub fn open_replace_with(session: &str, window: &mut Window, cx: &mut App) -> bo
     let draft = LaunchDraft::replace_with(session, &row.info, Some(row.host));
     let mark = Mark::take(cx);
     open(draft, &mark, window, cx).is_some()
+}
+
+/// Open Restart with of the session `session` (its key) in `window`: the launcher in restart mode, showing the session's
+/// current settings with its launch kind, agent type, host, folder, name and initial prompt held, whose main action
+/// restarts the session with the edited settings, resuming its own or a named conversation (SPEC.md, "Restart with").
+/// Call it from the handler of the user's action (the session header's Restart menu). Refused, returning `false`, as
+/// [`open_clone`] is, and also while [`restart_with_unavailable`] names a reason; like New, it brings back a refused
+/// launch waiting behind its notice instead.
+///
+/// Its main action reads "Stop and restart" while the session's agent reads working, and a press is then the consent to
+/// stop it; the session's row and header show the request while it waits, as for a plain Restart, and a success opens
+/// nothing (the session keeps running where it is). Focus starts on Cancel.
+pub fn open_restart_with(session: &str, window: &mut Window, cx: &mut App) -> bool {
+    if layers::focus_layer_open(window, cx) || !new_available(cx) {
+        return false;
+    }
+    if launch::open_waiting(window, cx) {
+        return true;
+    }
+    let Some(store) = session::current_store(cx) else {
+        return false;
+    };
+    let Some(row) = store.read(cx).collections().get::<SessionRow>(session) else {
+        return false;
+    };
+    if restart_with_reason(row).is_some() {
+        return false;
+    }
+    let Some(draft) = LaunchDraft::restart_with(session, &row.info, Some(row.host)) else {
+        return false;
+    };
+    let mark = Mark::take(cx);
+    open(draft, &mark, window, cx).is_some()
+}
+
+/// Why Restart with is not offered for the session `session` (its key), for the header's Restart menu to draw its entry
+/// greyed with this as its hover help and accessible description (SPEC.md, "Restart with": "visible but greyed out
+/// otherwise, with a hover tooltip and accessible description explaining why"); `None` when it is offered. A session
+/// the store no longer holds has none to offer. This answers only whether the session's launch can be restarted with
+/// edits; while a launch is pending or a dialog is open, [`open_restart_with`] refuses as New does, which the menu shows
+/// by [`new_available`] like its other launcher entries.
+pub fn restart_with_unavailable(session: &str, cx: &App) -> Option<String> {
+    let store = session::current_store(cx)?;
+    let collections = store.read(cx).collections();
+    let Some(row) = collections.get::<SessionRow>(session) else {
+        return Some("This session is no longer listed".to_owned());
+    };
+    restart_with_reason(row)
+}
+
+/// The old app's `restart_with_reason` (`session_view.rs` at the reference commit): a legacy launch is never changed
+/// (Replace with is the way), an agent launch can be edited when its conversation can be resumed or it has a stored
+/// resume command to take a named one, and a command launch when it declared an agent type and a resume command and its
+/// conversation can be resumed. A retired container session supports Delete only.
+pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
+    let info = &row.info;
+    let offer = info.restart_offer;
+    match &info.launch {
+        SessionLaunch::Agent {
+            selection, resume, ..
+        } => {
+            if selection.container.is_some() {
+                return Some(RETIRED_CONTAINER_REASON.to_owned());
+            }
+            if offer == RestartOffer::Resume || resume.is_some() {
+                return None;
+            }
+            // Reporting support and a stored resume command are separate facts: an older agent launch can gain
+            // tracking without gaining a resume command, which needs recreating, not a claim about capture.
+            if selection.harness.agent_kind().restart_readiness().is_none() {
+                Some(format!(
+                    "{} sessions can't be resumed",
+                    harness_label(selection.harness)
+                ))
+            } else if offer == RestartOffer::NoResumeCommand {
+                Some(
+                    "This agent launch has no resume command, so it cannot be restarted; use Clone or Replace with"
+                        .to_owned(),
+                )
+            } else if offer == RestartOffer::NotCaptured {
+                Some(not_captured_reason(info))
+            } else {
+                Some("No captured conversation to resume".to_owned())
+            }
+        }
+        SessionLaunch::Command(command) => {
+            if command.agent.is_none() || command.resume.is_none() {
+                return Some(
+                    "This command launch has no resume command, so it cannot be restarted; use Replace with"
+                        .to_owned(),
+                );
+            }
+            match offer {
+                RestartOffer::Resume => None,
+                // A declared type Farhelm has no conversation reporting for can carry a resume command, and will never
+                // have a conversation to fill it with.
+                RestartOffer::NoConversationReporting => command
+                    .agent
+                    .map(|agent| format!("{} sessions can't be resumed", harness_label(agent))),
+                RestartOffer::NotCaptured => Some(not_captured_reason(info)),
+                RestartOffer::NoResumeCommand => Some("No captured conversation to resume".to_owned()),
+            }
+        }
+        SessionLaunch::Legacy { .. } => Some(
+            "This session was created before launch kinds, so its launch cannot be changed; use Replace with"
+                .to_owned(),
+        ),
+    }
+}
+
+/// Restart with's reason for an uncaptured conversation: the Restart control's per-agent fact in a short form, since
+/// Restart with waits on the same conversation, ending with the same feedback invitation (the old
+/// `not_captured_with_reason`).
+fn not_captured_reason(info: &SessionInfo) -> String {
+    let ended = info.status.has_ended();
+    let readiness = info
+        .agent_kind
+        .display_name()
+        .zip(info.agent_kind.restart_readiness());
+    let reason = match (readiness, ended) {
+        (Some((name, readiness)), false) => format!(
+            "For {name} sessions, Restart with becomes available {}",
+            readiness.clause(ReadinessWording::ToTheUser)
+        ),
+        (None, false) => {
+            "Restart with becomes available once Farhelm captures this session's conversation"
+                .to_owned()
+        }
+        (Some((name, _)), true) => {
+            format!("Farhelm never captured this {name} session's conversation")
+        }
+        (None, true) => "Farhelm never captured this session's conversation".to_owned(),
+    };
+    format!(
+        "{reason}.{}",
+        restart::feedback_note(RestartOffer::NotCaptured, ended)
+    )
 }
 
 /// The note under Host when a Clone's source host no longer names the install the session ran on (retargeted onto
