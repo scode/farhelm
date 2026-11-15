@@ -731,6 +731,17 @@ flight, it gives one shared reason (`NotStarted::BUSY_REASON`) after a lead-in o
 ("Not saved:", "Not started:"), as the migration's orchestrator decided on 2026-11-14, so that a refused save never
 reads as a start that did not happen.
 
+Whether a kind of work creates a session, and whether it changes the host registry, is answered by the kind of work
+itself (`Work::creates_a_session`, `Work::changes_host_registry`), each an exhaustive classification that a new kind of
+work decides when it is added. SPEC.md has launches and changes to the host registry exclude each other: each side
+refuses its own action while the other side's work is in flight anywhere in the store, with no shared lock, and reads
+the other side's set from these answers. A host's destination save is the one-sided case: it refuses while a launch is
+in flight, but launches do not refuse during it, so it is not in the host-registry set (the migration's orchestrator,
+2026-11-14). Areas ask these methods whether work creates a session or changes the host registry, rather than keeping
+their own match over kinds of work for either, so the two sides cannot drift apart when a new kind of work arrives.
+Other questions about work are not these sets and keep their own matches: a view's wording per kind of work (a session
+row's progress line, say), or the session list's check for a Delete in flight.
+
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
 network I/O needs lives in the helm client, outside `crates/gui/` (see "Where the GUI meets the helm").
@@ -738,7 +749,8 @@ network I/O needs lives in the helm client, outside `crates/gui/` (see "Where th
 Enforced by clippy `disallowed-methods` for detaching, thread and runtime spawns, sleeps and clock reads in the GUI
 crates, by a test of overlapping actions on two sessions, and by a test of work on a host and a template beside a
 session's, each with its own busy state and refusal, by tests of a read's wording and of its send and reset, and by
-tests of a keyless send's wording and of its send, its refusal beside an operation's, and its reset.
+tests of a keyless send's wording and of its send, its refusal beside an operation's, and its reset, and by tests that
+pin each kind of work's two classifications.
 
 ### Drafts
 
