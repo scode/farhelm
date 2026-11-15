@@ -210,6 +210,15 @@ def sidebar_width() -> int | None:
     return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("sidebar_width")
 
 
+def fresh_spawner_terminal() -> bool:
+    """Whether the focused terminal holds nothing but the fake agent's ready line, as a spawning fake agent's just
+    opened does. The terminals a spawner step can have open before it show more: a basic agent's start line and prompt,
+    a replayed transcript, an earlier spawner's spawns. A child a spawner started with `--inherit-agent` runs the spawn
+    script too and would also pass, so a step must not open one right before `open_spawner`."""
+    screen = agent("terminal-text")
+    return screen.returncode == 0 and gui_agent.probe_text(screen.stdout).strip() == "FAKE-AGENT READY"
+
+
 def eventually(check, what: str, timeout: float = EFFECT_TIMEOUT_SECONDS):
     """`check()`'s first truthy answer, asked again every half second, or a failure naming `what` after `timeout`."""
     deadline = time.monotonic() + timeout
@@ -1777,7 +1786,15 @@ class Smoke(unittest.TestCase):
         gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
         self.ok("wait", f"text:{title}")
         self.ok("click", f"text:{title}")
-        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        # Wait for this spawner's own, fresh terminal, whose whole text is the ready line. Every fake agent prints that
+        # line, so waiting for it alone once passed on the previous session's terminal before the pane had switched,
+        # and `spawn` went to an agent that only echoes (seen once on a build worker). See `fresh_spawner_terminal` for
+        # which terminals show more.
+        try:
+            eventually(fresh_spawner_terminal, f"{title}'s fresh terminal, showing only FAKE-AGENT READY")
+        except AssertionError as timeout:
+            screen = agent("terminal-text")
+            raise AssertionError(f"{timeout}; the focused terminal shows:\n{screen.stdout}{screen.stderr}") from None
         self.assertEqual(waiting_approvals(), [], "premise: no request waits yet")
         hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
         self.assertTrue(
