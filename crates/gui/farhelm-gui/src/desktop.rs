@@ -41,6 +41,7 @@ use crate::ticker;
 pub(crate) mod menu;
 #[cfg(test)]
 mod tests;
+pub(crate) mod title_band;
 
 // ---- The menu bar and quitting -------------------------------------------------------------------------------------
 
@@ -400,15 +401,23 @@ pub fn follow_frame(main: AnyWindowHandle, follow: FrameFollow, cx: &mut App) {
 // ---- The title band and decorations ---------------------------------------------------------------------------------
 
 /// Set how the main window's frame is drawn, in the options the bootstrap built for it: the macOS title band (a
-/// transparent title bar, the traffic lights moved into the band, and the app owning the drag) and, on Linux, which
-/// side draws the decorations.
+/// transparent title bar, the traffic lights moved into the band, and the app owning the drag), so the sidebar's app
+/// bar and the session's top row reach the window's top edge and become its title bar (`title_band`).
 ///
-/// This sets only `titlebar`'s `appears_transparent` and `traffic_light_position`, `app_owns_titlebar_drag` and
-/// `window_decorations`. The rest of the options (the title, the bounds, the minimum size, the app id, the frame
-/// intervals) are the bootstrap's and stay as it set them.
+/// This may set only `titlebar`'s `appears_transparent` and `traffic_light_position`, `app_owns_titlebar_drag` and
+/// `window_decorations` (the last is left alone until the Linux title bar needs it). The rest of the options (the
+/// title, the bounds, the minimum size, the app id, the frame intervals) are the bootstrap's and stay as it set them.
 ///
-/// NOTE: A transparent title bar with app-owned dragging leaves the window without any drag area until the band that
-/// moves the window exists, so these values change together with the band, never before it.
-///
-/// The stub leaves the options as they are, which is GPUI's defaults for these fields.
-pub fn dress_window(_options: &mut WindowOptions, _cx: &App) {}
+/// NOTE: A transparent title bar with app-owned dragging leaves the window without any drag area but the band's rows
+/// (`title_band::row`), so these values and the band change together. Off macOS nothing changes yet: the Linux window
+/// keeps GPUI's default decorations until its own title bar is built.
+pub fn dress_window(options: &mut WindowOptions, _cx: &App) {
+    if !title_band::ON {
+        return;
+    }
+    if let Some(titlebar) = options.titlebar.as_mut() {
+        titlebar.appears_transparent = true;
+        titlebar.traffic_light_position = Some(title_band::TRAFFIC_LIGHTS);
+    }
+    options.app_owns_titlebar_drag = true;
+}

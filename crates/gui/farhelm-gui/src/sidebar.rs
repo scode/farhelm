@@ -57,10 +57,11 @@ use farhelm_helm_client::ApiPath;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SIDEBAR_WIDTH_RANGE};
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Render, Styled, Window, div, px,
+    ParentElement, Pixels, Render, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::components::{Divider, DividerDrag, DividerStep, HoverHelp, Role};
+use crate::desktop::title_band;
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::session_list::SessionList;
@@ -269,8 +270,29 @@ impl Sidebar {
     }
 }
 
+impl Sidebar {
+    /// The app header, for the main view to draw across the window's top above both panes, when the macOS window is too
+    /// narrow for the sidebar and the pane side by side; `None` otherwise, when the sidebar's own column draws it.
+    ///
+    /// SPEC.md, "Desktop window chrome": "In narrow macOS windows, the app-level row stays fixed above both scrolling
+    /// panes so horizontal scrolling cannot move application controls underneath native window buttons." The panes
+    /// scroll sideways once the window cannot fit both, so a header inside the sidebar's column would slide under the
+    /// traffic lights. The cutoff is the old app's `sidebar-narrow-window` class (`window width <= sidebar width + 321`
+    /// in `assets/sidebar-width.js` at reference commit `24bc0580`): the pane's floor and the sidebar's 1-pixel edge.
+    pub fn floating_header(&mut self, window: &Window, cx: &App) -> Option<AnyElement> {
+        let width = self.width(cx);
+        header_floats(width, window).then(|| header::header(window, cx).into_any_element())
+    }
+}
+
+/// Whether the app header floats above both panes ([`Sidebar::floating_header`]) for a sidebar `width` wide.
+fn header_floats(width: u32, window: &Window) -> bool {
+    title_band::ON
+        && window.viewport_size().width <= px(width as f32) + MAIN_PANE_MIN_WIDTH + px(1.)
+}
+
 impl Render for Sidebar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("sidebar", cx);
         let palette = theme::palette(cx);
         let width = self.width(cx);
@@ -285,7 +307,9 @@ impl Render for Sidebar {
             .bg(theme::color(palette.bg_1))
             .border_r_1()
             .border_color(theme::color(palette.border_sidebar_edge))
-            .child(header::header(cx))
+            .when(!header_floats(width, window), |column| {
+                column.child(header::header(window, cx))
+            })
             .child(div().flex_1().min_h_0().child(self.session_list.clone()));
         // The column, then the divider's strip over the column's edge and reaching over the pane, its negative right
         // margin handing those pixels back so the pane starts at the column's edge.

@@ -12,7 +12,7 @@ use gpui::{Action as _, Keystroke, OsAction, OwnedMenuItem, TestAppContext, div}
 
 use super::{
     FrameFacts, FrameHost, FrameRect, Observed, Placement, follow_frame, menu, restore_frame,
-    when_closed,
+    title_band, when_closed,
 };
 use crate::actions::{
     DeleteSession, HideApp, HideOtherApps, MinimizeWindow, Quit, ShowAllApps, TEXT_INPUT_CONTEXT,
@@ -518,4 +518,642 @@ fn a_window_within_two_points_of_the_visible_area_fills_it() {
     assert!(super::fills(size(1022., 684.), area));
     assert!(!super::fills(size(1024., 679.), area));
     assert!(!super::fills(size(760., 580.), area));
+}
+
+// ---- The title band ------------------------------------------------------------------------------------------------
+
+/// The press decision is the band's whole gesture contract (the old `decide_press` table at reference commit
+/// `24bc0580`): a primary press on empty background drags, a repeat zooms only with a paired predecessor and never
+/// drags, a repeat without one does nothing at all, and presses on what the row's contents claimed, presses with
+/// another button and anything in fullscreen do nothing. A wrong row here either moves the window from under a button or
+/// leaves the band dead.
+#[test]
+fn the_press_decision_drags_zooms_or_leaves_the_press_alone() {
+    use title_band::{PressAction, decide};
+    // Presses with another button never reach `decide`: a row listens for the primary button only, which the scene
+    // test below shows.
+    for (count, paired) in [(0, false), (1, false), (1, true)] {
+        assert_eq!(decide(true, count, paired, false), PressAction::Drag);
+    }
+    for count in [2, 3, 7] {
+        assert_eq!(decide(true, count, true, false), PressAction::Zoom);
+        assert_eq!(
+            decide(true, count, false, false),
+            PressAction::None,
+            "a repeat whose partner was elsewhere starts nothing"
+        );
+    }
+    for (count, paired) in [(1, false), (1, true), (2, true), (2, false)] {
+        assert_eq!(
+            decide(false, count, paired, false),
+            PressAction::None,
+            "a claimed press keeps its own interaction"
+        );
+    }
+    for (count, paired) in [(1, false), (2, true)] {
+        assert_eq!(decide(true, count, paired, true), PressAction::None);
+    }
+}
+
+use title_band::{PressAction, Row};
+
+/// A window with two band rows side by side (as the app bar and the session top row are), a stand-in for the page
+/// outside the band below them, and the window-wide press watcher, wired through the focus coordinator's root as the
+/// main view is. The app bar holds a control, a text claiming its presses and an image standing in for the wordmark,
+/// with gaps between them.
+struct Band {
+    root: crate::root::Attachment,
+    button: gpui::FocusHandle,
+    /// Every decision a band row made, in order.
+    decided: Rc<std::cell::RefCell<Vec<(Row, PressAction)>>>,
+    /// How many times the control's own click ran.
+    clicks: Rc<Cell<usize>>,
+}
+
+impl gpui::Render for Band {
+    fn render(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use crate::components::{Button, HoverHelp, Role};
+        use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, px};
+        let row = |id: &'static str, which: Row, decided: Rc<std::cell::RefCell<Vec<_>>>| {
+            title_band::band(
+                div()
+                    .id(id)
+                    .debug_selector(move || id.into())
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(40.))
+                    .px(px(40.))
+                    .h(px(48.))
+                    .w(px(400.)),
+                which,
+                move |action, _, _| decided.borrow_mut().push((which, action)),
+            )
+        };
+        let clicks = self.clicks.clone();
+        let app_bar = row("band-app-bar", Row::AppBar, self.decided.clone())
+            .child(
+                div()
+                    .debug_selector(|| "band-wordmark".into())
+                    .w(px(60.))
+                    .h(px(18.)),
+            )
+            .child(
+                Button::new(
+                    "band-button",
+                    "Control",
+                    HoverHelp::tooltip("A control"),
+                    Role::Button,
+                )
+                .focus(&self.button)
+                .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+            )
+            .child(title_band::claims_presses(
+                div()
+                    .id("band-text")
+                    .debug_selector(|| "band-text".into())
+                    .child("text"),
+            ));
+        let top_row = row("band-top-row", Row::SessionTop, self.decided.clone());
+        let content = div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(div().flex().flex_row().child(app_bar).child(top_row))
+            .child(
+                div()
+                    .debug_selector(|| "outside".into())
+                    .w(px(400.))
+                    .h(px(200.)),
+            )
+            .child(title_band::watch_presses());
+        crate::root::wrap(content, &self.root, window, cx)
+    }
+}
+
+/// What a band test holds on to.
+struct OpenBand<'a> {
+    cx: &'a mut gpui::VisualTestContext,
+    button: gpui::FocusHandle,
+    decided: Rc<std::cell::RefCell<Vec<(Row, PressAction)>>>,
+    clicks: Rc<Cell<usize>>,
+}
+
+/// Open the band scene through the shared harness.
+fn open_band(cx: &mut TestAppContext) -> OpenBand<'_> {
+    test_support::install(cx);
+    let decided = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let clicks = Rc::new(Cell::new(0));
+    let (recorded, counted) = (decided.clone(), clicks.clone());
+    let (scene, cx) = test_support::open_view(cx, move |window, cx| Band {
+        root: crate::root::attach(window, cx),
+        button: cx.focus_handle().tab_stop(true),
+        decided: recorded,
+        clicks: counted,
+    });
+    let button = cx.update(|_, cx| scene.read(cx).button.clone());
+    OpenBand {
+        cx,
+        button,
+        decided,
+        clicks,
+    }
+}
+
+impl OpenBand<'_> {
+    /// Press `button` at `at` as the `count`th click of a series, move the pointer a few pixels with the button held
+    /// (where a drag starts), release it, and return what the band decided for that press (nothing when no row saw
+    /// it, or when nothing started).
+    fn press_at(
+        &mut self,
+        at: gpui::Point<gpui::Pixels>,
+        button: gpui::MouseButton,
+        count: usize,
+    ) -> Option<(Row, PressAction)> {
+        self.press_moving(at, button, count, true)
+    }
+
+    /// [`Self::press_at`], with the pointer moved between press and release only when `moving`.
+    fn press_moving(
+        &mut self,
+        at: gpui::Point<gpui::Pixels>,
+        button: gpui::MouseButton,
+        count: usize,
+        moving: bool,
+    ) -> Option<(Row, PressAction)> {
+        let before = self.decided.borrow().len();
+        self.cx.simulate_event(gpui::MouseDownEvent {
+            button,
+            position: at,
+            modifiers: gpui::Modifiers::none(),
+            click_count: count,
+            first_mouse: false,
+        });
+        if moving {
+            self.cx.simulate_event(gpui::MouseMoveEvent {
+                position: at + gpui::point(gpui::px(3.), gpui::px(2.)),
+                pressed_button: Some(button),
+                modifiers: gpui::Modifiers::none(),
+            });
+        }
+        self.cx.simulate_event(gpui::MouseUpEvent {
+            button,
+            position: at,
+            modifiers: gpui::Modifiers::none(),
+            click_count: count,
+        });
+        test_support::settle(self.cx);
+        let decided = self.decided.borrow();
+        assert!(decided.len() <= before + 1, "one decision per press");
+        decided.get(before).copied()
+    }
+
+    /// A primary press on the center of what was drawn under `selector`.
+    fn press(&mut self, selector: &'static str, count: usize) -> Option<(Row, PressAction)> {
+        let at = test_support::center(self.cx, selector);
+        self.press_at(at, gpui::MouseButton::Left, count)
+    }
+}
+
+/// SPEC.md, "Desktop window chrome": empty background is everything in the band but its controls and its text; the
+/// wordmark, the gaps and the band's edges count as background. The old acceptance list (`window-chrome.spec.ts` and
+/// `click-detail.test.js` at reference commit `24bc0580`): a press on the wordmark, in a gap, on the row's top and
+/// bottom edge and at its far end drags; a press on a control keeps the control's own click and does not drag; a press
+/// on text does neither. And a press on empty band background is still an empty-space press for the focus rules
+/// (SPEC.md, "Keyboard focus"): the band leaves its default alone, so focus leaves the control that held it.
+#[gpui::test]
+fn presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs(
+    cx: &mut TestAppContext,
+) {
+    let mut band = open_band(cx);
+    let drag = Some((Row::AppBar, PressAction::Drag));
+    let bar = test_support::bounds(band.cx, "band-app-bar");
+    let wordmark = test_support::bounds(band.cx, "band-wordmark");
+    let gap = gpui::point(wordmark.right() + gpui::px(20.), bar.center().y);
+    assert_eq!(band.press("band-wordmark", 1), drag, "the wordmark");
+    assert_eq!(
+        band.press_at(gap, gpui::MouseButton::Left, 1),
+        drag,
+        "a gap"
+    );
+    for (name, at) in [
+        ("the top edge", gpui::point(gap.x, bar.top() + gpui::px(1.))),
+        (
+            "the bottom edge",
+            gpui::point(gap.x, bar.bottom() - gpui::px(1.)),
+        ),
+        (
+            "the far end",
+            gpui::point(bar.right() - gpui::px(2.), bar.center().y),
+        ),
+    ] {
+        assert_eq!(
+            band.press_at(at, gpui::MouseButton::Left, 1),
+            drag,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        band.press("band-top-row", 1),
+        Some((Row::SessionTop, PressAction::Drag)),
+        "the other row's empty background"
+    );
+    assert_eq!(
+        band.press("band-button", 1),
+        Some((Row::AppBar, PressAction::None))
+    );
+    assert_eq!(band.clicks.get(), 1, "the control kept its click");
+    assert_eq!(
+        band.press("band-text", 1),
+        Some((Row::AppBar, PressAction::None))
+    );
+    assert_eq!(
+        band.press("outside", 1),
+        None,
+        "outside the band no row acts"
+    );
+    band.cx.update(|window, cx| {
+        crate::focus::focus_control(&band.button, &crate::focus::Mark::take(cx), window, cx)
+    });
+    test_support::settle(band.cx);
+    assert!(
+        band.cx.update(|window, _| band.button.is_focused(window)),
+        "the premise: the control holds focus"
+    );
+    band.press_at(gap, gpui::MouseButton::Left, 1);
+    assert!(
+        !band.cx.update(|window, _| band.button.is_focused(window)),
+        "a press on empty band background is an empty-space press: focus left the control"
+    );
+}
+
+/// SPEC.md: "a single click without movement never zooms", and a click is not a drag either: the window's move starts
+/// only once the pointer moves with the button held, so a plain click on empty band background decides nothing that
+/// runs. Starting the move on the press itself was what kept AppKit from ever counting a double-click there (the move
+/// took the release). The click still counts as the first click of a pair: a double-click made of two motionless
+/// clicks zooms.
+#[gpui::test]
+fn a_click_without_movement_starts_nothing_and_still_pairs_for_a_zoom(cx: &mut TestAppContext) {
+    let mut band = open_band(cx);
+    let at = test_support::center(band.cx, "band-wordmark");
+    assert_eq!(
+        band.press_moving(at, gpui::MouseButton::Left, 1, false),
+        None,
+        "a click starts nothing"
+    );
+    assert_eq!(
+        band.press_moving(at, gpui::MouseButton::Left, 2, false),
+        Some((Row::AppBar, PressAction::Zoom)),
+        "its second click zooms"
+    );
+}
+
+/// A click that wobbles by a pixel with the button held is still a click, not a drag: the move starts only past a
+/// small threshold, because once AppKit's window move starts it takes the release and the next press no longer counts
+/// as a double-click's second click. Specified: a press moved by one pixel starts nothing, and a second click right
+/// after it zooms; a press that leaves its row with its first move (at the row's bottom edge, moving down) still starts
+/// the drag, since the move is watched across the whole window, not on the row.
+#[gpui::test]
+fn a_wobble_is_still_a_click_and_a_drag_that_leaves_the_row_still_starts(cx: &mut TestAppContext) {
+    let mut band = open_band(cx);
+    let at = test_support::center(band.cx, "band-wordmark");
+    let before = band.decided.borrow().len();
+    band.cx.simulate_event(gpui::MouseDownEvent {
+        button: gpui::MouseButton::Left,
+        position: at,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    band.cx.simulate_event(gpui::MouseMoveEvent {
+        position: at + gpui::point(gpui::px(1.), gpui::px(0.)),
+        pressed_button: Some(gpui::MouseButton::Left),
+        modifiers: gpui::Modifiers::none(),
+    });
+    band.cx.simulate_event(gpui::MouseUpEvent {
+        button: gpui::MouseButton::Left,
+        position: at,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+    });
+    test_support::settle(band.cx);
+    assert_eq!(
+        band.decided.borrow().len(),
+        before,
+        "a one-pixel wobble started nothing"
+    );
+    assert_eq!(
+        band.press_moving(at, gpui::MouseButton::Left, 2, false),
+        Some((Row::AppBar, PressAction::Zoom)),
+        "and it still pairs for a zoom"
+    );
+    let bar = test_support::bounds(band.cx, "band-app-bar");
+    let edge = gpui::point(at.x, bar.bottom() - gpui::px(1.));
+    band.cx.simulate_event(gpui::MouseDownEvent {
+        button: gpui::MouseButton::Left,
+        position: edge,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    band.cx.simulate_event(gpui::MouseMoveEvent {
+        position: edge + gpui::point(gpui::px(0.), gpui::px(10.)),
+        pressed_button: Some(gpui::MouseButton::Left),
+        modifiers: gpui::Modifiers::none(),
+    });
+    test_support::settle(band.cx);
+    assert_eq!(
+        band.decided.borrow().last().copied(),
+        Some((Row::AppBar, PressAction::Drag)),
+        "a drag whose first move leaves the row starts"
+    );
+}
+
+/// A double-click on empty band background zooms the window, and repeating it zooms again (restoring the prior frame);
+/// no repeat drags, so a triple-click cannot fling the window. A repeat counts only when the press before it was also a
+/// primary press on the same row's empty background: after a press on a control or text, outside the band, with another
+/// button, or on the other row, the repeat does nothing at all (the old "eligibility", `click-detail.test.js`). That
+/// repeat still pairs with the next one, so two background presses in a row always zoom whatever came before them.
+#[gpui::test]
+fn a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background(
+    cx: &mut TestAppContext,
+) {
+    let mut band = open_band(cx);
+    let (drag, zoom, none) = (
+        Some((Row::AppBar, PressAction::Drag)),
+        Some((Row::AppBar, PressAction::Zoom)),
+        Some((Row::AppBar, PressAction::None)),
+    );
+    assert_eq!(band.press("band-wordmark", 1), drag);
+    assert_eq!(band.press("band-wordmark", 2), zoom);
+    assert_eq!(
+        band.press("band-wordmark", 3),
+        zoom,
+        "a triple-click zooms again, never drags"
+    );
+
+    assert_eq!(band.press("band-button", 1), none);
+    assert_eq!(band.press("band-wordmark", 2), none, "after a control");
+    assert_eq!(
+        band.press("band-wordmark", 3),
+        zoom,
+        "the ineligible repeat pairs with the next"
+    );
+
+    for (name, interrupt) in [("text", "band-text"), ("outside the band", "outside")] {
+        band.press("band-wordmark", 1);
+        band.press(interrupt, 1);
+        assert_eq!(
+            band.press("band-wordmark", 2),
+            none,
+            "after a press on {name}"
+        );
+    }
+    band.press("band-wordmark", 1);
+    let wordmark = test_support::center(band.cx, "band-wordmark");
+    band.press_at(wordmark, gpui::MouseButton::Right, 1);
+    assert_eq!(
+        band.press("band-wordmark", 2),
+        none,
+        "after a press with another button"
+    );
+    band.press("band-top-row", 1);
+    assert_eq!(
+        band.press("band-wordmark", 2),
+        none,
+        "after a press on the other row"
+    );
+}
+
+/// The band needs the window to give it the title bar: on macOS the window opens with a transparent title bar, the
+/// traffic lights at 12 by 16 points (vertically centered in the 48-point band, where the old app put them) and the
+/// app owning the drag, since the band's rows do the dragging. Elsewhere the options keep GPUI's defaults, and in
+/// every build inactive windows still draw at full rate (decided by the maintainer on 2026-11-13), which dressing the
+/// window must not undo.
+#[gpui::test]
+fn the_window_options_give_the_band_the_title_bar_only_on_macos(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let options = cx.update(|cx| crate::bootstrap::window_options(cx));
+    let Some(titlebar) = options.titlebar else {
+        panic!("the main window has title bar options");
+    };
+    assert_eq!(titlebar.appears_transparent, title_band::ON);
+    assert_eq!(
+        titlebar.traffic_light_position,
+        title_band::ON.then_some(title_band::TRAFFIC_LIGHTS)
+    );
+    assert_eq!(options.app_owns_titlebar_drag, title_band::ON);
+    assert_eq!(options.inactive_frame_interval, None);
+}
+
+// ---- The band's rows in the macOS window ---------------------------------------------------------------------------
+
+/// The layout half of the band, in the real main view over the helm client's fake. macOS only, because the band
+/// exists only there (`title_band::ON`); these run on the test Mac. A press on the real rows starts a native move,
+/// which GPUI's test platform cannot make, so presses are the scene tests' above.
+#[cfg(target_os = "macos")]
+mod mac {
+    use farhelm_helm_client::fake::FakeHelm;
+    use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, px, size};
+
+    use super::title_band::{self, PressAction, Row};
+
+    use crate::main_view::MainView;
+    use crate::session_list::tests::{listing, session};
+    use crate::test_support::{self, frame, started};
+
+    /// The real main view over the fake helm, connected with `sessions` listed (the first one open), in an active
+    /// window of the default size. The fake is returned so the test keeps it, and with it the channel, alive.
+    fn open<'a>(
+        cx: &'a mut TestAppContext,
+        sessions: &[&'static str],
+    ) -> (FakeHelm, &'a mut VisualTestContext) {
+        let (mut fake, _connection) = started(cx);
+        let rows: Vec<_> = sessions.iter().map(|key| session(key)).collect();
+        fake.connect(vec![listing(sessions, &rows)]);
+        cx.run_until_parked();
+        let (_, window) = test_support::open_view(cx, MainView::new);
+        (fake, window)
+    }
+
+    /// Where the element with id `id` was drawn in a fresh frame (GPUI's driver record, which names elements by id).
+    fn drawn(cx: &mut VisualTestContext, id: &str) -> Bounds<Pixels> {
+        match frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+        {
+            Some(node) => node.bounds,
+            None => panic!("{id} was not drawn"),
+        }
+    }
+
+    /// SPEC.md, "Desktop window chrome": the traffic lights sit in the sidebar's top row, and the sidebar's app bar
+    /// and the session pane's top row, both 48 pixels, form the title band across the window's top. The old
+    /// `window-chrome.spec.ts` checked the same: both rows at the top, both 48 high. The app bar keeps 88 pixels clear
+    /// on its left for the lights, so the wordmark starts after them, and gives the room back in native fullscreen,
+    /// which hides them.
+    #[gpui::test]
+    fn the_band_rows_are_48_high_at_the_top_and_the_app_bar_keeps_the_lights_clear(
+        cx: &mut TestAppContext,
+    ) {
+        let (_fake, cx) = open(cx, &["s1"]);
+        test_support::settle(cx);
+        let bar = test_support::bounds(cx, "app-bar");
+        let top = test_support::bounds(cx, "session-header");
+        assert_eq!((bar.top(), bar.size.height), (px(0.), px(48.)));
+        assert_eq!((top.top(), top.size.height), (px(0.), px(48.)));
+        let wordmark = drawn(cx, "app-wordmark");
+        assert!(
+            wordmark.left() >= px(88.),
+            "the wordmark starts after the lights: {wordmark:?}"
+        );
+        cx.update(|window, _| window.toggle_fullscreen());
+        test_support::redraw(cx);
+        let wordmark = drawn(cx, "app-wordmark");
+        assert!(
+            wordmark.left() < px(88.),
+            "fullscreen gives the room back: {wordmark:?}"
+        );
+    }
+
+    /// SPEC.md: "With no session open, the main pane's half of the band is empty background too." The old app laid a
+    /// 48-pixel strip over the empty pane's top (`.main-empty-titlebar`), as wide as the pane, and checked that a press
+    /// there hits the strip rather than the pane's text behind it.
+    #[gpui::test]
+    fn with_no_session_open_a_band_strip_covers_the_panes_top(cx: &mut TestAppContext) {
+        let (_fake, cx) = open(cx, &[]);
+        test_support::settle(cx);
+        let strip = drawn(cx, "main-empty-titlebar");
+        let pane = drawn(cx, "main-pane");
+        assert_eq!(strip.top(), px(0.));
+        assert_eq!(strip.size.height, px(48.));
+        assert_eq!(
+            (strip.left(), strip.size.width),
+            (pane.left(), pane.size.width)
+        );
+    }
+
+    /// SPEC.md: "In narrow macOS windows, the app-level row stays fixed above both scrolling panes so horizontal
+    /// scrolling cannot move application controls underneath native window buttons." Once the window is no wider
+    /// than the sidebar and the pane's floor (the old `width + 321` cutoff), the app bar runs across the whole window's
+    /// top and both panes start below it; a wider window keeps it in the sidebar's column.
+    #[gpui::test]
+    fn in_a_narrow_window_the_app_bar_runs_above_both_panes(cx: &mut TestAppContext) {
+        let (_fake, cx) = open(cx, &["s1"]);
+        test_support::settle(cx);
+        let wide = test_support::bounds(cx, "app-bar");
+        let sidebar = drawn(cx, "sidebar");
+        assert!(
+            wide.right() <= sidebar.right(),
+            "the premise: a wide window keeps it in the sidebar's column: {wide:?} in {sidebar:?}"
+        );
+        let narrow = sidebar.size.width + px(321.);
+        cx.simulate_resize(size(narrow, px(600.)));
+        test_support::redraw(cx);
+        let bar = test_support::bounds(cx, "app-bar");
+        assert_eq!(
+            (bar.left(), bar.top(), bar.size.width),
+            (px(0.), px(0.), narrow)
+        );
+        let sidebar = drawn(cx, "sidebar");
+        let top = test_support::bounds(cx, "session-header");
+        assert!(
+            sidebar.top() >= px(48.) && top.top() >= px(48.),
+            "both panes start below it"
+        );
+    }
+
+    /// What the band decided for a primary press at `at` that then moves a few points, with the window's real rows (the decisions
+    /// are recorded instead of performed: GPUI's test platform cannot move or zoom a window).
+    fn press_at(cx: &mut VisualTestContext, at: gpui::Point<Pixels>) -> Option<(Row, PressAction)> {
+        cx.update(|_, cx| cx.set_global(title_band::Decisions::default()));
+        cx.simulate_event(gpui::MouseDownEvent {
+            button: gpui::MouseButton::Left,
+            position: at,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseMoveEvent {
+            position: at + gpui::point(px(3.), px(2.)),
+            pressed_button: Some(gpui::MouseButton::Left),
+            modifiers: gpui::Modifiers::none(),
+        });
+        cx.simulate_event(gpui::MouseUpEvent {
+            button: gpui::MouseButton::Left,
+            position: at,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+        });
+        test_support::settle(cx);
+        let decided = cx.update(|_, cx| cx.default_global::<title_band::Decisions>().0.clone());
+        assert!(decided.len() <= 1, "one decision per press: {decided:?}");
+        decided.first().copied()
+    }
+
+    /// The band is wired into the real rows, not only the stand-in scene's: in the main view with a session open, a
+    /// press on the app bar's wordmark and on the session top row's empty left region drags; a press on the version
+    /// text and on a session action keeps theirs; and a press at the band's height on the sidebar's resize edge, which
+    /// lies outside both rows, decides nothing. With no session open, the strip over the empty pane drags.
+    #[gpui::test]
+    fn the_real_rows_drag_from_their_background_and_leave_their_controls_and_text_alone(
+        cx: &mut TestAppContext,
+    ) {
+        let (_fake, cx) = open(cx, &["s1"]);
+        test_support::settle(cx);
+        let drag = |row| Some((row, PressAction::Drag));
+        let center = |cx: &mut VisualTestContext, id| drawn(cx, id).center();
+        let at = center(cx, "app-wordmark");
+        assert_eq!(press_at(cx, at), drag(Row::AppBar), "the wordmark");
+        let at = test_support::center(cx, crate::session_pane::header::TABS_SLOT);
+        assert_eq!(
+            press_at(cx, at),
+            drag(Row::SessionTop),
+            "the top row's empty left region"
+        );
+        let at = test_support::center(cx, "app-version");
+        assert_eq!(
+            press_at(cx, at),
+            Some((Row::AppBar, PressAction::None)),
+            "the version text"
+        );
+        let at = center(cx, "session-header-stop");
+        assert_eq!(
+            press_at(cx, at),
+            Some((Row::SessionTop, PressAction::None)),
+            "a session action"
+        );
+        let divider = test_support::bounds(cx, "sidebar-divider");
+        let at = gpui::point(divider.center().x, px(24.));
+        assert_eq!(press_at(cx, at), None, "the sidebar's resize edge");
+    }
+
+    /// See the test above: with no session open, the strip over the empty pane is the band's other half.
+    #[gpui::test]
+    fn with_no_session_open_the_empty_panes_strip_drags(cx: &mut TestAppContext) {
+        let (_fake, cx) = open(cx, &[]);
+        test_support::settle(cx);
+        let at = drawn(cx, "main-empty-titlebar").center();
+        assert_eq!(press_at(cx, at), Some((Row::EmptyPane, PressAction::Drag)));
+    }
+
+    /// SPEC.md: startup screens keep their content clear of the native controls, and with the app owning the title
+    /// bar's drag the window must still be movable there: while the window is not connected (here it never connects),
+    /// a strip of the band runs across its top, 48 points tall, and a press on it drags.
+    #[gpui::test]
+    fn the_connection_screens_strip_keeps_the_lights_clear_and_drags(cx: &mut TestAppContext) {
+        test_support::install(cx);
+        let (_, cx) = test_support::open_view(cx, MainView::new);
+        test_support::settle(cx);
+        let strip = drawn(cx, "connection-titlebar");
+        assert_eq!((strip.top(), strip.size.height), (px(0.), px(48.)));
+        assert_eq!(
+            press_at(cx, strip.center()),
+            Some((Row::EmptyPane, PressAction::Drag))
+        );
+    }
 }

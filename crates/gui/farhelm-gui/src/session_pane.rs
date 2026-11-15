@@ -74,6 +74,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
 
+use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
 use crate::session::{self, PerSession, UiSession};
@@ -345,17 +346,24 @@ pub(crate) fn delete_scrim(guard: DeleteGuard, step: u8, cx: &App) -> Stateful<D
         .child(card)
 }
 
-/// The pane with no session open.
+/// The pane with no session open. In the macOS window a strip of the window's title band lies over its top, standing in
+/// for the session's top row (the old `.main-empty-titlebar`), so the band still spans the whole window (SPEC.md,
+/// "Desktop window chrome": "With no session open, the main pane's half of the band is empty background too").
 fn empty(cx: &App) -> AnyElement {
     let store = session::current_store(cx);
     let text = placeholder(store.as_ref().map(|store| store.read(cx).collections()));
     div()
+        .relative()
         .size_full()
         .flex()
         .items_center()
         .justify_center()
         .text_color(theme::color(theme::palette(cx).fg_2))
         .child(text)
+        .children(
+            title_band::strip("main-empty-titlebar", Row::EmptyPane)
+                .map(|strip| div().absolute().top_0().left_0().right_0().child(strip)),
+        )
         .into_any_element()
 }
 
