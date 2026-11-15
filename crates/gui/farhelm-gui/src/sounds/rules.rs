@@ -25,6 +25,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use farhelm_proto::SessionStatus;
+use farhelm_proto::ui_channel::Preferences;
 
 use super::Sound;
 
@@ -85,6 +86,23 @@ impl Switches {
             Sound::TurnFinished => self.turn_finished,
         }
     }
+
+    /// The switches as the helm's shared preference row stores them, each unset field reading as its default
+    /// ([`Switches::default`]); `None` (no row pushed) is all defaults.
+    ///
+    /// The one place an unset field is read, so the owner that plays and the Settings switches that show the choice can
+    /// never disagree about a helm that never stored one.
+    pub fn from_preferences(preferences: Option<&Preferences>) -> Switches {
+        let defaults = Switches::default();
+        let stored = |field: fn(&Preferences) -> Option<bool>, default: bool| {
+            preferences.and_then(field).unwrap_or(default)
+        };
+        Switches {
+            approval: stored(|row| row.sound_approval, defaults.approval),
+            waiting: stored(|row| row.sound_waiting, defaults.waiting),
+            turn_finished: stored(|row| row.sound_turn_finished, defaults.turn_finished),
+        }
+    }
 }
 
 impl Default for Switches {
@@ -104,9 +122,11 @@ impl Default for Switches {
 /// helm sends, never a display spelling, so two sessions cannot merge into one history entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
-    /// Names the view the statuses below answer: the sidebar's host selector and status filter. The owner advances it
-    /// each time the listing starts answering a different query, and only when the helm's answer for that query is the
-    /// listing in the store, not when the user picks it (the statuses must belong to the view this value names).
+    /// Names the view the statuses below answer: the sidebar's host selector and status filter. A value different from
+    /// the previous observation's says the view changed, so the statuses are recorded without being judged. The owner
+    /// moves it on every observation while it cannot tell which view the listing answers (a filter change not yet
+    /// answered, a sessions collection the helm could not read), and once more when that is known again, so the first
+    /// observation of the new view's listing is recorded rather than judged against the old view's.
     ///
     /// It is a counter rather than the query itself so that leaving a view and coming back between two observations
     /// still counts as a change: the old app's `StatusScope` kept a generation for the same reason, because statuses
@@ -471,6 +491,32 @@ mod tests {
         );
         let mut rules = after(obs(&[("s", Running)], &[]));
         assert_eq!(rules.observe(obs(&[("s", Idle)], &[])), None);
+    }
+
+    /// The switches are the helm's shared preference row, and a helm that never stored a choice (every helm at the
+    /// switch to the new app) must get SPEC.md's defaults rather than everything off. Specified: no row and an empty
+    /// row read as the defaults; each stored field wins over its default, in both directions.
+    #[test]
+    fn the_preference_row_reads_unset_fields_as_the_defaults() {
+        assert_eq!(Switches::from_preferences(None), Switches::default());
+        assert_eq!(
+            Switches::from_preferences(Some(&Preferences::default())),
+            Switches::default()
+        );
+        let flipped = Preferences {
+            sound_approval: Some(false),
+            sound_waiting: Some(false),
+            sound_turn_finished: Some(true),
+            ..Preferences::default()
+        };
+        assert_eq!(
+            Switches::from_preferences(Some(&flipped)),
+            Switches {
+                approval: false,
+                waiting: false,
+                turn_finished: true,
+            }
+        );
     }
 
     /// A disabled or quiet event is consumed like a played one (the old "silent playback refusal still consumes the

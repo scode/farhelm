@@ -493,6 +493,54 @@ fn a_refusal_undoes_only_the_latest_choice() {
     assert!(choice.refusal().is_none(), "a new choice drops the words");
 }
 
+/// The status sounds record a changed view's statuses silently, and they can tell a view change from a session that
+/// started waiting only through this value, because the helm pushes a new query's listing before its reply and the
+/// listing does not say which query it answers. A value that stayed put through the change would ring for every
+/// waiting session the new view shows; one that moved when only the open session's naming changed would swallow a real
+/// edge. Specified: a fresh choice answers view 0; a filter change is `None` until its reply, accepted or refused, and
+/// then names a new view; going there and back with both queries unanswered stays `None` until the second reply, so the
+/// first reply alone does not settle it; a send that only names another open session keeps the view.
+#[test]
+fn the_listing_view_is_unknown_while_a_filter_change_is_unanswered() {
+    let host = |host| Query {
+        host,
+        status: Status::All,
+    };
+    let mut choice = Choice::default();
+    assert_eq!(choice.listing_view(), Some(0));
+
+    let narrowed = choice.choose(host(Some(2)), None).unwrap();
+    assert_eq!(choice.listing_view(), None, "unanswered");
+    choice.settle(narrowed, host(Some(2)), None, Ok(()));
+    let view = choice.listing_view();
+    assert!(view.is_some_and(|view| view != 0), "a new view: {view:?}");
+
+    let named = choice.choose(host(Some(2)), Some("a")).unwrap();
+    assert_eq!(choice.listing_view(), view, "naming alone keeps the view");
+    choice.settle(named, host(Some(2)), Some("a"), Ok(()));
+    assert_eq!(choice.listing_view(), view);
+
+    let away = choice.choose(host(None), Some("a")).unwrap();
+    let back = choice.choose(host(Some(2)), Some("a")).unwrap();
+    choice.settle(away, host(None), Some("a"), Ok(()));
+    assert_eq!(
+        choice.listing_view(),
+        None,
+        "the way back is still unanswered"
+    );
+    choice.settle(
+        back,
+        host(Some(2)),
+        Some("a"),
+        Err(HostText::from_host("no")),
+    );
+    let returned = choice.listing_view();
+    assert!(
+        returned.is_some_and(|returned| Some(returned) != view),
+        "coming back is another view change: {returned:?}"
+    );
+}
+
 /// The body is the wire contract with the helm's `SessionQuery`, which refuses unknown fields. The GUI tests pin every
 /// body that names a filter or an open session; this is the one they never see. Specified: All and All with nothing
 /// open encode as exactly `{}`, with no `selected` and never a `sort`.

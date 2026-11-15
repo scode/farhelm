@@ -2374,32 +2374,33 @@ shared preference row. The dialog shows one prominent warning beside the field f
 `json`, `log` and the image types in that default; HTML-like types have a browser-specific warning, and all other
 unrecognized types have a generic warning. The warnings follow the draft as typed, including when another entry is
 malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Under
-**Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has an off-by-default switch,
-server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent;
-default Default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
-Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
-or clearing it. Changing to another server clears a saved token unless a new one is entered, and the form says so before
-saving. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The
-**Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a monospace multi-line
-post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
-[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
-host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
-after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
-first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
-The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
-that changes affect future checkouts only, and that command-line host overrides keep their command. The installed
-desktop app's dialog also has an **App** section with a switch for installing updates automatically (see
-[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
-installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host and
-client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy:
+**Notifications**, sounds has three switches, shared helm preferences (see Status), and **ntfy alerts** has an
+off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
+Default, High, Urgent; default Default). These ntfy settings are explicitly saved helm configuration, shared by every
+client, outside the preference row. Save refusals appear inline. The stored token is never returned: the form shows
+whether one exists and allows replacing or clearing it. Changing to another server clears a saved token unless a new one
+is entered, and the form says so before saving. **Send test** uses the saved configuration, even while disabled, and
+reports success or failure inline. The **Checkouts** section holds the explicitly saved **Default checkout folder** and,
+below it, a monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster
+launches** switch (see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk
+space per repository and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard
+on the next create or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains
+expansion on each host, first-use folder creation, and that the default applies to hosts without their own folder, set
+in each host's settings. The command's help explains that it runs in each new checkout on its host, after cloning and
+before the agent starts, that changes affect future checkouts only, and that command-line host overrides keep their
+command. The installed desktop app's dialog also has an **App** section with a switch for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
+that app installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host
+and client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy:
 every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
 order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
 that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
-and announcement dismissal and the host rail's expansion (sound switches, by contrast, are deliberately per device; see
-Status). A client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may
-carry an optional parent reference usable by the API, but parentage does not nest the list and implies nothing about VCS
-state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and
-`clone` need not record the asking session.
+and announcement dismissal and the host rail's expansion. The sound switches are among these shared preferences: the
+maintainer decided on 2026-11-13 that they are helm preferences rather than per-device ones (see Status). A client that
+asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent
+reference usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking
+is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record
+the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -2649,12 +2650,13 @@ is one instance of this general rule, not a special case.
 Each client can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when
 an agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
 in-conversation questions and approvals still unverified. Such sessions can show Idle while Muse waits for an answer.
-Settings has sounds controls under **Notifications**, with one switch per event, remembered per device: waiting and
-approval default on, turn finished off. The open session stays quiet while its window is active; the state loaded when
-the window starts or resets makes no sound. Status sounds follow the sidebar's current host selector and filters;
-changing that view silently records its existing statuses. New approval requests sound regardless of those filters,
-because their cards are always shown. Each observation plays only its most urgent enabled, non-quiet event: approval,
-waiting, then turn finished. Every open client makes its own sounds.
+Settings has sounds controls under **Notifications**, with one switch per event: waiting and approval default on, turn
+finished off. The switches are helm preferences, shared by every client of the helm (the maintainer decided on
+2026-11-13 that they are helm preferences rather than per-device ones). The open session stays quiet while its window is
+active; the state loaded when the window starts or resets makes no sound. Status sounds follow the sidebar's current
+host selector and filters; changing that view silently records its existing statuses. New approval requests sound
+regardless of those filters, because their cards are always shown. Each observation plays only its most urgent enabled,
+non-quiet event: approval, waiting, then turn finished. Every open client makes its own sounds.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**

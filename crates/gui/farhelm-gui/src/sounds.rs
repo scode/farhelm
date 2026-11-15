@@ -1,26 +1,41 @@
-//! Status sounds: which sound an observation of the fleet calls for, and the sounds themselves, as plain Rust.
+//! Status sounds: which sound an observation of the fleet calls for, the sounds themselves, the owner that plays them,
+//! and the seam a platform player plugs into.
 //!
 //! SPEC.md, "Status" (the sounds paragraph). Each open client plays a sound when a session starts waiting, when a new
 //! agent approval request arrives, and when a session goes from running to idle, subject to three switches and a few
-//! silencing rules. This module holds the two framework-free halves of that, so both are tested without a window:
+//! silencing rules. The parts:
 //!
-//! - [`rules`]: given the previous and the current observation, at most one [`Sound`] to play.
-//! - [`synth`]: each [`Sound`] rendered once into a small mono WAV in memory, for a playback seam to hand to the
-//!   platform.
+//! - [`rules`]: given the previous and the current observation, at most one [`Sound`] to play. Plain Rust.
+//! - [`synth`]: each [`Sound`] rendered once into a small mono WAV in memory. Plain Rust.
+//! - [`StatusSounds`] ([`owner`]): the one owner that decides when a sound plays (SPEC_impl.md, "Notices: the notice
+//!   center", leaves the three sounds to it). It builds an observation from the current UI session's store on every
+//!   change, runs the rules and hands the chosen sound to the player. The main view keeps it for the window's life.
+//! - The player seam ([`Player`], [`install_player`]): what actually makes the sound. Nothing in this crate installs
+//!   one, so the app plays nothing until the desktop app installs a platform player; tests install a fake that
+//!   records what it was asked to play.
 //!
 //! Ported from the old Dioxus UI at the reference commit: `crates/farhelm-ui/src/sounds.rs` (`History`,
-//! `status_words`, `StatusScope`) and `crates/farhelm-ui/assets/sounds.js` (`detectEvents`, `chooseSound`, the `NOTES`
-//! table and the envelopes in `createPlayer`). The old app split the rules between Rust and JavaScript and played
-//! through Web Audio's oscillators; here the rules are one Rust type and the oscillators are replaced by rendering the
-//! same notes into PCM samples.
+//! `status_words`, `StatusScope`, `SessionSounds`) and `crates/farhelm-ui/assets/sounds.js` (`detectEvents`,
+//! `chooseSound`, the `NOTES` table and the envelopes in `createPlayer`). The old app split the rules between Rust and
+//! JavaScript and played through Web Audio's oscillators; here the rules are one Rust type and the oscillators are
+//! replaced by rendering the same notes into PCM samples.
 //!
-//! NOTE: Nothing here observes the store, reads the switches from the helm's preferences, or plays anything. Building an
-//! observation from pushed state, deciding which session is quiet, and handing the WAV bytes to the platform belong to
-//! the GPUI owner that uses these halves. Nothing here may depend on `gpui` or GPUI Kit either: that is what keeps
-//! the rules and the synthesizer testable as plain functions.
+//! The switches are the helm's shared preferences (`sound_waiting`, `sound_approval`, `sound_turn_finished`), which
+//! the old app kept per device: the maintainer decided on 2026-11-13 that every setting the old app kept per device
+//! becomes a helm preference. Settings → Notifications draws them (`crate::settings`), and [`rules::Switches`] reads
+//! them, unset fields included, for both.
+//!
+//! [`rules`] and [`synth`] must not depend on `gpui` or GPUI Kit: that is what keeps them testable as plain functions.
 
+use std::rc::Rc;
+
+use gpui::{App, Global};
+
+pub mod owner;
 pub mod rules;
 pub mod synth;
+
+pub use owner::StatusSounds;
 
 /// One of the three status sounds, declared from most to least urgent.
 ///
@@ -40,4 +55,39 @@ pub enum Sound {
 impl Sound {
     /// Every sound, most urgent first: the order the rules try them in.
     pub const PRIORITY: [Sound; 3] = [Sound::Approval, Sound::Waiting, Sound::TurnFinished];
+}
+
+// ---- The player seam ------------------------------------------------------------------------------------------------
+
+/// Makes a sound on the platform: the one place sound leaves the app.
+///
+/// [`StatusSounds`] calls it at most once per observation, with the sound and its rendered WAV file ([`synth::wav`],
+/// rendered once per process). Playback is best effort and fire-and-forget, as the old Web Audio player was: an
+/// implementation must return at once, must not report failure back (a sound that could not play is lost, never
+/// queued or retried), and is never asked whether the previous sound has finished.
+pub trait Player {
+    /// Play `sound`, whose complete mono 16-bit PCM WAV file is `wav`.
+    fn play(&self, sound: Sound, wav: &'static [u8]);
+}
+
+/// The installed player, if any.
+struct InstalledPlayer(Rc<dyn Player>);
+
+impl Global for InstalledPlayer {}
+
+/// Make `player` the app's player from now on, replacing any installed before.
+///
+/// Optional by design, so it is not part of the bootstrap and is looked up directly rather than through
+/// `bootstrap::installed`, which would fail a debug build without one: with no player installed the owner still
+/// decides every sound and plays nothing. The desktop app installs the platform player; tests install a fake.
+pub fn install_player(player: Rc<dyn Player>, cx: &mut App) {
+    cx.set_global(InstalledPlayer(player));
+}
+
+/// Hand `sound` to the installed player, rendering its WAV file the first time. Nothing without a player, which also
+/// skips the rendering.
+fn play(sound: Sound, cx: &App) {
+    if let Some(InstalledPlayer(player)) = cx.try_global::<InstalledPlayer>() {
+        player.play(sound, synth::wav(sound));
+    }
 }

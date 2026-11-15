@@ -19,12 +19,13 @@ start that asks for it; 54, the session list's Replace meeting the YOLO question
 cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
 other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel;
-67, the session list's Compact). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
-`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`);
-nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
-(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
-Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings). The behavior itself is
+specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
+`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
+`shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it
+clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's
+header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
+order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -1929,6 +1930,39 @@ class Smoke(unittest.TestCase):
             eventually(lambda: stored() is compact, f"the helm storing compact {compact}")
             self.ok("wait", "--gone" if compact else "--text", folder.name)
             self.ok("wait", "--text", title)
+
+    # ---- The other-dialogs area's status sound switches (68) ---------------------------------------------------------
+
+    def test_68_a_sound_switch_in_settings_changes_the_helms_preference(self) -> None:
+        """The three status sound switches are shared helm preferences (SPEC.md, "Status"), so a switch is only
+        working if a click reaches the helm's preference row, and the window shows what the helm stores. The step
+        seeds and touches no session, and turns the switch back, so no later step finds a sound changed. Specified:
+        Settings opened from the gear and moved to Notifications shows Turn finished off, as the helm stores no choice
+        for it; a click makes the helm store `sound_turn_finished` true and the switch show checked; a second click makes
+        it store false and the switch show unchecked; Escape closes Settings."""
+        before = gui_agent.helm_request(RUN, "GET", "/api/preferences").get("sound_turn_finished")
+        self.assertIsNone(before, "premise: the helm stores no turn finished choice")
+        self.assertNotIn(SETTINGS_SUMMARY, self.ok("snapshot"), "premise: Settings is not open")
+        self.ok("click", "id:app-settings-toggle")
+        self.ok("wait", "--text", SETTINGS_SUMMARY)
+        self.ok("click", "id:settings-section-notifications")
+        self.ok("wait", "--text", "Turn finished")
+        # A control's states follow its name, each in its own brackets, focus first (`[focused] [checked]`).
+        self.assertRegex(self.ok("snapshot", "-i"), r'switch "Turn finished".*\[unchecked\]', "off by default")
+
+        for stored, state in ((True, "checked"), (False, "unchecked")):
+            self.ok("click", "id:settings-sound-turn-finished")
+            eventually(
+                lambda stored=stored: gui_agent.helm_request(RUN, "GET", "/api/preferences").get("sound_turn_finished")
+                is stored,
+                f"the helm storing sound_turn_finished {stored}",
+            )
+            eventually(
+                lambda state=state: re.search(rf'switch "Turn finished".*\[{state}\]', self.ok("snapshot", "-i")),
+                f"the switch showing {state}",
+            )
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", SETTINGS_SUMMARY)
 
 
 def waiting_approvals() -> list[dict]:

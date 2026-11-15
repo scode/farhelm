@@ -4,7 +4,9 @@
 //! Each switch is ported from the old Settings dialog (`settings.rs` at reference commit `24bc0580`) with its label,
 //! hover help and help text, except that the help no longer says other clients see the choice "when they reload": the
 //! migration's orchestrator decided on 2026-11-13 that such shared changes arrive live in the new app, whose helm pushes
-//! its state, and that each area rewords its own help as it ports it.
+//! its state, and that each area rewords its own help as it ports it. The three status sounds' switches come from the
+//! old `SoundSettings` (`sounds.rs` at the same commit), which saved them on the device; here they are fields of the
+//! preference row like the rest (the maintainer's decision of 2026-11-13).
 //!
 //! A switch saves one field of the preference row with `PUT /api/preferences` and a sparse body naming only that field
 //! (the helm's `put_preferences`: a field the patch leaves out is untouched), so it never overwrites another field with
@@ -25,6 +27,8 @@ use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::Draft;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
+use crate::sounds::Sound;
+use crate::sounds::rules::Switches;
 use crate::theme::{self, metrics};
 
 /// The old labels' size: the browser's default 16 pixels, which the Settings rows inherited (the stylesheet's own
@@ -69,6 +73,13 @@ pub(super) enum Choice {
     ShowCodexTrustHint,
     /// Agent trust: the same for Muse's hint. Pi has no hint, so no switch.
     ShowMuseTrustHint,
+    /// Notifications, Sounds: Session waiting, on by default (the status sounds' switches read unset through
+    /// [`Switches::from_preferences`], which the sounds' owner reads too).
+    SoundWaiting,
+    /// Notifications, Sounds: Approval request, on by default.
+    SoundApproval,
+    /// Notifications, Sounds: Turn finished, off by default.
+    SoundTurnFinished,
 }
 
 impl Choice {
@@ -83,6 +94,9 @@ impl Choice {
         Choice::ShowClaudeTrustHint,
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
+        Choice::SoundWaiting,
+        Choice::SoundApproval,
+        Choice::SoundTurnFinished,
     ];
 
     /// The preference row's field this switch saves, as the wire names it.
@@ -97,6 +111,9 @@ impl Choice {
             Choice::ShowClaudeTrustHint => "claude_trust_hint_dismissed",
             Choice::ShowCodexTrustHint => "codex_trust_hint_dismissed",
             Choice::ShowMuseTrustHint => "muse_trust_hint_dismissed",
+            Choice::SoundWaiting => "sound_waiting",
+            Choice::SoundApproval => "sound_approval",
+            Choice::SoundTurnFinished => "sound_turn_finished",
         }
     }
 
@@ -105,8 +122,10 @@ impl Choice {
     /// defaults on, so only an explicit `false` turns it off (the old app: "treating an absent value like the
     /// confirmation opt-outs would disable it", and SPEC.md: on "including when the helm has never stored a choice").
     /// A trust hint's switch shows the hint unless its dismissal is stored `true` (the field's doc: "Unset and false
-    /// both allow the hint").
+    /// both allow the hint"). A sound's switch reads as the sounds' owner reads it ([`Switches::from_preferences`]),
+    /// so what Settings shows is what plays.
     pub(super) fn stored(self, preferences: Option<&Preferences>) -> bool {
+        let sound = |sound| Switches::from_preferences(preferences).enabled(sound);
         let field = preferences.and_then(|preferences| match self {
             Choice::SkipSessionConfirmations => preferences.skip_session_confirmations,
             Choice::NameSessionsOnQuickLaunch => preferences.name_session_on_quick_launch,
@@ -117,8 +136,12 @@ impl Choice {
             Choice::ShowClaudeTrustHint => preferences.claude_trust_hint_dismissed,
             Choice::ShowCodexTrustHint => preferences.codex_trust_hint_dismissed,
             Choice::ShowMuseTrustHint => preferences.muse_trust_hint_dismissed,
+            Choice::SoundWaiting | Choice::SoundApproval | Choice::SoundTurnFinished => None,
         });
         match self {
+            Choice::SoundWaiting => sound(Sound::Waiting),
+            Choice::SoundApproval => sound(Sound::Approval),
+            Choice::SoundTurnFinished => sound(Sound::TurnFinished),
             Choice::NameSessionsOnQuickLaunch => field != Some(false),
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
@@ -143,7 +166,10 @@ impl Choice {
             | Choice::ColorTerminalFrames
             | Choice::AutoUpdateRemoteHosts
             | Choice::SkipHostSetupConfirmation
-            | Choice::SkipHostRemoveConfirmation => on,
+            | Choice::SkipHostRemoveConfirmation
+            | Choice::SoundWaiting
+            | Choice::SoundApproval
+            | Choice::SoundTurnFinished => on,
         };
         patch(self.field(), serde_json::Value::Bool(stored))
     }
@@ -160,6 +186,9 @@ impl Choice {
             Choice::ShowClaudeTrustHint => "settings-claude-trust-hint",
             Choice::ShowCodexTrustHint => "settings-codex-trust-hint",
             Choice::ShowMuseTrustHint => "settings-muse-trust-hint",
+            Choice::SoundWaiting => "settings-sound-waiting",
+            Choice::SoundApproval => "settings-sound-approval",
+            Choice::SoundTurnFinished => "settings-sound-turn-finished",
         }
     }
 
@@ -181,6 +210,9 @@ impl Choice {
             }
             Choice::ShowCodexTrustHint => "Show the hint when Codex asks about a managed checkout",
             Choice::ShowMuseTrustHint => "Show the hint when Muse asks about a managed checkout",
+            Choice::SoundWaiting => "Session waiting",
+            Choice::SoundApproval => "Approval request",
+            Choice::SoundTurnFinished => "Turn finished",
         }
     }
 
@@ -213,12 +245,20 @@ impl Choice {
             Choice::ShowMuseTrustHint => {
                 "Show a note above the terminal when Muse asks about trust in a managed checkout"
             }
+            Choice::SoundWaiting => "Play a bell when a session starts waiting for your answer",
+            Choice::SoundApproval => {
+                "Play a ding-dong when an agent asks Farhelm to do something that needs your approval"
+            }
+            Choice::SoundTurnFinished => {
+                "Play a soft pluck when an agent goes from running to idle"
+            }
         }
     }
 
     /// The help under the switch, which for the two host switches explains the behavior the shown value gives
-    /// (SPEC.md: "Each switch explains the current behavior"). Empty for the trust hints' switches, which had none in
-    /// the old app; [`group`] then draws no paragraph.
+    /// (SPEC.md: "Each switch explains the current behavior"). Empty for the trust hints' and the sounds' switches,
+    /// which had none in the old app (the sounds share one paragraph under their sub-heading); [`group`] then draws no
+    /// paragraph.
     fn help(self, on: bool) -> &'static str {
         match self {
             Choice::SkipSessionConfirmations => {
@@ -253,12 +293,16 @@ impl Choice {
             }
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
-            | Choice::ShowMuseTrustHint => "",
+            | Choice::ShowMuseTrustHint
+            | Choice::SoundWaiting
+            | Choice::SoundApproval
+            | Choice::SoundTurnFinished => "",
         }
     }
 
     /// The line shown under the switch after the helm refused its save of `sent`. The old app's words where it had
-    /// them. It kept turning the session-confirmation opt-out on and the two host switches silent, a best-effort
+    /// them; the sounds' switches had none, since the old app saved them on the device, so theirs are new, worded like
+    /// the others. It kept turning the session-confirmation opt-out on and the two host switches silent, a best-effort
     /// exception that assumed an optimistic copy; the migration's orchestrator decided on 2026-11-14 that they report a
     /// refusal too (SPEC.md, "Errors and diagnostics"), so those lines are new, worded like the others.
     fn failure(self, sent: bool) -> &'static str {
@@ -292,6 +336,13 @@ impl Choice {
             }
             Choice::ShowMuseTrustHint => {
                 "Could not save whether to show the Muse trust hint. Try again."
+            }
+            Choice::SoundWaiting => "Could not save whether to play the waiting sound. Try again.",
+            Choice::SoundApproval => {
+                "Could not save whether to play the approval sound. Try again."
+            }
+            Choice::SoundTurnFinished => {
+                "Could not save whether to play the turn finished sound. Try again."
             }
         }
     }

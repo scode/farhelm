@@ -49,8 +49,9 @@
 //! - [`update_readout`]: the desktop updater's state as the words and marks the version readout shows, pure so its
 //!   rules are tested without a window.
 //! - [`announcements`]: the Announcements dialog, updates and information from Farhelm the helm queues.
-//! - [`sounds`]: the status sounds as plain Rust: the rules for which one an observation plays, and the three sounds
-//!   synthesized into WAV bytes; observing the store and playing them come later.
+//! - [`sounds`]: the status sounds: the rules for which one an observation plays and the three sounds synthesized into
+//!   WAV bytes, both plain Rust, the owner that observes the store and decides, and the seam a platform player plugs
+//!   into (none is installed yet, so nothing plays).
 //! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
 //! - [`shortcuts`]: the Keyboard shortcuts overview, every app-wide shortcut in this client's form, from its chord
 //!   or the Help menu.

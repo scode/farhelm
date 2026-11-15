@@ -38,8 +38,8 @@
 //!   save, as a draft's refusal does, where the old form showed one outcome at a time. While it is out the form is
 //!   locked as for a save, as the old one was, so a Save cannot overtake it. It moves no focus and opens nothing.
 //!
-//! NOTE: The Sounds sub-heading above ntfy alerts, with its three switches, is another area's, which adds it here when
-//! status sounds are built (`docs/gpui/parity/settings-and-hosts.md`).
+//! NOTE: The Sounds sub-heading above ntfy alerts, with its three switches, is not this form's: they are preference
+//! switches like the other sections', which the dialog draws above this form (`SettingsDialog::sounds`).
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
