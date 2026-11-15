@@ -40,6 +40,7 @@ fn projected(entries: Vec<(String, Value)>) -> Projected {
         entries,
         counts: None,
         selected_outside_query: None,
+        selected_cut: false,
     }
 }
 
@@ -50,6 +51,7 @@ fn empty_sent() -> Sent {
             order: Vec::new(),
             counts: None,
             selected_outside_query: None,
+            selected_cut: false,
         },
         entries: BTreeMap::new(),
     }
@@ -2196,6 +2198,121 @@ async fn the_open_session_rides_outside_the_listing_cap() {
             truncated: true,
         })
     );
+}
+
+/// Each supervisor lists only its newest sessions (the cap), so an old open
+/// session on a host past its cap can exist while no read of that host
+/// carries it. Under a host filter naming ANOTHER host, the query's own list
+/// is read whole, so without a word about the open session the GUI, which
+/// takes a missing open session as deleted only from an uncut listing, would
+/// read a cut-away session as deleted. The word must not be the list's
+/// `truncated`: that list was read to the end, and the GUI says "could not
+/// read the list to the end" from it. Specified, with host A uncut and host B
+/// past its cap: the open session cut from B's list is marked `selected_cut`
+/// while the host-A counts stay uncut; an open session B does list is
+/// carried and not marked, although its own read was cut; and an open
+/// session missing from uncut A is not marked although B is past its cap, so
+/// a deletion there is still provable.
+#[farhelm_testtrace::test]
+async fn an_open_session_its_capped_host_cut_away_is_marked_cut_and_the_list_is_not() {
+    let (builder, capped) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: vec![rest_harness::session("a1", 300)],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "capped.example",
+            rest_harness::HostScript {
+                identity: Some("capped-identity".to_string()),
+                sessions: vec![rest_harness::session("b-new", 200)],
+                truncated: true,
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let mut harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness.await_refreshed(capped).await;
+    let addr = harness.serve().await;
+    let a1 = harness.local_session_ref("a1");
+    let cut_away = harness.session_ref(capped, "b-old");
+    let only_local = SessionQuery {
+        host: Some(local),
+        ..SessionQuery::default()
+    };
+
+    // Premises: host A's own listing is whole, and the cut-away session's
+    // own read finds nothing and says it was cut.
+    let listing = served(&harness, &session_list_path(&only_local)).await;
+    assert_eq!(listing["truncated"], false, "premise: {listing}");
+    let carried = served(&harness, &selected_session_path(&cut_away)).await;
+    assert_eq!(
+        carried["sessions"],
+        serde_json::json!([]),
+        "premise: {carried}"
+    );
+    assert_eq!(carried["truncated"], true, "premise: {carried}");
+    // The one-session read is scoped to its own host: B's cap does not cut a
+    // read of a session on A (`store::SessionFilter::host_scope`).
+    let gone_from_a = harness.local_session_ref("gone");
+    let gone = served(&harness, &selected_session_path(&gone_from_a)).await;
+    assert_eq!(gone["truncated"], false, "{gone}");
+
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ws).await;
+    let host_a_counts = Some(ListCounts {
+        total: 2,
+        matching: Some(1),
+        truncated: false,
+    });
+
+    let changes = set_query(
+        &mut ws,
+        1,
+        serde_json::json!({ "host": local, "selected": cut_away }),
+    )
+    .await;
+    assert_eq!(changes.meta.order, std::slice::from_ref(&a1));
+    assert_eq!(
+        changes.meta.selected_outside_query, None,
+        "nothing to carry"
+    );
+    assert!(
+        changes.meta.selected_cut,
+        "a cut-away open session is no evidence of a deletion"
+    );
+    assert_eq!(
+        changes.meta.counts, host_a_counts,
+        "host A's list was read to the end"
+    );
+
+    let listed_on_b = harness.session_ref(capped, "b-new");
+    let changes = set_query(
+        &mut ws,
+        2,
+        serde_json::json!({ "host": local, "selected": listed_on_b }),
+    )
+    .await;
+    assert_eq!(changes.meta.selected_outside_query, Some(listed_on_b));
+    assert!(!changes.meta.selected_cut, "a carried session is not cut");
+    assert_eq!(changes.meta.counts, host_a_counts);
+
+    let changes = set_query(
+        &mut ws,
+        3,
+        serde_json::json!({ "host": local, "selected": gone_from_a }),
+    )
+    .await;
+    assert_eq!(changes.meta.selected_outside_query, None);
+    assert!(
+        !changes.meta.selected_cut,
+        "another host's cap must not make a deletion on host A unprovable"
+    );
+    assert_eq!(changes.meta.counts, host_a_counts);
 }
 
 /// The served ids of a snapshot's session list, in served order.

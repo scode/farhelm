@@ -95,9 +95,12 @@ pub(crate) struct ListQuery {
     /// Only the session with this full id (a session reference, as rows
     /// serve it). The UI channel reads the GUI's open session this way when
     /// the channel's query leaves it out (`crate::ui_channel`), so the read is
-    /// filter-free and never cut by the cap. Resolved like `parent`: a
-    /// reference that does not parse is a 400, one whose host entry is gone a
-    /// 404, and one whose entry exists but holds no such session an empty list.
+    /// free of every other filter and never cut by the listing cap; its
+    /// host's own cap can still leave it out, which `truncated` then says
+    /// (scoped to that host, `store::SessionFilter::host_scope`). Resolved
+    /// like `parent`: a reference that does not parse is a 400, one whose
+    /// host entry is gone a 404, and one whose entry exists but holds no such
+    /// session an empty list.
     id: Option<String>,
     /// Only sessions on this registered host (a `HostView::id`).
     host: Option<store::HostId>,

@@ -341,13 +341,18 @@ elsewhere reorders the open list. Collections carry their metadata: completeness
 The query also names the session the GUI has open, because a host or status filter, or the cap, can leave that session
 out of the list while the selection and its terminal stay, and its pane, header actions, details bar and Rename still
 need its current state. When the list leaves it out, the helm reads that one session as well (the list route narrowed to
-its id, so no filter or cap applies) and carries it in the collection, named in the metadata (`selected_outside_query`)
-and kept out of the order, so the list does not draw it while the store finds it by key. It counts toward none of
-`total`, `matching` and `truncated`, which stay the query's own, and it is diffed like any entry: it arrives when
-selected, loses the mark when the filter comes to match it, and goes when the selection moves or the session is deleted.
-A selected key that names no session carries nothing. Rejected: the GUI reading the open session with
-`GET /api/sessions/{id}`, which would be pushed state fetched (stale between reads), and which waits on the host without
-a bound.
+its id, so no other filter and not the listing cap applies) and carries it in the collection, named in the metadata
+(`selected_outside_query`) and kept out of the order, so the list does not draw it while the store finds it by key. It
+counts toward none of `total`, `matching` and `truncated`, which stay the query's own, and it is diffed like any entry:
+it arrives when selected, loses the mark when the filter comes to match it, and goes when the selection moves or the
+session is deleted. A selected key that names no session carries nothing. That one-session read is scoped to the
+session's host, and its host's own cap can still leave it out: each supervisor lists only its newest 500 sessions. When
+the read finds nothing and its host's list was cut, the metadata says so (`selected_cut`), because an old session the
+cap left out and a deleted one look the same there. It is a fact about the open session, not the list, so `truncated`
+stays the query's own: under a host filter naming another host the list was read whole, and the list's "could not read
+to the end" would be false. Without the flag, that whole list missing the open session would read as proof that it was
+deleted. Rejected: the GUI reading the open session with `GET /api/sessions/{id}`, which would be pushed state fetched
+(stale between reads), and which waits on the host without a bound.
 
 Changes are sent per collection, keyed by id, and an entry is always replaced whole; there are no field-level patches.
 The GUI applies every collection's changes with one generic piece of code, not code per kind. The helm finds changes by
@@ -4979,18 +4984,19 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - The REST list is served WHOLE, and this is a decision rather than a default (SPEC.md's Session list section states the
   scale assumption and the prohibition). `GET /api/sessions` reads every cached row for every host plus the in-memory
   rows of identity-less hosts, decodes them, filters, sorts, and counts in Rust, and answers with one array cut at
-  `LIST_SESSIONS_CAP` with `truncated` set when the cut applied or when any host's own list was cut at the wire's cap.
-  The reply is a snapshot: rows and both counts come from the same in-memory view, so nothing can move between them. A
-  host's cap flag is kept WITH its cache (`hosts.cache_truncated`, written in the same transaction as the rows it
-  describes) rather than with its connection, because the cut rows go on being served stale in every non-connected state
-  and across a helm restart, and SPEC.md forbids presenting a cut list as the whole one in any of them; the one host
-  with no cache (an identity-less supervisor, serving from the actor's memory) carries its flag on the snapshot beside
-  its rows, and both vanish with the connection. Versions 8 through 13 of this list were cursor-paginated at the REST
-  layer on top of a cursor-paginated wire, with per-order ordering columns and host-leading indexes in helm.db (schema
-  versions 11 and earlier), a Rust-side title fold cut to 128 characters with a batched backfill, a byte budget as a
-  second page cut, a matching-count cache keyed to a store generation, and a client-side "underfilled listing" predicate
-  — all of it existing because sorting by mutable keys under pagination lets a row cross the cursor between two pages.
-  Schema version 13 drops the ordering columns and their indexes and adds the per-host cap flag; `session_cache` keeps
+  `LIST_SESSIONS_CAP` with `truncated` set when the cut applied or when a host the filter could draw a row from (any
+  host, unless a host or id filter names one) cut its own list at the wire's cap. The reply is a snapshot: rows and both
+  counts come from the same in-memory view, so nothing can move between them. A host's cap flag is kept WITH its cache
+  (`hosts.cache_truncated`, written in the same transaction as the rows it describes) rather than with its connection,
+  because the cut rows go on being served stale in every non-connected state and across a helm restart, and SPEC.md
+  forbids presenting a cut list as the whole one in any of them; the one host with no cache (an identity-less
+  supervisor, serving from the actor's memory) carries its flag on the snapshot beside its rows, and both vanish with
+  the connection. Versions 8 through 13 of this list were cursor-paginated at the REST layer on top of a
+  cursor-paginated wire, with per-order ordering columns and host-leading indexes in helm.db (schema versions 11 and
+  earlier), a Rust-side title fold cut to 128 characters with a batched backfill, a byte budget as a second page cut, a
+  matching-count cache keyed to a store generation, and a client-side "underfilled listing" predicate — all of it
+  existing because sorting by mutable keys under pagination lets a row cross the cursor between two pages. Schema
+  version 13 drops the ordering columns and their indexes and adds the per-host cap flag; `session_cache` keeps
   `created_at` as the identity cross-check a read applies to a decoded payload. Schema version 29 removes the retired
   archive column and strips the retired member from valid object payloads; malformed and non-object payload bytes stay
   untouched so the migration does not turn pre-existing corruption into invented data. What the whole-list reply gives

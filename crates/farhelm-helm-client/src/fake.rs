@@ -277,6 +277,7 @@ mod tests {
                 order: vec![],
                 counts: None,
                 selected_outside_query: None,
+                selected_cut: false,
             },
             upsert: vec![],
             remove: vec![],

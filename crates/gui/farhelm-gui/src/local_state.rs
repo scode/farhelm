@@ -5,8 +5,8 @@
 //! session, so retiring a session cannot reach it (SPEC_impl.md, "One failure path: the reset").
 //!
 //! Two owners write it, each through [`select`] and [`clear`]. The session list ([`crate::session_list`]) owns the
-//! selection rules: a click, the automatic choice when nothing is selected, and dropping a session a complete listing no
-//! longer has. The connection keeps only its snapshot check: it clears the id when a complete snapshot no longer lists
+//! selection rules: a click, the automatic choice when nothing is selected, and dropping a session a complete listing,
+//! or an uncut one under a query that names it, no longer has. The connection keeps only its snapshot check: it clears the id when a complete snapshot no longer lists
 //! that session ([`crate::session`]). Every write that changes the id notifies the global's observers (GPUI notifies
 //! them on every mutable access, so the functions here skip the access when nothing would change), which is how every
 //! view that draws the selection redraws; a view that draws it observes [`LocalState`] with `cx.observe_global`.

@@ -530,6 +530,7 @@ fn unavailable_sessions() -> CollectionState {
             order: Vec::new(),
             counts: None,
             selected_outside_query: None,
+            selected_cut: false,
         },
         entries: Vec::new(),
     }

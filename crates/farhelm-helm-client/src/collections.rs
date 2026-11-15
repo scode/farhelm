@@ -382,6 +382,7 @@ mod tests {
             order: order.iter().map(|key| key.to_string()).collect(),
             counts: None,
             selected_outside_query: None,
+            selected_cut: false,
         }
     }
 
