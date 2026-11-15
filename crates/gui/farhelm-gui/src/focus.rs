@@ -34,7 +34,10 @@
 //!   last drawn positions), and to the layer itself only when no control is left. A menu traps Tab like a dialog
 //!   (SPEC.md: "Inside a dialog or menu, focus stays inside"). A popover that never takes focus (a list floating under
 //!   the field the user types in) is not a layer for any of this: it traps nothing and gives nothing back, and while
-//!   only such a popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]).
+//!   only such a popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]). A
+//!   popover that takes focus but lets Tab through (SPEC.md's tunnel list, [`layers::Popover::traps_tab`]) is a layer
+//!   for all of it but the trap: Tab walks its controls as if they stood right after its toggle in the page, and on out
+//!   of it ([`walk_through`]), and the layer manager closes it once focus has left it.
 //!   Inside the topmost layer, the app moves focus to another control of the layer (because of the user's action
 //!   there, a result that arrived later, or a question the prompt draws inline in the dialog opening and closing) only
 //!   through [`focus_in_layer`], and along a radio group or tab strip through [`move_within_control`].
@@ -1202,7 +1205,8 @@ fn apply_and_reveal(target: Move, window: &mut Window, cx: &mut App) {
 }
 
 /// Tab or Shift+Tab, and Option-Tab: the next or previous tab stop, staying inside the topmost layer when one is open
-/// (SPEC.md: every modal dialog keeps Tab within its controls, and inside a dialog or menu focus stays inside). With
+/// (SPEC.md: every modal dialog keeps Tab within its controls, and inside a dialog or menu focus stays inside), except
+/// a popover that lets Tab through, whose controls Tab walks in the page's order ([`walk_through`]). With
 /// `every` false, buttons are skipped ([`TabReach::TextFieldsAndPopups`]); Option-Tab and [`TabReach::EveryControl`]
 /// pass `true`.
 ///
@@ -1219,6 +1223,11 @@ fn step(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
 /// [`step`]'s focus move, without the scroll into view.
 fn walk(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
     let trap = layers::trap(window, cx);
+    if let Some(through) = layers::tab_through(window, cx)
+        && walk_through(&through, trap.as_ref(), forward, every, window, cx)
+    {
+        return;
+    }
     let start = window.focused(cx);
     let started_inside = trap
         .as_ref()
@@ -1250,6 +1259,94 @@ fn walk(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
         (Some(trap), None) => apply(Move::To(trap), window, cx),
         (None, None) => recover(window, cx),
     }
+}
+
+/// Tab or Shift+Tab while focus is in a popover that lets Tab through, or on its place ([`layers::tab_through`]): walk
+/// the page's order with the popover's controls standing right after its place, the order the old app had with the
+/// list drawn inside the pill's element. Returns `false`, having moved nothing, when focus is in neither, and the
+/// ordinary walk goes on.
+///
+/// GPUI's own order has the popover's controls after the whole page (overlays are painted last), so this order is
+/// pieced together from GPUI's: into the popover, a step from its container, which GPUI orders just before the
+/// popover's first control; out of it, its place, then GPUI's steps from there, passing over the popover's own
+/// controls (they follow the place in GPUI's order too when the place is the page's last stop). So from the place,
+/// Tab enters the popover's first control; from its last control, Tab reaches the control after the place; from its
+/// first, Shift+Tab reaches the place; and from the place, Shift+Tab the control before it. Without a place, a step
+/// out of the popover stays where GPUI put it. Buttons are skipped as `every` says, and a stop on the page outside
+/// `trap` (the dialog the popover was opened in) never qualifies, as in [`walk`]. When nothing qualifies, focus stays
+/// where it was.
+fn walk_through(
+    through: &layers::TabThrough,
+    trap: Option<&FocusHandle>,
+    forward: bool,
+    every: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let container = &through.container;
+    // A place no longer drawn has no position in the order.
+    let place = through.place.as_ref().filter(|place| {
+        root_handle(window, cx).is_some_and(|root| root.contains(place, window))
+            && !container.contains(place, window)
+    });
+    let on_place = place.is_some_and(|place| place.contains_focused(window, cx));
+    if !on_place && !container.contains_focused(window, cx) {
+        return false;
+    }
+    // A stop in the popover qualifies whatever the trap is: the trap is a layer below the popover (the dialog it was
+    // opened in), and the layer manager draws each layer apart, so the dialog's container never contains the
+    // popover's controls.
+    let qualifies = |window: &Window, cx: &App| {
+        (container.contains_focused(window, cx)
+            || trap.is_none_or(|trap| trap.contains_focused(window, cx)))
+            && (every || !is_button(window.focused(cx).as_ref(), window, cx))
+    };
+    let start = window.focused(cx);
+    let mut seen = vec![start.clone()];
+    // Walking the popover's own controls, until a step leaves them; then the page's, from the place.
+    let mut in_popover = !on_place || forward;
+    if on_place && forward {
+        apply(Move::To(container), window, cx);
+    }
+    loop {
+        apply(
+            if forward { Move::Next } else { Move::Previous },
+            window,
+            cx,
+        );
+        let inside = container.contains_focused(window, cx);
+        if in_popover && !inside {
+            in_popover = false;
+            // The walk on the page is a cycle of its own, from where it leaves the popover: the stops seen so far are
+            // the popover's, and GPUI orders them after the whole page, so a walk that has to wrap past the page's
+            // end (the place the page's last stop, or nothing after it qualifying) passes them again before it gets
+            // round, and would otherwise stop there as if it had come full circle.
+            seen.clear();
+            if let Some(place) = place {
+                apply(Move::To(place), window, cx);
+                // Backward, the place is the first stop out of the popover; forward, the next step leaves it.
+                if !forward && qualifies(window, cx) {
+                    return true;
+                }
+                seen.push(window.focused(cx));
+                continue;
+            }
+        }
+        // On the page, the popover's controls are passed over: they stand after the place, already walked or not yet
+        // reached.
+        if in_popover == inside && qualifies(window, cx) {
+            return true;
+        }
+        let focused = window.focused(cx);
+        if seen.contains(&focused) {
+            break;
+        }
+        seen.push(focused);
+    }
+    if let Some(start) = &start {
+        apply(Move::To(start), window, cx);
+    }
+    true
 }
 
 /// Whether `focused` is a control recorded as a button. A handle never recorded (the root, a layer's container) is not.

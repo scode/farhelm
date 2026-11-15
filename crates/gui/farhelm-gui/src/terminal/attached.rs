@@ -2014,6 +2014,7 @@ impl AttachedTerminal {
             anchor,
             // A display that never takes focus returns none, so this is never used.
             returns_to: focus::ReturnTo::Opener,
+            traps_tab: true,
         };
         layers::open_popover(popover, mark, window, cx)
     }

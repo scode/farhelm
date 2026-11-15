@@ -38,11 +38,11 @@
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
 //!   dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps focus
 //!   on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's tab
-//!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened, unless its opener
-//!   named home or a control (the button that opened a dialog, the toggle that opened a menu) instead
-//!   ([`Dialog::returns_to`], [`Popover::returns_to`]). A press reaches a dialog's empty-space rule only after the
-//!   controls under it have handled it, and one that gave focus to a control (a click into a text field) is not a press
-//!   on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
+//!   order within [`trap`]), unless it is the popover below that lets Tab through. Closing any layer returns focus to
+//!   what held it when the layer opened, unless its opener named home or a control (the button that opened a dialog,
+//!   the toggle that opened a menu) instead ([`Dialog::returns_to`], [`Popover::returns_to`]). A press reaches a
+//!   dialog's empty-space rule only after the controls under it have handled it, and one that gave focus to a control
+//!   (a click into a text field) is not a press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
 //! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
 //!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
 //!   question's answer over a terminal must not also focus the terminal or click a control there.
@@ -54,7 +54,18 @@
 //!   only it: it owns nothing above it, so a dialog opened while it shows (a shortcut pressed in the field or the
 //!   terminal beside it) stays open, with focus inside, when it goes ([`close`]). Every rule above that names "the
 //!   topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer that holds
-//!   focus, which such a popover never is.
+//!   focus, which such a popover never is (and for Tab's trap, the topmost that also traps Tab: see the next rule).
+//! - **A popover may let Tab through.** One opened with [`Popover::traps_tab`] off takes focus when it opens and
+//!   returns it on Escape like a menu, but traps no Tab: Tab and Shift+Tab walk its controls as if they stood in the
+//!   page right after its toggle (the control its [`Popover::returns_to`] names), and go on out of it to the controls
+//!   around the toggle. Focus leaving it, by Tab or by a press elsewhere, closes it and returns no focus; focus on its
+//!   toggle is not leaving, and neither is keyboard focus moving into a layer opened above it (a press inside such a
+//!   layer is still a press outside the popover, which closes it and everything above it). It is SPEC.md's tunnel
+//!   list: "Escape closes the list and returns focus to the pill; Tab follows its ordinary controls and leaving the
+//!   list closes it without reclaiming focus", and the old list closed on the pill's `focusout` once focus was outside
+//!   both the pill and the list. It holds focus, so it is the topmost layer that holds focus for recovery and the menu
+//!   highlight, and it counts for [`focus_layer_open`] (which says why). [`tab_through`] says how its place in Tab
+//!   order is kept, since GPUI paints every overlay, and so orders its controls, after the whole page.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it.
@@ -181,6 +192,9 @@ struct Layer {
     /// Whether the layer took focus when it opened and holds it while open: every layer but a popover opened without
     /// a start ([`Popover::start`]), which Tab's trap, focus recovery and the focus return on close all pass over.
     takes_focus: bool,
+    /// Whether Tab stays inside it while it holds focus: every layer that takes focus but a popover opened with
+    /// [`Popover::traps_tab`] off, whose Tab follows the page instead ([`tab_through`]).
+    traps_tab: bool,
     /// Where closing it returns focus: `opener`, unless its opener named home or a control ([`Dialog::returns_to`],
     /// [`Popover::returns_to`]).
     returns_to: focus::ReturnTo,
@@ -508,6 +522,21 @@ pub struct Popover {
     /// recovers (home, on the page) when the opener was that control itself and it is gone. A popover that never takes
     /// focus ([`Popover::start`] `None`) returns none, so this is never used for one.
     pub returns_to: focus::ReturnTo,
+    /// Whether Tab and Shift+Tab stay inside it while it holds focus: `true` for a menu or a select's list (SPEC.md:
+    /// "Inside a dialog or menu, focus stays inside"), and every popover but the one below.
+    ///
+    /// `false` for a list of ordinary controls opened from a toggle that sits in the page's Tab order like the toggle
+    /// itself, as SPEC.md has the terminal's tunnel pill and its list: "Escape closes the list and returns focus to
+    /// the pill; Tab follows its ordinary controls and leaving the list closes it without reclaiming focus". Such a
+    /// popover still takes focus when it opens (its start), and Escape still returns focus where `returns_to` says,
+    /// but Tab and Shift+Tab walk its controls in place of a trap and go on out of it, and focus leaving it closes it
+    /// with no focus returned (the module docs, "A popover may let Tab through"). It needs `returns_to` naming its
+    /// toggle ([`focus::ReturnTo::Control`]): that control is its place in the page's Tab order, its controls coming
+    /// right after it, and focus on it does not count as leaving. Without one it has no place: Tab out of it goes
+    /// wherever GPUI's window-wide order goes, and only its own controls count as inside it.
+    ///
+    /// Ignored for a popover that never takes focus ([`Popover::start`] `None`), which traps nothing anyway.
+    pub traps_tab: bool,
 }
 
 /// A dialog drawn beside an element instead of centered over a veil: placed and followed like a [`Popover`], closed
@@ -586,6 +615,7 @@ pub fn open_dialog(
         view,
         container,
         Some(start),
+        true,
         subject.into_iter().collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
@@ -650,6 +680,7 @@ pub fn open_anchored(
         view,
         container,
         Some(start),
+        true,
         std::iter::once(drawn).chain(subject).collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
@@ -674,6 +705,7 @@ pub fn open_popover(
         start,
         anchor,
         returns_to,
+        traps_tab,
     } = popover;
     let drawn = drawn(&anchor)?;
     open(
@@ -681,6 +713,7 @@ pub fn open_popover(
         view,
         container,
         start,
+        traps_tab,
         vec![drawn],
         None,
         // A menu's empty space (a separator, padding) keeps focus on its item.
@@ -702,6 +735,7 @@ fn open(
     view: AnyView,
     container: FocusHandle,
     start: Option<FocusHandle>,
+    traps_tab: bool,
     subjects: Vec<Subject>,
     main_action: Option<MainAction>,
     empty_press: focus::OnPress,
@@ -736,6 +770,7 @@ fn open(
             container,
             opener,
             takes_focus: start.is_some(),
+            traps_tab,
             returns_to,
             on_dismiss,
             main_action,
@@ -747,11 +782,91 @@ fn open(
         cx.notify();
         id
     });
+    if start.is_some() && !traps_tab {
+        watch_for_leaving(&stack, id, window, cx);
+    }
     // A popover that never takes focus leaves it with the control the user is in.
     if let Some(start) = &start {
         focus::enter_layer(start, window, cx);
     }
     Some(id)
+}
+
+/// Close the popover `id`, which takes focus but lets Tab through ([`Popover::traps_tab`]), once focus has left it:
+/// SPEC.md's "leaving the list closes it without reclaiming focus". A focus listener sees every way out (Tab, a press
+/// that focuses something else, GPUI Kit's own focus moves), which a check in each of those paths would not.
+///
+/// Focus on its place (the toggle named in [`Popover::returns_to`]) is not outside it, so focus can leave the popover
+/// in two steps (Shift+Tab to the toggle, then on to the control before it), and the toggle is watched as well as the
+/// popover. Focus moving into a layer opened above it (a question one of its controls asked) does not close it either;
+/// this listener sees only focus, and a press inside such a layer still closes the popover, and the layer with it, as
+/// a press outside it ([`overlay`]).
+///
+/// GPUI tells focus listeners while it finishes the frame that shows the move, so the listener only queues the check,
+/// which runs once that frame is done and reads where focus is then rather than what the event said: the event also
+/// fires when the window stops being active (switching apps), which moves no focus, and when the focused control
+/// vanished and the focus coordinator's recovery, which GPUI runs just before, has already put focus on the closest
+/// control left inside the popover (a closed tunnel's row).
+fn watch_for_leaving(stack: &Entity<LayerStack>, id: LayerId, window: &mut Window, cx: &mut App) {
+    let Some((container, place)) = stack
+        .read(cx)
+        .layers
+        .iter()
+        .find(|layer| layer.id == id)
+        .map(|layer| (layer.container.clone(), layer.place().cloned()))
+    else {
+        return;
+    };
+    let watches: Vec<Subscription> = std::iter::once(container)
+        .chain(place)
+        .map(|watched| {
+            window.on_focus_out(&watched, cx, move |_, window, cx| {
+                window.defer(cx, move |window, cx| close_if_left(id, window, cx));
+            })
+        })
+        .collect();
+    stack.update(cx, |stack, _| {
+        if let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) {
+            layer._watches.extend(watches);
+        }
+    });
+}
+
+/// [`watch_for_leaving`]'s check: close `id` if it is still open and focus is neither inside it, inside a layer above
+/// it, nor on its place.
+fn close_if_left(id: LayerId, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let left = {
+        let stack = stack.read(cx);
+        let Some(index) = stack.layers.iter().position(|layer| layer.id == id) else {
+            return;
+        };
+        let on_place = stack.layers[index]
+            .place()
+            .is_some_and(|place| place.contains_focused(window, cx));
+        !on_place
+            && !stack.layers[index..]
+                .iter()
+                .any(|layer| layer.container.contains_focused(window, cx))
+    };
+    if left {
+        close_as(id, CloseCause::Left, window, cx);
+    }
+}
+
+impl Layer {
+    /// Where a popover that lets Tab through sits in the page's Tab order: the control its opener named for focus to
+    /// return to, its toggle ([`Popover::traps_tab`]). `None` for any other layer.
+    fn place(&self) -> Option<&FocusHandle> {
+        match &self.returns_to {
+            focus::ReturnTo::Control(control) if self.takes_focus && !self.traps_tab => {
+                Some(control)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Close `id` in `window` from inside the stack's own update (a subject going, an anchor's release), once that update
@@ -776,14 +891,32 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
 /// with focus inside it. A layer opened by a click on the popover's own content and anchored there still goes with it,
 /// since its anchor is no longer drawn; a centered dialog opened that way stays.
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
-    close_as(id, false, window, cx);
+    close_as(id, CloseCause::Closed, window, cx);
 }
 
-/// [`close`], saying whether the user dismissed the layer (`dismissed`), which decides where a layer that returns
-/// focus home on Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it, and which repeats of the key press that
-/// closed it the focus coordinator swallows (a dismissal's held repeats only; see [`focus::return_to`]).
-fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
-    close_taking(dismissed, window, cx, |layers| {
+/// Why a layer is closing, which decides where focus goes after it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CloseCause {
+    /// Its opener closed it, its subject or anchor went, a reset, or a press outside a popover that traps Tab: focus
+    /// returns as the layer's `returns_to` says.
+    Closed,
+    /// The user dismissed it (Escape, a dialog's Close): as `Closed`, except that a layer returning focus home on
+    /// Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it home.
+    Dismissed,
+    /// Focus left a popover that lets Tab through, or a press landed outside it ([`Popover::traps_tab`]): no focus is
+    /// returned. Focus is already where the user put it, or, after a press that focused nothing (a macOS button, the
+    /// page's empty space), it is on a control the next frame no longer draws, and the focus coordinator's recovery
+    /// moves it on from there as from any control that vanished.
+    Left,
+}
+
+/// [`close`], saying why the layer closes ([`CloseCause`]). When focus is returned, the cause also decides which repeats
+/// of the key press that closed it the focus coordinator swallows (see [`focus::return_to`]): for `Closed`, the press's
+/// held repeats and its fresh ones within the repeat interval, unless a layer that holds focus is left open or one opens
+/// next (then the held ones only); for `Dismissed`, its held repeats only. A close that returns no focus swallows
+/// nothing, which is always so for `Left`.
+fn close_as(id: LayerId, why: CloseCause, window: &mut Window, cx: &mut App) {
+    close_taking(why, window, cx, |layers| {
         let index = layers.iter().position(|layer| layer.id == id)?;
         Some(if layers[index].takes_focus {
             layers.drain(index..).collect()
@@ -797,7 +930,7 @@ fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
 /// The one place layers leave the stack, so [`close`] and [`close_all`] share the focus return. `take` gets the stack's
 /// layers, bottom to top, and answers `None` when there is nothing to close.
 fn close_taking(
-    dismissed: bool,
+    why: CloseCause,
     window: &mut Window,
     cx: &mut App,
     take: impl FnOnce(&mut Vec<Layer>) -> Option<Vec<Layer>>,
@@ -813,20 +946,36 @@ fn close_taking(
     let Some(closed) = closed else {
         return;
     };
-    let focus_was_inside = closed
-        .iter()
-        .any(|layer| layer.container.contains_focused(window, cx));
+    // A dismissal from a popover's place (Escape on the tunnel pill while its list is open, [`Popover::traps_tab`])
+    // counts as from inside it: focus "returns" to the place it is already on, and the coordinator notes the Escape
+    // as a dismissal, so its held repeats are swallowed rather than dismissing each layer below in turn. Only for a
+    // dismissal: the toggle closing its own list (Enter or Space on the pill) must not swallow a quick second press
+    // that reopens it.
+    let focus_was_inside = closed.iter().any(|layer| {
+        layer.container.contains_focused(window, cx)
+            || (why == CloseCause::Dismissed
+                && layer
+                    .place()
+                    .is_some_and(|place| place.contains_focused(window, cx)))
+    });
     // Focus goes back as the lowest closed layer that took it says: a popover that never took focus has none to give
     // back, and the control the user stayed in keeps it.
-    if (focus_was_inside || window.focused(cx).is_none())
+    if why != CloseCause::Left
+        && (focus_was_inside || window.focused(cx).is_none())
         && let Some(bottom) = closed.iter().find(|layer| layer.takes_focus)
     {
         let returns_to = match &bottom.returns_to {
-            focus::ReturnTo::HomeOnEscape if dismissed => focus::ReturnTo::Home,
+            focus::ReturnTo::HomeOnEscape if why == CloseCause::Dismissed => focus::ReturnTo::Home,
             focus::ReturnTo::HomeOnEscape => focus::ReturnTo::Opener,
             other => other.clone(),
         };
-        focus::return_to(returns_to, bottom.opener.as_ref(), dismissed, window, cx);
+        focus::return_to(
+            returns_to,
+            bottom.opener.as_ref(),
+            why == CloseCause::Dismissed,
+            window,
+            cx,
+        );
     }
 }
 
@@ -856,7 +1005,7 @@ pub fn close_all(cx: &mut App) {
         // Every layer, not a close of the bottom one: when that is a popover that never takes focus, it closes alone.
         // A window that closed meanwhile has nothing left to close.
         let _ = window.update(cx, |_, window, cx| {
-            close_taking(false, window, cx, |layers| {
+            close_taking(CloseCause::Closed, window, cx, |layers| {
                 (!layers.is_empty()).then(|| std::mem::take(layers))
             })
         });
@@ -908,7 +1057,7 @@ pub fn dismiss(id: LayerId, window: &mut Window, cx: &mut App) {
     };
     let dismissal = hook.map_or(Dismissal::Close, |hook| hook(window, cx));
     if dismissal == Dismissal::Close && is_open(id, window, cx) {
-        close_as(id, true, window, cx);
+        close_as(id, CloseCause::Dismissed, window, cx);
     }
 }
 
@@ -939,6 +1088,16 @@ pub fn any_open(window: &Window, cx: &App) -> bool {
 /// [`any_open`]. A popover that never takes focus (a floating list, the terminal's link destination display) is not
 /// modal: [`any_open`] counts it, so a shortcut asking that would stop working while one shows. The dialog such a
 /// shortcut opens then sits above the popover, which is why closing the popover closes only itself ([`close`]).
+///
+/// A popover that lets Tab through ([`Popover::traps_tab`]) counts, though it is not modal either: what this answers is
+/// whether a layer holds the keyboard, which is how its callers already treat a menu, and it does. Counting it keeps
+/// the shortcuts and the page's late focus moves ([`focus::focus_control`], [`focus::choose_terminal`]) from acting
+/// while the user is in it, as they keep from acting in a menu, rather than opening a dialog over a list the user is
+/// tabbing through or pulling focus out of it to the page. That holds while focus is on the list's toggle too (the
+/// pill, which does not count as leaving the list): with the list open, Cmd+W, Rename and the quick switcher refuse
+/// there, and the page's late focus moves wait, until the list closes. It is the same test the focus coordinator's
+/// recovery uses (`top_container`), so a focused control going away inside it (a closed tunnel's row) leaves focus on
+/// the list's closest control rather than sending it home.
 pub fn focus_layer_open(window: &Window, cx: &App) -> bool {
     top_container(window, cx).is_some()
 }
@@ -949,9 +1108,46 @@ pub fn focus_layer_open(window: &Window, cx: &App) -> bool {
 /// NOTE: A popover that never takes focus ([`Popover::start`] `None`) traps nothing: Tab goes on from the control that
 /// holds focus as if the popover were not open, inside whatever layer below it holds focus (the launcher dialog around
 /// a floating list), or across the page. A list that keeps focus in its field (the launcher's folder picker, a
-/// suggestion list) is that popover, not a menu with a flag.
+/// suggestion list) is that popover, not a menu with a flag. A popover that lets Tab through ([`Popover::traps_tab`]
+/// off) traps nothing either: the trap is the topmost layer below it that does, if any, and Tab walks the popover
+/// itself as [`tab_through`] says.
 pub fn trap(window: &Window, cx: &App) -> Option<FocusHandle> {
-    top_container(window, cx)
+    let stack = stack(window, cx)?;
+    stack
+        .read(cx)
+        .layers
+        .iter()
+        .rev()
+        .find(|layer| layer.takes_focus && layer.traps_tab)
+        .map(|layer| layer.container.clone())
+}
+
+/// A popover that lets Tab through, as the focus coordinator walks it: its container and its place in the page's Tab
+/// order ([`Popover::traps_tab`]).
+pub(crate) struct TabThrough {
+    /// The popover's container, around every control of it.
+    pub(crate) container: FocusHandle,
+    /// The toggle it was opened from, which its controls follow in Tab order; `None` when its opener named none.
+    pub(crate) place: Option<FocusHandle>,
+}
+
+/// The topmost layer that holds focus, when it lets Tab through ([`Popover::traps_tab`] off): the one popover whose
+/// controls Tab walks in the page's order rather than inside a trap.
+///
+/// GPUI's Tab order is window-wide, by tab index and then by the order elements are painted, and every overlay is
+/// painted after the window's content, so in GPUI's own order a popover's controls come after every control on the
+/// page, whatever its anchor is. SPEC.md's tunnel list follows its pill instead, as the old app's list did, which was
+/// drawn inside the pill's own element: Shift+Tab from its first control reaches the pill, and Tab from its last goes
+/// on to the control after the pill. The coordinator splices the popover's controls in after its place to give that
+/// order; this hands it what it needs.
+pub(crate) fn tab_through(window: &Window, cx: &App) -> Option<TabThrough> {
+    let stack = stack(window, cx)?;
+    let stack = stack.read(cx);
+    let top = stack.layers.iter().rev().find(|layer| layer.takes_focus)?;
+    (!top.traps_tab).then(|| TabThrough {
+        container: top.container.clone(),
+        place: top.place().cloned(),
+    })
 }
 
 /// Whether focus is inside the topmost dialog or a layer above it (a menu opened from inside the dialog): where SPEC.md
@@ -974,7 +1170,8 @@ pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
 }
 
 /// The container of the topmost layer that holds focus, where focus recovers to when its holder disappears inside an
-/// open layer. A popover that never takes focus is passed over, so focus never recovers into one.
+/// open layer. A popover that never takes focus is passed over, so focus never recovers into one; a popover that lets
+/// Tab through ([`Popover::traps_tab`]) holds focus and is not passed over.
 pub(crate) fn top_container(window: &Window, cx: &App) -> Option<FocusHandle> {
     let stack = stack(window, cx)?;
     stack
@@ -1627,6 +1824,13 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 matches_width,
             } => {
                 let pressed = anchor.clone();
+                // A popover that lets Tab through closes on an outside press as when focus leaves it, returning none:
+                // the press puts focus where it lands ([`CloseCause::Left`]).
+                let why = if layer.takes_focus && !layer.traps_tab {
+                    CloseCause::Left
+                } else {
+                    CloseCause::Closed
+                };
                 // The card takes the pointer from whatever it covers, as the old app's cards did (a web page hands a press
                 // to the topmost element only). A popover has no veil, and GPUI hands a press, a click and a wheel to
                 // every element under the pointer up to the first that blocks them, so without this a click on a menu
@@ -1641,7 +1845,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                         .get()
                         .is_some_and(|bounds| bounds.contains(&event.position));
                     if !on_anchor {
-                        close(id, window, cx);
+                        close_as(id, why, window, cx);
                     }
                 });
                 PlacedPopover {

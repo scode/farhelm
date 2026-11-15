@@ -509,6 +509,7 @@ impl Opening {
                 start: Some(start),
                 anchor: self.anchor.clone(),
                 returns_to: focus::ReturnTo::Opener,
+                traps_tab: true,
             },
             &mark,
             window,
