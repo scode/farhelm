@@ -135,6 +135,10 @@ pub(crate) mod selection;
 pub(crate) mod status;
 pub(crate) mod stop;
 
+/// The home-folding rule the rows' last line uses, shared with the details bar's directory field so the two fold a path
+/// alike.
+pub(crate) use row::abbreviate_home;
+
 #[cfg(test)]
 pub(crate) mod lifecycle_tests;
 

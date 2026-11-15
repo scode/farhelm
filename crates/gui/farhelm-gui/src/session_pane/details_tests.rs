@@ -1,11 +1,14 @@
 //! Tests of the open session's details bar: which parts it draws and in what order for each kind of status, what it
 //! leaves out (a stale session's badge and age, a host nobody named, a mark for a host nobody placed), the words it
-//! uses for the local host, how its parts give way in a narrow pane, and its age moving on with the shared clock. The
-//! bar of an open session the list does not show is `carried_tests.rs`'s.
+//! uses for the local host, how its parts give way in a narrow pane, its age moving on with the shared clock, the
+//! managed-checkout mark, and the directory and command copy fields with their hidden-characters warning. The bar of
+//! an open session the list does not show is `carried_tests.rs`'s. How a copy field confirms a click is its own
+//! component's (`components/tests/copy_field.rs`); here the bar's wiring of it is.
 //!
 //! The decisions are a pure function ([`Details::of`]), tested without a window where only the decision matters.
 //! Everything else runs in a window over the helm client's fake and reads GPUI's driver record of the frame: the bar is
-//! `session-details`, its parts `session-details-status`, `-title`, `-host` (the mark), `-host-name` and `-age`. The
+//! `session-details`, its parts `session-details-status`, `-title`, `-host` (the mark), `-host-name`, `-age`,
+//! `-checkout`, `-directory` and `-command`, and the warning above it `session-details-copy-warning`. The
 //! first session of every snapshot is the open one, since it is the last visited. The layout test uses the real text
 //! system, because the test context's gives every character the same width and cannot show what is cut.
 
@@ -24,8 +27,11 @@ use serde_json::json;
 
 use super::SessionPane;
 use super::details::{
-    AGE_ID, BAR_ID, Details, HOST_MARK_ID, HOST_NAME_ID, STATUS_ID, Status, TITLE_ID,
+    AGE_ID, BAR_ID, CHECKOUT_ID, COMMAND_ID, DIRECTORY_ID, Details, HOST_MARK_ID, HOST_NAME_ID,
+    STATUS_ID, Status, TITLE_ID, WARNING_ID, directory_label,
 };
+use crate::actions::{FocusNextControl, FocusPreviousControl};
+use crate::components::{CONFIRMATION, COPIED};
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
 use crate::session_list::status::Live;
@@ -451,15 +457,9 @@ fn the_pulse_and_clock_handles_go_when_no_session_is_open(cx: &mut TestAppContex
 
 // ---- Layout, with the real text system -----------------------------------------------------------------------------
 
-/// The old bar's oversized-title case (`header.spec.ts`, "oversized title and copy fields overflow their boxes"): the
-/// bar never wraps, a title too long for it is cut with an ellipsis rather than pushing the rest out of the pane, and
-/// the live mark and the age never shrink, since a cut mark or age says nothing. The title and the host shrink in
-/// proportion to their widths, as the old bar's did, so nothing is asserted of the host beyond being on the line. Text
-/// width decides this, so it runs with the real text system and the bundled fonts. Specified: in a 420-pixel pane, a
-/// running session with a long title draws its live mark whole, its title cut short with `…`, and its age `2m` whole,
-/// all on the bar's one line and inside the pane.
-#[test]
-fn an_oversized_title_is_clipped_and_the_mark_and_age_stay_whole() {
+/// The driver record of the pane drawn alone in a window `width` pixels wide with `row` open, laid out by the real text
+/// system with the bundled fonts, since what is cut depends on real glyph widths.
+fn real_layout(width: f32, row: Fixture) -> Vec<DriverNode> {
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
         assets::UI_FONT,
     ));
@@ -469,13 +469,10 @@ fn an_oversized_title_is_clipped_and_the_mark_and_age_stay_whole() {
     let (mut fake, handle, events) = FakeHelm::new();
     let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
     cx.run_until_parked();
-    let row = active("a", 120).title(
-        "Refactor the API client so that every request retries with backoff and logs each attempt",
-    );
     fake.connect(snapshot(&[row], Vec::new()));
     cx.run_until_parked();
     let window = cx
-        .open_window(size(px(420.), px(300.)), |window, cx| {
+        .open_window(size(px(width), px(300.)), |window, cx| {
             let view = cx.new(|cx| PaneOnly::new(window, cx));
             cx.new(|cx| Root::new(view, window, cx))
         })
@@ -493,6 +490,23 @@ fn an_oversized_title_is_clipped_and_the_mark_and_age_stay_whole() {
             })
             .unwrap();
     }
+    nodes
+}
+
+/// The old bar's oversized-title case (`header.spec.ts`, "oversized title and copy fields overflow their boxes"): the
+/// bar never wraps, a title too long for it is cut with an ellipsis rather than pushing the rest out of the pane, and
+/// the live mark and the age never shrink, since a cut mark or age says nothing. The title and the host shrink in
+/// proportion to their widths, as the old bar's did, so nothing is asserted of the host beyond being on the line (the
+/// copy fields have given up all their width by then; `the_copy_fields_give_way_before_the_title_and_host` is their
+/// case). Text width decides this, so it runs with the real text system and the bundled fonts. Specified: in a
+/// 420-pixel pane, a running session with a long title draws its live mark whole, its title cut short with `…`, and
+/// its age `2m` whole, all on the bar's one line and inside the pane.
+#[test]
+fn an_oversized_title_is_clipped_and_the_mark_and_age_stay_whole() {
+    let row = active("a", 120).title(
+        "Refactor the API client so that every request retries with backoff and logs each attempt",
+    );
+    let nodes = real_layout(420., row);
     let bounds = |id: &str| node(&nodes, id).unwrap_or_else(|| panic!("{id} was drawn"));
     let status = bounds(STATUS_ID);
     let title = painted_within(&nodes, TITLE_ID);
@@ -518,4 +532,405 @@ fn an_oversized_title_is_clipped_and_the_mark_and_age_stay_whole() {
             part.bounds
         );
     }
+}
+
+/// SPEC.md, "Terminal experience": the copy fields "ellipsize before the session name or host when the bar runs out of
+/// room". The old bar's `flex: 0 3 auto` did not quite: shrinking is weighted by width, so beside a long command its
+/// title was cut too, and this bar follows SPEC.md there instead (the parity doc records it). Text width decides
+/// this, so it runs with the real text system. Specified: in a 700-pixel pane, a running session titled `Refactor the
+/// API client` on `buildbox`, launched with a command far too long for the bar, draws its title and host whole and its
+/// command cut short with `…`.
+#[test]
+fn the_copy_fields_give_way_before_the_title_and_host() {
+    let command = "/home/user/.cargo/bin/farhelm-fixtures fake-agent --script basic --transcript \
+                   /home/user/farhelm-gpui-worker/target/debug/build/fixtures/transcript-basic.txt";
+    let row = active("a", 120)
+        .title("Refactor the API client")
+        .invocation(command);
+    let nodes = real_layout(700., row);
+    assert_eq!(
+        painted_within(&nodes, TITLE_ID),
+        ["Refactor the API client"]
+    );
+    assert_eq!(painted_within(&nodes, HOST_NAME_ID), ["buildbox"]);
+    let shown = painted_within(&nodes, COMMAND_ID);
+    assert!(
+        shown.len() == 1 && shown[0].starts_with("/home") && shown[0].ends_with('…'),
+        "the command is cut short: {shown:?}"
+    );
+}
+
+// ---- The managed checkout and the copy fields -----------------------------------------------------------------------
+
+/// What the test clipboard holds, as text.
+fn clipboard(cx: &mut VisualTestContext) -> Option<String> {
+    cx.read_from_clipboard().and_then(|item| item.text())
+}
+
+/// The hidden-characters warning's wording for the command line, exactly as the old bar wrote it.
+const COMMAND_WARNING: &str = "⚠ The copied command contains hidden characters, displayed as <U+…>";
+
+/// A command line with a right-to-left override and a line break in it, the old bar's hidden-characters case
+/// (`header.spec.ts`, "details copy shows escaped peer text, copies raw bytes, and warns upward").
+const HIDDEN_COMMAND: &str = "codex --prompt \u{202E}abc\n# tail";
+
+/// SPEC.md: "Directory display still abbreviates the home directory to `~`", the session list's fold. The old bar added
+/// one guard: the fold must not remove a presentation-unsafe character, since the copy holds it and the shortened label
+/// would then hide its escape. Specified: `/home/alice/src` shows as `~/src`, and so does a hidden character after the
+/// account, which the fold keeps; one inside the account segment keeps the whole path; a path outside a home is
+/// unchanged.
+#[test]
+fn the_directory_folds_its_home_unless_the_fold_hides_a_character() {
+    assert_eq!(directory_label("/home/alice/src"), "~/src");
+    assert_eq!(directory_label("/home/alice/s\u{202E}rc"), "~/s\u{202E}rc");
+    assert_eq!(
+        directory_label("/home/al\u{202E}ice/src"),
+        "/home/al\u{202E}ice/src"
+    );
+    assert_eq!(directory_label("/tmp/work"), "/tmp/work");
+}
+
+/// SPEC.md: the bar ends with "the managed-checkout branch mark when present, directory, and command line", the two
+/// last as muted click-to-copy buttons (their order is the `session-details-bar` golden's). Each field shows its value
+/// (the directory folded), is named by it, and its hover help is the whole recorded value with "— click to copy", as
+/// the old tooltip and accessible description were. A click copies the recorded bytes, not what the field shows (the
+/// old `header.spec.ts` "copy full values" case), and an ordinary value has nothing hidden to warn about. Specified,
+/// for a session in `/home/user/src/a` launched as `codex --model gpt-5`: the directory paints and is named `~/src/a`,
+/// with the help `/home/user/src/a — click to copy`; the command paints and is named `codex --model gpt-5`, with the
+/// help `codex --model gpt-5 — click to copy`; a click on the directory puts `/home/user/src/a` on the clipboard and
+/// draws no warning.
+#[gpui::test]
+fn the_copy_fields_show_name_help_and_copy_their_values(cx: &mut TestAppContext) {
+    let row = active("a", 120).invocation("codex --model gpt-5");
+    let (_fake, cx) = open_main(cx, snapshot(&[row], Vec::new()));
+    let nodes = frame(cx);
+    assert_eq!(painted_within(&nodes, DIRECTORY_ID), ["~/src/a"]);
+    assert_eq!(painted_within(&nodes, COMMAND_ID), ["codex --model gpt-5"]);
+    assert_eq!(label(cx, DIRECTORY_ID).as_deref(), Some("~/src/a"));
+    assert_eq!(
+        label(cx, COMMAND_ID).as_deref(),
+        Some("codex --model gpt-5")
+    );
+    assert_eq!(
+        hover(cx, DIRECTORY_ID).as_deref(),
+        Some("/home/user/src/a — click to copy")
+    );
+    assert_eq!(
+        hover(cx, COMMAND_ID).as_deref(),
+        Some("codex --model gpt-5 — click to copy")
+    );
+    test_support::click(cx, DIRECTORY_ID);
+    assert_eq!(clipboard(cx).as_deref(), Some("/home/user/src/a"));
+    assert!(
+        node(&frame(cx), WARNING_ID).is_none(),
+        "nothing hidden: no warning"
+    );
+}
+
+/// The old bar's hidden-characters case: the field shows a command's hidden characters escaped and copies them raw,
+/// and since a command pasted into a shell runs the clipboard's version, a warning opens upward from the bar, inside
+/// the window, for as long as the click's confirmation shows. Specified: before the click the command paints
+/// `codex --prompt <U+202E>abc<U+000A># tail` and nothing painted holds a raw U+202E; a click copies the raw command;
+/// the warning, a status named with the old wording exactly, sits above the bar, unclipped and inside the window; 1.5
+/// seconds later it is gone.
+#[gpui::test]
+fn copying_hidden_characters_warns_upward_while_the_click_is_confirmed(cx: &mut TestAppContext) {
+    let row = active("a", 120).invocation(HIDDEN_COMMAND);
+    let (_fake, cx) = open_main(cx, snapshot(&[row], Vec::new()));
+    let nodes = frame(cx);
+    assert_eq!(
+        painted_within(&nodes, COMMAND_ID),
+        ["codex --prompt <U+202E>abc<U+000A># tail"]
+    );
+    assert!(
+        nodes
+            .iter()
+            .flat_map(|node| &node.texts)
+            .all(|text| !text.text.contains('\u{202E}')),
+        "no raw override reaches the screen"
+    );
+    test_support::click(cx, COMMAND_ID);
+    assert_eq!(clipboard(cx).as_deref(), Some(HIDDEN_COMMAND));
+    let nodes = frame(cx);
+    let warning = node(&nodes, WARNING_ID).expect("the warning is drawn");
+    assert_eq!(warning.role, Some(gpui::Role::Status));
+    assert_eq!(warning.label.as_deref(), Some(COMMAND_WARNING));
+    let bar = node(&nodes, BAR_ID).expect("the bar is drawn");
+    let window = cx.update(|window, _| window.viewport_size());
+    assert!(
+        warning.bounds.bottom() <= bar.bounds.top(),
+        "above the bar: {:?} {:?}",
+        warning.bounds,
+        bar.bounds
+    );
+    assert!(
+        warning.bounds.left() >= px(0.)
+            && warning.bounds.top() >= px(0.)
+            && warning.bounds.right() <= window.width,
+        "inside the window: {:?}",
+        warning.bounds
+    );
+    assert_eq!(warning.visible_bounds, warning.bounds, "not clipped");
+    test_support::advance(cx, CONFIRMATION);
+    assert!(
+        node(&frame(cx), WARNING_ID).is_none(),
+        "gone with the confirmation"
+    );
+}
+
+/// The warning names what was copied: copying a directory holding a hidden character warns about the folder (the
+/// command's wording is the case above). Specified: a click on `/home/al<U+202E>ice/src` copies the raw path and the
+/// warning reads `⚠ The copied folder contains hidden characters, displayed as <U+…>`.
+#[gpui::test]
+fn copying_a_hidden_character_in_the_directory_warns_for_the_folder(cx: &mut TestAppContext) {
+    let row = active("a", 120).cwd("/home/al\u{202E}ice/src");
+    let (_fake, cx) = open_main(cx, snapshot(&[row], Vec::new()));
+    test_support::click(cx, DIRECTORY_ID);
+    assert_eq!(clipboard(cx).as_deref(), Some("/home/al\u{202E}ice/src"));
+    assert_eq!(
+        label(cx, WARNING_ID).as_deref(),
+        Some("⚠ The copied folder contains hidden characters, displayed as <U+…>")
+    );
+}
+
+/// The old `header.spec.ts` case "copied command warning survives a safe metadata refresh": the warning describes the
+/// bytes the click copied, so a refresh that makes the value plain during the confirmation must neither take the
+/// warning away nor touch the clipboard, while the help already names the new value. Specified: after copying the hidden
+/// command, the helm pushes the session with `codex --model gpt-5`; the field still paints `✓ Copied`, the warning is
+/// still drawn, the clipboard still holds the hidden command, and the help names the new command; 1.5 seconds after the
+/// click the warning is gone and the field shows the new command.
+#[gpui::test]
+fn the_warning_survives_a_refresh_that_makes_the_value_plain(cx: &mut TestAppContext) {
+    let row = |invocation: &str| active("a", 120).invocation(invocation);
+    let (mut fake, cx) = open_main(cx, snapshot(&[row(HIDDEN_COMMAND)], Vec::new()));
+    test_support::click(cx, COMMAND_ID);
+    assert!(
+        node(&frame(cx), WARNING_ID).is_some(),
+        "the premise: a warning"
+    );
+    fake.push(change(
+        listing_meta(&["a"], 1, false),
+        &[row("codex --model gpt-5")],
+        &[],
+    ));
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert_eq!(painted_within(&nodes, COMMAND_ID), [COPIED]);
+    assert!(node(&nodes, WARNING_ID).is_some(), "the warning holds");
+    assert_eq!(clipboard(cx).as_deref(), Some(HIDDEN_COMMAND));
+    assert_eq!(
+        hover(cx, COMMAND_ID).as_deref(),
+        Some("codex --model gpt-5 — click to copy")
+    );
+    test_support::advance(cx, CONFIRMATION);
+    let nodes = frame(cx);
+    assert!(node(&nodes, WARNING_ID).is_none());
+    assert_eq!(painted_within(&nodes, COMMAND_ID), ["codex --model gpt-5"]);
+}
+
+/// The old managed-checkout mark (`ManagedCheckoutMark` in `icons.rs` at the reference commit) is named for the
+/// repository and explains the checkout in its hover: where it is, the session's own folder when that is not the
+/// checkout's (so a subdirectory's location stays known), and that the checkout goes to the trash with its last
+/// session. A session without a checkout shows no mark (`github-checkouts.spec.ts`: "an unmanaged session shows its
+/// directory and no mark"). Specified: the helm fixture's checkout of `octo/widgets` at `/home/user/src/widgets`, for
+/// a session in `/home/user/src/a`, names the mark `Managed checkout of octo/widgets` and its help is exactly the old
+/// tooltip with `Session folder: /home/user/src/a.`; for a session in the checkout's own folder the help has no
+/// session folder; an unmanaged session draws no mark and still draws its directory.
+#[gpui::test]
+fn the_checkout_mark_names_the_repository_and_explains_the_checkout(cx: &mut TestAppContext) {
+    let rows = [
+        active("a", 120),
+        active("b", 120).cwd("/home/user/src/widgets"),
+        active("c", 120).unmanaged(),
+    ];
+    let (_fake, cx) = open_main(cx, snapshot(&rows, Vec::new()));
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise");
+    assert_eq!(
+        label(cx, CHECKOUT_ID).as_deref(),
+        Some("Managed checkout of octo/widgets")
+    );
+    assert_eq!(
+        hover(cx, CHECKOUT_ID).as_deref(),
+        Some(
+            "Managed checkout of octo/widgets at /home/user/src/widgets. Session folder: /home/user/src/a. \
+             Farhelm made the checkout folder for its first session. When the last session using it is deleted, the \
+             checkout moves to the trash."
+        )
+    );
+    test_support::click(cx, "session-row-b");
+    assert_eq!(
+        hover(cx, CHECKOUT_ID).as_deref(),
+        Some(
+            "Managed checkout of octo/widgets at /home/user/src/widgets. Farhelm made the checkout folder for its \
+             first session. When the last session using it is deleted, the checkout moves to the trash."
+        )
+    );
+    test_support::click(cx, "session-row-c");
+    let nodes = frame(cx);
+    assert!(node(&nodes, CHECKOUT_ID).is_none(), "no checkout, no mark");
+    assert_eq!(painted_within(&nodes, DIRECTORY_ID), ["~/src/c"]);
+}
+
+/// SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar." The bar is drawn after the terminal, so
+/// its copy fields come after it in Tab's order, the directory first. (The terminal keeps Tab itself for its program,
+/// so the walk is driven by the focus coordinator's own step actions, which Tab and Option-Tab dispatch elsewhere.)
+/// Specified: with the open session's terminal focused, the next control is the directory field, the one after it the
+/// command field, and stepping back twice returns to the terminal.
+#[gpui::test]
+fn the_copy_fields_follow_the_terminal_in_tab_order(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot(&[active("a", 120)], Vec::new()));
+    assert!(
+        test_support::terminal_focused(cx),
+        "the premise: the terminal is home"
+    );
+    cx.dispatch_action(FocusNextControl);
+    assert_eq!(test_support::focused_id(cx).as_deref(), Some(DIRECTORY_ID));
+    cx.dispatch_action(FocusNextControl);
+    assert_eq!(test_support::focused_id(cx).as_deref(), Some(COMMAND_ID));
+    cx.dispatch_action(FocusPreviousControl);
+    cx.dispatch_action(FocusPreviousControl);
+    let _ = frame(cx);
+    assert!(test_support::terminal_focused(cx), "back on the terminal");
+}
+
+/// A confirmation belongs to the open session: the old view was keyed by the session, so choosing another one started
+/// its bar afresh, and a "✓ Copied" carried over would claim a copy the user never made of that session's value.
+/// Specified: after a click on a's directory, choosing b shows b's directory, not `✓ Copied`, and choosing a again
+/// within the 1.5 seconds shows a's directory too.
+#[gpui::test]
+fn a_confirmation_does_not_follow_another_selection(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(
+        cx,
+        snapshot(&[active("a", 120), active("b", 120)], Vec::new()),
+    );
+    test_support::click(cx, DIRECTORY_ID);
+    assert_eq!(
+        painted_within(&frame(cx), DIRECTORY_ID),
+        [COPIED],
+        "the premise"
+    );
+    test_support::click(cx, "session-row-b");
+    assert_eq!(painted_within(&frame(cx), DIRECTORY_ID), ["~/src/b"]);
+    test_support::click(cx, "session-row-a");
+    assert_eq!(painted_within(&frame(cx), DIRECTORY_ID), ["~/src/a"]);
+}
+
+/// The old bar's directory field showed `(empty)` for an empty path and `(whitespace only: N characters)` for a blank
+/// one (its `display_peer` markers), so a field never shows nothing; an empty field would be a button a few pixels wide
+/// with no name. The command line takes the same markers here (the old one showed nothing). The copy keeps the raw
+/// value. Specified: a session recorded with an empty directory and a command of three spaces paints and names
+/// `(empty)` and `(whitespace only: 3 characters)`, and a click on the command copies the three spaces.
+#[gpui::test]
+fn an_empty_or_blank_value_shows_the_old_marker_and_copies_the_raw_bytes(cx: &mut TestAppContext) {
+    let row = active("a", 120).cwd("").invocation("   ");
+    let (_fake, cx) = open_main(cx, snapshot(&[row], Vec::new()));
+    let nodes = frame(cx);
+    assert_eq!(painted_within(&nodes, DIRECTORY_ID), ["(empty)"]);
+    assert_eq!(
+        painted_within(&nodes, COMMAND_ID),
+        ["(whitespace only: 3 characters)"]
+    );
+    assert_eq!(label(cx, DIRECTORY_ID).as_deref(), Some("(empty)"));
+    assert_eq!(
+        label(cx, COMMAND_ID).as_deref(),
+        Some("(whitespace only: 3 characters)")
+    );
+    test_support::click(cx, COMMAND_ID);
+    assert_eq!(clipboard(cx).as_deref(), Some("   "));
+}
+
+/// The old managed-checkout mark explained a checkout in a disposable environment differently: Delete discards it
+/// rather than moving it to the trash, and the environment's end removes it with every unpushed change. A user reading
+/// the ordinary wording there would expect the trash to keep their work. Specified: for a session on a host that is
+/// session-owned and that the helm describes as an environment, the mark's help is exactly the old environment
+/// wording; once the helm pushes the same host, still session-owned, without the environment description, the help is
+/// the ordinary wording, so both halves of the rule are needed.
+#[gpui::test]
+fn the_checkout_mark_explains_an_environments_checkout(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView, KeyedEntry};
+    use farhelm_proto::{EnvironmentHostView, LaunchTarget, Place};
+    let mut registry = hosts(&[local(), remote(2, "buildbox")]);
+    let entry = &mut registry.entries[1];
+    let mut view: HostView = serde_json::from_value(entry.value.clone()).unwrap();
+    assert_eq!(view.id, 2, "the premise: the session's host");
+    view.is_session_owned = true;
+    view.environment = Some(EnvironmentHostView {
+        name: "sandbox-1".into(),
+        place_name: None,
+        target: LaunchTarget::Environment {
+            recipe: "default".into(),
+            place: Place::TensorlakeAccount,
+        },
+        tunnels: None,
+        credential_warning: None,
+    });
+    entry.value = serde_json::to_value(&view).unwrap();
+    let meta = registry.meta.clone();
+    let row = active("a", 120).cwd("/home/user/src/widgets");
+    let (mut fake, cx) = open_main(cx, snapshot(&[row], vec![registry]));
+    assert_eq!(
+        hover(cx, CHECKOUT_ID).as_deref(),
+        Some(
+            "Managed checkout of octo/widgets at /home/user/src/widgets. Delete discards this checkout with its \
+             session, without moving it to the trash, unless another session still uses it. Deleting the \
+             environment's last session, or the whole environment, permanently removes every checkout and unpushed \
+             change in it."
+        )
+    );
+
+    view.environment = None;
+    fake.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta,
+        upsert: vec![KeyedEntry {
+            key: HostView::key(2),
+            value: serde_json::to_value(&view).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+    assert_eq!(
+        hover(cx, CHECKOUT_ID).as_deref(),
+        Some(
+            "Managed checkout of octo/widgets at /home/user/src/widgets. Farhelm made the checkout folder for its \
+             first session. When the last session using it is deleted, the checkout moves to the trash."
+        )
+    );
+}
+
+/// The warning opens upward from the bar inside the bar's own width, where the old one was capped at 80% of the
+/// window (a recorded deviation): in a narrow pane it must wrap onto more lines rather than run past the window's
+/// edge, since it is the one thing such a copy must not leave unsaid. The pane is drawn alone, so it takes the whole
+/// window. Specified: after copying a command with hidden characters in a wide window, the warning is drawn; once the
+/// window is 220 pixels wide, the warning is still drawn, inside the window and unclipped, narrower and taller than it
+/// was, its words wrapped onto more lines.
+#[gpui::test]
+fn the_warning_wraps_inside_a_narrow_window(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(snapshot(
+        &[active("a", 120).invocation(HIDDEN_COMMAND)],
+        Vec::new(),
+    ));
+    cx.run_until_parked();
+    let (_view, cx) = test_support::open_view(cx, PaneOnly::new);
+    test_support::click(cx, COMMAND_ID);
+    let wide = node(&frame(cx), WARNING_ID)
+        .expect("the premise: the warning is drawn")
+        .bounds;
+    cx.simulate_resize(size(px(220.), px(500.)));
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    let warning = node(&nodes, WARNING_ID).expect("the warning is still drawn");
+    assert!(
+        warning.bounds.left() >= px(0.) && warning.bounds.right() <= px(220.),
+        "inside the window: {:?}",
+        warning.bounds
+    );
+    assert_eq!(warning.visible_bounds, warning.bounds, "not clipped");
+    assert!(
+        warning.bounds.size.width < wide.size.width
+            && warning.bounds.size.height > wide.size.height,
+        "wrapped: {:?} against {wide:?}",
+        warning.bounds
+    );
 }

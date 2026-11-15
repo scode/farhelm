@@ -902,8 +902,13 @@
     },
     {
       "golden": "session-details-bar",
-      "title": "The open session's details bar under its terminal: running on the local host, waiting, exited with a stop annotation, interrupted, a launch failure cut short, unclassified (no badge), no host name, and stale (title and host only), then the running one in a narrow pane",
+      "title": "The open session's details bar under its terminal: running on the local host, waiting, exited with a stop annotation, interrupted, a launch failure cut short, unclassified (no badge), no host name and no managed checkout, and stale (title and host only), each with its checkout mark and copy fields, then the running one in a narrow pane",
       "reference": "main-running-session"
+    },
+    {
+      "golden": "session-details-copy-warning",
+      "title": "The details bar just after a copy of a command line holding hidden characters: the command field confirming, and the warning above the bar",
+      "reference": null
     },
     {
       "golden": "session-list",

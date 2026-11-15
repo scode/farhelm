@@ -6,8 +6,9 @@
 //! user chose), and draws the session's top row above them ([`header`]: the lifecycle actions, and the left region
 //! holding the set's tab strip and the open-tunnels pill), with the lines a long Restart or Replace, a refusal and a
 //! header Replace's YOLO question add between the two, and the details bar below it ([`details`]: the session's status,
-//! title, host and age). Neither row keeps anything that belongs to a session: both read the store and the operation
-//! store while they draw.
+//! title, host, age, managed checkout, directory and command line). Neither row keeps anything that belongs to a
+//! session's state: both read the store and the operation store while they draw. The bar's copy fields' brief
+//! confirmations are the one thing kept, with the mounted terminals, so they go when the selection does.
 //!
 //! - **One set of terminals, remade on every change of selection.** Choosing another session drops the set (which ends
 //!   every one of its streams, tabs included) and makes a new one with a fresh attachment lease. This is the old app's
@@ -55,9 +56,8 @@
 //! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
-//! NOTE: Not ported yet: the details bar's managed-checkout mark and copy buttons, and the card a session without
-//! terminal contents shows instead. The scrim covers whichever terminal is shown, as the old one covered every pane; a
-//! Delete holds back the notices of all of them.
+//! NOTE: Not ported yet: the card a session without terminal contents shows instead. The scrim covers whichever
+//! terminal is shown, as the old one covered every pane; a Delete holds back the notices of all of them.
 
 pub(crate) mod details;
 pub(crate) mod header;
@@ -152,12 +152,15 @@ pub struct SessionPane {
     _observing: Vec<Subscription>,
 }
 
-/// The terminals the pane shows (the session's agent terminal and its tabs), and the session they are for.
+/// The terminals the pane shows (the session's agent terminal and its tabs), the session they are for, and that
+/// session's details bar's copy confirmations, which are made and dropped with the terminals (the old view's keyed
+/// remount reset them the same way).
 struct Mounted {
     key: String,
     set: Entity<TerminalSet>,
     /// Keeps home on the set's shown terminal as the user chooses tabs and tabs come and go.
     _home: Option<Subscription>,
+    copies: details::Copies,
 }
 
 impl Mounted {
@@ -189,6 +192,7 @@ impl Mounted {
             key,
             set,
             _home: None,
+            copies: details::Copies::new(cx),
         })
     }
 }
@@ -313,12 +317,14 @@ impl Render for SessionPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Counted in test builds, so a test can tell what redraws the pane (the details bar's clock, say).
         crate::render_count::record("session-pane", cx);
-        let shown = self
-            .mounted
-            .current(cx)
-            .as_ref()
-            .map(|mounted| (mounted.key.clone(), mounted.set.clone()));
-        let Some((key, terminals)) = shown else {
+        let shown = self.mounted.current(cx).as_ref().map(|mounted| {
+            (
+                mounted.key.clone(),
+                mounted.set.clone(),
+                mounted.copies.clone(),
+            )
+        });
+        let Some((key, terminals, copies)) = shown else {
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
@@ -333,12 +339,12 @@ impl Render for SessionPane {
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
         let header = self.header_row(&key, step, window, cx);
         let lines = self.header_lines(&key, step, cx);
-        let bar = self.details_bar(&key, window, cx);
+        let bar = self.details_bar(&key, &copies, window, cx);
         // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then the terminal,
         // which takes the rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines
         // show only while there is something to say), then the details bar. The bar comes last in drawing order as
-        // well as on screen, so its controls, when it has some, follow the top row and the terminal in Tab's order
-        // (SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar").
+        // well as on screen, so its controls follow the top row and the terminal in Tab's order (SPEC.md: "Keyboard
+        // order follows the top row, terminal, then bottom bar").
         div()
             .flex()
             .flex_col()
@@ -364,14 +370,15 @@ impl Render for SessionPane {
 impl SessionPane {
     /// The details bar for the open session filed under `key`, read from the store by key whether or not the list
     /// shows it, or `None` when the store holds no row for it (see [`details`]'s module docs) or the window has no UI
-    /// session. Takes or drops the pulse and clock handles the bar
-    /// needs for this frame, as the session list does for its rows.
+    /// session. Its copy fields confirm as `copies` records. Takes or drops the pulse and clock handles the bar needs
+    /// for this frame, as the session list does for its rows.
     fn details_bar(
         &mut self,
         key: &str,
+        copies: &details::Copies,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
+    ) -> Option<Div> {
         let now = age::seconds(ticker::wall_now(cx));
         let shown = session::current_store(cx).and_then(|store| {
             let collections = store.read(cx).collections();
@@ -389,7 +396,7 @@ impl SessionPane {
             self.clock = ages.then(|| ticker::clock(cx));
         }
         let pulse = self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx));
-        shown.map(|shown| details::bar(shown, pulse, cx))
+        shown.map(|shown| details::bar(shown, copies, pulse, cx))
     }
 }
 
