@@ -858,3 +858,665 @@ fn a_preview_from_another_installation_is_refused(cx: &mut TestAppContext) {
         )
     );
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Naming, Clone of a managed checkout
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// A command-launch session titled "source" in `/src/project`, in a managed checkout of `current` (its working copy)
+/// and launched as a checkout of `launched` (its provenance).
+fn checkout_session(
+    current: Option<GithubRepo>,
+    launched: Option<GithubRepo>,
+) -> farhelm_proto::SessionInfo {
+    let mut info = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
+        farhelm_proto::CommandLaunch {
+            command: "true".into(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        },
+    ));
+    info.working_copy = current.map(|repo| farhelm_proto::WorkingCopyInfo {
+        id: "copy-1".into(),
+        repo,
+        canonical_path: "/work/bar-1".into(),
+        origin_session_id: "s0".into(),
+    });
+    info.github_repo = launched;
+    info
+}
+
+/// SPEC.md, "Managed checkouts": "Clone of a session in a managed checkout starts on a managed checkout of that
+/// repository, preferring its current checkout association over its launch provenance", named `<title>-clone`; "the name
+/// field shows the effective name"; "Choosing an existing folder again restores the source's original directory and
+/// copied title; choosing the source repository again restores Clone's default name"; Clone into a different
+/// repository is unnamed; "editing the name makes it explicit". Specified: each of those on one Clone, and that a
+/// session with only launch provenance still clones onto its repository.
+#[test]
+fn a_clone_of_a_managed_checkout_starts_on_its_repository_named_clone() {
+    let session = checkout_session(Some(repo("acme", "bar")), Some(repo("acme", "old")));
+    let mut draft = LaunchDraft::clone_of(&session, Some(1));
+    let checkout = draft
+        .checkout
+        .clone()
+        .expect("a Clone of a checkout starts on one");
+    assert_eq!(
+        checkout.repo,
+        Some(repo("acme", "bar")),
+        "the current association wins"
+    );
+    assert!(!draft.name.is_touched(), "seeded, not chosen");
+    assert_eq!(draft.checkout_title(), "source-clone");
+    assert_eq!(draft.shown_name(), "source-clone");
+    draft.choose_destination(DestinationKind::Folder);
+    assert_eq!(
+        (draft.folder.value().as_str(), draft.shown_name().as_str()),
+        ("/src/project", "source"),
+        "Folder brings back the source's folder and title"
+    );
+    draft.choose_repository(repo("acme", "other"));
+    assert_eq!(draft.checkout_title(), "", "another repository is unnamed");
+    draft.choose_repository(repo("acme", "bar"));
+    assert_eq!(
+        draft.checkout_title(),
+        "source-clone",
+        "the source's repository again"
+    );
+    draft.edit_name("mine".into());
+    assert_eq!(draft.checkout_title(), "mine", "a typed name is exact");
+
+    let provenance = checkout_session(None, Some(repo("acme", "old")));
+    let draft = LaunchDraft::clone_of(&provenance, Some(1));
+    assert_eq!(
+        draft.checkout.and_then(|checkout| checkout.repo),
+        Some(repo("acme", "old"))
+    );
+    let plain = checkout_session(None, None);
+    assert_eq!(LaunchDraft::clone_of(&plain, Some(1)).checkout, None);
+}
+
+/// A repository identity the shared parser would not produce (a capital, an invisible character) did not come from the
+/// helm, so a Clone does not carry it into the editable field; the old launcher showed such text escaped behind a
+/// "Clear repository" button instead. The Clone still opens on a managed checkout, with nothing chosen, so one press of
+/// Launch cannot start it inside the source's own checkout (SPEC.md: "Empty, invalid or unselected repository input
+/// cannot launch using a previous folder"). Specified: for a capitalized and a formatting-character owner, the Clone is
+/// a managed checkout with no repository chosen and an empty field.
+#[test]
+fn a_clone_carries_only_a_repository_the_shared_parser_reads_back() {
+    for owner in ["Acme", "ac\u{202e}me"] {
+        let session = checkout_session(Some(repo(owner, "bar")), None);
+        let draft = LaunchDraft::clone_of(&session, Some(1));
+        let checkout = draft.checkout.expect("still a managed checkout");
+        assert_eq!(
+            (checkout.field_text(), checkout.repo),
+            (String::new(), None),
+            "{owner:?}"
+        );
+        assert_eq!(draft.clone_source, None);
+    }
+}
+
+/// SPEC.md: Clone's default and a template base name use "the lowest free `<title>-clone-N`" / "its first free
+/// candidate, from the base itself through `-2` to `-50`", each advanced only by a preview that finds the name taken;
+/// "Changing hosts or repositories restarts the suffix search"; "A typed name or a template's fixed name remains a
+/// conflict rather than gaining a suffix"; and the cap "leaves the conflict visible". Specified: a taken `source-clone`
+/// moves to `-2` and `-3`; an answer about a name the draft no longer holds moves nothing; a host change starts over; a
+/// template base name numbers the same way; a fixed or typed name never moves; at `-50` it stops.
+#[test]
+fn a_taken_default_name_moves_on_and_an_exact_one_stays() {
+    let session = checkout_session(Some(repo("acme", "bar")), None);
+    let mut draft = LaunchDraft::clone_of(&session, Some(1));
+    assert!(draft.advance_checkout_name("source-clone"));
+    assert_eq!(draft.checkout_title(), "source-clone-2");
+    assert!(
+        !draft.advance_checkout_name("source-clone"),
+        "a late answer about the old name"
+    );
+    assert!(draft.advance_checkout_name("source-clone-2"));
+    assert_eq!(draft.checkout_title(), "source-clone-3");
+    draft.choose_host(2, "~".into());
+    assert_eq!(
+        draft.checkout_title(),
+        "source-clone",
+        "another host starts over"
+    );
+    for _ in 2..=50 {
+        let title = draft.checkout_title();
+        assert!(draft.advance_checkout_name(&title));
+    }
+    assert_eq!(draft.checkout_title(), "source-clone-50");
+    assert!(!draft.advance_checkout_name("source-clone-50"), "the cap");
+
+    let mut template = LaunchDraft::new(Some(1), "~".into(), None);
+    template.edit_name("review".into());
+    template.set_template_name_kind(farhelm_proto::launcher::TemplateNameKind::Base);
+    template.choose_repository(repo("acme", "bar"));
+    assert!(template.advance_checkout_name("review"));
+    assert_eq!(template.checkout_title(), "review-2");
+    template.set_template_name_kind(farhelm_proto::launcher::TemplateNameKind::Fixed);
+    assert_eq!(template.checkout_title(), "review", "a fixed name is exact");
+    assert!(!template.advance_checkout_name("review"));
+    template.edit_name("typed".into());
+    assert!(
+        !template.advance_checkout_name("typed"),
+        "a typed name is exact"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Taken names, lost races, the inline setup and the guarded answer, in the dialog
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The supervisor's refusal of a taken checkout name, as the helm passes it on.
+const TAKEN: &str = "a directory with that checkout name already exists; choose another title";
+
+/// Answer what the window sent on opening, in the order sent (the fake answers in order): the catalog read with no
+/// models, everything else before the first checkout preview with an empty answer, as the shared `answer_catalog`
+/// does. Returns the commands from that preview on, still unanswered: a draft that opens on a chosen repository asks for
+/// its preview at once, which `answer_catalog` would answer empty.
+fn answer_catalog_keeping(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
+    let mut sent = sent(helm, cx);
+    sent.sort_by_key(|command| command.id);
+    let first_preview = sent
+        .iter()
+        .position(|command| command.path == PREVIEW)
+        .expect("the premise: the opening draft asked for its preview");
+    let rest = sent.split_off(first_preview);
+    let mut read = false;
+    for command in sent {
+        if command.path.ends_with("launch-catalog") {
+            read = true;
+            helm.reply(command.id, 200, Some(json!([])));
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    assert!(
+        read,
+        "the premise: the launcher read the catalog before the preview"
+    );
+    settle(cx);
+    rest
+}
+
+/// Answer the one preview among `commands` (which start with it, unanswered, in the order sent) with `status` and
+/// `body`, then the commands after it as `answer_catalog_keeping` answers them, returning what the preview asked.
+fn answer_preview_in(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    commands: &[FakeCommand],
+    status: u16,
+    body: Value,
+) -> Value {
+    let previews = to(commands, PREVIEW);
+    let [preview] = &previews[..] else {
+        panic!("one preview, not {}", previews.len());
+    };
+    helm.reply(preview.id, status, Some(body));
+    for command in commands.iter().filter(|command| command.id > preview.id) {
+        if command.path.ends_with("launch-catalog") {
+            helm.reply(command.id, 200, Some(json!([])));
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    settle(cx);
+    preview.body.clone().unwrap()
+}
+
+/// Answer the one preview among the commands sent since the last call with `status` and `body`, returning what it
+/// asked.
+fn answer_preview(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    status: u16,
+    body: Value,
+) -> Value {
+    let previews = to(&sent(helm, cx), PREVIEW);
+    let [preview] = &previews[..] else {
+        panic!("one preview, not {}", previews.len());
+    };
+    helm.reply(preview.id, status, Some(body));
+    settle(cx);
+    preview.body.clone().unwrap()
+}
+
+/// SPEC.md: Clone's default name "uses ... the lowest free `<source title>-clone-N`" and "preview and launch use it
+/// alike". Specified, on a Clone opened on a session in a checkout of `acme/bar`: the first preview asks for
+/// `source-clone`; the helm says it is taken; the next asks for `source-clone-2`, which the name field then shows, and
+/// whose ready answer is the folder shown.
+#[gpui::test]
+fn a_taken_clone_name_is_previewed_again_with_the_next_suffix(cx: &mut TestAppContext) {
+    let mut draft =
+        LaunchDraft::clone_of(&checkout_session(Some(repo("acme", "bar")), None), Some(1));
+    draft.choose_tab(Tab::Command);
+    draft.edit_command("true".into());
+    draft.choose_command_yolo(false);
+    let (mut helm, cx) = launcher_on(cx, draft);
+    let first = answer_catalog_keeping(&mut helm, cx);
+    let asked = answer_preview_in(&mut helm, cx, &first, 409, json!(TAKEN));
+    assert_eq!(asked["title"], json!("source-clone"));
+    let asked = answer_preview(
+        &mut helm,
+        cx,
+        200,
+        preview_reply("/work/bar-source-clone-2", "bar-source-clone-2", 3),
+    );
+    assert_eq!(asked["title"], json!("source-clone-2"));
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.name.text(cx).to_string()),
+        "source-clone-2"
+    );
+    assert_eq!(checkout_folder(cx), "/work/bar-source-clone-2");
+}
+
+/// SPEC.md: "If another create wins the displayed path, Launch reports the conflict and obtains a new preview; it
+/// never submits automatically". Specified: with a ready preview, the create the helm refuses with its proof that
+/// nothing was accepted comes back saying "... nothing was accepted; review the refreshed preview and press Launch
+/// again", a new preview goes out, and no second create is sent.
+#[gpui::test]
+fn a_lost_race_takes_a_new_preview_and_sends_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx) = checkout_open(cx);
+    edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
+    answer_preview(&mut helm, cx, 200, preview_reply("/work/bar-1", "bar-1", 3));
+    test_support::click(cx, "launcher-launch");
+    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    let [create] = &creates[..] else {
+        panic!("one create, not {}", creates.len());
+    };
+    let words =
+        "the checkout preview is no longer current; obtain a new preview before resubmitting";
+    helm.reply_marked(
+        create.id,
+        409,
+        vec![farhelm_proto::ui_channel::HelmMarker::CreateUnaccepted],
+        Some(json!(words)),
+    );
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx),
+        Some(format!(
+            "Not launched. {words}; nothing was accepted; review the refreshed preview and press Launch again"
+        ))
+    );
+    let after = sent(&mut helm, cx);
+    assert_eq!(to(&after, PREVIEW).len(), 1, "a new preview");
+    assert!(to(&after, "/api/sessions").is_empty(), "nothing sent again");
+}
+
+/// SPEC.md: "When the selected host has no checkout folder in effect, the launcher's managed-checkout destination
+/// offers the same explicit-save field ... success refreshes repository suggestions and the checkout preview without
+/// reopening the launcher", and "Selecting a repository before setup does not hide the field". Specified: a suggestions
+/// answer saying the host needs a folder shows the field, which reads the default folder; choosing a repository keeps
+/// it; saving `~/checkouts` sends `PUT /api/checkout-root`, and once done both the suggestions and the preview are
+/// asked for again; when the suggestions then say the host needs no setup, the field goes and focus moves on to the
+/// repository field rather than wherever focus recovery would put it.
+#[gpui::test]
+fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppContext) {
+    let (mut helm, cx) = checkout_open(cx);
+    test_support::advance(cx, Duration::from_millis(160));
+    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
+    assert_eq!(reads.len(), 1, "the premise: the suggestions read is out");
+    let mut reply = repositories(&[], false, Some("no checkout folder is configured"));
+    reply["needs_checkout_root"] = json!(true);
+    helm.reply(reads[0].id, 200, Some(reply));
+    settle(cx);
+    assert!(
+        cx.debug_bounds("launcher-checkout-setup").is_some(),
+        "the field shows"
+    );
+    let field_read = sent(&mut helm, cx);
+    let [get] = &to(&field_read, "/api/checkout-root")[..] else {
+        panic!("the field reads the default folder");
+    };
+    helm.reply(get.id, 200, Some(json!({"root": null})));
+    settle(cx);
+    edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
+    answer_preview(
+        &mut helm,
+        cx,
+        400,
+        json!("no checkout folder is configured"),
+    );
+    assert!(
+        cx.debug_bounds("launcher-checkout-setup").is_some(),
+        "choosing a repository keeps it"
+    );
+    test_support::click(cx, "checkout-folder");
+    test_support::keys(cx, "~ / c h e c k o u t s");
+    test_support::click(cx, "checkout-folder-save");
+    let put = sent(&mut helm, cx);
+    let [save] = &to(&put, "/api/checkout-root")[..] else {
+        panic!("one save");
+    };
+    assert_eq!(save.body, Some(json!({"root": "~/checkouts"})));
+    helm.reply(save.id, 200, Some(json!({"root": "~/checkouts"})));
+    settle(cx);
+    test_support::advance(cx, Duration::from_millis(160));
+    let after = sent(&mut helm, cx);
+    let previews = to(&after, PREVIEW);
+    assert_eq!(previews.len(), 1, "the preview is asked again");
+    let reads = to(&after, REPOSITORIES);
+    assert_eq!(reads.len(), 1, "and the suggestions");
+    // Answered in the order sent, as the fake requires; the field reads its route again after a done save.
+    let mut ordered = after.clone();
+    ordered.sort_by_key(|command| command.id);
+    for command in ordered {
+        let body = match command.path.as_str() {
+            PREVIEW => preview_reply("/home/user/checkouts/bar-1", "bar-1", 3),
+            REPOSITORIES => repositories(&[], false, None),
+            "/api/checkout-root" => json!({"root": "~/checkouts"}),
+            other => panic!("unexpected command after the save: {other}"),
+        };
+        helm.reply(command.id, 200, Some(body));
+    }
+    settle(cx);
+    assert!(
+        cx.debug_bounds("launcher-checkout-setup").is_none(),
+        "the host needs no setup now"
+    );
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .repository_focused(window, cx)),
+        "focus moved on to the repository field"
+    );
+}
+
+/// A Codex launch with YOLO chosen, into a managed checkout of `acme/bar` previewed ready, launched, refused for YOLO by
+/// a host that asks first, and answered "Start guarded session instead": the moment the guarded launch waits for its
+/// new preview. Returns that preview's command, unanswered, once it is checked that no create went out with it.
+fn guarded_waiting(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
+    let mut draft = LaunchDraft::new(
+        Some(1),
+        "~".into(),
+        Some(farhelm_proto::LaunchPermission::Yolo),
+    );
+    let _ = draft.choose_harness(farhelm_proto::LaunchHarness::Codex, None, None);
+    draft.choose_permissions(Some(farhelm_proto::LaunchPermission::Yolo));
+    draft.choose_repository(repo("acme", "bar"));
+    let (mut helm, cx) = launcher_on(cx, draft);
+    let first = answer_catalog_keeping(&mut helm, cx);
+    answer_preview_in(
+        &mut helm,
+        cx,
+        &first,
+        200,
+        preview_reply("/work/bar-1", "bar-1", 3),
+    );
+    test_support::click(cx, "launcher-launch");
+    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    let [create] = &creates[..] else {
+        panic!("one create, not {}", creates.len());
+    };
+    helm.reply_marked(
+        create.id,
+        409,
+        vec![farhelm_proto::ui_channel::HelmMarker::YoloConfirmation],
+        Some(json!("YOLO launches on host1 need --yolo")),
+    );
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "prompt-alternative-0").as_deref(),
+        Some("Start guarded session instead"),
+        "the premise: the question offers the guarded answer"
+    );
+    test_support::click(cx, "prompt-alternative-0");
+    let after = sent(&mut helm, cx);
+    assert!(
+        to(&after, "/api/sessions").is_empty(),
+        "no create before the preview"
+    );
+    let [preview] = &to(&after, PREVIEW)[..] else {
+        panic!("the new preview");
+    };
+    let preview = preview.clone();
+    (helm, cx, preview)
+}
+
+/// SPEC.md: the YOLO question's guarded answer starts "the same launch guarded instead"; switching to Guarded is an
+/// agent-choice change, which "invalidate[s] an undispatched preview". The old launcher waited for the new preview and
+/// then submitted once (its `GuardedSubmitStamp`); refusing instead would turn the answer into a dead end. Specified:
+/// once the new preview answers ready, one create goes out, Guarded and with that preview, without consent.
+#[gpui::test]
+fn the_guarded_answer_waits_for_the_new_preview_then_launches_once(cx: &mut TestAppContext) {
+    let (mut helm, cx, preview) = guarded_waiting(cx);
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 3)),
+    );
+    settle(cx);
+    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    let [create] = &creates[..] else {
+        panic!("one create once ready, not {}", creates.len());
+    };
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["launch"]["permissions"], json!("guarded"));
+    assert_eq!(body["confirm_yolo"], json!(false));
+    assert_eq!(
+        body["github_checkout"]["preview"]["cwd"],
+        json!("/work/bar-1")
+    );
+}
+
+/// The old cases "guarded checkout answer ... is cancelled by edit" and "... by close": the waiting launch answers for
+/// the draft as it was answered, so an edit (here the initial prompt, which no preview depends on, so only the edit's
+/// own rule can cancel it) or closing the launcher cancels it. Specified: for each, the ready preview that follows sends
+/// no create.
+#[gpui::test]
+fn an_edit_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppContext) {
+    let (mut helm, cx, preview) = guarded_waiting(cx);
+    test_support::click(cx, "launcher-prompt-row");
+    test_support::keys(cx, "h i");
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 3)),
+    );
+    settle(cx);
+    assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
+}
+
+/// See [`an_edit_cancels_the_guarded_answers_waiting_launch`]: closing the launcher cancels it too.
+#[gpui::test]
+fn closing_the_launcher_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppContext) {
+    let (mut helm, cx, preview) = guarded_waiting(cx);
+    test_support::click(cx, "launcher-cancel");
+    assert!(
+        !test_support::any_open(cx),
+        "the premise: the launcher closed"
+    );
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 3)),
+    );
+    settle(cx);
+    assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
+}
+
+/// SPEC.md: Launch "never submits automatically or silently chooses another directory". The waiting launch is for the
+/// preview the guarded answer made due; something else asking for a new one meanwhile (here a newer configuration
+/// revision, which may name another folder) means the folder it would start in is one the user has not seen.
+/// Specified: after the revision rises, neither the old preview's answer nor the new preview's ready answer sends a
+/// create.
+#[gpui::test]
+fn another_preview_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppContext) {
+    let (mut helm, cx, preview) = guarded_waiting(cx);
+    cx.update(|_, cx| {
+        let launcher = cx
+            .try_global::<Opened>()
+            .and_then(|opened| opened.0.upgrade())
+            .expect("a launcher is open");
+        launcher.update(cx, |launcher, cx| {
+            launcher.observe_checkout_config_revision(9, cx)
+        });
+    });
+    settle(cx);
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 9)),
+    );
+    settle(cx);
+    let after = sent(&mut helm, cx);
+    assert!(
+        to(&after, "/api/sessions").is_empty(),
+        "not on the old answer"
+    );
+    let [next] = &to(&after, PREVIEW)[..] else {
+        panic!("the preview for the new revision");
+    };
+    helm.reply(next.id, 200, Some(preview_reply("/work/bar-1", "bar-1", 9)));
+    settle(cx);
+    assert!(
+        to(&sent(&mut helm, cx), "/api/sessions").is_empty(),
+        "nor on the new one"
+    );
+}
+
+/// The old case "Escape dismisses repository suggestions before closing the composer": the list is a layer of its own
+/// above the launcher, so the first Escape closes only it and the second the launcher, and nothing is created. Why: an
+/// Escape meant for the list must not discard the whole draft. Specified: with the list open over the repository
+/// field, Escape closes the list with the launcher still open and the field still focused; a second Escape closes the
+/// launcher; no create was sent.
+#[gpui::test]
+fn escape_closes_the_suggestions_before_the_launcher(cx: &mut TestAppContext) {
+    let (mut helm, cx) = checkout_open(cx);
+    test_support::click(cx, "launcher-repository-row");
+    assert!(
+        cx.debug_bounds("launcher-repository-list").is_some(),
+        "the premise: the list is open"
+    );
+    test_support::keys(cx, "escape");
+    assert!(
+        cx.debug_bounds("launcher-repository-list").is_none(),
+        "the list closed"
+    );
+    assert!(test_support::any_open(cx), "the launcher stayed");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .repository_focused(window, cx)));
+    test_support::keys(cx, "escape");
+    assert!(
+        !test_support::any_open(cx),
+        "the second Escape closed the launcher"
+    );
+    assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// A quick launch into a managed checkout
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The real main view over the fake helm with session `a`, host1 and the preferences, and a quick launch prepared out
+/// of sight (`prepare_unseen`, what a template's shortcut starts) whose templates make a complete Command tab launch
+/// into a managed checkout of `acme/bar`. Answers the window's first reads and the catalog read in the order sent, and
+/// returns the commands from then on, still unanswered.
+fn quick_launch_into_a_checkout(
+    cx: &mut TestAppContext,
+) -> (FakeHelm, &mut VisualTestContext, Vec<FakeCommand>) {
+    use crate::session_list::tests::{listing, preferences, session};
+    let (mut helm, _connection) = test_support::started(cx);
+    helm.connect(vec![
+        listing(&["a"], &[session("a")]),
+        super::view_tests::fixture_hosts(&[0]),
+        preferences(&[], None),
+    ]);
+    cx.run_until_parked();
+    let (_, cx) = test_support::open_view(cx, crate::main_view::MainView::new);
+    cx.update(|window, cx| {
+        let finish = |draft: &mut LaunchDraft, _: super::draft::Catalog<'_>, _: &gpui::App| {
+            draft.choose_tab(Tab::Command);
+            draft.edit_command("true".into());
+            draft.choose_command_yolo(false);
+            draft.choose_repository(repo("acme", "bar"));
+            super::view::Prepared::Launch { notice: None }
+        };
+        let draft = LaunchDraft::new(Some(1), "~".into(), None);
+        assert!(super::view::prepare_unseen(
+            draft,
+            crate::focus::Mark::take(cx),
+            finish,
+            window,
+            cx
+        ));
+    });
+    settle(cx);
+    let mut first = sent(&mut helm, cx);
+    first.sort_by_key(|command| command.id);
+    let mut read = false;
+    for command in &first {
+        if command.path.ends_with("launch-catalog") {
+            read = true;
+            helm.reply(command.id, 200, Some(json!([])));
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    assert!(read, "the premise: the quick launch read the catalog");
+    settle(cx);
+    let rest = sent(&mut helm, cx);
+    (helm, cx, rest)
+}
+
+/// SPEC.md, "Managed checkouts": a template's shortcut "obtains the same exact preview and launches without showing the
+/// path first", and the old app's case "quick launch waits for a managed preview and starts directly". Why: a repository
+/// template's shortcut must start its session, not open New saying it waits for a preview. Specified: once the templates
+/// are applied, a preview of `acme/bar` goes out and no create; nothing is shown; the ready answer sends one create into
+/// the previewed folder, with the preview, and the launcher is still never shown.
+#[gpui::test]
+fn a_quick_launch_into_a_checkout_waits_for_its_preview_out_of_sight(cx: &mut TestAppContext) {
+    let (mut helm, cx, sent_after) = quick_launch_into_a_checkout(cx);
+    assert!(
+        to(&sent_after, "/api/sessions").is_empty(),
+        "no create before the preview"
+    );
+    let [preview] = &to(&sent_after, PREVIEW)[..] else {
+        panic!("the preview goes out at once");
+    };
+    assert!(
+        !test_support::any_open(cx),
+        "nothing is shown while it waits"
+    );
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 3)),
+    );
+    settle(cx);
+    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    let [create] = &creates[..] else {
+        panic!("one create once ready, not {}", creates.len());
+    };
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["cwd"], json!("/work/bar-1"));
+    assert_eq!(
+        body["github_checkout"]["preview"]["cwd"],
+        json!("/work/bar-1")
+    );
+    assert!(!test_support::any_open(cx), "the launcher was never shown");
+}
+
+/// A quick launch that cannot start shows New with the same draft and what stopped it (SPEC.md, "Quick launch": its
+/// refusal "reveals New with the same draft, error or confirmation"). Specified: the preview refused for a host with no
+/// checkout folder sends no create and shows the launcher, its preview saying the helm's words.
+#[gpui::test]
+fn a_quick_launch_whose_preview_fails_is_shown(cx: &mut TestAppContext) {
+    let (mut helm, cx, sent_after) = quick_launch_into_a_checkout(cx);
+    let [preview] = &to(&sent_after, PREVIEW)[..] else {
+        panic!("the preview goes out at once");
+    };
+    let words = "no checkout folder is configured; set one in this host's settings or a default in Settings → Checkouts";
+    helm.reply(preview.id, 400, Some(json!(words)));
+    settle(cx);
+    assert!(
+        to(&sent(&mut helm, cx), "/api/sessions").is_empty(),
+        "nothing started"
+    );
+    assert!(test_support::any_open(cx), "the launcher is shown");
+    assert_eq!(
+        name_of(cx, "launcher-preview-error").as_deref(),
+        Some(words)
+    );
+}

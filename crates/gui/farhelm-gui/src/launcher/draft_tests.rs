@@ -43,6 +43,10 @@ pub(super) fn session(launch: SessionLaunch) -> SessionInfo {
     info.title = "source".into();
     info.invocation = "source-command --flag".into();
     info.launch = launch;
+    // An ordinary folder session: the helm fixture's row is in a managed checkout, which a Clone would start a new
+    // checkout of (the managed-checkout tests give their sources one of their own).
+    info.working_copy = None;
+    info.github_repo = None;
     info
 }
 

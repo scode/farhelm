@@ -39,13 +39,18 @@ fn fleet() -> CollectionState {
             session("b").host(9),
             session("c").host(11),
             session("d").host(5),
-            session("e").host(9).title("fix login").launch(json!({
-                "kind": "command",
-                "command": "make watch {farhelm_args}",
-                "yolo": false,
-                "agent": "codex",
-                "resume": "make watch --resume {conversation} {farhelm_args}",
-            })),
+            session("e")
+                .host(9)
+                .title("fix login")
+                .unmanaged()
+                .not_launched_as_checkout()
+                .launch(json!({
+                    "kind": "command",
+                    "command": "make watch {farhelm_args}",
+                    "yolo": false,
+                    "agent": "codex",
+                    "resume": "make watch --resume {conversation} {farhelm_args}",
+                })),
         ],
     );
     let identities = [

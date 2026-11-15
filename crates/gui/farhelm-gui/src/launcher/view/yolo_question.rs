@@ -169,7 +169,8 @@ impl Launcher {
                     launcher
                         .draft
                         .choose_permissions(Some(LaunchPermission::Guarded));
-                    launcher.submit(false, mark, window, cx);
+                    // A managed checkout's preview is stale after the switch; this waits for the new one.
+                    let _ = launcher.submit_or_wait_for_preview(mark, window, cx);
                 });
             }) as GuardedAction
         });

@@ -72,6 +72,8 @@ pub(crate) struct Fixture {
     /// The session's managed checkout in the helm's wire form (`null` for none), when the test names one; else the
     /// helm fixture's, a checkout of `octo/widgets`.
     working_copy: Option<Value>,
+    /// Whether the session's launch provenance (`github_repo`) is cleared; else the helm fixture's, `octo/widgets`.
+    no_launch_repository: bool,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -93,6 +95,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         tabs: 0,
         invocation: None,
         working_copy: None,
+        no_launch_repository: false,
     }
 }
 
@@ -171,6 +174,13 @@ impl Fixture {
         self.working_copy = Some(Value::Null);
         self
     }
+    /// The session not launched as a managed checkout either: its launch provenance (`github_repo`), which the helm
+    /// fixture's row has and a Clone starts a new checkout of, is cleared. With [`Self::unmanaged`], an ordinary folder
+    /// session, as the launcher's Clone tests need.
+    pub(crate) fn not_launched_as_checkout(mut self) -> Self {
+        self.no_launch_repository = true;
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -210,6 +220,9 @@ impl Fixture {
         }
         if let Some(working_copy) = &self.working_copy {
             value["working_copy"] = working_copy.clone();
+        }
+        if self.no_launch_repository {
+            value["github_repo"] = Value::Null;
         }
         entry
     }
