@@ -25,6 +25,8 @@
 //! The session launcher's footer had two more parts (`.launch-composer-footer`): a summary of what its main action
 //! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
 //! answer has to say ([`DialogFrame::notices`]).
+//! A body whose content may hold nothing focusable can have a tab stop of its own that the keys scroll
+//! ([`DialogFrame::scroll_stop`]; `scroll_box.rs` has the full account).
 //!
 //! Two of the old app's small information dialogs, Announcements and the Welcome card, drew their parts tighter than the
 //! ordinary dialog (`.announcements-dialog > .dialog-header` and `.welcome-dialog > .welcome-header` in the old
@@ -34,14 +36,14 @@
 //! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.
 
 use gpui::{
-    AnyElement, App, BoxShadow, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Pixels, RenderOnce, Role, ScrollHandle, SharedString,
+    AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FontWeight, InteractiveElement,
+    IntoElement, ParentElement, Pixels, RenderOnce, Role, ScrollHandle, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
-use super::{Button, HoverHelp, IconButton};
+use super::{Button, HoverHelp, IconButton, Ring, scroll_handle, scroll_stop};
 use crate::assets::Icon;
-use crate::focus;
+use crate::focus::{self, RegionReport};
 use crate::host_text::Line;
 use crate::theme::{self, metrics};
 
@@ -88,6 +90,7 @@ pub struct DialogFrame {
     footer_lead: Option<AnyElement>,
     notices: Option<AnyElement>,
     compact: bool,
+    scroll_stop: Option<SharedString>,
 }
 
 impl DialogFrame {
@@ -118,6 +121,7 @@ impl DialogFrame {
             footer_lead: None,
             notices: None,
             compact: false,
+            scroll_stop: None,
         }
     }
 
@@ -213,6 +217,18 @@ impl DialogFrame {
         self.compact = true;
         self
     }
+
+    /// Give the body a tab stop named `label` ("Announcement content") whenever it holds no tab stop, as a long
+    /// announcement without a link or a list whose every action is disabled holds none (a button counts, whatever Tab
+    /// reaches on macOS; a disabled control does not). The keys scroll it as they do the scroll box; `scroll_box.rs`'s
+    /// module docs have the full account. The stop follows the body one frame behind ([`focus::ScrollRegion::report`]),
+    /// and one taken away while it has focus hands focus to the closest control left, as any control that goes away
+    /// does. It has no hover help: a tooltip over the whole body would cover what the user reads. Without this the body
+    /// is drawn exactly as before.
+    pub fn scroll_stop(mut self, label: impl Into<SharedString>) -> Self {
+        self.scroll_stop = Some(label.into());
+        self
+    }
 }
 
 impl RenderOnce for DialogFrame {
@@ -288,16 +304,25 @@ impl RenderOnce for DialogFrame {
             .id(ElementId::Name(format!("{}-body", self.id).into()))
             .debug_selector(|| format!("{}-body", self.id))
             .flex_shrink_1()
-            // A fixed-height frame's body takes whatever the header and footer leave.
-            .when(self.fixed_height.is_some(), |body| body.flex_grow(1.))
-            .min_h(px(BODY_MIN_HEIGHT))
             .overflow_y_scroll()
             .py(pad_y)
             .px(pad_x)
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_0))
             .child(self.body);
-        let body = focus::scroll_region(body, &body_scroll);
+        // How the body sits in the card: it gives up height down to its floor, and a fixed-height frame's body takes
+        // whatever the header and footer leave. With a scroll stop, that is the stop's place, and the body fills it.
+        let fixed = self.fixed_height.is_some();
+        let place = |element: Stateful<Div>| {
+            element
+                .flex_shrink_1()
+                .when(fixed, |element| element.flex_grow(1.))
+                .min_h(px(BODY_MIN_HEIGHT))
+        };
+        let body = match self.scroll_stop {
+            None => focus::scroll_region(place(body), &body_scroll).into_any_element(),
+            Some(label) => body_with_stop(&self.id, label, place, body, &body_scroll, window, cx),
+        };
         // A frame with nothing for its footer to hold draws none: the Templates dialog, whose editor carries its own
         // action row inside the body (SPEC.md: "the complete editor keeps scrolling within the dialog, including its
         // editor-local action footer").
@@ -407,14 +432,57 @@ impl RenderOnce for DialogFrame {
     }
 }
 
-/// The scroll handle kept under `key` for as long as the frame is drawn in consecutive frames, so a scrolled body stays
-/// where it was. `key` must differ from the scrolling element's own id, because GPUI keys element state by path and
-/// type.
-fn scroll_handle(key: String, window: &mut Window, cx: &mut App) -> ScrollHandle {
-    window
-        .use_keyed_state(ElementId::Name(key.into()), cx, |_, _| ScrollHandle::new())
+/// The body `body` (scroll state `scroll`) of the frame drawn under `id`, inside the box that is its scroll stop
+/// ([`DialogFrame::scroll_stop`]), which `place` puts where the body would otherwise sit. The box is drawn in every
+/// frame, so the body's layout never changes with the stop; only whether the box is a stop does, read from what the
+/// body reported the last time it was prepared.
+fn body_with_stop(
+    id: &SharedString,
+    label: SharedString,
+    place: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
+    body: Stateful<Div>,
+    scroll: &ScrollHandle,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let report: RegionReport = window
+        .use_keyed_state(
+            ElementId::Name(format!("{id}-body-report").into()),
+            cx,
+            |_, _| RegionReport::default(),
+        )
         .read(cx)
-        .clone()
+        .clone();
+    let holds_stops = report.get();
+    let region = focus::scroll_region(body.flex_grow(1.).min_h_0(), scroll).report(&report);
+    let stop_id: SharedString = format!("{id}-body-stop").into();
+    let stop = place(
+        div()
+            .id(ElementId::Name(stop_id.clone()))
+            .debug_selector(|| stop_id.to_string())
+            .flex()
+            .flex_col(),
+    )
+    .child(region);
+    if holds_stops {
+        return stop.into_any_element();
+    }
+    // The body has no border: the ring lies along the stop's edge, inside the card, which would clip anything outside.
+    let ring = Ring {
+        inset: px(0.),
+        radius: px(0.),
+    };
+    scroll_stop(
+        stop,
+        &stop_id,
+        scroll,
+        Role::Region,
+        label,
+        ring,
+        window,
+        cx,
+    )
+    .into_any_element()
 }
 
 /// `--shadow-dialog`: `0 10px 24px` in the token's color, under the dialog frame and under the one modal panel the old
