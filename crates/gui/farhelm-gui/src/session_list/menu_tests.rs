@@ -51,6 +51,8 @@ pub(crate) fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionS
     let preferences = Preferences {
         visit_history: order.iter().take(1).map(|key| key.to_string()).collect(),
         skip_session_confirmations: Some(skip),
+        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        welcome_seen: Some(true),
         ..Preferences::default()
     };
     vec![

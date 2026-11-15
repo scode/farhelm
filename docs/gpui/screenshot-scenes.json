@@ -888,6 +888,11 @@
       "reference": null
     },
     {
+      "golden": "welcome-dialog",
+      "title": "The Welcome card: the introduction, Read Get started and Send feedback now in their bordered pointers, the footer's note and Got it with focus",
+      "reference": "welcome-dialog"
+    },
+    {
       "golden": "announcements-dialog",
       "title": "The Announcements dialog as Help's history opens it: two shown announcements, one with a detail line and a link (the old dialog was never captured)",
       "reference": null
@@ -1286,7 +1291,7 @@
     },
     {
       "id": "welcome-dialog",
-      "ported": false
+      "ported": true
     },
     {
       "id": "feedback-dialog",

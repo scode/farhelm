@@ -189,11 +189,14 @@ pub(crate) fn listing(order: &[&str], rows: &[Fixture]) -> CollectionState {
     }
 }
 
-/// The preferences collection with this visit history and remembered last selection.
+/// The preferences collection with this visit history and remembered last selection, from a helm that has already
+/// shown the Welcome card. A helm whose preferences leave it unseen opens the card over the main view at its first
+/// snapshot (`crate::welcome`), which would cover every control these fixtures' tests drive.
 pub(crate) fn preferences(history: &[&str], last: Option<&str>) -> CollectionState {
     preferences_state(Preferences {
         visit_history: history.iter().map(|key| key.to_string()).collect(),
         last_selected: last.map(str::to_owned),
+        welcome_seen: Some(true),
         ..Preferences::default()
     })
 }

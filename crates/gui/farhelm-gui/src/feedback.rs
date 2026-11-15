@@ -30,15 +30,17 @@
 //! Agents have no way to open or send this dialog: there is no agent request or command line verb for it, and none may
 //! be added (SPEC.md: feedback sent that way would leave the machine without the user pressing Send).
 //!
-//! [`open`] is the entry point: the Help menu's Send feedback item calls it with the `?` button as the opener, and the
-//! Welcome card is to call it with its own return target.
+//! [`open`] is the entry point: the Help menu's Send feedback item calls it with the `?` button as the opener. The
+//! Welcome card's Send feedback now calls [`open_returning`] with its own return target and, for the card that opened
+//! by itself at a window start, a close continuation: SPEC.md has the announcement check wait until this dialog
+//! closes, and the layer manager tells no one when a layer closes. The continuation runs when the dialog's entity is
+//! released, which the layer's closing does by whatever route (Cancel, the ×, Escape, the close after the thanks, a
+//! reset), since the layer holds the dialog's only strong reference.
 //!
 //! NOTE: Not ported. The old app announced a successful send once more in a status region outside the dialog after it
 //! closed, because its dialog's own region went inert with the modal; here the thank-you line is itself a status,
 //! announced while it shows. The old app's failure for a helm it could not reach at all ("the request to Farhelm
-//! failed") has no counterpart: a lost channel resets the window, which closes the dialog. And the Welcome card's
-//! "Send feedback now" handoff, which has announcements wait until this dialog closes, needs a way to hear that close
-//! that the layer manager does not offer; it comes with the Welcome card.
+//! failed") has no counterpart: a lost channel resets the window, which closes the dialog.
 
 #[cfg(test)]
 mod tests;
@@ -121,8 +123,7 @@ const ATTACHED_TERM_WIDTH: f32 = 104.;
 
 // ---- Opening ---------------------------------------------------------------------------------------------------------
 
-/// Open the dialog on top of everything else in `window`: the entry point for the Help menu's Send feedback, and for
-/// the Welcome card once it lands.
+/// Open the dialog on top of everything else in `window`: the entry point for the Help menu's Send feedback.
 ///
 /// `opener` is the control closing returns focus to ([`ReturnTo::Control`]), also where the click that opened it left
 /// that control unfocused (macOS): from the Help menu, the `?` button, not the menu item, which goes with its popover.
@@ -131,6 +132,27 @@ const ATTACHED_TERM_WIDTH: f32 = 104.;
 /// Re-use checked. Returns the dialog's layer, or `None` when nothing opened.
 pub fn open(
     opener: &FocusHandle,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    open_returning(ReturnTo::Control(opener.clone()), None, mark, window, cx)
+}
+
+/// What [`open_returning`] runs once the dialog has closed: told the window it closed in.
+pub type OnClosed = Box<dyn FnOnce(&mut Window, &mut App)>;
+
+/// [`open`] for the Welcome card's Send feedback now: closing returns focus as `returns_to` says (the card's own
+/// target: the `?` button for a card reopened from Help, home for the one that opened by itself), and `on_closed`, if
+/// given, runs once the dialog has closed.
+///
+/// `on_closed` runs exactly once, after the dialog's layer closed by any route, a reset's included, so a caller that
+/// must not act for a retired UI session checks that itself. It runs outside every update but the window's, so it may
+/// open a layer. It never runs when the dialog did not open (the user moved on since `mark`, or the window is inert):
+/// then there is nothing to wait for, and the caller learns that from the `None` this returns.
+pub fn open_returning(
+    returns_to: ReturnTo,
+    on_closed: Option<OnClosed>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -169,7 +191,7 @@ pub fn open(
             // SPEC.md, "Opening and closing", does not list Send feedback among the dialogs that keep focus on the
             // control in use when their empty space is clicked.
             keeps_focus_on_empty_click: false,
-            returns_to: ReturnTo::Control(opener.clone()),
+            returns_to,
             on_dismiss: Some(on_dismiss),
             placement: layers::DialogPlacement::Centered,
             dismiss_on_outside_press: false,
@@ -178,7 +200,14 @@ pub fn open(
         window,
         cx,
     )?;
-    dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
+    dialog.update(cx, |dialog, cx| {
+        dialog.layer = Some(layer);
+        // Registered only once the dialog is open, so a refused open (the entity dropped at once) runs nothing. The
+        // layer holds the dialog's one strong reference (the send's completion, the thanks' timer and the handlers all
+        // hold it weakly), so the release comes with the layer's closing.
+        dialog._on_closed = on_closed
+            .map(|on_closed| cx.on_release_in(window, move |_, window, cx| on_closed(window, cx)));
+    });
     #[cfg(test)]
     cx.set_global(tests::Opened(dialog.downgrade()));
     Some(layer)
@@ -328,6 +357,8 @@ pub(crate) struct FeedbackDialog {
     closing: Option<ticker::Deadline>,
     /// Each field's edits, which redraw the dialog (Send's availability, Re-use's presence, the size line).
     _edits: [Subscription; 2],
+    /// Runs [`open_returning`]'s close continuation when the dialog is released; `None` without one.
+    _on_closed: Option<Subscription>,
 }
 
 impl FeedbackDialog {
@@ -357,6 +388,7 @@ impl FeedbackDialog {
             layer: None,
             closing: None,
             _edits: edits,
+            _on_closed: None,
         }
     }
 
