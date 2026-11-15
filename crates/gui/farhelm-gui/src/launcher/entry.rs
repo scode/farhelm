@@ -11,8 +11,8 @@
 //! New is refused while a launch is pending: the old New button was disabled while the page's one operation token was
 //! held, and SPEC.md keeps "a launch is pending" among what disables it ("Cmd+N ... unless a modal is open or New is
 //! disabled"). It is refused too while one of this window's host-registry changes is in flight (SPEC.md: "Launches and
-//! changes to the host registry still exclude each other"; `launch::host_change_in_flight` says which work counts), as
-//! the old token's host changes disabled it. A refused launch waiting behind its notice is different: New brings that
+//! changes to the host registry still exclude each other"; `crate::hosts::host_change_in_flight` says which work
+//! counts), as the old token's host changes disabled it. A refused launch waiting behind its notice is different: New brings that
 //! launcher back, with its draft and refusal, rather than starting a fresh one, as the old app did (its New revealed a
 //! returned launcher). SPEC.md leaves open whether that notice keeps New refused until it is opened; bringing the draft
 //! back answers it without refusing anything.
@@ -60,7 +60,7 @@ pub const NEW_SESSION_HELP: &str = if cfg!(target_os = "macos") {
 /// drawing a New trigger draws it disabled while this is `false`, reading it while it draws: the launch slot and the
 /// operation store both notify when what it answers from changes.
 pub fn new_available(cx: &mut App) -> bool {
-    !launch::pending(cx) && !launch::host_change_in_flight(cx)
+    !launch::pending(cx) && !crate::hosts::host_change_in_flight(cx)
 }
 
 /// Open New in `window` with New's prefill (see the module docs), or bring back a refused launch waiting behind its

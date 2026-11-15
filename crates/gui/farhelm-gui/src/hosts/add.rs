@@ -53,7 +53,7 @@
 //!   confirmation ([`Seed::from_agent`], carried through a refused setup's reopen too), whatever the setup preference
 //!   says. The dialog closes when its request stops waiting before it was accepted, as the old dialog did, a late
 //!   Allow included. While another dialog is open, or a host is being probed, set up or removed, the open is refused
-//!   with a reason ([`host_add::ANOTHER_DIALOG_OPEN`], [`host_add::HOST_CHANGE_IN_FLIGHT`]); the old app queued it.
+//!   with a reason ([`NotOpened::reason`]); the old app queued it.
 //!
 //! An outcome shows in the dialog whether or not the user moved on since Add: drawing a line inside the dialog that is
 //! already open moves no focus and opens nothing, which is all SPEC.md's "Keyboard focus" rule withholds from a late
@@ -84,7 +84,8 @@ use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
 use super::{setup, ssh_help};
-use crate::approvals::host_add::{self, AgentAdd, AgentRequest, Answered};
+use crate::approvals::answers;
+use crate::approvals::host_add::{self, AgentRequest, Answered};
 use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark, ReturnTo};
@@ -158,14 +159,31 @@ pub(crate) struct Seed {
 /// Why [`open_for_agent`] opened nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotOpened {
-    /// Another dialog is open; the card says so ([`host_add::ANOTHER_DIALOG_OPEN`]) and the request keeps waiting.
+    /// Another dialog is open; the card says so ([`NotOpened::reason`]) and the request keeps waiting.
     AnotherDialog,
-    /// A host is being probed, set up or removed; the card says so ([`host_add::HOST_CHANGE_IN_FLIGHT`]) and the
-    /// request keeps waiting.
+    /// A host is being probed, set up or removed; the card says so ([`NotOpened::reason`]) and the request keeps
+    /// waiting.
     HostChangeInFlight,
     /// Answers are paused, an answer to the request is in flight, the request no longer waits, the user moved on since
     /// the press, or the window is inert: nothing to say.
     Nothing,
+}
+
+impl NotOpened {
+    /// What the card's refusal line says, in the app's words, or `None` when there is nothing to say. The old app queued
+    /// the open behind the open dialog or the host change instead; this port refuses it and keeps both the open dialog
+    /// and the request (a recorded deviation), so the user can finish what is open and act on the card again.
+    pub fn reason(self) -> Option<&'static str> {
+        match self {
+            NotOpened::AnotherDialog => {
+                Some("Another dialog is open. Close it, then open this request's Add host again.")
+            }
+            NotOpened::HostChangeInFlight => Some(
+                "Another host change is still in progress. Open this request's Add host again once it has finished.",
+            ),
+            NotOpened::Nothing => None,
+        }
+    }
 }
 
 /// Open the Add host dialog for an agent's host add request, from its card's action: prefilled with the destination
@@ -188,7 +206,7 @@ pub fn open_for_agent(
     if layers::focus_layer_open(window, cx) {
         return Err(NotOpened::AnotherDialog);
     }
-    if host_add::host_change_in_flight(cx) {
+    if super::host_change_in_flight(cx) {
         return Err(NotOpened::HostChangeInFlight);
     }
     if request.paused(cx) || request.answering(cx) || !request.waiting(cx) {
@@ -468,8 +486,11 @@ pub(crate) struct AddHostDialog {
     problem: Option<HostSentence>,
     /// Set right after the layer opens; taken when the dialog closes itself, so it closes once.
     layer: Option<LayerId>,
-    /// The agent's request the dialog answers, when a card opened it, and how far its answers have taken it.
-    agent: Option<AgentAdd>,
+    /// The agent's request the dialog answers, when a card opened it; kept after the helm accepted the dialog's Allow,
+    /// for its labels.
+    agent: Option<AgentRequest>,
+    /// The helm accepted the dialog's Allow: from here on the add is ordinary and answers nothing more.
+    accepted: bool,
     /// The add began as an agent's request: Add's approval lines show, and the setup confirmation always asks.
     from_agent: bool,
     /// An agent's dialog's watches: a redraw when the answer bar's pause ends, which makes Add live again; and a close
@@ -496,12 +517,12 @@ impl AddHostDialog {
                 request.alias.clone(),
                 None,
                 true,
-                Some(AgentAdd::new(request)),
+                Some(request),
             ),
         };
         let mut watches = Vec::new();
-        if let Some(agent) = agent.as_ref() {
-            watches.push(cx.observe(&agent.request().arming, |_, _, cx| cx.notify()));
+        if let Some(request) = agent.as_ref() {
+            watches.push(cx.observe(&request.arming, |_, _, cx| cx.notify()));
             if let Some(operations) = session::current_operations(cx) {
                 let handle = window.window_handle();
                 watches.push(cx.observe(&operations, move |dialog: &mut Self, _, cx| {
@@ -539,21 +560,22 @@ impl AddHostDialog {
             problem,
             layer: None,
             agent,
+            accepted: false,
             from_agent,
             _watches: watches,
         }
     }
 
-    /// The agent's request, while Add and Cancel still answer it.
+    /// The agent's request, while Add and Cancel still answer it: until the helm accepted the dialog's Allow.
     fn pending(&self) -> Option<&AgentRequest> {
-        self.agent.as_ref().and_then(AgentAdd::pending)
+        self.agent.as_ref().filter(|_| !self.accepted)
     }
 
-    /// Whether the dialog's subject is gone ([`AgentAdd::subject_gone`]).
+    /// Whether the dialog's subject is gone: the pending request stopped waiting, with no answer to it out to say what
+    /// came of it. The old dialog closed then, since an Add could only be refused.
     fn request_gone(&self, cx: &App) -> bool {
-        self.agent
-            .as_ref()
-            .is_some_and(|agent| agent.subject_gone(cx))
+        self.pending()
+            .is_some_and(|request| !request.answering(cx) && !request.waiting(cx))
     }
 
     /// Cancel, the header's close or Escape on an agent's add: answer Deny and close once the helm took it (or the
@@ -600,7 +622,7 @@ impl AddHostDialog {
     /// Whether something Add started is out: this dialog's probe, or an answer to its agent's request. Add reads
     /// "Checking…" then.
     fn probing(&self, cx: &App) -> bool {
-        self.agent.as_ref().is_some_and(|agent| agent.answering(cx))
+        self.pending().is_some_and(|request| request.answering(cx))
             || session::current_operations(cx)
                 .is_some_and(|operations| operations.read(cx).in_flight(&self.key).is_some())
     }
@@ -608,19 +630,14 @@ impl AddHostDialog {
     /// Whether Add is busy: [`Self::probing`], or for an agent's request the answer bar's pause, during which Add keeps
     /// its label but answers nothing.
     fn busy(&self, cx: &App) -> bool {
-        self.probing(cx) || self.agent.as_ref().is_some_and(|agent| agent.busy(cx))
+        self.probing(cx) || self.pending().is_some_and(|request| request.paused(cx))
     }
 
     /// Add: refuse what can be refused without contacting anything, then refuse while a session launch is in flight,
     /// else start the probe, or for an agent's request not yet accepted, answer its Allow and probe once the helm took
     /// it. Does nothing while the probe or an answer is out, or the window is inert.
     fn add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(operations) = session::current_operations(cx) else {
-            return;
-        };
-        if operations.read(cx).in_flight(&self.key).is_some()
-            || self.agent.as_ref().is_some_and(|agent| agent.busy(cx))
-        {
+        if session::current_operations(cx).is_none() || self.busy(cx) {
             return;
         }
         let destination = self.destination.draft().value().clone();
@@ -659,9 +676,7 @@ impl AddHostDialog {
                 dialog.set_read_only(false, cx);
                 match answered {
                     Answered::Delivered => {
-                        if let Some(agent) = dialog.agent.as_mut() {
-                            agent.accept();
-                        }
+                        dialog.accepted = true;
                         match refusal(&destination, &alias, cx) {
                             Some(refused) => dialog.problem = Some(refused),
                             None => dialog.probe(destination, alias, handle, cx),
@@ -670,7 +685,7 @@ impl AddHostDialog {
                     // The request is gone, so the dialog has nothing left to approve: it closes, as the old one did
                     // once its request was gone, and the cards' late-answer notice says that nothing was added.
                     Answered::Gone => {
-                        host_add::late_allow(cx);
+                        answers::post_late(false, cx);
                         dialog.close_later(None, handle, cx);
                     }
                     Answered::Refused(words) => dialog.problem = Some(error_line().host(&words)),
@@ -683,7 +698,7 @@ impl AddHostDialog {
         });
         match sent {
             Ok(host_add_sent) => {
-                if host_add_sent == crate::approvals::answers::Sent::Sent {
+                if host_add_sent == answers::Sent::Sent {
                     self.problem = None;
                     self.set_read_only(true, cx);
                 }
@@ -879,10 +894,7 @@ impl Render for AddHostDialog {
         let weak = cx.weak_entity();
         // An agent's add names who asked, then spells out what Add approves, above the fields as the old dialog did
         // (the approvals module draws both).
-        let requester = self
-            .agent
-            .as_ref()
-            .map(|agent| agent.request().requester(cx));
+        let requester = self.agent.as_ref().map(|request| request.requester(cx));
         let approved = self.from_agent.then(|| {
             host_add::approved_fields(
                 self.destination.draft().value(),
