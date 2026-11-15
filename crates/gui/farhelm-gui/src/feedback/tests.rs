@@ -588,3 +588,26 @@ fn blank_and_over_long_messages_are_refused_before_sending(cx: &mut TestAppConte
         json!("x".repeat(FEEDBACK_MESSAGE_MAX_CHARS))
     );
 }
+
+/// The old dialog's body was a keyboard stop of its own, named "Feedback sent" once the send succeeded, when the body
+/// holds only the thank-you line: in a short window that line must still be reachable to scroll (the old
+/// `modal-layout.spec.ts` sent-feedback case). While the fields are there, they are the body's way in. Specified: an
+/// open dialog draws no body stop; after a successful send it draws one named "Feedback sent".
+#[gpui::test]
+fn after_a_send_the_thanks_has_a_body_stop_of_its_own(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle) = open_bar(cx, None);
+    open_dialog(cx);
+    keys(cx, "h i");
+    assert_eq!(
+        label(cx, "feedback-body-stop"),
+        None,
+        "the fields are the way in"
+    );
+    let (id, _) = send(&mut helm, cx);
+    answer(&mut helm, cx, id, 204, Value::Null);
+    settle(cx);
+    assert_eq!(
+        label(cx, "feedback-body-stop").as_deref(),
+        Some("Feedback sent")
+    );
+}

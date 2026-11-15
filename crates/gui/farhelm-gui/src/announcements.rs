@@ -260,6 +260,9 @@ impl Render for AnnouncementsDialog {
             .summary("Updates and information from Farhelm.")
             .width(px(WIDTH))
             .compact()
+            // The old body was a stop of its own under this name, so a long announcement without a link can still be
+            // scrolled from the keyboard.
+            .scroll_stop("Announcement content")
             .close(
                 "Close announcements",
                 HoverHelp::tooltip("Close: done with these announcements"),

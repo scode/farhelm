@@ -20,17 +20,16 @@
 //!   row must not delete the row a re-read moved under the pointer. Whenever what decides where rows are drawn changes,
 //!   every entry's Delete is unavailable for [`SETTLE`] (the old app's `SETTLE_MS`, matching the approval cards'
 //!   answer pause).
-//! - **Focus.** It starts on the footer's Close, and Tab goes header close, the archive list's controls, then the
-//!   footer (SPEC.md, "Initial focus stays on footer Close"). Close, the header's close and Escape are never
+//! - **Focus.** It starts on the footer's Close, and Tab goes header close, the archive list's controls (or, while
+//!   none of them is available, the list's own stop, "Archived checkouts"), then the footer (SPEC.md, "Initial focus
+//!   stays on footer Close"). Close, the header's close and Escape are never
 //!   unavailable, and closing never cancels a delete the helm took.
 //!
 //! NOTE: Not here yet: Delete all in the footer and each host's "Delete all on" with their in-place questions, which
 //! come with the confirmations piece; so the footer holds Close alone.
 //!
-//! NOTE: Deviations from the old dialog, each recorded in the parity file. The archive list gets no tab stop of its own
-//! while every control in it is unavailable, so the keyboard cannot reach it to scroll it then: the dialog frame has no
-//! such stop yet (a foundation request). The old dialog stacked its footer's actions as full-width rows at phone
-//! widths, which the app's 720 by 560 minimum window never reaches, so that is not ported.
+//! NOTE: A deviation from the old dialog, recorded in the parity file: the old dialog stacked its footer's actions as
+//! full-width rows at phone widths, which the app's 720 by 560 minimum window never reaches, so that is not ported.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -303,6 +302,10 @@ impl Render for TrashDialog {
                 listing::space(bytes, partial)
             ))
             .width(px(WIDTH))
+            // The old list was a stop of its own under this name, so the archives stay keyboard-scrollable while every
+            // action in them is unavailable (SPEC.md, "Reaching everything by keyboard": a region holding nothing
+            // focusable gets its own tab stop).
+            .scroll_stop("Archived checkouts")
             .close(
                 "Close trash",
                 HoverHelp::tooltip(
