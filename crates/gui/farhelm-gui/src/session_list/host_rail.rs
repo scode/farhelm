@@ -16,10 +16,8 @@
 //! Add host opens the Add host dialog ([`crate::hosts::add::open`]) with itself as the opener, so that closing the
 //! dialog returns focus to it, as the gear does for Settings. It is never disabled: the old button was, while the old
 //! page's one token for launches and host registry changes was held (`ops::OpLock` at the reference commit), but here
-//! refusing belongs to the dialog's own Add, each side refusing its own action while the other's work is in flight
-//! (decided by the migration's orchestrator on 2026-11-14). That Add does not refuse during a launch yet (interim, in
-//! the dialog's module docs), so until it does a host can be added while a session launches, which the old app did not
-//! allow.
+//! refusing belongs to the dialog's own Add, which refuses while a session launch is in flight, each side refusing its
+//! own action while the other's work is in flight (decided by the migration's orchestrator on 2026-11-14).
 //!
 //! The rail's entries scroll on their own, and a focus move the keyboard or the app makes onto an entry below or above
 //! the rail's fold scrolls it into view: the scrolling part is a focus coordinator scroll region
@@ -116,10 +114,6 @@ const HOSTS_HELP: &str = "Hosts: show host management";
 /// The gear's hover help, the old app's words. The old app added ", and this app's automatic updates" when the desktop
 /// app's updater was active; this app has no updater yet, so the words stop where the old app's did without one.
 const SETTINGS_HELP: &str = "Settings: choices that apply to every host on this helm";
-
-/// Add host's hover help, the old app's words, kept although the dialog it opens offers SSH alone for now (the
-/// dialog's module docs record the missing Tensorlake choice).
-const ADD_HOST_HELP: &str = "Add host: connect a machine or create a Tensorlake sandbox";
 
 impl SessionList {
     /// The user pressed Hosts: show the Hosts panel in place of the list's column, or Sessions again if it shows. The
@@ -401,7 +395,7 @@ fn add_host(handle: &FocusHandle) -> AnyElement {
         "host-rail-add",
         Icon::Add,
         "Add host",
-        HoverHelp::tooltip(ADD_HOST_HELP),
+        HoverHelp::tooltip(crate::hosts::add::ADD_HOST_HELP),
         Role::Button,
     )
     .tier(Tier::Rail)

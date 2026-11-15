@@ -1,5 +1,6 @@
 //! Tests of the button: a click and Enter or Space run it once, a disabled one is inert, a busy one keeps focus, its
-//! help and the retired look while ignoring presses, and a pressed one reports its state with its label as its name.
+//! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, and a
+//! square one keeps its side.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -9,8 +10,9 @@ use gpui::{
     TestAppContext, div, px,
 };
 
-use crate::components::{Button, HoverHelp, Role, Tier};
-use crate::test_support::{center, check, click, frame, keys, open, redraw};
+use crate::assets::Icon;
+use crate::components::{Button, HoverHelp, IconButton, Role, Tier};
+use crate::test_support::{bounds, center, check, click, frame, keys, open, redraw};
 
 use super::{tooltip, wait_hover_delay};
 
@@ -344,5 +346,39 @@ fn a_pressed_button_reports_its_state_and_content_keeps_the_label_as_its_name(
     assert!(
         !painted.iter().any(|text| text == "All hosts"),
         "{painted:?}"
+    );
+}
+
+/// A square button keeps the side it is given whatever its tier's padding would make it: the Hosts heading's add button
+/// is the old 24-pixel square, where the neutral tier's own padding around a 14-pixel icon makes 28, and a heading that
+/// grew by those pixels would push the host rows down. Specified: a neutral icon button made square at 24 pixels is
+/// drawn 24 by 24, and the same button without it is larger.
+#[gpui::test]
+fn a_square_button_keeps_its_side_whatever_its_tier_pads(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        let add = |id: &'static str| {
+            IconButton::new(
+                id,
+                Icon::Add,
+                "Add host",
+                HoverHelp::tooltip("Add host: connect a machine"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral)
+        };
+        div()
+            .flex()
+            .items_start()
+            .gap(px(8.))
+            .child(add("square").square(px(24.)))
+            .child(add("padded"))
+            .into_any_element()
+    });
+    let square = bounds(cx, "square");
+    assert_eq!((square.size.width, square.size.height), (px(24.), px(24.)));
+    let padded = bounds(cx, "padded");
+    assert!(
+        padded.size.height > px(24.),
+        "the premise: the tier's padding alone makes it larger, {padded:?}"
     );
 }

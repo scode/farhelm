@@ -1,6 +1,6 @@
 //! Tests of the host settings dialog over the helm client's fake: where focus starts and returns, what each permission
-//! switch, the destination and alias editors, the appearance picker and the checkout folder send, and what a refusal
-//! leaves on screen.
+//! switch, the destination and alias editors, the appearance picker and the checkout folder send, what a refusal leaves
+//! on screen, and the destination's wait for a session launch.
 //!
 //! The dialog is opened the way the user opens it: a click on a Hosts panel row's toggle, then on the menu's Settings.
 //! The hosts are the reference screens' three (the local host as 1, `build-box` at `dev@build-box` as 2, `gpu-1` as
@@ -22,12 +22,11 @@ use serde_json::{Value, json};
 
 use super::{FOLDER_NOTE, Field, HostSettingsDialog};
 use crate::focus;
-use crate::hosts::tests::{hosts, open_panel, reference_hosts};
-use crate::layers;
+use crate::hosts::tests::{hosts, nothing_in_flight, open_panel, reference_hosts, start_work};
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::settings::Refused;
-use crate::test_support::{click, focused_id, frame, keys, settle};
+use crate::test_support::{any_open, click, focused_id, frame, keys, settle};
 
 /// The dialog [`super::open_settings`] opened last, recorded in test builds only, so a test can read its fields.
 pub(super) struct Opened(pub(super) WeakEntity<HostSettingsDialog>);
@@ -183,10 +182,6 @@ fn push_build_box(
 
 /// How a test changes the pushed host to what the helm stores after a save.
 type Stores = fn(&mut HostView);
-
-fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
-}
 
 // ---- Opening, closing and focus ------------------------------------------------------------------------------------
 
@@ -479,6 +474,53 @@ fn the_destination_saves_as_typed_and_a_refusal_stays_in_place(cx: &mut TestAppC
         .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
         .collect();
     assert!(painted.iter().any(|line| line == "newbox"), "{painted:?}");
+}
+
+/// Why this matters: the destination is where a launch on the host dials, so changing it while a session launch is in
+/// flight is the race the old app's page-wide token kept out; the migration's orchestrator decided that it alone of the
+/// dialog's saves waits for a launch, and the alias does not. Specified: with a launcher `Launch` in flight, Save of a
+/// typed destination sends nothing, the row says "Destination: not started, a session launch is in progress; try again
+/// when it finishes", and the field stays open with the draft as typed; once the launch settles, Save again in the same
+/// open field sends the kept draft and the line goes; with another launch in flight, the alias's Save still sends.
+#[gpui::test]
+fn the_destination_waits_for_a_launch_and_the_alias_does_not(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_build_box(cx);
+    let launch = start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, "host-settings-edit-destination");
+    keys(cx, &format!("{SELECT_ALL} n e w b o x enter"));
+    assert!(helm.commands().is_empty(), "nothing was sent");
+    assert_eq!(
+        label(cx, "host-settings-destination-launch"),
+        Some(format!("Destination: {}", crate::hosts::LAUNCH_IN_FLIGHT))
+    );
+    assert_eq!(editing(cx), Some(Field::Destination), "still open");
+    let editor = dialog(cx);
+    let draft = cx.update(|_, cx| editor.read(cx).destination.draft().value().clone());
+    assert_eq!(draft, "newbox", "the draft was kept");
+
+    helm.reply(launch, 200, None);
+    settle(cx);
+    assert!(nothing_in_flight(cx), "the premise: the launch settled");
+    keys(cx, "enter");
+    let (saved, path, body) = one_command(&mut helm);
+    assert_eq!(path, "/api/hosts/2/destination");
+    assert_eq!(body, json!({ "ssh": "newbox" }), "the kept draft went");
+    assert_eq!(
+        label(cx, "host-settings-destination-launch"),
+        None,
+        "the line went with the press that got past the launch check"
+    );
+    helm.reply(saved, 200, None);
+    settle(cx);
+
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, "host-settings-edit-alias");
+    keys(cx, &format!("{SELECT_ALL} b o x enter"));
+    let (_, path, _) = one_command(&mut helm);
+    assert_eq!(
+        path, "/api/hosts/2/alias",
+        "the alias went during the launch"
+    );
 }
 
 /// Why this matters: the alias is the name a host is shown under, and clearing it must be possible (the helm then names

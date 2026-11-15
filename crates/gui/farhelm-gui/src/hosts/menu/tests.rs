@@ -1,6 +1,6 @@
 //! Tests of a host's actions menu as the Hosts panel opens it: what it offers on a remote host and on the helm's own
-//! machine, what its greyed Update does (nothing), Settings and Remove waiting for the host's own work, which hosts
-//! offer Remove, and where focus goes.
+//! machine, what its greyed Update does (nothing), the header of a host that reports no build, Settings and Remove
+//! waiting for the host's own work, which hosts offer Remove, and where focus goes.
 //!
 //! The panel runs over the helm client's fake with the reference screens' three hosts (the local host as 1,
 //! `build-box` as 2, `gpu-1` as 3), and the menu is opened by clicking a row's toggle. Every step ends in one of the
@@ -10,12 +10,11 @@ use farhelm_helm_client::{ApiPath, Method};
 use gpui::{DriverNode, Role, TestAppContext, VisualTestContext, px, size};
 
 use crate::hosts::tests::{
-    connected, host, hosts, open_panel, open_panel_in_column, reference_hosts,
+    connected, connecting, host, hosts, open_panel, open_panel_in_column, reference_hosts,
 };
-use crate::layers;
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
-use crate::test_support::{self, bounds, center, click, focused_id, frame, keys};
+use crate::test_support::{self, any_open, bounds, center, click, focused_id, frame, keys};
 
 /// The panel over the reference hosts in a window as large as the reference screens', with nothing open.
 fn open_hosts(
@@ -54,10 +53,6 @@ fn painted(nodes: &[DriverNode]) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// Why this matters: the menu is how a user reaches a host's settings and removes it, and what it lists must be what the
@@ -156,9 +151,12 @@ fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
 
 /// Why this matters: the helm refuses to update its own machine, which is updated by running the installer again, so
 /// the local row's Update is shown greyed with that reason and must never send anything (`provisioning.spec.ts`, "the
-/// local row's update is greyed out, points at the installer, and sends nothing"). Specified: the local host's menu
-/// reads "Local host · Farhelm ..." and offers Update, then Settings; focus starts on Update; its line says "Run the
-/// installer again to update this machine"; clicking it and pressing Enter on it send nothing and leave the menu open.
+/// local row's update is greyed out, points at the installer, and sends nothing"). Focus must not start on it: a greyed
+/// command draws no highlight, so a menu opening there showed no mark of where Enter would go (the old menu opened on
+/// Retry, ahead of it). Specified: the local host's menu reads "Local host · Farhelm ..." and offers Update, then
+/// Settings; focus starts on Settings, and Up reaches the greyed Update, as the old menu's arrows reached it; its line
+/// says "Run the installer again to update this machine"; clicking it and pressing Enter on it send nothing and leave
+/// the menu open.
 #[gpui::test]
 fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx);
@@ -175,12 +173,32 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
         "the helm's own machine is never removed"
     );
     assert!(painted(&nodes).contains("Run the installer again to update this machine"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-settings"));
+    keys(cx, "up");
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
 
     click(cx, "host-menu-update");
     keys(cx, "enter");
     assert!(helm.commands().is_empty(), "the greyed Update sent nothing");
     assert!(any_open(cx), "and the menu stayed open");
+}
+
+/// Why this matters: the header's second line says which Farhelm a host runs, and only a build the host reports is one.
+/// The helm also pushes where Farhelm is installed on the host, a path, which the old header showed in the build's
+/// place when the host reported none, so it read as a version. Specified: a host on its second connection attempt, with
+/// an install path recorded, has its header read "dev@build-box.invalid · Farhelm not connected".
+#[gpui::test]
+fn a_host_that_reports_no_build_reads_not_connected(cx: &mut TestAppContext) {
+    let mut down = host(2, "ssh", connecting(2, Some("connection refused")));
+    down.remote_farhelm = Some("~/.local/bin/farhelm".to_owned());
+    let (_helm, _, cx) = open_panel(cx, vec![hosts(&[host(1, "local", connected()), down])]);
+    cx.simulate_resize(size(px(1600.), px(1000.)));
+    test_support::settle(cx);
+    click(cx, "host-menu-toggle-2");
+    assert_eq!(
+        label(&frame(cx), "host-menu-summary-2"),
+        "dev@build-box.invalid · Farhelm not connected"
+    );
 }
 
 /// Why this matters: a host's settings must not change under its own work in flight (an Update's plan, a save), as the

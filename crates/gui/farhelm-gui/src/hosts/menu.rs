@@ -108,10 +108,15 @@ pub(super) fn toggle(
 /// the entry point the Hosts panel's row toggle calls, and the host rail's avatar menu will. `mark` is the [`Mark`]
 /// taken in that control's handler.
 ///
-/// Focus starts on the menu's first command, as the old menu's did, and the menu names `opener` as where its closing
-/// returns focus, so closing it returns focus to `opener`, and the settings dialog opened from the menu returns it
+/// Focus starts on the menu's first command that can act, and the menu names `opener` as where its closing returns
+/// focus, so closing it returns focus to `opener`, and the settings dialog opened from the menu returns it
 /// there too (see the module docs). Nothing opens, and no focus moves, when the user has moved on since `mark`, the
 /// window is inert, the registry does not list the host, or `anchor` is not drawn.
+///
+/// Why not simply the first command: the old menu started on its first command, but that was always Retry, which this
+/// port leaves out, so the old local menu never opened on its greyed Update. Starting there now would put focus where
+/// the menu draws no highlight (a greyed item takes none), so the user could not see where Enter goes. The arrow keys
+/// still walk every command, the greyed Update included, as the old menu's did.
 ///
 /// Returns the menu's layer, or `None` when nothing opened.
 pub fn open_menu(
@@ -129,9 +134,13 @@ pub fn open_menu(
     let rerun_focus = cx.focus_handle().tab_stop(true);
     let update_focus = cx.focus_handle().tab_stop(true);
     let settings_focus = cx.focus_handle().tab_stop(true);
-    // Focus starts on the first command, as the old menu's did.
+    // Focus starts on the first command that can act: Re-run when drawn, then Settings when available. The greyed
+    // Update is never where it starts (see `open_menu`'s docs); only a menu where nothing can act starts on its first
+    // command, the greyed Update when drawn.
     let start = if reruns_setup(&view, &offered) {
         rerun_focus.clone()
+    } else if offered.settings_enabled {
+        settings_focus.clone()
     } else {
         match offered.update {
             Some(Update::Greyed) => update_focus.clone(),
@@ -196,9 +205,9 @@ pub(crate) struct HostMenu {
     opener: FocusHandle,
     /// Re-run's focus handle, where the menu starts when it offers it.
     rerun_focus: FocusHandle,
-    /// The greyed Update's focus handle, where the menu starts when it offers one.
+    /// The greyed Update's focus handle, where the menu starts only when no command in it can act.
     update_focus: FocusHandle,
-    /// Settings' focus handle, where the menu starts otherwise.
+    /// Settings' focus handle, where the menu starts when it offers no Re-run and Settings is available.
     settings_focus: FocusHandle,
     /// Set right after the layer opens; what a chosen command closes.
     layer: Option<LayerId>,
@@ -328,8 +337,11 @@ impl Render for HostMenu {
 
 /// The menu's header ([`MenuHeader`]): the host's name, then where it is and which Farhelm it runs on one line
 /// ("dev@build-box · Farhelm 0.16.0"). The destination and the build are host values in the monospace face; the helm's
-/// own machine reads "Local host", and a host that reports no build the last one the helm recorded for it, or "not
-/// connected".
+/// own machine reads "Local host", and a host that reports no build reads "not connected" in the app's own face.
+///
+/// NOTE: The old header fell back to the host's `remote_farhelm` when no build was reported, but that field is where
+/// Farhelm is installed on the host (a path), not a version, so the line read as "Farhelm ~/.local/bin/farhelm". Only a
+/// build the host reports now ([`phase::reported_build`]) is shown as one.
 fn header(view: &HostView, name: &HostText) -> MenuHeader {
     let mut summary =
         HostSentence::new(SharedString::from(format!("host-menu-summary-{}", view.id)));
@@ -338,8 +350,7 @@ fn header(view: &HostView, name: &HostText) -> MenuHeader {
         None => summary.text("Local host"),
     };
     summary = summary.text(" · Farhelm ");
-    let build = phase::reported_build(&view.state).or(view.remote_farhelm.as_deref());
-    summary = match build {
+    summary = match phase::reported_build(&view.state) {
         Some(build) => summary.mono(&HostText::from_host(build)),
         None => summary.text("not connected"),
     };
