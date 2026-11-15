@@ -50,8 +50,8 @@ pub const UI_CHANNEL_PATH: &str = "/api/ui";
 ///
 /// Outside `/api/` on purpose: the helm handles it in the channel itself
 /// rather than routing it, because the query is state of THIS channel (the
-/// helm keeps serving the filtered, sorted view and its counts after every
-/// change), not something any HTTP route owns. It is still an ordinary
+/// helm keeps serving the filtered, sorted view, its counts and the open
+/// session after every change), not something any HTTP route owns. It is still an ordinary
 /// command, so it is admitted in order and answered like every other one.
 pub const SESSION_QUERY_PATH: &str = "/ui/session-query";
 
@@ -332,13 +332,31 @@ pub struct CollectionChanges {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollectionMeta {
     pub availability: Availability,
-    /// Every key, in the order the helm serves the collection. The GUI draws
-    /// in this order; entries arrive keyed, not positioned.
+    /// Every key, in the order the helm serves the collection, except
+    /// [`Self::selected_outside_query`]'s. The GUI draws in this order;
+    /// entries arrive keyed, not positioned.
     pub order: Vec<String>,
     /// The session list's counts, which describe more than the entries do
     /// (the whole view, the filter's matches, whether a cap cut the list).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counts: Option<ListCounts>,
+    /// The key of the one entry the session list carries only because the
+    /// channel's [`SessionQuery::selected`] names it: the session the GUI has
+    /// open, which the query's filter or the listing cap left out. `None`
+    /// when the query selects nothing, when the selected session is listed
+    /// anyway, and when the helm knows no such session.
+    ///
+    /// The open session's pane, header and Rename need its current state
+    /// even while the list does not show it, and pushed state is never
+    /// fetched, so the helm pushes it here rather than leaving the GUI a read
+    /// that goes stale. It is deliberately outside the list: its key is not
+    /// in [`Self::order`], so a reader that draws the order skips it while a
+    /// lookup by key finds it, and [`Self::counts`] stay exactly the query's
+    /// (the selected session is in `total` only as a member of the view,
+    /// never added for being carried). Omitted from the wire when `None`, so
+    /// a collection without one is sent exactly as before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_outside_query: Option<String>,
 }
 
 /// Whether the helm could read a collection the last time it tried.
@@ -371,6 +389,14 @@ pub struct ListCounts {
 /// unknown status or sort word is refused rather than silently ignored. The
 /// list's cap is the helm's own fixed listing cap. Every field absent means
 /// every session, in creation order.
+///
+/// Fields added later are optional and left off the wire when unset, so a
+/// query that uses none of them is sent exactly as before they existed. A
+/// query that sets one is refused by a helm older than the field (unknown
+/// fields are refused), which is acceptable only because the desktop app
+/// attaches to the helm it embeds, from the same build, and a standalone helm
+/// serves no UI (SPEC.md, "Topology"). A UI attaching to a remote helm would
+/// need a version check first.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionQuery {
@@ -386,6 +412,16 @@ pub struct SessionQuery {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
+    /// The key the session list files the GUI's open session under (its
+    /// served id), so that the list carries that session even when the
+    /// filters above or the listing cap leave it out
+    /// ([`CollectionMeta::selected_outside_query`]). Not a filter: it never
+    /// changes which sessions are listed, their order or the counts.
+    ///
+    /// Not validated: a key that names no session the helm knows (one deleted
+    /// since, say) is simply not carried, and the query is still accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,6 +1094,66 @@ mod tests {
                 "{foreign:?} is not a method"
             );
         }
+    }
+
+    /// The open session rides the session list outside its query, and both
+    /// halves of that are wire format: the GUI names the session in its query
+    /// as `selected`, and the helm names the entry it carries for that reason
+    /// as `selected_outside_query` in the collection's metadata. Pins both
+    /// spellings, that each round-trips, and that each is left off the wire
+    /// when unset, so a query or a collection without one is exactly what it
+    /// was before the fields existed and a message from before them decodes.
+    #[test]
+    fn the_selected_session_fields_round_trip_and_are_omitted_when_unset() {
+        let query = SessionQuery {
+            status: Some("idle".into()),
+            selected: Some("entry:fh-1".into()),
+            ..SessionQuery::default()
+        };
+        let json = serde_json::json!({ "status": "idle", "selected": "entry:fh-1" });
+        assert_eq!(serde_json::to_value(&query).unwrap(), json);
+        assert_eq!(serde_json::from_value::<SessionQuery>(json).unwrap(), query);
+        assert_eq!(
+            serde_json::to_value(SessionQuery::default()).unwrap(),
+            serde_json::json!({})
+        );
+
+        let meta = CollectionMeta {
+            availability: Availability::Available,
+            order: vec!["listed".into()],
+            counts: Some(ListCounts {
+                total: 2,
+                matching: Some(1),
+                truncated: false,
+            }),
+            selected_outside_query: Some("carried".into()),
+        };
+        let json = serde_json::json!({
+            "availability": { "state": "available" },
+            "order": ["listed"],
+            "counts": { "total": 2, "matching": 1, "truncated": false },
+            "selected_outside_query": "carried",
+        });
+        assert_eq!(serde_json::to_value(&meta).unwrap(), json);
+        assert_eq!(
+            serde_json::from_value::<CollectionMeta>(json).unwrap(),
+            meta
+        );
+
+        let unflagged = CollectionMeta {
+            selected_outside_query: None,
+            ..meta
+        };
+        let json = serde_json::json!({
+            "availability": { "state": "available" },
+            "order": ["listed"],
+            "counts": { "total": 2, "matching": 1, "truncated": false },
+        });
+        assert_eq!(serde_json::to_value(&unflagged).unwrap(), json);
+        assert_eq!(
+            serde_json::from_value::<CollectionMeta>(json).unwrap(),
+            unflagged
+        );
     }
 
     /// Each marker stands for one helm header with one value, and the GUI

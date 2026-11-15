@@ -39,6 +39,7 @@ fn projected(entries: Vec<(String, Value)>) -> Projected {
     Projected {
         entries,
         counts: None,
+        selected_outside_query: None,
     }
 }
 
@@ -48,6 +49,7 @@ fn empty_sent() -> Sent {
             availability: Availability::Available,
             order: Vec::new(),
             counts: None,
+            selected_outside_query: None,
         },
         entries: BTreeMap::new(),
     }
@@ -133,6 +135,50 @@ fn a_failed_read_marks_the_collection_unavailable_without_removing_anything() {
         recovered.upsert.is_empty(),
         "an unchanged entry is not resent"
     );
+}
+
+/// The channel reads the selected session only for a key that names one: an
+/// empty key (which the list route would read as no `id` at all, serving the
+/// whole fleet on every push) selects nothing, like an absent one.
+#[farhelm_testtrace::test]
+fn an_empty_selected_key_selects_nothing() {
+    let query = |selected: Option<&str>| SessionQuery {
+        selected: selected.map(str::to_owned),
+        ..SessionQuery::default()
+    };
+    assert_eq!(selected_key(&query(Some("entry:fh-1"))), Some("entry:fh-1"));
+    assert_eq!(selected_key(&query(Some(""))), None);
+    assert_eq!(selected_key(&query(None)), None);
+}
+
+/// The entry carried only because the query selected it must stay out of the
+/// list the GUI draws while a lookup by key still finds it, so the diff keeps
+/// its key out of the order and names it in the metadata instead. When the
+/// query starts to match it, the entry is unchanged, so only the metadata moves
+/// (it joins the order and loses the mark), and nothing is resent or removed.
+#[farhelm_testtrace::test]
+fn the_diff_keeps_the_entry_carried_outside_the_query_out_of_the_order() {
+    let mut carried = projected(vec![entry("a", "one"), entry("open", "two")]);
+    carried.selected_outside_query = Some("open".into());
+    let (first, sent) = diff(Collection::Sessions, &empty_sent(), Ok(carried));
+    let first = first.expect("a first read is a change");
+    assert_eq!(first.meta.order, ["a"]);
+    assert_eq!(first.meta.selected_outside_query.as_deref(), Some("open"));
+    assert_eq!(
+        first.upsert,
+        vec![keyed("a", "one"), keyed("open", "two")],
+        "the carried entry is sent like any other"
+    );
+
+    let (listed, _) = diff(
+        Collection::Sessions,
+        &sent,
+        Ok(projected(vec![entry("a", "one"), entry("open", "two")])),
+    );
+    let listed = listed.expect("the mark moving is a change");
+    assert!(listed.upsert.is_empty() && listed.remove.is_empty());
+    assert_eq!(listed.meta.order, ["a", "open"]);
+    assert_eq!(listed.meta.selected_outside_query, None);
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +312,7 @@ fn test_collection() -> CollectionSpec {
         collection: Collection::Approvals,
         path: |_| "/api/test/items".to_string(),
         split: |body| split_keyed_array(body, "items", "id"),
+        selected: None,
     }
 }
 
@@ -1708,6 +1755,214 @@ async fn a_yolo_launch_refused_over_a_real_channel_carries_its_markers() {
     assert_eq!(
         reply.markers,
         [HelmMarker::CreateUnaccepted, HelmMarker::YoloConfirmation]
+    );
+}
+
+/// Send `query` as this channel's session query and return the session list's
+/// changes it pushed, checking that the reply that follows accepts it.
+///
+/// Every caller expects the query to change the list, and the channel pushes
+/// a command's changes before its reply, so a reply that arrives first fails
+/// at once, naming that cause, rather than leaving the test to time out
+/// waiting for a push that is never coming.
+async fn set_query(ws: &mut WsTestClient, id: u64, query: Value) -> CollectionChanges {
+    send_message(ws, &command(id, "PUT", SESSION_QUERY_PATH, Some(query))).await;
+    let changes = loop {
+        match recv_message(ws).await {
+            ServerMessage::Changes(changes) if changes.collection == Collection::Sessions => {
+                break changes;
+            }
+            ServerMessage::Reply(reply) => panic!(
+                "the query's reply ({}, status {}) came with no session-list change",
+                reply.id, reply.status
+            ),
+            _ => continue,
+        }
+    };
+    let ServerMessage::Reply(reply) = recv_message(ws).await else {
+        panic!("the reply follows the changes");
+    };
+    assert_eq!((reply.id, reply.status), (id, 204), "the query is accepted");
+    changes
+}
+
+/// The open session's pane, header and Rename read its row from the pushed
+/// session list, so the list must carry that session while a filter leaves it
+/// out (SPEC.md keeps the selection then), and carry it outside the list: out
+/// of the order, marked in the metadata, and in none of the counts. Specifies
+/// it through every way the carried entry moves: the query selecting a
+/// filtered-out session; the filter matching it, which lists it once and
+/// unmarked; the selection moving and clearing; a selected key that names
+/// nothing, which carries nothing and leaves the list available; and the
+/// session's deletion, which removes it.
+#[farhelm_testtrace::test]
+async fn the_open_session_rides_outside_a_filter_that_leaves_it_out() {
+    let mut harness = rest_harness::helm_listing(vec![
+        rest_harness::session("alpha", 100),
+        rest_harness::session("beta", 200),
+    ])
+    .await;
+    let addr = harness.serve().await;
+    let alpha = harness.local_session_ref("alpha");
+    let beta = harness.local_session_ref("beta");
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ws).await;
+    let narrowed = Some(ListCounts {
+        total: 2,
+        matching: Some(1),
+        truncated: false,
+    });
+
+    // The filter leaves the open session out: it stays, carried and marked.
+    let changes = set_query(
+        &mut ws,
+        1,
+        serde_json::json!({ "title": "alp", "selected": beta }),
+    )
+    .await;
+    assert_eq!(changes.meta.order, std::slice::from_ref(&alpha));
+    assert_eq!(changes.meta.selected_outside_query, Some(beta.clone()));
+    assert_eq!(changes.meta.counts, narrowed, "the counts are the filter's");
+    assert!(changes.remove.is_empty(), "the open session is not removed");
+
+    // The filter matches it: listed once, unmarked.
+    let changes = set_query(
+        &mut ws,
+        2,
+        serde_json::json!({ "title": "bet", "selected": beta }),
+    )
+    .await;
+    assert_eq!(changes.meta.order, std::slice::from_ref(&beta));
+    assert_eq!(changes.meta.selected_outside_query, None);
+    assert_eq!(changes.meta.counts, narrowed);
+    assert_eq!(changes.remove, std::slice::from_ref(&alpha));
+
+    // The selection moves to a session the filter leaves out.
+    let changes = set_query(
+        &mut ws,
+        3,
+        serde_json::json!({ "title": "bet", "selected": alpha }),
+    )
+    .await;
+    assert_eq!(changes.meta.order, std::slice::from_ref(&beta));
+    assert_eq!(changes.meta.selected_outside_query, Some(alpha.clone()));
+    let upserted: Vec<&str> = changes.upsert.iter().map(|e| e.key.as_str()).collect();
+    assert_eq!(upserted, [alpha.as_str()]);
+
+    // The selection clears: the carried session goes.
+    let changes = set_query(&mut ws, 4, serde_json::json!({ "title": "bet" })).await;
+    assert_eq!(changes.meta.selected_outside_query, None);
+    assert_eq!(changes.remove, std::slice::from_ref(&alpha));
+
+    // A key that names nothing is accepted and carries nothing.
+    send_message(
+        &mut ws,
+        &command(
+            5,
+            "PUT",
+            SESSION_QUERY_PATH,
+            Some(serde_json::json!({ "title": "bet", "selected": "not a session" })),
+        ),
+    )
+    .await;
+    let ServerMessage::Reply(reply) = recv_message(&mut ws).await else {
+        panic!("an unchanged list sends no changes, only the reply");
+    };
+    assert_eq!((reply.id, reply.status), (5, 204));
+
+    // The carried session is deleted: it goes, and the list stays available.
+    let changes = set_query(
+        &mut ws,
+        6,
+        serde_json::json!({ "title": "bet", "selected": alpha }),
+    )
+    .await;
+    assert_eq!(changes.meta.selected_outside_query, Some(alpha.clone()));
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.fleet.edit(local, |script| {
+        script.sessions.retain(|session| session.id != "alpha");
+    });
+    harness.refresh_to_completion(local).await;
+    let changes = changes_of(&mut ws, Collection::Sessions).await;
+    assert_eq!(changes.remove, std::slice::from_ref(&alpha));
+    assert_eq!(changes.meta.availability, Availability::Available);
+    assert_eq!(changes.meta.selected_outside_query, None);
+    assert_eq!(changes.meta.order, std::slice::from_ref(&beta));
+}
+
+/// The listing cap can leave the open session out as surely as a filter can
+/// (under creation order a fleet past the cap loses its oldest sessions), and
+/// the pane needs it just the same. With one session more than the cap, the
+/// open one being the oldest, the list is cut and carries it outside the
+/// order, and the counts still describe the cut list alone. The fleet is two
+/// hosts because one host may list at most the cap itself.
+#[farhelm_testtrace::test]
+async fn the_open_session_rides_outside_the_listing_cap() {
+    let cap = farhelm_proto::LIST_SESSIONS_CAP;
+    let filler = (1..=cap)
+        .map(|n| rest_harness::session(&format!("s{n:04}"), 100 + n as i64))
+        .collect();
+    let (builder, other) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: filler,
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "oldest.example",
+            rest_harness::HostScript {
+                identity: Some("oldest-identity".to_string()),
+                sessions: vec![rest_harness::session("oldest", 50)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let mut harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness.await_refreshed(other).await;
+    let addr = harness.serve().await;
+    let oldest = harness.session_ref(other, "oldest");
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    let sessions = collections
+        .iter()
+        .find(|collection| collection.collection == Collection::Sessions)
+        .expect("the snapshot holds the session list");
+    assert!(
+        sessions.entries.iter().all(|entry| entry.key != oldest),
+        "premise: the cap cut the oldest session from the opening list"
+    );
+    assert_eq!(
+        sessions.meta.counts.map(|counts| counts.truncated),
+        Some(true),
+        "premise: the opening list is truncated"
+    );
+
+    let changes = set_query(
+        &mut ws,
+        1,
+        serde_json::json!({ "sort": "created", "selected": oldest }),
+    )
+    .await;
+    assert_eq!(changes.meta.order.len(), cap);
+    assert!(!changes.meta.order.contains(&oldest), "the cap cut it");
+    assert_eq!(changes.meta.selected_outside_query, Some(oldest.clone()));
+    assert!(
+        changes.upsert.iter().any(|entry| entry.key == oldest),
+        "the carried session's row is sent"
+    );
+    assert_eq!(
+        changes.meta.counts,
+        Some(ListCounts {
+            total: cap as u64 + 1,
+            matching: None,
+            truncated: true,
+        })
     );
 }
 

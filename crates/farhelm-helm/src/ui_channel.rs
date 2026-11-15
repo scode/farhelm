@@ -34,6 +34,19 @@
 //! The channel is also the seat ([`UiSeat`]): a helm serves one GUI, and a new
 //! channel displaces the old one.
 //!
+//! ## The open session rides outside the query
+//!
+//! The session list is this channel's query, so a host or status filter, or
+//! the listing cap, can leave out the session the GUI has open, while its pane,
+//! header and Rename still need that session's current state. The query names
+//! the open session (`SessionQuery::selected`), and when the list's own read
+//! leaves it out, [`Channel::read`] reads that one session too and carries it
+//! as an extra entry, named in the metadata
+//! (`CollectionMeta::selected_outside_query`), kept out of the order and
+//! counted nowhere. It is diffed like any entry, so it arrives, changes and
+//! goes (the selection moves, the filter starts to match it, it is deleted)
+//! through the ordinary push.
+//!
 //! ## What the helm owes the GUI's watchdog
 //!
 //! The GUI treats any command left unanswered for too long as a broken
@@ -182,6 +195,10 @@ pub(crate) struct Projected {
     /// Entries in served order, with their keys.
     pub(crate) entries: Vec<(String, Value)>,
     pub(crate) counts: Option<ListCounts>,
+    /// The key of the entry in `entries` that is there only because the
+    /// session query selected it (always the last entry). The diff keeps it
+    /// out of the order and names it in the metadata.
+    pub(crate) selected_outside_query: Option<String>,
 }
 
 /// How the channel reads one pushed collection: which GET to run, and how to
@@ -200,6 +217,11 @@ pub(crate) struct CollectionSpec {
     pub(crate) collection: Collection,
     pub(crate) path: fn(&SessionQuery) -> String,
     pub(crate) split: fn(Value) -> Result<Projected, String>,
+    /// For the collection [`SessionQuery::selected`] names an entry of (the
+    /// session list): the path of a read that serves only the entry filed
+    /// under a key, through the same route and `split`. `None` for every
+    /// other collection. Like `path`, the read must be helm-local.
+    pub(crate) selected: Option<fn(&str) -> String>,
 }
 
 /// The collections a production channel pushes.
@@ -209,11 +231,13 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
             collection: Collection::Sessions,
             path: session_list_path,
             split: split_sessions,
+            selected: Some(selected_session_path),
         },
         CollectionSpec {
             collection: Collection::Hosts,
             path: |_| "/api/hosts".to_string(),
             split: |body| split_keyed_array(body, "hosts", "id"),
+            selected: None,
         },
         CollectionSpec {
             collection: Collection::Preferences,
@@ -222,23 +246,28 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
                 Ok(Projected {
                     entries: vec![(PREFERENCES_KEY.to_string(), body)],
                     counts: None,
+                    selected_outside_query: None,
                 })
             },
+            selected: None,
         },
         CollectionSpec {
             collection: Collection::Approvals,
             path: |_| "/api/approvals".to_string(),
             split: |body| split_keyed_array(body, "approvals", "id"),
+            selected: None,
         },
         CollectionSpec {
             collection: Collection::Templates,
             path: |_| "/api/templates".to_string(),
             split: |body| split_keyed_array(body, "templates", "name"),
+            selected: None,
         },
         CollectionSpec {
             collection: Collection::Notices,
             path: |_| "/api/notices".to_string(),
             split: |body| split_keyed_array(body, "notices", "id"),
+            selected: None,
         },
         CollectionSpec {
             collection: Collection::Announcements,
@@ -247,13 +276,16 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
                 Ok(Projected {
                     entries: vec![(ANNOUNCEMENTS_KEY.to_string(), body)],
                     counts: None,
+                    selected_outside_query: None,
                 })
             },
+            selected: None,
         },
         CollectionSpec {
             collection: Collection::HostProgress,
             path: |_| "/api/provisioning".to_string(),
             split: |body| split_keyed_array(body, "runs", "host_id"),
+            selected: None,
         },
     ]
 }
@@ -282,6 +314,22 @@ fn session_list_path(query: &SessionQuery) -> String {
     } else {
         format!("/api/sessions?{params}")
     }
+}
+
+/// `GET /api/sessions` narrowed to the one session served under `key`, with
+/// no other filter, so no filter and no cap can leave it out.
+fn selected_session_path(key: &str) -> String {
+    let params = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("id", key)
+        .finish();
+    format!("/api/sessions?{params}")
+}
+
+/// The key the query selects, if any. An empty key selects nothing: the list
+/// route reads an empty `?id=` as absent, so reading it would serve the whole
+/// unfiltered fleet after every push only to find nothing in it.
+fn selected_key(query: &SessionQuery) -> Option<&str> {
+    query.selected.as_deref().filter(|key| !key.is_empty())
 }
 
 /// The session list: rows keyed by their served (fully qualified) id, plus
@@ -324,6 +372,7 @@ fn split_keyed_array(body: Value, field: &str, key: &str) -> Result<Projected, S
     Ok(Projected {
         entries,
         counts: None,
+        selected_outside_query: None,
     })
 }
 
@@ -353,10 +402,13 @@ pub(crate) fn diff(
             (meta, Vec::new(), Vec::new(), previous.entries.clone())
         }
         Ok(projected) => {
+            let outside = projected.selected_outside_query;
             let order = projected
                 .entries
                 .iter()
-                .map(|(key, _)| key.clone())
+                .map(|(key, _)| key)
+                .filter(|key| Some(*key) != outside.as_ref())
+                .cloned()
                 .collect();
             let mut upsert = Vec::new();
             for (key, value) in &projected.entries {
@@ -378,6 +430,7 @@ pub(crate) fn diff(
                 availability: Availability::Available,
                 order,
                 counts: projected.counts,
+                selected_outside_query: outside,
             };
             (meta, upsert, remove, entries)
         }
@@ -486,10 +539,29 @@ impl Channel {
         }
     }
 
-    /// Read one collection through its GET handler.
+    /// Read one collection through its GET handler, plus the entry the query
+    /// selected when the collection has one and the read left it out (see the
+    /// module docs, "The open session rides outside the query").
+    ///
+    /// A selected entry that is listed anyway is not read again and not
+    /// marked, so it is never sent twice. A selected key the helm knows no
+    /// session under is simply not carried.
     async fn read(&self, spec: &CollectionSpec, query: &SessionQuery) -> Result<Projected, String> {
+        let mut projected = self.read_path(spec, &(spec.path)(query)).await?;
+        if let (Some(selected_path), Some(key)) = (spec.selected, selected_key(query))
+            && !projected.entries.iter().any(|(listed, _)| listed == key)
+            && let Some(entry) = self.read_selected(spec, &selected_path(key), key).await?
+        {
+            projected.entries.push(entry);
+            projected.selected_outside_query = Some(key.to_owned());
+        }
+        Ok(projected)
+    }
+
+    /// One GET of `path`, split as `spec` splits its collection.
+    async fn read_path(&self, spec: &CollectionSpec, path: &str) -> Result<Projected, String> {
         let request = self
-            .request(Method::GET, &(spec.path)(query), None)
+            .request(Method::GET, path, None)
             .map_err(|error| format!("this list's read could not be built: {error}"))?;
         let Routed { status, body, .. } = route(self.router.clone(), request).await;
         if !status.is_success() {
@@ -501,6 +573,43 @@ impl Channel {
         let body: Value = serde_json::from_slice(&body)
             .map_err(|error| format!("this list's reply was not JSON: {error}"))?;
         (spec.split)(body)
+    }
+
+    /// The selected entry's own read: `Ok(None)` when the helm serves no entry
+    /// under `key`.
+    ///
+    /// A refusal (a 4xx: a key that does not parse as a session reference, or
+    /// whose host entry is gone) means the key names nothing, so the entry is
+    /// absent, as for a session deleted since. Any other failure fails the
+    /// collection's read like a failed list read, because a failed read is no
+    /// evidence that the session is gone.
+    async fn read_selected(
+        &self,
+        spec: &CollectionSpec,
+        path: &str,
+        key: &str,
+    ) -> Result<Option<(String, Value)>, String> {
+        let request = self
+            .request(Method::GET, path, None)
+            .map_err(|error| format!("the open session's read could not be built: {error}"))?;
+        // The markers are left out: this read is never relayed to the GUI as
+        // a reply, only merged into the push.
+        let Routed { status, body, .. } = route(self.router.clone(), request).await;
+        if status.is_client_error() {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            return Err(format!(
+                "reading the open session failed ({status}): {}",
+                String::from_utf8_lossy(&body)
+            ));
+        }
+        let body: Value = serde_json::from_slice(&body)
+            .map_err(|error| format!("the open session's reply was not JSON: {error}"))?;
+        Ok((spec.split)(body)?
+            .entries
+            .into_iter()
+            .find(|(served, _)| served == key))
     }
 
     /// Sort the session list in the order the helm has stored as the shared
@@ -563,6 +672,7 @@ impl Channel {
                     availability: Availability::Available,
                     order: Vec::new(),
                     counts: None,
+                    selected_outside_query: None,
                 },
                 entries: BTreeMap::new(),
             };
@@ -571,6 +681,7 @@ impl Channel {
                 .meta
                 .order
                 .iter()
+                .chain(&sent.meta.selected_outside_query)
                 .filter_map(|key| {
                     sent.entries.get(key).map(|value| KeyedEntry {
                         key: key.clone(),
@@ -599,6 +710,7 @@ impl Channel {
                     availability: Availability::Available,
                     order: Vec::new(),
                     counts: None,
+                    selected_outside_query: None,
                 },
                 entries: BTreeMap::new(),
             });
@@ -642,7 +754,8 @@ impl Channel {
     /// The channel-local [`SESSION_QUERY_PATH`] command. The new query is
     /// validated by serving the list with it, so the route's own refusals (an
     /// unknown status or sort word) answer here unchanged and leave the old
-    /// query in force.
+    /// query in force. Its selected key is not validated: one that names no
+    /// session is accepted and carries nothing.
     async fn set_session_query(&mut self, command: Command) -> (Vec<ServerMessage>, Reply) {
         let reply = |status: StatusCode, body: Option<Value>| Reply {
             id: command.id,
