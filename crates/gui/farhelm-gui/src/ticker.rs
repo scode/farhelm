@@ -10,12 +10,20 @@
 //! - One-shot deadlines ([`after`]): a hover delay, a banner's expiry, a "still waiting" threshold. They fire on time
 //!   whether or not the window is active, because they are about the user's time, not about drawing.
 //! - Wall-clock time, for text that says how long ago something happened (a session row's age, the details bar's, the
-//!   stopped card's). [`wall_now`] reads the time of day, and a view that shows such text holds a [`Clock`], which
-//!   notifies it every [`CLOCK_PERIOD`] (the old app re-rendered its relative times every 30 seconds) whether or not
-//!   its window is active and whatever the reduced-motion setting. An age is information, not motion, and an inactive
-//!   window is often still on screen, where a frozen "2m" would be wrong; one redraw every 30 seconds costs nothing
-//!   worth saving. One loop serves every [`Clock`] in the app, so a list of 200 rows that each show an age is one view
-//!   redrawn twice a minute, not 200 timers.
+//!   stopped card's). [`wall_now`] reads the time of day, and a view that shows such text holds a [`Clock`] from
+//!   [`clock`], which notifies it every [`CLOCK_PERIOD`] (the old app re-rendered its relative times every 30 seconds)
+//!   whether or not its window is active and whatever the reduced-motion setting. An age is information, not motion,
+//!   and an inactive window is often still on screen, where a frozen "2m" would be wrong; one redraw every 30 seconds
+//!   costs nothing worth saving. One loop serves every such [`Clock`] in the app, so a list of 200 rows that each show
+//!   an age is one view redrawn twice a minute, not 200 timers.
+//! - Counts of whole seconds, for text that says how long something has been going on (how long a Restart has waited,
+//!   a host setup's elapsed time). A view that shows one holds a [`Clock`] from [`every_second`] instead of from
+//!   [`clock`], and is notified every [`SECONDS_PERIOD`] on the same terms as an age: in an inactive window and under
+//!   reduced motion too, because a count is information, not motion, and one that froze while the window was in the
+//!   background would be wrong when the user looks. Its holders are few and short-lived (a count shows only while
+//!   something is in progress), so one wake-up a second while one shows costs little, and one loop serves them all.
+//!   The one-second clock has its own loop beside the 30-second one, so a view that shows only ages is never woken
+//!   every second.
 //!
 //! GUI crates may not read the system clock or start timers (`crates/gui/clippy.toml`), so tests drive all of this
 //! through GPUI's executor clock, and this module holds the crate's one exemption from the timer ban. The wall clock
@@ -41,10 +49,10 @@
 //! step of one cycle counted from the tick count, so every pulsing dot in the app steps together. A new phase goes here
 //! too, beside the tick that drives it.
 //!
-//! Every handle (an animation's, a blink's, a pulse's, a [`Clock`]) works the same way: the view keeps it as a field,
-//! the ticker keeps only a weak reference to it, and dropping it, or the view that holds it, ends that view's
-//! notifications. A loop finds out at its next wake-up that nobody is left and stops there, so no timer outlives the
-//! last handle by more than one period.
+//! Every handle (an animation's, a blink's, a pulse's, either clock's [`Clock`]) works the same way: the view keeps it
+//! as a field, the ticker keeps only a weak reference to it, and dropping it, or the view that holds it, ends that
+//! view's notifications. A loop finds out at its next wake-up that nobody is left and stops there, so no timer outlives
+//! the last handle by more than one period.
 
 use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime};
@@ -78,6 +86,10 @@ pub const PULSE_CYCLE_TICKS: u64 = 20;
 /// seconds, so an age is at most half a minute stale.
 pub const CLOCK_PERIOD: Duration = Duration::from_secs(30);
 
+/// How often a view holding a [`Clock`] from [`every_second`] is notified: a count of whole seconds moves on once a
+/// second.
+pub const SECONDS_PERIOD: Duration = Duration::from_secs(1);
+
 /// The ticker's state: who animates and who shows wall-clock text, and the loop that serves each while anyone does.
 #[derive(Default)]
 struct Ticker {
@@ -86,13 +98,10 @@ struct Ticker {
     /// dropping) the finished task.
     tick_loop: Option<Task<()>>,
     running: bool,
-    /// The views holding a [`Clock`], each notified every [`CLOCK_PERIOD`].
-    clocks: Vec<ClockSubscriber>,
-    /// The clock loop, which stops by itself once no [`Clock`] lives and is replaced the same way as `tick_loop`. It
-    /// is separate from the tick loop because it answers to neither window activity nor reduced motion, and because
-    /// folding it into the ticks would keep a timer firing ten times a second for a view that changes twice a minute.
-    clock_loop: Option<Task<()>>,
-    clock_running: bool,
+    /// The 30-second clock that [`clock`] hands out, for ages.
+    ages: ClockLoop,
+    /// The one-second clock that [`every_second`] hands out, for counts of seconds.
+    seconds: ClockLoop,
     reduced_motion: bool,
     active_override: Option<bool>,
     /// How many ticks have been delivered since the app started. Only differences between two readings mean anything;
@@ -101,6 +110,16 @@ struct Ticker {
 }
 
 impl Global for Ticker {}
+
+impl Ticker {
+    /// The holders and loop of `period`'s clock.
+    fn clock_loop(&mut self, period: Period) -> &mut ClockLoop {
+        match period {
+            Period::Ages => &mut self.ages,
+            Period::Seconds => &mut self.seconds,
+        }
+    }
+}
 
 /// One view that animates: it is notified on the ticks its [`Cadence`] picks, while its window is active and its
 /// handle lives.
@@ -113,10 +132,40 @@ struct Subscriber {
     since: u64,
 }
 
-/// One view that shows wall-clock text: it is notified every [`CLOCK_PERIOD`] while its [`Clock`] lives.
+/// One clock's holders, and the loop that notifies them every period while any holder lives. The loop stops by itself
+/// once none of this clock's [`Clock`]s lives, and the next handle starts a new one, replacing (and so dropping) the
+/// finished task, as with `tick_loop`. A clock's loop is separate from the tick loop because it answers to neither
+/// window activity nor reduced motion, and because folding it into the ticks would keep a timer firing ten times a
+/// second for a view that changes once a second or twice a minute.
+#[derive(Default)]
+struct ClockLoop {
+    holders: Vec<ClockSubscriber>,
+    task: Option<Task<()>>,
+    running: bool,
+}
+
+/// One view that shows an age or a count of seconds: it is notified every period of its clock while its [`Clock`]
+/// lives.
 struct ClockSubscriber {
     alive: Weak<()>,
     view: EntityId,
+}
+
+/// Which of the ticker's two clocks a [`Clock`] belongs to: the ages' 30-second one or the counts' one-second one.
+#[derive(Clone, Copy)]
+enum Period {
+    Ages,
+    Seconds,
+}
+
+impl Period {
+    /// The time between two notifications of this clock.
+    fn duration(self) -> Duration {
+        match self {
+            Period::Ages => CLOCK_PERIOD,
+            Period::Seconds => SECONDS_PERIOD,
+        }
+    }
 }
 
 /// Which ticks a subscriber hears about.
@@ -198,15 +247,19 @@ impl Pulsing {
     }
 }
 
-/// Held by a view that shows wall-clock text (an age), for as long as it shows some. Dropping it, or the view, stops
-/// the view's clock notifications.
+/// Held by a view that shows wall-clock text (an age) or a count of seconds, for as long as it shows some. Dropping it,
+/// or the view, stops the view's clock notifications.
 ///
-/// The view is notified every [`CLOCK_PERIOD`], in an inactive window and under reduced motion too, and reads the time
-/// to draw from [`wall_now`] when it renders; the handle carries no time of its own. One handle serves everything the
-/// view draws, so a list keeps one for all its rows: a row that is not a view of its own holds none, and nothing runs a
-/// timer per row. Every handle in the app shares one cadence, so a new handle's first notification may come sooner
-/// than a whole period after it was made. A view that draws an age is drawn uncached: the cache wrapper cannot see the
-/// time, so a cached row would replay its old age however often its list is notified (`cache.rs` has the note).
+/// A handle from [`clock`] is notified every [`CLOCK_PERIOD`], one from [`every_second`] every [`SECONDS_PERIOD`], in
+/// an inactive window and under reduced motion too. The view reads the time to draw from [`wall_now`] when it renders;
+/// the handle carries no time of its own. One handle serves everything the view draws, so a list keeps one for all its
+/// rows: a row that is not a view of its own holds none, and nothing runs a timer per row. While a view holds the
+/// one-second clock its ages stay fresh too, but a view that also shows ages keeps its 30-second handle, since it holds
+/// the one-second one only while a count shows and its ages would freeze once the count goes. Every handle of a clock
+/// shares that clock's one cadence, so a new handle's first notification may come sooner than a whole period after it
+/// was made, and a count of seconds turns over up to a second after the moment it counts from does. A view that draws
+/// an age or a count is drawn uncached: the cache wrapper cannot see the time, so a cached row would replay
+/// its old text however often its list is notified (`cache.rs` has the note).
 #[must_use = "a view hears the clock only while it holds this"]
 pub struct Clock {
     _alive: Rc<()>,
@@ -320,20 +373,36 @@ fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, cadence: Cadence)
 ///
 /// Unlike [`animate`], this takes no window: whether the window is active never matters to it.
 pub fn clock<V: 'static>(cx: &mut Context<V>) -> Clock {
+    hold(Period::Ages, cx)
+}
+
+/// Start notifying the view `cx` belongs to every [`SECONDS_PERIOD`] until the handle drops, on the same terms as
+/// [`clock`]: for a view that shows a count of whole seconds, which it works out from [`wall_now`] as it renders. A
+/// view holds it only while it shows a count, since every holder keeps the one-second loop's timer firing. A count that
+/// first shows after an exact threshold (the sidebar's waiting line, two seconds into a request) keeps an [`after`]
+/// deadline for the threshold and takes this handle when the deadline fires: the shared cadence would otherwise show it
+/// up to a second late, and a reply in that second would never show a line at all.
+pub fn every_second<V: 'static>(cx: &mut Context<V>) -> Clock {
+    hold(Period::Seconds, cx)
+}
+
+/// Add the view `cx` belongs to as a holder of `period`'s clock, and start that clock's loop unless it runs.
+fn hold<V: 'static>(period: Period, cx: &mut Context<V>) -> Clock {
     let alive = Rc::new(());
     let view = cx.entity_id();
     let Some(ticker) = installed_mut::<Ticker>(cx) else {
         return Clock { _alive: alive };
     };
-    ticker.clocks.push(ClockSubscriber {
+    let clock = ticker.clock_loop(period);
+    clock.holders.push(ClockSubscriber {
         alive: Rc::downgrade(&alive),
         view,
     });
-    if !ticker.clock_running {
-        ticker.clock_running = true;
-        let task = periodic(CLOCK_PERIOD, clock_tick, cx);
+    if !clock.running {
+        clock.running = true;
+        let task = periodic(period.duration(), move |cx| clock_tick(period, cx), cx);
         if let Some(ticker) = installed_mut::<Ticker>(cx) {
-            ticker.clock_loop = Some(task);
+            ticker.clock_loop(period).task = Some(task);
         }
     }
     Clock { _alive: alive }
@@ -360,13 +429,13 @@ pub fn wall_now(cx: &App) -> SystemTime {
 }
 
 /// A task that waits `period` and runs `step`, again and again until `step` returns false: the shape the tick loop and
-/// the clock loop share. Each loop's `step` decides when nobody needs it any more, so the loop, and with it its timer,
+/// the clock loops share. Each loop's `step` decides when nobody needs it any more, so the loop, and with it its timer,
 /// ends on the first wake-up after its last handle dropped.
-fn periodic(period: Duration, step: fn(&mut App) -> bool, cx: &mut App) -> Task<()> {
+fn periodic(period: Duration, step: impl Fn(&mut App) -> bool + 'static, cx: &mut App) -> Task<()> {
     cx.spawn(async move |cx| {
         loop {
             timer(cx.background_executor(), period).await;
-            if !cx.update(step) {
+            if !cx.update(&step) {
                 break;
             }
         }
@@ -422,22 +491,23 @@ fn tick(cx: &mut App) -> bool {
     true
 }
 
-/// One clock period: notify every view whose [`Clock`] still lives, active window or not, reduced motion or not.
-/// Returns whether the loop should keep running: not once no [`Clock`] lives.
-fn clock_tick(cx: &mut App) -> bool {
+/// One period of `period`'s clock: notify every view whose [`Clock`] of that clock still lives, active window or not,
+/// reduced motion or not. Returns whether the loop should keep running: not once none of its [`Clock`]s lives.
+fn clock_tick(period: Period, cx: &mut App) -> bool {
     let views: Vec<EntityId> = {
         let Some(ticker) = installed_mut::<Ticker>(cx) else {
             return false;
         };
-        ticker
-            .clocks
+        let clock = ticker.clock_loop(period);
+        clock
+            .holders
             .retain(|subscriber| subscriber.alive.strong_count() > 0);
-        if ticker.clocks.is_empty() {
-            ticker.clock_running = false;
+        if clock.holders.is_empty() {
+            clock.running = false;
             return false;
         }
-        ticker
-            .clocks
+        clock
+            .holders
             .iter()
             .map(|subscriber| subscriber.view)
             .collect()
@@ -456,7 +526,7 @@ pub(crate) fn ticks(cx: &App) -> u64 {
 }
 
 /// The crate's one timer: everything time-based goes through [`after`], the tick loop that [`animate`], [`blink`] and
-/// [`pulse`] start, or the clock loop that [`clock`] starts, which call this.
+/// [`pulse`] start, or the clock loops that [`clock`] and [`every_second`] start, which call this.
 #[allow(
     clippy::disallowed_methods,
     reason = "the ticker is the one owner of GUI time (SPEC_impl.md, \"Animation time: the ticker\")"

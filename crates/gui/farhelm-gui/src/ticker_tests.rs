@@ -1,7 +1,8 @@
 //! Tests of the ticker: an animating view redraws at most ten times a second and only in an active window, the
 //! override and reduced motion, the cursor blink and the running pulse that wake their views only when they change,
-//! one-shot deadlines, the wall clock that follows the executor's clock, and the 30-second clock that redraws its views
-//! whatever the window's activity and starts again after its last handle went.
+//! one-shot deadlines, the wall clock that follows the executor's clock, the 30-second clock that redraws its views
+//! whatever the window's activity and starts again after its last handle went, and the one-second clock that does the
+//! same for counts of seconds on a loop of its own and runs until its last holder goes.
 //!
 //! Each test installs the app-wide state as the real bootstrap does ([`crate::test_support::install`]), and each but
 //! the deadline and wall-clock tests opens a window of its own. Time moves only when the test advances GPUI's simulated clock.
@@ -415,4 +416,154 @@ fn a_clock_starts_again_after_its_last_handle_went(cx: &mut TestAppContext) {
         1,
         "a new loop redrew the new view when its period ended"
     );
+}
+
+/// A view that shows a count of seconds for as long as it holds the ticker's one-second clock handle. Each instance
+/// records its renders under its own name, so a test can tell two holders' redraws apart.
+struct Counter {
+    name: &'static str,
+    second: Option<ticker::Clock>,
+}
+
+impl Render for Counter {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        render_count::record(self.name, cx);
+        div()
+    }
+}
+
+/// A wait's "5s" and a host setup's elapsed time must count on in a window the user is not typing into and under
+/// reduced motion, like an age (a count is information, not motion), and SPEC.md asks for the wait to move on about
+/// once a second. Specified: with the window inactive and reduced motion on, a view holding the one-second `Clock` is
+/// not redrawn before a whole second has passed, and is redrawn exactly once per second after that. The test counts
+/// literal seconds rather than `SECONDS_PERIOD`, so the constant cannot drift from what SPEC.md asks unnoticed.
+#[gpui::test]
+fn a_second_clock_redraws_its_view_every_second_in_an_inactive_window(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    cx.update(|cx| ticker::set_reduced_motion(true, cx));
+    let (_counter, cx) = cx.add_window_view(|_, cx| Counter {
+        name: "counter",
+        second: Some(ticker::every_second(cx)),
+    });
+    cx.run_until_parked();
+    cx.deactivate_window();
+    assert!(
+        !cx.update(|window, cx| ticker::is_active(window, cx)),
+        "premise: the window counts as inactive"
+    );
+    cx.update(|_, cx| render_count::reset(cx));
+
+    let count = |cx: &mut VisualTestContext| cx.update(|_, cx| render_count::count("counter", cx));
+    let second = Duration::from_secs(1);
+    cx.executor()
+        .advance_clock(second - Duration::from_millis(1));
+    cx.run_until_parked();
+    assert_eq!(count(cx), 0, "not before a whole second");
+    cx.executor().advance_clock(Duration::from_millis(1));
+    cx.run_until_parked();
+    assert_eq!(count(cx), 1, "once the second ends");
+    for redraws in 2..=5 {
+        cx.executor().advance_clock(second);
+        cx.run_until_parked();
+        assert_eq!(count(cx), redraws, "once more per second");
+    }
+}
+
+/// The two clocks have separate loops, which is the reason the ticker keeps two: a one-second holder that joined the
+/// 30-second loop would count every 30 seconds, and an age holder on the one-second loop would wake its view every
+/// second for text that changes twice a minute. Specified: with a view already holding the age clock (its loop
+/// running), a second view that takes the one-second clock is redrawn once per second over a stretch shorter than
+/// `CLOCK_PERIOD`, and the age holder is not redrawn at all. The age clock goes first because that order catches a
+/// one-second holder joining an already running 30-second loop.
+#[gpui::test]
+fn the_second_clock_and_the_age_clock_keep_separate_loops(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let _ager = cx.add_window(|_, cx| Ager {
+        _clock: ticker::clock(cx),
+    });
+    cx.run_until_parked();
+    assert!(
+        scheduler_holds_work(&cx.executor()),
+        "premise: the age clock's loop is running"
+    );
+    let _counter = cx.add_window(|_, cx| Counter {
+        name: "counter",
+        second: Some(ticker::every_second(cx)),
+    });
+    cx.run_until_parked();
+    cx.update(render_count::reset);
+
+    let seconds = 5;
+    assert!(
+        Duration::from_secs(seconds) < ticker::CLOCK_PERIOD,
+        "premise: the stretch ends before the age clock's first period"
+    );
+    for redraws in 1..=seconds as usize {
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| render_count::count("counter", cx)),
+            redraws,
+            "the one-second holder is redrawn once per second"
+        );
+    }
+    assert_eq!(
+        cx.update(|cx| render_count::count("ager", cx)),
+        0,
+        "the age holder is not woken by the one-second clock"
+    );
+}
+
+/// Every holder of the one-second clock shares one loop, so that loop must outlive any one holder (a second wait still
+/// showing must keep counting when the first settles) and must end with the last one (a timer firing every second for
+/// nobody keeps the app awake), and the next holder must start it again. Specified: of two views holding the clock,
+/// dropping the first's handle leaves the second redrawn on the next second while the loop waits on the one after;
+/// dropping the second's handle ends the loop at its next wake-up, leaving no task or timer in the scheduler; and a
+/// handle taken after that is notified when the next second ends.
+#[gpui::test]
+fn the_second_clock_runs_until_its_last_holder_goes_and_starts_again(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let first = cx.add_window(|_, cx| Counter {
+        name: "first",
+        second: Some(ticker::every_second(cx)),
+    });
+    let second = cx.add_window(|_, cx| Counter {
+        name: "second",
+        second: Some(ticker::every_second(cx)),
+    });
+    cx.run_until_parked();
+    let count = |name, cx: &mut TestAppContext| cx.update(|cx| render_count::count(name, cx));
+    let hold = |counter: gpui::WindowHandle<Counter>, held: bool, cx: &mut TestAppContext| {
+        counter
+            .update(cx, |counter, _, cx| {
+                counter.second = held.then(|| ticker::every_second(cx));
+            })
+            .expect("premise: the window is open");
+    };
+
+    hold(first, false, cx);
+    cx.update(render_count::reset);
+    cx.executor().advance_clock(ticker::SECONDS_PERIOD);
+    cx.run_until_parked();
+    assert_eq!(count("first", cx), 0, "a dropped handle hears nothing more");
+    assert_eq!(count("second", cx), 1, "the other holder still counts");
+    assert!(
+        scheduler_holds_work(&cx.executor()),
+        "the loop waits on its next second while a holder lives"
+    );
+
+    hold(second, false, cx);
+    cx.executor().advance_clock(ticker::SECONDS_PERIOD);
+    cx.run_until_parked();
+    assert!(
+        !scheduler_holds_work(&cx.executor()),
+        "the loop ended at its first wake-up after the last holder went, leaving no timer"
+    );
+
+    hold(second, true, cx);
+    cx.run_until_parked();
+    cx.update(render_count::reset);
+    cx.executor().advance_clock(ticker::SECONDS_PERIOD);
+    cx.run_until_parked();
+    assert_eq!(count("second", cx), 1, "a new loop redrew the new holder");
 }
