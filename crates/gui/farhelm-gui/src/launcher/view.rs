@@ -403,12 +403,20 @@ fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
 type AfterCatalog = Box<dyn FnOnce(Entity<Launcher>, &mut App)>;
 
 /// One template batch for [`Launcher::apply_batch`]: the edits it makes to the draft against the catalog, reading the
-/// store through the `App` it is given, and the notice it leaves under the agent choices, or the refusal to show
-/// instead.
+/// store through the `App` it is given, and what it leaves the launcher saying (the notice under the agent choices and
+/// a note, [`BatchApplied`]), or the refusal to show instead.
 type Batch = Box<dyn FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> BatchResult>;
 
-/// What a [`Batch`] did: the agent choices' notice (`Some(None)` clears it, `None` leaves it), or its refusal.
-type BatchResult = Result<Option<Option<String>>, HostSentence>;
+/// What a [`Batch`] did: what it leaves the launcher saying ([`BatchApplied`]), or its refusal.
+type BatchResult = Result<BatchApplied, HostSentence>;
+
+/// What an applied [`Batch`] leaves the launcher saying: the agent choices' notice (`Some(None)` clears it, `None`
+/// leaves it), and a note to show once it has applied, if any (a quick switcher pick's needs-more-choices banner), in
+/// place of whatever the edit would otherwise have cleared.
+pub(crate) struct BatchApplied {
+    pub(crate) notice: Option<Option<String>>,
+    pub(crate) note: Option<Note>,
+}
 
 /// The open launcher. See the module docs.
 pub(crate) struct Launcher {
@@ -763,13 +771,14 @@ impl Launcher {
     }
 
     /// Apply one batch of template edits to the draft (one shortcut press or one completed sequence: SPEC.md, "Each
-    /// completed sequence is one refusal unit"). `edit` makes the edits through the draft's own hand-edit methods
-    /// (`crate::templates::apply`), given the catalog as read and the `App` to read the store from (a batch that waited
-    /// for the catalog reads it then, not at the press), and returns the notice the agent choices show afterwards
-    /// (`Some(None)` clears it, `None` leaves it), or the refusal to show instead, having changed nothing.
+    /// completed sequence is one refusal unit"; or a quick switcher pick). `edit` makes the edits through the draft's
+    /// own hand-edit methods (`crate::templates::apply`), given the catalog as read and the `App` to read the store
+    /// from (a batch that waited for the catalog reads it then, not at the press), and returns what the launcher says
+    /// afterwards ([`BatchApplied`]), or the refusal to show instead, having changed nothing.
     ///
-    /// An applied batch is an edit like any other: the text fields are put back in step with the draft and whatever the
-    /// launcher was saying goes. A refused one changes nothing but what it says. Focus stays where it is, so a press
+    /// An applied batch is an edit like any other: the text fields are put back in step with the draft, and the
+    /// launcher says what the batch returned (its note, if any), not what it said before. A refused one changes nothing
+    /// but what it says. Focus stays where it is, so a press
     /// never moves the user out of the field they are in; a control the edits remove hands focus on through the focus
     /// coordinator, as any control that goes away does. Nothing happens while the YOLO question's host write is out,
     /// when the launcher holds still.
@@ -796,12 +805,18 @@ impl Launcher {
     /// [`Launcher::apply_batch`] with the catalog answered.
     fn apply_now(&mut self, edit: Batch, window: &mut Window, cx: &mut Context<Self>) {
         match edit(&mut self.draft, self.catalog.as_deref(), cx) {
-            Ok(notice) => {
+            Ok(BatchApplied { notice, note }) => {
                 if let Some(notice) = notice {
                     self.notice = notice;
                 }
                 self.sync_fields(window, cx);
                 self.changed(cx);
+                // After the edit, which takes away what the launcher was saying. A banner (a switcher pick's) goes on its
+                // own after the same while as a quick launch's, counted from now, when its template has applied.
+                if matches!(note, Some(Note::Banner(_))) {
+                    self.schedule_banner_expiry(cx);
+                }
+                self.note = note;
             }
             Err(refusal) => {
                 self.note = Some(Note::Refusal(refusal));

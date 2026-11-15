@@ -188,7 +188,7 @@ fn runs_true() -> TemplateFields {
 }
 
 /// The templates collection holding the module docs' templates, available or not.
-fn templates(availability: Availability) -> CollectionState {
+pub(super) fn templates(availability: Availability) -> CollectionState {
     let all = [
         template("go", runs_true()),
         template(
@@ -248,7 +248,7 @@ fn templates(availability: Availability) -> CollectionState {
 
 /// The preferences collection with ⚡ on `marked`, if anything, and no number keys, from a helm that has shown the
 /// Welcome card.
-fn marked(marked: Option<&str>) -> CollectionState {
+pub(super) fn marked(marked: Option<&str>) -> CollectionState {
     bound(marked, &[])
 }
 
@@ -268,7 +268,7 @@ fn bound(marked: Option<&str>, keys: &[(&str, &str)]) -> CollectionState {
 }
 
 /// The real main view over the fake helm: no sessions, [`hosts`], the templates and ⚡ on `mark`.
-fn window<'a>(
+pub(super) fn window<'a>(
     cx: &'a mut TestAppContext,
     mark: Option<&str>,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
@@ -287,7 +287,7 @@ fn window<'a>(
 }
 
 /// `state` pushed as the helm pushes a change.
-fn push(helm: &mut FakeHelm, cx: &mut VisualTestContext, state: CollectionState) {
+pub(super) fn push(helm: &mut FakeHelm, cx: &mut VisualTestContext, state: CollectionState) {
     helm.push(CollectionChanges {
         collection: state.collection,
         meta: state.meta,
@@ -299,7 +299,7 @@ fn push(helm: &mut FakeHelm, cx: &mut VisualTestContext, state: CollectionState)
 
 /// The creates the window sent since the last call, every other command answered at once, the catalog read with
 /// [`catalog`], round after round (the launcher's own helper).
-fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
+pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
     creates_answering(helm, cx, &catalog())
 }
 
@@ -321,12 +321,12 @@ fn number_key(cx: &mut VisualTestContext, digit: u8) {
 }
 
 /// Every line of text the frame painted, joined with single spaces.
-fn text(cx: &mut VisualTestContext) -> String {
+pub(super) fn text(cx: &mut VisualTestContext) -> String {
     painted(&frame(cx)).join(" ")
 }
 
 /// The launcher's banner, by its accessible text, if one is drawn.
-fn banner(cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn banner(cx: &mut VisualTestContext) -> Option<String> {
     label(cx, "launcher-banner")
 }
 
@@ -337,12 +337,12 @@ fn refusal(cx: &mut VisualTestContext) -> Option<String> {
 
 /// The launcher's refusal note (a quick launch's refusal on New, a shortcut's in the open launcher), drawn as its own
 /// alert above the refusal alert, by its accessible text, if one is drawn.
-fn note(cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn note(cx: &mut VisualTestContext) -> Option<String> {
     label(cx, "launcher-note")
 }
 
 /// Whether the launch whose create is out is still a quick launch New never showed.
-fn unseen(cx: &mut VisualTestContext) -> bool {
+pub(super) fn unseen(cx: &mut VisualTestContext) -> bool {
     cx.update(|_, cx| launch::pending_unseen_quick_launch(cx))
 }
 
