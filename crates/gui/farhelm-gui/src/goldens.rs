@@ -1826,6 +1826,19 @@ fn session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     );
 }
 
+/// The Help menu, open beside the host rail foot's `?` button with its first item highlighted (reference `help-menu`):
+/// the items this platform offers with no updater running, the Linux golden with Open-Source Notices last.
+fn help_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, _, window, cx| {
+            let help = list.read(cx).help_button().clone();
+            help.update(cx, |help, cx| help.toggle(window, cx));
+        },
+        cx,
+    );
+}
+
 /// The waiting row's Delete question, asked from its row as the menu's Delete asks it (reference
 /// `row-delete-confirmation`): its tab, its running agent, its quoted title and its managed checkout. The
 /// `anchored-prompt` golden pins the prompt's own look with made-up wording; this one pins the row's wording and where
@@ -2815,6 +2828,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: session_row_menu_setup,
+    },
+    Scene {
+        name: "help-menu",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: help_menu_setup,
     },
     Scene {
         name: "row-delete-confirmation",

@@ -154,6 +154,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, div, px,
 };
 
+use crate::help_menu::HelpButton;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::HostsPanel;
 use crate::local_state::{self, LocalState};
@@ -225,6 +226,9 @@ pub struct SessionList {
     /// The Hosts control's focus handle, on the rail's foot, a tab stop: kept here so that Hosts keeps focus when it
     /// toggles the panel ([`host_rail`]).
     hosts_focus: FocusHandle,
+    /// The `?` Help button on the rail's foot, below the gear: a view of the help menu's own, which keeps its focus
+    /// handle and its open menu, created here once for the window's life ([`crate::help_menu`]).
+    help: Entity<HelpButton>,
     /// What the host rail keeps across frames (Add host's focus handle, its scroll position): kept here, since the rail
     /// is rebuilt on every draw ([`host_rail::Kept`]).
     rail: host_rail::Kept,
@@ -256,6 +260,12 @@ struct Current {
 }
 
 impl SessionList {
+    /// The rail foot's `?` button, for the screenshot goldens, which open its menu without a click.
+    #[cfg(test)]
+    pub(crate) fn help_button(&self) -> &Entity<HelpButton> {
+        &self.help
+    }
+
     /// The list, settled once when it is made and again on every change it observes.
     ///
     /// The settle at the end runs while the list is being made. [`session::observe_current`]'s own first call comes
@@ -282,6 +292,7 @@ impl SessionList {
             all_focus: cx.focus_handle().tab_stop(true),
             settings_focus: cx.focus_handle().tab_stop(true),
             hosts_focus: cx.focus_handle().tab_stop(true),
+            help: cx.new(HelpButton::new),
             rail: host_rail::Kept::new(cx),
             hosts_panel: cx.new(HostsPanel::new),
         };
@@ -582,6 +593,7 @@ impl Render for SessionList {
             &self.hosts_focus,
             hosts_shown,
             &self.settings_focus,
+            &self.help,
             palette,
         );
         if hosts_shown {

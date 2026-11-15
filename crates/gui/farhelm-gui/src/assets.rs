@@ -243,6 +243,12 @@ pub enum Icon {
     PermissionUnknown,
     /// A bell, unfilled: the Settings dialog's Notifications section (the old app's quiet `BellIcon`).
     Bell,
+    /// A question mark in a circle: the host rail foot's Help button, drawn in the Settings gear's 16-pixel box and
+    /// stroke so the two read as a pair (the old app's `HelpIcon`).
+    Help,
+    /// An arrow leaving a box: a menu item that opens a site outside Farhelm in the browser (the old app's
+    /// `ActionGlyph::External`).
+    External,
 }
 
 impl Icon {
@@ -316,6 +322,8 @@ impl Icon {
         Icon::PermissionOwnSetting,
         Icon::PermissionUnknown,
         Icon::Bell,
+        Icon::Help,
+        Icon::External,
     ];
 }
 
@@ -388,6 +396,8 @@ impl Icon {
             Icon::PermissionOwnSetting => "icons/permission-own-setting.svg",
             Icon::PermissionUnknown => "icons/permission-unknown.svg",
             Icon::Bell => "icons/bell.svg",
+            Icon::Help => "icons/help.svg",
+            Icon::External => "icons/external.svg",
         }
     }
 }
@@ -497,6 +507,8 @@ impl Assets {
             "icons/templates.svg" => Some(include_bytes!("../assets/icons/templates.svg")),
             "icons/bolt.svg" => Some(include_bytes!("../assets/icons/bolt.svg")),
             "icons/bolt-filled.svg" => Some(include_bytes!("../assets/icons/bolt-filled.svg")),
+            "icons/help.svg" => Some(include_bytes!("../assets/icons/help.svg")),
+            "icons/external.svg" => Some(include_bytes!("../assets/icons/external.svg")),
             _ => None,
         }
     }

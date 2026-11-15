@@ -14,11 +14,15 @@
 //! the old `clamp_title`, for the accessible name of a menu and of the button that opens it, which the session menu's
 //! `clamp_name` also is.
 //!
+//! The Help menu's header is the app's own words ("Help" over "Farhelm guides and feedback", the old `BarMenuFlyout`'s),
+//! so [`MenuHeader::app`] draws a title that is not host text; everything else about the look is shared.
+//!
 //! NOTE: The old header carried hover help naming the full title and summary, for a header cut short by its line
 //! clamps. Neither row menu ported so far draws that help, and this component does not either.
 
 use gpui::{
-    App, FontWeight, IntoElement, ParentElement as _, RenderOnce, Styled as _, Window, div, px,
+    App, FontWeight, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
+    Window, div, px,
 };
 
 use crate::host_text::{self, HostSentence, HostText};
@@ -32,11 +36,17 @@ const NAME_CHARS: usize = 64;
 /// `.menu-summary`'s size.
 const SUMMARY_TEXT: f32 = 11.;
 
-/// A menu's header: `title` over `summary`, both host text (see the module docs).
+/// A menu's header: `title` over `summary`, both host text, or both the app's words (see the module docs).
 #[derive(IntoElement)]
 pub struct MenuHeader {
-    title: HostText,
+    title: Title,
     summary: HostSentence,
+}
+
+/// What a header's title is: a host value, drawn through the escaping element, or the app's own words.
+enum Title {
+    Host(HostText),
+    App(SharedString),
 }
 
 impl MenuHeader {
@@ -44,8 +54,17 @@ impl MenuHeader {
     /// mixing the app's words with host values, cut after four lines).
     pub fn new(title: &HostText, summary: HostSentence) -> Self {
         MenuHeader {
-            title: title.clone(),
+            title: Title::Host(title.clone()),
             summary,
+        }
+    }
+
+    /// A header whose `title` and `summary` are both the app's own words, for a menu about the app rather than a host
+    /// value (the Help menu). Drawn exactly as [`MenuHeader::new`] draws, with nothing to escape.
+    pub fn app(title: impl Into<SharedString>, summary: impl Into<SharedString>) -> Self {
+        MenuHeader {
+            title: Title::App(title.into()),
+            summary: HostSentence::new("menu-header-summary").text(summary),
         }
     }
 
@@ -86,11 +105,14 @@ impl RenderOnce for MenuHeader {
             .border_b_1()
             .border_color(theme::color(palette.border_dim))
             .child(
-                host_text::element(&self.title)
-                    .text_size(metrics::TEXT_SM)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .line_clamp(3),
+                match self.title {
+                    Title::Host(title) => host_text::element(&title),
+                    Title::App(title) => div().child(title),
+                }
+                .text_size(metrics::TEXT_SM)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::color(palette.fg_0))
+                .line_clamp(3),
             )
             .child(
                 div()

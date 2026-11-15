@@ -32,12 +32,13 @@
 //! whose focus handle is the list's for that reason.
 //!
 //! The rail's foot ([`foot`]) is pinned under its entries, which scroll above it, and holds Hosts above the Settings
-//! gear, in the old foot's order. Hosts swaps the list's column for the Hosts panel ([`crate::hosts::HostsPanel`]) and
-//! back, keeping focus on itself; choosing All or a host returns to Sessions (SPEC.md: "All or a host avatar returns
-//! to Sessions"), and while the panel shows, the rail's chosen entry wears a quieter look so the filled Hosts control
-//! marks the view on screen. Whether the panel shows belongs to the UI session, like the choice. The gear opens the
-//! Settings dialog ([`crate::settings::open`]) with itself as the opener, so that Escape and either close control bring
-//! focus back to it (SPEC.md: "Escape and either close control return focus to the gear").
+//! gear, and the `?` Help button below the gear ([`crate::help_menu`]), in the old foot's order. Hosts swaps the list's
+//! column for the Hosts panel ([`crate::hosts::HostsPanel`]) and back, keeping focus on itself; choosing All or a host
+//! returns to Sessions (SPEC.md: "All or a host avatar returns to Sessions"), and while the panel shows, the rail's
+//! chosen entry wears a quieter look so the filled Hosts control marks the view on screen. Whether the panel shows
+//! belongs to the UI session, like the choice. The gear opens the Settings dialog ([`crate::settings::open`]) with
+//! itself as the opener, so that Escape and either close control bring focus back to it (SPEC.md: "Escape and either
+//! close control return focus to the gear").
 //!
 //! The foot is drawn by the list after its own column rather than inside the rail, as the old app placed its
 //! `.host-rail-footer` after the sidebar's content: GPUI's Tab order follows the order controls are drawn in, and the
@@ -45,11 +46,12 @@
 //! through the list (or the Hosts panel) to the foot. The rail leaves the foot's height free at its bottom
 //! ([`FOOT_HEIGHT`]), and the foot is drawn over that room.
 //!
-//! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the notices bell, Help and the expand
-//! toggle) for the help and notices areas; an avatar's right-click menu; every host status (connection dots, update
-//! badges, progress rings, dimming and the state words that join the avatar's name, and the update count that joins
-//! Hosts' name); and the rail's expansion to 220 pixels, with Add host's "Add host" label. The foot is sized for the
-//! two controls it holds: the old foot was 208 pixels, five 40-pixel controls, and it grows back as the others arrive.
+//! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the notices bell and the expand toggle)
+//! for the notices area and the rail's expansion; an avatar's right-click menu; every host status (connection dots,
+//! update badges, progress rings, dimming and the state words that join the avatar's name, and the update count that
+//! joins Hosts' name); and the rail's expansion to 220 pixels, with Add host's "Add host" label. The foot is sized for
+//! the three controls it holds: the old foot was 208 pixels, five 40-pixel controls, and it grows back as the others
+//! arrive.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -57,9 +59,9 @@ pub(crate) mod tests;
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
-    AnyElement, App, Context, FocusHandle, InteractiveElement, IntoElement, ParentElement, Pixels,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
-    svg,
+    AnyElement, App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
+    div, px, svg,
 };
 
 use super::SessionList;
@@ -67,6 +69,7 @@ use super::row::short_name;
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, IconButton, Role, StatusMark, Tier};
 use crate::focus::{self, Mark};
+use crate::help_menu::HelpButton;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, host_mark};
 use crate::settings;
@@ -100,9 +103,9 @@ const RAIL_BUTTON: f32 = 40.;
 const FOOT_PAD_BOTTOM: f32 = 8.;
 const FOOT_PAD_X: f32 = 7.5;
 
-/// The foot's height while it holds Hosts and the gear: two controls and the bottom padding. The old foot's 208 pixels
-/// held five controls; it grows by 40 pixels with each control that joins it.
-pub(super) const FOOT_HEIGHT: f32 = 2. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
+/// The foot's height while it holds Hosts, the gear and Help: three controls and the bottom padding. The old foot's 208
+/// pixels held five controls; it grows by 40 pixels with each control that joins it.
+pub(super) const FOOT_HEIGHT: f32 = 3. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
 
 /// `SettingsIcon`'s size in the old foot's icon box.
 const SETTINGS_GLYPH: f32 = 16.;
@@ -410,10 +413,11 @@ fn add_host(handle: &FocusHandle) -> AnyElement {
 }
 
 /// The rail's foot (`.host-rail-footer`), for the list to draw after its own column, as its last child, over the room
-/// [`rail`] leaves at its bottom: Hosts above the Settings gear, in the old foot's order, pinned there while the rail's
-/// entries scroll above them. `hosts_focus` and `settings_focus` are their focus handles, which the list keeps for the
-/// window's life: Hosts keeps focus when it toggles, and Settings gives focus back to the gear when it closes. Hosts is
-/// pressed and expanded while `hosts_shown`, and toggles the Hosts panel through `list`.
+/// [`rail`] leaves at its bottom: Hosts above the Settings gear above `help` (the `?` button, a view of the help menu's
+/// own that the list keeps), in the old foot's order, pinned there while the rail's entries scroll above them.
+/// `hosts_focus` and `settings_focus` are their focus handles, which the list keeps for the window's life: Hosts keeps
+/// focus when it toggles, and Settings gives focus back to the gear when it closes. Hosts is pressed and expanded while
+/// `hosts_shown`, and toggles the Hosts panel through `list`.
 ///
 /// The element places itself (absolutely, at the bottom left of the row the list draws it in), so that row must be
 /// the one that holds the rail at its left edge and fills the sidebar's height.
@@ -422,6 +426,7 @@ pub(super) fn foot(
     hosts_focus: &FocusHandle,
     hosts_shown: bool,
     settings_focus: &FocusHandle,
+    help: &Entity<HelpButton>,
     palette: &Palette,
 ) -> impl IntoElement {
     let list = list.clone();
@@ -486,4 +491,5 @@ pub(super) fn foot(
                 settings::open(&gear, &mark, window, cx);
             }),
         )
+        .child(help.clone())
 }
