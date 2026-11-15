@@ -14,14 +14,17 @@
 //! reads the shortcuts it shows once, when it is set. Then the coordinator starts following the host's answer for which
 //! controls Tab reaches, the ticker takes the host's reduced-motion setting (and, in an agent build, counts every window
 //! as active, so a run under headless Mutter, which reports every window inactive, still animates), the desktop
-//! integration keeps the host's source of the license notices, and the UI channel to the helm opens, so the window's
-//! first frame already reflects where the connection stands. Only then does a window open, at the frame the host
-//! restored if it restored one; once it is open, the window is handed to the desktop integration, which makes its close
-//! quit the app and tells the host about every change to its frame.
+//! integration keeps the host's source of the license notices and the host's updater (so the window's first frame
+//! already knows whether an updater runs), and the UI channel to the helm opens, so the window's first frame already
+//! reflects where the connection stands. Only then does a window open, at the frame the host restored if it restored
+//! one; once it is open, the window is handed to the desktop integration, which makes its close quit the app, tells the
+//! host about every change to its frame, and follows the host's reports of a second launch, which bring it forward.
+//! Everything from [`install`] on is `start`, which a test runs on GPUI's test platform.
 //!
 //! The desktop integration ([`crate::desktop`]) is area code. The bootstrap only calls into it at those points and
 //! passes the host's values through untouched, reading no field of the desktop module's types, so the area fills in
-//! menus, quitting on close, the saved frame, the title band and the notices without changing this file.
+//! menus, quitting on close, the saved frame, the title band, the notices, the updater and second launches without
+//! changing this file.
 //!
 //! Nothing here may panic: on macOS this runs inside an AppKit callback, where a panic aborts the process. Failures are
 //! returned, and [`run`] hands them to the host's [`Host::on_startup_failure`], which owns how the process reports them.
@@ -30,8 +33,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 use gpui::{
-    App, AppContext as _, Global, Size, Subscription, Task, WindowBounds, WindowHandle,
-    WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext as _, Global, Size, Subscription, Task, WindowBounds,
+    WindowHandle, WindowOptions, px, size,
 };
 use gpui_component::Root;
 
@@ -260,6 +263,58 @@ pub struct Host {
     /// How the main window's frame is restored at launch and remembered while it changes. `None` opens the window at
     /// the default frame centered on the display every time (tests, and any host with nowhere to save a frame).
     pub window_frame: Option<desktop::FrameHost>,
+    /// The updater, for the app's update surfaces. `None` means no updater runs (tests, and a host that started none).
+    /// Handed to the desktop integration before the window opens.
+    pub updater: Option<desktop::UpdaterHost>,
+    /// How the host reports that the app was launched again while it runs. `None` means no second launch is reported
+    /// (tests, and a host that listens for none). Handed to the desktop integration with the main window once it is
+    /// open.
+    pub activations: Option<desktop::Activations>,
+}
+
+/// The part of the [`Host`] that [`start`] uses: everything but the quit wiring, which [`run`] installs before it, and
+/// the startup failure handler, which `run` calls when `start` fails.
+struct Startup {
+    tab_reach: focus::TabReachSource,
+    helm: Option<farhelm_helm_client::HelmEndpoint>,
+    reduced_motion: bool,
+    licenses: fn() -> String,
+    window_frame: Option<desktop::FrameHost>,
+    updater: Option<desktop::UpdaterHost>,
+    activations: Option<desktop::Activations>,
+}
+
+/// Install all app-wide state, open the main window and hand it to the desktop integration, returning the window: the
+/// startup order the module docs give, from [`install`] on. Split out of [`run`], which needs the real platform, so a
+/// test can run the same sequence on GPUI's test platform and see what it calls when.
+fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
+    let Startup {
+        tab_reach,
+        helm,
+        reduced_motion,
+        licenses,
+        window_frame,
+        updater,
+        activations,
+    } = startup;
+    install(cx)?;
+    focus::follow_tab_reach(tab_reach, cx);
+    ticker::set_reduced_motion(reduced_motion, cx);
+    // Headless Mutter reports every window inactive forever, and the bridge's runs are where an agent watches the app
+    // animate, so agent builds count windows as active (SPEC_impl.md, "GPUI cookbook").
+    #[cfg(feature = "agent")]
+    ticker::set_active_override(Some(true), cx);
+    desktop::keep_licenses(licenses, cx);
+    desktop::keep_updater(updater, cx);
+    if let Some(endpoint) = helm {
+        session::connect(endpoint, cx)?;
+    }
+    let (restored, follow) = desktop::restore_frame(window_frame, cx);
+    let main: AnyWindowHandle = open_main_window(restored, cx)?.into();
+    desktop::quit_when_closed(main, cx);
+    desktop::follow_frame(main, follow, cx);
+    desktop::follow_activations(main, activations, cx);
+    Ok(main)
 }
 
 /// What keeps the app's quit wiring alive for the life of the app: the task waiting on [`Host::quit_requested`] and the
@@ -285,8 +340,18 @@ pub fn run(host: Host) {
         reduced_motion,
         licenses,
         window_frame,
+        updater,
+        activations,
     } = host;
-    let tab_reach: focus::TabReachSource = std::rc::Rc::from(tab_reach);
+    let startup = Startup {
+        tab_reach: std::rc::Rc::from(tab_reach),
+        helm,
+        reduced_motion,
+        licenses,
+        window_frame,
+        updater,
+        activations,
+    };
     gpui_platform::application()
         .with_assets(Assets)
         .run(move |cx: &mut App| {
@@ -309,24 +374,7 @@ pub fn run(host: Host) {
                 _requested: requested,
                 _on_quit: on_quit,
             });
-            let started = install(cx).and_then(|()| {
-                focus::follow_tab_reach(tab_reach, cx);
-                ticker::set_reduced_motion(reduced_motion, cx);
-                // Headless Mutter reports every window inactive forever, and the bridge's runs are where an agent
-                // watches the app animate, so agent builds count windows as active (SPEC_impl.md, "GPUI cookbook").
-                #[cfg(feature = "agent")]
-                ticker::set_active_override(Some(true), cx);
-                desktop::keep_licenses(licenses, cx);
-                if let Some(endpoint) = helm {
-                    session::connect(endpoint, cx)?;
-                }
-                let (restored, follow) = desktop::restore_frame(window_frame, cx);
-                let main: gpui::AnyWindowHandle = open_main_window(restored, cx)?.into();
-                desktop::quit_when_closed(main, cx);
-                desktop::follow_frame(main, follow, cx);
-                Ok(())
-            });
-            if let Err(error) = started {
+            if let Err(error) = start(startup, cx) {
                 tracing::error!("the window could not open: {error:#}");
                 on_startup_failure(format!("{error:#}"));
                 cx.quit();
@@ -387,6 +435,39 @@ mod tests {
                 options.window_bounds,
                 Some(WindowBounds::Windowed(Bounds::centered(None, narrow, cx)))
             );
+        });
+    }
+
+    /// A startup with every optional host value absent: no helm, no saved frame, no updater, no second launches.
+    fn startup_without_host_values() -> Startup {
+        Startup {
+            tab_reach: std::rc::Rc::new(|| focus::TabReach::EveryControl),
+            helm: None,
+            reduced_motion: true,
+            licenses: String::new,
+            window_frame: None,
+            updater: None,
+            activations: None,
+        }
+    }
+
+    /// Nothing else runs the real startup sequence end to end (`run` needs the real platform), so a startup that
+    /// fails, or opens a window too many or none, would otherwise first show in a launched app. Specifies that the whole
+    /// startup, with every optional host value absent (no helm, no saved frame, no updater, no second launches),
+    /// succeeds on GPUI's test platform and opens exactly the main window it returns.
+    #[gpui::test]
+    fn the_startup_opens_only_the_main_window_without_host_values(cx: &mut TestAppContext) {
+        let main = cx
+            .update(|cx| start(startup_without_host_values(), cx))
+            .expect("the startup succeeds with no host values");
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let open: Vec<_> = cx
+                .windows()
+                .iter()
+                .map(|window| window.window_id())
+                .collect();
+            assert_eq!(open, vec![main.window_id()], "only the main window opens");
         });
     }
 }
