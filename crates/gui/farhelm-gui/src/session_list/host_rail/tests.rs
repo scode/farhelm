@@ -772,7 +772,7 @@ fn tab_from_all_reaches_the_first_avatar_and_space_chooses_it(cx: &mut TestAppCo
     assert_eq!(body, json!({ "host": 3 }));
 }
 
-// ---- The foot: Hosts and the Settings gear --------------------------------------------------------------------------
+// ---- The foot: the notices bell, Hosts and the Settings gear --------------------------------------------------------
 
 /// The foot's controls' element ids (the old `.hosts-panel-toggle` and `.app-settings-toggle`), outside the
 /// `host-rail-` ids so the entry lists above do not count them.
@@ -782,6 +782,9 @@ const GEAR: &str = "app-settings-toggle";
 /// The Help button's element id (the old `.app-help-toggle`), the foot's last control, below the gear; the help menu's
 /// own tests cover the button and its menu.
 const HELP: &str = "app-help-toggle";
+
+/// The notices bell's element id (the old `.rail-notices-toggle`), the foot's first control, above Hosts.
+const BELL: &str = crate::rail_notices::BELL_ID;
 
 /// The id of the switch Settings focuses when it opens (its Sessions section's first switch, Skip session
 /// confirmations), as the Settings dialog's own tests name it.
@@ -808,8 +811,10 @@ fn panel_shown(cx: &mut VisualTestContext) -> bool {
 /// hover help is "Hosts: show host management", directly above the gear, a button named "Settings" whose hover help is
 /// the old app's words without the updater clause; both are 40-pixel squares 7.5 pixels from the window's left edge,
 /// the gear's bottom 48 pixels above the window's, leaving the 40-pixel Help button and the foot's 8-pixel padding
-/// below it (the help menu's tests pin that button); the rail's scrolling part ends at the foot's top, 128 pixels
-/// above the bottom, so both sit wholly below every entry.
+/// below it (the help menu's tests pin that button); the notices bell, the same square at the same inset, sits directly
+/// above Hosts at the foot's top (SPEC.md: "at the top of the navigation rail's footer, above Hosts"; the rail
+/// notices' own tests cover the bell and its panel); the rail's scrolling part ends at the foot's top, 168 pixels above
+/// the bottom, so every foot control sits wholly below every entry.
 #[gpui::test]
 fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot());
@@ -836,12 +841,26 @@ fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &m
         "Hosts sits directly above the gear"
     );
     assert_eq!(gear.bottom(), px(700. - 48.));
+    let bell = node(&nodes, BELL)
+        .expect("the notices bell is drawn")
+        .bounds;
+    assert_eq!(
+        (bell.size.width, bell.size.height, bell.left()),
+        (px(40.), px(40.), px(7.5)),
+        "the notices bell is the foot's first control"
+    );
+    assert_eq!(
+        bell.bottom(),
+        hosts.top(),
+        "the bell sits directly above Hosts"
+    );
     assert_eq!(
         test_support::bounds(cx, "host-rail").bottom(),
-        hosts.top(),
+        bell.top(),
         "the entries scroll above the foot"
     );
     assert_eq!(hosts.top(), px(700. - 128.));
+    assert_eq!(bell.top(), px(700. - 168.));
     assert_eq!(
         hover_help(cx, HOSTS).as_deref(),
         Some("Hosts: show host management")
@@ -977,8 +996,8 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
 /// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
 /// which leaves focus on its avatar and draws the heading's order title, Trash, Templates and New buttons, the status
 /// segments and the chip as the list's controls, Tab goes to host 2's avatar, Add host, the order title, Trash,
-/// Templates, New, the segments' chosen All (their one stop), the chip, Hosts, the gear, then Help; Shift+Tab from Help
-/// goes back to the gear.
+/// Templates, New, the segments' chosen All (their one stop), the chip, the notices bell, Hosts, the gear, then Help;
+/// Shift+Tab from Help goes back to the gear.
 #[gpui::test]
 fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
@@ -1002,6 +1021,7 @@ fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppCo
         crate::session_list::NEW_ID,
         "session-status-All",
         "host-filter-chip",
+        BELL,
         HOSTS,
         GEAR,
         HELP,

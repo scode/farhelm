@@ -2,8 +2,8 @@
 
 Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0580:e2e/<path>`) and what replaces them
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
-sections: Feedback, Welcome card, Announcements, Partial deletion, Status (session notifications), and Desktop window
-chrome's Keyboard shortcuts paragraph.
+sections: Feedback, Welcome card, Announcements, Partial deletion, Status (session notifications and the rail's notices
+bell), and Desktop window chrome's Keyboard shortcuts paragraph.
 
 | Old spec                           | Tests | Covers                                                                       | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ---------------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -14,6 +14,7 @@ chrome's Keyboard shortcuts paragraph.
 | `tests/keyboard-shortcuts.spec.ts` | 5     | the ${mac ? "Mac" : "non-Mac"} overview chord owns terminal input and labels | ported, below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `tests/sounds.spec.ts`             | 6     | device sounds                                                                | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `tests/notifications.spec.ts`      | 12    | session notifications                                                        | ported: the bell's presence, loudness, name, help and place before the age, the list beside the bell without opening the session, newest first with New and Resolved and ages, Escape, the bell again, a press elsewhere and the row going each marking what the list showed, nothing sent when nothing unread was shown, a refused mark sent again on the next close, Clear all and the bell's return, and the docs-link rule are replaced by `notices_bell::tests` and the `session-bell-list` golden; the cleanup-helper case tested the old suite itself; the two build-mismatch cases and the older-failure race are superseded by the store (every change is pushed before its reply, and no mark is cached locally); the resize and moved-row dismissals are deviations (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `tests/rail-notices.spec.ts`       | 4     | rail notices quiet, alerting and resolved in ${palette}                      | ported in process, below; the sidebar parity file lists it too                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## `tests/welcome.spec.ts` and `tests/announcements.spec.ts`
 
@@ -85,8 +86,9 @@ The golden is `welcome-dialog` (the reference scene's card).
 The Trash button is `trash::TrashButton`, which the session list keeps and draws in its header, and the dialog it opens
 is `trash::dialog`; the rules both use are `trash::listing`. Ported: the button, its reads and rechecks, and the dialog
 with each checkout's own Delete and Retry, and the per-host and global confirmed deletes (each host's "Delete all on"
-and the footer's Delete all), and the archive cue's wiggle (`trash::cue`). The archive cue's flight and the notices
-bell's Retry now and Open Trash come with their own pieces.
+and the footer's Delete all), the archive cue's wiggle (`trash::cue`), and the rail notices panel's Retry now and Open
+Trash, which call into the button (`TrashButton::retry`, `TrashButton::open`). The archive cue's flight comes with its
+own piece.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/trash/dialog/tests.rs` unless named otherwise (`trash/tests.rs` is the
 button's, `trash/listing/tests.rs` the rules'):
@@ -215,6 +217,36 @@ handles it.
 
 The golden is `keyboard-shortcuts-dialog` (Linux forms; the old overview was never captured, so SPEC.md and the old code
 are its reference).
+
+## `tests/rail-notices.spec.ts`
+
+The bell is `rail_notices::NoticesButton`, which the session list keeps and draws at the top of the rail's foot; its
+panel draws the pushed `Notices` collection. Replacing tests, in `crates/gui/farhelm-gui/src/rail_notices/tests.rs`
+unless named otherwise:
+
+- "rail notices quiet, alerting and resolved in ${palette}":
+  `the_bell_reports_its_unread_count_in_its_name_and_beside_the_glyph`,
+  `the_bell_counts_unread_unresolved_notices_and_the_panel_is_newest_first`,
+  `the_panel_lists_notices_newest_first_beside_the_bell` (the notice's host, checkout, size, reason, failure time and
+  the resolved entry without Retry now), `clear_resolved_removes_only_the_resolved_notices_shown`,
+  `clear_resolved_is_unavailable_with_nothing_resolved` and `an_empty_panel_says_there_are_no_notifications`; the
+  computed colors in both palettes are the `notices-alerting` and `notices-empty` goldens, and the closed loud bell is
+  the `notices-bell-loud` golden. The bell's place above Hosts and its Tab stop are
+  `session_list::host_rail::tests::the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help` and
+  `tab_reaches_the_foot_after_the_rail_and_the_lists_controls`.
+- "rail close marks only shown notices and preserves independent focus":
+  `every_close_path_marks_only_the_unread_notices_shown` (Escape, the bell, Close, a press elsewhere, Tab out of the
+  panel), `a_press_on_hosts_closes_the_panel_marks_it_and_shows_host_management` (a press on another control closes and
+  marks, and still takes effect), `the_close_marks_only_what_a_frame_drew` and
+  `closing_with_nothing_unread_shown_sends_nothing`. Its fenced GET is superseded: the notices are pushed, and nothing
+  reads them.
+- "Trash reads follow host epochs and coalesce independently": the Trash button's, in `trash/tests.rs`
+  (`reads_follow_each_hosts_connection_and_trash_epoch_only`).
+- "rail Retry and Open Trash share the permanent guarded cleanup owner": `retry_now_follows_the_trashs_guards` and
+  `open_trash_opens_the_dialog_and_closing_it_returns_to_the_bell` (with host management shown); the guard itself is
+  `trash::listing::tests::retry_needs_a_capable_listing_showing_the_checkout_stuck`. Marked sessions are not ported yet
+  (the sidebar's), so the case's marking half waits for them; the Trash dialog is a layer of its own, which nothing that
+  hides the header's button closes.
 
 ## Deviations
 
@@ -385,3 +417,22 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **An overflowing list scrolls only with the pointer.** Ten long entries can be taller than a short window; the list
   then scrolls its entries, but the keyboard reaches only its links and Clear all, so an entry without a link cannot be
   scrolled to by keyboard, where the old list's focused panel scrolled with the arrow keys.
+
+### Rail notices
+
+- **The panel opens from the bell's top, not up from its bottom.** The old panel's bottom edge sat 4 pixels below the
+  bell's, so a long list grew upward. The layer manager's one beside placement starts a popover 4 pixels above its
+  anchor's top and keeps it inside the window, so at the rail's foot the panel sits on the window's bottom edge, as the
+  Help menu does, and no pointer notch is drawn. An upward placement would be a change to the layer manager.
+- **The open bell wears the open look.** The old toggle had no look of its own while its panel was open. The shared
+  button draws every open toggle with the accent fill and the inverse ink (the Help button's look), so the bell does
+  too, its glyph and count in the inverse ink, red or not, while the panel is open.
+- **The close marks only the unread notices it showed.** The old reader sent every shown id on each close; here the ids
+  of notices that were already read or resolved are left out, and a close that showed nothing unread sends nothing, as
+  the session bell does. The helm changes nothing for those ids either way.
+- **A Retry refusal shows on the notice.** The old panel showed a Retry's error line at the panel's top. Here the
+  Trash's own record of that checkout's last refusal shows under the notice's actions, the same words the Trash dialog
+  shows, whichever of the two retried it.
+- **No "Loading notifications…" wait in practice.** The notices arrive with the first snapshot; the line shows only
+  while the collection has never been read. The old panel's "Could not refresh notifications" shows when the helm pushes
+  the collection as unavailable.

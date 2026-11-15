@@ -41,8 +41,9 @@
 //!   address stays plain text, because a host's supervisor must not be able to put a link to anywhere it likes in front
 //!   of the user.
 //!
-//! The rail's notices bell is a separate surface that will share this list's drawing when it lands; nothing of it is
-//! here yet.
+//! The rail's notices bell ([`crate::rail_notices`]) is a separate surface with state of its own, which draws its panel
+//! with this list's pieces: the floating panel ([`list_panel`]), an entry's frame with its red edge ([`entry_frame`])
+//! and the hairline between entries ([`hairline`]).
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionNotification;
@@ -329,13 +330,6 @@ pub(crate) fn bell(
                     })
                 }),
         );
-    #[cfg(test)]
-    DRAWN.with_borrow_mut(|drawn| {
-        drawn.insert(
-            key.to_owned(),
-            (state.downgrade(), anchor.clone(), focus.downgrade()),
-        );
-    });
     let toggled = key.to_owned();
     let (opener, bell_focus) = (anchor.clone(), focus.clone());
     // The readout tier draws no padding, edge or fill, at rest or under the pointer, so the button is exactly the old
@@ -367,37 +361,6 @@ pub(crate) fn bell(
     )
 }
 
-/// One bell as [`DRAWN`] keeps it: its state and its focus handle, both held weakly, and its anchor (which refers to
-/// its element's state weakly itself).
-#[cfg(test)]
-type DrawnBell = (gpui::WeakEntity<BellState>, Anchor, gpui::WeakFocusHandle);
-
-#[cfg(test)]
-thread_local! {
-    /// Each bell's state, anchor and focus handle as last drawn, by session key, for the screenshot goldens, which
-    /// press a bell without a pointer ([`press_drawn`]). A golden finds a control's place from GPUI's driver record, but
-    /// in the goldens' headless window that record held none of the session list's rows when this was written
-    /// (2026-11-14), so it has no place to click. Test builds only; nothing in the app reads it. The state and the focus
-    /// handle are held weakly, so recording a bell keeps nothing alive that the app would have dropped.
-    static DRAWN: std::cell::RefCell<std::collections::HashMap<String, DrawnBell>> =
-        std::cell::RefCell::default();
-}
-
-/// Activate the bell of `key`'s row as a press on it would, if a frame has drawn it; returns whether one had. For the
-/// screenshot goldens ([`DRAWN`] says why they cannot click it).
-#[cfg(test)]
-pub(crate) fn press_drawn(key: &str, window: &mut Window, cx: &mut App) -> bool {
-    let Some((state, anchor, focus)) = DRAWN.with_borrow(|drawn| drawn.get(key).cloned()) else {
-        return false;
-    };
-    // Weak, so a bell no longer drawn (or one from an earlier scene's app) is not kept alive here.
-    let (Some(state), Some(focus)) = (state.upgrade(), focus.upgrade()) else {
-        return false;
-    };
-    toggle(key, &state, &anchor, &focus, window, cx);
-    true
-}
-
 /// The bell of `key`'s row was activated: close its list if it is open, otherwise open the list beside the bell with
 /// the mark this press took. Closing returns focus to the bell, which the list names, also on macOS, where the click
 /// that opened it left the bell unfocused.
@@ -422,24 +385,14 @@ fn toggle(
     let mark = Mark::take(cx);
     let view = cx.new(|cx| NotificationList::new(key, cx));
     let container = view.read(cx).container.clone();
-    let opened = layers::open_popover(
-        Popover {
-            // The layer holds the view's only strong handle, so the view is released exactly when the list closes,
-            // which is what sends the read mark ([`NotificationList::mark_read`]).
-            view: view.into(),
-            container: container.clone(),
-            // The list itself, as the old panel took focus, so a stray Enter cannot clear anything.
-            start: Some(container),
-            anchor: anchor.clone(),
-            returns_to: focus::ReturnTo::Control(bell.clone()),
-            // Tab walks the list's links and Clear all after the bell and goes on out of it, closing it, as the old
-            // list closed when focus left it for anything but its bell.
-            traps_tab: false,
-        },
-        &mark,
-        window,
-        cx,
-    );
+    // The layer holds the view's only strong handle, so the view is released exactly when the list closes, which is
+    // what sends the read mark ([`NotificationList::mark_read`]). Focus starts on the list itself, as the old panel
+    // took focus, so a stray Enter cannot clear anything; Tab walks the list's links and Clear all after the bell and
+    // goes on out of it, closing it, as the old list closed when focus left it for anything but its bell.
+    let popover = Popover::menu(view, container.clone(), anchor.clone(), container)
+        .returns_to(focus::ReturnTo::Control(bell.clone()))
+        .tab_through();
+    let opened = layers::open_popover(popover, &mark, window, cx);
     state.update(cx, |state, _| state.open = opened);
 }
 
@@ -571,15 +524,7 @@ impl Render for NotificationList {
         let palette = theme::palette(cx);
         // `.host-row-menu-panel`: the floating surface with 4 pixels at top and bottom, never taller than the window
         // allows, its entries scrolling inside it.
-        let panel = layers::surface(cx)
-            .id(LIST_ID)
-            .debug_selector(|| LIST_ID.into())
-            .role(Role::Dialog)
-            .w(px(LIST_WIDTH))
-            .max_h(window.viewport_size().height - px(WINDOW_ROOM))
-            .flex()
-            .flex_col()
-            .py(px(4.));
+        let panel = list_panel(LIST_ID, px(LIST_WIDTH), window, cx);
         let Some(store) = session::current_store(cx) else {
             return panel;
         };
@@ -602,14 +547,8 @@ impl Render for NotificationList {
             .min_h_0()
             .overflow_y_scroll();
         for (at, notification) in entries.iter().enumerate() {
-            // `.session-bell-entry + .session-bell-entry`: a hairline between entries, across the red edge too.
             if at > 0 {
-                body = body.child(
-                    div()
-                        .h(px(1.))
-                        .flex_none()
-                        .bg(theme::color(palette.border_dim)),
-                );
+                body = body.child(hairline(palette));
             }
             body = body.child(entry(
                 notification,
@@ -716,8 +655,51 @@ fn entry(
             .monospace()
             .described(false)
         }));
+    entry_frame(
+        SharedString::from(format!("{ENTRY_ID_PREFIX}{seq}")),
+        new,
+        palette,
+        div()
+            .flex()
+            .flex_col()
+            .child(meta)
+            .child(entry_text(notification, ink)),
+    )
+}
+
+// ---- Pieces the rail's notices panel shares ------------------------------------------------------------------------
+
+/// The floating panel a list of notifications is drawn on, under element id `id` and `width` wide: the row menus'
+/// surface with 4 pixels at top and bottom (`.host-row-menu-panel`), a column never taller than the window allows
+/// (`max-height: calc(100vh - 16px)`), named as a dialog, which the caller labels. The session bell's list and the
+/// rail's notices panel both draw on it, at their old widths.
+pub(crate) fn list_panel(
+    id: &'static str,
+    width: gpui::Pixels,
+    window: &Window,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    layers::surface(cx)
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(Role::Dialog)
+        .w(width)
+        .max_h(window.viewport_size().height - px(WINDOW_ROOM))
+        .flex()
+        .flex_col()
+        .py(px(4.))
+}
+
+/// One entry's frame under element id `id` (`.session-bell-entry`): a red edge at its left while it is `new`, so the
+/// distinction does not rest on a word alone, and the entry's padding around `content`, which the caller lays out.
+pub(crate) fn entry_frame(
+    id: SharedString,
+    new: bool,
+    palette: &Palette,
+    content: impl IntoElement,
+) -> gpui::Stateful<gpui::Div> {
     div()
-        .id(SharedString::from(format!("{ENTRY_ID_PREFIX}{seq}")))
+        .id(id)
         .flex()
         .flex_row()
         .flex_none()
@@ -731,15 +713,20 @@ fn entry(
             div()
                 .flex_1()
                 .min_w_0()
-                .flex()
-                .flex_col()
                 .pt(px(6.))
                 .pb(px(6.))
                 .pl(px(8.))
                 .pr(px(11.))
-                .child(meta)
-                .child(entry_text(notification, ink)),
+                .child(content),
         )
+}
+
+/// The hairline between two entries (`.session-bell-entry + .session-bell-entry`), across the red edge too.
+pub(crate) fn hairline(palette: &Palette) -> gpui::Div {
+    div()
+        .h(px(1.))
+        .flex_none()
+        .bg(theme::color(palette.border_dim))
 }
 
 /// An entry's text in `ink` (`.session-bell-text`), wrapping rather than widening the list. Text without a docs link is
