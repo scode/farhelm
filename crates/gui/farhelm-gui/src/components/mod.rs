@@ -13,6 +13,11 @@
 //! dropdown, which only the layer manager may). Outside this module Kit appears
 //! only where SPEC_impl.md allows it: its `Root` around the window (the bootstrap and the screenshot goldens) and the
 //! projection of Farhelm's tokens onto Kit's theme (the theme module), which Kit's input reads.
+//!
+//! Some modules here draw no control. Drawing-only pieces such as `pulse` and `menu_separator` have no input, focus or
+//! name, so the label, hover help and role rule does not reach them. `transition`'s [`entrance`] fades an element in as
+//! it appears: it is the one place in the GUI crates' own code where GPUI's animation may be used, for one-shot
+//! transitions only (its module docs say why the ticker cannot draw them and what it keeps).
 
 mod banner;
 mod button;
@@ -33,6 +38,7 @@ mod select;
 mod status_mark;
 mod tab_strip;
 mod text_input;
+mod transition;
 
 #[cfg(test)]
 mod tests;
@@ -58,6 +64,7 @@ pub use select::{Select, SelectOption};
 pub use status_mark::StatusMark;
 pub use tab_strip::{TabOption, TabStrip};
 pub use text_input::{EditCommand, TextInput, TextInputEvent, TextInputState, Vertical};
+pub use transition::{ENTRANCE, entrance};
 
 use std::rc::Rc;
 

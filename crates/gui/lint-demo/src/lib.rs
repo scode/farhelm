@@ -264,6 +264,16 @@ fn with_animations() -> impl IntoElement {
     )
 }
 
+fn with_spring() -> impl IntoElement {
+    use gpui::AnimationExt;
+    // expect: disallowed_methods gpui::AnimationExt::with_spring
+    div().with_spring(
+        "demo",
+        gpui::SpringAnimation::new(gpui::SpringConfig::new(100., 10., 1.)).to(1f32),
+        |element, _| element,
+    )
+}
+
 // View caching.
 
 fn entity_cached<V: gpui::Render>(view: Entity<V>) -> impl IntoElement {

@@ -11,8 +11,9 @@
 //! Each component's tests live in a file named after the component's own file under `components/` (`button.rs` for
 //! `components/button.rs`, and so on), so a change to one control touches one test file rather than a file every
 //! control's PR edits. Two files test the layer's shared rules from `components/mod.rs` instead of a control:
-//! `hover_help.rs` (hover help and its tooltip) and `enter_choice.rs` (the choice controls' Enter rule). A new
-//! control's tests go in a new file here, declared below.
+//! `hover_help.rs` (hover help and its tooltip) and `enter_choice.rs` (the choice controls' Enter rule). `transition.rs`
+//! tests the one-shot entrance (`components/transition.rs`), which draws no control. A new control's tests go in a new
+//! file here, declared below.
 //!
 //! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
 //! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
@@ -33,6 +34,7 @@ mod select;
 mod status_mark;
 mod tab_strip;
 mod text_input;
+mod transition;
 
 use gpui::VisualTestContext;
 

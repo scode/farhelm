@@ -49,6 +49,7 @@ FUNCTION = re.compile(r"^\s*fn\s+(\w+)")
 # exceptions column. Adding one is a foundation change.
 EXCEPTION_OWNERS = {
     ("farhelm-gui/src/cache.rs", "element"),
+    ("farhelm-gui/src/components/transition.rs", "one_shot"),
     ("farhelm-gui/src/focus.rs", "apply"),
     ("farhelm-gui/src/focus.rs", "track_raw"),
     ("farhelm-gui/src/layers.rs", "overlay"),

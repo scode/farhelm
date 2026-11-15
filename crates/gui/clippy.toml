@@ -88,18 +88,21 @@ disallowed-methods = [
   { path = "tokio::task::spawn_blocking", reason = "GUI crates spawn no runtime tasks; the helm client crate owns the runtime" },
 
   # Animation time: the ticker alone schedules redraws over time (at most 10 a second, paused while inactive), and it
-  # and the channel watchdog are the only executor-timer users. GPUI animations are for one-shot transitions in the
-  # component layer only.
+  # and the channel watchdog are the only executor-timer users. In the GUI crates' own code, GPUI animations are for
+  # one-shot transitions only, drawn by the component layer's one owner of them (components/transition.rs), which never
+  # loops and stands still under reduced motion. GPUI Kit's internals animate inside the dependency, where clippy does
+  # not reach.
   { path = "gpui::BackgroundExecutor::timer", reason = "only the ticker and the channel watchdog use timers" },
   { path = "gpui::Window::request_animation_frame", reason = "only the ticker schedules redraws over time" },
   { path = "gpui::Window::on_next_frame", reason = "only the ticker schedules redraws over time" },
   { path = "gpui::Context::on_next_frame", reason = "only the ticker schedules redraws over time" },
   { path = "gpui::AsyncWindowContext::on_next_frame", reason = "only the ticker schedules redraws over time" },
-  { path = "gpui::AnimationExt::with_animation", reason = "only the component layer animates, one-shot transitions only" },
-  { path = "gpui::AnimationExt::with_animations", reason = "only the component layer animates, one-shot transitions only" },
-  { path = "gpui_base::transition", reason = "only the component layer animates, one-shot transitions only" },
-  { path = "gpui_base::spring", reason = "only the component layer animates, one-shot transitions only" },
-  { path = "gpui_base::animate_keyframes", reason = "only the component layer animates, one-shot transitions only" },
+  { path = "gpui::AnimationExt::with_animation", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui::AnimationExt::with_animations", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui::AnimationExt::with_spring", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui_base::transition", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui_base::spring", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui_base::animate_keyframes", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
 
   # Colors come only from theme tokens, which the component layer defines from the old app's stylesheet.
   { path = "gpui::rgb", reason = "colors come from theme tokens in the component layer" },
