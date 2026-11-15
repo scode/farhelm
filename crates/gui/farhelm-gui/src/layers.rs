@@ -774,7 +774,8 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
 }
 
 /// [`close`], saying whether the user dismissed the layer (`dismissed`), which decides where a layer that returns
-/// focus home on Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it.
+/// focus home on Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it, and which repeats of the key press that
+/// closed it the focus coordinator swallows (a dismissal's held repeats only; see [`focus::return_to`]).
 fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
     close_taking(dismissed, window, cx, |layers| {
         let index = layers.iter().position(|layer| layer.id == id)?;
@@ -819,7 +820,7 @@ fn close_taking(
             focus::ReturnTo::HomeOnEscape => focus::ReturnTo::Opener,
             other => other.clone(),
         };
-        focus::return_to(returns_to, bottom.opener.as_ref(), window, cx);
+        focus::return_to(returns_to, bottom.opener.as_ref(), dismissed, window, cx);
     }
 }
 

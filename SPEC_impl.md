@@ -482,7 +482,19 @@ binary reads and the coordinator asks on every Tab and Shift+Tab press, so a cha
 Tab reaches text fields and pop-ups only and Option-Tab reaches every control; on: Tab reaches every control); on Linux,
 every control. Key presses count toward "the user moved on" where GPUI shows every keystroke before any binding runs: a
 key a binding handles (Farhelm's Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key
-listener.
+listener. A key press that closes a layer hands focus to something else (the launcher's Launch returns it to the
+terminal), so its repeats would land there as new presses. The coordinator swallows them instead, at the same point: the
+same key, still held from that press, or pressed again within 500 ms of it, 500 ms included (the old app's submit-repeat
+interval), is neither counted nor delivered, so a repeated Enter on Launch neither stops the launch from opening its
+session nor reaches the terminal's program. Three kinds of close keep only their held repeats. A close that leaves a
+layer holding focus open (Enter choosing in a select's list inside the launcher) returns focus to a control the user is
+still working in, where the next Enter is a new press (Launch). A dismissal (Escape) keeps only its held repeats too, so
+pressing Escape twice still closes two layers, while a held Escape closes one. And a close after which a layer opens (a
+menu item opening its question) keeps only its held repeats as well, since the new layer's start is where the next press
+is meant to go ("Delete then Enter deletes"). Any other key press or a click ends the closing press's repeats. The press
+is recorded before anything acts on the key, so a layer the key capture closes (its handler runs inside the keystroke
+interceptor) is taken as closed by that press. GPUI shows no key release before bindings run, and needs none here: a
+held repeat is marked as one, and only a fresh press follows a release.
 
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
@@ -856,7 +868,8 @@ Owner: the notice center. It is a code owner, not a new surface.
 
 It is the single place that decides when to post to and withdraw from the existing surfaces: the bell list and notices
 panel, approval cards, banners such as the version-mismatch and outage cards, and chimes. The surfaces look as they do
-today. The only new notice is the generic connection-lost one after a reset, in an existing style.
+today. A new notice is added only where SPEC.md requires one, and each is drawn in an existing style; the generic
+connection-lost notice after a reset was the first.
 
 Enforced by the review gate.
 
