@@ -88,6 +88,9 @@ pub(crate) mod update;
 
 pub use menu::open_menu;
 pub use settings::open_settings;
+// The launcher's YOLO question sends exactly what the host settings' "Start YOLO sessions without asking" switch
+// sends.
+pub(crate) use settings::start_yolo_without_asking_command;
 
 #[cfg(test)]
 pub(crate) mod tests;

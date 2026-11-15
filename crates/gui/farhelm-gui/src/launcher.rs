@@ -38,6 +38,7 @@ pub(crate) mod model;
 pub mod request;
 pub mod view;
 mod words;
+mod yolo;
 
 #[cfg(test)]
 mod draft_tests;
@@ -51,3 +52,5 @@ mod model_tests;
 mod request_tests;
 #[cfg(test)]
 mod view_tests;
+#[cfg(test)]
+mod yolo_tests;

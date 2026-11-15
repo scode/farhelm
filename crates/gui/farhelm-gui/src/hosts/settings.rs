@@ -291,6 +291,14 @@ const LINKS_HELP: &str = "Agents on this host may open public web addresses. Loc
 const LOCAL_LINKS_HELP: &str = "Agents on this host may make your browser load addresses on your own machine or \
                                 private network without an approval question.";
 
+/// The command that sets host `host` to start YOLO sessions without asking: exactly what this dialog's "Start YOLO
+/// sessions without asking" switch sends when turned on. The launcher's YOLO question sends it for its "don't ask again"
+/// answer (SPEC.md, "Creation": it "first sets the host to start YOLO sessions without asking, exactly as its settings
+/// would"), so the two can never send different requests. It is [`Work::Save`] on the host's own key, as the switch's is.
+pub(crate) fn start_yolo_without_asking_command(host: i64) -> Result<Command, PathError> {
+    Permission::Yolo.command(host, true)
+}
+
 /// One of the Permissions section's switches, each its own stored value on its own route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Permission {
