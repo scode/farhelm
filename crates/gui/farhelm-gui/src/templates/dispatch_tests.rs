@@ -1,13 +1,15 @@
 //! Tests of the quick-launch dispatcher: resolving references and choosing the incomplete banner (pure), and, in the
-//! real main view over the helm client's fake, what the ⚡ chord and a sequence's Enter do with what they name.
+//! real main view over the helm client's fake, what the ⚡ chord, the number keys and a sequence's Enter do with what
+//! they name.
 //!
 //! The window tests start with no sessions, so New's prefill is the helm's own host (host1, connected, install
 //! `identity1`) in `~`, and with these templates: `go` launches on its own (a command, YOLO answered no), `partial`
 //! only sets a folder, `nowhere` names a host no install has, `offline` would launch `offline-cmd` on host2, which is
 //! still connecting, `model-only` sets only the model `gpt-x`, which the catalog lists for Codex alone, and `wrong-model`
-//! asks Claude for that Codex model. Which one holds ⚡ is each test's choice. A create the window sends is read off the
-//! fake helm's commands; every other command is answered at once, the catalog read with [`catalog`]. What the launcher
-//! says is read from its banner's and refusal alert's accessible text, which is the whole sentence.
+//! asks Claude for that Codex model. Which ones hold ⚡ and the number keys is each test's choice. A create the window
+//! sends is read off the fake helm's commands; every other command is answered at once, the catalog read with
+//! [`catalog`]. What the launcher says is read from its banner's and refusal alert's accessible text, which is the whole
+//! sentence.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -22,12 +24,14 @@ use farhelm_proto::ui_channel::{
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
+use super::SEQUENCE_PREFIX_NAME;
 use super::dispatch::{Origin, Reference, incomplete_banner, resolve};
 use super::sequence::{self, Binding, Refusal};
 use super::shortcuts::Bindings;
 use super::summary::Part;
 use crate::actions::{QUICK_LAUNCH_CHORD, SEQUENCE_PREFIX_CHORD};
 use crate::launcher::launch_tests::creates_answering;
+use crate::launcher::view::BANNER_SHOWS_FOR;
 use crate::launcher::view_tests::fixture_hosts;
 use crate::launcher::{self, launch};
 use crate::main_view::MainView;
@@ -242,10 +246,21 @@ fn templates(availability: Availability) -> CollectionState {
     }
 }
 
-/// The preferences collection with ⚡ on `marked`, if anything, from a helm that has shown the Welcome card.
+/// The preferences collection with ⚡ on `marked`, if anything, and no number keys, from a helm that has shown the
+/// Welcome card.
 fn marked(marked: Option<&str>) -> CollectionState {
+    bound(marked, &[])
+}
+
+/// The preferences collection with ⚡ on `marked`, if anything, and number keys `keys` (each a digit and the template
+/// name it holds), from a helm that has shown the Welcome card.
+fn bound(marked: Option<&str>, keys: &[(&str, &str)]) -> CollectionState {
     preferences_state(Preferences {
         quick_launch_template: marked.map(str::to_owned),
+        template_shortcuts: keys
+            .iter()
+            .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
+            .collect(),
         // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
         welcome_seen: Some(true),
         ..Preferences::default()
@@ -291,6 +306,18 @@ fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> 
 /// Press the ⚡ chord once.
 fn chord(cx: &mut VisualTestContext) {
     keys(cx, QUICK_LAUNCH_CHORD);
+}
+
+/// Press number key `digit`'s chord once, as this platform spells it (Cmd+digit, Ctrl+Shift+digit). The keystroke
+/// carries no native identity, so the physical-key table matches it by its logical key, as it does every injected key
+/// (`crate::actions`).
+fn number_key(cx: &mut VisualTestContext, digit: u8) {
+    let chord = if cfg!(target_os = "macos") {
+        format!("cmd-{digit}")
+    } else {
+        format!("ctrl-shift-{digit}")
+    };
+    keys(cx, &chord);
 }
 
 /// Every line of text the frame painted, joined with single spaces.
@@ -638,12 +665,14 @@ fn a_press_waits_while_a_refused_launch_waits_behind_its_notice(cx: &mut TestApp
     );
 }
 
-/// SPEC.md: "Other visible dialogs keep the keyboard". A chord that launched or applied from under another dialog would
-/// act behind the user's back. Specified: with `go` marked and Templates open, the chord sends nothing and leaves the
-/// window as it was.
+/// SPEC.md: "Other visible dialogs keep the keyboard", for the ⚡ chord and the number keys alike ("Other visible modals
+/// retain the keyboard"). A chord that launched or applied from under another dialog would act behind the user's back.
+/// Specified: with ⚡ and number key 1 on `go` and Templates open, the chord and the number key send nothing and leave
+/// the window as it was.
 #[gpui::test]
-fn the_chord_does_nothing_under_another_dialog(cx: &mut TestAppContext) {
+fn the_chord_and_number_keys_do_nothing_under_another_dialog(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, Some("go"));
+    push(&mut helm, cx, bound(Some("go"), &[("1", "go")]));
     cx.update(|window, cx| {
         let mark = focus::Mark::take(cx);
         super::open_with_hint(super::Hint::NumberKey, &mark, window, cx)
@@ -652,6 +681,7 @@ fn the_chord_does_nothing_under_another_dialog(cx: &mut TestAppContext) {
     settle(cx);
     let before = text(cx);
     chord(cx);
+    number_key(cx, 1);
     assert!(creates(&mut helm, cx).is_empty(), "nothing launched");
     assert_eq!(text(cx), before, "nothing changed");
 }
@@ -669,8 +699,9 @@ fn a_sequences_enter_launches_unseen(cx: &mut TestAppContext) {
 }
 
 /// Outside the launcher, an incomplete sequence opens New "with a prominent banner saying 'This sequence doesn't make
-/// a complete setup; complete it below'", and a refused one "opens New with that error" (SPEC.md); neither may launch.
-/// Specified: the prefix, `partial` and Enter opens New with the template's folder and the sequence banner; once that
+/// a complete setup; complete it below'", which "follows the number-key banner's expiry", and a refused one "opens New
+/// with that error" (SPEC.md); neither may launch. Specified: the prefix, `partial` and Enter opens New with the
+/// template's folder and the sequence banner, which is gone six seconds later, New still open; once that
 /// New is closed, `zzz` and Enter opens New with "Not launched." and "No template matches"; neither sends a create.
 #[gpui::test]
 fn a_sequence_that_cannot_launch_opens_new(cx: &mut TestAppContext) {
@@ -688,6 +719,9 @@ fn a_sequence_that_cannot_launch_opens_new(cx: &mut TestAppContext) {
         banner(cx).as_deref(),
         Some("This sequence doesn't make a complete setup; complete it below.")
     );
+    test_support::advance(cx, BANNER_SHOWS_FOR);
+    assert_eq!(banner(cx), None, "the banner went on its own");
+    assert!(text(cx).contains("/srv/partial"), "and New stayed");
     keys(cx, "escape");
     assert!(!any_open(cx), "the premise: New closed");
 
@@ -946,4 +980,127 @@ fn launch_drops_the_batches_waiting_for_the_catalog(cx: &mut TestAppContext) {
         !text(cx).contains("/srv/partial"),
         "the waiting press was dropped, not applied"
     );
+}
+
+// ---- Number keys ----
+
+/// SPEC.md, "Template number shortcuts": a key "starts its template through the same direct launch path as quick
+/// launch", so a bound key gives a session without the launcher, through the real handler. That a held key acts once
+/// is the actions module's guard, tested there
+/// (`actions_tests::a_held_number_key_acts_once_and_a_held_text_size_chord_repeats`). Specified: with number key 1 on
+/// `go`, the chord sends one create, of `go`'s command, opens no layer and leaves the launch marked as a quick launch
+/// New never showed.
+#[gpui::test]
+fn a_number_key_launches_its_template_unseen(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(None, &[("1", "go")]));
+    number_key(cx, 1);
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one press sent one create, not {}", sent.len());
+    };
+    assert_eq!(
+        create.body.clone().unwrap_or_default()["command"]["command"],
+        json!("true"),
+        "the template's command"
+    );
+    assert!(!any_open(cx), "the launcher was never shown");
+    assert!(unseen(cx), "a quick launch New never showed");
+}
+
+/// SPEC.md: "Unbound keys open Templates with a binding hint", and a key bound to a name no template has is as
+/// unusable (the old dispatcher fell back to the hint for both). A key that did nothing would leave the user guessing
+/// how to give it a template. Specified: with 1 on `deleted` and 0 unbound, each key sends no create and opens
+/// Templates with the number-key hint.
+#[gpui::test]
+fn an_unbound_number_key_opens_templates_with_its_hint(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(None, &[("1", "deleted")]));
+    for digit in [0, 1] {
+        assert!(!any_open(cx), "{digit}: the premise: nothing is open");
+        number_key(cx, digit);
+        assert!(
+            creates(&mut helm, cx).is_empty(),
+            "{digit}: nothing launched"
+        );
+        assert!(
+            text(cx).contains("Give a template a number key"),
+            "{digit}: Templates with its hint"
+        );
+        keys(cx, "escape");
+    }
+}
+
+/// SPEC.md: "Any template can hold a number key, including one that cannot launch alone", and "Pressing such a key alone
+/// opens New with the template applied and a prominent alert banner at the top explaining that it cannot launch on its
+/// own and how to combine it with the sequence prefix. The banner expires about six seconds after application
+/// finishes". Counting from the press instead would let a slow catalog read spend the time the banner is there to be
+/// read in. Specified: with 1 on `partial` and the catalog read left unanswered for longer than the banner lasts,
+/// nothing is drawn; once it answers, New shows the folder and the banner naming `partial` and the prefix, sends no
+/// create, keeps the banner until just before six seconds have passed, and drops it at six, New staying open.
+#[gpui::test]
+fn a_partial_number_key_opens_new_with_the_prefix_banner_for_six_seconds(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(None, &[("1", "partial")]));
+    number_key(cx, 1);
+    test_support::advance(cx, BANNER_SHOWS_FOR + Duration::from_secs(1));
+    assert!(!any_open(cx), "the premise: the catalog read is still out");
+    // This answers the catalog read, the templates apply, and the banner's six seconds start now.
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+    assert!(
+        text(cx).contains("/srv/partial"),
+        "New, with the template applied"
+    );
+    let expected = format!(
+        "partial cannot launch on its own. Use {SEQUENCE_PREFIX_NAME} to combine template keys, then Enter to \
+         launch, or complete this setup below."
+    );
+    assert_eq!(banner(cx), Some(expected));
+    test_support::advance(cx, BANNER_SHOWS_FOR - Duration::from_millis(100));
+    assert!(
+        banner(cx).is_some(),
+        "the banner is still there just before six seconds"
+    );
+    test_support::advance(cx, Duration::from_millis(100));
+    assert_eq!(banner(cx), None, "and gone at six");
+    assert!(
+        text(cx).contains("/srv/partial"),
+        "New stayed, with its draft"
+    );
+}
+
+/// SPEC.md: a number key "applies it to an open session launcher draft under the same focus, ordering and refusal rules
+/// as the ⚡ chord", and a partial template there needs no banner, since the user is already completing the draft;
+/// launching from there would discard what they were preparing. Specified: with New open, 1 on `partial` and 2 on
+/// `nowhere`, 1 puts the folder in the draft and says nothing; 2 shows its refusal and leaves the folder; 3, unbound,
+/// refuses there by its key without opening Templates; nothing is sent and New stays open.
+#[gpui::test]
+fn number_keys_apply_to_the_open_launcher(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(
+        &mut helm,
+        cx,
+        bound(None, &[("1", "partial"), ("2", "nowhere")]),
+    );
+    open_new(&mut helm, cx);
+    number_key(cx, 1);
+    assert!(text(cx).contains("/srv/partial"), "partial applied");
+    assert_eq!((banner(cx), note(cx)), (None, None), "and said nothing");
+
+    number_key(cx, 2);
+    let shown = note(cx).expect("nowhere refused");
+    assert!(shown.contains("nowhere"), "{shown:?}");
+    assert!(
+        text(cx).contains("/srv/partial"),
+        "the refused press changed nothing"
+    );
+
+    number_key(cx, 3);
+    assert_eq!(note(cx).as_deref(), Some("No template is bound to key 3"));
+    assert!(
+        !text(cx).contains("Give a template a number key"),
+        "Templates did not open"
+    );
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+    assert!(any_open(cx), "Launch is left to the user");
 }
