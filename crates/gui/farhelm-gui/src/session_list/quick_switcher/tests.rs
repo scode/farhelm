@@ -30,8 +30,9 @@ use crate::session_list::host_rail::tests::{
     filtered, hosts, hover_help, local, node, pressed, remote, texts_within,
 };
 use crate::session_list::tests::{
-    Fixture, change, launcher_drawn, listing, painted, preferences, selected, session,
+    Fixture, carrying, change, launcher_drawn, listing, painted, preferences, selected, session,
 };
+use crate::session_pane::details::BAR_ID;
 use crate::test_support::{
     self, any_open, click, focused_id, frame, keys, open_main, settle, terminal_focused,
 };
@@ -848,13 +849,21 @@ fn filtered_fleet() -> Vec<CollectionState> {
 
 impl Main<'_> {
     /// Choose host 2 on the rail and Idle in the segments, and have the helm accept both, with the listing it then
-    /// serves: b alone, 1 of the fleet's 3.
+    /// serves: b alone, 1 of the fleet's 3, and the open session carried outside the list when it is not b, as the
+    /// helm carries the session its query names. Leaving the open session out would tell the list it was deleted.
     fn filter_to_idle_on_host_2(&mut self) {
         self.reads();
         click(self.cx, "host-rail-host-2");
         click(self.cx, "session-status-Idle");
-        self.helm
-            .push(change(filtered(&["b"], 3, 1), &[], &["a", "c"]));
+        let open = selected(self.cx).expect("the premise: a session is open");
+        let meta = filtered(&["b"], 3, 1);
+        let meta = if open == "b" {
+            meta
+        } else {
+            carrying(meta, &open)
+        };
+        let gone: Vec<&str> = ["a", "c"].into_iter().filter(|key| *key != open).collect();
+        self.helm.push(change(meta, &[], &gone));
         self.accept_commands();
         let nodes = frame(self.cx);
         assert!(
@@ -935,6 +944,55 @@ fn a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them(cx: &mut Test
         settle(main.cx);
         main.filter_to_idle_on_host_2();
     }
+}
+
+/// SPEC.md lets the open session's absence from a filtered listing mean it was deleted, but only once the helm has
+/// answered a query naming it (decided by the maintainer on 2026-11-15). Until then a pick the filters hide has no row,
+/// so a rule built on absence alone would undo the pick at once and open another session in its place. Specified, with
+/// host 2 and Idle answered naming a (b listed, a carried): a pick of c, hidden by its host, keeps c open with no
+/// details bar (the store holds no row for it yet) and sends `{"selected": "c"}`; once the helm pushes its unfiltered
+/// listing of a, b and c and accepts the query, c is still open, listed and named by the details bar.
+#[gpui::test]
+fn a_fresh_pick_of_a_hidden_session_stays_open_until_its_query_is_answered(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, filtered_fleet());
+    main.filter_to_idle_on_host_2();
+
+    main.pick("c");
+    assert_eq!(
+        selected(main.cx).as_deref(),
+        Some("c"),
+        "the pick stays open"
+    );
+    assert!(
+        node(&frame(main.cx), BAR_ID).is_none(),
+        "the premise: the store holds no row for c yet"
+    );
+    let commands = main.helm.commands();
+    let queries: Vec<_> = commands
+        .iter()
+        .filter(|command| command.path == SESSION_QUERY_PATH)
+        .map(|command| command.body.clone().unwrap_or_default())
+        .collect();
+    assert_eq!(queries, [json!({ "selected": "c" })]);
+
+    main.helm.push(change(
+        filtered(&["a", "b", "c"], 3, 3),
+        &[session("c").host(3).status(json!({ "state": "idle" }))],
+        &[],
+    ));
+    for command in &commands {
+        main.helm.reply(command.id, 204, None);
+    }
+    settle(main.cx);
+    assert_eq!(selected(main.cx).as_deref(), Some("c"));
+    let nodes = frame(main.cx);
+    assert!(node(&nodes, "session-row-c").is_some(), "c is listed");
+    assert!(
+        node(&nodes, BAR_ID).is_some(),
+        "and the details bar names it"
+    );
 }
 
 /// SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick". A pick is never

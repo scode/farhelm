@@ -2,8 +2,8 @@
 //! helm carries it in the pushed collection outside the list's order because the session query names it
 //! (`session_list::filters`, "The query names the open session"). The list must not draw or count it, and the pane must
 //! work on it as on a listed session: its terminal stays, the header's actions ask and send about it, the details bar
-//! names it, and the Rename shortcut renames it. This window's own Delete of it moves the selection on; a deletion made
-//! elsewhere does not, until a complete listing proves it.
+//! names it, and the Rename shortcut renames it. Once it is deleted, by this window or elsewhere, the selection moves
+//! on, filtered listing or not.
 //!
 //! The window is the real main view over the helm client's fake, which plays the helm's side: the test pushes what the
 //! helm would push for each query and answers every command itself. The fixtures are the rail's: sessions a and b on
@@ -11,11 +11,11 @@
 //! step helpers, so the focus and layer invariants are checked after each.
 
 use farhelm_helm_client::Method;
-use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
-use super::details::{BAR_ID, TITLE_ID};
+use super::details::TITLE_ID;
 use super::header::Action;
 use crate::actions::RENAME_SESSION_CHORD;
 use crate::session_list::host_rail::tests::{
@@ -80,6 +80,41 @@ fn sent(fake: &mut FakeHelm) -> Vec<(Method, String, serde_json::Value)> {
             )
         })
         .collect()
+}
+
+/// With a idle and open, choose Running and answer as the helm does: the query names a, so the listing (1 of 2 matched,
+/// complete) lists b alone and carries a outside its order.
+fn hide_idle_a(fake: &mut FakeHelm, cx: &mut VisualTestContext) {
+    test_support::click(cx, "session-status-Running");
+    let (query, body) = one_query(fake);
+    assert_eq!(body, json!({ "status": "running", "selected": "a" }));
+    fake.push(change(carrying(filtered(&["b"], 2, 1), "a"), &[], &[]));
+    fake.reply(query.id, 204, None);
+    settle(cx);
+    assert!(
+        node(&frame(cx), "session-row-a").is_none(),
+        "the premise: Running hides a"
+    );
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a stays open"
+    );
+}
+
+/// Ask the header's Delete of the open a and confirm it; the Delete it sent, left unanswered.
+fn confirm_delete_of_a(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> FakeCommand {
+    test_support::click(cx, Action::Delete.id());
+    assert!(drawn(cx, "prompt"), "the header's Delete asks");
+    test_support::click(cx, "prompt-confirm");
+    let mut commands = fake.commands();
+    assert_eq!(commands.len(), 1, "one Delete was sent: {commands:?}");
+    let delete = commands.remove(0);
+    assert_eq!(
+        (delete.method, delete.path.split('?').next()),
+        (Method::Delete, Some("/api/sessions/a"))
+    );
+    delete
 }
 
 // ---- The open session the list leaves out --------------------------------------------------------------------------
@@ -165,44 +200,27 @@ fn a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename(
 
 /// The gate's finding on the first version of this work: once the header could delete a hidden open session, the helm
 /// stopped carrying it, no filtered listing proves a session gone, and the pane stayed on the deleted session for good
-/// ("Session unavailable — reconnecting", an empty header, no bar) until the user chose All. This window's own Delete
-/// that the helm did is the proof (`session_list::delete`, "This window's own Delete is evidence"). Specified, with a
-/// idle and b running, Running hiding a and listing b (1 of 2) while the helm carries a: the header's Delete asks,
-/// Confirm sends a's Delete; the helm's push removing a leaves a selected while the Delete is pending, and its success
-/// reply then opens b, which the details bar names and whose header draws its actions.
+/// ("Session unavailable — reconnecting", an empty header, no bar) until the user chose All. The helm's push without
+/// the session its answered query names is the proof (`session_list::selection`, "A selection stays until it is proven
+/// gone"), and the automatic choice then waits for the Delete as after any Delete. Specified, with a idle and b
+/// running, Running hiding a and listing b (1 of 2) while the helm carries a: the header's Delete asks, Confirm sends
+/// a's Delete; the helm's push removing a clears the selection while the Delete is pending, and its success reply then
+/// opens b, which the details bar names and whose header draws its actions.
 #[gpui::test]
 fn this_windows_delete_of_a_hidden_open_session_opens_the_next_session(cx: &mut TestAppContext) {
     let idle = json!({ "state": "idle" });
     let (mut fake, cx) = open_a(cx, session("a").status(idle), session("b"));
-    test_support::click(cx, "session-status-Running");
-    let (query, _) = one_query(&mut fake);
-    fake.push(change(carrying(filtered(&["b"], 2, 1), "a"), &[], &[]));
-    fake.reply(query.id, 204, None);
-    settle(cx);
-    assert!(
-        node(&frame(cx), "session-row-a").is_none(),
-        "the premise: Running hides a"
-    );
-
-    test_support::click(cx, Action::Delete.id());
-    assert!(drawn(cx, "prompt"), "the header's Delete asks");
-    test_support::click(cx, "prompt-confirm");
-    let commands = fake.commands();
-    let [delete] = &commands[..] else {
-        panic!("one Delete was sent: {commands:?}");
-    };
-    assert_eq!(
-        (delete.method, delete.path.split('?').next()),
-        (Method::Delete, Some("/api/sessions/a"))
-    );
-    // The helm pushes the removal before its reply; settling in between shows that only the Delete's success moves
-    // the selection, never the store losing the session while the Delete is pending.
+    hide_idle_a(&mut fake, cx);
+    let delete = confirm_delete_of_a(&mut fake, cx);
+    // The helm pushes the removal before its reply; settling in between shows that the pending Delete holds the
+    // automatic choice back (SPEC.md: "Automatic selection after Delete waits until every admitted Delete has
+    // settled"), so a is dropped and b is not opened yet.
     fake.push(change(filtered(&["b"], 1, 1), &[], &["a"]));
     settle(cx);
     assert_eq!(
         selected(cx).as_deref(),
-        Some("a"),
-        "a pending Delete moves nothing"
+        None,
+        "a pending Delete holds the next session back"
     );
     fake.reply(delete.id, 200, Some(json!({})));
     settle(cx);
@@ -218,40 +236,129 @@ fn this_windows_delete_of_a_hidden_open_session_opens_the_next_session(cx: &mut 
     );
 }
 
-/// SPEC.md: "Existing removal detection still needs a complete, unfiltered fleet reply to infer an external deletion",
-/// so a carried session that disappears because someone else deleted it (another window, the command line) is not
-/// proof, and the open session stays open as an unavailable pane until a complete listing shows it gone. Letting the
-/// carried session's absence count is with the maintainer (raised by the migration's orchestrator on 2026-11-14), and
-/// the parity file records the gap. Meanwhile nothing reads a row that is not there. Specified, with Waiting hiding a
-/// and the helm carrying it: a push that removes a and carries nothing keeps a selected, with no details bar, no header
-/// actions and nothing opened by the Rename shortcut; choosing All sends `{"selected": "a"}`, and its complete listing
-/// of b alone opens b, for which the query is sent again as `{"selected": "b"}`.
+/// The helm's push without the open session proves it gone only while no later query is on its way, so a Delete the
+/// user follows with another filter choice would leave the pane on the deleted session, as unavailable, until that
+/// query's reply, one round trip later. This window's own Delete that the helm did is the proof then
+/// (`session_list::delete`, "This window's own Delete is evidence"). Specified, with a idle and b running, Running
+/// hiding a and listing b while the helm carries a: Confirm sends a's Delete; a click on All then sends
+/// `{"selected": "a"}`; the helm, taking commands in order, pushes the removal of a under Running and replies to the
+/// Delete, and b opens while the All query is still unanswered; once the helm answers it, b stays open.
 #[gpui::test]
-fn a_carried_session_deleted_elsewhere_stays_open_until_a_complete_listing_proves_it_gone(
+fn this_windows_delete_proves_its_session_gone_while_a_later_query_is_in_flight(
     cx: &mut TestAppContext,
 ) {
-    let (mut fake, cx) = open_a(cx, session("a").title("Hidden work"), session("b"));
-    hide_a(&mut fake, cx);
-    fake.push(change(filtered(&[], 1, 0), &[], &["a"]));
-    settle(cx);
-    assert_eq!(selected(cx).as_deref(), Some("a"));
-    assert!(node(&frame(cx), BAR_ID).is_none(), "no row, no bar");
-    for action in Action::ALL {
-        assert!(
-            cx.debug_bounds(action.id()).is_none(),
-            "{action:?} is not drawn"
-        );
-    }
-    keys(cx, RENAME_SESSION_CHORD);
-    assert!(!any_open(cx), "nothing to rename");
-    assert_eq!(sent(&mut fake), []);
-
+    let idle = json!({ "state": "idle" });
+    let (mut fake, cx) = open_a(cx, session("a").status(idle), session("b"));
+    hide_idle_a(&mut fake, cx);
+    let delete = confirm_delete_of_a(&mut fake, cx);
     test_support::click(cx, "session-status-All");
-    let (query, body) = one_query(&mut fake);
+    let (all, body) = one_query(&mut fake);
     assert_eq!(body, json!({ "selected": "a" }));
-    fake.push(change(listing_meta(&["b"], 1, false), &[session("b")], &[]));
-    fake.reply(query.id, 204, None);
+
+    fake.push(change(filtered(&["b"], 1, 1), &[], &["a"]));
+    fake.reply(delete.id, 200, Some(json!({})));
+    settle(cx);
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("b"),
+        "the next session opened before the All query's reply"
+    );
+
+    fake.push(change(listing_meta(&["b"], 1, false), &[], &[]));
+    fake.reply(all.id, 204, None);
+    settle(cx);
+    assert_eq!(sent_queries(&mut fake), [json!({ "selected": "b" })]);
     settle(cx);
     assert_eq!(selected(cx).as_deref(), Some("b"));
-    assert_eq!(sent_queries(&mut fake), [json!({ "selected": "b" })]);
+}
+
+/// The helm pushes a query's listing before it replies, so a query naming another session can leave the open session
+/// out although it exists. A user who opens b and comes straight back to a, before the helm has answered the query
+/// naming b, must not lose a to that listing: the proof waits until nothing is in flight
+/// (`session_list::filters::Choice::serves_named`'s NOTE). Specified, with a and b running and Running answered naming
+/// a (both listed): clicks on b and then a; the helm's listing for the query naming b, in which a (gone idle) is
+/// neither listed nor carried, and its reply keep a open; the helm's listing for the query naming a, carrying the idle
+/// a, and its reply keep a open with the details bar naming it.
+#[gpui::test]
+fn a_quick_return_to_a_session_is_not_undone_by_the_query_it_overtook(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_a(cx, session("a").title("Return"), session("b"));
+    test_support::click(cx, "session-status-Running");
+    let (query, _) = one_query(&mut fake);
+    fake.push(change(filtered(&["a", "b"], 2, 2), &[], &[]));
+    fake.reply(query.id, 204, None);
+    settle(cx);
+
+    test_support::click(cx, "session-row-b");
+    test_support::click(cx, "session-row-a");
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a is open again"
+    );
+    let commands = fake.commands();
+    let naming = |key: &str| {
+        commands
+            .iter()
+            .position(|command| {
+                command.body == Some(json!({ "status": "running", "selected": key }))
+            })
+            .unwrap_or_else(|| panic!("a query naming {key}: {commands:?}"))
+    };
+    let (for_b, for_a) = (naming("b"), naming("a"));
+    assert!(for_b < for_a, "the premise: the query naming b went first");
+
+    fake.push(change(filtered(&["b"], 2, 1), &[], &["a"]));
+    for command in &commands[..=for_b] {
+        fake.reply(command.id, 204, None);
+    }
+    settle(cx);
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the query naming a is still on its way"
+    );
+
+    let idle = json!({ "state": "idle" });
+    fake.push(change(
+        carrying(filtered(&["b"], 2, 1), "a"),
+        &[session("a").title("Return").status(idle)],
+        &[],
+    ));
+    for command in &commands[for_b + 1..] {
+        fake.reply(command.id, 204, None);
+    }
+    settle(cx);
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert_eq!(test_support::label(cx, TITLE_ID).as_deref(), Some("Return"));
+}
+
+/// SPEC.md's exception to "Existing removal detection still needs a complete, unfiltered fleet reply" (decided by the
+/// maintainer on 2026-11-15): once the helm has answered a query naming the open session, it carries that session in
+/// every listing while it exists, so a filtered listing without it means someone else deleted it (another window, the
+/// command line). Before, the pane stayed on the deleted session as an unavailable pane, with no header actions and no
+/// details bar, until the user chose All. Specified, with a idle and b running, Running hiding a and listing b (1 of 2)
+/// while the helm carries a, and nothing deleted from this window: a push that removes a and carries nothing opens b,
+/// which the details bar names and whose header draws its actions, and the query is sent again as Running naming b.
+#[gpui::test]
+fn a_carried_session_deleted_elsewhere_moves_the_selection_on(cx: &mut TestAppContext) {
+    let idle = json!({ "state": "idle" });
+    let (mut fake, cx) = open_a(cx, session("a").status(idle), session("b"));
+    hide_idle_a(&mut fake, cx);
+
+    fake.push(change(filtered(&["b"], 1, 1), &[], &["a"]));
+    settle(cx);
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("b"),
+        "the next session opened"
+    );
+    assert_eq!(test_support::label(cx, TITLE_ID).as_deref(), Some("b"));
+    assert!(
+        cx.debug_bounds(Action::Delete.id()).is_some(),
+        "b's header draws its actions"
+    );
+    assert_eq!(
+        sent_queries(&mut fake),
+        [json!({ "status": "running", "selected": "b" })]
+    );
 }

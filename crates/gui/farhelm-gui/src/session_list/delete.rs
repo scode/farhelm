@@ -30,14 +30,16 @@
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
 //! with nothing alive, as SPEC.md's header Delete does.
 //!
-//! **This window's own Delete is evidence.** The selection rules drop a selected session only once a complete,
-//! unfiltered listing proves it gone (`session::listing_proves_gone`), and a filtered one never does. The open session
-//! a filter hides can still be deleted from its header or with the Delete shortcut, and the helm then stops carrying
-//! it, which no filtered listing proves; without more, the pane would stay on the deleted session for good. So a Delete
-//! this window sent that the helm did ([`deleted_here`]), with the session gone from the store, counts as that proof:
-//! the selection moves on as after a complete listing without it. A deletion made elsewhere is still inferred only from
-//! a complete listing (SPEC.md), so a Rename editor or a question about a hidden session deleted by another client
-//! stays open, and the helm refuses what it then sends.
+//! **This window's own Delete is evidence.** The selection rules drop a selected session once a complete, unfiltered
+//! listing proves it gone (`session::listing_proves_gone`), or once an available, uncut listing without it answers a
+//! query that named it (`selection::absent_while_named`), which is how the open session a filter hides is found
+//! deleted, here or elsewhere. A Delete this window sent that the helm did ([`deleted_here`]), with the session gone
+//! from the store, counts as proof too, whatever query the helm serves. It is what proves a filtered listing's loss of
+//! a session that the query in force does not name: a later query is in flight (the user chose a filter while the
+//! Delete was on its way), or the helm refused the query naming it (`filters`' `Choice::named`). Without it the pane
+//! would stay on the deleted session until the next reply, or the next query. A Rename editor or a question about a
+//! hidden session deleted by another client still stays open, since a layer keeps the complete-listing rule, and the
+//! helm refuses what it then sends.
 
 use std::collections::HashSet;
 
@@ -291,8 +293,8 @@ impl Global for DeletedHere {}
 ///
 /// NOTE: The list's settle on the Delete's own settling sees the record only because GPUI runs the operation store's
 /// observers when the update that settled the Delete returns, after its completion recorded the key here.
-/// `session_pane/carried_tests.rs`'s `this_windows_delete_of_a_hidden_open_session_opens_the_next_session` fails if
-/// that order changes.
+/// `session_pane/carried_tests.rs`'s `this_windows_delete_proves_its_session_gone_while_a_later_query_is_in_flight`
+/// fails if that order changes, or if this record stops counting.
 pub(crate) fn deleted_here(key: &str, cx: &mut App) -> bool {
     cx.update_default_global::<DeletedHere, _>(|here, cx| here.0.current(cx).contains(key))
 }
