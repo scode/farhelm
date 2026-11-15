@@ -217,6 +217,35 @@ fn switching_sessions_drops_the_old_stream_and_attaches_the_new_one(cx: &mut Tes
     assert_ne!(opened[0].1.lease, opened[1].1.lease, "a lease per view");
 }
 
+/// The old app once mounted the first session's socket into the second session's view when the user switched before
+/// the first terminal was ready: a mount retry for the first session outlived the switch (old `terminal.spec.ts`,
+/// "switching sessions before the first terminal is ready mounts the second session's socket"). Here the moment is a
+/// switch while the first stream is still attaching, which the test above does not reach because it makes a live
+/// first. A stream left open then would take the session's terminal from any other client and keep feeding a view
+/// nobody shows. Specified: with a's stream still attaching (no socket open, nothing replayed), a click on b's row
+/// closes a's stream, so nothing a's side sends later has a reader, and opens one stream, for b; once b is live, a
+/// typed letter reaches b's program, and a's stream never received anything.
+#[gpui::test]
+fn switching_while_the_first_stream_attaches_closes_it(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    assert_eq!(
+        fleet.phase(0),
+        FakePhase::Attaching,
+        "the premise: a is still attaching"
+    );
+
+    click(fleet.cx, "session-row-b");
+    settle(fleet.cx);
+    assert_eq!(fleet.phase(0), FakePhase::Closed, "a's stream ended");
+    assert_eq!(fleet.attached(), ["a", "b"], "one stream for b");
+    assert_eq!(fleet.phase(1), FakePhase::Attaching);
+
+    fleet.go_live(1);
+    keys(fleet.cx, "x");
+    assert_eq!(fleet.input(1), [letter("x", 88)]);
+    assert_eq!(fleet.input(0), [], "a's stream never carried anything");
+}
+
 // ---- Focus ---------------------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Where focus rests": "Choosing a session, including the one already selected, focuses its terminal", taking
@@ -393,6 +422,97 @@ fn a_removal_pushed_from_elsewhere_selects_the_next_session_whose_terminal_takes
     fleet.go_live(1);
     keys(fleet.cx, "y");
     assert_eq!(fleet.input(1), [letter("y", 89)]);
+}
+
+impl Fleet<'_> {
+    /// The paths of the Deletes and Replaces the window sent since the last call. Every other command (the open
+    /// session's seen mark, the remembered selection) is answered with success at once, as [`Fleet::deletes`] does.
+    fn deletes_and_replaces(&mut self) -> Vec<String> {
+        let mut found = Vec::new();
+        for command in self.helm.commands() {
+            if command.method == Method::Delete || command.path.ends_with("/replace") {
+                found.push(command.path);
+            } else {
+                self.helm.reply(command.id, 200, None);
+            }
+        }
+        found
+    }
+}
+
+/// [`a_delete_question_keeps_the_keyboard_while_the_terminal_goes_live`] and its Replace twin: the header question
+/// `button` asks, opened while a's terminal is still catching up, keeps focus when the terminal goes live.
+fn a_question_keeps_the_keyboard_while_the_terminal_goes_live(
+    cx: &mut TestAppContext,
+    button: &'static str,
+) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet
+        .cx
+        .update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    fleet.deletes_and_replaces();
+    assert_eq!(
+        fleet.phase(0),
+        FakePhase::Attaching,
+        "the premise: a is catching up"
+    );
+    click(fleet.cx, button);
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: the question has focus"
+    );
+
+    fleet.go_live(0);
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the terminal going live left focus on the question"
+    );
+    keys(fleet.cx, "tab");
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some("prompt-cancel")
+    );
+    keys(fleet.cx, "enter");
+    assert!(
+        !fleet.drawn("prompt"),
+        "Enter on Cancel closed the question"
+    );
+    assert_eq!(fleet.input(0), [], "and sent the program no Enter");
+
+    click(fleet.cx, button);
+    assert!(fleet.drawn("prompt"), "the premise: asked again");
+    keys(fleet.cx, "escape");
+    assert!(terminal_focused(fleet.cx), "Escape returns to the terminal");
+    keys(fleet.cx, "x");
+    assert_eq!(
+        fleet.input(0),
+        [letter("x", 88)],
+        "only the key typed after it"
+    );
+    assert_eq!(fleet.deletes_and_replaces(), [] as [String; 0]);
+}
+
+/// A replay completing is automatic: nothing the user did moved focus then, so it must not move it either (SPEC.md,
+/// "Where focus rests": the terminal "never takes focus from a control that holds it"). A question the user opened
+/// while the terminal was still catching up owns the keyboard, and an Enter meant for it must not reach the agent
+/// (old `terminal-replay-rename.spec.ts`, "replay reveal preserves a header delete question's keyboard ownership").
+/// Specified: with a's terminal still attaching, a click on the header's Delete focuses the question's confirm button,
+/// which keeps focus when the terminal goes live; Tab moves to Cancel, and Enter there closes the question and sends
+/// the program nothing; asked again and dismissed with Escape, focus is on the terminal, a letter typed then is all
+/// the program receives, and no Delete was sent.
+#[gpui::test]
+fn a_delete_question_keeps_the_keyboard_while_the_terminal_goes_live(cx: &mut TestAppContext) {
+    a_question_keeps_the_keyboard_while_the_terminal_goes_live(cx, "session-header-delete");
+}
+
+/// [`a_delete_question_keeps_the_keyboard_while_the_terminal_goes_live`] for the header's Replace question (old
+/// `terminal-replay-rename.spec.ts`, "replay reveal preserves a header replace question's keyboard ownership"), which
+/// is asked and answered the same way. Specified: the same steps through the Replace question, and no Replace sent.
+#[gpui::test]
+fn a_replace_question_keeps_the_keyboard_while_the_terminal_goes_live(cx: &mut TestAppContext) {
+    a_question_keeps_the_keyboard_while_the_terminal_goes_live(cx, "session-header-replace");
 }
 
 // ---- The Delete shortcut ------------------------------------------------------------------------------------------

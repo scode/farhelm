@@ -875,6 +875,159 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     assert_eq!(h.text().as_deref().map(first_line), Some("second"));
 }
 
+/// The first part of a replay as the supervisor sends it, ahead of its history: hello at `cols` by `rows` with a
+/// history cap of 1000, the state, `text` on the first row, and the frame.
+fn first_screen(cols: u16, rows: u16, text: &str) -> Vec<GridOutput> {
+    let mut replay = screen(cols, rows, text, serde_json::Value::Null);
+    replay[0] = serde_json::from_value(
+        serde_json::json!({"t":"hello","cols":cols,"rows":rows,"history_cap":1000}),
+    )
+    .unwrap();
+    replay
+}
+
+/// A history message carrying `lines` lines ("h0" oldest) at `cols`.
+fn history(lines: usize, cols: u16) -> GridOutput {
+    let rows: Vec<_> = (0..lines)
+        .map(|i| {
+            let text = format!("h{i}");
+            serde_json::json!({"w":false,"r":[[0,text.len(),text,[0,-1,-1]]]})
+        })
+        .collect();
+    serde_json::from_value(serde_json::json!({"t":"history","first":0,"rows":rows,"cols":cols}))
+        .unwrap()
+}
+
+/// A restart replaces the session's terminal with a new one that starts with the old one's scrollback above a blank
+/// screen (SPEC.md, "Lifecycle operations"), and the supervisor detaches the viewer with `other` to move it there. The
+/// client must come back by itself: a restart is not another client taking over, so offering Take control would ask the
+/// user to fix something nobody broke (old `terminal-restart.spec.ts`, "a restarted session's terminal still shows the
+/// previous run's scrollback above the new one", whose client half this is). The old screen must give way to the new
+/// run's in one redraw, never to half a replay. What the status line says during the backoff is the reconnect
+/// display's, not checked here. Specified: with a live, focused terminal showing "screen" above 40 history lines, a
+/// detach with `other` offers no Take control and keeps "screen" up; the stream reattaches by the non-displacing route,
+/// and while the new replay (a screen with "new run" on its first row and the 40 lines above it) arrives nothing is
+/// redrawn and "screen" stays; on completion the owner redraws once to show "new run" with no line of the old screen,
+/// following the bottom; the wheel then reaches the carried-over history, and a typed key is delivered to the new
+/// attachment.
+#[gpui::test]
+fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert_eq!(
+        h.text().as_deref().map(first_line),
+        Some("screen"),
+        "the premise"
+    );
+
+    h.fake()
+        .detach(Some(DetachCode::Other), "session restarted");
+    settle(h.cx);
+    assert_eq!(h.fake().phase(), FakePhase::Reconnecting);
+    assert!(
+        h.status().is_some_and(|line| !line.take_control),
+        "no Take control"
+    );
+    assert!(h.cx.debug_bounds("terminal-take-control").is_none());
+    assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
+
+    let asked = h.fake().attach();
+    assert!(!asked.take_control, "it reattaches without displacing");
+    let mut replay = first_screen(asked.cols, asked.rows, "new run");
+    replay.push(history(40, asked.cols));
+    let mut replay = replay.into_iter();
+    // The first message announces the attachment, which redraws the status line away; the rest is the replay proper.
+    h.fake().output(replay.next().unwrap());
+    settle(h.cx);
+    h.reset_renders();
+    for message in replay {
+        h.fake().output(message);
+    }
+    settle(h.cx);
+    assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
+    assert_eq!(
+        (h.renders("attached-terminal"), h.renders("terminal")),
+        (0, 0)
+    );
+
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert_eq!(h.renders("attached-terminal"), 1, "one redraw");
+    let text = h.text().unwrap();
+    assert_eq!(first_line(&text), "new run");
+    assert!(!text.contains("screen"), "the old screen is gone: {text:?}");
+    assert!(h.following());
+
+    h.wheel(1.);
+    assert!(
+        h.text().unwrap().lines().any(|line| line.starts_with('h')),
+        "the carried-over history is reachable"
+    );
+    keys(h.cx, "a");
+    assert_eq!(h.sent(), [(key("a", 65), true)]);
+}
+
+/// SPEC.md, "Terminal experience": attaching from a second client "visibly detaches the first, which keeps a non-live
+/// snapshot". When that happens during the first attach's replay there is no earlier screen to keep, and the
+/// supervisor sends no end of replay to a viewer it has detached, so a terminal that only ever showed complete replays
+/// would sit blank under its Detached line. The old app showed what had arrived (old `grid-attach.spec.ts`, "a takeover
+/// during a grid terminal's catch-up reveals what arrived, under the banner"). A replay that a reconnect cuts off is
+/// still dropped, since the reconnect replays again; so is one with no complete screen yet, which has nothing to draw.
+/// Specified: a takeover after only the hello and state shows no screen and says "Detached: " with Take control; after
+/// Take control, a complete first screen ("$ echo" on its first row) cut off by a dropped link shows no screen either;
+/// after the reconnect delivers that screen and part of its history, a takeover shows "$ echo" on the first row under
+/// "Detached: " with Take control, not live.
+#[gpui::test]
+fn a_takeover_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let asked = h.fake().attach();
+    for message in first_screen(asked.cols, asked.rows, "$ echo")
+        .into_iter()
+        .take(2)
+    {
+        h.fake().output(message);
+    }
+    h.fake()
+        .detach(Some(DetachCode::TakenOver), "another client attached");
+    settle(h.cx);
+    assert_eq!(h.text(), None, "no screen had arrived");
+    assert!(h.status().is_some_and(|line| line.take_control));
+
+    click(h.cx, "terminal-take-control");
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Attaching,
+        "the premise: Take control attaches again"
+    );
+    let asked = h.fake().attach();
+    assert!(asked.take_control, "the premise: as a takeover");
+    for message in first_screen(asked.cols, asked.rows, "$ echo") {
+        h.fake().output(message);
+    }
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(h.text(), None, "a reconnect's cut replay is dropped");
+
+    let asked = h.fake().attach();
+    for message in first_screen(asked.cols, asked.rows, "$ echo") {
+        h.fake().output(message);
+    }
+    h.fake().output(history(10, asked.cols));
+    h.fake()
+        .detach(Some(DetachCode::TakenOver), "another client attached");
+    settle(h.cx);
+    assert_eq!(h.text().as_deref().map(first_line), Some("$ echo"));
+    let line = h.status().expect("the Detached line");
+    assert_eq!(line.words, "Detached: ");
+    assert!(line.take_control);
+    assert!(!h.read(|owner, _| owner.is_live()));
+    assert!(h.cx.debug_bounds("terminal-connecting").is_none());
+}
+
 /// A flood is delivered at most `BATCH` events per turn of the main thread, and the delivery then yields, so other
 /// work queued on the main thread (input, a frame) runs between batches instead of after the whole flood. Consecutive
 /// output in a turn is applied as one batch, so the terminal redraws once per turn, never once per message. Twenty
