@@ -163,18 +163,32 @@ pub fn start(
     if !arming.read(cx).armed() {
         return Ok(Sent::Paused);
     }
+    start_unpaused(id, answer, host_add, cx, on_settled)?;
+    Ok(Sent::Sent)
+}
+
+/// [`start`] without the answer bar's pause, for an answer whose press already passed it and that went on through a
+/// question since: Tunnel and open's tunnel warning, whose Allow answers the card the user pressed, not one that moved
+/// under the pointer ([`super::tunnel`]).
+pub fn start_unpaused(
+    id: &str,
+    answer: ApprovalAnswer,
+    host_add: Option<String>,
+    cx: &mut App,
+    on_settled: impl FnOnce(&Settled, &mut App) + 'static,
+) -> Result<(), NotStarted> {
     let command = command(id, answer, host_add).map_err(NotStarted::Path)?;
     let Some(operations) = crate::session::current_operations(cx) else {
         return Err(NotStarted::Retired);
     };
     operations.update(cx, |operations, cx| {
         operations.start(&OpKey::approval(id), command, cx, on_settled)
-    })?;
-    Ok(Sent::Sent)
+    })
 }
 
-/// What an answer's reply means once it arrives: only the helm's 410 is a late answer.
-fn settle(always: bool, settled: &Settled, cx: &mut App) {
+/// What an answer's reply means once it arrives: only the helm's 410 is a late answer. Shared with Tunnel and open,
+/// whose answer goes out once the tunnel warning is answered ([`super::tunnel`]).
+pub(super) fn settle(always: bool, settled: &Settled, cx: &mut App) {
     let Outcome::Refused(refusal) = &settled.outcome else {
         return;
     };
