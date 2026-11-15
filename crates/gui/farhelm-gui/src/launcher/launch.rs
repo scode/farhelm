@@ -32,23 +32,33 @@
 //! store, by the launch's key. Dismissing the notice withdraws only the notice; the launcher stays in the slot, and New
 //! (or Clone) brings it back.
 //!
-//! NOTE: Not built yet: the pending pill and the "Started" pill that report a launch while the launcher is hidden.
+//! **Reports while hidden.** A create that waits two seconds shows the progress pill (`super::pill`) until its reply,
+//! armed by a ticker deadline the held launcher keeps, so the deadline goes with it on a reply or a reset. A success
+//! that does not open its session shows the "Started" report for four seconds instead; its expiry is kept in the slot,
+//! and a later report replacing it in the layer manager's one launch pill makes that expiry a no-op.
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
 use farhelm_proto::session_requests::CreateSessionBody;
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
+use super::pill::{self, ProgressPill, StartedReport};
 use super::view::{Launcher, show};
 use crate::focus::{self, Mark};
+use crate::host_text::HostText;
+use crate::layers::{self, PillId};
 use crate::notices::{self, Notice};
 use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
 use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::selection;
+use crate::ticker;
 
 /// Where a submitted launcher waits while it is not drawn: one per UI session, so a reset drops it.
 pub(crate) struct LaunchSlot {
     held: PerSession<Option<Held>>,
+    /// The "Started" report's expiry, which takes it down four seconds after it shows. Kept apart from `held`, since
+    /// the report outlives the launcher that launched it.
+    started: Option<ticker::Deadline>,
     /// Withdraws the launch notice once the UI session that owed its launcher is gone.
     _following: ObservingCurrent,
 }
@@ -57,6 +67,15 @@ pub(crate) struct LaunchSlot {
 struct Held {
     launcher: Entity<Launcher>,
     waiting: Waiting,
+    /// The progress pill of the create it waits on: `None` once it waits for the user.
+    progress: Option<Progress>,
+}
+
+/// A pending create's progress pill: the deadline that shows it two seconds after the press, then the pill it showed in
+/// the launch's window (the one its reply's settle is handed).
+struct Progress {
+    _shows: ticker::Deadline,
+    shown: Option<PillId>,
 }
 
 /// What a hidden launcher waits for before it is drawn again or dropped.
@@ -81,6 +100,7 @@ fn slot(cx: &mut App) -> Entity<LaunchSlot> {
     }
     let slot = cx.new(|cx| LaunchSlot {
         held: PerSession::default(),
+        started: None,
         _following: session::observe_current(cx, |slot: &mut LaunchSlot, cx| {
             if slot.held.current(cx).is_none() {
                 withdraw_notices(cx);
@@ -154,13 +174,15 @@ fn hold(held: Option<Held>, cx: &mut App) {
 /// Send `body`, the draft's create, for `launcher` (the open launcher in `window`) through the operation store, and
 /// hold the launcher in the slot while the create is out. `mark` is the user's answer the reply's moved-on check counts
 /// from: taken in the handler of the press of Launch, or of the YOLO question's answer whose host write this create
-/// waited for. Returns whether the create went out; it does not without a UI session, or with a body that will not
+/// waited for. `host` is the target host's name as the launcher shows it now, which the progress pill keeps for the
+/// request's life. Returns whether the create went out; it does not without a UI session, or with a body that will not
 /// encode, which the draft's types rule out.
 ///
 /// The caller closes the launcher's layer once this returns `true`; the launcher stays alive here.
 pub(super) fn start(
     launcher: Entity<Launcher>,
     body: &CreateSessionBody,
+    host: HostText,
     mark: Mark,
     window: &mut Window,
     cx: &mut App,
@@ -168,6 +190,7 @@ pub(super) fn start(
     let Some(operations) = session::current_operations(cx) else {
         return false;
     };
+    let title = body.title.clone();
     let (Ok(path), Ok(body)) = (ApiPath::api(&["sessions"]), serde_json::to_value(body)) else {
         tracing::warn!("a launch's create could not be put into a command");
         return false;
@@ -193,14 +216,72 @@ pub(super) fn start(
         tracing::debug!(?refused, "a launch was not sent");
         return false;
     }
+    let shows = arm_progress(&launcher, handle, host, title, cx);
     hold(
         Some(Held {
             launcher,
             waiting: Waiting::Reply,
+            progress: Some(Progress {
+                _shows: shows,
+                shown: None,
+            }),
         }),
         cx,
     );
     true
+}
+
+/// The deadline that shows `launcher`'s progress pill in `window` two seconds from now, naming `host` and `title` as
+/// the request carries them and counting from now, if the slot still holds `launcher` waiting for its reply then.
+fn arm_progress(
+    launcher: &Entity<Launcher>,
+    window: AnyWindowHandle,
+    host: HostText,
+    title: Option<String>,
+    cx: &mut App,
+) -> ticker::Deadline {
+    let sent = ticker::wall_now(cx);
+    let launcher = launcher.downgrade();
+    ticker::after(pill::PROGRESS_SHOWS_AFTER, cx, move |cx| {
+        let Some(launcher) = launcher.upgrade() else {
+            return;
+        };
+        if waiting(&launcher, cx) != Some(Waiting::Reply) {
+            return;
+        }
+        let shown = cx
+            .update_window(window, |_, window, cx| {
+                let view = cx.new(|cx| ProgressPill::new(host, title, sent, cx));
+                layers::show_launch_pill(view.into(), window, cx)
+            })
+            .ok()
+            .flatten();
+        slot(cx).update(cx, |slot, cx| {
+            if let Some(progress) = slot
+                .held
+                .current(cx)
+                .as_mut()
+                .and_then(|held| held.progress.as_mut())
+            {
+                progress.shown = shown;
+            }
+        });
+    })
+}
+
+/// Take down the progress pill of the create the slot waits on, if it shows in `window`: its reply has come, whatever
+/// it says (SPEC.md: the pill "goes when the launcher returns or closes").
+fn hide_progress(window: AnyWindowHandle, cx: &mut App) {
+    let shown = slot(cx).update(cx, |slot, cx| {
+        slot.held
+            .current(cx)
+            .as_mut()
+            .and_then(|held| held.progress.take())
+            .and_then(|progress| progress.shown)
+    });
+    if let Some(id) = shown {
+        let _ = cx.update_window(window, |_, window, cx| layers::hide_pill(id, window, cx));
+    }
 }
 
 /// `launcher`'s create, sent under `key`, settled. `mark` is the user's answer the launch counts from (the press of
@@ -220,13 +301,14 @@ fn settle(
     if waiting(&launcher, cx) != Some(Waiting::Reply) {
         return;
     }
+    hide_progress(window, cx);
     // The store counts from when it sent the create; `mark` from the answer that asked for it, which for a create sent
     // after the YOLO question's host write is earlier, and presses made during that write count too.
     let user_moved_on = settled.user_moved_on || focus::has_moved_on(&mark, cx);
     match &settled.outcome {
         Outcome::Done(body) => {
             hold(None, cx);
-            opened(body.clone(), user_moved_on, cx);
+            opened(body.clone(), user_moved_on, window, cx);
         }
         // A create is never accepted as long work, so this cannot arrive. If it did, nothing failed, and the pushed
         // list shows what the helm made of it.
@@ -263,16 +345,36 @@ fn settle(
 /// a session, unless the user moved on since pressing Launch (SPEC.md: "A successful New or Clone opens its session
 /// only while the submitted launcher opening is still current and the user has pressed no key or pointer button
 /// anywhere in the page since their last answer to it"). The opening is current by construction: nothing replaces a
-/// launcher while its create is out.
-fn opened(body: Option<serde_json::Value>, user_moved_on: bool, cx: &mut App) {
-    if user_moved_on {
-        return;
-    }
+/// launcher while its create is out. Otherwise the row appears, nothing else moves, and the "Started" report says so in
+/// `window` for four seconds.
+fn opened(
+    body: Option<serde_json::Value>,
+    user_moved_on: bool,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
     let Some(Ok(session)) = body.map(serde_json::from_value::<SessionInfo>) else {
         tracing::warn!("a launch succeeded with a reply that does not read as its session");
         return;
     };
-    selection::choose(&session.id, cx);
+    if !user_moved_on {
+        selection::choose(&session.id, cx);
+        return;
+    }
+    let shown = cx
+        .update_window(window, |_, window, cx| {
+            let view = cx.new(|_| StartedReport::new(&session.title));
+            layers::show_launch_pill(view.into(), window, cx)
+        })
+        .ok()
+        .flatten();
+    let Some(id) = shown else {
+        return;
+    };
+    let expiry = ticker::after(pill::STARTED_SHOWS_FOR, cx, move |cx| {
+        let _ = cx.update_window(window, |_, window, cx| layers::hide_pill(id, window, cx));
+    });
+    slot(cx).update(cx, |slot, _| slot.started = Some(expiry));
 }
 
 /// A create was refused ([`RefusedLaunch`]); the operation store keeps the helm's words under its key. Bring `launcher`
@@ -318,6 +420,7 @@ fn come_back(
             Some(Held {
                 launcher,
                 waiting: Waiting::User,
+                progress: None,
             }),
             cx,
         );

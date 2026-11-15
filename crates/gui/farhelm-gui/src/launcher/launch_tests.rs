@@ -535,3 +535,172 @@ fn a_timed_out_create_the_user_moved_on_from_has_its_own_notice(cx: &mut gpui::T
         "the notice went"
     );
 }
+
+// ---- The pills -------------------------------------------------------------------------------------------------------
+
+/// Whether the frame painted the line `text` anywhere (the pill's seconds are their own text element).
+fn painted(cx: &mut VisualTestContext, text: &str) -> bool {
+    crate::session_list::tests::painted(&test_support::frame(cx))
+        .iter()
+        .any(|line| line == text)
+}
+
+/// SPEC.md, "Creation": "after about two seconds, a small pending pill appears at the bottom of the window with a
+/// spinner, Launching ..., the captured host's name, the session name when supplied, and elapsed seconds", announced
+/// once, not every second, and gone when the launcher returns (the old `launch-progress.spec.ts` case "launcher status
+/// waits two seconds, counts up and ends on a real refusal"). Without it a slow launch hides the launcher with no sign
+/// that anything is happening. Specified: a launch of "slow" on host1 shows nothing for 1.9 seconds; at 2.1 seconds the
+/// pill is a status named "Launching “slow” on host1…" painting "2 s", and a second later "3 s" under the same name; a
+/// refusal then takes it down and brings the launcher back with the refusal.
+#[gpui::test]
+fn a_slow_launch_shows_its_progress_pill_after_two_seconds(cx: &mut gpui::TestAppContext) {
+    let mut draft = command_draft();
+    draft.edit_name("slow".into());
+    let (mut helm, cx, create) = launched_with(cx, draft);
+    test_support::advance(cx, std::time::Duration::from_millis(1_900));
+    assert_eq!(
+        name_of(cx, "launch-progress"),
+        None,
+        "nothing before two seconds"
+    );
+    test_support::advance(cx, std::time::Duration::from_millis(200));
+    let name = name_of(cx, "launch-progress");
+    assert_eq!(name.as_deref(), Some("Launching “slow” on host1…"));
+    assert!(is_status(cx, "launch-progress"), "announced as a status");
+    assert!(painted(cx, "2 s"), "it counts from the press");
+    test_support::advance(cx, std::time::Duration::from_secs(1));
+    assert!(painted(cx, "3 s"), "and counts up");
+    assert_eq!(name_of(cx, "launch-progress"), name, "under the same name");
+    helm.reply(create.id, 409, Some(json!("host1 is not connected")));
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launch-progress"),
+        None,
+        "the reply took it down"
+    );
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. host1 is not connected")
+    );
+}
+
+/// A quick reply must not flash a spinner or leave a counter behind (the old case "a launch answered below the
+/// threshold keeps the ordinary refusal"). Specified: a create refused at once shows its refusal, and no pill shows
+/// three seconds later.
+#[gpui::test]
+fn a_quick_reply_shows_no_progress_pill(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    helm.reply(create.id, 400, Some(json!("fixture launch refused")));
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. fixture launch refused"),
+        "the premise: the refusal came back"
+    );
+    test_support::advance(cx, std::time::Duration::from_secs(3));
+    assert_eq!(name_of(cx, "launch-progress"), None);
+}
+
+/// SPEC.md, "Creation": when a successful New does not open its session because the user moved on, "the row appears,
+/// nothing else moves, and a display-only pill says Started “name” for about four seconds"; a launch that opens its
+/// session needs no report. Specified: after a key press while the create is out, its success leaves the selection
+/// alone and shows a status named "Started “made”", gone four seconds later; a success the user waited for opens the
+/// session and shows no report.
+#[gpui::test]
+fn a_launch_that_does_not_open_reports_started(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    keys(cx, "x");
+    created(&mut helm, cx, create.id, "made");
+    assert_ne!(
+        selected(cx).as_deref(),
+        Some("made"),
+        "the premise: the user moved on, so nothing opened"
+    );
+    assert_eq!(
+        name_of(cx, "launch-started-report").as_deref(),
+        Some("Started “made”")
+    );
+    test_support::advance(cx, std::time::Duration::from_millis(3_900));
+    assert!(
+        name_of(cx, "launch-started-report").is_some(),
+        "up for four seconds"
+    );
+    test_support::advance(cx, std::time::Duration::from_millis(200));
+    assert_eq!(name_of(cx, "launch-started-report"), None);
+}
+
+/// The other half of [`a_launch_that_does_not_open_reports_started`]: a launch the user waited for opens its session,
+/// and the open session is its own report. Specified: with no press meanwhile, the success opens "made" and shows no
+/// "Started" report.
+#[gpui::test]
+fn a_launch_that_opens_its_session_reports_nothing(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    created(&mut helm, cx, create.id, "made");
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("made"),
+        "the premise: it opened"
+    );
+    assert_eq!(name_of(cx, "launch-started-report"), None);
+}
+
+/// The node drawn under `id` is a status, which assistive technology announces when it appears (the old pill's
+/// `role="status"`).
+fn is_status(cx: &mut VisualTestContext, id: &str) -> bool {
+    test_support::frame(cx)
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some(id) && node.role == Some(gpui::Role::Status))
+}
+
+/// The seconds must move on in a window behind others too, since the wait is the user's time, while the spinner stops
+/// there (SPEC_impl.md, "Animation time: the ticker": a looping animation runs only in the active window; a count of
+/// seconds runs on the ticker's once-a-second clock regardless). Without the clock the count would freeze until
+/// something else redrew the pill. Specified: with the pill up and the window deactivated, a second's advance redraws
+/// the pill, which then paints "3 s".
+#[gpui::test]
+fn the_progress_pill_counts_in_an_inactive_window(cx: &mut gpui::TestAppContext) {
+    let (_helm, cx, _create) = launched(cx);
+    test_support::advance(cx, std::time::Duration::from_millis(2_100));
+    assert!(
+        is_status(cx, "launch-progress"),
+        "the premise: the pill shows"
+    );
+    cx.deactivate_window();
+    settle(cx);
+    assert!(
+        !cx.update(|window, _| window.is_window_active()),
+        "the premise: the window is inactive"
+    );
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    test_support::advance(cx, std::time::Duration::from_secs(1));
+    assert!(
+        cx.update(|_, cx| crate::render_count::count("launch-progress", cx)) > 0,
+        "the clock redrew the pill"
+    );
+    assert!(painted(cx, "3 s"));
+}
+
+/// A slow launch that succeeds while the user is elsewhere hands the one launch pill from its progress to its report,
+/// and neither keeps New busy (SPEC.md, "Creation": the report "does not keep the launcher or its draft busy").
+/// Specified: with the progress pill up and a key pressed meanwhile, the success replaces it with "Started “made”", and
+/// New opens while the report shows.
+#[gpui::test]
+fn a_slow_success_hands_the_pill_to_its_started_report(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    test_support::advance(cx, std::time::Duration::from_millis(2_100));
+    assert!(
+        is_status(cx, "launch-progress"),
+        "the premise: the pill shows"
+    );
+    keys(cx, "x");
+    created(&mut helm, cx, create.id, "made");
+    assert_eq!(name_of(cx, "launch-progress"), None, "the progress went");
+    assert!(is_status(cx, "launch-started-report"));
+    assert_eq!(
+        name_of(cx, "launch-started-report").as_deref(),
+        Some("Started “made”")
+    );
+    assert!(cx.update(super::entry::open_new), "New opens meanwhile");
+    settle(cx);
+    assert!(any_open(cx));
+}

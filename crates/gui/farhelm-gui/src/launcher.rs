@@ -5,8 +5,9 @@
 //! Built in pieces. So far:
 //!
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
-//! - [`entry`]: the entry points other surfaces call to open New, and what they need to draw its triggers.
+//! - [`entry`]: the entry points other surfaces call to open New and Clone, and what they need to draw their triggers.
 //! - [`launch`]: a submitted New or Clone, from the press of Launch to what its reply opens or brings back.
+//! - `pill`: the progress pill and the "Started" report a hidden launcher leaves at the bottom of the window.
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //!   The Templates editor's model suggestions are its rows for one agent type.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
@@ -35,6 +36,7 @@ pub mod draft;
 pub mod entry;
 pub mod launch;
 pub(crate) mod model;
+mod pill;
 pub mod request;
 pub mod view;
 mod words;
