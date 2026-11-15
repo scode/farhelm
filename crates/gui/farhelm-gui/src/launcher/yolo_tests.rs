@@ -1,5 +1,6 @@
-//! Tests of the launcher's YOLO question: which reason it gives and when it offers guarded (no GPUI), and its flows in
-//! the real main view over the helm client's fake, from the helm's YOLO refusal to the launch each answer sends.
+//! Tests of the YOLO question: which reason it gives and when it offers guarded (no GPUI), its flows in the launcher
+//! over the helm client's fake, from the helm's YOLO refusal to the launch each answer sends, and the plain Replace
+//! question the sidebar asks through `entry::ask_yolo_for_replace`, on a page of its own.
 //!
 //! The helm's refusal is a 409 carrying `HelmMarker::YoloConfirmation`, as the helm sends it for a YOLO launch on a
 //! host that asks first. The fake answers commands only when told, so each test answers the create, then the host
@@ -329,5 +330,175 @@ fn a_click_during_stop_asking_keeps_the_new_session_from_opening(cx: &mut gpui::
         selected(cx).as_deref(),
         Some("b"),
         "the click during the write counted as moving on"
+    );
+}
+
+// ---- The plain Replace question -------------------------------------------------------------------------------------
+
+/// A page drawing the plain Replace question where the sidebar would: the question in a shared cell the test fills.
+struct ReplacePage {
+    root: crate::root::Attachment,
+    shown: std::rc::Rc<std::cell::RefCell<Option<crate::prompt::Inline<super::entry::YoloAsk>>>>,
+}
+
+impl gpui::Render for ReplacePage {
+    fn render(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::{ParentElement as _, Styled as _};
+        let content = gpui::div()
+            .size_full()
+            .children(self.shown.borrow().clone());
+        crate::root::wrap(content, &self.root, window, cx)
+    }
+}
+
+/// What a plain Replace question's test watches: the retries it asked for, and whether the user had moved on since the
+/// answer when the last one ran (what the caller would combine with its own Replace's flag).
+struct Retries {
+    count: std::rc::Rc<std::cell::Cell<u32>>,
+    moved_on: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+/// The page over the fake helm with host1 and the plain Replace question asked for a command launch asserted YOLO, the
+/// user's answer to Replace marked first; with `press_between`, a key is pressed after that answer and before the
+/// question arrives, as when the user went on to something else while the Replace was out.
+fn replace_question(
+    cx: &mut gpui::TestAppContext,
+    press_between: bool,
+) -> (FakeHelm, &mut VisualTestContext, Retries) {
+    let (mut helm, _connection) = test_support::started(cx);
+    helm.connect(vec![super::view_tests::fixture_hosts(&[0])]);
+    cx.run_until_parked();
+    let shown = std::rc::Rc::default();
+    let drawn = std::rc::Rc::clone(&shown);
+    let (_, cx) = test_support::open_view(cx, move |window, cx| ReplacePage {
+        root: crate::root::attach(window, cx),
+        shown: drawn,
+    });
+    let retries = Retries {
+        count: std::rc::Rc::default(),
+        moved_on: std::rc::Rc::default(),
+    };
+    let (counted, moved) = (retries.count.clone(), retries.moved_on.clone());
+    let launch = farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+        command: "true".into(),
+        yolo: true,
+        agent: None,
+        resume: None,
+    });
+    let mark = cx.update(|_, cx| crate::focus::Mark::take(cx));
+    if press_between {
+        keys(cx, "x");
+    }
+    cx.update(|window, cx| {
+        let question = super::entry::ask_yolo_for_replace(
+            1,
+            crate::host_text::HostText::from_host("host1"),
+            &launch,
+            &mark,
+            move |mark, _, cx| {
+                counted.set(counted.get() + 1);
+                moved.set(crate::focus::has_moved_on(&mark, cx));
+            },
+            window,
+            cx,
+        );
+        shown.replace(Some(question));
+    });
+    test_support::redraw(cx);
+    (helm, cx, retries)
+}
+
+/// SPEC.md, "Creation": for a plain Replace the GUI answers the helm's YOLO refusal with the same confirmation, "shown
+/// with the control or surface that started the launch" (the sidebar's row, header or card), and with no guarded
+/// answer, since plain Replace keeps the stored launch; Cancel takes focus when the user has not moved on. Specified:
+/// the question opens focused on Cancel, says the command was asserted YOLO, offers the permanent answer first among
+/// the extras and nothing after it, and the one-off answer asks the caller to retry once.
+#[gpui::test]
+fn the_plain_replace_question_offers_no_guarded_answer_and_retries(cx: &mut gpui::TestAppContext) {
+    let (_helm, cx, retries) = replace_question(cx, false);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(
+        name_of(cx, "yolo-reason").as_deref(),
+        Some("This command was asserted to bypass its safety checks.")
+    );
+    assert_eq!(
+        name_of(cx, "prompt-alternative-0").as_deref(),
+        Some("Start, and don't ask again on this host")
+    );
+    assert_eq!(
+        name_of(cx, "prompt-alternative-1"),
+        None,
+        "no guarded answer"
+    );
+    test_support::click(cx, "prompt-confirm");
+    assert_eq!(retries.count.get(), 1, "the one-off answer retried once");
+}
+
+/// SPEC.md: the permanent answer "first sets the host to start YOLO sessions without asking ... and then retries with
+/// the override"; for a plain Replace the retry is the sidebar's own. Specified: the permanent answer sends the host
+/// settings' write for host1, asks for no retry until it is answered, then exactly one.
+#[gpui::test]
+fn the_plain_replace_permanent_answer_writes_then_retries(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, retries) = replace_question(cx, false);
+    test_support::click(cx, "prompt-alternative-0");
+    cx.run_until_parked();
+    let write = helm
+        .commands()
+        .into_iter()
+        .find(|command| command.path == "/api/hosts/1/yolo-without-asking")
+        .expect("the host write was sent");
+    assert_eq!(
+        retries.count.get(),
+        0,
+        "no retry before the write is answered"
+    );
+    helm.reply(write.id, 200, Some(json!({})));
+    settle(cx);
+    assert_eq!(retries.count.get(), 1, "one retry after the write");
+}
+
+/// SPEC.md: "a plain Replace's question, which arrives after its reply, takes focus only if the user has not moved on
+/// since answering Replace". Taking focus then would pull the user out of whatever they went on to. Specified: with a
+/// key pressed after the answer to Replace, the question shows but focus does not go to its Cancel.
+#[gpui::test]
+fn the_plain_replace_question_leaves_focus_once_the_user_moved_on(cx: &mut gpui::TestAppContext) {
+    let (_helm, cx, _retries) = replace_question(cx, true);
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Start YOLO session anyway"),
+        "the premise: the question shows"
+    );
+    assert_ne!(
+        focused_id(cx).as_deref(),
+        Some("prompt-cancel"),
+        "it took no focus"
+    );
+}
+
+/// The permanent answer's retry runs from the host write's reply, after any press the user made meanwhile, so it hands
+/// the caller the answer's mark: a click during the write must count as moving on for what the Replace may open, as it
+/// does for the launcher's own launch. Specified: after the permanent answer, a click during the write; the retry,
+/// once the write succeeds, sees that the user has moved on since the answer.
+#[gpui::test]
+fn the_plain_replace_retry_carries_the_answers_mark(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, retries) = replace_question(cx, false);
+    test_support::click(cx, "prompt-alternative-0");
+    cx.run_until_parked();
+    let write = helm
+        .commands()
+        .into_iter()
+        .find(|command| command.path == "/api/hosts/1/yolo-without-asking")
+        .expect("the premise: the host write is out");
+    keys(cx, "x");
+    helm.reply(write.id, 200, Some(json!({})));
+    settle(cx);
+    assert_eq!(retries.count.get(), 1, "the premise: the retry ran");
+    assert!(
+        retries.moved_on.get(),
+        "the key pressed during the write counted as moving on"
     );
 }
