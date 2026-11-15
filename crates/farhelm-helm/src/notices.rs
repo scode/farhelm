@@ -747,6 +747,8 @@ pub(crate) mod tests {
     /// fixture makes bypass observable as an immediate routing error. Poll the
     /// handlers directly: auth's database read and mutation ownership's task
     /// handoff could otherwise explain a pending router future without a gate.
+    /// The Delete hands its work to a task of its own (its reply is bounded),
+    /// so the test lets that task run before checking it still waits.
     #[farhelm_testtrace::test]
     async fn trash_handlers_wait_for_their_host_gate_without_blocking_other_hosts() {
         let harness = FleetBuilder::new().await.start().await;
@@ -766,9 +768,15 @@ pub(crate) mod tests {
             list.as_mut().now_or_never().is_none(),
             "list waits before routing"
         );
+        // The Delete's first poll only starts its work on a task of its own, which a bypass of the gate would let
+        // finish (a routing error) as soon as it runs; give it every chance to, then check it is still waiting.
+        let _ = delete.as_mut().now_or_never();
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
         assert!(
             delete.as_mut().now_or_never().is_none(),
-            "Delete shares list ordering"
+            "Delete's own task waits for the gate too"
         );
         let unrelated = crate::sessions::list_checkout_trash(
             State(Arc::clone(&harness.state)),
@@ -786,13 +794,12 @@ pub(crate) mod tests {
                 .status(),
             StatusCode::CONFLICT
         );
+        // The Delete's work runs on a task of its own (its reply is bounded while the cleanup goes on), so it takes the
+        // released gate once that task runs rather than within one synchronous poll.
         assert_eq!(
-            delete
-                .now_or_never()
-                .expect("next caller proceeds after the first releases")
-                .into_response()
-                .status(),
-            StatusCode::CONFLICT
+            delete.await.into_response().status(),
+            StatusCode::CONFLICT,
+            "next caller proceeds after the first releases"
         );
     }
 

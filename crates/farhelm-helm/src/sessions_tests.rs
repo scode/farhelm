@@ -11777,6 +11777,232 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
     peer.await.unwrap();
 }
 
+/// A trash cleanup on a host that holds its answer (a supervisor waiting on
+/// directory admission behind a hung operation, say) must not hold every later
+/// GUI command behind it on the ordered UI channel, and it must not lose the
+/// cleanup either: the route is bounded like the other host commands rather
+/// than turned into an accepted form, because a supervisor of this protocol
+/// answers once the folders are moved aside. Specified: a delete whose peer
+/// holds its reply answers 504 once `HOST_REPLY_BOUND` passes, saying the
+/// cleanup may still be carried out; a listing sent while the cleanup still
+/// holds the host's trash gate answers 504 at the bound too, saying a cleanup
+/// is waiting for the host, and never reaches the host; when the peer then
+/// answers with the checkout accepted, the fleet feed is bumped and the host's
+/// Trash epoch advances (what makes every window's Trash read the host again);
+/// and a listing after that reaches the host, so the timed-out cleanup did not
+/// keep the gate. The paused clock makes the bound exact.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn a_trash_delete_on_a_slow_host_answers_at_the_bound_and_its_late_result_shows() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (release, held) = tokio::sync::oneshot::channel::<()>();
+    let peer = tokio::spawn(async move {
+        let (read, write) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteCheckoutTrash { req_id, ids } = request else {
+            panic!("expected deletion, got {request:?}");
+        };
+        // The host holds its answer until the test has seen the bounded reply.
+        held.await.expect("the test releases the held answer");
+        writer
+            .write_control(&ControlMsg::CheckoutTrashDeleted {
+                req_id,
+                deleted: farhelm_proto::CheckoutTrashDeleted {
+                    removed: ids,
+                    issues: vec![],
+                },
+            })
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        // Only the listing sent after the cleanup answered asks without sizes: the one sent while the gate was held
+        // must never have reached the host.
+        let ControlMsg::ListCheckoutTrash {
+            req_id,
+            measure_sizes: false,
+        } = request
+        else {
+            panic!("expected the later listing, without sizes, got {request:?}");
+        };
+        writer
+            .write_control(&ControlMsg::CheckoutTrashListed {
+                req_id,
+                listing: farhelm_proto::CheckoutTrashListing {
+                    checkouts: vec![farhelm_proto::ArchivedCheckout {
+                        id: "recorded".into(),
+                        name: "project-1-20260101T000000Z".into(),
+                        repository: "acme/project".into(),
+                        path: "/remote/checkouts/.farhelm-trash/project-1-20260101T000000Z".into(),
+                        archived_at: Some(1767225600),
+                        bytes: Some(4096),
+                        removing: true,
+                        stuck: None,
+                    }],
+                    issues: vec![],
+                    removing: true,
+                    reports_retired: true,
+                },
+            })
+            .await
+            .unwrap();
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let post = |endpoint: &str, body: serde_json::Value| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/checkout-trash/{endpoint}"))
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    };
+    let epoch = |harness: &rest_harness::Harness| {
+        let state = harness.state.clone();
+        async move {
+            crate::hosts::host_views(&state)
+                .await
+                .unwrap()
+                .iter()
+                .map(|view| view.trash_epoch)
+                .sum::<u64>()
+        }
+    };
+    assert_eq!(epoch(&harness).await, 0, "premise: no Trash change yet");
+
+    let response = harness
+        .router()
+        .oneshot(post(
+            "delete",
+            serde_json::json!({"host":local,"ids":["recorded"]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("the cleanup may still be carried out"),
+        "the bounded reply says the cleanup goes on: {text}"
+    );
+    assert_eq!(epoch(&harness).await, 0, "nothing was accepted yet");
+
+    // The cleanup's task still holds the host's trash gate, so a listing waits for it until the bound and says so. The
+    // outer timeout turns a listing that waits on the gate past the bound into a failure rather than a hung test.
+    let response = tokio::time::timeout(
+        crate::sessions::HOST_REPLY_BOUND + std::time::Duration::from_secs(1),
+        harness.router().oneshot(post(
+            "list",
+            serde_json::json!({"host":local,"measure_sizes":true}),
+        )),
+    )
+    .await
+    .expect("the listing queued behind the held cleanup answered at the bound")
+    .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("a Trash cleanup on this host is still waiting"),
+        "the listing's timeout names the waiting cleanup, not the host: {text}"
+    );
+
+    let mut feed = harness.manager.events().subscribe();
+    let before = *feed.borrow_and_update();
+    release.send(()).expect("the peer still holds its answer");
+    // `is_ok_and` drops the `watch::Ref` the wait returns at once: kept alive, it would hold the feed's read lock and
+    // block the next bump (the final listing's notice recording can make one) forever.
+    let bumped = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        feed.wait_for(|value| *value != before),
+    )
+    .await
+    .is_ok_and(|waited| waited.is_ok());
+    assert!(
+        bumped,
+        "the late success never bumped the fleet feed (the peer task finished: {})",
+        peer.is_finished()
+    );
+    assert_eq!(
+        epoch(&harness).await,
+        1,
+        "the late success advanced the Trash epoch"
+    );
+
+    let response = harness
+        .router()
+        .oneshot(post("list", serde_json::json!({"host":local})))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    let listing: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(listing["checkouts"][0]["id"], "recorded", "{listing}");
+    assert_eq!(listing["checkouts"][0]["removing"], true, "{listing}");
+    peer.await.unwrap();
+}
+
+/// A trash listing is a read of the host, so one that never answers must not
+/// hold the ordered UI channel either. Specified: against a peer that reads
+/// the request and never answers, `POST /api/checkout-trash/list` replies 504
+/// once `HOST_REPLY_BOUND` passes.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn a_trash_listing_on_a_host_that_never_answers_replies_at_the_bound() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+    use tower::ServiceExt;
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (asked_tx, asked) = tokio::sync::oneshot::channel();
+    let _peer = tokio::spawn(async move {
+        let (read, write) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = reader.read_frame().await.unwrap().unwrap();
+        let _ = asked_tx.send(request);
+        // Never answer, and keep the connection open: a hung host, not a gone one.
+        std::future::pending::<()>().await;
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/checkout-trash/list")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({"host":local,"measure_sizes":true}).to_string(),
+        ))
+        .unwrap();
+    let response = harness.router().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    let request = tokio::time::timeout(std::time::Duration::from_secs(5), asked)
+        .await
+        .expect("premise: the listing reached the host")
+        .expect("the peer handed over the request it read");
+    assert!(
+        matches!(
+            farhelm_proto::io::parse_control(&request).unwrap(),
+            farhelm_proto::ControlMsg::ListCheckoutTrash { .. }
+        ),
+        "premise: the host was asked for its listing, so the 504 is its silence"
+    );
+}
+
 /// Bare and malformed targets fail at REST ingress even when a bare target
 /// would be unambiguous. A live silent peer distinguishes admission refusal
 /// from a supervisor's own rejection or an unavailable fixture.
