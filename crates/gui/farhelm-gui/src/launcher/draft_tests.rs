@@ -658,3 +658,43 @@ fn restart_with_shows_the_stored_permission_and_resets_to_it() {
     let captured = LaunchDraft::restart_with("s1", &source, Some(1)).unwrap();
     assert!(matches!(&captured.mode, Mode::RestartWith(restart) if !restart.conversation_required));
 }
+
+/// A recent setup's catalog model is the catalog's, and any other model is a custom one its agent owns, as if typed;
+/// with no catalog yet, every model counts as custom. The setup's choices land on the Agent tab as deliberate ones.
+/// Why: a later agent switch clears a custom model by its owner (the shared reconciliation), so a catalog model marked
+/// custom would be cleared wrongly, and a custom one left unowned would cross to the next agent (old
+/// `custom_model_owner`).
+#[test]
+fn a_recent_setups_model_is_owned_only_when_custom() {
+    let mut catalog_model = selection(LaunchHarness::Codex);
+    catalog_model.model = Some("gpt-6-luna".into());
+    catalog_model.permissions = Some(LaunchPermission::Yolo);
+    let mut draft = new_draft();
+    draft.choose_tab(Tab::Command);
+    draft.restore_recent(&catalog_model, Some(&catalog()));
+    assert_eq!(draft.tab, Tab::Agent);
+    assert_eq!(draft.agent.model.as_deref(), Some("gpt-6-luna"));
+    assert_eq!(
+        draft.agent.model_owner, None,
+        "a catalog model is the catalog's"
+    );
+    assert!(draft.agent.permissions_explicit);
+
+    let mut custom = selection(LaunchHarness::Codex);
+    custom.model = Some("my-finetune".into());
+    let mut draft = new_draft();
+    draft.restore_recent(&custom, Some(&catalog()));
+    assert_eq!(
+        draft.agent.model_owner,
+        Some(LaunchHarness::Codex),
+        "a custom model is its agent's"
+    );
+
+    let mut draft = new_draft();
+    draft.restore_recent(&catalog_model, None);
+    assert_eq!(
+        draft.agent.model_owner,
+        Some(LaunchHarness::Codex),
+        "with no catalog yet, every model counts as custom"
+    );
+}
