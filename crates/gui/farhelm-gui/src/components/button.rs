@@ -25,6 +25,10 @@
 //! reason its hover help explains (the session header's Restart for a session that cannot resume, whose reason must
 //! stay reachable by pointer and keyboard alike).
 //!
+//! A button with words in the session list's heading band (its order title) takes that band's padding
+//! ([`Button::heading`]), as the old sheet's `.session-heading .sort-title` rule gave it; the band's icon buttons are
+//! fixed squares ([`Button::square`]).
+//!
 //! The focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only
 //! after keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost
 //! button's box is visible to a keyboard user. The Settings section list's entries (`Tier::Nav`) are the exception:
@@ -151,6 +155,10 @@ const ICON_CHOICE_SIZE: f32 = 36.;
 const COLOR_CHOICE_SIZE: f32 = 26.;
 const COLOR_CHOICE_PAD: f32 = 3.;
 
+/// A heading button with words' padding, vertical then horizontal (`.session-heading .sort-title`: `padding: 2px 0`),
+/// so the order title's words start at the band's own edge.
+const HEADING_WORDS_PAD: (f32, f32) = (2., 0.);
+
 /// A compact button's padding, vertical then horizontal: `.titlebar-actions .btn`'s `padding: 2px 8px`, the session
 /// header's actions.
 const COMPACT_PAD: (f32, f32) = (2., 8.);
@@ -179,6 +187,8 @@ pub struct Button {
     refused: bool,
     /// The session header's tighter geometry ([`Button::compact`]).
     compact: bool,
+    /// The list heading band's padding for a button with words ([`Button::heading`]).
+    heading: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
     /// Whether the button's choice is the one in force; `None` for a button that is not a choice.
@@ -224,6 +234,7 @@ impl Button {
             busy: false,
             refused: false,
             compact: false,
+            heading: false,
             expanded: None,
             pressed: None,
             quiet: false,
@@ -297,6 +308,15 @@ impl Button {
     /// label, and a 13-pixel icon, so the header's actions keep their compact height and fit a 650-pixel pane.
     pub fn compact(mut self) -> Self {
         self.compact = true;
+        self
+    }
+
+    /// The session list heading band's padding for a button that shows words or other content (the order title,
+    /// `.session-heading .sort-title`): 2 pixels above and below and none at its sides, so its words line up with the
+    /// band's edge. Only the padding changes: the tier still gives the colors. The band's icon buttons (the old
+    /// Templates, Trash and New) are 24-pixel squares instead ([`Button::square`]).
+    pub fn heading(mut self) -> Self {
+        self.heading = true;
         self
     }
 
@@ -549,6 +569,7 @@ impl RenderOnce for Button {
         let ring = focus::shows_ring(&focus, window);
         // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.
         let (pad_y, pad_x) = match self.tier {
+            _ if self.heading => (px(HEADING_WORDS_PAD.0), px(HEADING_WORDS_PAD.1)),
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
@@ -611,7 +632,7 @@ impl RenderOnce for Button {
             _ if self.show_label || self.content.is_some() => (pad_x, None),
             _ => (pad_y, None),
         };
-        // A rail entry and an appearance choice are squares that never give up their width.
+        // A rail entry, an appearance choice and a button given a side are squares that never give up their width.
         let square = self.side.is_some()
             || matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
         let enabled = !self.disabled;

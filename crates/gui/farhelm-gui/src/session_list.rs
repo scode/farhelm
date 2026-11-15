@@ -3,8 +3,10 @@
 //! SPEC.md, "Session list". The list is drawn from the store while it draws and keeps nothing the helm pushed: its rows
 //! are the sessions collection in the order the collection's metadata gives (the helm sorts; the channel starts in the
 //! user's stored order), so a pushed change or a reset redraws it with nothing to go stale. Above the rows, a heading
-//! band names the order and carries the count; a listing the helm's cap cut says so in an amber band, and a failed read
-//! says so in red, while the rows it had stay (a failed read is no evidence that anything was deleted).
+//! band carries the order's title, which opens the menu that changes the order ([`order`]), the count ("Sessions: N"
+//! to assistive technology and on hover, as the old count said) and, at its right, the Templates button; a listing the
+//! helm's cap cut says so in an amber band in place of the count, and a failed read says so in red, while the rows it
+//! had stay (a failed read is no evidence that anything was deleted).
 //!
 //! The list also owns the selection rules ([`selection`]), and applies them from observers, never from drawing: it
 //! settles the selection and the open session's seen mark ([`SessionList::settle`]) whenever the connection changes (a
@@ -99,15 +101,19 @@
 //! which the list draws after its column, holds Hosts, which swaps that column for the Hosts panel ([`crate::hosts`]),
 //! and the Settings gear.
 //!
-//! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
-//! control), compact rows, marking, pins, the row menu's other commands, and the rail's host status, the foot's
-//! controls other than Hosts and Settings, Add host and expansion.
+//! The Templates button opens the Templates dialog ([`crate::templates::open`]), which returns focus to what held it
+//! when it opened, as SPEC.md's "Opening and closing" asks.
+//!
+//! NOTE: Not ported yet, each with the area that brings it: the heading's New (the launcher's entry point) and Trash
+//! with its count (milestone M3), compact rows and the order menu's Compact, marking, pins, the row menu's other
+//! commands, and the rail's host status, the foot's controls other than Hosts and Settings, Add host and expansion.
 
 pub(crate) mod age;
 pub(crate) mod delete;
 pub(crate) mod filters;
 pub(crate) mod host_rail;
 pub(crate) mod menu;
+pub(crate) mod order;
 pub(crate) mod outcome;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
@@ -145,24 +151,26 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use farhelm_helm_client::Collections;
-use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionMeta, Preferences, SessionRow,
-};
+use farhelm_proto::ui_channel::{Availability, Collection, CollectionMeta, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Role, SharedString,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
+    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Role,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, div, px,
 };
 
+use crate::assets::Icon;
+use crate::components::{HoverHelp, IconButton, StatusMark, Tier};
+use crate::focus::Mark;
 use crate::help_menu::HelpButton;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::HostsPanel;
+use crate::layers::Anchor;
 use crate::local_state::{self, LocalState};
 use crate::operations;
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
-use crate::ticker;
+use crate::{templates, ticker};
 use selection::{Change, Listed, Open, Stamped};
 
 /// How far past each edge of its view the list draws rows: about two noncompact rows, so a row scrolling in is already
@@ -229,6 +237,12 @@ pub struct SessionList {
     /// The `?` Help button on the rail's foot, below the gear: a view of the help menu's own, which keeps its focus
     /// handle and its open menu, created here once for the window's life ([`crate::help_menu`]).
     help: Entity<HelpButton>,
+    /// The order title's focus handle, a tab stop: kept here for the window's life so that the order menu names the
+    /// title as where closing returns focus, whichever frame drew it ([`order`]).
+    order_focus: FocusHandle,
+    /// Where the order title was last drawn, for its menu to open below; recorded by every frame that draws the title.
+    /// It refers to the title's element weakly, so a title no longer drawn (the Hosts panel shown) opens nothing.
+    order_anchor: Option<Anchor>,
     /// What the host rail keeps across frames (Add host's focus handle, its scroll position): kept here, since the rail
     /// is rebuilt on every draw ([`host_rail::Kept`]).
     rail: host_rail::Kept,
@@ -257,6 +271,8 @@ struct Current {
     /// Whether the Hosts panel shows in place of the list's column. Per UI session like the choice, so a reset brings
     /// the window back to Sessions with the rest of the UI.
     hosts_shown: bool,
+    /// The order's write and its menu ([`order::OrderState`]), made the first time the title is drawn under the session.
+    order: Option<Entity<order::OrderState>>,
 }
 
 impl SessionList {
@@ -293,6 +309,8 @@ impl SessionList {
             settings_focus: cx.focus_handle().tab_stop(true),
             hosts_focus: cx.focus_handle().tab_stop(true),
             help: cx.new(HelpButton::new),
+            order_focus: cx.focus_handle().tab_stop(true),
+            order_anchor: None,
             rail: host_rail::Kept::new(cx),
             hosts_panel: cx.new(HostsPanel::new),
         };
@@ -576,6 +594,10 @@ impl Render for SessionList {
         let choice = self.current.current(cx).filters.clone();
         let hosts_shown = self.current.current(cx).hosts_shown;
         let weak = cx.weak_entity();
+        // The title before the store is borrowed for the rest of the frame: drawing it records its anchor, which needs
+        // the window's element state. No title is drawn while the Hosts panel shows.
+        let stored = order::Order::stored_in(store.read(cx).collections());
+        let title = (!hosts_shown).then(|| self.order_title(stored, window, cx));
         let collections = store.read(cx).collections();
         let palette = theme::palette(cx);
         let body_row = body_row.child(host_rail::rail(
@@ -596,9 +618,9 @@ impl Render for SessionList {
             &self.help,
             palette,
         );
-        if hosts_shown {
-            // The panel in the column's box, which gives it the definite height it scrolls its rows in. The list's
-            // column is not drawn meanwhile, so neither are its rows and controls.
+        let Some(title) = title else {
+            // The Hosts panel, in the column's box, which gives it the definite height it scrolls its rows in. The
+            // list's column is not drawn meanwhile, so neither are its rows and controls.
             return body_row
                 .child(
                     div()
@@ -608,7 +630,7 @@ impl Render for SessionList {
                         .child(self.hosts_panel.clone()),
                 )
                 .child(foot);
-        }
+        };
         // The heading and the segments row are drawn before the first listing too (the module docs).
         let filter_row = filters::row(collections, choice.chosen(), &weak, palette);
         let refused = choice
@@ -617,7 +639,7 @@ impl Render for SessionList {
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
                 .child(
-                    list.child(heading(collections, None, palette))
+                    list.child(heading(title, None, cx))
                         .child(filter_row)
                         .children(refused)
                         .child(status_line("Loading sessions…")),
@@ -628,16 +650,16 @@ impl Render for SessionList {
 
         let count = count_line(meta, self.entries.len());
         let heading = heading(
-            collections,
+            title,
             match &count {
                 CountLine::Count(count) => Some(count.clone()),
                 CountLine::Cut(_) => None,
             },
-            palette,
+            cx,
         );
         let truncated = match count {
             CountLine::Count(_) => None,
-            CountLine::Cut(warning) => Some(band(warning, palette.warn_bg, palette.warn_bright)),
+            CountLine::Cut(warning) => Some(cut_band(warning, palette)),
         };
         let unavailable = match &meta.availability {
             Availability::Available => None,
@@ -737,13 +759,25 @@ fn draw_row(
     )
 }
 
-/// The list's heading band: the title, which names the order the helm stored, and `count` beside it when the list has
-/// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own).
-fn heading(
-    collections: &Collections,
-    count: Option<String>,
-    palette: &theme::Palette,
-) -> impl IntoElement {
+/// The list's heading band (`.session-heading`): the order's title ([`order`]), the count beside it when the list has
+/// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
+/// the heading's actions at its right edge (`.session-heading-actions`), of which only Templates is ported (the module
+/// docs' NOTE).
+fn heading(title: AnyElement, count: Option<String>, cx: &App) -> impl IntoElement {
+    let palette = theme::palette(cx);
+    let templates = IconButton::new(
+        "templates-button",
+        Icon::Templates,
+        "Templates",
+        templates::button_help(cx),
+        Role::Button,
+    )
+    .tier(Tier::Neutral)
+    .square(px(HEADING_ICON_SIDE))
+    .on_click(|_, window, cx| {
+        let mark = Mark::take(cx);
+        let _ = templates::open(&mark, window, cx);
+    });
     div()
         .flex()
         .flex_row()
@@ -752,20 +786,43 @@ fn heading(
         .py(metrics::LIST_HEADING_PAD.0)
         .px(metrics::LIST_HEADING_PAD.1)
         .bg(theme::color(palette.bg_2))
-        .child(
-            div()
-                .text_size(metrics::TEXT_MD)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::color(palette.fg_0))
-                .child(order_title(selection::preferences(collections))),
-        )
+        .child(title)
         .children(count.map(|count| {
-            div()
-                .text_size(metrics::TEXT_SM)
-                .text_color(theme::color(palette.fg_1))
-                .child(count)
+            let name = format!("Sessions: {count}");
+            // The old count's `aria-label` and `data-tooltip`; the name and the help are the same words, so the help is
+            // not read a second time as its description.
+            StatusMark::new(
+                COUNT_ID,
+                name.clone(),
+                HoverHelp::tooltip(name),
+                Role::Label,
+                count,
+            )
+            .described(false)
+            .into_any_element()
         }))
+        .child(
+            // `margin-left: auto; flex-shrink: 0`: the actions keep their place at the right edge as one group.
+            div()
+                .ml_auto()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(HEADING_ACTIONS_GAP))
+                .child(templates),
+        )
 }
+
+/// The count's element id, for the count beside the title and the cut listing's warning alike (only one is drawn).
+pub(crate) const COUNT_ID: &str = "session-count";
+
+/// The heading's icon buttons' side (`.session-heading .templates-button`: `height: 24px`, the box including its edge),
+/// with the 14-pixel icon centered where the old `padding: 3px` put it.
+const HEADING_ICON_SIDE: f32 = 24.;
+
+/// `.session-heading-actions`'s gap between its buttons.
+const HEADING_ACTIONS_GAP: f32 = 4.;
 
 /// What the list says about its count: the count beside the title, or, for a listing the helm's cap cut, a warning on
 /// a line of its own instead, because the numbers alone would read as the whole list. Ported from the old app's
@@ -811,16 +868,6 @@ pub(crate) fn empty_fleet(collections: &Collections) -> bool {
         && selection::listed(collections).is_empty()
 }
 
-/// The list's title: the name of the order the helm stored, which is the order the channel started in. An order this
-/// build does not know, or none, is most recent activity, as for the channel.
-fn order_title(preferences: Option<&Preferences>) -> &'static str {
-    match preferences.and_then(|preferences| preferences.list_sort.as_deref()) {
-        Some("created") => "Newest created",
-        Some("title") => "Title A–Z",
-        _ => "Recently active",
-    }
-}
-
 /// One of the list's own one-line states ("Loading sessions…", "No sessions"): the old `.status` line.
 fn status_line(text: &'static str) -> impl IntoElement {
     div()
@@ -840,13 +887,23 @@ fn failure_line(sentence: HostSentence, palette: &theme::Palette) -> impl IntoEl
         .child(sentence)
 }
 
-/// A full-width band of 12-pixel text, as the old `.banner` lines in the sidebar.
-fn band(text: impl Into<SharedString>, fill: theme::Token, ink: theme::Token) -> impl IntoElement {
+/// A cut listing's warning in place of the count: a full-width band of 12-pixel amber text on the warning fill, as the
+/// old `.banner.truncation-banner` line, named and helped as "Sessions: <warning>" as the old count was.
+fn cut_band(warning: String, palette: &theme::Palette) -> impl IntoElement {
+    let name = format!("Sessions: {warning}");
     div()
         .py(px(4.))
         .px(px(10.))
-        .bg(theme::color(fill))
-        .text_color(theme::color(ink))
-        .text_size(metrics::TEXT_SM)
-        .child(text.into())
+        .bg(theme::color(palette.warn_bg))
+        .child(
+            StatusMark::new(
+                COUNT_ID,
+                name.clone(),
+                HoverHelp::tooltip(name),
+                Role::Label,
+                warning,
+            )
+            .ink(palette.warn_bright)
+            .described(false),
+        )
 }

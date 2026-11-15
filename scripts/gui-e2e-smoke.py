@@ -11,7 +11,7 @@ Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from th
 host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
 rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
 and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's
-Help menu and SSH help). The behavior itself is specified and tested in process
+Help menu and SSH help; 46, the session list's order menu). The behavior itself is specified and tested in process
 (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
 `hosts/`, `help_menu/tests.rs`); nothing here checks layout or wording beyond the names it clicks. A menu's
 commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's header has
@@ -850,17 +850,21 @@ class Smoke(unittest.TestCase):
         def shows(status: str | None, listed: list[str], hidden: list[str]):
             """A check that the window lists `listed`, not `hidden`, and counts what the helm lists in `status`
             against the whole fleet ("N of M"), or, for `None` (All), the plain total and no "N of M" count. The count
-            is matched whole, quotes included, as the snapshot names a text element, so "1 of 9" never matches "11 of
+            is read from its accessible name ("Sessions: N of M"), since the snapshot nests the count's painted text
+            under the named mark that draws it, and matched whole, quotes included, so "1 of 9" never matches "11 of
             9"."""
 
             def check() -> bool:
                 states = gui_agent.listed_states(RUN)
                 snapshot = self.ok("snapshot")
                 if status is None:
-                    counted = re.search(r'"\d+ of \d+"', snapshot) is None and f'"{len(states)}"' in snapshot
+                    counted = (
+                        re.search(r'"Sessions: \d+ of \d+"', snapshot) is None
+                        and f'"Sessions: {len(states)}"' in snapshot
+                    )
                 else:
                     matching = sum(1 for state in states.values() if state == status)
-                    counted = f'"{matching} of {len(states)}"' in snapshot
+                    counted = f'"Sessions: {matching} of {len(states)}"' in snapshot
                 return (
                     counted
                     and all(title in snapshot for title in listed)
@@ -987,6 +991,101 @@ class Smoke(unittest.TestCase):
         self.ok("press", "escape")
         self.ok("wait", "--gone", SSH_HELP_SUMMARY)
         self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
+
+    # ---- The session list's order menu (46), on sessions of its own --------------------------------------------------
+
+    def test_46_the_order_menu_reorders_the_list_by_creation_and_by_title(self) -> None:
+        """Choosing an order is a write of the shared preference (`PUT /api/preferences`, `list_sort`), and the helm
+        re-sorts the list it pushes; the window never sorts. So only the real helm shows that a choice took effect: it
+        stores the word and serves the list in that order. Specified, on three basic sessions this step seeds with
+        titles of its own (created in the order b, c, a, and titled so that alphabetical order is a, b, c), after a line
+        typed, once all three are idle, into the one the helm lists last by creation makes it the most recently active,
+        so that the helm's activity order of the three differs from its creation order (checked as the premise, with the
+        window drawing the activity order): choosing Newest created from the title's menu makes the helm store
+        `created`, the title name the order with focus on it, and the window show the three in the order the helm itself
+        lists them by creation; choosing Title A–Z does the same for `title`, in the helm's title order, which differs
+        from the creation order by the titles. The window's order is read from where each title first appears in the
+        bridge's snapshot, which follows drawing order, top to bottom; their titles start with "A order" so that the
+        title order draws them near the top of a list of many sessions. The step chooses Recently active again before it
+        ends, which stores `activity`, the order every step before it saw."""
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Sort: Recently active"', "premise: Recently active")
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        tag = uuid.uuid4().hex[:8]
+        titles = [f"A order {tag} {letter}" for letter in ("b", "c", "a")]
+        ids = []
+        for index, title in enumerate(titles):
+            body = gui_agent.seed_body(index, gui_agent.SESSION_CWD, fixtures)
+            body["title"] = title
+            ids.append(gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"])
+        for title in titles:
+            self.ok("wait", "--text", title)
+
+        def stored() -> str | None:
+            return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("list_sort")
+
+        def helm_order(word: str) -> list[str]:
+            """This step's three titles in the order the helm lists them under `word` (`?sort=<word>`, its own sort)."""
+            listed = gui_agent.helm_request(RUN, "GET", f"/api/sessions?sort={word}")["sessions"]
+            return [row["title"] for row in listed if row["title"] in titles]
+
+        def shows(word: str):
+            """A check that the window draws this step's three sessions in the helm's `word` order, all three drawn."""
+
+            def check() -> bool:
+                expected = helm_order(word)
+                snapshot = self.ok("snapshot")
+                if len(expected) != len(titles) or not all(title in snapshot for title in titles):
+                    return False
+                return sorted(titles, key=snapshot.index) == expected
+
+            return check
+
+        # The premise that makes the Newest created half able to fail: three sessions seeded back to back can list in
+        # the same order by activity and by creation, and then a window that never re-sorted would pass. Work in the
+        # session the helm lists last by creation moves it to the front by activity while it stays last by creation.
+        # That session is taken from the helm's own creation order, not from the order the step seeded them in: seeds
+        # made within one second share a creation stamp, and the helm breaks that tie by id, so the first seeded need
+        # not list last. Only a move from idle into running starts a work burst (SPEC.md, "Session list"), so the line
+        # is typed once the supervisor reads all three idle.
+        gui_agent.wait_for_statuses(lambda: gui_agent.listed_states(RUN), {id: "idle" for id in ids})
+        oldest = helm_order("created")[-1]
+        oldest_id = ids[titles.index(oldest)]
+        self.ok("click", f"text:{oldest}")
+        eventually(lambda: last_selected() == oldest_id, "premise: the helm remembering the session as selected")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        line = f"order-{tag}"
+        self.ok("type", "--keys", line)
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", f"echo:{line}")
+        orders = {}
+
+        def orders_differ() -> bool:
+            orders["activity"], orders["created"] = helm_order("activity"), helm_order("created")
+            return orders["activity"] != orders["created"]
+
+        try:
+            eventually(orders_differ, "the helm's activity order of the sessions differing from their creation order")
+        except AssertionError as failure:
+            raise AssertionError(
+                f"{failure}: by activity {orders.get('activity')}, by creation {orders.get('created')}"
+            ) from failure
+        eventually(shows("activity"), "the window drawing the sessions in the helm's activity order")
+
+        for word, label, item in (
+            ("created", "Newest created", "id:session-order-created"),
+            ("title", "Title A–Z", "id:session-order-title"),
+        ):
+            self.ok("click", "id:session-order")
+            self.ok("wait", "--text", "Order and density, shared by every client")
+            self.ok("click", item)
+            self.ok("wait", "--gone", "Order and density, shared by every client")
+            eventually(lambda: stored() == word, f"the helm storing {word}")
+            self.assertRegex(self.ok("snapshot", "-i"), rf'button "Sort: {label}" \[focused\]', "the title names it")
+            eventually(shows(word), f"the window drawing the sessions in the helm's {word} order")
+
+        self.ok("click", "id:session-order")
+        self.ok("click", "id:session-order-activity")
+        eventually(lambda: stored() == "activity", "the helm storing activity again")
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
 # OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived

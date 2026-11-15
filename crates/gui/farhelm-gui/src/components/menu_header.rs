@@ -14,7 +14,8 @@
 //! accessible name of a menu and of the button that opens it, in both menus.
 //!
 //! The Help menu's header is the app's own words ("Help" over "Farhelm guides and feedback", the old `BarMenuFlyout`'s),
-//! so [`MenuHeader::app`] draws a title that is not host text; everything else about the look is shared.
+//! and so is the session list's order menu's ("Session list" over "Order and density, shared by every client"), so
+//! [`MenuHeader::app`] draws a title that is not host text; everything else about the look is shared.
 //!
 //! NOTE: The old header carried hover help naming the full title and summary, for a header cut short by its line
 //! clamps. Neither row menu ported so far draws that help, and this component does not either.
@@ -59,7 +60,8 @@ impl MenuHeader {
     }
 
     /// A header whose `title` and `summary` are both the app's own words, for a menu about the app rather than a host
-    /// value (the Help menu). Drawn exactly as [`MenuHeader::new`] draws, with nothing to escape.
+    /// value (the Help menu, the session list's order menu). Drawn exactly as [`MenuHeader::new`] draws, with nothing
+    /// to escape.
     pub fn app(title: impl Into<SharedString>, summary: impl Into<SharedString>) -> Self {
         MenuHeader {
             title: Title::App(title.into()),
