@@ -8,15 +8,18 @@
 //! - **"The user moved on."** A counter that any key press or click inside Farhelm advances, except a modifier alone, a
 //!   repeat of the same gesture (auto-repeat, a double click, Enter pressed again on the control that already has focus),
 //!   scrolling, pointer movement and switching apps, none of which reach it. Key presses are counted where GPUI shows
-//!   every keystroke before any binding runs (a keystroke interceptor): a key that a binding handles, Farhelm's own Tab
-//!   and Escape or GPUI Kit's editing keys in a text input, never reaches an ordinary key listener, and SPEC.md counts
-//!   every key press. Work that finishes later takes a [`Mark`]
-//!   when the user starts it and asks [`has_moved_on`] before it moves focus or opens anything. The layer manager refuses
-//!   to open a layer for a mark the user has moved on from, which is how "things the user did not start never open over
-//!   what they are doing" is kept. The three public moves a feature makes after the user acted, [`choose_terminal`],
-//!   [`focus_control`] and [`focus_in_layer`], take the mark of that action for the same reason. A fourth,
-//!   [`move_within_control`], needs none and is the component layer's alone: it carries focus inside the control whose
-//!   arrow key is being handled (a radio group, a tab strip).
+//!   every keystroke before any binding runs (the actions module's keystroke interceptor, which hands each key-down to
+//!   [`note_press`] before anything else): a key that a binding handles, Farhelm's own Tab and Escape or GPUI Kit's
+//!   editing keys in a text input, never reaches an ordinary key listener, and SPEC.md counts every key press. The same
+//!   interceptor stops a repeat of a key press that closed a layer before any binding sees it, and it is not counted,
+//!   although focus has moved since ([`Closing`] says which presses repeat it): a repeated Enter on the launcher's
+//!   Launch neither keeps the launch from opening its session nor reaches the terminal that focus returned to. Work
+//!   that finishes later takes a [`Mark`] when the user starts it and asks [`has_moved_on`] before it moves focus or
+//!   opens anything. The layer manager refuses to open a layer for a mark the user has moved on from, which is how
+//!   "things the user did not start never open over what they are doing" is kept. The three public moves a feature
+//!   makes after the user acted, [`choose_terminal`], [`focus_control`] and [`focus_in_layer`], take the mark of that
+//!   action for the same reason. A fourth, [`move_within_control`], needs none and is the component layer's alone: it
+//!   carries focus inside the control whose arrow key is being handled (a radio group, a tab strip).
 //! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where
 //!   focus rests" defines: the selected session's terminal, New when there are no sessions, a stopped session's card
 //!   when the selected session has stopped. The views that own those set it: [`set_home`] in general, and
@@ -79,11 +82,10 @@
 //!   A control focused before it is first drawn (a layer's start, or a control [`focus_control`] focuses in the same
 //!   update that shows it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A
 //!   move to another control of the open dialog goes through [`focus_in_layer`], which moves and scrolls only once a
-//!   frame has drawn the control: Settings' trust hints, which open agent trust and, once the agent's read answers,
-//!   move focus to its switch and scroll its switch into view, the launcher's Custom choice, which moves focus into
-//!   the flags field it shows (SPEC.md), and an inline question's starting answer. Nothing yet scrolls to a layer's
-//!   start below the fold; SPEC.md's archive global confirmation, whose actions are brought into view when it opens,
-//!   will need it.
+//!   frame has drawn the control, whether a result arrives later or the user's action there shows the control: the
+//!   launcher's Custom choice, for one, moves focus into the flags field it shows (SPEC.md), and an inline question's
+//!   starting answer is reached the same way. Nothing yet scrolls to a layer's start below the fold; SPEC.md's archive
+//!   global confirmation, whose actions are brought into view when it opens, will need it.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -91,11 +93,12 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, Div, Element, ElementId, Entity,
     FocusHandle, Global, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
-    Keystroke, KeystrokeEvent, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels,
+    KeyDownEvent, Keystroke, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels,
     ScrollHandle, StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle,
     Window, WindowId, canvas, px,
 };
@@ -179,9 +182,88 @@ struct MovedOn {
     /// The last key press that counted, and what had focus when it did: the same key again on the same control is a
     /// repeat of the gesture (Enter pressed twice on a submit), not a new one.
     last_key: Option<(Keystroke, Option<WeakFocusHandle>)>,
+    /// The last fresh key press (not a held repeat) and when it arrived, until a click: what closed a layer that
+    /// closes now, for [`Closing`]. Kept past the key's own handling, because a close can run later in the same
+    /// update, from an event the key made a control emit (a text field's Enter reporting Submitted).
+    last_press: Option<(Keystroke, Instant)>,
+    /// The key press that last closed a layer, whose repeats are swallowed ([`Closing`]).
+    closing: Option<Closing>,
 }
 
 impl Global for MovedOn {}
+
+/// How long after a key press that closed a layer the same key pressed again is still a repeat of that press, the end
+/// included. The old app's submit-repeat interval (`SUBMIT_REPEAT_MS` in `crates/farhelm-ui/assets/launch-activity.js`
+/// at `24bc0580`), which ended a repeat only once more than that had passed (`now - previous.at > SUBMIT_REPEAT_MS`).
+const CLOSING_REPEAT: Duration = Duration::from_millis(500);
+
+/// A key press that closed a layer that held focus, which returned focus elsewhere (often the terminal). Its repeats
+/// are repeats of the gesture (SPEC.md, "Who may move focus": a repeated Enter on the same submit), and they are
+/// swallowed: not counted as the user moving on, and not delivered to whatever focus went back to. Without this, a
+/// repeated Enter on the launcher's Launch counted as moving on, so the launch would not open its session, and it
+/// reached the terminal's program as a second Enter. The old app hid the launcher and left focus on the page's body,
+/// so the second press went nowhere.
+///
+/// The repeats are the same keystroke while still held from that press (auto-repeat), and the same keystroke pressed
+/// again within [`CLOSING_REPEAT`] of it, as the old app's interval measured from the first press (a swallowed press
+/// does not extend it). Three kinds of close keep only the held repeats:
+///
+/// - A close that leaves a layer holding focus open, such as Enter choosing in a select's list inside the launcher, or
+///   answering a question over a dialog: focus goes back to a control the user is still working in, and the next Enter
+///   there (Launch, from the closed select) is a new press. The old app's window covered only the case where focus fell
+///   to the page.
+/// - A dismissal (Escape, through the layer manager): Escape pressed twice in quick succession is the ordinary way to
+///   back out of two layers, while a held Escape closes one layer and then reaches nothing, not every layer below and
+///   the terminal's program after them. (A dismissal of the last layer also keeps only its held repeats, so a second
+///   Escape pressed at once reaches the terminal.)
+/// - A close after which a layer opens ([`enter_layer`]), such as a menu item opening its question: the new layer starts
+///   where the next press is meant to go.
+///
+/// Any other fresh key press or a click ends it.
+struct Closing {
+    keystroke: Keystroke,
+    /// When the press that closed the layer arrived, on the executor's clock (a test's fake clock).
+    at: Instant,
+    /// Whether a fresh press within [`CLOSING_REPEAT`] is a repeat too: only when no layer holding focus was left open
+    /// and the user did not dismiss the layer, and no longer once a layer opens.
+    fresh_presses: bool,
+}
+
+impl Closing {
+    /// Whether `down`, arriving at `now`, repeats the press that closed the layer. The same key with the same modifiers;
+    /// the text it would type is left out, since it says nothing about which key went down.
+    fn repeated_by(&self, down: &KeyDownEvent, now: Instant) -> bool {
+        self.keystroke.key == down.keystroke.key
+            && self.keystroke.modifiers == down.keystroke.modifiers
+            && (down.is_held
+                || self.fresh_presses && now.saturating_duration_since(self.at) <= CLOSING_REPEAT)
+    }
+}
+
+/// Remember the key press that closed a layer just now, if a key press did: the last fresh press since the last
+/// click. The layer manager's close calls this through [`return_to`], once per layer that held focus and returned it,
+/// after the closed layers have left the stack, so [`layers::focus_layer_open`] says whether a layer holding focus is
+/// still open. `dismissed` is whether the user dismissed it (Escape). A dismissal, or a layer holding focus left open,
+/// keeps only the held repeats ([`Closing`]).
+///
+/// The press is the last one, not one known to be in flight: GPUI has no hook at the end of a key's handling, and a
+/// close the key causes may run later in the same update (an event a control emits). A layer that closes on its own
+/// after a key press (a reply, its subject going) is therefore taken as closed by that press. That is harmless: the
+/// window is measured from the press, so an old press swallows only a key still held from it, which was meant for the
+/// layer that went. A press is recorded before anything acts on it ([`note_press`]), so a layer the key capture's
+/// handler closes, inside the interceptor, is taken as closed by it, not by the press before.
+fn note_closing(dismissed: bool, window: &Window, cx: &mut App) {
+    let fresh_presses = !dismissed && !layers::focus_layer_open(window, cx);
+    if let Some(moved) = installed_mut::<MovedOn>(cx)
+        && let Some((keystroke, at)) = moved.last_press.clone()
+    {
+        moved.closing = Some(Closing {
+            keystroke,
+            at,
+            fresh_presses,
+        });
+    }
+}
 
 /// A point in the user's input, taken when they start something that may finish later.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,26 +283,35 @@ pub fn has_moved_on(mark: &Mark, cx: &App) -> bool {
     Mark::take(cx) != *mark
 }
 
-/// The keystroke interceptor that feeds the counter, kept alive for the app's lifetime.
-struct KeyWatch {
-    _interceptor: Subscription,
-}
-
-impl Global for KeyWatch {}
-
-/// Count a key press, unless it repeats the last one on the same control. Runs for every keystroke before any binding
-/// is matched; a modifier pressed alone arrives without a key-down and is not a press.
-fn note_key(event: &KeystrokeEvent, window: &Window, cx: &mut App) {
-    let Some(down) = &event.key_down else {
-        return;
-    };
-    if down.is_held {
-        return;
-    }
+/// Record a key-down for "the user moved on" and say whether it is swallowed: a repeat of a key press that closed a
+/// layer ([`Closing`]), which must reach nothing and is not counted. Otherwise a press is counted unless it repeats the
+/// last one on the same control, and a held repeat is not. A modifier pressed alone arrives without a key-down and is
+/// not a press.
+///
+/// The actions module's keystroke interceptor, which sees every key before GPUI matches a binding, calls this before
+/// it does anything else with the key (hands it to the key capture, queues a physical-key row's action), and stops a
+/// swallowed key itself once the key capture has had it. Recording first is what lets a layer the key capture's
+/// handler closes, which it does inside the interceptor, be taken as closed by this press.
+pub(crate) fn note_press(down: &KeyDownEvent, window: &Window, cx: &mut App) -> bool {
+    let now = cx.background_executor().now();
     let focused = window.focused(cx);
     let Some(moved) = installed_mut::<MovedOn>(cx) else {
-        return;
+        return false;
     };
+    if moved
+        .closing
+        .as_ref()
+        .is_some_and(|closing| closing.repeated_by(down, now))
+    {
+        return true;
+    }
+    if down.is_held {
+        return false;
+    }
+    // Any other fresh press ends the closing press's repeats, as in the old app ("any unrelated press retires the
+    // submit gesture"), and becomes the press a layer closing now was closed by.
+    moved.closing = None;
+    moved.last_press = Some((down.keystroke.clone(), now));
     let repeat = moved.last_key.as_ref().is_some_and(|(key, on)| {
         *key == down.keystroke && on.as_ref().and_then(WeakFocusHandle::upgrade) == focused
     });
@@ -231,6 +322,7 @@ fn note_key(event: &KeystrokeEvent, window: &Window, cx: &mut App) {
     if !repeat {
         moved.count += 1;
     }
+    false
 }
 
 /// Count a click, unless it is the second or later click of a double click.
@@ -243,6 +335,9 @@ fn note_click(event: &MouseDownEvent, cx: &mut App) {
     };
     moved.count += 1;
     moved.last_key = None;
+    // A layer a click closes was not closed by a key, and a key pressed after a click repeats nothing.
+    moved.last_press = None;
+    moved.closing = None;
 }
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
@@ -324,17 +419,13 @@ struct Windows(HashMap<WindowId, WeakEntity<WindowFocus>>);
 
 impl Global for Windows {}
 
-/// Install the app-wide state, and the keystroke interceptor that counts key presses. The bootstrap calls this before
-/// any window opens.
+/// Install the app-wide state. The bootstrap calls this before any window opens. Key presses reach the counter through
+/// the actions module's keystroke interceptor ([`note_press`]), so a press is recorded before anything acts on it.
 pub fn install(cx: &mut App) {
     cx.set_global(MovedOn::default());
     cx.set_global(Windows::default());
     // Until the host says otherwise, Tab reaches every control: the rule wherever there is no setting to follow.
     cx.set_global(default_rules());
-    let watch = cx.intercept_keystrokes(|event, window, cx| note_key(event, window, cx));
-    cx.set_global(KeyWatch {
-        _interceptor: watch,
-    });
 }
 
 /// What a root view keeps to have the coordinator look after its window: the window's focus state and the listener that
@@ -443,13 +534,11 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
 
 /// Move focus to `target`, a control inside the topmost layer that holds focus (a dialog, or a menu above it), because
 /// of something the user did there, and scroll it into view as after Tab; at once if a frame has drawn `target` there,
-/// or else after the first frame that does. The callers:
-///
-/// - A result that arrives later than the user's action: Settings opened at agent trust from a trust hint, with focus
-///   on the dialog, moving focus to the agent's switch once that agent's read answers.
-/// - The user's own action moving focus to another control of the same layer: choosing Custom in the launcher (a click
-///   or Enter) moving focus into its permission flags field, which the same action makes appear.
-/// - The prompt, moving focus into a question it draws inline in its owner's dialog and back out when it closes.
+/// or else after the first frame that does. Every move the app makes to another control of the open dialog or menu
+/// goes through here, whether it answers the user's action at once or a result that arrives later, and whether
+/// `target` was already drawn or the action makes it appear: choosing Custom in the launcher, for example, moves focus
+/// into the permission flags field that the same choice shows. The prompt moves focus this way into a question it draws
+/// inline in its owner's dialog, and back out when the question closes.
 ///
 /// [`focus_control`]'s rule for the topmost layer instead of the page: `chosen` is the mark taken when the user acted,
 /// and it does nothing once they have moved on since (a key press or a click), with no layer that holds focus open (the
@@ -1247,7 +1336,14 @@ pub fn highlight(item: &FocusHandle, window: &mut Window, cx: &mut App) {
 /// Focus `handle` because a layer just opened and it is where that layer starts (the layer manager calls this).
 ///
 /// Nothing is scrolled into view: the layer has not been drawn yet, so its start has no position to scroll to.
+///
+/// A key press that closed a layer stops swallowing fresh presses of its key here, keeping only its held repeats
+/// ([`Closing`]): the new layer starts on the control the user is meant to answer, so a new press goes ahead (SPEC.md,
+/// "Opening and closing": from a row's menu, Delete then Enter deletes), while a held Enter still cannot answer it.
 pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
+    if let Some(closing) = installed_mut::<MovedOn>(cx).and_then(|moved| moved.closing.as_mut()) {
+        closing.fresh_presses = false;
+    }
     apply(Move::To(handle), window, cx);
 }
 
@@ -1290,13 +1386,16 @@ pub enum ReturnTo {
 }
 
 /// Return focus where `target` says because a layer closed, `opener` being what held focus when it opened, or recover
-/// if that is gone (the layer manager calls this).
+/// if that is gone (the layer manager calls this). `dismissed` is whether the user dismissed the layer (Escape): the key
+/// press that closed it has its repeats swallowed from here on, and a dismissal only its held ones ([`Closing`]).
 pub(crate) fn return_to(
     target: ReturnTo,
     opener: Option<&WeakFocusHandle>,
+    dismissed: bool,
     window: &mut Window,
     cx: &mut App,
 ) {
+    note_closing(dismissed, window, cx);
     // A layer closing with focus returned ends any pending move made in it, also when focus returns through recovery
     // below, which would keep it.
     if let Some(state) = state(window, cx) {
