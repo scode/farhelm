@@ -769,8 +769,13 @@ Host-supplied text is its own type from the moment it is decoded. The only eleme
 characters and isolates text direction, using one escape table shared with the command line. This covers host-authored
 text shown anywhere outside the terminal, including link disclosures and accessible names. Terminal grid content keeps
 its own rendering contract (SPEC.md: "Terminal output is not part of this rule"). The only strings that come out of host
-text are its escaped presentation, used for display and accessible names, and its raw value, used for editing and
-operations. Raw values keep their bytes, and an escaped presentation never becomes a saved value.
+text are its escaped spellings, the presentation used for display and the accessible spelling used for accessible names
+(the same string except for an abbreviated identity), and its raw value, used for editing and operations. Raw values
+keep their bytes, and an escaped spelling never becomes a saved value. An identity the user compares (an installation or
+session id) has a stricter presentation instead, in the same notation: only printable ASCII other than `<`, `(` and `)`
+shows as itself, so no two identities look alike, and its compact form keeps the start and end of a session's bare id
+without splitting an escape. That compact form is drawn short and named in full: its accessible text is the strict
+spelling of the whole reference, as SPEC.md's From line requires.
 
 Direction isolation is structural: every piece of host text is laid out as its own text element, never concatenated into
 a string with the app's words, so a right-to-left value reorders only within itself, as HTML's `<bdi>` did in the old

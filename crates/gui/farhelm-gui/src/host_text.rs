@@ -3,10 +3,11 @@
 //! SPEC.md (confirmed 2026-10-10): text a host supplied that the GUI shows outside a terminal is escaped so invisible
 //! and direction-changing characters are visible, including in accessible names, wherever it appears and however it
 //! reached the helm. SPEC_impl.md, "Host-supplied text", makes that a type: a [`HostText`] is made from a host's value
-//! where the GUI first reads it, and the only strings that ever come out of it are its escaped presentation (for display
-//! and accessible names, produced inside this module and drawn only by this module's elements) and its raw value (for
-//! editing and operations, through [`HostText::raw`]). There is no `Display`, `Deref` or `AsRef<str>`, and `Debug`
-//! prints the escaped form, so a host's bytes cannot slip into a label, a log line or a tooltip by accident.
+//! where the GUI first reads it, and the only strings that ever come out of it are its escaped spellings (the
+//! presentation for display and the accessible spelling for accessible names, the same string except for an abbreviated
+//! identity; produced inside this module and drawn only by this module's elements) and its raw value (for editing and
+//! operations, through [`HostText::raw`]). There is no `Display`, `Deref` or `AsRef<str>`, and `Debug` prints the
+//! escaped form, so a host's bytes cannot slip into a label, a log line or a tooltip by accident.
 //!
 //! Escaping uses the one table and notation shared with the rest of Farhelm (`farhelm_proto::text::escaped`): every
 //! presentation-unsafe character becomes `<U+XXXX>`, and a literal `<U+` the host typed has its `<` escaped so it cannot
@@ -36,8 +37,11 @@
 //! names a host value is a [`HostSentence`] handed to `HoverHelp::sentence` (or several, one per paragraph, handed to
 //! `HoverHelp::paragraphs`): the tooltip draws each through this module's element, and the control's accessible
 //! description is the sentence's [`HostSentence::accessible_name`] (for paragraphs, each one's, a blank line apart).
-//! Identity labels the user compares (installation ids, which SPEC.md also wants with their spaces visible) are not
-//! built yet; they arrive with the first view that shows one, as a second presentation here.
+//! An identity the user compares (an installation id, a session id: SPEC.md wants their spaces visible too) is made
+//! with [`HostText::identity`] instead of [`HostText::from_host`], or with [`HostText::identity_abbreviated`] where a
+//! compact line shows only its ends. An abbreviated identity is drawn short and named in full, since SPEC.md's From
+//! line wants the shortened ID's accessible name to carry the complete one; hover help that shows the full ID is still
+//! the view's to add, through [`HostText::identity`].
 
 use std::fmt;
 use std::ops::Range;
@@ -53,13 +57,21 @@ use crate::assets;
 
 /// Text a host supplied, as the GUI holds it from the moment it reads it.
 ///
-/// Holds the raw value and its escaped presentation, computed once. Equality and hashing are defined on the raw value:
-/// two different host values are different values even when they look alike on screen (a homoglyph, say), and a later
-/// presentation that drops information (truncation, say) must not make two values equal.
+/// Holds the raw value and two spellings of it, computed once and chosen by the constructor: the presentation, which is
+/// drawn, and the accessible spelling, which names it (in a sentence's accessible name, and in `Debug`). For ordinary
+/// values ([`HostText::from_host`]) both are the escaped text, and for an identity ([`HostText::identity`]) both are its
+/// stricter spelling. Only [`HostText::identity_abbreviated`] makes them differ: drawn short, named in full. A view
+/// never picks a spelling at drawing time.
+///
+/// Equality compares the raw value and both spellings: two different host values are different values even when they
+/// look alike on screen (a homoglyph, say), and two presentations of one value are different values because they draw
+/// differently (a hover help that switches between them must count as changed). Hashing uses the raw value alone, which
+/// keeps equal values hashing equal.
 #[derive(Clone)]
 pub struct HostText {
     raw: Arc<str>,
     presentation: SharedString,
+    accessible: SharedString,
 }
 
 impl HostText {
@@ -68,7 +80,58 @@ impl HostText {
     pub fn from_host(raw: impl Into<Arc<str>>) -> Self {
         let raw = raw.into();
         let presentation = SharedString::from(farhelm_proto::text::escaped(&raw));
-        HostText { raw, presentation }
+        HostText::drawn_as_named(raw, presentation)
+    }
+
+    /// Take a host-supplied identity the user compares with another (an installation id in a "recorded as install X;
+    /// now reports Y" question, a session id on an approval card), shown so that two different identities never look
+    /// alike.
+    ///
+    /// Printable ASCII is shown as itself except `<`, `(` and `)`; every other character, spaces included, is written
+    /// as `<U+XXXX>`, and the empty identity is shown as `(empty)`. Escaping `<` means every `<` on screen starts an
+    /// escape, so a literal `<U+0020>` cannot pose as a space; escaping the parentheses keeps `(empty)` for the empty
+    /// value alone. UUIDs, domain names and IP addresses still read as they are. Unlike [`from_host`](Self::from_host),
+    /// this also spells variation selectors and non-ASCII letters, which the shared table leaves alone so ordinary
+    /// titles keep rendering; in a comparison, a look-alike letter shown as itself would pass for the one it imitates.
+    /// Ported from the old app's `display_identity`.
+    pub fn identity(raw: impl Into<Arc<str>>) -> Self {
+        let raw = raw.into();
+        let presentation = SharedString::from(identity_spelling(&raw));
+        HostText::drawn_as_named(raw, presentation)
+    }
+
+    /// Take a host-supplied identity for a compact line that shows only its start and end (SPEC.md: the approval
+    /// card's From line shows "the start and end of the requester's bare ID, without splitting an escape spelling").
+    ///
+    /// A full session reference (entry UUID, colon, supervisor id) is shortened from its bare id: exactly one valid
+    /// entry prefix is dropped, and a bare id that itself looks like a full reference keeps its look-alike prefix as
+    /// data. Anything that does not parse as a reference is shortened whole. The shown value is the bare id in
+    /// [`identity`](Self::identity)'s spelling, kept whole when that spelling is 16 characters or fewer, and otherwise
+    /// cut to about its first 8 and last 4 shown characters around `…`. The cuts fall only between whole per-character
+    /// spellings, so an escape at a cut is kept whole and the kept ends may run longer than 8 and 4.
+    ///
+    /// Only the drawing is short. The accessible spelling is [`identity`](Self::identity)'s spelling of the whole
+    /// reference, entry prefix included, so a sentence holding this part is named with the complete ID (SPEC.md: the
+    /// shortened ID's "hover and accessible name carry the complete entry-prefixed ID"), as the old card's label was.
+    /// The hover is not this type's: a view that shows the full ID there builds its help from an
+    /// [`identity`](Self::identity) of the same raw value. The raw value is the whole reference too, so a copy or an
+    /// operation gets every byte. Ported from the old app's `shortened_requester_id`.
+    pub fn identity_abbreviated(raw: impl Into<Arc<str>>) -> Self {
+        let raw = raw.into();
+        HostText {
+            presentation: SharedString::from(abbreviated_identity_spelling(&raw)),
+            accessible: SharedString::from(identity_spelling(&raw)),
+            raw,
+        }
+    }
+
+    /// A value named exactly as it is drawn, which is every constructor's but the abbreviation's.
+    fn drawn_as_named(raw: Arc<str>, presentation: SharedString) -> Self {
+        HostText {
+            raw,
+            accessible: presentation.clone(),
+            presentation,
+        }
     }
 
     /// The value exactly as the host wrote it, for editing (a rename draft starts from it) and for operations (it goes
@@ -82,11 +145,18 @@ impl HostText {
     fn presentation(&self) -> SharedString {
         self.presentation.clone()
     }
+
+    /// The escaped spelling that names the value, for accessible names and `Debug` only.
+    fn accessible(&self) -> SharedString {
+        self.accessible.clone()
+    }
 }
 
 impl PartialEq for HostText {
     fn eq(&self, other: &Self) -> bool {
         self.raw == other.raw
+            && self.presentation == other.presentation
+            && self.accessible == other.accessible
     }
 }
 
@@ -98,11 +168,12 @@ impl std::hash::Hash for HostText {
     }
 }
 
-/// Prints the escaped presentation, so a host value in a log or test message is as visible as on screen.
+/// Prints the accessible spelling, so a host value in a log or test message is as visible as on screen, and an
+/// abbreviated identity shows in full.
 impl fmt::Debug for HostText {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("HostText")
-            .field(&self.presentation.as_ref())
+            .field(&self.accessible.as_ref())
             .finish()
     }
 }
@@ -172,6 +243,57 @@ fn mark_ranges(presentation: &str, mut chosen: Vec<usize>) -> Vec<Range<usize>> 
     ranges
 }
 
+/// The spelling of one identity character: itself for printable ASCII other than `<`, `(` and `)`, else its escape.
+/// Every raw character has exactly one token, which is what lets an abbreviation cut between tokens without ever
+/// splitting an escape.
+fn identity_token(ch: char) -> String {
+    if ch.is_ascii_graphic() && !matches!(ch, '<' | '(' | ')') {
+        ch.to_string()
+    } else {
+        farhelm_proto::text::notation(ch)
+    }
+}
+
+/// [`HostText::identity`]'s presentation. Only the empty identity needs the placeholder: a blank one is never blank
+/// on screen, since every space has a spelling of its own.
+fn identity_spelling(raw: &str) -> String {
+    if raw.is_empty() {
+        return "(empty)".to_string();
+    }
+    raw.chars().map(identity_token).collect()
+}
+
+/// [`HostText::identity_abbreviated`]'s presentation.
+fn abbreviated_identity_spelling(raw: &str) -> String {
+    let reference = raw.parse::<farhelm_proto::SessionRef>().ok();
+    let bare = reference
+        .as_ref()
+        .map_or(raw, farhelm_proto::SessionRef::bare_id);
+    let tokens: Vec<String> = bare.chars().map(identity_token).collect();
+    // Budgets count shown characters, not raw ones: eight invisible characters would otherwise become eighty shown
+    // ones. Tokens are ASCII, so their byte length is their shown width.
+    if tokens.iter().map(String::len).sum::<usize>() <= 16 {
+        return identity_spelling(bare);
+    }
+    let mut start = 0;
+    let mut width = 0;
+    while start < tokens.len() && width < 8 {
+        width += tokens[start].len();
+        start += 1;
+    }
+    let mut end = tokens.len();
+    width = 0;
+    while end > start && width < 4 {
+        end -= 1;
+        width += tokens[end].len();
+    }
+    // The two ends met, so nothing would be left out: show it all rather than an ellipsis that hides nothing.
+    if start == end {
+        return tokens.concat();
+    }
+    format!("{}…{}", tokens[..start].concat(), tokens[end..].concat())
+}
+
 /// One part of a [`HostSentence`]. `Debug` prints a host part through [`HostText`]'s own `Debug`, escaped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Part {
@@ -194,8 +316,9 @@ enum Part {
 /// A clone draws the same parts under the same id, so two clones drawn in one frame are two nodes with one id; a
 /// sentence is cloned to be kept (inside a frozen [`Question`](crate::prompt::Question), say), not to be drawn twice.
 ///
-/// Equality compares the id and every part, host parts by their raw value (as [`HostText`]'s does), so two sentences
-/// that differ only by a hidden character in a host value are different; `Debug` prints host parts escaped.
+/// Equality compares the id and every part, host parts as [`HostText`]'s own equality does (raw value and spellings), so
+/// two sentences that differ only by a hidden character in a host value are different; `Debug` prints host parts
+/// escaped.
 #[derive(Clone, Debug, PartialEq, Eq, IntoElement)]
 pub struct HostSentence {
     id: ElementId,
@@ -236,12 +359,14 @@ impl HostSentence {
 
     /// The sentence as assistive technology reads it: the app's words as they are and each host value escaped, so an
     /// accessible name shows a hidden character exactly as the screen does (SPEC.md: "including in accessible names").
+    /// A host value is named by its accessible spelling, which is what is drawn except for an abbreviated identity,
+    /// named in full ([`HostText::identity_abbreviated`]).
     pub fn accessible_name(&self) -> SharedString {
         let mut name = String::new();
         for part in &self.parts {
             match part {
                 Part::App(words) => name.push_str(words),
-                Part::Host(text) | Part::Mono(text) => name.push_str(&text.presentation()),
+                Part::Host(text) | Part::Mono(text) => name.push_str(&text.accessible()),
             }
         }
         name.into()
@@ -770,13 +895,154 @@ pub(crate) mod tests {
         );
     }
 
+    /// Why this matters: an identity is shown so the user can tell two of them apart (an install that now reports a
+    /// different id, the session that asked for an approval), which only works if no two identities look alike and the
+    /// ordinary ones (UUIDs, domain names, addresses) still read as themselves.
+    ///
+    /// Specification: printable ASCII other than `<`, `(` and `)` is shown as itself; each of those three, a space, a
+    /// non-ASCII letter, a variation selector and a control character is shown as `<U+XXXX>`; the empty identity is
+    /// `(empty)`, which a host's literal `(empty)` cannot imitate; and the raw value keeps the host's bytes.
+    #[test]
+    fn an_identity_spells_everything_but_plain_ascii() {
+        for (raw, shown) in [
+            (
+                "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d",
+                "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d",
+            ),
+            ("build-1.example.com:22", "build-1.example.com:22"),
+            ("!~", "!~"),
+            ("<U+0020>", "<U+003C>U+0020>"),
+            ("a(b)", "a<U+0028>b<U+0029>"),
+            ("a b", "a<U+0020>b"),
+            ("caf\u{e9}", "caf<U+00E9>"),
+            ("\u{2764}\u{FE0F}", "<U+2764><U+FE0F>"),
+            ("a\u{1b}", "a<U+001B>"),
+            ("", "(empty)"),
+            ("(empty)", "<U+0028>empty<U+0029>"),
+        ] {
+            let text = HostText::identity(raw);
+            assert_eq!(text.presentation().as_ref(), shown, "identity {raw:?}");
+            assert_eq!(text.raw(), raw);
+        }
+    }
+
+    /// Why this matters: the approval card's From line has room for only the ends of the asking session's id (SPEC.md,
+    /// "Agent-spawned sessions"), and a cut through an escape would show something that is the literal spelling of a
+    /// different id. Ported from the old app's
+    /// `requester_abbreviation_preserves_identity_tokens_and_bare_suffix`.
+    ///
+    /// Specification: one entry prefix is dropped and the bare id is shown in the identity spelling, whole when 16
+    /// shown characters or fewer, otherwise as about its first 8 and last 4 around `…` with escapes at a cut kept whole;
+    /// a value whose kept ends meet is shown whole, with no `…`; a bare id that looks like a full reference keeps its
+    /// look-alike prefix; a value that is not a reference is shortened whole. The raw value stays the whole reference,
+    /// and a sentence holding the part, like `Debug`, names it by the identity spelling of the whole reference.
+    #[test]
+    fn an_abbreviated_identity_keeps_escapes_whole_and_the_bare_suffix() {
+        const ENTRY: &str = "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d";
+        let reference = |bare: &str| {
+            farhelm_proto::SessionRef::new(ENTRY, bare)
+                .unwrap()
+                .to_string()
+        };
+        let nested = reference("x");
+        for (raw, shown) in [
+            (reference("short"), "short"),
+            // The cutoff: 16 shown characters are kept whole, 17 are shortened.
+            (reference("1234567890abcdef"), "1234567890abcdef"),
+            (reference("1234567890abcdefg"), "12345678…defg"),
+            (reference("1234567890abcdefghijkl"), "12345678…ijkl"),
+            (
+                reference("1234567\u{200b}middle\u{202e}"),
+                "1234567<U+200B>…<U+202E>",
+            ),
+            (reference("<U+200B>middle-long-enough"), "<U+003C>…ough"),
+            // Two escapes and a letter: past 16 shown characters, but the head and tail meet with nothing between them,
+            // so it is shown whole rather than with an ellipsis that hides nothing.
+            (reference("\u{200b}\u{200c}a"), "<U+200B><U+200C>a"),
+            (reference(&nested), "7f8c2b1e…6d:x"),
+            ("1234567890abcdefghijkl".to_string(), "12345678…ijkl"),
+        ] {
+            let text = HostText::identity_abbreviated(raw.as_str());
+            assert_eq!(
+                text.presentation().as_ref(),
+                shown,
+                "abbreviation of {raw:?}"
+            );
+            assert_eq!(text.raw(), raw, "the raw value keeps the entry prefix");
+        }
+        let id = HostText::identity_abbreviated(reference("1234567\u{200b}middle\u{202e}"));
+        assert_eq!(
+            HostSentence::new("from")
+                .text("ID ")
+                .mono(&id)
+                .accessible_name()
+                .as_ref(),
+            "ID 7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:1234567<U+200B>middle<U+202E>"
+        );
+        assert_eq!(
+            format!("{id:?}"),
+            "HostText(\"7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:1234567<U+200B>middle<U+202E>\")"
+        );
+    }
+
+    /// Why this matters: equality decides whether something drawn must be redrawn or refreshed (the layer manager
+    /// refreshes a hovered control's kept help only when the new help is unequal), so two spellings of one raw value
+    /// that draw differently, or are named differently, must not compare equal, or the stale one stays.
+    ///
+    /// Specification: one raw value taken as ordinary text, as an identity and as an abbreviated identity, where each
+    /// draws differently, gives three unequal values, which still hash equal (hashing uses the raw value alone); a
+    /// value that an abbreviation draws exactly as ordinary text does but names differently (`12345678…ijkl`, whose
+    /// `…` the identity spelling escapes) is unequal to it; values that draw and are named alike (an identity short
+    /// enough to be shown whole, and its abbreviation) are equal.
+    #[test]
+    fn spellings_of_one_value_that_differ_are_different_values() {
+        use std::hash::BuildHasher as _;
+
+        let raw = "1234567890 abcdefghijkl";
+        let plain = HostText::from_host(raw);
+        let identity = HostText::identity(raw);
+        let abbreviated = HostText::identity_abbreviated(raw);
+        assert_eq!(plain.presentation().as_ref(), raw, "premise");
+        assert_eq!(
+            identity.presentation().as_ref(),
+            "1234567890<U+0020>abcdefghijkl",
+            "premise"
+        );
+        assert_eq!(
+            abbreviated.presentation().as_ref(),
+            "12345678…ijkl",
+            "premise"
+        );
+        assert_ne!(plain, identity);
+        assert_ne!(plain, abbreviated);
+        assert_ne!(identity, abbreviated);
+        let hasher = std::collections::hash_map::RandomState::new();
+        assert_eq!(hasher.hash_one(&plain), hasher.hash_one(&identity));
+        assert_eq!(hasher.hash_one(&identity), hasher.hash_one(&abbreviated));
+
+        let drawn_alike = "12345678…ijkl";
+        let plain = HostText::from_host(drawn_alike);
+        let abbreviated = HostText::identity_abbreviated(drawn_alike);
+        assert_eq!(plain.presentation(), abbreviated.presentation(), "premise");
+        assert_eq!(
+            abbreviated.accessible().as_ref(),
+            "12345678<U+2026>ijkl",
+            "premise"
+        );
+        assert_ne!(plain, abbreviated);
+
+        let short = HostText::identity("a b");
+        let short_abbreviated = HostText::identity_abbreviated("a b");
+        assert_eq!(short, short_abbreviated);
+    }
+
     /// Why this matters: equality decides whether a pushed change touched a value (a draft, a selection), and two host
     /// values that differ only by a hidden character are exactly the ones that must not be treated as the same.
     ///
     /// Specification: a value and its look-alike with a zero-width space are different values, and a value equals
-    /// itself. Equality is on the raw bytes by definition (the `PartialEq` impl), and this test cannot tell that apart
-    /// from comparing presentations: escaping is injective (every `<U+` in a presentation is an escape, so it decodes
-    /// back to one raw value), so no pair of inputs differs in one and not the other. It pins the outcome, not the
+    /// itself. Equality compares the raw bytes and both spellings (the `PartialEq` impl), and this test cannot tell
+    /// which of them decided: escaping is injective (every `<U+` in a presentation is an escape, so it decodes back to
+    /// one raw value), so no pair of ordinary values differs in one and not the other. It pins the outcome, not the
     /// mechanism.
     #[test]
     fn look_alike_values_are_different_values() {
