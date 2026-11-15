@@ -281,7 +281,9 @@ pub(crate) fn status(
         | Work::SendFeedback
         | Work::TrashDelete
         | Work::TabOpen
-        | Work::TabClose => None,
+        | Work::TabClose
+        | Work::Pin
+        | Work::MovePin => None,
     }
 }
 

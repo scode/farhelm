@@ -329,6 +329,13 @@ pub enum Icon {
     /// A clock: a compact row's session whose status is only last-known, its host not connected (the old
     /// `QualifierGlyph::Stale`).
     Stale,
+    /// A pushpin: pin a session above the unpinned ones, or unpin it, on a row menu's Pin to top and Unpin (the old
+    /// app's `ActionGlyph::Pin`, in the 14-unit action box with the 1.2 stroke).
+    Pin,
+    /// An arrow up from a stem: a row menu's Move up among the pins (the old app's `ActionGlyph::MoveUp`).
+    MoveUp,
+    /// An arrow down to a stem: a row menu's Move down among the pins (the old app's `ActionGlyph::MoveDown`).
+    MoveDown,
     /// A card in front of another: start a new session from this one's settings, keeping this one, on the session
     /// header's Clone and the row menu's Clone (the old app's `ActionGlyph::Clone`).
     Clone,
@@ -426,6 +433,9 @@ impl Icon {
         Icon::EndedInterrupted,
         Icon::EndedError,
         Icon::Stale,
+        Icon::Pin,
+        Icon::MoveUp,
+        Icon::MoveDown,
         Icon::Clone,
     ];
 }
@@ -520,6 +530,9 @@ impl Icon {
             Icon::EndedInterrupted => "icons/ended-interrupted.svg",
             Icon::EndedError => "icons/ended-error.svg",
             Icon::Stale => "icons/stale.svg",
+            Icon::Pin => "icons/pin.svg",
+            Icon::MoveUp => "icons/move-up.svg",
+            Icon::MoveDown => "icons/move-down.svg",
             Icon::Clone => "icons/clone.svg",
         }
     }
@@ -653,6 +666,9 @@ impl Assets {
             }
             "icons/ended-error.svg" => Some(include_bytes!("../assets/icons/ended-error.svg")),
             "icons/stale.svg" => Some(include_bytes!("../assets/icons/stale.svg")),
+            "icons/pin.svg" => Some(include_bytes!("../assets/icons/pin.svg")),
+            "icons/move-up.svg" => Some(include_bytes!("../assets/icons/move-up.svg")),
+            "icons/move-down.svg" => Some(include_bytes!("../assets/icons/move-down.svg")),
             "icons/clone.svg" => Some(include_bytes!("../assets/icons/clone.svg")),
             _ => None,
         }
