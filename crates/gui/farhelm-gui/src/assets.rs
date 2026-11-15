@@ -80,6 +80,9 @@
 //! everything in it has been read. The BellFilled is the same drawing with the body filled (`loud: true`), the session
 //! row's bell while something in it is unread: the old app filled it so an unread bell stays obvious to a reader who
 //! cannot tell its red from the quiet grey.
+//!
+//! The Lock, the Credentials section's glyph, is the old app's `ActionGlyph::Lock`, in the 14-unit action box with the
+//! 1.2 stroke.
 
 use std::borrow::Cow;
 
@@ -294,6 +297,8 @@ pub enum Icon {
     /// `ActionGlyph::Uninstall`, in the 14-unit action box with the 1.2 stroke). The arrow points out of the tray
     /// because the old one's downward arrow read as downloading the installation.
     Uninstall,
+    /// A padlock: the Settings dialog's Credentials section (the old app's `ActionGlyph::Lock`).
+    Lock,
 }
 
 impl Icon {
@@ -380,6 +385,7 @@ impl Icon {
         Icon::TrashEmpty,
         Icon::TrashFull,
         Icon::Uninstall,
+        Icon::Lock,
     ];
 }
 
@@ -465,6 +471,7 @@ impl Icon {
             Icon::TrashEmpty => "icons/trash-empty.svg",
             Icon::TrashFull => "icons/trash-full.svg",
             Icon::Uninstall => "icons/uninstall.svg",
+            Icon::Lock => "icons/lock.svg",
         }
     }
 }
@@ -570,6 +577,7 @@ impl Assets {
             "icons/trash-empty.svg" => Some(include_bytes!("../assets/icons/trash-empty.svg")),
             "icons/trash-full.svg" => Some(include_bytes!("../assets/icons/trash-full.svg")),
             "icons/uninstall.svg" => Some(include_bytes!("../assets/icons/uninstall.svg")),
+            "icons/lock.svg" => Some(include_bytes!("../assets/icons/lock.svg")),
             "icons/bell-filled.svg" => Some(include_bytes!("../assets/icons/bell-filled.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

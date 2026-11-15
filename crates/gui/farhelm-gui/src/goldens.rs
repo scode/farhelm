@@ -8,14 +8,14 @@
 //! a row's notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the
 //! Send feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
 //! drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at
-//! Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to
-//! connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a host's Update
-//! running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the host settings dialog
-//! at its top and scrolled to its end, the host refusal dialog for a refused Update, the version readout while an
-//! updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
-//! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
-//! (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty, full and
-//! freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
+//! Appearance, at Hosts, at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
+//! host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a
+//! host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the
+//! host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
+//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
+//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
+//! itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty,
+//! full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
 //! appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
@@ -2426,15 +2426,16 @@ fn feedback_dialog_reuse_setup(state: &SceneState, window: &mut Window, cx: &mut
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts`,
-/// `settings-agent-trust`, `settings-notifications` and `settings-app`): focus on the section's first switch (on the
-/// dialog itself at Appearance, Terminal, Checkouts, Agent trust and Notifications), naming on because the row stores
-/// no choice for it, and automatic remote-host updates turned on so the Hosts picture shows a switch in each state.
-/// Agent trust's reads of each agent's trust, sent as it opens, are answered at once with the trust off and the hint
-/// not dismissed, Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a
-/// checkout kept ready, and Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`,
-/// no topic, Default priority, no token); nothing else is answered. The opener is the scene's ring handle, which stands
-/// in for the gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-credentials`, `settings-terminal`,
+/// `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`): focus on the section's
+/// first switch (on the dialog itself at Appearance, Credentials, Terminal, Checkouts, Agent trust and Notifications),
+/// naming on because the row stores no choice for it, and automatic remote-host updates turned on so the Hosts picture
+/// shows a switch in each state. Agent trust's reads of each agent's trust, sent as it opens, are answered at once with
+/// the trust off and the hint not dismissed, Checkouts' reads as the reference stack had them: no default folder, no
+/// post-clone command, and a checkout kept ready, Notifications' read of the ntfy settings with the helm's defaults
+/// (off, `https://ntfy.sh`, no topic, Default priority, no token), and Credentials' read with an empty catalog; nothing
+/// else is answered. The opener is the scene's ring handle, which stands in for the gear. The fake and the connection
+/// are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -2478,6 +2479,7 @@ fn settings_scene(
                     "/api/checkout-root" => serde_json::json!({ "root": null }),
                     "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
                     "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
+                    "/api/credentials" => serde_json::json!([]),
                     "/api/ntfy-alerts" => {
                         match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
                             Ok(defaults) => defaults,
@@ -2689,6 +2691,13 @@ fn settings_appearance_setup(state: &SceneState, window: &mut Window, cx: &mut A
 /// Settings at Hosts.
 fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
+}
+
+/// Settings at Credentials, as in the reference but for the Tensorlake API key form, which is not built yet: nothing
+/// saved in any list. Focus starts
+/// on the dialog itself, since every control waits for the section's reads.
+fn settings_credentials_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Credentials, window, cx);
 }
 
 /// Settings at Terminal, the default link choice chosen because the row stores none, and, decided for the Mac on every
@@ -4091,6 +4100,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_hosts_setup,
+    },
+    Scene {
+        name: "settings-credentials",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_credentials_setup,
     },
     Scene {
         name: "settings-terminal",
