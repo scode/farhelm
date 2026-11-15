@@ -22,7 +22,7 @@ use super::tests::{change, listing_meta, open_main, painted, selected, sent, ses
 use crate::focus::Mark;
 use crate::main_view::MainView;
 use crate::operations::OpKey;
-use crate::test_support::{focused_id, frame, started};
+use crate::test_support::{focused_id, frame, started, terminal_focused};
 use crate::{layers, session, test_support};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -106,11 +106,6 @@ fn choose(cx: &mut VisualTestContext, button: &'static str, item: &'static str) 
     test_support::click(cx, button);
     test_support::click(cx, item);
     test_support::settle(cx);
-}
-
-/// Whether the focused element is a session's terminal (the pane mounts one, the selected session's).
-fn terminal_focused(cx: &mut VisualTestContext) -> bool {
-    focused_id(cx).as_deref() == Some("terminal-grid")
 }
 
 /// The hover help of the open question's Cancel, as shown once the pointer has rested on it for the hover delay.

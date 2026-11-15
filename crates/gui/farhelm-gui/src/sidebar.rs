@@ -53,7 +53,7 @@ mod header;
 #[cfg(test)]
 mod tests;
 
-use farhelm_helm_client::ApiPath;
+use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SIDEBAR_WIDTH_RANGE};
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
@@ -62,11 +62,10 @@ use gpui::{
 
 use crate::components::{Divider, DividerDrag, DividerStep, HoverHelp, Role};
 use crate::desktop::title_band;
-use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::session_list::SessionList;
-use crate::session_list::selection;
 use crate::theme::{self, metrics};
+use crate::{operations, render_count};
 
 /// The sidebar's width while the helm stores none: `--sidebar-width`'s default, the rail included, which the theme
 /// keeps as [`metrics::SIDEBAR_WIDTH`] (the screenshot goldens draw the session list at it too).
@@ -198,20 +197,34 @@ impl Sidebar {
     }
 
     /// Send `width` as the helm's `sidebar_width` preference and hold it on screen until the helm replies (the store
-    /// rule's one exception; see the module docs). While the window is inert nothing is sent: the sidebar is not drawn
-    /// then, so nothing calls this.
+    /// rule's one exception; see the module docs). The write is a keyless one ([`operations::send`]): nothing draws it
+    /// busy and no refusal is kept for it. Any reply ends the hold if it is to the latest write, a refusal and a
+    /// command the channel lost included, so the sidebar then shows what the helm stores; a failure is logged, never
+    /// shown. A reset drops the reply, and the hold goes with the UI session's state. While the window is inert
+    /// nothing is sent: the sidebar is not drawn then, so nothing calls this.
     fn write(&mut self, width: u32, cx: &mut Context<Self>) {
+        let path = match ApiPath::api(&["preferences"]) {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::warn!(%error, "could not save the sidebar's width");
+                return;
+            }
+        };
         let current = self.current.current(cx);
         current.sent += 1;
         let number = current.sent;
         current.held = Some((number, width));
         let sidebar = cx.weak_entity();
-        selection::send_then(
-            ApiPath::api(&["preferences"]),
-            serde_json::json!({ "sidebar_width": width }),
-            "save the sidebar's width",
+        operations::send(
+            Method::Put,
+            path,
+            Some(serde_json::json!({ "sidebar_width": width })),
+            "PUT /api/preferences",
             cx,
-            move |cx| {
+            move |answer, cx| {
+                if let Err(reason) = answer {
+                    tracing::warn!(?reason, "could not save the sidebar's width");
+                }
                 // A reply to anything but the latest write leaves the latest one held.
                 let _ = sidebar.update(cx, |sidebar, cx| {
                     let current = sidebar.current.current(cx);
