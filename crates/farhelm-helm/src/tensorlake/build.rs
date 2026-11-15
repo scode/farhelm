@@ -51,6 +51,14 @@
 //! not the HTTP request that started it. Progress is a `watch` channel the
 //! recipes GET reads, plus a feed bump per step so clients re-read.
 //!
+//! The UI channel pushes the recipes GET and the recipe places GET (both read
+//! this registry), re-reading them on every bump and after each of its own
+//! commands, so every change either shows outside a channel command must
+//! bump once it is in place. Podman place jobs therefore also bump
+//! when admitted and once their registry entry is gone
+//! ([`RecipeBuilds::start_podman`]); Tensorlake jobs bump after removing
+//! theirs.
+//!
 //! Deleting a recipe cancels its build and then cleans up. Cancellation is
 //! cooperative: only the waits on Tensorlake and on the sandbox (API calls,
 //! script runs, poll sleeps) are cancelled, never a state write, so a
@@ -438,14 +446,22 @@ pub(crate) struct PodmanProgress {
 
 /// A panic or runtime cancellation cannot leave admission permanently busy.
 /// Durable container/image ownership remains for explicit later cleanup.
+///
+/// Its drop is also where a job's end is announced: the place view reads
+/// `building` from this registry entry, so a bump before the entry goes (the
+/// job's own last bump, say) lets the re-read it wakes see a finished job
+/// still building, with nothing left to announce the change. Every drop
+/// removes the entry, so this bump is always a real change.
 struct PodmanJobAdmission {
     owner: Arc<RecipeBuilds>,
     key: (String, crate::store::HostId),
+    events: Arc<FleetEvents>,
 }
 
 impl Drop for PodmanJobAdmission {
     fn drop(&mut self) {
         self.owner.registry().podman_jobs.remove(&self.key);
+        self.events.bump();
     }
 }
 
@@ -676,11 +692,16 @@ impl RecipeBuilds {
     /// Admit place work under the same lock as recipe deletion. The owned
     /// task survives its initiating waiter, and every joiner observes its
     /// actual outcome. A new later attempt may retry a finished failure.
+    ///
+    /// `events` is bumped when a new job is admitted and when it ends (see
+    /// [`PodmanJobAdmission`]), the two changes to the place view's
+    /// `building` that no step announces; `work` bumps for its own steps.
     pub(crate) fn start_podman<F, Fut>(
         self: &Arc<Self>,
         name: &str,
         place: crate::store::HostId,
         rebuild: bool,
+        events: Arc<FleetEvents>,
         work: F,
     ) -> anyhow::Result<watch::Receiver<PodmanProgress>>
     where
@@ -715,13 +736,23 @@ impl RecipeBuilds {
             },
         );
         let owner = Arc::clone(self);
+        let ended = Arc::clone(&events);
         tokio::spawn(async move {
-            let _admission = PodmanJobAdmission { owner, key };
+            let _admission = PodmanJobAdmission {
+                owner,
+                key,
+                events: ended,
+            };
             let result = work(progress.clone(), cancel)
                 .await
                 .map_err(|error| super::shell::shown(&error.to_string()));
             progress.send_modify(|view| view.result = Some(result));
         });
+        // Bump with the registry unlocked: a bump observer runs inside the
+        // bump and may take it (`FleetEvents::observe_bumps`), as the re-read
+        // the bump wakes does later.
+        drop(registry);
+        events.bump();
         Ok(receiver)
     }
 

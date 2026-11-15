@@ -309,15 +309,21 @@ under "The store, and how views redraw").
 Owner: the UI channel.
 
 Pushed collections are the helm-local data the fleet feed already invalidates: sessions, hosts, templates, preferences,
-notices, approvals, announcements and host progress. The PR that adds a collection lists it. Each is read through its
-GET route: sessions keyed by their served id, templates by name, notices by id, approvals by id, hosts by registry id;
-preferences and the announcement queue travel as one entry each; host progress is `GET /api/provisioning`, every run
-this helm process retains, keyed by host id (a host with no run is absent, not idle). Their entry types live in
-`farhelm-proto` beside the channel's. The snapshot sent when a channel opens never waits on a remote host. Every other
-read (directory browse, repository lists, the trash list, launch history, file stat) is an ordinary GET command whose
-reply body is the result. Data the old GUI polled stays a query that the GUI issues again; it does not become a
-replicated collection. The one exception is the Podman check's readiness, which rides each local and ssh host's entry so
-its start and end reach the GUI (see "Podman places, creation and images").
+notices, approvals, announcements, host progress, recipes and recipe places. The PR that adds a collection lists it.
+Each is read through its GET route: sessions keyed by their served id, templates by name, notices by id, approvals by
+id, hosts by registry id; preferences and the announcement queue travel as one entry each; host progress is
+`GET /api/provisioning`, every run this helm process retains, keyed by host id (a host with no run is absent, not idle);
+recipes are `GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe
+and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` beside the channel's. The snapshot sent
+when a channel opens never waits on a remote host. Every other read (directory browse, repository lists, the trash list,
+launch history, file stat) is an ordinary GET command whose reply body is the result. Data the old GUI polled stays a
+query that the GUI issues again; it does not become a replicated collection. There are two exceptions, both for work
+whose progress Settings follows while it runs: the Podman check's readiness, which rides each local and ssh host's entry
+so its start and end reach the GUI (see "Podman places, creation and images"), and the recipe catalog and recipe places,
+so a recipe build's steps reach Settings → Recipes as they move (decided by the migration's orchestrator on 2026-11-15).
+A pushed read must start nothing, because it runs after every bump; that is why `/api/environment-places`, whose read
+schedules Podman checks, stays a query. Neither recipe collection follows the clock: a prepared artifact that passes its
+freshness window reads stale at the next re-read, not when it passes.
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -5517,7 +5523,9 @@ that provider.
 Rebuild is a required provider operation that returns after admission or joining. It reads the current definition. A
 Podman Rebuild refuses as busy when a preparation-only job holds that recipe/place, so joining cannot claim a rebuild
 that never ran. Readiness is a synchronous projection over shared recipe state and the one build registry, with the same
-freshness rule for both providers and an exhaustive place decision.
+freshness rule for both providers and an exhaustive place decision. A Podman place job bumps the fleet feed when it is
+admitted, at each step, and once its registry entry is gone, so the pushed recipe places never show a finished job still
+building.
 
 Recipe deletion first takes the shared registry's deletion admission, excluding new builds, preparations and source
 selection for every provider. Each provider cleans all its recorded and live places under that guard. Cleanup waits for

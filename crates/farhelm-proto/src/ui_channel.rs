@@ -277,6 +277,19 @@ pub enum Collection {
     /// `GET /api/provisioning` serves it, keyed by host id. A host without a
     /// run is absent, not listed as idle.
     HostProgress,
+    /// The recipe catalog, as `GET /api/tensorlake/recipes` serves its
+    /// `recipes`, keyed by recipe name: each definition with its Tensorlake
+    /// snapshot, build and preparation progress, so a running build's step
+    /// arrives as it moves. Like [`Self::RecipePlaces`], it does not follow
+    /// the clock (see there).
+    Recipes,
+    /// Each recipe's readiness at each place, as `GET /api/recipe-places`
+    /// serves it, keyed by [`crate::RecipePlaceView::key`]: a Podman place's
+    /// image build or preparation, with its current step, arrives as it moves.
+    /// Time alone pushes nothing: a prepared artifact that outlives its
+    /// freshness window reads stale only at the next re-read, which any
+    /// later feed bump or command brings.
+    RecipePlaces,
 }
 
 /// The one key the [`Collection::Preferences`] collection uses: the helm has
