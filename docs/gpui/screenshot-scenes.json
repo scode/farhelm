@@ -601,6 +601,22 @@
       "reference": null
     },
     {
+      "id": "app-terminal-host-frame",
+      "title": "Settings' Color terminal frames by host turned on: the terminal's thin frame in its host's identity color",
+      "reference": null,
+      "mockup": false,
+      "start": ["--sessions", "1"],
+      "steps": [
+        ["click", "text:Fixture 1"],
+        ["terminal-text", "--wait", "FAKE-AGENT READY"],
+        ["click", "id:app-settings-toggle"],
+        ["click", "id:settings-section-sessions"],
+        ["click", "id:settings-color-terminal-frames"],
+        ["press", "escape"],
+        ["wait", "--idle"]
+      ]
+    },
+    {
       "golden": "dialog",
       "title": "The dialog frame",
       "reference": "rename-dialog"
