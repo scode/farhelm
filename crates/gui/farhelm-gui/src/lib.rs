@@ -48,6 +48,7 @@
 //!   frame, its title band and decorations, and the open-source notices.
 //! - [`update_readout`]: the desktop updater's state as the words and marks the version readout shows, pure so its
 //!   rules are tested without a window.
+//! - [`announcements`]: the Announcements dialog, updates and information from Farhelm the helm queues.
 //! - [`sounds`]: the status sounds as plain Rust: the rules for which one an observation plays, and the three sounds
 //!   synthesized into WAV bytes; observing the store and playing them come later.
 //! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
@@ -60,6 +61,7 @@
 //! into every build, so ordinary test runs cover it.
 
 pub mod actions;
+pub mod announcements;
 // Every build, so the bootstrap reads the overrides one way whatever the features: they are installed only by an agent
 // build, which alone reads the process environment (`agent_startup::from_env`), and every other build finds none and
 // starts with the defaults. Ordinary test runs, which never turn on the `agent` feature, cover the rest. The module

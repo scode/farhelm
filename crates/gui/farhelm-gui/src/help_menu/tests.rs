@@ -1,11 +1,12 @@
-//! Tests of the `?` button and its Help menu: the items and their order for every combination of updater and platform,
-//! the button's place and names at the rail's foot, opening and closing the menu, where focus goes, and what each item
+//! Tests of the `?` button and its Help menu: the items and their order for every combination of updater, shown
+//! announcements and platform, the button's place and names at the rail's foot, opening and closing the menu, where focus goes, and what each item
 //! does.
 //!
 //! Like the session list's tests, these run the real main view over the helm client's fake and read controls from
 //! GPUI's driver record of the frame by their ids. Links are checked through GPUI's test platform, which records the
 //! URL the app asked it to open, so nothing reaches a browser. The menu's order is a pure function of whether an
-//! updater runs and whether this is Linux, tested as such for every combination.
+//! updater runs, whether this helm has shown an announcement and whether this is Linux, tested as such for every
+//! combination.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -59,9 +60,10 @@ fn drawn_items(cx: &mut VisualTestContext) -> Vec<String> {
     drawn.into_iter().map(|(_, id)| id.to_string()).collect()
 }
 
-/// The ids [`items`] gives for this platform, with or without an updater: what the menu should draw.
+/// The ids [`items`] gives for this platform, with or without an updater, before any announcement was shown: what
+/// the menu should draw.
 fn expected(updater: bool) -> Vec<String> {
-    items(updater, cfg!(target_os = "linux"))
+    items(updater, false, cfg!(target_os = "linux"))
         .into_iter()
         .map(|item| item.id().to_owned())
         .collect()
@@ -109,35 +111,37 @@ fn open_menu(cx: &mut VisualTestContext) {
 // ---- The order of the items ----------------------------------------------------------------------------------------
 
 /// SPEC.md fixes the menu's order ("in order: ... Chat on Discord, Documentation, ..., Release notes, SSH needs 2FA?",
-/// "Check for updates last"), and the Linux-only notices item has no place in SPEC.md, so it goes at the very end where
-/// it moves nothing else. An item out of place is a menu the documentation no longer describes. Specified: without an
-/// updater and off Linux, Discord, Documentation, Release notes, SSH help; an updater adds Check for updates after
-/// them; Linux adds Open-Source Notices after everything, including after Check for updates.
+/// "Announcements appears directly after Release notes", "Check for updates last"), and the Linux-only notices item has
+/// no place in SPEC.md, so it goes at the very end where it moves nothing else. An item out of place is a menu the
+/// documentation no longer describes. Specified, for all eight combinations: Discord, Documentation, Release notes, SSH
+/// help always, in that order; a shown announcement adds Announcements right after Release notes; an updater adds Check
+/// for updates after the fixed items; Linux adds Open-Source Notices after everything, including after Check for
+/// updates.
 #[test]
 fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last() {
-    let fixed = vec![
-        Item::ChatOnDiscord,
-        Item::Documentation,
-        Item::ReleaseNotes,
-        Item::SshHelp,
-    ];
-    assert_eq!(items(false, false), fixed);
-    assert_eq!(
-        items(true, false),
-        [&fixed[..], &[Item::CheckForUpdates]].concat()
-    );
-    assert_eq!(
-        items(false, true),
-        [&fixed[..], &[Item::OpenSourceNotices]].concat()
-    );
-    assert_eq!(
-        items(true, true),
-        [
-            &fixed[..],
-            &[Item::CheckForUpdates, Item::OpenSourceNotices]
-        ]
-        .concat()
-    );
+    for updater in [false, true] {
+        for announced in [false, true] {
+            for linux in [false, true] {
+                let mut expected =
+                    vec![Item::ChatOnDiscord, Item::Documentation, Item::ReleaseNotes];
+                if announced {
+                    expected.push(Item::Announcements);
+                }
+                expected.push(Item::SshHelp);
+                if updater {
+                    expected.push(Item::CheckForUpdates);
+                }
+                if linux {
+                    expected.push(Item::OpenSourceNotices);
+                }
+                assert_eq!(
+                    items(updater, announced, linux),
+                    expected,
+                    "updater {updater}, announced {announced}, linux {linux}"
+                );
+            }
+        }
+    }
 }
 
 // ---- The button at the rail's foot ---------------------------------------------------------------------------------
@@ -332,4 +336,81 @@ fn open_source_notices_dispatches_the_app_menus_action_on_linux(cx: &mut TestApp
     test_support::click(cx, "help-menu-open-source-notices");
     assert_eq!(dispatched.get(), 1);
     assert!(!any_open(cx), "the item closed the menu");
+}
+
+// ---- Announcements -------------------------------------------------------------------------------------------------
+
+/// SPEC.md: "After at least one successful showing, Announcements stays in the ? menu directly after Release notes",
+/// and it opens the history, "returning focus to Help" when that closes. The item reads the pushed queue when the menu
+/// draws, so it appears as soon as the helm pushes a history. Specified: with nothing shown, the menu has no
+/// Announcements item; once the helm pushes a queue whose history holds one announcement, the menu draws Announcements
+/// directly after Release notes; choosing it closes the menu and opens the history showing that announcement; Escape
+/// closes it with focus back on the `?` button.
+#[gpui::test]
+fn announcements_appear_after_a_showing_and_open_the_history(cx: &mut TestAppContext) {
+    use farhelm_proto::announcements::{Announcement, AnnouncementQueue};
+    use farhelm_proto::ui_channel::{ANNOUNCEMENTS_KEY, Collection, CollectionChanges, KeyedEntry};
+    let entry = |history: Vec<Announcement>| KeyedEntry {
+        key: ANNOUNCEMENTS_KEY.into(),
+        value: serde_json::to_value(AnnouncementQueue {
+            pending: vec![],
+            history,
+        })
+        .unwrap(),
+    };
+    let mut nothing_shown = snapshot();
+    nothing_shown.push(CollectionState {
+        collection: Collection::Announcements,
+        meta: test_support::meta(&[ANNOUNCEMENTS_KEY]),
+        entries: vec![entry(vec![])],
+    });
+    let (mut fake, cx) = open_main(cx, nothing_shown);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    open_menu(cx);
+    assert!(
+        !drawn_items(cx).contains(&"help-menu-announcements".to_owned()),
+        "nothing shown yet, so no Announcements item"
+    );
+    test_support::keys(cx, "escape");
+
+    fake.push(CollectionChanges {
+        collection: Collection::Announcements,
+        meta: test_support::meta(&[ANNOUNCEMENTS_KEY]),
+        upsert: vec![entry(vec![Announcement {
+            id: "1".to_owned(),
+            title: "Shown before".to_owned(),
+            body: "Its body.".to_owned(),
+            detail: None,
+            link: None,
+        }])],
+        remove: vec![],
+    });
+    test_support::settle(cx);
+    open_menu(cx);
+    let drawn = drawn_items(cx);
+    let at = |id: &str| {
+        drawn
+            .iter()
+            .position(|item| item == id)
+            .unwrap_or_else(|| panic!("{id} was not drawn: {drawn:?}"))
+    };
+    assert_eq!(
+        at("help-menu-announcements"),
+        at("help-menu-release-notes") + 1,
+        "Announcements directly after Release notes: {drawn:?}"
+    );
+    test_support::click(cx, "help-menu-announcements");
+    assert!(node(&frame(cx), MENU).is_none(), "the menu closed");
+    assert!(any_open(cx), "the history opened");
+    assert!(
+        frame(cx).iter().any(|node| node
+            .texts
+            .iter()
+            .any(|text| text.text.as_ref() == "Shown before")),
+        "the history shows the shown announcement"
+    );
+    test_support::keys(cx, "escape");
+    assert!(!any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
 }

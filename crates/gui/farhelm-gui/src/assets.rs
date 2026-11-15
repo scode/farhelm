@@ -255,6 +255,9 @@ pub enum Icon {
     External,
     /// Two sliders: an order of the session list, beside each order in its menu (the old app's Adjust glyph).
     Adjust,
+    /// An i in a circle: a menu item that shows information Farhelm wrote, such as the announcements it has shown
+    /// (the old app's `ActionGlyph::Info`).
+    Info,
 }
 
 impl Icon {
@@ -331,6 +334,7 @@ impl Icon {
         Icon::Help,
         Icon::External,
         Icon::Adjust,
+        Icon::Info,
     ];
 }
 
@@ -406,6 +410,7 @@ impl Icon {
             Icon::Help => "icons/help.svg",
             Icon::External => "icons/external.svg",
             Icon::Adjust => "icons/adjust.svg",
+            Icon::Info => "icons/info.svg",
         }
     }
 }
@@ -518,6 +523,7 @@ impl Assets {
             "icons/help.svg" => Some(include_bytes!("../assets/icons/help.svg")),
             "icons/external.svg" => Some(include_bytes!("../assets/icons/external.svg")),
             "icons/adjust.svg" => Some(include_bytes!("../assets/icons/adjust.svg")),
+            "icons/info.svg" => Some(include_bytes!("../assets/icons/info.svg")),
             _ => None,
         }
     }

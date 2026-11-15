@@ -78,8 +78,8 @@ use farhelm_helm_client::fake::terminal::FakeTerminal;
 use farhelm_helm_client::terminal::AttachmentLease;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
-    KeyedEntry, ListCounts, PREFERENCES_KEY,
+    ANNOUNCEMENTS_KEY, Availability, Collection, CollectionChanges, CollectionMeta,
+    CollectionState, HostView, KeyedEntry, ListCounts, PREFERENCES_KEY,
 };
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
@@ -2170,6 +2170,66 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     keep.push(Box::new(watch));
 }
 
+/// The Announcements dialog as the `?` menu's history opens it: two shown announcements, newest first, the first with a
+/// detail line, two paragraphs and a labelled link, the second plain. The old app's announcements dialog was never
+/// captured as a reference scene, so SPEC.md and the old code are this picture's reference.
+fn announcements_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::announcements::{Announcement, AnnouncementLink, AnnouncementQueue};
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let newest = Announcement {
+        id: "2".to_owned(),
+        title: "Sessions now restart in their own terminal".to_owned(),
+        body: "Restart keeps the session's history and opens a fresh terminal beside it.\n\nNothing changes for \
+               sessions you do not restart."
+            .to_owned(),
+        detail: Some("Since 0.40.0".to_owned()),
+        link: Some(AnnouncementLink {
+            label: "Release notes".to_owned(),
+            url: "https://farhelm.io/docs/release-notes/".to_owned(),
+        }),
+    };
+    let older = Announcement {
+        id: "1".to_owned(),
+        title: "Hosts update on their own".to_owned(),
+        body: "Remote hosts now update when the app does.".to_owned(),
+        detail: None,
+        link: None,
+    };
+    helm.connect(vec![CollectionState {
+        collection: Collection::Announcements,
+        meta: test_support::meta(&[ANNOUNCEMENTS_KEY]),
+        entries: vec![KeyedEntry {
+            key: ANNOUNCEMENTS_KEY.into(),
+            value: serde_json::to_value(AnnouncementQueue {
+                pending: vec![],
+                history: vec![newest, older],
+            })
+            .unwrap(),
+        }],
+    }]);
+    // As for Rename: the queue reaches the store after this setup returns, so the history opens once the connection
+    // has a UI session, and only once.
+    let handle = window.window_handle();
+    let opener = cx.focus_handle().tab_stop(true);
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let opener = opener.clone();
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::announcements::open_history(&opener, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts`,
 /// `settings-agent-trust` and `settings-notifications`): focus on the section's first switch (on the dialog itself at
@@ -3417,6 +3477,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: session_list_deleting_setup,
+    },
+    Scene {
+        name: "announcements-dialog",
+        size: (640., 520.),
+        draw: empty,
+        setup: announcements_dialog_setup,
     },
     Scene {
         name: "rename-dialog",
