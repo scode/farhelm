@@ -8150,6 +8150,19 @@ launcher's moved-on rule decides whether a prepared launch opens anything, and t
 from overtaking a template save sent before it. A launcher prepared out of sight shown after the user moved on waits
 behind the launch notice, as a refused launch does.
 
+One row search (`templates/rows.rs`) is what the quick switcher's templates section, the launcher's `tl:` search and the
+Cmd+J list will call; none of them draws rows yet. It matches a lowercased substring of the name, in the helm's order,
+each row with its summary, ⚡ and number key (the caller decides which to draw: the old switcher's section drew name and
+summary, Cmd+J the shortcuts too), read from the store when the list draws; the caller strips the `tl:` label, which is
+the trimmed query up to its first colon, `tl` in any case. A pick from the switcher's section
+(`dispatch::pick_from_switcher`) opens New on its prefill at once and applies the template to it as a press in the open
+launcher does (next paragraph), so it waits for New's catalog read; it never launches, and a press of Launch in that
+frame or two starts New's plain prefill and drops the pick, as it drops any batch still waiting. A template that cannot
+launch on its own is followed by the needs-more-choices banner once it applies. Its refusals are the old switcher pick's
+words, shown in New without "Not launched.", since nothing was launching. The Quick launch row is the ⚡ chord's
+dispatch with the switcher origin. Both act only once the switcher has closed, since the page path refuses while a
+dialog holds the keyboard, and do nothing while the launcher is busy.
+
 While the session launcher is the dialog holding the keyboard (`launcher::entry::open_launcher`: a weak slot the
 launcher sets each time it is shown, checked against the layer stack's topmost layer that takes focus, never a downcast
 of the dialog's view), a press or a completed sequence applies to its draft instead and leaves Launch to the user

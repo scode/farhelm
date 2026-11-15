@@ -40,6 +40,9 @@
 //! The banner New opens with goes about six seconds after the templates applied, or at the user's first edit (SPEC.md,
 //! "Template number shortcuts", which the sequence's banner follows); the launcher keeps that deadline
 //! (`launcher::view::BANNER_SHOWS_FOR`).
+//!
+//! A pick in the quick switcher's templates section ([`pick_from_switcher`]) does not go through [`dispatch`]: it opens
+//! New at once and applies the template there as a press in the open launcher does, never launching.
 
 use farhelm_proto::launcher::{LaunchTemplate, stacked_quick_launch_eligible};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView, PREFERENCES_KEY, Preferences};
@@ -52,7 +55,7 @@ use super::{SEQUENCE_PREFIX_NAME, apply};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Catalog, LaunchDraft};
-use crate::launcher::view::{Launcher, Note, Prepared};
+use crate::launcher::view::{BatchApplied, Launcher, Note, Prepared};
 use crate::launcher::{self, entry};
 use crate::{layers, local_state, session};
 
@@ -69,7 +72,7 @@ pub enum Origin {
     Sequence,
     /// A pick in the Cmd+J template list.
     TemplateList,
-    /// The quick switcher's Quick launch row.
+    /// The quick switcher: its Quick launch row, or a pick in its templates section.
     Switcher,
 }
 
@@ -128,7 +131,16 @@ pub(super) fn refused(refusal: &Refusal, window: &mut Window, cx: &mut App) {
 /// that a word is never reported unknown only because the templates could not be read. Before the first snapshot the
 /// window is inert, and nothing is refused here.
 pub(super) fn refused_unavailable(window: &mut Window, cx: &mut App) -> bool {
-    let unavailable = session::current_store(cx).and_then(|store| {
+    let Some(error) = unavailable(cx) else {
+        return false;
+    };
+    refused(&Refusal::Unavailable(error), window, cx);
+    true
+}
+
+/// The helm's words for why its templates are unavailable, if it reports them so; `None` before the first snapshot.
+pub(super) fn unavailable(cx: &App) -> Option<String> {
+    session::current_store(cx).and_then(|store| {
         match &store
             .read(cx)
             .collections()
@@ -138,12 +150,90 @@ pub(super) fn refused_unavailable(window: &mut Window, cx: &mut App) -> bool {
             Availability::Unavailable { error } => Some(error.clone()),
             Availability::Available => None,
         }
-    });
-    let Some(error) = unavailable else {
-        return false;
+    })
+}
+
+/// A pick of the template named `name` in the quick switcher's templates section: open New on its prefill at once and
+/// apply the template to it, never launching (SPEC.md: "Picking one opens New with its edits applied, without using
+/// the query as the session name ... Neither name nor template pick launches a session"), as the old switcher opened
+/// New and then accepted the template there. The template is applied as a press in the open launcher is
+/// ([`Launcher::apply_batch`]), so it waits for New's catalog read; until then New shows its prefill. A template that
+/// cannot launch on its own is followed by the needs-more-choices banner once it applies. The template is the one the
+/// store holds under `name` at the pick.
+///
+/// Its refusals are the old switcher pick's, shown in the open New with no "Not launched.", since nothing was
+/// launching: a failed template read is "Couldn't load templates: <the helm's words>; search tl: and retry", a name
+/// the store no longer has is "No template is named \"<name>\"; it may have been deleted", and a template that does
+/// not apply says why in [`apply::apply`]'s words alone, changing nothing.
+///
+/// Like [`dispatch`] it does nothing while a dialog or menu holds the keyboard or the launcher is busy (a launch
+/// pending, a quick launch being prepared, a refused launch waiting behind its notice, a host change in flight), as the
+/// switcher's New row does then; so the switcher closes itself first and calls this from the handler of the user's
+/// pick.
+pub fn pick_from_switcher(name: &str, window: &mut Window, cx: &mut App) {
+    if !on_page(window, cx) {
+        return;
+    }
+    let Some(draft) = entry::new_prefill(cx) else {
+        return;
     };
-    refused(&Refusal::Unavailable(error), window, cx);
-    true
+    // New with the old switcher pick's refusal, for a pick that cannot apply at all.
+    let refused = |draft: LaunchDraft, parts: &[Part], window: &mut Window, cx: &mut App| {
+        let note = Note::Refusal(sentence(PAGE_REFUSAL, parts));
+        entry::open_with(draft, Some(note), window, cx);
+    };
+    if let Some(error) = unavailable(cx) {
+        let parts = [
+            Part::Words("Couldn't load templates: ".to_owned()),
+            Part::Host(error),
+            Part::Words("; search tl: and retry".to_owned()),
+        ];
+        return refused(draft, &parts, window, cx);
+    }
+    let Some(template) = stored_templates(cx)
+        .into_iter()
+        .find(|template| template.name == name)
+    else {
+        let parts = [
+            Part::Words("No template is named \"".to_owned()),
+            Part::Host(name.to_owned()),
+            Part::Words("\"; it may have been deleted".to_owned()),
+        ];
+        return refused(draft, &parts, window, cx);
+    };
+    // `on_page` above is all that keeps a pick off a refused launch waiting behind its notice: `open_with` would bring
+    // that one back instead of opening this draft.
+    if !entry::open_with(draft, None, window, cx) {
+        return;
+    }
+    let Some(launcher) = entry::open_launcher(window, cx) else {
+        return;
+    };
+    let templates = vec![template];
+    // Whether the template can launch on its own does not depend on the catalog, so the banner is decided now.
+    let banner = (!stacked_quick_launch_eligible(
+        templates.iter().map(|template| &template.fields),
+    ))
+    .then(|| {
+        Note::Banner(sentence(
+            "quick-launch-banner",
+            &incomplete_banner(Origin::Switcher, &templates),
+        ))
+    });
+    launcher.update(cx, |launcher, cx| {
+        launcher.apply_batch(
+            move |draft, catalog, cx| {
+                apply_from_store(draft, &templates, catalog, cx)
+                    .map(|applied| BatchApplied {
+                        notice: applied.notice,
+                        note: banner,
+                    })
+                    .map_err(|refusal| sentence(PAGE_REFUSAL, &[Part::Host(refusal)]))
+            },
+            window,
+            cx,
+        )
+    });
 }
 
 /// The banner New shows when `templates`, applied for a quick launch from `origin`, do not make a launch on their own, in
@@ -243,7 +333,10 @@ fn in_launcher(
                 let templates = resolved
                     .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &refusal.launcher_sentence()))?;
                 apply_from_store(draft, &templates, catalog, cx)
-                    .map(|applied| applied.notice)
+                    .map(|applied| BatchApplied {
+                        notice: applied.notice,
+                        note: None,
+                    })
                     .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &[Part::Host(refusal)]))
             },
             window,
