@@ -13,7 +13,9 @@
 //!   conversation selector are one-time inputs beside them.
 //! - A destination: host, folder and session name. The folder and the name are [`Draft`]s, because their touched mark
 //!   decides whether something else may overwrite them: a host change re-seeds only a folder the user has not typed or
-//!   picked (SPEC.md, "Working directory").
+//!   picked (SPEC.md, "Working directory"). Instead of the folder, the destination can be a managed checkout
+//!   ([`Checkout`]): a new clone of a GitHub repository the helm makes for the session (SPEC.md, "Managed checkouts").
+//!   The folder is kept, unused, while a checkout is chosen, so choosing Folder again brings it back.
 //! - A [`Mode`]: New, Clone, Replace with or Restart with. Clone, Replace with and Restart with are seeded from the
 //!   source session's stored launch, verbatim, never parsed back from a command line (SPEC.md, "Clone"). Seeding is a
 //!   separate path from editing: it marks nothing touched and raises no banner. [`LaunchDraft::holds`] answers which
@@ -30,15 +32,15 @@
 //! into argv.
 //!
 //! Not here: the composer search's parsing, recent setups and the host's default-folder precedence (the view passes
-//! the folder a host change should seed), managed checkouts, environments, and the launch's validation and request
-//! bodies.
+//! the folder a host change should seed), a managed checkout's suggestions and preview (the view reads them from the
+//! helm; the draft holds only what the user chose), environments, and the launch's validation and request bodies.
 
 use farhelm_proto::launcher::{
     LaunchCatalogModel, TemplateNameKind, compatible_efforts, reconcile_harness_selection,
 };
 use farhelm_proto::{
-    CommandLaunch, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, SessionInfo,
-    SessionLaunch,
+    CommandLaunch, GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+    SessionInfo, SessionLaunch,
 };
 
 use crate::drafts::Draft;
@@ -133,6 +135,48 @@ pub enum Field {
     Destination,
     Name,
     InitialPrompt,
+}
+
+/// Which kind of destination the launcher's Where row shows chosen: an existing folder on the host, or a managed
+/// checkout the helm clones for the session (SPEC.md, "Managed checkouts": "the same segmented destination control:
+/// folder or managed checkout").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DestinationKind {
+    Folder,
+    Checkout,
+}
+
+/// A managed-checkout destination: what the repository field holds, and the repository the user chose.
+///
+/// Only a chosen repository can launch. Typed text is never one, even a valid `owner/repo` pair: SPEC.md, "Empty,
+/// invalid or unselected repository input cannot launch using a previous folder", and selecting a repository is what
+/// "explicitly requests a new checkout". So typing drops the choice, and choosing from the suggestions (or `gh:` in the
+/// composer search, or a Clone of a checkout session) sets it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Checkout {
+    /// The repository field's text while no repository is chosen.
+    pub query: String,
+    /// The chosen repository, canonical lowercase.
+    pub repo: Option<GithubRepo>,
+    /// How many times a repository has been chosen in this draft. Choosing one again, even the same repository, asks
+    /// the helm for a new preview, as the old launcher did (its `preview_revision`), so the count is part of what a
+    /// preview answers for; nothing else reads it.
+    pub chosen: u64,
+}
+
+impl Checkout {
+    /// The repository field's text: the chosen repository's `owner/repo`, or the text typed since.
+    pub fn field_text(&self) -> String {
+        match &self.repo {
+            Some(repo) => repo_identifier(repo),
+            None => self.query.clone(),
+        }
+    }
+}
+
+/// A repository's `owner/repo` pair, as the field shows it and as the preview and the create send it.
+pub fn repo_identifier(repo: &GithubRepo) -> String {
+    format!("{}/{}", repo.owner, repo.name)
 }
 
 /// The Agent tab's choices, as the user made them. Text fields keep their raw text even while it does not parse, so a
@@ -248,6 +292,8 @@ pub struct LaunchDraft {
     /// The target host's registry id; `None` only while the helm has reported no host at all.
     pub host: Option<i64>,
     pub folder: Draft<String>,
+    /// The managed checkout chosen instead of the folder, or `None` for a folder destination. See [`Checkout`].
+    pub checkout: Option<Checkout>,
     pub name: Draft<String>,
     /// Whether the host is a hand pick ([`Self::choose_host`], which a launch template's host goes through too), rather
     /// than New's prefill or the source session's host a Clone inherited. Save as template checks the host only after
@@ -287,6 +333,7 @@ impl LaunchDraft {
             conversation: String::new(),
             host,
             folder: Draft::load(folder),
+            checkout: None,
             name: Draft::load(String::new()),
             host_chosen: false,
             name_kind: None,
@@ -362,6 +409,7 @@ impl LaunchDraft {
             conversation: String::new(),
             host,
             folder: Draft::load(session.cwd.clone()),
+            checkout: None,
             name: Draft::load(session.title.clone()),
             host_chosen: false,
             name_kind: None,
@@ -747,11 +795,93 @@ impl LaunchDraft {
     }
 
     /// The folder field's text, as typed, or a folder picked from the dropdown, Browse or search: either is the
-    /// user's own choice, so a later host change keeps it.
+    /// user's own choice, so a later host change keeps it. It also makes the destination that folder again if a managed
+    /// checkout was chosen (SPEC.md: "Selecting a folder or editing the ordinary directory returns to an
+    /// existing-directory launch without changing the agent choice"); the field itself is read-only then, so this is a
+    /// folder picked elsewhere, as by the composer search.
     pub fn edit_folder(&mut self, text: String) {
+        if self.holds(Field::Destination) {
+            return;
+        }
         // `Draft::edit` refuses only while a save of the draft is in flight; the launcher never saves its drafts (a
         // launch is not a save), so every edit lands.
         let _ = self.folder.edit(text);
+        self.checkout = None;
+    }
+
+    /// The Where row's choice: a folder, or a managed checkout. Choosing Folder brings back the folder the draft held
+    /// before, untouched by the checkout; choosing Managed checkout starts with an empty repository field. Choosing the
+    /// kind already chosen changes nothing, so it never drops a chosen repository. Restart with holds its destination.
+    pub fn choose_destination(&mut self, kind: DestinationKind) {
+        if self.holds(Field::Destination) || kind == self.destination_kind() {
+            return;
+        }
+        self.checkout = match kind {
+            DestinationKind::Folder => None,
+            DestinationKind::Checkout => Some(Checkout::default()),
+        };
+    }
+
+    /// The kind of destination chosen now.
+    pub fn destination_kind(&self) -> DestinationKind {
+        match self.checkout {
+            Some(_) => DestinationKind::Checkout,
+            None => DestinationKind::Folder,
+        }
+    }
+
+    /// The repository field's text, as typed. It drops a chosen repository (typed text is never a choice; see
+    /// [`Checkout`]), and makes the destination a managed checkout if it was not.
+    pub fn edit_repository_query(&mut self, text: String) {
+        if self.holds(Field::Destination) {
+            return;
+        }
+        let chosen = self.checkout.as_ref().map_or(0, |checkout| checkout.chosen);
+        self.checkout = Some(Checkout {
+            query: text,
+            repo: None,
+            chosen,
+        });
+    }
+
+    /// Choose `repo` for a managed checkout: from the repository field's suggestions, or from wherever else names a
+    /// repository the way a hand choice does (the composer search's `gh:owner/repo`). The destination becomes a managed
+    /// checkout of it, and the helm is asked for a new preview even when it is the repository already chosen. Refused,
+    /// changing nothing, where the mode holds the destination (Restart with).
+    pub fn choose_repository(&mut self, repo: GithubRepo) {
+        if self.holds(Field::Destination) {
+            return;
+        }
+        let chosen = self.checkout.as_ref().map_or(0, |checkout| checkout.chosen) + 1;
+        self.checkout = Some(Checkout {
+            query: repo_identifier(&repo),
+            repo: Some(repo),
+            chosen,
+        });
+    }
+
+    /// The name a managed checkout is previewed and launched with: its folder is named after it, and empty means an
+    /// unnamed checkout, which gets the lowest free `<repo>-N` as both folder and title.
+    ///
+    /// Clone and Replace with copy their source's title, and a copied title the user has not edited is ignored for a
+    /// checkout (SPEC.md: "Replace with into a managed checkout, Clone into a different repository, and Clone of a
+    /// source with no repository ignore an untouched copied title: the session is unnamed"). The name field shows this
+    /// value while a checkout is chosen, and the copied title again when Folder is chosen back.
+    pub fn checkout_title(&self) -> String {
+        let copied = matches!(self.mode, Mode::Clone | Mode::ReplaceWith { .. });
+        if copied && !self.name.is_touched() {
+            return String::new();
+        }
+        self.name.value().clone()
+    }
+
+    /// The session name the name field shows: the name as held, or, while a managed checkout is chosen, the name the
+    /// checkout gets ([`Self::checkout_title`]).
+    pub fn shown_name(&self) -> String {
+        match self.checkout {
+            Some(_) => self.checkout_title(),
+            None => self.name.value().clone(),
+        }
     }
 
     /// The session name, typed or accepted from `name:`. It becomes the user's exact name: a template's name kind no

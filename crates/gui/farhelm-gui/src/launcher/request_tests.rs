@@ -13,7 +13,7 @@ use farhelm_proto::{
 };
 
 use super::draft::{LaunchDraft, Tab};
-use super::request::Target;
+use super::request::{Preview, Target};
 
 /// Host 1 connected with connection 4, as the helm's pinned host list serves it; host 2 the same row never
 /// connected (connection 0) and not connected now.
@@ -45,7 +45,11 @@ fn catalog() -> Vec<LaunchCatalogModel> {
 }
 
 fn target<'a>(hosts: &'a [HostView], catalog: Option<&'a [LaunchCatalogModel]>) -> Target<'a> {
-    Target { hosts, catalog }
+    Target {
+        hosts,
+        catalog,
+        preview: Preview::Waiting,
+    }
 }
 
 fn draft() -> LaunchDraft {

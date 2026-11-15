@@ -18,24 +18,61 @@
 //! The bodies are `farhelm_proto::session_requests`' types, built only from a draft that passes
 //! [`LaunchDraft::refusal`]. What the old app's bodies carried for its retry keys is gone: the GUI sends none
 //! (SPEC.md, "Creation").
+//!
+//! A managed checkout launches only with a current preview of its folder in hand (SPEC.md, "Managed checkouts":
+//! "Before Launch becomes available, the composer shows the exact host and path"), which the view reads from the helm
+//! and passes in as [`Preview`]; the create then sends that preview back unchanged, so the helm can refuse it if the
+//! host's checkout folder changed since. Since the GUI sends no request keys, the old app's retained attempts for an
+//! ambiguous fresh-checkout create ("Retry reconciles the original request at this path") have no counterpart here.
 
 use farhelm_proto::launcher::{LaunchCatalogModel, compatible_efforts};
 use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody, RestartSessionBody};
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use farhelm_proto::{
-    CommandLaunch, DeleteGuard, LaunchPermission, LaunchSelection, RETIRED_CONTAINER_REASON,
-    SessionLaunch, check_permission_flags, split_permission_flags, split_wrapper_prefix,
+    AcceptedGithubPreview, CommandLaunch, DeleteGuard, GithubCheckoutRequest, LaunchPermission,
+    LaunchSelection, RETIRED_CONTAINER_REASON, SessionLaunch, check_permission_flags,
+    split_permission_flags, split_wrapper_prefix,
 };
 
-use super::draft::{Catalog, LaunchDraft, Mode, Restart, RestartBaseline, Tab};
+use super::draft::{Catalog, LaunchDraft, Mode, Restart, RestartBaseline, Tab, repo_identifier};
 
-/// What a launch is checked against besides the draft: the hosts as the store holds them, and the model catalog as
-/// the launcher read it.
+/// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog as the
+/// launcher read it, and a managed checkout's preview.
 #[derive(Clone, Copy, Debug)]
 pub struct Target<'a> {
     pub hosts: &'a [HostView],
     pub catalog: Catalog<'a>,
+    /// The preview of the chosen managed checkout's folder, as current for the draft as it is now. Ignored for a
+    /// folder destination.
+    pub preview: Preview<'a>,
 }
+
+/// Where a managed checkout's preview stands for the draft as it is now: the view asks the helm again whenever what a
+/// preview answers for changes (the host and its installation, the repository, the name, the agent choices), and an
+/// answer for anything earlier is not one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Preview<'a> {
+    /// No current answer yet: asked, about to be asked, or not askable.
+    Waiting,
+    /// The helm's answer: the exact folder, which the create sends back unchanged.
+    Ready(&'a AcceptedGithubPreview),
+    /// The helm refused to preview it, in its words, which the view shows beside the preview.
+    Failed,
+}
+
+/// Why a managed checkout without a chosen repository cannot launch, the old launcher's words.
+pub const SELECT_REPOSITORY: &str = "Select a GitHub repository before launching";
+/// Why a named conversation cannot start in a managed checkout: a new clone has no conversation to resume. The old
+/// launcher's words, which it said at the press.
+pub const CONVERSATION_IN_CHECKOUT: &str =
+    "Named conversations cannot start in a new managed checkout; choose an existing folder";
+/// Why a managed checkout waits for its preview, the old launcher's words; a failed preview says this too, while its
+/// own words show beside the preview.
+pub const WAIT_FOR_PREVIEW: &str = "Wait for a current checkout preview before launching";
+/// Why a managed checkout cannot launch on a connected host that reports no installation identity: the helm binds every
+/// checkout preview to that identity, so none can be asked for. The old launcher's words.
+pub const UNVERIFIED_HOST: &str =
+    "The host installation is not verified; a checkout cannot be created";
 
 impl LaunchDraft {
     /// Why this draft cannot launch now, or `None` when it can. The first reason in the old app's order wins, so the
@@ -47,6 +84,10 @@ impl LaunchDraft {
     pub fn refusal(&self, target: Target<'_>, live: Option<&SessionLaunch>) -> Option<String> {
         if let Some(reason) = self.host_refusal(target.hosts) {
             return Some(reason);
+        }
+        // The old order: the destination's reasons come right after the host's, before the launch kind's.
+        if let Some(reason) = self.checkout_refusal(target) {
+            return Some(reason.to_owned());
         }
         match self.tab {
             Tab::Agent => {
@@ -138,6 +179,30 @@ impl LaunchDraft {
             );
         }
         None
+    }
+
+    /// A managed checkout's reason, if it has one: a repository chosen, no named conversation, on a host with an
+    /// installation identity, with a current preview. The conversation comes before the preview, so a launch the helm
+    /// would refuse anyway is not told to wait for one.
+    fn checkout_refusal(&self, target: Target<'_>) -> Option<&'static str> {
+        let checkout = self.checkout.as_ref()?;
+        if checkout.repo.is_none() {
+            return Some(SELECT_REPOSITORY);
+        }
+        if self.active_conversation().is_some() {
+            return Some(CONVERSATION_IN_CHECKOUT);
+        }
+        let verified = self
+            .host
+            .and_then(|id| target.hosts.iter().find(|host| host.id == id))
+            .is_some_and(|host| host.identity.as_deref().is_some_and(|id| !id.is_empty()));
+        if !verified {
+            return Some(UNVERIFIED_HOST);
+        }
+        match target.preview {
+            Preview::Ready(_) => None,
+            Preview::Waiting | Preview::Failed => Some(WAIT_FOR_PREVIEW),
+        }
     }
 
     /// The target host's reason, if it has one: it must be in the store and connected (SPEC.md: the host picker lists
@@ -272,26 +337,63 @@ impl LaunchDraft {
             Tab::Command => (None, self.command_launch()),
         };
         let host = self.host?;
-        let name = self.name.value();
+        // The refusal check has found this host connected, so its connection number is a real one.
+        let incarnation = target
+            .hosts
+            .iter()
+            .find(|view| view.id == host)
+            .map(|view| view.incarnation);
+        let (cwd, name, expected_incarnation, github_checkout) = match self.checkout_launch(target)
+        {
+            // A managed checkout starts in the previewed folder, on the connection the preview was taken on, with the
+            // name its folder is named after (empty for an unnamed one, which the helm names `<repo>-N`).
+            Some((repo, preview)) => {
+                let title = self.checkout_title();
+                (
+                    preview.binding.cwd.clone(),
+                    title.clone(),
+                    Some(preview.incarnation),
+                    Some(GithubCheckoutRequest {
+                        repo,
+                        title: Some(title),
+                        preview: Some(preview.clone()),
+                    }),
+                )
+            }
+            None => (
+                self.folder.value().clone(),
+                self.name.value().clone(),
+                incarnation,
+                None,
+            ),
+        };
         Some(CreateSessionBody {
             host: Some(host),
-            // The refusal check has found this host connected, so its connection number is a real one.
-            expected_incarnation: target
-                .hosts
-                .iter()
-                .find(|view| view.id == host)
-                .map(|view| view.incarnation),
-            cwd: self.folder.value().clone(),
+            expected_incarnation,
+            cwd,
             // A blank name asks for a generated one; any other name is sent byte for byte (old
             // `optional_create_title` at the reference commit).
-            title: (!name.trim().is_empty()).then(|| name.clone()),
+            title: (!name.trim().is_empty()).then_some(name),
             launch,
             command,
             prompt: self.active_prompt().map(str::to_owned),
             conversation: self.active_conversation().map(str::to_owned),
             confirm_yolo: false,
-            github_checkout: None,
+            github_checkout,
         })
+    }
+
+    /// A managed checkout's repository and current preview, for the create: `None` for a folder destination.
+    /// [`Self::refusal`] has already refused a checkout without both.
+    fn checkout_launch<'a>(
+        &self,
+        target: Target<'a>,
+    ) -> Option<(String, &'a AcceptedGithubPreview)> {
+        let repo = self.checkout.as_ref()?.repo.as_ref()?;
+        match target.preview {
+            Preview::Ready(preview) => Some((repo_identifier(repo), preview)),
+            Preview::Waiting | Preview::Failed => None,
+        }
     }
 
     /// Replace with's request (`POST /api/sessions/{id}/replace`): this draft's create, then the source's delete

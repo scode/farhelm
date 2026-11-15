@@ -29,8 +29,8 @@
 //!   it refuses for the folder is marked the same way (from the refusal's words) while the draft still names it, which
 //!   [`Launcher::changed`](super::Launcher) ensures by dropping the refusal on any edit.
 //!
-//! NOTE: Managed-checkout paths are not checked; the managed-checkout destination comes with its own piece, and until
-//! then every launcher folder is a plain folder.
+//! Only a folder destination is checked: a managed checkout's folder does not exist until the launch makes it, and the
+//! helm's preview names it instead (`checkout`).
 
 use std::time::Duration;
 
@@ -113,6 +113,10 @@ impl Launcher {
     /// What the folder check is about now: the chosen host on its current connection and the folder as it stands, or
     /// `None` when there is nothing to check (no host, a host that is not connected, an empty folder).
     fn check_key(&self, cx: &gpui::App) -> Option<CheckKey> {
+        // A managed checkout's folder does not exist yet, and the helm previews it instead (`checkout`).
+        if self.draft.checkout.is_some() {
+            return None;
+        }
         let host = self.draft.host?;
         // The folder exactly as the launch would send it, so the check and the launch ask about the same path.
         let cwd = self.draft.folder.value();
