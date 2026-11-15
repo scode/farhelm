@@ -393,6 +393,12 @@ impl OpKey {
     /// of the catalog that shows the recipe building then drops whatever refusal the key holds (`settings/recipes.rs`,
     /// `settle_refusals`). The editor decides knowingly whether that is right for its refusals, or tells them apart by
     /// [`Failure::work`] after giving builds a kind of work of their own.
+    ///
+    /// The rule above, made precise: each Rebuild at one of the recipe's container places shares the key and its
+    /// refusal record with the snapshot build, so the row draws a refused Rebuild in the same place, and a refusal is
+    /// dropped by the first push that shows one of the recipe's sources start building, its snapshot or one of its
+    /// container places, not by every push that shows it building: a refusal that lands while a source already builds
+    /// stays while that source goes on.
     pub fn recipe(name: &str) -> OpKey {
         OpKey(Key::Recipe(name.to_owned()))
     }

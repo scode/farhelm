@@ -722,9 +722,10 @@ unavailable while a save runs.
 
 ## `tests/tensorlake-recipes.spec.ts`, partly
 
-Settings → Recipes lists the shared catalog with each recipe's summary and built-snapshot status, and builds snapshots.
-New recipe, Edit and the recipe editor, the row's prepared-snapshot line and its per-place container lines come in later
-changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.rs`:
+Settings → Recipes lists the shared catalog with each recipe's summary, its per-place container lines with a Rebuild per
+place, its built-snapshot status and its prepared-snapshot line, and builds snapshots. New recipe, Edit and the recipe
+editor come in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.rs` and
+`crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`:
 
 - "a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with the recipe": partly. The row's status
   in every build state, with the one action each offers (Build snapshot, Rebuild snapshot, Retry, or none while a build
@@ -746,8 +747,25 @@ changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.r
   `an_unreadable_catalog_keeps_the_rows_and_retry_loading_asks_again`, with the failure and the recovery pushed by the
   helm (see "Recipes" under Deviations for what Retry loading sends); a failed read with no rows,
   `an_empty_catalog_says_so_and_an_unreadable_one_shows_only_its_reason`.
-- "recipe preparation reports lazy progress, failure and readiness" and "recipe preparation explains ${state} without a
-  Prepare now action": wait for the row's prepared-snapshot line.
+- "recipe preparation reports lazy progress, failure and readiness": partly. The line in every preparation state, with
+  no action of its own, `prepared_status_reports_all_phases_and_lazy_recovery` and
+  `prepared_status_keeps_readiness_last_checked_and_ages_display_only`; its age moving on the clock with nothing read,
+  `a_ready_snapshots_age_moves_on_the_clock_which_goes_when_hidden`, and its pulse,
+  `a_running_preparation_pulses_until_the_section_is_hidden`. What preparation does in Tensorlake (the preparer, its
+  cleanup and the snapshot it records) is the helm's, tested in `crates/farhelm-helm/src/tensorlake/build_tests.rs`.
+- "recipe preparation explains ${state} without a Prepare now action": `prepared_status_explains_each_helm_stale_reason`
+  and, for the interrupted state, `prepared_status_reports_all_phases_and_lazy_recovery`; the stale look is the golden
+  `settings-recipes-places`.
+- The per-place lines and their Rebuild, which no case of this spec drove (`tests/podman-environments.spec.ts`'s
+  "recipes refreshes recipe places after a delayed probe without a fleet notice" is the launcher area's row, and its
+  Recipes half is ported here): `the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name`,
+  `places_not_pushed_yet_read_as_reading`, `unreadable_places_show_their_reason_in_the_row`,
+  `a_places_rebuild_is_accepted_under_the_recipes_key_and_the_push_shows_it_building`,
+  `a_refused_rebuild_shows_under_the_row_until_a_push_shows_it_building`,
+  `a_refusal_stays_while_another_place_of_its_recipe_already_builds`, `a_place_without_a_line_building_keeps_a_refusal`,
+  and the check asked on opening, its outcome brought by the helm's push of the places,
+  `container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome`; the look, the golden
+  `settings-recipes-places`.
 - "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}", "${agent} modes retain drafts and
   select only named ${agent} logins", "a managed recipe is created, edited and deleted without exposing its token", "the
   recipe editor refuses bad names, asks before leaving, and saves a custom base", "closing Settings with an unsaved
@@ -904,7 +922,8 @@ Where the port does not match the old app, and why. Each stays until the work na
   shows whether the catalog could be read. The visible behavior is the old one; what is sent differs.
 - **A refused build's words outlive Settings.** The old row kept them in the dialog and lost them when Settings closed.
   Here the build is work on the recipe's own operation key, which keeps a refusal until the next build of that recipe
-  starts or the pushed catalog shows it building (the old row's rule), so reopening Settings still shows it.
+  starts or the pushed state shows the recipe start building, its snapshot or one of its container places (the old row's
+  rule, settled on the start because every push re-checks it), so reopening Settings still shows it.
 - **The running dot sits on the build's own line.** The old row drew it before the snapshot status's last line, which a
   pending cleanup or an unsupported-base warning can follow; the dot then marked a line that is not running. Here it
   marks the "Building snapshot" line wherever it falls.
@@ -914,6 +933,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   "Save an API key in Settings → Credentials to build snapshots."
 - **New recipe and Edit are not drawn yet.** Both open the recipe editor, which comes in a later change; the empty
   list's golden lacks the reference's New recipe button for that reason.
+- **A place's name comes from the pushed hosts.** The old rows named each place from `GET /api/environment-places`, and
+  re-read the places whenever that list, read again on every feed notice and polled while a check ran, changed. Here the
+  name is the host's own in the hosts collection the helm pushes, through the rule every host name follows, so a place
+  reads as its host does everywhere else in the app: the local host as "Local (this machine)", where the old row said
+  "this machine". A finished Podman check reaches the place's words with the helm's next push of the places, which every
+  check's end brings; as before, the section asks for a check of every container host once when it is first shown in an
+  opening. A place whose host is not registered still reads "Unavailable place".
 
 ### Containers
 

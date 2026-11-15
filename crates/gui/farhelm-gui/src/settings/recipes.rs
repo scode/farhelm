@@ -35,30 +35,41 @@
 //!   build or joins the running one, through the operation store under the recipe's key ([`OpKey::recipe`]). The helm
 //!   answers 202 once the build runs on its own task, and pushes the recipe building before that reply. A refusal (no
 //!   API key, no SSH key, a recipe being deleted) stays under the row, in the helm's words, until the next build of
-//!   that recipe starts or the pushed catalog shows the recipe building (the old row's rule, [`settle_refusals`]), so a
-//!   build started elsewhere since does not bring an old refusal back once it ends. The request needs a saved API key,
-//!   so without one the button is unavailable and the row says so, as the old one did. The work is [`Work::Save`]: the
-//!   store treats it like an editor's save (busy only on its own key, never superseded), and a kind of its own would
-//!   need an arm in other areas' exhaustive matches over work for no difference in behavior. The key is shared with
-//!   the recipe's editor, whose own refusals it clears ([`OpKey::recipe`]).
-//! - **The pulse only while shown.** The running pulse is held only while a row shows a running build, the window is
-//!   active and the section is the one shown: the dialog keeps the section's state while another section shows, and
-//!   tells it to let the pulse go then ([`Recipes::hidden`]), since a held pulse keeps the ticker waking for nothing.
+//!   that recipe starts or the pushed state shows the recipe start building (the old row's rule,
+//!   [`settle_refusals`]), so a build started elsewhere since does not bring an old refusal back once it ends. The
+//!   request needs a saved API key, so without one the button is unavailable and the row says so, as the old one did.
+//!   The work is [`Work::Save`]: the store treats it like an editor's save (busy only on its own key, never
+//!   superseded), and a kind of its own would need an arm in other areas' exhaustive matches over work for no
+//!   difference in behavior. The key is shared with the recipe's editor, whose own refusals it clears
+//!   ([`OpKey::recipe`]).
+//! - **Preparation and places.** Under the built snapshot, a row says whether the snapshot new hosts and sessions start
+//!   from is ready ([`prepared`]), and above it, how the recipe stands at each container place, with a Rebuild per place
+//!   ([`places`]), from the second pushed collection, `recipe_places`.
+//! - **The pulse and the clock only while shown.** The running pulse is held only while a row shows a running build or
+//!   preparation, the window is active and the section is the one shown; the ticker's 30-second clock, which moves the
+//!   prepared line's ages on, only while a row shows one and the section is shown. The dialog keeps the section's state
+//!   while another section shows, and tells it to let both go then ([`Recipes::hidden`]), since a held handle keeps the
+//!   ticker waking for nothing.
 //!
-//! NOTE: The push does not follow the clock. What a recipe has prepared reads stale once it passes its 24-hour
-//! freshness window only when the helm next re-reads the catalog, on its next announced change or command, not when the
-//! window passes. Nothing here re-reads for it: the old list did not either (it re-read on the helm's change
-//! notices, which ageing does not send, and said readiness was "when last checked" for that reason), and the helm
-//! decides freshness again whenever a launch uses the artifact. Decided by the migration's settings-and-hosts area on
-//! 2026-11-15, porting the old app's behavior as the migration's orchestrator asked.
+//! NOTE: The push does not follow the clock. A prepared snapshot reads stale once it passes its 24-hour freshness
+//! window only when the helm next re-reads the catalog, on its next announced change or command, not when the window
+//! passes; until then the prepared line says it was ready "when last checked", with an age the clock moves on. Nothing
+//! here re-reads for it: the old list did not either (it re-read on the helm's change notices, which ageing does not
+//! send, and qualified readiness as last checked for that reason), and the helm decides freshness again whenever a
+//! launch uses the snapshot. Decided by the migration's settings-and-hosts area on 2026-11-15, porting the old app's
+//! behavior as the migration's orchestrator asked.
 //!
-//! NOTE: Not ported yet, each waiting for the change that brings it (`docs/gpui/parity/settings-and-hosts.md`):
-//! New recipe and each row's Edit, which open the recipe editor, are not drawn until the editor exists; a row's
-//! prepared-snapshot line and its per-place container lines with their Rebuild come next.
+//! NOTE: Not ported yet (`docs/gpui/parity/settings-and-hosts.md`): New recipe and each row's Edit, which open the
+//! recipe editor, are not drawn until the editor exists.
+
+mod places;
+pub(super) mod prepared;
+
+use std::collections::HashSet;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::Place;
-use farhelm_proto::recipes::{BuildStep, BuildView, RecipeBase, RecipeView};
+use farhelm_proto::recipes::{BuildStep, BuildView, PrepareView, RecipeBase, RecipeView};
 use farhelm_proto::ui_channel::{Availability, Collection};
 use gpui::{
     AnyElement, App, Context, Div, ElementId, FontWeight, Hsla, InteractiveElement as _,
@@ -152,6 +163,8 @@ pub(super) fn summary(view: &RecipeView) -> String {
 pub(super) enum Tone {
     /// The ordinary quiet line (`fg-1`).
     Plain,
+    /// A prepared snapshot the helm found fresh at its last read (`ok`).
+    Positive,
     /// Something the user may want to act on, such as a stale snapshot (`warn-bright`).
     Warning,
     /// A failed build (`danger`).
@@ -165,6 +178,7 @@ impl Tone {
     fn ink(self, palette: &Palette) -> Hsla {
         theme::color(match self {
             Tone::Plain => palette.fg_1,
+            Tone::Positive => palette.ok,
             Tone::Warning => palette.warn_bright,
             Tone::Error => palette.danger,
             Tone::Muted => palette.fg_2,
@@ -277,6 +291,34 @@ impl SnapshotStatus {
 /// the settling of a refusal ([`settle_refusals`]) all ask.
 fn building(view: &RecipeView) -> bool {
     matches!(view.build, BuildView::Building { .. })
+}
+
+/// Whether the helm reports a preparation of `view`'s snapshot running: the test the pulse asks, the same state that
+/// makes the prepared line the running one ([`prepared::prepared_status`]).
+fn preparing(view: &RecipeView) -> bool {
+    matches!(view.preparation, PrepareView::Preparing { .. })
+}
+
+/// One status line of a row, `line` drawn as `sentence` in its tone's ink at the rows' 12 pixels, with the running
+/// pulse's dot at opacity `pulse` before its words when it is a running build's or preparation's line.
+fn status_line(line: &Line, sentence: HostSentence, pulse: f32, cx: &App) -> Div {
+    let palette = theme::palette(cx);
+    div()
+        .flex()
+        .items_center()
+        .gap(px(DOT_GAP))
+        .min_w_0()
+        .text_size(metrics::TEXT_SM)
+        .text_color(line.tone.ink(palette))
+        .children(line.running.then(|| {
+            div()
+                .flex_none()
+                .size(px(DOT))
+                .rounded_full()
+                .bg(theme::color(palette.accent))
+                .opacity(pulse)
+        }))
+        .child(sentence)
 }
 
 /// A UTC date and minute, `2026-11-03 14:02 UTC`: the old row's stamp. Labelled UTC because the helm's epoch seconds
@@ -433,36 +475,68 @@ fn catalog(cx: &App) -> Option<Catalog> {
     })
 }
 
-/// Forget the last refused build of every recipe the pushed catalog shows building. The build the refusal was about has
-/// been asked for since, here or elsewhere, so its words would only come back stale once that build ends (the old
-/// row's rule: a refusal stays "until the next click or a re-read shows the build running"). A recipe shown idle keeps
-/// its refusal.
+/// Forget the last refused build or rebuild of every recipe one of whose sources the pushed state newly shows building:
+/// its snapshot in the catalog, or one of its places that has a line ([`places::building_places`]). `seen` holds the
+/// sources shown building last time, which this replaces; a source is the recipe and the place's host id, or `None`
+/// for the snapshot. The build the refusal was about has been asked for since, here or elsewhere, so its words would
+/// only come back stale once that build ends (the old row's rule: a refusal stays "until the next click or a re-read
+/// shows the build running"). A recipe shown idle keeps its refusal, and so does one whose sources were shown building
+/// all along, except at an opening's first settling, which counts every source shown building as started.
 ///
-/// The section calls it whenever the pushed state changes, and once as it is made ([`session::observe_current`]), so
-/// reopening Settings drops a refusal whose recipe started building while the dialog was closed. This is not the
-/// refusal's own completion, which is where `forget` is usually called. It is safe because the helm pushes the changes a
-/// command causes before that command's reply: a press whose request is still out has nothing on its key to drop
-/// (`forget` leaves work in flight alone), even when the push showing its own build arrives first, and a refusal it
-/// settles with lands after that push and stays until a later one shows the recipe building. A reset retires the old
-/// store with its records, and the observation moves to the new store.
-fn settle_refusals(cx: &mut App) {
+/// It settles on a source starting to build, not on its being shown building, because it runs on every push of
+/// anything, and a build announces each of its steps. The key is the recipe's, shared by its snapshot build and every
+/// place's Rebuild, so it cannot tell places apart: a Rebuild refused at one place while another place of the recipe
+/// already builds lands after the push that shows that build, and settling on the build being shown would drop the
+/// refusal at the next unrelated push, within a second, before anyone could read it. Each source counts on its own, so
+/// the snapshot or another place starting while one place builds still settles; and a source that starts settles a
+/// refused Rebuild at another place, or a refused Build snapshot. That is accepted: the row shows one refusal per
+/// recipe, as the old row did, and the user's next press of any of them clears it anyway. A container place's
+/// preparation counts as building too, since the pushed place does not tell it from a build. While the places are not
+/// known (unreadable, say), the places last seen building are carried forward, so the push that makes them readable
+/// again does not count a place that kept building as starting.
+///
+/// The section calls it whenever the pushed state changes, and once as it is made with nothing seen yet
+/// ([`session::observe_current`]), so reopening Settings drops a refusal whose recipe started building while the
+/// dialog was closed. This is not the refusal's own completion, which is where `forget` is usually called. It is safe
+/// because the helm pushes the changes a command causes before that command's reply: a press whose request is still
+/// out has nothing on its key to drop (`forget` leaves work in flight alone), even when the push showing its own build
+/// arrives first, and a refusal it settles with lands after that push and stays until the recipe next starts to build.
+/// A reset retires the old store with its records, and the observation moves to the new store.
+fn settle_refusals(seen: &mut HashSet<Source>, cx: &mut App) {
     let (Some(catalog), Some(operations)) = (catalog(cx), session::current_operations(cx)) else {
         return;
     };
-    let keys: Vec<OpKey> = catalog
+    let mut building: HashSet<Source> = catalog
         .rows
         .iter()
         .filter(|recipe| building(recipe))
-        .map(|recipe| OpKey::recipe(&recipe.name))
+        .map(|recipe| (recipe.name.clone(), None))
         .collect();
+    match places::building_places(cx) {
+        Some(places) => building.extend(
+            places
+                .into_iter()
+                .map(|(recipe, host)| (recipe, Some(host))),
+        ),
+        None => building.extend(seen.iter().filter(|(_, host)| host.is_some()).cloned()),
+    }
+    let started: HashSet<OpKey> = building
+        .difference(seen)
+        .map(|(name, _)| OpKey::recipe(name))
+        .collect();
+    *seen = building;
     operations.update(cx, |operations, cx| {
-        for key in &keys {
+        for key in &started {
             operations.forget(key, cx);
         }
     });
 }
 
 // ---- The section ---------------------------------------------------------------------------------------------------
+
+/// What can build for a recipe, as [`settle_refusals`] tells starts apart: the recipe's name, and the host id of its
+/// container place, or `None` for its snapshot.
+type Source = (String, Option<i64>);
 
 /// The Recipes section, a view of its own that Settings makes the first time the section shows in an opening and keeps
 /// until the dialog closes (see the module docs).
@@ -471,23 +545,36 @@ pub(super) struct Recipes {
     /// `Some(false)` after a failed one, as the old list treated a key it could not read. Kept while a later read is
     /// out, so showing the section again does not flicker Build.
     api_key_set: Option<bool>,
-    /// The running pulse, held while the section is shown, the window is active and a row shows a build running; let
-    /// go while another section shows ([`Recipes::hidden`]).
+    /// The running pulse, held while the section is shown, the window is active and a row shows a build or a
+    /// preparation running; let go while another section shows ([`Recipes::hidden`]).
     pulse: Option<ticker::Pulsing>,
+    /// The ticker's 30-second clock, held while the section is shown and a row's prepared line shows an age
+    /// ([`prepared::shows_age`]); let go while another section shows.
+    clock: Option<ticker::Clock>,
+    /// The sources the pushed state showed building when refusals were last settled, so only a source that starts to
+    /// build settles its recipe's refusal ([`settle_refusals`]). A change-detection memo, never drawn; empty until the
+    /// first settling.
+    building: HashSet<Source>,
     /// The subscription that settles refusals whenever the pushed state changes ([`settle_refusals`]). Drawing needs
     /// none: the rows read the store while they draw, so GPUI redraws them on every push.
     _pushed: session::ObservingCurrent,
 }
 
 impl Recipes {
-    /// The section, reading the account now.
+    /// The section, reading the account now and asking the helm to check every container host once.
     pub(super) fn new(cx: &mut Context<Self>) -> Self {
         let recipes = Recipes {
             api_key_set: None,
             pulse: None,
-            _pushed: session::observe_current(cx, |_: &mut Recipes, cx| settle_refusals(cx)),
+            clock: None,
+            building: HashSet::new(),
+            _pushed: session::observe_current(cx, |recipes: &mut Recipes, cx| {
+                settle_refusals(&mut recipes.building, cx)
+            }),
         };
         recipes.read_account(cx);
+        // Once per opening, as the old section did when Settings opened (the places module docs).
+        Self::check_hosts(cx);
         recipes
     }
 
@@ -508,12 +595,20 @@ impl Recipes {
         );
     }
 
-    /// Another section is shown in its place: let the running pulse go. The dialog keeps this view, undrawn, until it
-    /// closes, and only drawing reconsiders the pulse, so without this a row pushed as building would keep the ticker
-    /// waking ten times a second for a section nobody sees. Showing the section again draws it, which takes the pulse
-    /// again if a row still shows a build.
+    /// Another section is shown in its place: let the running pulse and the clock go. The dialog keeps this view,
+    /// undrawn, until it closes, and only drawing reconsiders them, so without this a row pushed as building would keep
+    /// the ticker waking ten times a second for a section nobody sees. Showing the section again draws it, which takes
+    /// them again if a row still needs them.
     pub(super) fn hidden(&mut self) {
         self.pulse = None;
+        self.clock = None;
+    }
+
+    /// Whether the section holds the running pulse and the ticker's clock now, for tests of when it lets them go: a
+    /// held 30-second clock fires too rarely for a test to tell it from none by its ticks.
+    #[cfg(test)]
+    pub(super) fn holds_time(&self) -> (bool, bool) {
+        (self.pulse.is_some(), self.clock.is_some())
     }
 
     /// Build, Rebuild or Retry for the recipe `name`: start or join its snapshot build under the recipe's key. Does
@@ -543,9 +638,18 @@ impl Recipes {
         cx.notify();
     }
 
-    /// One recipe's row (`.recipe-row`): its name, summary and snapshot status, the build it offers, and the helm's
-    /// words for its last refused build.
-    fn row(&self, view: &RecipeView, pulse: f32, cx: &Context<Self>) -> Stateful<Div> {
+    /// One recipe's row (`.recipe-row`): its name, summary, per-place lines from the pushed `places`, snapshot status,
+    /// prepared-snapshot line, the build it offers, and the helm's words for its last refused build or rebuild.
+    /// `pulse` is the running pulse's opacity now, and `now` the viewer's time in seconds since the epoch, for the
+    /// prepared line's ages.
+    fn row(
+        &self,
+        view: &RecipeView,
+        places: &places::Places,
+        pulse: f32,
+        now: Option<i64>,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
         let palette = theme::palette(cx);
         let name = view.name.clone();
         let status = snapshot_status(view);
@@ -572,24 +676,11 @@ impl Recipes {
             .iter()
             .map(|sentence| sentence.accessible_name().to_string())
             .collect();
-        let lines = status.lines.iter().zip(sentences).map(|(line, sentence)| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(DOT_GAP))
-                .min_w_0()
-                .text_size(metrics::TEXT_SM)
-                .text_color(line.tone.ink(palette))
-                .children(line.running.then(|| {
-                    div()
-                        .flex_none()
-                        .size(px(DOT))
-                        .rounded_full()
-                        .bg(theme::color(palette.accent))
-                        .opacity(pulse)
-                }))
-                .child(sentence)
-        });
+        let lines = status
+            .lines
+            .iter()
+            .zip(sentences)
+            .map(|(line, sentence)| status_line(line, sentence, pulse, cx));
         // `.recipe-row-snapshot`: one status region per recipe, named for it, so assistive technology reads the whole
         // status as one.
         let snapshot = div()
@@ -604,6 +695,18 @@ impl Recipes {
             .gap(px(LINE_GAP))
             .min_w_0()
             .children(lines);
+        // `.recipe-row-prepared`: preparation is a status region of its own, apart from the build, as in the old row.
+        let prepared = prepared::prepared_status(view, now);
+        let prepared_sentence = prepared.sentence(format!("recipe-{name}-prepared-line"));
+        let prepared = div()
+            .id(ElementId::Name(format!("recipe-{name}-prepared").into()))
+            .role(Role::Status)
+            .aria_label(SharedString::from(format!(
+                "Preparation of {name}: {}",
+                prepared_sentence.accessible_name()
+            )))
+            .min_w_0()
+            .child(status_line(&prepared, prepared_sentence, pulse, cx));
         let actions = status.action.map(|action| {
             let weak = cx.weak_entity();
             let label = format!("{} for {name}", action.label());
@@ -636,8 +739,8 @@ impl Recipes {
                         .child(NO_KEY)
                 }))
         });
-        // The refusal of the last build of this recipe, until its next build starts or the pushed catalog shows it
-        // building ([`settle_refusals`]).
+        // The refusal of the last build or rebuild of this recipe, until its next one starts or the pushed state shows
+        // it start building ([`settle_refusals`]).
         let refused = refusal.map(|reason| {
             choices::failure_outcome(format!("recipe-{name}-build-error"), &reason, cx)
         });
@@ -672,7 +775,9 @@ impl Recipes {
                             .text_color(theme::color(palette.fg_1))
                             .child(summary(view)),
                     )
+                    .children(self.place_lines(&name, places, in_flight, cx))
                     .child(snapshot)
+                    .child(prepared)
                     .children(actions)
                     .children(refused),
             )
@@ -683,7 +788,9 @@ impl Recipes {
     fn listing(
         &self,
         catalog: Option<&Catalog>,
+        places: &places::Places,
         pulse: f32,
+        now: Option<i64>,
         cx: &Context<Self>,
     ) -> Option<AnyElement> {
         match catalog {
@@ -707,7 +814,12 @@ impl Recipes {
                     .flex()
                     .flex_col()
                     .gap(px(ROW_GAP))
-                    .children(catalog.rows.iter().map(|view| self.row(view, pulse, cx)))
+                    .children(
+                        catalog
+                            .rows
+                            .iter()
+                            .map(|view| self.row(view, places, pulse, now, cx)),
+                    )
                     .into_any_element(),
             ),
         }
@@ -756,19 +868,27 @@ impl Recipes {
 impl Render for Recipes {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        // Read from the store while drawing, so every push that changes the catalog redraws the rows.
+        // Read from the store while drawing, so every push that changes the catalog or the places redraws the rows.
         let catalog = catalog(cx);
-        // Hold the pulse only while a row shows a running build and someone can see the window: the ticker's rule,
-        // which keeps the tick loop from firing for a window nobody looks at. Drawing means the section is shown; the
-        // dialog lets the pulse go when it is not ([`Recipes::hidden`]).
-        let running = catalog
-            .iter()
-            .flat_map(|catalog| &catalog.rows)
-            .any(building);
+        let places = places::places(cx);
+        // Hold the pulse only while a row shows a running build or preparation and someone can see the window: the
+        // ticker's rule, which keeps the tick loop from firing for a window nobody looks at. Hold the clock while a
+        // row shows an age, whatever the window's activity, as every age's view does. Drawing means the section is
+        // shown; the dialog lets both go when it is not ([`Recipes::hidden`]).
+        let recipes = || catalog.iter().flat_map(|catalog| &catalog.rows);
+        let running = recipes().any(|view| building(view) || preparing(view));
         let pulses = running && ticker::is_active(window, cx);
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
+        let ages = recipes().any(prepared::shows_age);
+        if ages != self.clock.is_some() {
+            self.clock = ages.then(|| ticker::clock(cx));
+        }
+        let now = ticker::wall_now(cx)
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|since| i64::try_from(since.as_secs()).ok());
         let pulse = pulse_opacity(
             self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             palette.status_pulse_min,
@@ -783,7 +903,7 @@ impl Render for Recipes {
             .w_full()
             .min_w_0()
             .child(choices::help(HELP, cx))
-            .children(self.listing(catalog.as_ref(), pulse, cx))
+            .children(self.listing(catalog.as_ref(), &places, pulse, now, cx))
             .children(self.read_failure(catalog.as_ref(), cx))
     }
 }

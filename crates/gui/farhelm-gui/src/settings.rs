@@ -75,6 +75,8 @@ mod credential_tests;
 mod credentials;
 mod ntfy;
 #[cfg(test)]
+mod recipe_place_tests;
+#[cfg(test)]
 mod recipe_tests;
 mod recipes;
 mod refused;
@@ -301,23 +303,20 @@ pub(crate) fn auto_update_command()
     Choice::AutoUpdateRemoteHosts.command(true)
 }
 
-/// The platform Settings decides the tunnel switch for ([`terminal::shown_on`]): this build's, except where a test or a
-/// golden chose one with [`TunnelsPlatform`], so that the Mac's Terminal section is covered on any machine.
-fn tunnels_platform(cx: &App) -> Platform {
-    #[cfg(test)]
-    if let Some(chosen) = cx.try_global::<TunnelsPlatform>() {
-        return chosen.0;
+/// Decide the open Settings dialog's tunnel switch for `platform` ([`SettingsDialog::decide_tunnels_for`]), for a
+/// golden that pictures the Mac's Terminal section on any machine. Reaches the dialog through the handle the dialog's
+/// opening records for tests. Panics when no dialog is open: called too early, it would otherwise leave the switch
+/// decided for this machine's platform, and a test of that same platform would pass without testing anything.
+#[cfg(test)]
+pub(crate) fn decide_tunnels_for_opened(platform: Platform, cx: &mut App) {
+    match cx
+        .try_global::<tests::Opened>()
+        .and_then(|opened| opened.0.upgrade())
+    {
+        Some(dialog) => dialog.update(cx, |dialog, cx| dialog.decide_tunnels_for(platform, cx)),
+        None => panic!("no Settings dialog is open to decide its tunnel switch for"),
     }
-    let _ = cx;
-    crate::actions::THIS_PLATFORM
 }
-
-/// The platform tests and goldens decide Settings' tunnel switch for, in place of this machine's ([`tunnels_platform`]).
-#[cfg(test)]
-pub(crate) struct TunnelsPlatform(pub(crate) Platform);
-
-#[cfg(test)]
-impl gpui::Global for TunnelsPlatform {}
 
 /// The helm's preference row, if it pushed one.
 fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Preferences> {
@@ -513,6 +512,10 @@ pub(crate) struct SettingsDialog {
     /// switches, Appearance, Terminal's link choice and tunnel switch, the spare switch and the trust switches
     /// ([`refused`]). Checkouts' fields and the ntfy form, views of their own, keep their own.
     refused: Refused,
+    /// The platform the Terminal section decides its tunnel switch for ([`terminal::shown_on`]): this build's, which
+    /// tests and goldens replace ([`SettingsDialog::decide_tunnels_for`]) so the Mac's section is covered on any machine.
+    /// Held here and read the same way in every build, rather than chosen by a test-only branch while drawing.
+    platform: Platform,
 }
 
 /// Checkouts' text fields, each a view of its own ([`CheckoutField`]) that the dialog draws as a child.
@@ -531,6 +534,14 @@ struct Handover {
 }
 
 impl SettingsDialog {
+    /// Decide the tunnel switch for `platform` instead of this build's: the test-only setter of [`Self::platform`], so
+    /// tests and goldens draw the Mac's Terminal section on any machine. Takes effect at the next draw.
+    #[cfg(test)]
+    pub(crate) fn decide_tunnels_for(&mut self, platform: Platform, cx: &mut Context<Self>) {
+        self.platform = platform;
+        cx.notify();
+    }
+
     /// A dialog showing `shown`, with no save of its own yet.
     fn new(shown: Section, cx: &mut Context<Self>) -> Self {
         let switches = Choice::ALL
@@ -569,6 +580,7 @@ impl SettingsDialog {
             focus_on: None,
             layer: None,
             refused: Refused::default(),
+            platform: crate::actions::THIS_PLATFORM,
         }
     }
 
@@ -1014,7 +1026,7 @@ impl SettingsDialog {
                 .map(IntoElement::into_any_element)
                 .collect();
                 // Below the link choices, as in the old desktop app, and only where tunnels open.
-                if terminal::shown_on(tunnels_platform(cx)) {
+                if terminal::shown_on(self.platform) {
                     body.push(self.tunnel_switch(preferences, cx));
                 }
                 body
