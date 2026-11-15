@@ -126,40 +126,18 @@ pub(super) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to fini
 /// each side refusing its own action while the other's work is in flight, rather than by the old app's shared token.
 /// (Add host's half, refusing itself while a launch is in flight, is the hosts work's.)
 ///
-/// What counts is decided by kind of work ([`changes_host_registry`]): a host's probe and setup (a new host's, or a
-/// registered one's re-run), and a host's removal. The orchestrator decided on 2026-11-14 that the probe counts, which the old app left outside its token, and
-/// that a save of a registered host's settings does not, its destination and alias included: that window is one short
-/// save, so a launch does not wait for it (the hosts side is to refuse a destination change during a launch instead,
-/// in its own change).
-/// Suspend and Resume are not registry changes (SPEC.md), and nothing done to a session is.
-///
-/// TODO: call the operation store's shared classification, `Work::changes_host_registry()`, instead of the local
-/// [`changes_host_registry`] once the store has it; the two answer the same.
+/// What counts is the operation store's own classification ([`Work::changes_host_registry`]): a host's probe and setup
+/// (a new host's, or a registered one's re-run), its removal and its Update. The orchestrator decided on 2026-11-14
+/// that the probe counts, which the old app left outside its token, and that a save of a registered host's settings
+/// does not, its destination and alias included: that window is one short save, so a launch does not wait for it (the
+/// hosts side is to refuse a destination change during a launch instead, in its own change). Suspend and Resume are
+/// not registry changes (SPEC.md), and nothing done to a session is.
 pub(super) fn host_change_in_flight(cx: &App) -> bool {
-    session::current_operations(cx)
-        .is_some_and(|operations| operations.read(cx).any_in_flight(changes_host_registry))
-}
-
-/// Whether `work` is a registry change counted by its kind: a host probe registers a host that answers, a setup
-/// registers the host it sets up, a removal takes a host out of the registry, and an Update replaces the host's
-/// installation (the set the migration's orchestrator recorded on 2026-11-14). Exhaustive, so a new kind of work
-/// decides.
-fn changes_host_registry(work: Work) -> bool {
-    match work {
-        Work::Probe | Work::Setup | Work::RemoveHost | Work::UpdateHost => true,
-        Work::Rename
-        | Work::Delete(_)
-        | Work::Save
-        | Work::Stop
-        | Work::Replace
-        | Work::Seen
-        | Work::Restart
-        | Work::TunnelOpen
-        | Work::TunnelClose
-        | Work::Launch
-        // An answer to a host add's card only opens the way: the add's own probe and setup are what register a host.
-        | Work::Answer => false,
-    }
+    session::current_operations(cx).is_some_and(|operations| {
+        operations
+            .read(cx)
+            .any_in_flight(Work::changes_host_registry)
+    })
 }
 
 /// Put `held` in the slot for the current UI session, or empty it, and notify: a surface drawing New's trigger reads
