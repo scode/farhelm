@@ -45,14 +45,20 @@ FIXTURE = [
     ("Wiring", ["src/main_view.rs", "src/kit/"], [("src/main_view.rs", "reported"), ("src/kit/", "reported")]),
 ]
 TABLE = "docs/gpui/foundation-ownership.md"
+# The fixture's areas, as (name, area paths), for the cross-area import check: Lists holds a module file with a
+# directory of submodules, Panes a single file, and `src/area.rs` is in no area.
+AREAS = [("Lists", ["src/list.rs", "src/list/"]), ("Panes", ["src/pane.rs"])]
 
 
-def table_md(foundations) -> str:
-    """The markdown form of `foundations`, shaped like the real file: prose, the main table, then the rules table."""
+def table_md(foundations, areas=AREAS) -> str:
+    """The markdown form of `foundations` and `areas`, shaped like the real file: prose, the main table, the area
+    table, then the rules table."""
     lines = ["# Ownership", "", "Some prose with a `code/span` that is not a table.", ""]
     lines += ["| Foundation | Owned paths | Extension points | Lint exceptions |", "| --- | --- | --- | --- |"]
     for name, owned, _ in foundations:
         lines.append(f"| {name} | {', '.join(f'`{p}`' for p in owned)} (with a `<U+XXXX>` aside) | prose | none |")
+    lines += ["", "| Area | Area paths |", "| --- | --- |"]
+    lines += [f"| {name} | {', '.join(f'`{p}`' for p in paths)} |" for name, paths in areas]
     lines += ["", "## Rules", "", "| Foundation | Extension path | Rule |", "| --- | --- | --- |"]
     for name, _, extensions in foundations:
         lines += [f"| {name} | `{path}` | `{rule}` |" for path, rule in extensions]
@@ -73,6 +79,9 @@ class Repo:
         self.write("src/area.rs", "fn area() {}\n")
         self.write("src/main_view.rs", "fn ground() {}\nfn overlay() {}\n")
         self.write("src/kit/row.rs", "fn row() {}\n")
+        self.write("src/list.rs", "pub struct Thing;\n")
+        self.write("src/list/row.rs", "use crate::theme::A;\n")
+        self.write("src/pane.rs", "pub struct Pane;\n")
         self.write("deny.toml", "")
         self.write(TABLE, table_md(FIXTURE))
         self.commit("base")
@@ -387,6 +396,155 @@ class FoundationPathsTest(unittest.TestCase):
         self.assertIn("no-such-rev", result.stderr)
 
 
+class CrossAreaImportTest(unittest.TestCase):
+    """An area that starts importing another area's module owes that module a reported row, and nothing else checked
+    that rule: a drift scan of the migration found about ten such imports without one. The check reports each one,
+    in the reported form, without refusing, and reports nothing an area may import freely."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.repo = Repo(pathlib.Path(directory.name))
+
+    def crossings(self, result) -> list[str]:
+        """The cross-area import lines of a run, which must pass whatever it reports."""
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return [line for line in result.stdout.splitlines() if ": cross-area import: " in line]
+
+    def test_a_new_cross_area_import_without_a_row_is_reported(self):
+        """The case the check exists for. Specified: a Lists file that adds `use crate::pane::Pane;` is reported as
+        Lists importing Panes' `src/pane.rs`, the run passes, and the summary counts it."""
+        self.repo.write("src/list/row.rs", "use crate::theme::A;\nuse crate::pane::Pane;\n")
+        self.repo.commit("import a pane")
+        result = self.repo.check()
+        line = "reported: Lists: src/list/row.rs: cross-area import: imports crate::pane::Pane, from src/pane.rs"
+        self.assertEqual(self.crossings(result), [line + " of Panes, which no row covers"])
+        self.assertIn("; 1 cross-area imports reported", result.stdout)
+
+    def test_an_import_of_a_module_no_area_or_row_covers_is_reported_as_unassigned(self):
+        """A module nobody owns is the gap the area table exists to close, and skipping it would hide exactly the new
+        top-level modules the table has not caught up with. Specified: a Lists file that adds an import of
+        `src/area.rs`, in no area and no row, is reported as unassigned, and the run passes."""
+        self.repo.write("src/list/row.rs", "use crate::theme::A;\nuse crate::area::area;\n")
+        self.repo.commit("import an unassigned module")
+        line = "reported: Lists: src/list/row.rs: cross-area import: imports crate::area::area, from src/area.rs"
+        self.assertEqual(self.crossings(self.repo.check()), [line + ", which no area or row covers (unassigned)"])
+
+    def test_a_cross_area_import_with_a_row_is_not_reported(self):
+        """Once the module has its row, its changes are reported as owned-path touches, so the import needs nothing
+        more. Specified: with `src/pane.rs` in the base's main table, the same import prints no cross-area line."""
+        self.repo.write(TABLE, table_md([*FIXTURE, ("Pane row", ["src/pane.rs"], [("src/pane.rs", "reported")])]))
+        self.repo.commit("file a row")
+        self.repo.git("tag", "-f", "base")
+        self.repo.write("src/list/row.rs", "use crate::pane::Pane;\n")
+        self.repo.commit("import a pane")
+        self.assertEqual(self.crossings(self.repo.check()), [])
+
+    def test_same_area_and_foundation_imports_are_not_reported(self):
+        """An area's own modules are its own, foundations are shared by design, and a commented-out `use` imports
+        nothing. Specified: a Lists file importing `src/list.rs`, the foundation directory `src/kit/` and the foundation
+        file `src/theme.rs`, beside a commented-out import of Panes' module, reports nothing."""
+        source = "use crate::list::Thing;\nuse crate::kit::row::row;\nuse crate::theme::B;\n// use crate::pane::Pane;\n"
+        self.repo.write("src/list/row.rs", source)
+        self.repo.commit("same-area and foundation imports")
+        self.assertEqual(self.crossings(self.repo.check()), [])
+
+    def test_grouped_imports_are_expanded_and_only_new_modules_count(self):
+        """rustfmt groups and wraps `use` statements, so a line-based check would miss an import inside a group and
+        report every rewrap. Specified: a new file whose multi-line group, aliased and with `self`, names a same-area,
+        a foundation and a cross-area module reports the cross-area one; a modified file that only regroups an import
+        the base already had reports nothing."""
+        grouped = "use crate::{\n    kit::row,\n    list::{self, Thing},\n    pane::{self as p, Pane as P},\n};\n"
+        self.repo.write("src/list/view.rs", grouped)
+        self.repo.write("src/list/row.rs", "use crate::theme::A;\nuse crate::pane::Pane;\n")
+        self.repo.commit("base imports a pane")
+        self.repo.git("tag", "-f", "base")
+        self.repo.write("src/list/row.rs", "use crate::{pane::Pane, theme::A};\n")
+        self.repo.write("src/list/new.rs", grouped)
+        self.repo.commit("regroup and add a grouped file")
+        line = "reported: Lists: src/list/new.rs: cross-area import: imports crate::pane, from src/pane.rs of Panes"
+        self.assertEqual(self.crossings(self.repo.check()), [line + ", which no row covers"])
+
+    def test_test_files_are_skipped_as_importers_and_as_modules(self):
+        """The migration's orchestrator decided that an area's tests borrowing another area's test helpers owe no row;
+        without the skip, such imports were a third of what the check reported over main's recent commits. Specified:
+        a Lists test file (`*_tests.rs`, `tests.rs`, under `tests/`) importing Panes' module, and a Lists file importing
+        Panes' test helpers, report nothing, while the same import from a plain Lists file still does."""
+        self.repo.write("src/pane/tests.rs", "pub fn fixture() {}\n")
+        self.repo.write("src/pane_tests.rs", "pub fn helper() {}\n")
+        # The helpers must be Panes' own, or they would be skipped as a module of no area, test or not.
+        panes = ("Panes", ["src/pane.rs", "src/pane/", "src/pane_tests.rs"])
+        self.repo.write(TABLE, table_md(FIXTURE, areas=[AREAS[0], panes]))
+        self.repo.commit("pane test helpers")
+        self.repo.git("tag", "-f", "base")
+        for path in ("src/list/row_tests.rs", "src/list/tests.rs", "src/list/tests/case.rs"):
+            self.repo.write(path, "use crate::pane::Pane;\n")
+        self.repo.write("src/list/row.rs", "use crate::pane::tests::fixture;\nuse crate::pane_tests::helper;\n")
+        self.repo.write("src/list/plain.rs", "use crate::pane::Pane;\n")
+        self.repo.commit("test imports")
+        lines = self.crossings(self.repo.check())
+        self.assertEqual([line.split(": ")[2] for line in lines], ["src/list/plain.rs"])
+
+    def test_a_bad_area_table_or_a_stale_area_path_never_stops_the_check(self):
+        """The import check is advisory, and an area may delete its own files without a refusal, so nothing in the area
+        table may stop a landing with exit 2: that once made one area refactor block every later landing, the table's
+        repair included. Specified: with overlapping area paths, and with no area table, the run says cross-area
+        imports were not checked and still judges the owned paths; with an area path that names no file, it checks
+        imports as usual."""
+        overlap = table_md(FIXTURE, areas=[*AREAS, ("Rows", ["src/list/row.rs"])])
+        missing = table_md(FIXTURE).replace("| Area | Area paths |", "| Region | Area paths |")
+        for markdown, reason in [(overlap, "overlap"), (missing, "has no table headed | Area | Area paths |")]:
+            self.repo.write(TABLE, markdown)
+            self.repo.commit("break the area table")
+            self.repo.git("tag", "-f", "base")
+            self.repo.write("src/list/row.rs", "use crate::pane::Pane;\n")
+            self.repo.write("src/focus.rs", "fn focus() { changed() }\n")
+            self.repo.commit("import a pane and touch a rule owner")
+            result = self.repo.check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("refused: Focus: src/focus.rs: no extension point: modifies the file", result.stdout)
+            self.assertIn("; cross-area imports not checked: ", result.stdout)
+            self.assertIn(reason, result.stdout)
+            self.assertNotIn(": cross-area import: ", result.stdout)
+            self.repo.git("checkout", "-q", "base", "--", ".")
+            self.repo.commit("back to the base")
+        self.repo.write(TABLE, table_md(FIXTURE, areas=[*AREAS, ("Gone", ["src/gone.rs"])]))
+        self.repo.commit("an area path with no file")
+        self.repo.git("tag", "-f", "base")
+        self.repo.write("src/list/row.rs", "use crate::pane::Pane;\n")
+        self.repo.commit("import a pane")
+        self.assertEqual(len(self.crossings(self.repo.check())), 1)
+
+    def test_an_area_file_the_import_check_cannot_read_never_stops_the_check(self):
+        """The import pass's guard must catch more than table problems: a file it cannot read (here a non-UTF-8 area
+        file; a `RecursionError` from pathological braces takes the same path) would otherwise end the run with a
+        traceback, whose Python exit 1 reads as a refusal. Specified: the run says cross-area imports were not
+        checked, naming the error, prints no traceback, and still refuses the owned-path change beside it."""
+        self.repo.write("src/list/odd.rs", b"\xff use crate::pane::Pane;\n")
+        self.repo.write("src/focus.rs", "fn focus() { changed() }\n")
+        self.repo.commit("a non-UTF-8 area file and a rule-owner touch")
+        result = self.repo.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("refused: Focus: src/focus.rs: no extension point: modifies the file", result.stdout)
+        self.assertIn("; cross-area imports not checked: UnicodeDecodeError", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_imports_resolve_under_a_nested_crate_root_and_through_mod_rs(self):
+        """Every real area lives under `crates/gui/farhelm-gui/src/`, not the fixture's root-level `src/`, and a
+        module may be `x/mod.rs`. Specified: a nested file's crate root is its crate's `src/`; paths resolve to the
+        deepest module file, `x.rs` or `x/mod.rs`."""
+        self.assertEqual(checker.crate_src("crates/x/src/a/b.rs"), "crates/x/src/")
+        self.assertEqual(checker.crate_src("src/a.rs"), "src/")
+        self.assertIsNone(checker.crate_src("docs/a.rs"))
+        tree = {"crates/x/src/a.rs", "crates/x/src/b/mod.rs", "crates/x/src/b/c.rs"}
+        source = "use crate::a::Item;\nuse crate::b::{Thing, c::Deep};\n"
+        self.assertEqual(
+            checker.imported_modules(source, "crates/x/src/", tree),
+            {"crates/x/src/a.rs": "crate::a::Item", "crates/x/src/b/mod.rs": "crate::b::Thing",
+             "crates/x/src/b/c.rs": "crate::b::c::Deep"},
+        )
+
+
 class TableTest(unittest.TestCase):
     """The table's own validation, which keeps every verdict down to one owner and one rule."""
 
@@ -453,14 +611,19 @@ class TableTest(unittest.TestCase):
         self.assertEqual(foundations[2].owned, ["src/focus.rs", "deny.toml"])
 
     def test_the_checked_in_table_is_valid(self):
-        """The repository's own table parses, and every path it names exists in the checkout, so a bad edit fails
-        here before a landing step."""
+        """The repository's own tables parse, the area table included, and every path they name exists in the
+        checkout, so a bad edit fails here before a landing step. The landing check itself does not require area
+        paths to exist (see `parse_areas`), so this test is the only place a stale area path shows."""
         files = subprocess.run(
             ["git", "-C", str(REPO), "ls-files", "--cached"],
             check=True, capture_output=True, text=True,
         ).stdout.splitlines()
         foundations = checker.parse_table((REPO / TABLE).read_text(), set(files))
         self.assertIn("Operation store", [foundation.name for foundation in foundations])
+        areas = checker.parse_areas((REPO / TABLE).read_text())
+        self.assertIn("terminal", areas.values())
+        stale = [path for path in areas if not any(checker.covers(path, file) for file in files)]
+        self.assertEqual(stale, [], "area paths that name no file")
 
 
 if __name__ == "__main__":

@@ -33,15 +33,16 @@ admits, and prints every reported touch for the review gate without refusing it.
 it with `--owner`, which reports the same findings without refusing.
 
 This file is the check's only source. It reads each foundation's owned paths from the main table's second column (the
-backticked paths there) and the rules, the reported tier's included, from "Extension point rules" below, always from the
-base revision's copy of this file, so a PR cannot widen the rules it is judged by. For the same reason the landing step
-runs the base's copy of the script, from stdin, after rebasing the PR onto that base:
+backticked paths there), the rules, the reported tier's included, from "Extension point rules" below, and each area's
+paths from the area table under "What is not a foundation", always from the base revision's copy of this file, so a PR
+cannot widen the rules it is judged by. For the same reason the landing step runs the base's copy of the script, from
+stdin, after rebasing the PR onto that base:
 
     git show <base>:scripts/check-foundation-paths.py | python3 -I - --repo <checkout> --base <base> --head <PR commit>
 
 `--head` is the PR's commit id or bookmark, never `HEAD`: in a jj workspace git's `HEAD` is the working copy's parent,
-which need not be the PR's tip. Every path the tables name must exist in the base revision, so an owner who renames a
-foundation file updates the table in the same PR, or the check stops.
+which need not be the PR's tip. Every path the main and rules tables name must exist in the base revision, so an owner
+who renames a foundation file updates the table in the same PR, or the check stops.
 
 Paths are relative to the repository root; a path ending in `/` covers everything under it.
 
@@ -775,7 +776,33 @@ areas that use it.
 When an area starts importing a module it does not own, the notice it posts about that touch also files a reported row
 for that module here, and the foundations owner builds the row. The migration's orchestrator decided this on 2026-11-14,
 after host identity, `harness.rs`, `permission.rs` and `environment_ui.rs` each needed an ask of its own; until its row
-lands, the check reports nothing about another area's edit to such a module.
+lands, the check reports nothing about another area's edit to such a module. So that the notice is not forgotten, the
+check prints as `reported` each module an area's file starts importing with `use crate::` from another area's paths in
+the area table, unless an owned path of the main table already covers it; it never refuses for one. A drift scan found
+about ten such imports without a row before the check looked for them.
+
+The area table says which paths each area owns, for that check alone: it reads the second column's backticked paths,
+which never overlap one another, though one may hold a foundation's owned path, as `hosts/` holds host identity, whose
+row keeps it reported. The import check is advisory, so a malformed area table makes the check say that cross-area
+imports were not checked, never stop, and an area path that names no file (an area may delete its own files without a
+request) covers nothing; the script's tests require every area path to exist in the checkout. The check compares each
+file's imports with the same path's at the base, so a file that is moved or split reports again every cross-area import
+it already had without a row. A new top-level module an area adds is in no area, and its own imports go unchecked, until
+someone adds it to the table; an area file that imports a module in no area's paths and no row is reported as
+unassigned, so the orchestrator hears of it. An import from or of a test file is never reported (`*_tests.rs`,
+`tests.rs`, or a file under a `tests/` directory), since an area's tests borrowing another's fixtures owe no row. The
+map was confirmed by the migration's orchestrator on 2026-11-15.
+
+| Area                                 | Area paths                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sidebar-and-session-view             | `crates/gui/farhelm-gui/src/session_list.rs`, `crates/gui/farhelm-gui/src/session_list/`, `crates/gui/farhelm-gui/src/session_pane.rs`, `crates/gui/farhelm-gui/src/session_pane/`, `crates/gui/farhelm-gui/src/sidebar.rs`, `crates/gui/farhelm-gui/src/sidebar/`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| terminal                             | `crates/gui/farhelm-gui/src/terminal.rs`, `crates/gui/farhelm-gui/src/terminal/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| launcher                             | `crates/gui/farhelm-gui/src/launcher.rs`, `crates/gui/farhelm-gui/src/launcher/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| templates-and-quick-launch           | `crates/gui/farhelm-gui/src/templates.rs`, `crates/gui/farhelm-gui/src/templates/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| settings-and-hosts                   | `crates/gui/farhelm-gui/src/settings.rs`, `crates/gui/farhelm-gui/src/settings/`, `crates/gui/farhelm-gui/src/hosts.rs`, `crates/gui/farhelm-gui/src/hosts/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| desktop-integration                  | `crates/gui/farhelm-gui/src/desktop.rs`, `crates/gui/farhelm-gui/src/desktop/`, `crates/gui/farhelm-gui/src/update_readout.rs`, `crates/gui/farhelm-gui/src/update_readout/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| approvals-and-agent-spawned-sessions | `crates/gui/farhelm-gui/src/approvals.rs`, `crates/gui/farhelm-gui/src/approvals/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| other-dialogs                        | `crates/gui/farhelm-gui/src/announcements.rs`, `crates/gui/farhelm-gui/src/announcements/`, `crates/gui/farhelm-gui/src/welcome.rs`, `crates/gui/farhelm-gui/src/welcome/`, `crates/gui/farhelm-gui/src/trash.rs`, `crates/gui/farhelm-gui/src/trash/`, `crates/gui/farhelm-gui/src/feedback.rs`, `crates/gui/farhelm-gui/src/feedback/`, `crates/gui/farhelm-gui/src/help_menu.rs`, `crates/gui/farhelm-gui/src/help_menu/`, `crates/gui/farhelm-gui/src/notices_bell.rs`, `crates/gui/farhelm-gui/src/notices_bell/`, `crates/gui/farhelm-gui/src/sounds.rs`, `crates/gui/farhelm-gui/src/sounds/`, `crates/gui/farhelm-gui/src/shortcuts.rs`, `crates/gui/farhelm-gui/src/shortcuts/` |
 
 ## Extension point rules
 
