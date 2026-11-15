@@ -28,7 +28,7 @@ use crate::session_list::host_rail::tests::{
     queries, sent_queries, snapshot,
 };
 use crate::session_list::tests::{
-    change, collections, listing, open_main, painted, preferences, selected, session,
+    carrying, change, collections, listing, open_main, painted, preferences, selected, session,
 };
 use crate::test_support::{click, focused_id, frame, keys};
 
@@ -38,10 +38,13 @@ use crate::test_support::{click, focused_id, frame, keys};
 const HOST_3: &str = "Build fleet with a deliberately long caption";
 
 /// Accept every query the window sent since the last look, after pushing the empty answer the helm would serve for the
-/// last of them (0 of 2 sessions matched, complete); `gone` are the rows the answer takes away.
+/// last of them (0 of 2 sessions matched, complete); `gone` are the rows the answer takes away. Every caller has a
+/// open, so the answer carries a outside the list as the helm carries the session its query names; an answer without
+/// it would tell the list a was deleted, so `gone` never names a.
 fn answer_empty(fake: &mut FakeHelm, cx: &mut VisualTestContext, gone: &[&str]) {
     let sent = queries(fake);
-    fake.push(change(filtered(&[], 2, 0), &[], gone));
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    fake.push(change(carrying(filtered(&[], 2, 0), "a"), &[], gone));
     for (command, _) in sent {
         fake.reply(command.id, 204, None);
     }
@@ -272,7 +275,7 @@ fn every_empty_answer_names_its_filters_with_a_link_per_filter(cx: &mut TestAppC
             both,
         ),
     ];
-    let mut gone: &[&str] = &["a", "b"];
+    let mut gone: &[&str] = &["b"];
     for (host, status, sentence, drawn) in cases {
         click(cx, host);
         click(cx, status);
@@ -309,7 +312,7 @@ fn each_link_clears_its_own_filter_and_focuses_all(cx: &mut TestAppContext) {
     answer_everything(&mut fake);
     click(cx, "host-rail-host-3");
     click(cx, "session-status-Waiting");
-    answer_empty(&mut fake, cx, &["a", "b"]);
+    answer_empty(&mut fake, cx, &["b"]);
     assert_eq!(
         label(&frame(cx), "filter-empty"),
         format!("No waiting sessions on {HOST_3}."),
@@ -539,6 +542,41 @@ fn a_refused_filter_change_names_the_open_session_again_once() {
         Err(HostText::from_host("no")),
     );
     assert_eq!(choice.choose(Query::default(), Some("c")), None, "no loop");
+}
+
+/// The selection rules read the open session's absence from a filtered listing as its deletion only through
+/// `serves_named`, so it must hold exactly while the helm serves a query naming the key with nothing later in flight:
+/// any sooner undoes a fresh pick, any later misses a deletion. Specified: nothing is named before any send; All naming
+/// a names it only once accepted; a send naming b in flight names neither a nor b; its acceptance names b alone; a
+/// refused send naming c leaves b named, since the helm still serves the query that named b.
+#[test]
+fn the_query_in_force_names_a_session_once_answered_with_nothing_in_flight() {
+    let mut choice = Choice::default();
+    assert!(!choice.serves_named("a"), "nothing sent");
+    let first = choice.choose(Query::default(), Some("a")).unwrap();
+    assert!(!choice.serves_named("a"), "sent, not yet answered");
+    choice.settle(first, Query::default(), Some("a"), Ok(()));
+    assert!(choice.serves_named("a"));
+
+    let second = choice.choose(Query::default(), Some("b")).unwrap();
+    assert!(
+        !choice.serves_named("a") && !choice.serves_named("b"),
+        "a query in flight"
+    );
+    choice.settle(second, Query::default(), Some("b"), Ok(()));
+    assert!(choice.serves_named("b") && !choice.serves_named("a"));
+
+    let third = choice.choose(Query::default(), Some("c")).unwrap();
+    choice.settle(
+        third,
+        Query::default(),
+        Some("c"),
+        Err(HostText::from_host("no")),
+    );
+    assert!(
+        choice.serves_named("b") && !choice.serves_named("c"),
+        "a refusal leaves the query the helm serves"
+    );
 }
 
 /// A refused query must put the answered choice back rather than leave a choice shown that the helm is not serving,

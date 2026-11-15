@@ -12,9 +12,12 @@
 //! - **A selection stays until it is proven gone.** A selected session missing from the listing is dropped only when
 //!   the listing proves it gone ([`crate::session::listing_proves_gone`], the rule a confirmation about a session uses
 //!   too); a truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user
-//!   had open. One more thing proves it: this window's own Delete of it succeeded and the store no longer holds it
-//!   (`delete`'s "This window's own Delete is evidence"), since a filtered listing never would. When it is proven gone,
-//!   the automatic choice picks the next one, never the one that just went.
+//!   had open. Two more things prove it, both with the store holding no row for it. The helm serves a query that names
+//!   it, so an available listing that is filtered but not cut would carry it while it exists ([`absent_while_named`];
+//!   SPEC.md's exception to "Existing removal detection", decided by the maintainer on 2026-11-15): that is how a hidden
+//!   open session deleted in another window or from the command line is noticed. Or this window's own Delete of it
+//!   succeeded (`delete`'s "This window's own Delete is evidence"). When it is proven gone, the automatic choice picks
+//!   the next one, never the one that just went.
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
@@ -47,7 +50,9 @@
 
 use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::SessionSeenRequest;
-use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SessionRow};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, PREFERENCES_KEY, Preferences, SessionRow,
+};
 use gpui::App;
 
 use crate::focus::Mark;
@@ -78,6 +83,31 @@ pub(crate) fn listed(collections: &Collections) -> Vec<Listed<'_>> {
         .collect()
 }
 
+/// Whether `collections` prove the open session `key` gone although its listing may be filtered: the helm serves a
+/// query naming `key` (`serves_named`, from [`super::filters::Choice::serves_named`], which says when that holds), so
+/// every listing it pushes carries the session while it exists, and the listing is available, not cut, and holds no
+/// row for it. A failed read, or no listing yet, proves nothing, as for [`crate::session::listing_proves_gone`].
+///
+/// NOTE: A cut listing proves nothing, whatever the query names. The helm carries the named session from what its
+/// hosts' listings hold, and each host cuts its own listing at its cap (500 sessions, newest first), so an old open
+/// session on a host past its cap is carried by no listing although it exists, and the cut is what says so. One case
+/// still slips through: under a host filter, a host other than the chosen one that is past its cap does not mark the
+/// listing cut, so an old open session on that host reads as deleted. Closing that needs the helm to stop counting a
+/// cut host's empty answer for one session as "no such session"; until then it is a known gap (the parity file has
+/// it).
+///
+/// It is the list's rule only. A layer about a session ([`crate::session::Subject::session`]) and Rename's
+/// unavailability keep the complete-listing rule, since they cannot see the query: a Rename editor open on a hidden
+/// session deleted elsewhere stays open, and the helm refuses its save.
+pub(crate) fn absent_while_named(collections: &Collections, key: &str, serves_named: bool) -> bool {
+    serves_named
+        && collections.meta(Collection::Sessions).is_some_and(|meta| {
+            meta.availability == Availability::Available
+                && meta.counts.as_ref().is_none_or(|counts| !counts.truncated)
+        })
+        && collections.get::<SessionRow>(key).is_none()
+}
+
 /// What the selection should become.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Change {
@@ -89,9 +119,9 @@ pub(crate) enum Change {
     Clear,
 }
 
-/// Where the selection should be, given what is selected, what is listed, whether the listing proves the selected
-/// session gone (`gone`, [`crate::session::listing_proves_gone`]), and the helm's preferences (its visit history and
-/// remembered last selection).
+/// Where the selection should be, given what is selected, what is listed, whether the selected session is proven gone
+/// (`gone`, by any of the module docs' proofs), and the helm's preferences (its visit history and remembered last
+/// selection).
 pub(crate) fn settle(
     selected: Option<&str>,
     listed: &[Listed],

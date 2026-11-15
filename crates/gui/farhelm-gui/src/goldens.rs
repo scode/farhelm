@@ -63,6 +63,7 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::HostsPanel;
 use crate::hosts::identity::host_mark;
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
+use crate::local_state;
 use crate::notices::Notice;
 use crate::operations::OpKey;
 use crate::prompt::{self, Answer, Question};
@@ -2284,6 +2285,7 @@ fn host_filter_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
         state,
         |list, state, _, cx| {
             list.update(cx, |list, cx| list.choose_host(Some(2), cx));
+            let open = local_state::selected(cx);
             let mut keep = state.keep.borrow_mut();
             let Some(helm) = keep
                 .iter_mut()
@@ -2291,28 +2293,41 @@ fn host_filter_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             else {
                 return;
             };
-            let gone: Vec<String> = fleet().iter().map(|row| row.key.to_owned()).collect();
-            helm.push(CollectionChanges {
-                collection: Collection::Sessions,
-                meta: CollectionMeta {
-                    availability: Availability::Available,
-                    order: Vec::new(),
-                    counts: Some(ListCounts {
-                        total: 6,
-                        matching: Some(0),
-                        truncated: false,
-                    }),
-                    selected_outside_query: None,
-                },
-                upsert: Vec::new(),
-                remove: gone,
-            });
+            helm.push(listing_carrying_the_open_session(&[], open));
             for command in helm.commands() {
                 helm.reply(command.id, 204, None);
             }
         },
         cx,
     );
+}
+
+/// The listing the helm pushes for a filtered query over the scenes' fleet: `shown` of its 6 in order, complete, and
+/// the rest removed, except the open session, which the helm carries outside the order because the query names it.
+/// Leaving the open session out would tell the list it was deleted elsewhere, and the list would move the selection
+/// on, which is not what these scenes picture.
+fn listing_carrying_the_open_session(shown: &[&str], open: Option<String>) -> CollectionChanges {
+    let carried = open.filter(|key| !shown.contains(&key.as_str()));
+    let remove = fleet()
+        .iter()
+        .map(|row| row.key.to_owned())
+        .filter(|key| !shown.contains(&key.as_str()) && carried.as_ref() != Some(key))
+        .collect();
+    CollectionChanges {
+        collection: Collection::Sessions,
+        meta: CollectionMeta {
+            availability: Availability::Available,
+            order: shown.iter().map(|key| key.to_string()).collect(),
+            counts: Some(ListCounts {
+                total: 6,
+                matching: Some(shown.len() as u64),
+                truncated: false,
+            }),
+            selected_outside_query: carried,
+        },
+        upsert: Vec::new(),
+        remove,
+    }
 }
 
 /// The fleet narrowed to `buildbox` and Waiting, the scenes' host and status: the rail chooses the host and the
@@ -2328,6 +2343,7 @@ fn filtered_to_waiting_on_buildbox(
         list.choose_host(Some(2), cx);
         list.choose_status(Status::Waiting, cx);
     });
+    let open = local_state::selected(cx);
     let mut keep = state.keep.borrow_mut();
     let Some(helm) = keep
         .iter_mut()
@@ -2335,26 +2351,7 @@ fn filtered_to_waiting_on_buildbox(
     else {
         return;
     };
-    let gone: Vec<String> = fleet()
-        .iter()
-        .map(|row| row.key.to_owned())
-        .filter(|key| !shown.contains(&key.as_str()))
-        .collect();
-    helm.push(CollectionChanges {
-        collection: Collection::Sessions,
-        meta: CollectionMeta {
-            availability: Availability::Available,
-            order: shown.iter().map(|key| key.to_string()).collect(),
-            counts: Some(ListCounts {
-                total: 6,
-                matching: Some(shown.len() as u64),
-                truncated: false,
-            }),
-            selected_outside_query: None,
-        },
-        upsert: Vec::new(),
-        remove: gone,
-    });
+    helm.push(listing_carrying_the_open_session(shown, open));
     for command in helm.commands() {
         helm.reply(command.id, 204, None);
     }
