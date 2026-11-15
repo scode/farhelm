@@ -1475,7 +1475,7 @@
     },
     {
       "id": "settings-notifications",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-app",
@@ -1507,7 +1507,7 @@
     },
     {
       "id": "checkout-trash-dialog",
-      "ported": false
+      "ported": true
     },
     {
       "id": "welcome-dialog",
@@ -1643,7 +1643,7 @@
     },
     {
       "id": "help-menu",
-      "ported": false
+      "ported": true
     },
     {
       "id": "header-restart-menu",

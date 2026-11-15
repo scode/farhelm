@@ -9,7 +9,7 @@
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView};
-use gpui::{DriverNode, TestAppContext, VisualTestContext};
+use gpui::{DriverNode, Pixels, TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
 
 use super::SETTLE;
@@ -973,4 +973,80 @@ fn cancelling_returns_focus_to_delete_all_while_it_is_unavailable(cx: &mut TestA
     test_support::advance(cx, SETTLE);
     assert!(pressable(&frame(cx), "trash-delete-all"));
     assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+}
+
+/// The top edge of what was drawn under element id `id` in a fresh frame; fails when nothing was.
+fn top(cx: &mut VisualTestContext, id: &str) -> Pixels {
+    match node(&frame(cx), id) {
+        Some(node) => node.bounds.top(),
+        None => panic!("{id} was not drawn"),
+    }
+}
+
+/// Why this matters: SPEC.md puts the global question in "its own bounded, keyboard-scrollable region directly above
+/// the footer". Focus starts on Delete permanently, at the question's end, so once the question outgrows its region
+/// the line naming what it deletes sits above view, and without the region's page keys a keyboard user would confirm a
+/// deletion whose count and hosts they cannot read. The old region was a scroll region the browser scrolled around the
+/// focused answer; the frame's notices do so only when the dialog opts in.
+///
+/// Specified, in a window 400 pixels tall (shorter than the app's minimum, standing in for host names long enough to
+/// make the question outgrow the region at any height), with the global question open: focus is on Delete permanently
+/// and the question's first line starts above the region's top, scrolled there to show the answer; Home brings it to
+/// the region's top or below; Page Down scrolls it back up, and End at least as far as focus had and on to the end,
+/// where the question's band ends at the region's bottom; Page Up scrolls it back down; focus stays on Delete
+/// permanently throughout, and the region draws no stop of its own while its answers can take focus.
+#[gpui::test]
+fn page_keys_scroll_the_global_questions_region_from_its_focused_answer(cx: &mut TestAppContext) {
+    let (_helm, _, cx) = opened(cx);
+    cx.simulate_resize(size(px(720.), px(400.)));
+    test_support::settle(cx);
+    test_support::click(cx, "trash-delete-all");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: Delete permanently holds focus"
+    );
+    let region = top(cx, "checkout-trash-dialog-notices");
+    let revealed = top(cx, "trash-confirm-checkouts");
+    assert!(
+        revealed < region,
+        "the premise: the question outgrows its region, scrolled to show its answer: {revealed:?} above {region:?}"
+    );
+
+    test_support::keys(cx, "home");
+    let start = top(cx, "trash-confirm-checkouts");
+    assert!(start >= region, "Home scrolled to the start: {start:?}");
+    test_support::keys(cx, "pagedown");
+    let paged = top(cx, "trash-confirm-checkouts");
+    assert!(paged < start, "Page Down scrolled forward: {paged:?}");
+    // The focus coordinator scrolls only far enough to show the answer, short of the band's padding under it, so
+    // End's end is the band's bottom meeting the region's, not where focus left the question.
+    test_support::keys(cx, "end");
+    assert!(
+        top(cx, "trash-confirm-checkouts") <= revealed,
+        "End scrolled at least as far as focus had"
+    );
+    // By debug selector, which the band has and the driver record does not carry.
+    assert_eq!(
+        test_support::bounds(cx, "trash-global-confirmation").bottom(),
+        test_support::bounds(cx, "checkout-trash-dialog-notices").bottom(),
+        "End scrolled to the end: the band's bottom meets the region's"
+    );
+    let ended = top(cx, "trash-confirm-checkouts");
+    test_support::keys(cx, "pageup");
+    let back = top(cx, "trash-confirm-checkouts");
+    assert!(
+        back > ended,
+        "Page Up scrolled back: {back:?} below {ended:?}"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "focus stayed on the answer"
+    );
+    assert_eq!(
+        test_support::label(cx, "checkout-trash-dialog-notices-stop"),
+        None,
+        "and the region is no stop while its answers can take focus"
+    );
 }
