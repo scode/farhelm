@@ -1348,6 +1348,33 @@ fn the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one(cx: &mut
     );
 }
 
+/// SPEC.md, "Launch templates": Save as template checks the host "only after a hand pick", and the old picker counted
+/// re-picking the host already shown as one. A picker that skipped the shown host would leave New's prefilled host
+/// unchecked however the user confirmed it. Specified: picking host1, already chosen, marks the host the user's own
+/// choice and leaves the folder as it was.
+#[gpui::test]
+fn re_picking_the_shown_host_counts_as_a_hand_pick(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "/seeded");
+    assert!(
+        !draft(cx).host_chosen,
+        "the premise: New's host is a prefill"
+    );
+    test_support::click(cx, "launcher-folder-row");
+    keys(cx, "shift-tab");
+    assert!(host_focused(cx), "the premise: the host button has focus");
+    // Down opens the list at the chosen host1, and Enter picks the highlighted row.
+    keys(cx, "down");
+    assert!(
+        has_node(cx, "launcher-host-list"),
+        "the premise: the list is open"
+    );
+    keys(cx, "enter");
+    assert!(!has_node(cx, "launcher-host-list"), "Enter picked a host");
+    assert_eq!(draft(cx).host, Some(1));
+    assert!(draft(cx).host_chosen);
+    assert_eq!(draft(cx).folder.value(), "/seeded");
+}
+
 /// The keyboard: with the button focused, Down opens the list at the chosen host and moves on, Enter picks the
 /// highlighted host and closes the list; a typed folder survives the host change. Enter on the closed button presses
 /// the main action, under the choice controls' Enter rule (SPEC.md, "Creation": "Enter on the closed pickers ...
