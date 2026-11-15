@@ -572,3 +572,47 @@ fn notices_go_only_when_a_readable_registry_drops_their_host(cx: &mut TestAppCon
         "the late answer left nothing"
     );
 }
+
+/// SPEC.md, "Reaching everything by keyboard": "A region whose content holds nothing focusable gets its own tab stop
+/// with an accessible name", and the old app's "trash list stays keyboard-scrollable while every list action is
+/// disabled". While a host's measured read is out every entry's Delete is unavailable, so nothing in the list can take
+/// focus; the old list was a stop of its own named "Archived checkouts". Specified: with the measured reads out and the settle pause over, the body draws its stop under
+/// that name; once the reads are answered and the Deletes are available again, it draws none.
+#[gpui::test]
+fn the_archive_list_has_its_own_stop_while_every_action_is_unavailable(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = open_button(
+        cx,
+        vec![crate::hosts::tests::hosts(&[local(), remote(), down()])],
+    );
+    answer_reads(&mut helm, archives);
+    test_support::settle(cx);
+    test_support::click(cx, BUTTON_ID);
+    let measured = take(&mut helm);
+    test_support::advance(cx, SETTLE);
+    assert!(
+        !enabled(&frame(cx), "trash-entry-delete-1-a"),
+        "the premise: the Deletes are unavailable while measuring"
+    );
+    test_support::settle(cx);
+    assert_eq!(
+        test_support::label(cx, "checkout-trash-dialog-body-stop").as_deref(),
+        Some("Archived checkouts")
+    );
+
+    answer(
+        &mut helm,
+        &measured,
+        |host| (200, archives(host)),
+        |_| (500, Value::Null),
+    );
+    test_support::advance(cx, SETTLE);
+    assert!(
+        enabled(&frame(cx), "trash-entry-delete-1-a"),
+        "the premise: the Deletes are back"
+    );
+    test_support::settle(cx);
+    assert_eq!(
+        test_support::label(cx, "checkout-trash-dialog-body-stop"),
+        None
+    );
+}
