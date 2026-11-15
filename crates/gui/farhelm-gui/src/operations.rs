@@ -21,7 +21,7 @@
 //!   and the Rename editor to its own feature. Work on different keys is independent: each keeps its own completion
 //!   handling until it settles. Where an area says that a start was refused because its key already has work in
 //!   flight, it gives the shared reason ([`NotStarted::BUSY_REASON`]) after a lead-in of its own ("Not saved:",
-//!   "Not started:") rather than a reason of its own.
+//!   "Not started:") rather than a reason of its own, unless the line ports the old app's words, which it keeps.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
 //!   its [`Work`] variant, so that no other work can be superseded by accident.
@@ -603,6 +603,11 @@ impl NotStarted {
     /// save or "Not started:" for a start ("Not started: another operation was in progress. Try again."), rather than
     /// wording its own reason. The store cannot supply the lead-in: [`NotStarted::Busy`] carries the work holding the
     /// key, not the one refused, and only the feature knows what the press was for.
+    ///
+    /// The shared reason is for a busy line that has no old-app wording to port. A line that ports the old app's words
+    /// verbatim keeps them, since the migration ports the old app rather than rewording it: the terminal's "Another
+    /// tunnel action is still waiting", for one, stays as the old app had it. The migration's orchestrator decided this
+    /// on 2026-11-14.
     ///
     /// Ported from the old app's session row, whose exclusion is the closest to the store's rule (one request per key):
     /// "Stop: not started, another operation is in progress; try again" (`list/lifecycle.rs` at reference commit
