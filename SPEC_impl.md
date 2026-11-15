@@ -549,27 +549,27 @@ held repeat is marked as one, and only a fresh press follows a release.
 
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
-innermost first, by the least distance that shows the whole control, as a browser's scroll-into-view does. It works from
-where controls were last drawn, moved by any scroll since, and asks for its own frame; virtualized lists keep their own
-reveal. A control focused before it is first drawn (a layer's start) has no position and is not scrolled to; the
-archive's global confirmation, whose actions SPEC.md brings into view when it opens, still needs a way to scroll a
-layer's start into view. On the page, a result that arrives later moves focus with `focus::focus_control`. Inside the
-open dialog, a move to another control goes through `focus::focus_in_layer`, for a result that arrives later (Settings
-moving to an agent's switch once its trust read answers), for the user's own action there (the launcher's Custom choice
-moving into its flags field), and for a question the prompt draws inline in the dialog, as it opens and closes. Both do
-nothing once the user has moved on since the action, and both scroll the control into view. `focus_in_layer` also does
-nothing once focus has left that dialog or for a control drawn outside it. A control that is not drawn yet (one the
-action itself makes appear, or any control of a dialog opened in the same update) becomes the window's one pending move,
-which the coordinator makes with the same checks once a frame has drawn the control: the position record every control
-draws while a frame is prepared tells it the target was drawn, and the move runs once that frame is drawn. Any other
-focus move but the coordinator's own recovery drops it, and so does a layer that took focus closing with focus returned
-(a dialog closed before its first frame keeps it, harmlessly, since its target is never drawn elsewhere), so a newer
-move wins, and area code never schedules a focus move on a frame itself. A dialog or menu opened from a button (a
-session row's menu toggle) names that button as where closing returns focus (`focus::ReturnTo::Control`) rather than
-focusing it before opening: on macOS a click leaves a button unfocused, so what held focus before the click would get it
-back, and a focus move made first costs a whole-window refresh and is refused from inside another dialog.
-`focus::move_within_control`, which carries focus along inside one control as part of the key the user pressed there,
-scrolls nothing.
+innermost first, by the least distance that shows the whole control, as a browser's `scrollIntoView({block: 'nearest'})`
+does. It works from where controls were last drawn, moved by any scroll since, and asks for its own frame; virtualized
+lists keep their own reveal. A control focused before it is first drawn (a layer's start) has no position and is not
+scrolled to; the archive's global confirmation, whose actions SPEC.md brings into view when it opens, still needs a way
+to scroll a layer's start into view. On the page, a result that arrives later moves focus with `focus::focus_control`.
+Inside the open dialog, a move to another control goes through `focus::focus_in_layer`, for a result that arrives later
+(Settings moving to an agent's switch once its trust read answers), for the user's own action there (the launcher's
+Custom choice moving into its flags field), and for a question the prompt draws inline in the dialog, as it opens and
+closes. Both do nothing once the user has moved on since the action, and both scroll the control into view.
+`focus_in_layer` also does nothing once focus has left that dialog or for a control drawn outside it. A control that is
+not drawn yet (one the action itself makes appear, or any control of a dialog opened in the same update) becomes the
+window's one pending move, which the coordinator makes with the same checks once a frame has drawn the control: the
+position record every control draws while a frame is prepared tells it the target was drawn, and the move runs once that
+frame is drawn. Any other focus move but the coordinator's own recovery drops it, and so does a layer that took focus
+closing with focus returned (a dialog closed before its first frame keeps it, harmlessly, since its target is never
+drawn elsewhere), so a newer move wins, and area code never schedules a focus move on a frame itself. A dialog or menu
+opened from a button (a session row's menu toggle) names that button as where closing returns focus
+(`focus::ReturnTo::Control`) rather than focusing it before opening: on macOS a click leaves a button unfocused, so what
+held focus before the click would get it back, and a focus move made first costs a whole-window refresh and is refused
+from inside another dialog. `focus::move_within_control`, which carries focus along inside one control as part of the
+key the user pressed there, scrolls nothing.
 
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, by the review gate, which refuses area code that defers a focus move to a later frame itself (a
@@ -1225,6 +1225,19 @@ Traps that an earlier rule already prevents get one line pointing at it.
   when a refresh is ignored, so the drawn frame keeps showing nothing focused until something else redraws; found when
   dismissing this app's own banner left an idle window that way. Rule: the focus coordinator's listener asks for one
   more frame (`window.defer`).
+- **Scrolling a control into view leaves the help under it hidden.** Tab to a control below the fold of a scrolling
+  dialog body (a Settings switch) scrolls the body the least distance that shows the control ("Focus: the focus
+  coordinator"), so the help drawn under it stays below the fold while the control has focus, and for the last control
+  Tab never shows it. The old app had nothing that made a control and its help one block to scroll to: the switch was
+  the focused `<input>` inside its label, the help a sibling paragraph tied to it only by `aria-describedby`
+  (`crates/farhelm-ui/src/settings.rs` at the reference commit), and the stylesheet sets `scroll-margin` only on the
+  answers of two scrolling questions (the launch notices' YOLO buttons and the global trash confirmation's answer row).
+  What showed the help there was probably WebKit's own focus scroll, which, as far as is known, centers a control that
+  lies wholly out of view instead of moving it the least distance, and so takes a last control's body to its end; that
+  has not been checked in WebKit. Known gap, recorded rather than fixed as the migration's orchestrator asked on
+  2026-11-14: the component layer cannot tell which help belongs to which control, because Settings draws its help lines
+  itself, so a fix needs either area code to declare each control's block or a different alignment in the coordinator's
+  reveal, which every scrolling region would feel.
 - **GPUI keeps a frame's input handler past that frame,** and with it a strong handle to whatever implements it. A view
   that was its own `ElementInputHandler` outlived its retirement, focus handle included, so focus stayed on an element
   nobody drew and the coordinator's recovery never ran (found when the terminal got its input handler). Rule: the
