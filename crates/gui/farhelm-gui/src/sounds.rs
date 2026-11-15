@@ -10,8 +10,8 @@
 //! - [`StatusSounds`] ([`owner`]): the one owner that decides when a sound plays (SPEC_impl.md, "Notices: the notice
 //!   center", leaves the three sounds to it). It builds an observation from the current UI session's store on every
 //!   change, runs the rules and hands the chosen sound to the player. The main view keeps it for the window's life.
-//! - The player seam ([`Player`], [`install_player`]): what actually makes the sound. Nothing in this crate installs
-//!   one, so the app plays nothing until the desktop app installs a platform player; tests install a fake that
+//! - The player seam ([`Player`], [`install_player`]): what actually makes the sound. The bootstrap installs the player
+//!   the host hands it (`bootstrap::Host::player`), and a host without one plays nothing; tests install a fake that
 //!   records what it was asked to play.
 //!
 //! Ported from the old Dioxus UI at the reference commit: `crates/farhelm-ui/src/sounds.rs` (`History`,
@@ -77,11 +77,19 @@ impl Global for InstalledPlayer {}
 
 /// Make `player` the app's player from now on, replacing any installed before.
 ///
-/// Optional by design, so it is not part of the bootstrap and is looked up directly rather than through
-/// `bootstrap::installed`, which would fail a debug build without one: with no player installed the owner still
-/// decides every sound and plays nothing. The desktop app installs the platform player; tests install a fake.
+/// Optional by design: the bootstrap installs one only when the host passes one, and it is looked up directly rather
+/// than through `bootstrap::installed`, which would fail a debug build without one: with no player installed the owner
+/// still decides every sound and plays nothing. The desktop app hands its platform player to the bootstrap, which
+/// installs it; tests install a fake.
 pub fn install_player(player: Rc<dyn Player>, cx: &mut App) {
     cx.set_global(InstalledPlayer(player));
+}
+
+/// The installed player, for the bootstrap's test that the host's player is the one installed. It only reads.
+#[cfg(test)]
+pub(crate) fn installed_player(cx: &App) -> Option<Rc<dyn Player>> {
+    cx.try_global::<InstalledPlayer>()
+        .map(|InstalledPlayer(player)| player.clone())
 }
 
 /// Hand `sound` to the installed player, rendering its WAV file the first time. Nothing without a player, which also

@@ -15,7 +15,8 @@
 //! controls Tab reaches, the ticker takes the host's reduced-motion setting (and, in an agent build, counts every window
 //! as active, so a run under headless Mutter, which reports every window inactive, still animates), the desktop
 //! integration keeps the host's source of the license notices and the host's updater (so the window's first frame
-//! already knows whether an updater runs), and the UI channel to the helm opens, so the window's first frame already
+//! already knows whether an updater runs), the host's status-sound player is installed if it has one (before any
+//! window exists to decide a sound), and the UI channel to the helm opens, so the window's first frame already
 //! reflects where the connection stands. Only then does a window open, at the frame the host restored if it restored
 //! one; once it is open, the window is handed to the desktop integration, which makes its close quit the app, tells the
 //! host about every change to its frame, and follows the host's reports of a second launch, which bring it forward.
@@ -31,6 +32,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Global, Size, Subscription, Task, WindowBounds,
@@ -42,7 +44,7 @@ use crate::assets::{self, Assets};
 use crate::main_view::MainView;
 use crate::render_count;
 use crate::theme::{self, Preference};
-use crate::{actions, desktop, focus, layers, local_state, notices, session, ticker};
+use crate::{actions, desktop, focus, layers, local_state, notices, session, sounds, ticker};
 
 /// The smallest window the app supports, in logical pixels.
 ///
@@ -270,6 +272,11 @@ pub struct Host {
     /// (tests, and a host that listens for none). Handed to the desktop integration with the main window once it is
     /// open.
     pub activations: Option<desktop::Activations>,
+    /// What plays the status sounds ([`sounds::Player`]). `None` plays nothing (tests, and a host with no platform
+    /// player): the GUI still decides every sound, and the switches in Settings still change, but nothing is heard.
+    /// Installed before the main window opens, so the player is already in place for the first sound the window
+    /// decides.
+    pub player: Option<Rc<dyn sounds::Player>>,
 }
 
 /// The part of the [`Host`] that [`start`] uses: everything but the quit wiring, which [`run`] installs before it, and
@@ -282,6 +289,7 @@ struct Startup {
     window_frame: Option<desktop::FrameHost>,
     updater: Option<desktop::UpdaterHost>,
     activations: Option<desktop::Activations>,
+    player: Option<Rc<dyn sounds::Player>>,
 }
 
 /// Install all app-wide state, open the main window and hand it to the desktop integration, returning the window: the
@@ -296,6 +304,7 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
         window_frame,
         updater,
         activations,
+        player,
     } = startup;
     install(cx)?;
     focus::follow_tab_reach(tab_reach, cx);
@@ -306,6 +315,9 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
     ticker::set_active_override(Some(true), cx);
     desktop::keep_licenses(licenses, cx);
     desktop::keep_updater(updater, cx);
+    if let Some(player) = player {
+        sounds::install_player(player, cx);
+    }
     if let Some(endpoint) = helm {
         session::connect(endpoint, cx)?;
     }
@@ -342,15 +354,17 @@ pub fn run(host: Host) {
         window_frame,
         updater,
         activations,
+        player,
     } = host;
     let startup = Startup {
-        tab_reach: std::rc::Rc::from(tab_reach),
+        tab_reach: Rc::from(tab_reach),
         helm,
         reduced_motion,
         licenses,
         window_frame,
         updater,
         activations,
+        player,
     };
     gpui_platform::application()
         .with_assets(Assets)
@@ -438,23 +452,26 @@ mod tests {
         });
     }
 
-    /// A startup with every optional host value absent: no helm, no saved frame, no updater, no second launches.
+    /// A startup with every optional host value absent: no helm, no saved frame, no updater, no second launches, no
+    /// player.
     fn startup_without_host_values() -> Startup {
         Startup {
-            tab_reach: std::rc::Rc::new(|| focus::TabReach::EveryControl),
+            tab_reach: Rc::new(|| focus::TabReach::EveryControl),
             helm: None,
             reduced_motion: true,
             licenses: String::new,
             window_frame: None,
             updater: None,
             activations: None,
+            player: None,
         }
     }
 
     /// Nothing else runs the real startup sequence end to end (`run` needs the real platform), so a startup that
     /// fails, or opens a window too many or none, would otherwise first show in a launched app. Specifies that the whole
-    /// startup, with every optional host value absent (no helm, no saved frame, no updater, no second launches),
-    /// succeeds on GPUI's test platform and opens exactly the main window it returns.
+    /// startup, with every optional host value absent (no helm, no saved frame, no updater, no second launches, no
+    /// player), succeeds on GPUI's test platform, opens exactly the main window it returns, and installs no sound
+    /// player.
     #[gpui::test]
     fn the_startup_opens_only_the_main_window_without_host_values(cx: &mut TestAppContext) {
         let main = cx
@@ -468,6 +485,36 @@ mod tests {
                 .map(|window| window.window_id())
                 .collect();
             assert_eq!(open, vec![main.window_id()], "only the main window opens");
+            assert!(
+                sounds::installed_player(cx).is_none(),
+                "no player is installed"
+            );
+        });
+    }
+
+    /// A player that plays nothing; the test below only asks which player the app holds.
+    struct Silent;
+
+    impl sounds::Player for Silent {
+        fn play(&self, _: sounds::Sound, _: &'static [u8]) {}
+    }
+
+    /// The host's player is the only way the desktop app's status sounds reach the speakers, and a seam that dropped
+    /// it would fail silently: the window would go on deciding sounds and playing none. Specifies that a startup with
+    /// a host player leaves that same player installed once the main window is open.
+    #[gpui::test]
+    fn the_startup_installs_the_hosts_player(cx: &mut TestAppContext) {
+        let player: Rc<dyn sounds::Player> = Rc::new(Silent);
+        let startup = Startup {
+            player: Some(player.clone()),
+            ..startup_without_host_values()
+        };
+        cx.update(|cx| start(startup, cx))
+            .expect("the startup succeeds with a player");
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let installed = sounds::installed_player(cx).expect("a player is installed");
+            assert!(Rc::ptr_eq(&installed, &player), "the host's own player");
         });
     }
 }
