@@ -363,22 +363,35 @@ impl SessionLaunch {
         match self {
             SessionLaunch::Agent {
                 selection, start, ..
-            } => {
-                let prefix_words = selection.wrapper_prefix.as_ref().map_or(0, Vec::len);
-                let (prefix, suffix) = start.split_at(prefix_words.min(start.len()));
-                let suffix = shell_words::join(
-                    suffix
-                        .iter()
-                        .filter(|element| element.as_str() != FARHELM_ARGS_PLACEHOLDER),
-                );
-                [prefix.join(" "), suffix]
-                    .into_iter()
-                    .filter(|part| !part.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            }
+            } => display_argv(start, selection.wrapper_prefix.as_ref().map_or(0, Vec::len)),
             SessionLaunch::Command(command) => command.command.clone(),
             SessionLaunch::Legacy { invocation, .. } => invocation.clone(),
+        }
+    }
+
+    /// The resume command a Restart runs, spelled the way [`Self::display_command`] spells the start command, or
+    /// `None` when the launch has no resume command at all.
+    ///
+    /// An agent launch's resume argv shares its start's raw wrapper-prefix boundary, so the prefix keeps its own
+    /// shell spelling and only the composed words after it are quoted; a legacy launch's stored template has no prefix.
+    /// Approval cards show this beside the start command because a later plain Restart runs it without another check
+    /// against the agent YOLO rule (SPEC.md, "Agent-spawned sessions").
+    pub fn display_resume(&self) -> Option<String> {
+        match self {
+            SessionLaunch::Agent {
+                selection, resume, ..
+            } => resume.as_ref().map(|resume| {
+                display_argv(
+                    resume,
+                    selection.wrapper_prefix.as_ref().map_or(0, Vec::len),
+                )
+            }),
+            SessionLaunch::Command(command) => command.resume.clone(),
+            SessionLaunch::Legacy {
+                resume_template, ..
+            } => resume_template
+                .as_ref()
+                .map(|resume| display_argv(resume, 0)),
         }
     }
 
@@ -494,6 +507,24 @@ impl SessionLaunch {
     pub fn field_bytes(&self) -> usize {
         serde_json::to_string(self).map_or(usize::MAX, |json| json.len())
     }
+}
+
+/// One stored argv as a shell command line: the first `prefix_words` words are a wrapper prefix already in its own
+/// shell spelling (quotes and escapes kept), joined as written; the rest are literal argv, quoted, with Farhelm's
+/// internal [`FARHELM_ARGS_PLACEHOLDER`] left out. Malformed peer data can record a prefix longer than the vector; the
+/// split stays bounded rather than trusting it.
+fn display_argv(argv: &[String], prefix_words: usize) -> String {
+    let (prefix, suffix) = argv.split_at(prefix_words.min(argv.len()));
+    let suffix = shell_words::join(
+        suffix
+            .iter()
+            .filter(|element| element.as_str() != FARHELM_ARGS_PLACEHOLDER),
+    );
+    [prefix.join(" "), suffix]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Shell-split one command field, naming it in the refusal.
@@ -871,6 +902,67 @@ mod tests {
         });
         assert_eq!(command.agent_kind(), AgentKind::Muse);
         assert!(!command.has_resume());
+    }
+
+    /// Spec: a launch's resume command is displayed the way its start command is: an agent launch's wrapper prefix
+    /// keeps its own shell spelling while the composed words after it are quoted and the internal placeholder is left
+    /// out, a command launch shows the user's text, a legacy template joins its words, and a launch without a resume
+    /// command has none.
+    ///
+    /// Why: approval cards show this text as what a later plain Restart runs without another YOLO check; quoting the
+    /// prefix again, or showing the placeholder, would show a different command from the one Bash runs.
+    #[test]
+    fn resume_commands_display_like_start_commands() {
+        let prefix = vec!["with-endpoint".to_string(), "\"$PROFILE\"".to_string()];
+        let agent = SessionLaunch::Agent {
+            selection: LaunchSelection {
+                wrapper_prefix: Some(prefix.clone()),
+                ..selection_for_muse()
+            },
+            start: [
+                prefix.clone(),
+                vec!["muse".into(), FARHELM_ARGS_PLACEHOLDER.into()],
+            ]
+            .concat(),
+            resume: Some(
+                [
+                    prefix,
+                    vec![
+                        "muse".into(),
+                        "--resume".into(),
+                        "two words".into(),
+                        FARHELM_ARGS_PLACEHOLDER.into(),
+                    ],
+                ]
+                .concat(),
+            ),
+        };
+        assert_eq!(agent.display_command(), "with-endpoint \"$PROFILE\" muse");
+        assert_eq!(
+            agent.display_resume().as_deref(),
+            Some("with-endpoint \"$PROFILE\" muse --resume 'two words'")
+        );
+        let command = command(
+            "agent {farhelm_args}",
+            Some(LaunchHarness::Claude),
+            Some("agent --resume {conversation} {farhelm_args}"),
+        );
+        assert_eq!(
+            command.display_resume().as_deref(),
+            Some("agent --resume {conversation} {farhelm_args}")
+        );
+        let legacy = SessionLaunch::Legacy {
+            invocation: "agent --start".into(),
+            agent_kind: crate::AgentKind::Generic,
+            resume_template: Some(vec!["agent".into(), "--resume".into()]),
+        };
+        assert_eq!(legacy.display_resume().as_deref(), Some("agent --resume"));
+        let without = SessionLaunch::Agent {
+            selection: selection_for_muse(),
+            start: vec!["muse".into()],
+            resume: None,
+        };
+        assert_eq!(without.display_resume(), None);
     }
 
     /// A Muse selection with every choice at its default.
