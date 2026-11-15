@@ -42,7 +42,7 @@ use gpui::{
     WeakEntity, div, prelude::FluentBuilder as _, px,
 };
 
-use super::delete;
+use crate::components::spinner_icon;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Failure, OpKey, Work};
 use crate::theme::{self, metrics};
@@ -248,7 +248,7 @@ pub(crate) fn wait_line(
             .min_w_0()
             .text_size(metrics::TEXT_SM)
             .text_color(ink)
-            .child(delete::spinner_icon(step, px(12.), ink))
+            .child(spinner_icon(step, px(12.), ink))
             .child(div().flex_1().min_w_0().child(label))
             .child(div().flex_none().child(format!("{seconds} s"))),
     )

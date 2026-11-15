@@ -85,7 +85,7 @@
 //! to that Delete opens the next one only once every Delete has settled; a Stop or a Replace holds nothing back, with
 //! one exception for the open session's own Replace ([`selection`], "A Replace keeps its own source open until it
 //! answers"). Every pending Delete's, Stop's and long Replace's spinner turns from one handle the list holds, the way
-//! the pulse does ([`delete::Spinner`]). A row's menu button and its anchor exist only while the row is drawn, so a
+//! the pulse does ([`Spinner`]). A row's menu button and its anchor exist only while the row is drawn, so a
 //! menu whose row scrolls well out of view closes, and a question about a row out of view is asked centered.
 //!
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
@@ -165,7 +165,7 @@ use gpui::{
 };
 
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, StatusMark, Tier};
+use crate::components::{HoverHelp, IconButton, Spinner, StatusMark, Tier};
 use crate::focus::Mark;
 use crate::help_menu::HelpButton;
 use crate::host_text::{HostSentence, HostText};
@@ -210,7 +210,7 @@ pub struct SessionList {
     /// The pending operations' spinner, held exactly while the window is active and some listed row shows one (a
     /// Delete or a Stop in flight, or a Replace that has waited long enough to say so), and worked out at the top of
     /// each frame like `pulse`.
-    spinner: Option<delete::Spinner>,
+    spinner: Option<Spinner>,
     /// The ticker's 30-second clock (see the module docs), held exactly while some listed row has an age to show, and
     /// worked out at the top of each frame like `pulse`. Unlike the pulse it does not depend on the window being
     /// active: an inactive window still shows its ages.
@@ -604,7 +604,7 @@ impl Render for SessionList {
         }
         let spins = ticker::is_active(window, cx) && any_spinner;
         if spins != self.spinner.is_some() {
-            self.spinner = spins.then(|| delete::Spinner::start(window, cx));
+            self.spinner = spins.then(|| Spinner::start(window, cx));
         }
         if any_stamp != self.clock.is_some() {
             self.clock = any_stamp.then(|| ticker::clock(cx));

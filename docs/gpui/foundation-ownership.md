@@ -136,8 +136,8 @@ Extension points: reported, the whole directory. An area may add, without a requ
 - or an additive builder method on an existing control, built the way its siblings are.
 
 A drawing-only shared piece (no input, no focus, nothing to name) belongs in the layer too and is exempt from the label,
-hover help and role rule, decided by the migration's orchestrator on 2026-11-14: `pulse.rs` (`pulse_opacity`) and
-`menu_separator.rs` (`menu_separator`) are two.
+hover help and role rule, decided by the migration's orchestrator on 2026-11-14: `pulse.rs` (`pulse_opacity`),
+`menu_separator.rs` (`menu_separator`) and `spinner.rs` (`Spinner` and `spinner_icon`) are three.
 
 `HoverHelp`, `with_hover_help`, `activate_on_enter_or_space`, `activate_on_click`, `enter_choice`, `on_enter_choice` and
 `scroll_stop` in `components/mod.rs` are the layer's rules: a change to them is a request. An element that fades in as

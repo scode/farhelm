@@ -32,8 +32,8 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
-use super::{SessionList, delete, menu};
-use crate::components::{HoverHelp, Tier};
+use super::{SessionList, menu};
+use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Outcome, Settled, Work};
@@ -270,7 +270,7 @@ pub(super) fn progress(key: &str, step: u8, selected: bool, cx: &App) -> impl In
         .text_size(metrics::TEXT_ROW_TITLE)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(ink)
-        .child(delete::spinner_icon(step, px(12.), ink))
+        .child(spinner_icon(step, px(12.), ink))
         .child(PROGRESS_LABEL)
 }
 
