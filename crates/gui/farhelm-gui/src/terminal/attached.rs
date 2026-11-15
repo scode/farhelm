@@ -230,6 +230,10 @@ pub struct AttachedTerminal {
     fault: Option<SharedString>,
     /// The grid size last fitted, which the stream was opened at or last resized to.
     fit: Option<(u16, u16)>,
+    /// Whether a resize went out since the current attach began: its first screen can then still show the size the
+    /// attach asked for, and the resize already on its way corrects it, so `output` must not ask again. Cleared when
+    /// the attach ends (a dropped link, a detach notice or a refusal), so every attach gets its own one correction.
+    resized_since_attach: bool,
     /// The display's scale at the last fit, which the exit line's placement needs to know the grid's cell.
     scale: Option<f32>,
     /// The height the grid actually has, the pane less the status line and padding, which is where the exit line must
@@ -404,6 +408,7 @@ impl AttachedTerminal {
             live: false,
             fault: None,
             fit: None,
+            resized_since_attach: false,
             scale: None,
             room: None,
             grid_origin: None,
@@ -699,7 +704,10 @@ impl AttachedTerminal {
             None => self.open(size, cx),
             // The stream delivers a resize whatever state it is in: at once on an open socket, as the first message
             // of a socket still connecting, and in the query of a later attach otherwise.
-            Some(handle) => handle.resize(size.0, size.1),
+            Some(handle) => {
+                handle.resize(size.0, size.1);
+                self.resized_since_attach = true;
+            }
         }
     }
 
@@ -795,6 +803,19 @@ impl AttachedTerminal {
 
     /// Apply consecutive output to the view that should get it: the staged replay, or the live screen.
     fn output(&mut self, run: Vec<GridOutput>, cx: &mut Context<Self>) {
+        // The pane owns the program's size (SPEC.md: "the PTY resizes to that client"): a first screen at another size
+        // than the pane fits (an attach-time resize the supervisor clamped or lost) gets one resize back to the fit,
+        // unless a resize already on its way will correct it.
+        for message in &run {
+            if let GridOutput::Hello { cols, rows, .. } = message
+                && let (Some(fit), Some(handle)) = (self.fit, &self.handle)
+                && fit != (*cols, *rows)
+                && !self.resized_since_attach
+            {
+                handle.resize(fit.0, fit.1);
+                self.resized_since_attach = true;
+            }
+        }
         let (view, live) = match (&self.staging, &self.committed) {
             (Some(staging), _) => (staging.clone(), false),
             (None, Some(committed)) if self.live => (committed.clone(), true),
@@ -862,6 +883,15 @@ impl AttachedTerminal {
             self.reporting = 0;
             let metrics = self.metrics;
             self.staging = Some(cx.new(|_| TerminalView::new(metrics)));
+        }
+        // Each of these ends the attach, and the next one (a reconnect by itself, or Take control) asks for the size
+        // last fitted: no resize is on its way for it yet. Resetting here rather than on `Attaching` keeps a resize
+        // sent while the new attach is opening from being forgotten; the first attach starts with none.
+        if matches!(
+            state,
+            StreamState::Reconnecting | StreamState::Detached { .. } | StreamState::Refused { .. }
+        ) {
+            self.resized_since_attach = false;
         }
         self.stream = state;
         cx.notify();

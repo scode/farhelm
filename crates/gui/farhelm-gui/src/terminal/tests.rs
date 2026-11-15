@@ -963,3 +963,185 @@ fn an_unchanged_phase_redraws_nothing(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(cx.update(|cx| render_count::count("terminal", cx)), 1);
 }
+
+// ---- Drawing ---------------------------------------------------------------------------------------------------------
+
+/// A terminal window showing one complete screen: a hello at `cols` by `rows`, plain state, the screen rows `screen`
+/// (the protocol's JSON form) and one frame with `cursor`, round-tripped through the encoder as [`messages`] does and
+/// drawn once, so each shown row's cache holds what the element shaped for it.
+fn drawn(
+    cols: u16,
+    rows: u16,
+    screen: serde_json::Value,
+    cursor: serde_json::Value,
+    cx: &mut TestAppContext,
+) -> (Entity<TerminalView>, gpui::AnyWindowHandle) {
+    let recording = [
+        serde_json::json!({"t":"hello","cols":cols,"rows":rows,"history_cap":0}),
+        serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+            "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+        serde_json::json!({"t":"rows","rows":screen}),
+        serde_json::json!({"t":"frame","rev":1,"cols":cols,"rows":rows,"cursor":cursor}),
+    ]
+    .map(|message| message.to_string())
+    .join("\n");
+    let (terminal, window) = terminal_window(cx);
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply(messages(&recording), cx);
+        applied.unwrap();
+        view.mark_replay_complete(cx).unwrap();
+    });
+    cx.run_until_parked();
+    (terminal, window)
+}
+
+/// One shaped run as `paint_rows` places it: the run's wire column and width (its background box), and each glyph
+/// piece's column within the run, width and text. A piece is drawn at the run's column plus its own, times the cell
+/// width, and clipped to its width in cells.
+type ShapedRun = (u16, u16, Vec<(u16, u16, String)>);
+
+/// What the last frame shaped for screen row `y`. Panics when the row was never drawn.
+fn shaped(terminal: &Entity<TerminalView>, y: usize, cx: &mut TestAppContext) -> Vec<ShapedRun> {
+    terminal.read_with(cx, |view, _| {
+        let shaped = view.rows[y].shaped.borrow();
+        let runs = shaped.as_ref().expect("the premise: the row was drawn");
+        runs.iter()
+            .map(|run| {
+                let pieces = run.pieces.iter();
+                let pieces = pieces.map(|p| (p.col, p.width, p.line.text.to_string()));
+                (run.col, run.width, pieces.collect())
+            })
+            .collect()
+    })
+}
+
+/// A run of `text` shaped as one piece covering its whole box.
+fn whole(col: u16, width: u16, text: &str) -> ShapedRun {
+    (col, width, vec![(0, width, text.to_owned())])
+}
+
+/// A printable-ASCII run of `text` shaped one piece per cell.
+fn per_cell(col: u16, text: &str) -> ShapedRun {
+    let pieces = text.chars().enumerate();
+    let pieces = pieces.map(|(i, c)| (i as u16, 1, c.to_string())).collect();
+    (col, text.len() as u16, pieces)
+}
+
+/// A glyph the font draws wider or narrower than its cells must never move the cells after it: the old app's version
+/// of this test caught a block element drawn 1.5 cells wide, and Arabic cells that shape narrower side by side, each
+/// pushing every later letter off its column. GPUI's rule differs from the old app's flow-or-box choice: printable
+/// ASCII is split one piece per cell, and every other run is one piece as wide as the wire says, placed at the wire's
+/// column and clipped there, so no font measurement takes part. A bidi control prints nothing, but its cell is still
+/// a box at its column.
+///
+/// Specified: on a row of box drawing, ASCII pairs, a light shade, a left-to-right mark alone in a cell and an accented
+/// Latin letter, each ASCII pair is a run of two one-cell pieces at its wire column and every other cell is a run of
+/// one whole piece at its own column; the mark's piece is empty; on the next row two Arabic cells are whole pieces at
+/// columns 0 and 1, and the `X` after them is at column 2.
+#[gpui::test]
+fn non_ascii_runs_draw_as_one_box_at_their_wire_column(cx: &mut TestAppContext) {
+    let plain = [0, -1, -1];
+    let screen = serde_json::json!([
+        [0, {"w": false, "r": [
+            [0, 1, "\u{2500}", plain], [1, 1, "\u{253c}", plain], [2, 1, "\u{2500}", plain],
+            [3, 2, "ab", plain], [5, 1, "\u{2591}", plain], [6, 2, "cd", plain],
+            [8, 1, "\u{200e}", plain], [9, 2, "ef", plain], [11, 1, "\u{e9}", plain],
+            [12, 2, "gh", plain],
+        ]}],
+        [1, {"w": false, "r": [[0, 1, "\u{6fb}", plain], [1, 1, "\u{6fb}", plain], [2, 1, "X", plain]]}],
+    ]);
+    let cursor = serde_json::json!({"x":0,"y":0,"visible":false,"shape":"block","blink":false});
+    let (terminal, _window) = drawn(40, 2, screen, cursor, cx);
+    assert_eq!(
+        shaped(&terminal, 0, cx),
+        [
+            whole(0, 1, "\u{2500}"),
+            whole(1, 1, "\u{253c}"),
+            whole(2, 1, "\u{2500}"),
+            per_cell(3, "ab"),
+            whole(5, 1, "\u{2591}"),
+            per_cell(6, "cd"),
+            whole(8, 1, ""),
+            per_cell(9, "ef"),
+            whole(11, 1, "\u{e9}"),
+            per_cell(12, "gh"),
+        ]
+    );
+    assert_eq!(
+        shaped(&terminal, 1, cx),
+        [
+            whole(0, 1, "\u{6fb}"),
+            whole(1, 1, "\u{6fb}"),
+            per_cell(2, "X")
+        ]
+    );
+}
+
+/// Cells arrive in visual order, so nothing the program prints may reorder them: a right-to-left override (zero-width,
+/// so the emulator keeps it with the cell before it) or right-to-left letters let a bidi-aware shaper move text across
+/// cells, which the old app's test caught in the browser. Each non-ASCII cell is its own run and the override is
+/// stripped before shaping, while copy and automation keep the received text.
+///
+/// Specified: `ab`, `c` with U+202E in one cell, `def`, then three Hebrew letters in their own cells draw at columns
+/// 0-1, 2, 3-5, 6, 7 and 8 in that order, the override's cell drawing only `c`; the view's text still holds U+202E.
+#[gpui::test]
+fn right_to_left_text_and_an_override_keep_their_wire_columns(cx: &mut TestAppContext) {
+    let plain = [0, -1, -1];
+    let screen = serde_json::json!([[0, {"w": false, "r": [
+        [0, 2, "ab", plain], [2, 1, "c\u{202e}", plain], [3, 3, "def", plain],
+        [6, 1, "\u{5e9}", plain], [7, 1, "\u{5dc}", plain], [8, 1, "\u{5d5}", plain],
+    ]}]]);
+    let cursor = serde_json::json!({"x":0,"y":0,"visible":false,"shape":"block","blink":false});
+    let (terminal, _window) = drawn(60, 2, screen, cursor, cx);
+    assert_eq!(
+        shaped(&terminal, 0, cx),
+        [
+            per_cell(0, "ab"),
+            whole(2, 1, "c"),
+            per_cell(3, "def"),
+            whole(6, 1, "\u{5e9}"),
+            whole(7, 1, "\u{5dc}"),
+            whole(8, 1, "\u{5d5}"),
+        ]
+    );
+    let text = terminal
+        .read_with(cx, |view, _| view.terminal_text())
+        .unwrap();
+    assert!(
+        text.starts_with("abc\u{202e}def\u{5e9}\u{5dc}\u{5d5}"),
+        "{text:?}"
+    );
+}
+
+/// A program hides the cursor while it redraws (`CSI ? 25 l`) and shows it again after, and both must reach the
+/// screen: a cursor left showing flickers across every redraw, and one that never comes back leaves the user typing
+/// blind. The old app's test fed the frames directly, as this one does.
+///
+/// Specified: on a drawn screen with an unfocused cursor at (0, 0), a frame with `visible:true` paints the cursor's
+/// outline, one with `visible:false` paints no quad in the cursor's color, and one with `visible:true` again paints
+/// the same outline as the first.
+#[gpui::test]
+fn a_hidden_cursor_is_not_drawn_and_comes_back_when_shown(cx: &mut TestAppContext) {
+    let at = |rev: u64, visible: bool| -> serde_json::Value {
+        serde_json::json!({"t":"frame","rev":rev,"cols":20,"rows":4,
+            "cursor":{"x":0,"y":0,"visible":visible,"shape":"bar","blink":false}})
+    };
+    let screen = serde_json::json!([[0, {"w": false, "r": [[0, 2, "$ ", [0, -1, -1]]]}]]);
+    let (terminal, window) = drawn(20, 4, screen, at(1, true)["cursor"].clone(), cx);
+    let cursor_color = gpui::Background::from(TerminalColor::of(TERMINAL.cursor).hsla(1.));
+    let drawn_cursor = |rev: u64, visible: bool, cx: &mut TestAppContext| {
+        let frame: GridOutput = serde_json::from_value(at(rev, visible)).unwrap();
+        terminal.update(cx, |view, cx| view.apply([frame], cx).1.unwrap());
+        cx.run_until_parked();
+        let quads = cx.update_window(window, |_, window, _| window.painted_quads());
+        let quads = quads.unwrap().into_iter();
+        quads
+            .filter(|quad| quad.background == cursor_color)
+            .map(|quad| quad.bounds)
+            .collect::<Vec<_>>()
+    };
+    let shown = drawn_cursor(2, true, cx);
+    assert!(!shown.is_empty(), "the premise: a shown cursor is drawn");
+    assert_eq!(drawn_cursor(3, false, cx), []);
+    assert_eq!(drawn_cursor(4, true, cx), shown);
+}
