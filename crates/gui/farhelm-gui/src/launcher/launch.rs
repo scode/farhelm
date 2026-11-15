@@ -234,8 +234,9 @@ pub(crate) fn pending_unseen_quick_launch(cx: &mut App) -> bool {
 
 /// Why Launch waits while one of this window's host-registry changes is in flight, as its hover text and after "Not
 /// launched." on a press: SPEC.md, "Creation": "Launches and changes to the host registry still exclude each other".
-/// The old app disabled Launch and New without a reason while its one page-wide operation token was held.
-pub(super) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to finish";
+/// The old app disabled Launch and New without a reason while its one page-wide operation token was held. Restart and
+/// Replace give it too (`crate::session_list::menu::launch_wait`).
+pub(crate) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to finish";
 
 /// Put `held` in the slot for the current UI session, or empty it, and notify: a surface drawing New's trigger reads
 /// [`super::entry::new_available`] while it draws, and redraws when the slot it read changes.

@@ -18,28 +18,29 @@
 //!   operation's name in front of the words, as that slot did, and a Rename or Delete refusal shows the words alone, as
 //!   before. The open session's header shows the same line below its top row ([`pane_line`]), as the old header's
 //!   error lines did.
-//! - **The wait clock is deadlines, never a timer of its own.** One clock serves Replace and Restart, the two requests
-//!   SPEC.md gives this line ("Restarting on <host>…" or "Replacing on <host>…"), and a session has at most one, since
-//!   it has at most one request in flight. Nothing shows for the first two seconds; then the line shows the whole
-//!   seconds since the request started, moved on once a second by a chain of [`ticker::after`] deadlines, which fire
-//!   whether or not the window is active (a wait is about the user's time, not about drawing; SPEC_impl.md, "Animation
-//!   time: the ticker"). Each step checks that the work the clock was started for is still in flight on the session, so
-//!   the line hides the moment the request settles and the clock itself goes at its next step.
-//! - **One UI session.** A clock shows only while the current operation store has its work in flight, and every step
+//! - **The wait clock is the ticker's, never a timer of its own.** One clock serves Replace and Restart, the two
+//!   requests SPEC.md gives this line, and a session has at most one, since it has at most one request in flight. A
+//!   [`ticker::after`] deadline shows the line two seconds after the request; from then the line counts the whole
+//!   seconds since it, read from [`ticker::wall_now`], and the ticker's shared one-second clock
+//!   ([`ticker::every_second`]) moves it on. Both fire whether or not the window is active (SPEC_impl.md, "Animation
+//!   time: the ticker"). The threshold is a deadline of its own because the shared clock's cadence would show the line
+//!   up to a second late. The line hides the moment its request settles; the clock goes at its threshold or at the
+//!   next second, whichever comes first.
+//! - **One UI session.** A clock shows only while the current operation store has its work in flight, and every prune
 //!   checks the same, so after a reset (SPEC_impl.md, "One failure path: the reset") a clock kept from before shows
-//!   nothing and goes at its next step: the new store has none of the old requests in flight, and a request started
+//!   nothing and goes at the next prune: the new store has none of the old requests in flight, and a request started
 //!   under it starts that key's clock over ([`start_clock`]). So the clocks need no keying on the store.
 //!
 //! The words and lines are functions of a session's key, so the row and the open session's header show the same ones.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     App, AppContext as _, Context, Div, ElementId, Entity, Global, Hsla, InteractiveElement,
     ParentElement, Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled,
-    WeakEntity, div, prelude::FluentBuilder as _, px,
+    Subscription, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::components::spinner_icon;
@@ -51,9 +52,6 @@ use crate::{session, ticker};
 /// How long a Restart or a Replace waits before its line shows: the old `LaunchProgress`'s two whole seconds, so a quick
 /// reply adds nothing.
 pub(crate) const PROGRESS_SHOWS_AFTER: Duration = Duration::from_secs(2);
-
-/// How often the Replace clock moves on once it shows.
-const PROGRESS_STEP: Duration = Duration::from_secs(1);
 
 // ---- The words -------------------------------------------------------------------------------------------------------
 
@@ -263,26 +261,44 @@ pub(crate) fn wait_line(
 
 // ---- What is kept ----------------------------------------------------------------------------------------------------
 
-/// The wait clocks of one UI session, by session key. Each stops itself once the work it was started for is no longer in
-/// flight on its session.
+/// The wait clocks of one UI session, by session key, and the one-second clock that moves their lines on. Each clock
+/// goes once the work it was started for is no longer in flight on its session.
 ///
-/// An entity rather than plain state so that every view that reads it while drawing (the row, later the header)
-/// redraws when it changes, as views redraw for the operation store, with no observer of its own.
+/// An entity rather than plain state so that every view that reads it while drawing (the row, the header) redraws
+/// when it changes, as views redraw for the operation store, with no observer of its own; the one-second clock's
+/// notifications reach those views the same way.
+///
+/// It holds the one-second clock itself, though the foundation ownership doc says a view holds one: GPUI redraws
+/// every window that read this entity when the clock notifies it. The notification also runs [`RowOutcomes::prune`],
+/// which lets a settled request's clock go, something neither of the two views drawing these lines could do alone.
 pub(crate) struct RowOutcomes {
     clocks: HashMap<String, Clock>,
+    /// The ticker's one-second clock, held exactly while some clock's line shows (its threshold passed and its work
+    /// still in flight), so the app is woken once a second only while some line has a count to move on.
+    second: Option<ticker::Clock>,
+    /// Prunes the clocks on every notification of this entity, the one-second clock's included: nothing else calls
+    /// back here once a line shows, so this is where a settled request's clock goes.
+    _prune: Subscription,
 }
 
-/// One request's clock: the work it waits on (a Restart or a Replace), the whole seconds its line shows (`None` before
-/// the first two have passed), and the deadline that moves it on. Dropping the clock drops the deadline, and with it the
-/// chain.
+/// One request's clock: the work it waits on (a Restart or a Replace), when it was sent by the ticker's wall clock,
+/// and the deadline that shows its line two seconds later, which is `None` once it has fired. Dropping the clock drops
+/// the deadline.
 struct Clock {
     work: Work,
-    shown: Option<u64>,
-    _next: ticker::Deadline,
+    sent: SystemTime,
+    threshold: Option<ticker::Deadline>,
 }
 
-/// Where the [`RowOutcomes`] is kept: a global because the list and, later, the header read the same one. It is not
-/// keyed on the UI session (see the module docs, "One UI session").
+impl Clock {
+    /// Whether the line shows: its threshold has passed.
+    fn shows(&self) -> bool {
+        self.threshold.is_none()
+    }
+}
+
+/// Where the [`RowOutcomes`] is kept: a global because the list and the header read the same one. It is not keyed on
+/// the UI session (see the module docs, "One UI session").
 #[derive(Default)]
 struct Kept(Option<Entity<RowOutcomes>>);
 
@@ -298,70 +314,62 @@ fn current_or_new(cx: &mut App) -> Entity<RowOutcomes> {
     if let Some(outcomes) = current(cx) {
         return outcomes;
     }
-    let outcomes = cx.new(|_| RowOutcomes {
+    let outcomes = cx.new(|cx| RowOutcomes {
         clocks: HashMap::new(),
+        second: None,
+        _prune: cx.observe_self(RowOutcomes::prune),
     });
     cx.set_global(Kept(Some(outcomes.clone())));
     outcomes
 }
 
 impl RowOutcomes {
-    /// `key`'s clock reached `seconds`: show them and arm the next step, unless its work has settled meanwhile (then
-    /// the clock goes).
-    fn tick(&mut self, key: String, seconds: u64, cx: &mut Context<Self>) {
-        let waiting = self.clocks.get(&key).map(|clock| clock.work);
-        if waiting.is_none() || in_flight(&key, cx) != waiting {
-            self.clocks.remove(&key);
-            cx.notify();
-            return;
+    /// `key`'s threshold passed: its line shows from now, and the one-second clock moves it on. A clock whose work has
+    /// settled meanwhile goes instead, with no second clock taken for it.
+    fn threshold_passed(&mut self, key: &str, cx: &mut Context<Self>) {
+        if let Some(clock) = self.clocks.get_mut(key) {
+            clock.threshold = None;
         }
-        let next = step_at(
-            cx.weak_entity(),
-            key.clone(),
-            PROGRESS_STEP,
-            seconds + 1,
-            cx,
-        );
-        if let Some(clock) = self.clocks.get_mut(&key) {
-            clock.shown = Some(seconds);
-            clock._next = next;
-            cx.notify();
+        // The notification runs the prune (`_prune`), which drops a settled clock or takes the one-second clock.
+        cx.notify();
+    }
+
+    /// Drop every clock whose work is no longer in flight on its session (settled, or gone with a reset's store), and
+    /// hold the one-second clock exactly while a remaining line shows. Changes nothing a view draws, since a line is
+    /// drawn only while its work is in flight, so it notifies nobody.
+    fn prune(&mut self, cx: &mut Context<Self>) {
+        self.clocks
+            .retain(|key, clock| in_flight(key, cx) == Some(clock.work));
+        self.hold_second(cx);
+    }
+
+    /// Take the one-second clock while some clock's line shows, and let go of it once none does.
+    fn hold_second(&mut self, cx: &mut Context<Self>) {
+        let counting = self.clocks.values().any(Clock::shows);
+        if counting != self.second.is_some() {
+            self.second = counting.then(|| ticker::every_second(cx));
         }
     }
-}
-
-/// A deadline `delay` from now that moves `key`'s clock to `seconds`.
-fn step_at(
-    outcomes: WeakEntity<RowOutcomes>,
-    key: String,
-    delay: Duration,
-    seconds: u64,
-    cx: &mut App,
-) -> ticker::Deadline {
-    ticker::after(delay, cx, move |cx| {
-        // Gone with its UI session; then there is nothing to move on.
-        let _ = outcomes.update(cx, |outcomes, cx| outcomes.tick(key, seconds, cx));
-    })
 }
 
 /// Start `key`'s clock for `work` (a Restart or a Replace), at the moment its request was sent: it shows two seconds
 /// from now. A clock already running for the key (an earlier request whose settle has not been heard yet) starts over.
 pub(crate) fn start_clock(key: &str, work: Work, cx: &mut App) {
     let outcomes = current_or_new(cx);
-    let next = step_at(
-        outcomes.downgrade(),
-        key.to_owned(),
-        PROGRESS_SHOWS_AFTER,
-        PROGRESS_SHOWS_AFTER.as_secs(),
-        cx,
-    );
+    let weak = outcomes.downgrade();
+    let shown = key.to_owned();
+    let threshold = ticker::after(PROGRESS_SHOWS_AFTER, cx, move |cx| {
+        // Gone with its UI session; then there is nothing to show.
+        let _ = weak.update(cx, |outcomes, cx| outcomes.threshold_passed(&shown, cx));
+    });
+    let sent = ticker::wall_now(cx);
     outcomes.update(cx, |outcomes, cx| {
         outcomes.clocks.insert(
             key.to_owned(),
             Clock {
                 work,
-                shown: None,
-                _next: next,
+                sent,
+                threshold: Some(threshold),
             },
         );
         cx.notify();
@@ -369,14 +377,31 @@ pub(crate) fn start_clock(key: &str, work: Work, cx: &mut App) {
 }
 
 /// The whole seconds `key`'s `work` has waited, once it has waited two; `None` before that, once it has settled, and for
-/// any other work.
+/// any other work. Read from the wall clock, and never less than the two seconds the line waits for, so a wall clock
+/// that a slewing or a reset puts behind the deadline's timer never shows "1 s" or "0 s".
 pub(crate) fn waited_seconds(key: &str, work: Work, cx: &App) -> Option<u64> {
     if in_flight(key, cx) != Some(work) {
         return None;
     }
     let outcomes = current(cx)?;
     let clock = outcomes.read(cx).clocks.get(key)?;
-    (clock.work == work).then_some(clock.shown).flatten()
+    if clock.work != work || !clock.shows() {
+        return None;
+    }
+    let waited = ticker::wall_now(cx)
+        .duration_since(clock.sent)
+        .unwrap_or_default();
+    Some(waited.max(PROGRESS_SHOWS_AFTER).as_secs())
+}
+
+/// Whether the kept clocks hold the ticker's one-second clock, and how many request clocks they keep: what the tests
+/// read to show that a settled request lets go of the one-second clock. `None` before any clock was started.
+#[cfg(test)]
+pub(crate) fn kept(cx: &App) -> Option<(bool, usize)> {
+    current(cx).map(|outcomes| {
+        let outcomes = outcomes.read(cx);
+        (outcomes.second.is_some(), outcomes.clocks.len())
+    })
 }
 
 /// The work in flight on `key` in the current UI session's operation store.

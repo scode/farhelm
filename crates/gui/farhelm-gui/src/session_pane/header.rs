@@ -25,10 +25,11 @@
 //! - **The Delete shortcut** is this Delete (SPEC.md, "Desktop window chrome"): the main view hands it to
 //!   [`SessionPane::header_action`].
 //! - **Exclusion.** While the session has any request in flight, or the YOLO question its Replace met is open, every
-//!   action is unavailable, as the row's menu items are (`session_list::menu::refused`); a pending Stop shows its
-//!   spinner and "Stopping…" on the Stop button, and a pending Delete shows its progress in place of the actions until
-//!   it settles (they come back with a refusal). While a question an action asked is open, its button reads as pressed
-//!   and a click on it does nothing; a press anywhere else closes the question unanswered.
+//!   action is unavailable, as the row's menu items are (`session_list::menu::refused`), and Restart and Replace also
+//!   wait for a host change (`session_list::menu::launch_wait`). A pending Stop shows its spinner and "Stopping…" on
+//!   the Stop button, and a pending Delete shows its progress in place of the actions until it settles (they come back
+//!   with a refusal). While a question an action asked is open, its button reads as pressed and a click on it does
+//!   nothing; a press anywhere else closes the question unanswered.
 //! - **The open session by key.** Each action reads the session's row from the store by key, and the helm keeps the
 //!   open session there even while a filter or the list's cap leaves it out of the list (`session_list::filters`,
 //!   "The query names the open session"), so the actions work on a session the list does not show exactly as on a
@@ -129,6 +130,17 @@ impl Action {
         }
     }
 
+    /// Whether the action on `row` would start a session now, and so waits for a host change ([`menu::launch_wait`]).
+    /// A Restart that cannot resume does not: it keeps its own reason, which outlasts the change. Exhaustive, so a new
+    /// action decides.
+    fn would_launch(self, row: &SessionRow) -> bool {
+        match self {
+            Action::Restart => restart::offered(row),
+            Action::Replace => true,
+            Action::Stop | Action::Delete => false,
+        }
+    }
+
     /// Delete is the one destructive action, so it alone is in the danger tier; the rest are neutral.
     fn tier(self) -> Tier {
         match self {
@@ -187,6 +199,8 @@ struct Shown<'a> {
     row: &'a SessionRow,
     skipped: bool,
     busy: bool,
+    /// [`menu::launch_wait`].
+    launch_wait: Option<&'static str>,
     stopping: bool,
     /// The spinner's step, from the pane's spinner.
     step: u8,
@@ -278,6 +292,7 @@ impl SessionPane {
             row: &row_now,
             skipped,
             busy: menu::refused(key, cx),
+            launch_wait: menu::launch_wait(cx),
             stopping: stop::in_flight(key, cx),
             step,
         };
@@ -466,7 +481,9 @@ fn action_button(
 ) -> Button {
     let pane = pane.clone();
     let row = shown.row;
-    let help = hover_help(action, row, shown.skipped);
+    // A launch waiting for a host change says why in place of what it does.
+    let wait = shown.launch_wait.filter(|_| action.would_launch(row));
+    let help = wait.map_or_else(|| hover_help(action, row, shown.skipped), str::to_owned);
     let stopping = action == Action::Stop && shown.stopping;
     let label = if stopping {
         stop::PROGRESS_LABEL
@@ -498,12 +515,14 @@ fn action_button(
         );
     }
     match action {
+        // Busy rather than disabled while waiting, so the reason in the hover help stays reachable.
         Action::Restart => button
             .accessible_name(restart::offer_label(row.info.restart_offer))
-            .busy(!restart::offered(row))
+            .busy(!restart::offered(row) || wait.is_some())
             .disabled(shown.busy),
+        Action::Replace => button.busy(wait.is_some()).disabled(shown.busy),
         Action::Stop => button.disabled(shown.busy || row.stale),
-        Action::Replace | Action::Delete => button.disabled(shown.busy),
+        Action::Delete => button.disabled(shown.busy),
     }
 }
 

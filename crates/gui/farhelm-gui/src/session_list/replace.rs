@@ -16,6 +16,7 @@
 //!   carries no `intent_key`. It sets `confirm_yolo` only when it is sent again after the user confirmed the YOLO
 //!   question ([`super::replace_yolo`]): a host that asks before YOLO launches refuses a YOLO launch's Replace without
 //!   it, and that refusal asks the question. Every other refusal shows on the row as described below.
+//! - **A host change comes first.** Replace waits for one ([`menu::launch_wait`]).
 //! - **A long wait says so.** After two seconds the row shows "Replacing on <host>… <n> s", the host as the helm names
 //!   it and the whole seconds since the request went out, moved on once a second ([`super::outcome`]'s clock); a
 //!   quick reply adds nothing.
@@ -302,8 +303,14 @@ pub(super) fn send_with_consent(
 }
 
 /// Send `key`'s Replace as `sent` says through the operation store, its completion settling in `window`, and start its
-/// row's clock. A session that already has a request in flight sends nothing. Returns whether it was sent.
+/// row's clock. A session that already has a request in flight sends nothing, and nothing is sent while a host change
+/// is in flight ([`menu::refuse_for_host_change`]). A YOLO question's permanent answer confirmed then has already
+/// written its host's setting, which stays written while the Replace waits for the user to ask again. Returns whether
+/// it was sent.
 fn start(key: &str, sent: Sent, window: AnyWindowHandle, cx: &mut App) -> bool {
+    if menu::refuse_for_host_change(key, Work::Replace, cx) {
+        return false;
+    }
     let Some(operations) = session::current_operations(cx) else {
         return false;
     };

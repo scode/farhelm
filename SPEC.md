@@ -2261,8 +2261,9 @@ Collapse and "Collapse navigation rail" while expanded, and exposes its expanded
 foot included, to 220px beside the session list. Expanded host rows show the display name and a smaller destination
 underneath when different; long names truncate and remain available in full in the tooltip. Captions disappear, All
 hosts, Add host and the foot controls show labels, and each whole row highlights and selects as one click target.
-Picking a host keeps the rail expanded. Badges, menus and actions retain their behavior. Each device remembers expansion
-locally, independently of the helm; a fresh device starts collapsed. Touch screens follow the same rules.
+Picking a host keeps the rail expanded. Badges, menus and actions retain their behavior. Expansion is a helm preference
+that every client shares, so a window opens with the rail as it was last left; a helm that has none starts collapsed.
+Touch screens follow the same rules.
 
 Choosing a host sends a server-side query immediately and is not persisted, while All widens it again. Status, sort and
 the selected session remain unchanged. Unavailable hosts retain their last-known sessions; a removed selected host
@@ -2391,11 +2392,11 @@ client of this helm; existing controls with a natural place in the main UI stay 
 every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
 order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
 that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
-and announcement dismissal (host rail expansion and sound switches, by contrast, are deliberately per device; see
-Session list and Status). A client that asks the helm for no particular order gets creation time. No mandatory
-hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
-implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
-`farhelm agent create` and `clone` need not record the asking session.
+and announcement dismissal and the host rail's expansion (sound switches, by contrast, are deliberately per device; see
+Status). A client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may
+carry an optional parent reference usable by the API, but parentage does not nest the list and implies nothing about VCS
+state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and
+`clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
