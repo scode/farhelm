@@ -5,6 +5,7 @@
 //! Built in pieces. So far:
 //!
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
+//! - [`entry`]: the entry points other surfaces call to open New, and what they need to draw its triggers.
 //! - [`launch`]: a submitted New or Clone, from the press of Launch to what its reply opens or brings back.
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
@@ -29,6 +30,7 @@
 //!   handling.
 
 pub mod draft;
+pub mod entry;
 pub mod launch;
 mod model;
 pub mod request;
@@ -37,6 +39,8 @@ pub(crate) mod words;
 
 #[cfg(test)]
 mod draft_tests;
+#[cfg(test)]
+mod entry_tests;
 #[cfg(test)]
 mod launch_tests;
 #[cfg(test)]

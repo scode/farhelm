@@ -29,7 +29,7 @@ fn command_draft() -> LaunchDraft {
 
 /// The creates (`POST /api/sessions`) the window sent since the last call. Every other command (the catalog read, the
 /// selection remembered) is answered at once, so the fake's in-order replies stay possible while a create waits.
-fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
+pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
     cx.run_until_parked();
     let mut creates = Vec::new();
     for command in helm.commands() {
