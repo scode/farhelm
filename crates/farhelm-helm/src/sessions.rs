@@ -595,20 +595,39 @@ pub(crate) struct DeleteCheckoutTrashReq {
 /// Read one host independently so a slow or unreachable host does not delay
 /// answers from the others. The helm keeps no archived-checkout cache, but a
 /// capable answer records shared condition notices before returning it.
+///
+/// The whole wait, for the host's trash gate and then for the host, ends at
+/// one deadline [`HOST_REPLY_BOUND`] away: a read leaves nothing to finish,
+/// and neither a host that never answers nor a cleanup holding the gate on
+/// such a host may hold every later GUI command behind it on the ordered
+/// channel. The two timeouts say different things, because a listing queued
+/// behind a cleanup that is stuck on its host never reached the host at all.
+/// Recording the notices afterwards is the helm's own database work and is not
+/// bounded.
 pub(crate) async fn list_checkout_trash(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CheckoutTrashReq>,
 ) -> impl IntoResponse {
-    let request_guard = state.trash_requests.lock(req.host).await;
-    let (claim, client) = match host_client(&state, req.host) {
-        Ok(target) => target,
-        Err(error) => return http_error(error),
+    let deadline = tokio::time::Instant::now() + HOST_REPLY_BOUND;
+    let Ok(request_guard) =
+        tokio::time::timeout_at(deadline, state.trash_requests.lock(req.host)).await
+    else {
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Timeout,
+            "a Trash cleanup on this host is still waiting for the host's answer".to_owned(),
+        )));
     };
-    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
-        return http_error(error);
+    let read = async {
+        let (claim, client) = host_client(&state, req.host)?;
+        crate::precondition::incarnation_holds(&claim, req.expected_incarnation)?;
+        let listing =
+            within_host_read_bound_until(deadline, client.list_checkout_trash(req.measure_sizes))
+                .await?;
+        anyhow::Ok((claim, listing))
     }
-    match client.list_checkout_trash(req.measure_sizes).await {
-        Ok(listing) => {
+    .await;
+    match read {
+        Ok((claim, listing)) => {
             let notice_error =
                 crate::notices::observe_trash(&state, claim, listing.clone(), request_guard)
                     .await
@@ -636,32 +655,59 @@ struct CheckoutTrashBody {
     notice_error: Option<String>,
 }
 
-/// Empty an explicitly selected set on one observed host. The router owns
-/// this action, so a browser disconnect cannot cancel its deletion request.
+/// Empty an explicitly selected set on one observed host. The router owns this
+/// action, so a browser disconnect cannot cancel its deletion request.
+///
+/// The wait is bounded by [`HOST_REPLY_BOUND`] like the other host commands
+/// ([`within_host_reply_bound_saying`]), not converted to an accepted form: a
+/// supervisor of this helm's protocol moves the selected folders aside and
+/// answers without waiting for their recursive removal, so its answer is prompt
+/// unless the host is hung (holding directory admission, say), and its
+/// per-entry results and refusals keep travelling in this reply body. Past the
+/// bound the reply says the host timed out while the cleanup runs on its own
+/// task, which keeps the host's trash gate until the host answers or the
+/// request fails. A late answer that accepted any checkout advances the host's
+/// Trash epoch and wakes the fleet feed, so the Trash button and dialog read
+/// the host again and show those checkouts removing or gone; the reasons of a
+/// late answer's refusals reach nobody (the refused checkouts stay listed, to
+/// retry). The migration's orchestrator decided on 2026-11-14 to bound this
+/// route rather than give it an accepted form.
 pub(crate) async fn delete_checkout_trash(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<DeleteCheckoutTrashReq>,
 ) -> impl IntoResponse {
-    let _request_guard = state.trash_requests.lock(req.host).await;
-    let (claim, client) = match host_client(&state, req.host) {
-        Ok(target) => target,
-        Err(error) => return http_error(error),
-    };
-    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
-        return http_error(error);
-    }
-    match client.delete_checkout_trash(req.ids).await {
-        Ok(deleted) => {
-            // Acceptance is enough to make other clients re-read this host;
-            // it is never evidence that the underlying files are gone.
-            if !deleted.removed.is_empty() {
-                state.trash_requests.changed(claim.host);
-                state.manager.events().bump();
+    within_host_reply_bound_saying(
+        async move {
+            let _request_guard = state.trash_requests.lock(req.host).await;
+            let (claim, client) = match host_client(&state, req.host) {
+                Ok(target) => target,
+                Err(error) => return http_error(error),
+            };
+            if let Err(error) =
+                crate::precondition::incarnation_holds(&claim, req.expected_incarnation)
+            {
+                return http_error(error);
             }
-            axum::Json(deleted).into_response()
-        }
-        Err(error) => http_error(error),
-    }
+            match client.delete_checkout_trash(req.ids).await {
+                Ok(deleted) => {
+                    // Acceptance is enough to make other clients re-read this host;
+                    // it is never evidence that the underlying files are gone.
+                    if !deleted.removed.is_empty() {
+                        state.trash_requests.changed(claim.host);
+                        state.manager.events().bump();
+                    }
+                    axum::Json(deleted).into_response()
+                }
+                Err(error) => http_error(error),
+            }
+        },
+        format!(
+            "the host did not answer within {} seconds; the cleanup may still be carried out, \
+             and Trash shows the checkouts it removes",
+            HOST_REPLY_BOUND.as_secs()
+        ),
+    )
+    .await
 }
 
 /// GET /api/launch-catalog returns the release-owned choices the helm will
@@ -3620,6 +3666,11 @@ pub(crate) async fn rename_session(
 /// close) reaches only the log; the pushed session list still shows what
 /// happened to the sessions.
 ///
+/// The trash routes are bounded too: a listing drops its read, and a cleanup
+/// runs on past the bound, the checkouts a late answer accepts showing in
+/// Trash rather than the session list, while a late answer's refusal reasons
+/// reach nobody (`list_checkout_trash`, `delete_checkout_trash`).
+///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
 /// `do_replace_session`, the restart's, `create_session_request` and
@@ -3724,7 +3775,17 @@ async fn log_late_failure(task: tokio::task::JoinHandle<axum::response::Response
 pub(crate) async fn within_host_read_bound<T>(
     read: impl std::future::Future<Output = anyhow::Result<T>>,
 ) -> anyhow::Result<T> {
-    match tokio::time::timeout(HOST_REPLY_BOUND, read).await {
+    within_host_read_bound_until(tokio::time::Instant::now() + HOST_REPLY_BOUND, read).await
+}
+
+/// [`within_host_read_bound`] ending at `deadline` instead of a bound from
+/// now, for a route that spent part of its bound before asking the host (the
+/// trash listing's wait for its host's trash gate).
+pub(crate) async fn within_host_read_bound_until<T>(
+    deadline: tokio::time::Instant,
+    read: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    match tokio::time::timeout_at(deadline, read).await {
         Ok(result) => result,
         Err(_elapsed) => Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::Timeout,
