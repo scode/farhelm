@@ -32,10 +32,10 @@
 //!   host again.
 //! - **[`TrashButton::open`] is the entry point** for the dialog, with the return target the caller names: the
 //!   button's own press names the button, and the notices bell's Open Trash, when it comes, names its own control.
+//! - **The archive cue** ([`cue`]): the can wiggles when this window's session Delete moved a checkout into the trash.
 //!
-//! NOTE: Not here yet, each with its own piece: the archive cue (a deleted row's outline flying into the can), and the
-//! notices bell's Retry now and Open Trash. The old page's read generations are not ported, and its uncertain-outcome
-//! bookkeeping only in a smaller form ([`listing`]'s module docs say why).
+//! NOTE: Not here yet, with its own piece: the notices bell's Retry now and Open Trash. The old page's read generations
+//! are not ported, and its uncertain-outcome bookkeeping only in a smaller form ([`listing`]'s module docs say why).
 //!
 //! NOTE: Deviations from the old button, both from what the GPUI app does not have: the old button was disabled while
 //! the page's launch-and-registry lock was held, a lock this app does not have (launches here are each on a key of their
@@ -44,6 +44,7 @@
 //! failed read also ends a host's rechecks, where the old page kept polling and retried the read after half a second
 //! ([`TrashButton::listed`] says why).
 
+pub(crate) mod cue;
 pub(crate) mod dialog;
 pub(crate) mod listing;
 
@@ -128,7 +129,16 @@ pub struct TrashButton {
     /// Reads and drops hosts' trash as the store changes ([`TrashButton::sync`]).
     _following: session::ObservingCurrent,
     /// The bob's ticks, held while the can is upside down and the window active, like the session list's pulse.
-    bob: Option<Bob>,
+    bob: Option<Ticks>,
+    /// The archive cue's wiggle ([`cue`]): its ticks while it plays.
+    wiggle: Option<Ticks>,
+    /// The drawn-button token ([`Self::shown`]) the cue saw when it asked for a wiggle, which the next draw starts if it
+    /// still draws that same button: starting one needs the window, which the cue's caller does not have, and a button
+    /// that stopped being drawn in between must not play late.
+    wiggle_asked: Option<gpui::EntityId>,
+    /// State that lives exactly as long as the button is drawn in consecutive frames (GPUI's keyed element state), so
+    /// the cue can tell a drawn button from one the list is not showing.
+    shown: WeakEntity<()>,
     /// The dialog this button opened last. Its view going away (the layer closed, or a reset closed every layer) is
     /// how the button tells whether it is open without a window.
     dialog: Option<(LayerId, WeakEntity<TrashDialog>)>,
@@ -151,11 +161,15 @@ struct Kept {
 impl TrashButton {
     /// A button following the current UI session; it reads every connected host's trash once the first snapshot is in.
     pub fn new(cx: &mut Context<Self>) -> Self {
+        cue::register(cx.weak_entity(), cx);
         TrashButton {
             focus: cx.focus_handle().tab_stop(true),
             current: PerSession::default(),
             _following: session::observe_current(cx, |button: &mut Self, cx| button.sync(cx)),
             bob: None,
+            wiggle: None,
+            wiggle_asked: None,
+            shown: WeakEntity::new_invalid(),
             dialog: None,
         }
     }
@@ -391,7 +405,7 @@ impl TrashButton {
     /// How far up the can is drawn now, or `None` while the button holds no bob: for the tests of the bob.
     #[cfg(test)]
     pub(crate) fn lift(&self, cx: &App) -> Option<f32> {
-        self.bob.as_ref().map(|bob| bob.lift(cx))
+        self.bob.as_ref().map(|bob| bob_lift(bob.count(cx)))
     }
 
     /// The dialog this button opened, while it is open: for the screenshot goldens, which turn its settle pause off.
@@ -614,8 +628,9 @@ pub(crate) fn delete_command(target: &Target) -> Result<Command, farhelm_helm_cl
 }
 
 /// The can's drawing: open-lid when `full`, an outline otherwise; upside down while `emptying`, lifted by `lift`
-/// pixels, in `ink`. Shared with the dialog's title, which draws it upright.
-pub(crate) fn can(full: bool, emptying: bool, lift: f32, ink: gpui::Hsla) -> gpui::Svg {
+/// pixels, turned by `turn` degrees more (the archive cue's wiggle), in `ink`. Shared with the dialog's title, which
+/// draws it upright and still.
+pub(crate) fn can(full: bool, emptying: bool, lift: f32, turn: f32, ink: gpui::Hsla) -> gpui::Svg {
     let icon = if full {
         Icon::TrashFull
     } else {
@@ -626,9 +641,11 @@ pub(crate) fn can(full: bool, emptying: bool, lift: f32, ink: gpui::Hsla) -> gpu
         .size(px(CAN))
         .flex_none()
         .text_color(ink);
-    if emptying {
+    let upside_down = if emptying { PI } else { 0. };
+    if emptying || turn != 0. {
         drawn.with_transformation(
-            Transformation::rotate(gpui::radians(PI)).with_translation(point(px(0.), px(-lift))),
+            Transformation::rotate(gpui::radians(upside_down + turn.to_radians()))
+                .with_translation(point(px(0.), px(-lift))),
         )
     } else {
         drawn
@@ -646,9 +663,28 @@ impl Render for TrashButton {
         // ticker's timer running, which an inactive window has no use for.
         let bobs = emptying && ticker::is_active(window, cx);
         if bobs != self.bob.is_some() {
-            self.bob = bobs.then(|| Bob::start(window, cx));
+            self.bob = bobs.then(|| Ticks::start(window, cx));
         }
-        let lift = self.bob.as_ref().map_or(0., |bob| bob.lift(cx));
+        let lift = self.bob.as_ref().map_or(0., |bob| bob_lift(bob.count(cx)));
+        self.shown = window
+            .use_keyed_state("checkout-trash-shown", cx, |_, _| ())
+            .downgrade();
+        // A wiggle the cue asked for starts here, in an active window only, and only if this draw is of the button the
+        // cue saw drawn. It ends after its last keyframe, or as soon as the window goes inactive: ticks never come to an
+        // inactive window, so a wiggle held there would stay tilted and keep the ticker's timer running (the bob's
+        // rule above), and by the time the user is back the old 900 ms animation would long be over.
+        let active = ticker::is_active(window, cx);
+        if self.wiggle_asked.take() == Some(self.shown.entity_id()) && active {
+            self.wiggle = Some(Ticks::start(window, cx));
+        }
+        let turn = self
+            .wiggle
+            .as_ref()
+            .and_then(|wiggle| cue::wiggle_angle(wiggle.count(cx)))
+            .filter(|_| active);
+        if turn.is_none() {
+            self.wiggle = None;
+        }
         // `.checkout-trash-button`: the quiet ink, the primary one while the can holds something.
         let ink = theme::color(if full { palette.fg_0 } else { palette.fg_2 });
         // `.session-heading .checkout-trash-button`: 24 pixels high, as the heading's other buttons, with 5 pixels
@@ -663,7 +699,7 @@ impl Render for TrashButton {
             .items_center()
             .gap(px(3.))
             .text_color(ink)
-            .child(can(full, emptying, lift, ink))
+            .child(can(full, emptying, lift, turn.unwrap_or(0.), ink))
             .children((count > 0).then(|| {
                 div()
                     .text_size(px(COUNT_TEXT))
@@ -689,36 +725,37 @@ impl Render for TrashButton {
     }
 }
 
-/// The bob's ticks: a small entity of its own that the ticker notifies on every tick, counting them, which the button
-/// observes to redraw. The same shape as the component layer's spinner (`components::Spinner`).
-struct Bob {
+/// An animation's ticks (the bob's, the wiggle's): a small entity of its own that the ticker notifies on every tick,
+/// counting them, which the button observes to redraw. The same shape as the component layer's spinner
+/// (`components::Spinner`).
+struct Ticks {
     turn: Entity<Turn>,
     _redraw: Subscription,
 }
 
-/// See [`Bob`].
+/// See [`Ticks`].
 struct Turn {
     ticks: u64,
     _animating: ticker::Animating,
     _ticks: Subscription,
 }
 
-impl Bob {
-    /// A bob starting at its lowest step, redrawing the view `cx` belongs to on every tick.
-    fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Bob {
+impl Ticks {
+    /// Ticks counted from 0, redrawing the view `cx` belongs to on every tick.
+    fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Ticks {
         let turn = cx.new(|cx| Turn {
             ticks: 0,
             _animating: ticker::animate(window, cx),
             _ticks: cx.observe_self(|turn: &mut Turn, _| turn.ticks += 1),
         });
-        Bob {
+        Ticks {
             _redraw: cx.observe(&turn, |_, _, cx| cx.notify()),
             turn,
         }
     }
 
-    /// How far up to draw the can now ([`bob_lift`]).
-    fn lift(&self, cx: &App) -> f32 {
-        bob_lift(self.turn.read(cx).ticks)
+    /// How many ticks have come since the start.
+    fn count(&self, cx: &App) -> u64 {
+        self.turn.read(cx).ticks
     }
 }

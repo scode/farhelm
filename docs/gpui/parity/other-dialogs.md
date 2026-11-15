@@ -84,8 +84,8 @@ The golden is `welcome-dialog` (the reference scene's card).
 The Trash button is `trash::TrashButton`, which the session list keeps and draws in its header, and the dialog it opens
 is `trash::dialog`; the rules both use are `trash::listing`. Ported: the button, its reads and rechecks, and the dialog
 with each checkout's own Delete and Retry, and the per-host and global confirmed deletes (each host's "Delete all on"
-and the footer's Delete all). The archive cue and the notices bell's Retry now and Open Trash come with their own
-pieces.
+and the footer's Delete all), and the archive cue's wiggle (`trash::cue`). The archive cue's flight and the notices
+bell's Retry now and Open Trash come with their own pieces.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/trash/dialog/tests.rs` unless named otherwise (`trash/tests.rs` is the
 button's, `trash/listing/tests.rs` the rules'):
@@ -145,17 +145,23 @@ button's, `trash/listing/tests.rs` the rules'):
 - `tests/github-checkouts.spec.ts`, "trash count and cue follow the final reference, including another client": the
   count following another window's change is `reads_follow_each_hosts_connection_and_trash_epoch_only` (a moved trash
   epoch reads that host); the per-host confirmation is `a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there`;
-  the cue is a later piece's. "trash global confirmation freezes archives and reports preserved recovery work": the
-  freezing is `delete_all_sends_one_frozen_delete_per_reachable_host`, and a host's report of what it kept is shown as
-  any delete's is (`a_refused_delete_stays_visible_on_the_next_opening`). "single trash delete removes one real archive
-  and preserves its neighbour", partly: the frozen one-checkout command is
+  the cue playing only for this client's confirmed archive is `trash/cue/tests.rs`'s
+  `a_confirmed_archive_from_this_window_wiggles_the_can` and `nothing_but_a_confirmed_archive_wiggles` (a bare Delete, a
+  refusal and another client's removal play nothing), and reduced motion and a hidden button
+  `reduced_motion_or_a_hidden_button_plays_nothing`; the flight waits for a foundation change (under "### Archive cue"
+  below). "trash global confirmation freezes archives and reports preserved recovery work": the freezing is
+  `delete_all_sends_one_frozen_delete_per_reachable_host`, and a host's report of what it kept is shown as any delete's
+  is (`a_refused_delete_stays_visible_on_the_next_opening`). "single trash delete removes one real archive and preserves
+  its neighbour", partly: the frozen one-checkout command is
   `an_entrys_delete_runs_at_once_and_keeps_its_row_until_a_listing_confirms_it_gone`; the real archive's removal is not
   driven end to end, because the bridge's fake fleet holds no managed checkout (its sessions run in `/tmp`, and a
   checkout needs a repository source the bridge does not set up). The end-to-end smoke test's step 49 opens the dialog
   over the real helm and supervisor with an empty trash.
 - `tests/bulk-session-actions.spec.ts`, "a newly displayed retained mark preserves the open Trash dialog": marking is
   not ported yet (the sidebar's); the dialog is a layer of its own, so nothing that hides the button can close it.
-  "archive cues require a visible Trash destination while marks remain" is the archive cue piece's.
+  "archive cues require a visible Trash destination while marks remain", partly: a Trash button not drawn plays no
+  wiggle (`reduced_motion_or_a_hidden_button_plays_nothing`, with the Hosts panel in the list's place); the marks that
+  hide it in the old app wait for marking, and the flight it counted for a foundation change.
 
 The goldens are `trash-button-empty`, `trash-button-full`, `trash-button-emptying`, `checkout-trash-dialog` (the
 reference scene's trash), and `checkout-trash-confirm-all` and `checkout-trash-confirm-host` (its questions; the
@@ -264,6 +270,25 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Hosts progress independently in outcome, not in time.** Each host's delete is its own request on its own key, and
   one host's answer never waits on another's to be applied. But the helm answers the window's commands one at a time, so
   a host that does not answer delays the others' answers by up to the helm's 20-second host bound.
+
+### Archive cue
+
+- **Waiting for a foundation change: the row's outline does not fly into the can.** SPEC.md's cue has "the row's dashed
+  outline" fly into the trash before it wiggles. That outline is drawn above the sidebar, over whatever is there, and
+  only the layer manager may draw such an overlay; it has none for this (its one free-floating overlay is the
+  quick-launch pill). Requested of the foundations by the other-dialogs area's coordinator. Until then the can wiggles
+  at once on the archived reply, as the old cue did when it had no row to fly from.
+- **Only the can turns.** The old wiggle turned the whole button, its edge and count with it. GPUI turns an SVG, not a
+  box of elements, so here the can turns inside a still button.
+- **The wiggle is drawn at the ticker's ten steps a second.** The old animation ran at the display's rate. Here each
+  tick draws the turn the old eased keyframes give at that moment, so its sharpest swings fall between ticks: the first
+  tick shows about -14 degrees, and the 12-degree swing back is not seen. The ticker's ten-a-second cap is the app's
+  rule for every animation.
+- **A wiggle ends when the window goes inactive.** The ticker sends no ticks to an inactive window, so a wiggle under
+  way ends there, upright, rather than being held tilted; one asked for while the window is inactive does not start. The
+  old 900 ms animation ran on regardless, and would have been over by the time the user came back.
+- **It plays over the bob.** A can already upside down and bobbing (a delete of this window's running, a host freeing
+  space) wiggles too, the turn added to its upside-down one, as the old wiggle turned the button around the bobbing can.
 
 ### Session bell
 
