@@ -691,6 +691,16 @@ systemd or SSH substrate ran.
   rewrites the references; look at each changed PNG before keeping it. A failure leaves the new captures in
   `gui-goldens/` beside the test binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or
   GPUI or GPUI Kit change; CI does not run it yet.
+- `python3 scripts/record-test-run.py --kind development --selection 'GPUI host text on macOS' --concurrency 'libtest default threads' -- cargo test --locked -p farhelm-gui --lib host_text::`,
+  on a Mac — the host-supplied text tests, including the macOS-only
+  `host_text::tests::on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated`, which shapes a sentence
+  naming a host value with CoreText and the bundled fonts: it flows between words, breaks before the value, and keeps
+  the value's direction isolated. It caught a Mac-only line-break bug that Linux runs cannot see, since Linux shapes
+  with cosmic-text (the test's own docs explain it). Neither CI nor the release gate runs `farhelm-gui` tests on macOS.
+  Run it on a Mac (the shared test Mac under its lock, `docs/gui-agent.md`, "On a Mac", when an agent runs it) when
+  `crates/gui/farhelm-gui/src/host_text.rs`, the bundled fonts under `crates/gui/farhelm-gui/assets/fonts/`, the GPUI
+  version, or a GPUI patch (`vendor/README.md`, "GPUI") change. It compiles the GUI crate's tests and needs no GUI
+  session.
 - `python3 -B scripts/test-gui-agent.py` — the harness that drives the GPUI app (`scripts/gui-agent.py`,
   `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
   shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,
