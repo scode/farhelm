@@ -614,13 +614,6 @@ fn allow_then_open(tunnels: WeakEntity<Tunnels>, url: String, cx: &mut App) {
     });
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Settings' tunnel switch calls it, in the settings area's own change"
-    )
-)]
 /// Settings' way into the tunnel warning, for its switch (SPEC.md: tunnels stay off "until they accept the warning"):
 /// ask the warning now, unless the user moved on since `mark`, and on Allow save the shared consent and tell `done`
 /// whether it was stored. Cancel, Escape and closing the question save nothing and call nothing. Focus returns to what

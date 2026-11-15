@@ -1,29 +1,53 @@
 //! Settings → Terminal: who owns a click on a web link in a terminal, as one radio group over the helm's
-//! `terminal_link_click` preference.
+//! `terminal_link_click` preference, and the tunnel consent switch over its `tunnel_consent` preference.
 //!
-//! Ported from the Terminal block of the old app's `settings.rs` (`TerminalLinkChoice`) at reference commit `24bc0580`,
-//! with its three choices, their description lines and its help. The help no longer says other clients see the choice
-//! "when they reload": shared changes arrive live in this app (the migration's orchestrator decided on 2026-11-13 that
-//! each area rewords its own help as it ports it).
+//! Ported from the Terminal block of the old app's `settings.rs` (`TerminalLinkChoice`) and its desktop-only
+//! `TunnelSettings` (`tunnels.rs`) at reference commit `24bc0580`, with the link group's three choices, their
+//! description lines and its help, and the switch's label and help. The link help no longer says other clients see the
+//! choice "when they reload": shared changes arrive live in this app (the migration's orchestrator decided on
+//! 2026-11-13 that each area rewords its own help as it ports it). The switch's help never said so.
 //!
 //! The link choice saves like a switch ([`super::SettingsDialog::choose_link_click`]): the field alone, under the
 //! preference row's key, showing the value being saved only while the save is in flight and the helm's stored choice
 //! at every other moment, with a failure line under the group after a refusal. What a terminal does with a click is
 //! the terminal's to read from the same preference; nothing here tells a terminal anything.
 //!
-//! NOTE: Not drawn yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The tunnel consent switch waits for
-//! the tunnel feature's own consent question ("Allow tunnels from remote sessions?"), which the terminal area builds:
-//! turning tunnels on must go through that warning, so a plain switch here would grant consent unasked (decided on
-//! 2026-11-14). The desktop app's **File types to open with Cmd-click** field governs opening downloaded files and
-//! comes with file downloads, later in the migration.
+//! The tunnel switch is not symmetric (SPEC.md: consent "is off until they accept the warning"):
+//!
+//! - **On** asks the tunnel security warning, the terminal's own question
+//!   ([`crate::terminal::tunnels::ask_consent`]), which saves the consent on Allow. The switch shows the stored choice
+//!   throughout, also while that save is in flight, since nothing the dialog holds is being saved; it turns on when the
+//!   helm pushes the stored consent. Cancel saves nothing and leaves nothing to say. Whatever held focus when the
+//!   warning opened gets it back: the switch when a key press or a click on Linux focused it, but not after a click on
+//!   a Mac, where a click leaves a checkbox unfocused.
+//! - **Off** needs no warning and saves `false` at once like any switch, showing off while the save is in flight. The
+//!   helm closes every open tunnel when it stores it.
+//!
+//! The old switch held its stored value while either save ran ("No optimistic checked state can stand in for an
+//! acknowledgment"); here only turning it on does, since turning it off is a draft's save like any switch's.
+//!
+//! Either way a refusal shows the helm's words under the switch, as the old switch did, until the next press that sends
+//! or asks. A press while another Settings save holds the preference row's key sends and asks nothing, and says so
+//! ([`super::refused`]); the warning is not shown for a press whose consent could not be saved. A refusal that arrives
+//! after Settings has closed is shown nowhere, as for every Settings save; the old app put it in its tunnel notice.
+//!
+//! The switch is drawn only where tunnels open, the Mac ([`shown_on`]), as the old one was drawn only in the Mac app
+//! (`native_desktop`, which the browser interface lacked). On Linux the terminal offers no tunnel, and the switch's
+//! words and its warning's speak of this Mac.
+//!
+//! NOTE: Not drawn yet, recorded in `docs/gpui/parity/settings-and-hosts.md`: the desktop app's **File types to open
+//! with Cmd-click** field governs opening downloaded files and comes with file downloads, later in the migration.
 
 use farhelm_helm_client::PathError;
+use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::Preferences;
-use gpui::{App, Div, ParentElement as _, Role, Styled as _, Window, div, px};
+use gpui::{App, Div, FocusHandle, ParentElement as _, Role, Styled as _, Window, div, px};
 
-use super::{Refused, choices};
-use crate::components::{HoverHelp, RadioGroup, RadioOption};
+use super::Refused;
+use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use crate::components::{Checkbox, HoverHelp, RadioGroup, RadioOption};
 use crate::drafts::Draft;
+use crate::host_text::{HostSentence, HostText};
 use crate::operations::Command;
 
 /// The radio group's element id; each option is drawn under `settings-terminal-links-<its label>`.
@@ -153,4 +177,113 @@ pub(super) fn links(
         )
         .children(choices::busy_line(refused, ID, cx));
     [choices::help(HELP, cx), choice]
+}
+
+// ---- Tunnel consent ------------------------------------------------------------------------------------------------
+
+/// The tunnel switch's element id, which tests and the test bridge find it by.
+pub(super) const TUNNEL_ID: &str = "settings-tunnels";
+
+/// Its failure line's.
+pub(super) const TUNNEL_ERROR_ID: &str = "settings-tunnels-error";
+
+/// The preference row's field, as the wire names it.
+const TUNNEL_FIELD: &str = "tunnel_consent";
+
+/// The switch's label, the old one's.
+const TUNNEL_LABEL: &str = "Allow tunnels from remote sessions";
+
+/// The switch's hover help. The old switch had none, only the help paragraph under it, which assistive technology read
+/// as its description; every control here has hover help, so it says the paragraph's first sentence.
+const TUNNEL_TOOLTIP: &str = "Open a remote session's localhost links through this Mac";
+
+/// The help under the switch, the old words.
+const TUNNEL_HELP: &str = "Open a remote session's localhost links through this Mac. Turning this off closes every \
+                           open tunnel. The next tunnel asks again. This choice applies to this helm.";
+
+/// The tunnel switch's state in the open dialog (see the module docs for its two directions).
+pub(super) struct TunnelConsent {
+    /// Turning tunnels off: while that save is in flight its draft holds `false`, which the switch shows. Turning them
+    /// on has no draft, since the warning's own save is the terminal's, not the dialog's.
+    pub(super) off: Draft<bool>,
+    /// The helm's words for the last press's failed save, in either direction, until the next press that sends or asks.
+    pub(super) failure: Option<HostText>,
+    /// Kept by the dialog, like a switch's, so the switch stays the same control across section switches. The warning
+    /// returns focus to whatever held it when it opened, which is this switch only when the press focused it (see the
+    /// module docs).
+    pub(super) focus: FocusHandle,
+}
+
+impl TunnelConsent {
+    /// A switch with nothing saved or refused yet.
+    pub(super) fn new(cx: &mut App) -> Self {
+        TunnelConsent {
+            off: Draft::load(false),
+            failure: None,
+            focus: cx.focus_handle().tab_stop(true),
+        }
+    }
+
+    /// What the switch shows: off while its own off save is in flight, and otherwise whether the helm stores consent
+    /// (only an explicit `true`: unset is off, SPEC.md's "off until accepted").
+    fn shown(&self, preferences: Option<&Preferences>) -> bool {
+        !self.off.is_saving()
+            && preferences.and_then(|preferences| preferences.tunnel_consent) == Some(true)
+    }
+}
+
+/// Whether Settings draws the tunnel switch on `platform`: only on the Mac, where the terminal offers tunnels (see the
+/// module docs). The platform is a value, as the terminal's offer takes it, so tests on any machine cover both.
+pub(super) fn shown_on(platform: Platform) -> bool {
+    platform == Platform::Mac
+}
+
+/// `PUT /api/preferences` with only `{"tunnel_consent": false}`: turning tunnels off. Turning them on is the warning's
+/// save ([`crate::terminal::tunnels::ask_consent`]), never this dialog's.
+pub(super) fn tunnels_off_command() -> Result<Command, PathError> {
+    choices::patch(TUNNEL_FIELD, serde_json::Value::Bool(false))
+}
+
+/// The tunnel switch with its help, after a failed save the helm's words under it, and the line saying why a press
+/// sent nothing (`refused`, [`choices::busy_line`]), in one group as the other switches are (`.setting-group`).
+/// `on_toggle` is what a toggle does with the new value.
+pub(super) fn tunnel_switch(
+    state: &TunnelConsent,
+    preferences: Option<&Preferences>,
+    refused: &Refused,
+    on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Div {
+    let switch = div()
+        .text_size(px(LABEL_TEXT))
+        .line_height(px(LABEL_LINE_HEIGHT))
+        .child(
+            Checkbox::new(
+                TUNNEL_ID,
+                TUNNEL_LABEL,
+                HoverHelp::tooltip(TUNNEL_TOOLTIP),
+                Role::Switch,
+            )
+            .switch()
+            .checked(state.shown(preferences))
+            .focus(&state.focus)
+            .on_toggle(on_toggle),
+        );
+    // The old line was the helm's words alone (`display_peer(error)`), with no words of the app's before them.
+    let failure = state.failure.as_ref().map(|reason| {
+        choices::host_failure_line(
+            TUNNEL_ERROR_ID,
+            HostSentence::new(TUNNEL_ERROR_ID).host(reason),
+            cx,
+        )
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(GROUP_GAP))
+        .min_w_0()
+        .child(switch)
+        .child(choices::help(TUNNEL_HELP, cx))
+        .children(failure)
+        .children(choices::busy_line(refused, TUNNEL_ID, cx))
 }

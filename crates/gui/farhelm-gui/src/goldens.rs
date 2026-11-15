@@ -2208,9 +2208,14 @@ fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
 }
 
-/// Settings at Terminal, the default link choice chosen because the row stores none. Focus starts on the dialog itself
-/// (`Section::first`), so no ring shows, as in the reference, where the section was reached by a click.
+/// Settings at Terminal, the default link choice chosen because the row stores none, and, decided for the Mac on every
+/// machine, the tunnel switch below it off because the row stores no consent. Focus starts on the dialog itself
+/// (`Section::first`), so no ring shows, as in the reference, where the section was reached by a click. The reference is
+/// the browser interface, which had no tunnel switch; the old Mac app drew it under the link choices.
 fn settings_terminal_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    cx.set_global(crate::settings::TunnelsPlatform(
+        farhelm_input_mapping::Platform::Mac,
+    ));
     settings_scene(state, crate::settings::Section::Terminal, window, cx);
 }
 
