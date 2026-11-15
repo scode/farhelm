@@ -161,7 +161,7 @@ pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, Path
 impl SessionList {
     /// The user asked to replace `key` (its row's Replace) at `mark`: ask, beside the row's menu button while the row is
     /// drawn and centered when it is not, or replace at once when confirmations are skipped. Nothing happens for a
-    /// session that is not listed, or that has any request in flight.
+    /// session the store holds no row for, or that has any request in flight.
     pub(crate) fn replace(
         &mut self,
         key: &str,

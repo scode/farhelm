@@ -29,8 +29,11 @@
 //!   in place of the actions until it settles (they come back with a refusal). While a question an action asked is
 //!   open, its button reads as pressed and a click on it does nothing; a press anywhere else closes the question
 //!   unanswered.
-//! - **A session the list does not show.** The open session may be filtered out of the list or past its cap; its
-//!   actions are then drawn disabled with hover help saying why, since the row data they act on is not there.
+//! - **The open session by key.** Each action reads the session's row from the store by key, and the helm keeps the
+//!   open session there even while a filter or the list's cap leaves it out of the list (`session_list::filters`,
+//!   "The query names the open session"), so the actions work on a session the list does not show exactly as on a
+//!   listed one. With no row at all (the moment before the helm answers the query that names a newly opened session,
+//!   or a selected key that names no session), the row draws no actions, since there is nothing they could ask from.
 //! - **Focus.** Each question returns focus home (the terminal) on Escape and to where it was on any other close, which
 //!   is SPEC.md's "Escape cancels the header's Stop, Restart, Replace or Delete question and returns focus to the
 //!   terminal" ([`crate::prompt::Question::returns_home_on_escape`]).
@@ -148,15 +151,6 @@ pub(crate) fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> Str
     }
 }
 
-/// The hover help of `action` while the open session is not in the session list: the actions act on the listed row,
-/// so without one there is nothing they could ask from.
-pub(crate) fn unlisted_help(action: Action) -> String {
-    format!(
-        "{}: unavailable while the session list does not show this session (a filter or the list's limit hides it)",
-        action.label()
-    )
-}
-
 // ---- What the header keeps -------------------------------------------------------------------------------------------
 
 /// What the header keeps between frames: where each button was last drawn, so its question can hang under it, and the
@@ -185,8 +179,8 @@ impl Header {
 
 /// What the top row draws for the open session, read from the store and the operation store now.
 struct Shown<'a> {
-    /// The session's row as the list reads it; `None` when the list does not show it.
-    row: Option<&'a SessionRow>,
+    /// The session's row as the store holds it, listed or carried outside the list.
+    row: &'a SessionRow,
     skipped: bool,
     busy: bool,
     stopping: bool,
@@ -252,7 +246,7 @@ impl SessionPane {
             return row.into_any_element();
         };
         let collections = store.read(cx).collections();
-        let listed = collections.get::<SessionRow>(key).cloned();
+        let row_now = collections.get::<SessionRow>(key).cloned();
         let skipped = menu::skips_questions(collections);
         if let Some(guard) = delete::in_flight(key, cx) {
             self.header.anchors.clear();
@@ -263,8 +257,13 @@ impl SessionPane {
                 ))
                 .into_any_element();
         }
+        // No row, no actions (the module docs' "The open session by key").
+        let Some(row_now) = row_now else {
+            self.header.anchors.clear();
+            return row.into_any_element();
+        };
         let shown = Shown {
-            row: listed.as_ref(),
+            row: &row_now,
             skipped,
             busy: delete::busy(key, cx),
             stopping: stop::in_flight(key, cx),
@@ -343,7 +342,8 @@ impl SessionPane {
 
     /// The user activated `action` in the open session's header at `mark`. It goes as the row's menu goes for the same
     /// session, through the same functions, with the question (when it asks) hung under the action's button. Nothing
-    /// happens while that question is open, for a session the list does not show, or for one with a request in flight.
+    /// happens while that question is open, for a session the store holds no row for, or for one with a request in
+    /// flight.
     pub(crate) fn header_action(
         &mut self,
         action: Action,
@@ -444,10 +444,8 @@ fn action_button(
     cx: &App,
 ) -> Button {
     let pane = pane.clone();
-    let help = match shown.row {
-        Some(row) => hover_help(action, row, shown.skipped),
-        None => unlisted_help(action),
-    };
+    let row = shown.row;
+    let help = hover_help(action, row, shown.skipped);
     let stopping = action == Action::Stop && shown.stopping;
     let label = if stopping {
         stop::PROGRESS_LABEL
@@ -478,9 +476,6 @@ fn action_button(
                 .child(stop::PROGRESS_LABEL),
         );
     }
-    let Some(row) = shown.row else {
-        return button.disabled(true);
-    };
     match action {
         Action::Restart => button
             .accessible_name(restart::offer_label(row.info.restart_offer))

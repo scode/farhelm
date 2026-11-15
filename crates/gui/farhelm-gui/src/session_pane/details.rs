@@ -30,11 +30,12 @@
 //! - **Nothing here takes focus yet.** The bar is drawn after the terminal, so the copy buttons that come with the next
 //!   piece will follow the top row and the terminal in Tab's order, as SPEC.md asks; today the bar has no stop at all.
 //!
-//! What the bar shows is decided by [`Details::of`], a pure function of the session's listed row, the registry and the
-//! clock, so tests read it without a window; [`bar`] only lays it out. The pane draws the bar only for a session the
-//! session list shows. A filter or the list's cap can hide the open session from the listing. The migration's
-//! orchestrator decided on 2026-11-14 that the session query will name the open session and the helm will keep it in
-//! the pushed collection even then. Until that helm change lands, such a session gets no bar.
+//! What the bar shows is decided by [`Details::of`], a pure function of the session's row, the registry and the clock,
+//! so tests read it without a window; [`bar`] only lays it out. The pane reads the row from the store by key, so the bar
+//! names the open session also while a filter or the list's cap hides it from the list: the session query names the
+//! open session, and the helm keeps it in the pushed collection then (`session_list::filters`, "The query names the
+//! open session"). The bar never takes the title from the filtered listing. With no row in the store at all (before the
+//! helm answers the query naming a newly opened session, say), the pane draws no bar.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::SessionRow;
@@ -90,7 +91,7 @@ fn badge_max_width() -> Pixels {
     metrics::TEXT_SM * (32. * ZERO_ADVANCE_EM) + px(2. * BADGE_PAD_X)
 }
 
-/// What the bar shows for one session, decided from its listed row, the registry and the viewer's clock. See the module
+/// What the bar shows for one session, decided from its row, the registry and the viewer's clock. See the module
 /// docs for the rules each field follows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Details {

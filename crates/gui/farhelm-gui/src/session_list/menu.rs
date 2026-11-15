@@ -362,7 +362,7 @@ enum LifecycleCommand {
     Delete,
 }
 
-/// A row a lifecycle action was asked for, as listed when the user asked.
+/// A row a lifecycle action was asked for, as the store held it when the user asked.
 pub(crate) struct Actionable {
     /// The row as the store holds it now: what any question is drawn from and any precondition is taken from.
     pub(crate) row: SessionRow,
@@ -372,8 +372,9 @@ pub(crate) struct Actionable {
 }
 
 /// `key`'s row, for a lifecycle action the user just asked for (from the row's menu, or the open session's header), or
-/// `None` when nothing may happen: the session is not listed, or it has a request in flight (SPEC.md: "a pending
-/// request refuses another lifecycle action").
+/// `None` when nothing may happen: the store holds no row for the session, or it has a request in flight (SPEC.md: "a
+/// pending request refuses another lifecycle action"). The row is read by key, so the open session the helm carries
+/// outside a filtered or cut list is actionable like a listed one.
 pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
     let store = session::current_store(cx)?;
     let collections = store.read(cx).collections();

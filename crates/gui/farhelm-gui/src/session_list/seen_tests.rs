@@ -1,7 +1,8 @@
 //! Tests of a row's manual Mark read and Mark unread, and of the open session's seen memory: the menu item and the
 //! status dot, the exact body each sends, what a pending or refused toggle does to the row, and that a manual Mark
 //! unread of the open session survives everything but the user leaving and coming back, or new output, including a
-//! listing that hides the session for a while.
+//! listing that hides the session for a while, and that the open session the helm carries outside a filtered list is
+//! marked seen as its output arrives.
 //!
 //! Everything runs in the real main view over the helm client's fake, as the menu's own tests do (whose fixtures and
 //! helpers these share), and reads what the window sent from the fake and what it drew from GPUI's driver record of
@@ -16,7 +17,7 @@ use serde_json::{Value, json};
 
 use super::host_rail::tests::{hosts, local, remote};
 use super::menu_tests::{any_layer, drawn, ended, label_of, push, snapshot};
-use super::tests::{Fixture, change, listing_meta, open_main, selected, session};
+use super::tests::{Fixture, carrying, change, listing_meta, open_main, selected, session};
 use crate::actions::QUICK_SWITCHER_CHORD;
 use crate::test_support::{focused_id, meta};
 use crate::{layers, test_support};
@@ -65,6 +66,16 @@ fn remembered(key: &str) -> (Method, String, Value) {
         Method::Put,
         "/api/preferences".to_owned(),
         json!({ "last_selected": key }),
+    )
+}
+
+/// The session query the list sends when `key` becomes the open session under the unfiltered choice, naming it
+/// (`filters`, "The query names the open session").
+fn named(key: &str) -> (Method, String, Value) {
+    (
+        Method::Put,
+        SESSION_QUERY_PATH.to_owned(),
+        json!({ "selected": key }),
     )
 }
 
@@ -339,8 +350,9 @@ fn the_dot_toggles_once_without_opening_its_row(cx: &mut TestAppContext) {
 /// immediately re-record it as seen — until the user leaves and returns to it, or new output arrives." The automatic
 /// rule runs on every pushed change, so each of those is a chance to undo the user's choice. Specified, with a open and
 /// seen: Mark unread from a's menu sends `null`, and the helm's push of a unseen sends nothing; nor does a pushed change
-/// to b; opening b sends only its visit, and opening a again sends its visit and its seen mark at its activity; a
-/// second Mark unread, from a's dot, sticks the same way, and new output on a sends its seen mark at the new activity.
+/// to b; opening b sends only its visit and the query naming it, and opening a again sends its visit, the query naming
+/// it and its seen mark at its activity; a second Mark unread, from a's dot, sticks the same way, and new output on a
+/// sends its seen mark at the new activity.
 #[gpui::test]
 fn a_manual_unread_of_the_open_session_sticks_until_the_user_returns_or_output_arrives(
     cx: &mut TestAppContext,
@@ -364,11 +376,11 @@ fn a_manual_unread_of_the_open_session_sticks_until_the_user_returns_or_output_a
     );
 
     test_support::click(cx, "session-row-b");
-    assert_eq!(answered(&mut fake), [remembered("b")]);
+    assert_eq!(answered(&mut fake), [remembered("b"), named("b")]);
     test_support::click(cx, "session-row-a");
     assert_eq!(
         answered(&mut fake),
-        [remembered("a"), seen_put("a", json!(100))],
+        [remembered("a"), named("a"), seen_put("a", json!(100))],
         "returning to a marks it seen"
     );
     push(&mut fake, &order, &[(idle("a"), 0)], cx);
@@ -471,7 +483,7 @@ fn the_seen_memory_survives_a_host_filter_that_hides_the_open_session(cx: &mut T
         [(
             Method::Put,
             SESSION_QUERY_PATH.to_owned(),
-            json!({ "host": 2 })
+            json!({ "host": 2, "selected": "a" })
         )]
     );
     fake.push(change(narrowed(&["b"], 2, 1), &[], &["a"]));
@@ -501,9 +513,50 @@ fn the_seen_memory_survives_a_host_filter_that_hides_the_open_session(cx: &mut T
     );
     assert_eq!(
         answered(&mut fake),
-        [(Method::Put, SESSION_QUERY_PATH.to_owned(), json!({}))],
+        [named("a")],
         "a's return marks nothing"
     );
+}
+
+/// SPEC.md, "Status": the open session's output is marked seen as it arrives, also while a filter hides its row,
+/// because the session is still the one open; and a manual Mark unread still sticks. The helm carries the hidden open
+/// session in the store, so its activity is known, unlike a moment with no row. Specified, with a open and marked
+/// unread by hand, over the local host and one remote: choosing the remote, answered with a listing of b that carries a
+/// (unseen, same activity), keeps a open and sends nothing; the helm's push of the carried a with new activity at 150
+/// sends a's seen mark at 150.
+#[gpui::test]
+fn a_carried_open_session_is_marked_seen_as_its_output_arrives(cx: &mut TestAppContext) {
+    let rows = [(idle("a"), 0), (idle("b"), 0)];
+    let mut state = snapshot(&rows, false);
+    state.push(hosts(&[
+        local(),
+        remote(2, "ops@render-west.example.invalid"),
+    ]));
+    let (mut fake, cx) = open_main(cx, state);
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    answered(&mut fake);
+    toggle_from_menu(cx, "session-menu-a");
+    push(&mut fake, &["a", "b"], &[(idle("a").seen(None), 0)], cx);
+    assert_eq!(answered(&mut fake), [seen_put("a", Value::Null)]);
+
+    test_support::click(cx, "host-rail-host-2");
+    answered(&mut fake);
+    fake.push(change(carrying(narrowed(&["b"], 2, 1), "a"), &[], &[]));
+    test_support::settle(cx);
+    assert!(
+        !drawn(cx, "session-row-a"),
+        "the premise: the listing hides a"
+    );
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert_eq!(answered(&mut fake), [], "a manual unread still sticks");
+
+    fake.push(change(
+        carrying(narrowed(&["b"], 2, 1), "a"),
+        &[idle("a").activity(150).seen(None)],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert_eq!(answered(&mut fake), [seen_put("a", json!(150))]);
 }
 
 /// SPEC.md, "Status": a manual Mark unread sticks "until the user leaves and returns to it", and a filter that hides
@@ -512,8 +565,9 @@ fn the_seen_memory_survives_a_host_filter_that_hides_the_open_session(cx: &mut T
 /// review gate, as a memory kept for whichever hidden session was open. Specified, with a open and marked unread by
 /// hand, over the local host and one remote: choosing the remote hides a and c; the quick switcher opens c, then a again,
 /// each picked by typing its title and Enter, and nothing is marked while they are hidden (picking the hidden c widens
-/// the query to All, `{}`, as SPEC.md's quick switcher asks, but a stays hidden until the helm's widened listing
-/// arrives); once that listing shows a again unseen at the same activity, a is marked seen at that activity.
+/// the query to All, `{"selected": "c"}`, as SPEC.md's quick switcher asks, but a stays hidden until the helm's widened
+/// listing arrives); once that listing shows a again unseen at the same activity, a is marked seen at that activity.
+/// The fake helm here carries no hidden session, so these are the moments with no row for the open one.
 #[gpui::test]
 fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut TestAppContext) {
     let rows = [(idle("a"), 0), (idle("b"), 0), (idle("c"), 0)];
@@ -544,7 +598,7 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
     assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
     let sent = answered(&mut fake);
     assert!(
-        sent.contains(&(Method::Put, SESSION_QUERY_PATH.to_owned(), json!({}))),
+        sent.contains(&named("c")),
         "the pick of the hidden c widened the query: {sent:?}"
     );
     assert!(

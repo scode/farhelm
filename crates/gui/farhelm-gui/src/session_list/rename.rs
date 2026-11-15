@@ -36,14 +36,17 @@
 //! - **One request per session.** It does not open while the session has work in flight in the operation store (a
 //!   Delete, say), as the old app refused it (`on_rename_start`'s `busy_now`); and a Save while other work started on
 //!   the session is refused by the store.
+//! - **A session the list does not show.** The editor reads the session from the store by key, never from the list,
+//!   and the helm keeps the open session in the store while a filter or the listing cap leaves it out of the list
+//!   (`super::filters`, "The query names the open session"). So the shortcut renames the open session "including when
+//!   its row is filtered out" (SPEC.md, "Desktop window chrome"), seeded from its current title, and the editor follows
+//!   its title there as for a listed one.
 //!
 //! The old app's optimistic rename overlay is not ported: the UI channel pushes every change before the reply that
 //! caused it (SPEC_impl.md, "The UI channel"), so the store already shows the new title when the save succeeds.
 //!
 //! NOTE: Not ported yet. Quick launch's naming mode of this editor (SPEC.md: "Quick launch uses the same editor in
-//! naming mode") comes with quick launch. A selected session the store does not list (past the listing cap, or filtered
-//! out once filters exist) cannot be renamed yet, although SPEC.md has the shortcut work "including when its row is
-//! filtered out": the store holds no title to seed the draft from, so the shortcut does nothing for it.
+//! naming mode") comes with quick launch.
 
 #[cfg(test)]
 mod tests;
@@ -78,7 +81,7 @@ use crate::{local_state, session};
 ///
 /// Returns the editor's layer, or `None` when nothing opened: the window is inert, the session has work in flight (a
 /// Delete, say: SPEC.md, "an open lifecycle confirmation or a pending request refuses another lifecycle action"), the
-/// store does not list the session so there is no title to start from, or the user moved on. A refusal is silent, as
+/// store holds no row for the session so there is no title to start from, or the user moved on. A refusal is silent, as
 /// it was in the old app: the session's row already shows the work in flight.
 pub fn open(key: &str, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
     open_returning(key, mark, ReturnTo::Opener, window, cx)
@@ -163,7 +166,7 @@ fn open_returning(
 }
 
 /// The Rename shortcut ([`crate::actions::RenameSession`]): open the editor for the open session, which in this app is
-/// the selected one (the module docs' NOTE says which selected session it cannot rename yet). With no session selected,
+/// the selected one, listed or not (the module docs' "A session the list does not show"). With no session selected,
 /// or while a dialog or menu holds the keyboard (SPEC.md: "A visible modal keeps keyboard ownership"; a popover that
 /// never takes focus, such as a terminal link's destination display, is not one), it does nothing. The main
 /// view calls it for the action wherever focus is, the terminal included, and the action is taken either way, as

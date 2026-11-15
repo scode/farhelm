@@ -1,6 +1,7 @@
-//! Tests of the list's query: the status segments and the query they send with the rail's host, the empty answer's
-//! sentence and links, the heading and segments before the first listing, the selection left alone by a filter, and
-//! the query's bookkeeping, refusal wording, empty-answer rule and switcher-pick rule as pure functions.
+//! Tests of the list's query: the status segments and the query they send with the rail's host, the open session every
+//! send names and the send a new open session makes, the empty answer's sentence and links, the heading and segments
+//! before the first listing, and the query's body, bookkeeping, refusal wording, empty-answer rule and switcher-pick
+//! rule as pure functions. The open session a filter hides is `session_pane/carried_tests.rs`'s.
 //!
 //! Like the rail's tests, these run the real main view over the helm client's fake, which hands the test every command
 //! the window sent, and read controls from GPUI's driver record of the frame by their ids: the segments are
@@ -24,7 +25,7 @@ use crate::host_text::HostText;
 use crate::operations;
 use crate::session_list::host_rail::tests::{
     answer_everything, filtered, fleet_hosts, hosts, hover_help, label, node, one_query, pressed,
-    queries, snapshot,
+    queries, sent_queries, snapshot,
 };
 use crate::session_list::tests::{
     change, collections, listing, open_main, painted, preferences, selected, session,
@@ -140,12 +141,13 @@ fn the_segments_are_a_radio_group_with_the_old_words_and_the_chip_after_them(
 }
 
 /// The helm replaces its whole query on every send (SPEC_impl.md, "The UI channel"), so a status sent without the host
-/// would silently widen the list to every host, and the other way round; and SPEC.md wants the query sent at once and
-/// nothing sent for the choice already in force. Specified: a click on Running sends `{"status": "running"}` and checks
-/// it before any reply; a second click sends nothing; host 3 then sends `{"host": 3, "status": "running"}`; Waiting and
-/// Idle each send host 3 with their word; Left on the focused Idle chooses Waiting and sends it (the old status spec's
-/// arrow case); All sends `{"host": 3}`; with Waiting chosen again, the chip sends `{"status": "waiting"}`. The open
-/// session stays open throughout.
+/// would silently widen the list to every host, and the other way round, and a send without the open session would
+/// stop the helm carrying it while a filter hides it; and SPEC.md wants the query sent at once and nothing sent for the
+/// choice already in force. Specified, every body naming the open session a as `selected`: a click on Running sends
+/// `{"status": "running"}` and checks it before any reply; a second click sends nothing; host 3 then sends `{"host": 3,
+/// "status": "running"}`; Waiting and Idle each send host 3 with their word; Left on the focused Idle chooses Waiting
+/// and sends it (the old status spec's arrow case); All sends `{"host": 3}`; with Waiting chosen again, the chip sends
+/// `{"status": "waiting"}`. The open session stays open throughout.
 #[gpui::test]
 fn every_query_carries_both_the_host_and_the_status(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -155,7 +157,7 @@ fn every_query_carries_both_the_host_and_the_status(cx: &mut TestAppContext) {
 
     click(cx, "session-status-Running");
     let (query, body) = one_query(&mut fake);
-    assert_eq!(body, json!({ "status": "running" }));
+    assert_eq!(body, json!({ "status": "running", "selected": "a" }));
     let nodes = frame(cx);
     assert!(
         pressed(&nodes, "session-status-Running"),
@@ -168,24 +170,48 @@ fn every_query_carries_both_the_host_and_the_status(cx: &mut TestAppContext) {
     assert_eq!(queries(&mut fake).len(), 0, "the same choice sends nothing");
 
     click(cx, "host-rail-host-3");
-    accept_one(&mut fake, cx, json!({ "host": 3, "status": "running" }));
+    accept_one(
+        &mut fake,
+        cx,
+        json!({ "host": 3, "status": "running", "selected": "a" }),
+    );
     click(cx, "session-status-Waiting");
-    accept_one(&mut fake, cx, json!({ "host": 3, "status": "waiting" }));
+    accept_one(
+        &mut fake,
+        cx,
+        json!({ "host": 3, "status": "waiting", "selected": "a" }),
+    );
     click(cx, "session-status-Idle");
-    accept_one(&mut fake, cx, json!({ "host": 3, "status": "idle" }));
+    accept_one(
+        &mut fake,
+        cx,
+        json!({ "host": 3, "status": "idle", "selected": "a" }),
+    );
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("session-status-Idle"),
         "the premise: the click focused Idle"
     );
     keys(cx, "left");
-    accept_one(&mut fake, cx, json!({ "host": 3, "status": "waiting" }));
+    accept_one(
+        &mut fake,
+        cx,
+        json!({ "host": 3, "status": "waiting", "selected": "a" }),
+    );
     click(cx, "session-status-All");
-    accept_one(&mut fake, cx, json!({ "host": 3 }));
+    accept_one(&mut fake, cx, json!({ "host": 3, "selected": "a" }));
     click(cx, "session-status-Waiting");
-    accept_one(&mut fake, cx, json!({ "host": 3, "status": "waiting" }));
+    accept_one(
+        &mut fake,
+        cx,
+        json!({ "host": 3, "status": "waiting", "selected": "a" }),
+    );
     click(cx, "host-filter-chip");
-    accept_one(&mut fake, cx, json!({ "status": "waiting" }));
+    accept_one(
+        &mut fake,
+        cx,
+        json!({ "status": "waiting", "selected": "a" }),
+    );
     assert!(pressed(&frame(cx), "session-status-Waiting"));
     assert_eq!(selected(cx), open);
 }
@@ -271,11 +297,12 @@ fn every_empty_answer_names_its_filters_with_a_link_per_filter(cx: &mut TestAppC
 
 /// Each link clears only its own filter (the old status spec: Show all statuses keeps the host, Show all hosts keeps
 /// the status), and both take away the control the user just used, so focus moves to the rail's All (SPEC.md); the
-/// sentence keeps describing the answered query until the helm answers the new one. Specified: with host 3 and Waiting
-/// answered empty, Show all statuses sends `{"host": 3}`, leaves focus on All, checks All at once and keeps "No waiting
-/// sessions on <host 3>." until its empty answer, which reads "No sessions on <host 3>."; with Waiting chosen again and
-/// answered empty, Enter on Show all hosts (reached by Tab from Waiting, past the chip) sends `{"status": "waiting"}`,
-/// leaves focus on All, takes the chip away, and its empty answer reads "No waiting sessions."
+/// sentence keeps describing the answered query until the helm answers the new one. Specified (each body also naming
+/// the open session a): with host 3 and Waiting answered empty, Show all statuses sends `{"host": 3}`, leaves focus on
+/// All, checks All at once and keeps "No waiting sessions on <host 3>." until its empty answer, which reads "No
+/// sessions on <host 3>."; with Waiting chosen again and answered empty, Enter on Show all hosts (reached by Tab from
+/// Waiting, past the chip) sends `{"status": "waiting"}`, leaves focus on All, takes the chip away, and its empty
+/// answer reads "No waiting sessions."
 #[gpui::test]
 fn each_link_clears_its_own_filter_and_focuses_all(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -291,7 +318,7 @@ fn each_link_clears_its_own_filter_and_focuses_all(cx: &mut TestAppContext) {
 
     click(cx, "filter-show-all-statuses");
     let (held, body) = one_query(&mut fake);
-    assert_eq!(body, json!({ "host": 3 }));
+    assert_eq!(body, json!({ "host": 3, "selected": "a" }));
     assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
     let nodes = frame(cx);
     assert!(
@@ -322,7 +349,7 @@ fn each_link_clears_its_own_filter_and_focuses_all(cx: &mut TestAppContext) {
     );
     keys(cx, "enter");
     let (cleared, body) = one_query(&mut fake);
-    assert_eq!(body, json!({ "status": "waiting" }));
+    assert_eq!(body, json!({ "status": "waiting", "selected": "a" }));
     assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
     assert!(node(&frame(cx), "host-filter-chip").is_none());
     fake.push(change(filtered(&[], 2, 0), &[], &[]));
@@ -384,39 +411,36 @@ fn the_heading_and_segments_are_drawn_before_the_first_listing(cx: &mut TestAppC
     assert_eq!(body, json!({ "status": "running" }));
 }
 
-/// SPEC.md: "Hiding the selected session changes neither that selection nor its open terminal" (the old status spec's
-/// filtered-out selected session, whose terminal stayed). A filtered listing is no proof that a session is gone.
-/// Specified: with a open, Waiting answered with a listing that leaves a out (0 of 2) keeps a selected, sends nothing
-/// but the query (no selection is written or cleared), and the pane still draws a's terminal.
-///
-/// NOTE: The old spec also checked that the pane still named the hidden session. The pane names no session yet,
-/// filtered or not (its title and details bar are not ported), so that half is not checked. When they are ported, they
-/// must not take the title from the listing, which a filter empties.
+/// The helm carries only the session the query names, so the query has to follow the open session: a click on another
+/// row while a filter is in force must name the new session without widening or changing the filter, and choosing the
+/// open session again must not send anything (the channel admits one command at a time, so a spare send delays the
+/// next real one). Specified: the first settle at startup sends `{"selected": "a"}`; with Running chosen and answered,
+/// a click on b sends `{"status": "running", "selected": "b"}`, a second click on b sends nothing, and Running stays
+/// checked.
 #[gpui::test]
-fn a_status_that_hides_the_open_session_leaves_it_open(cx: &mut TestAppContext) {
-    let rows = [session("a"), session("b")];
-    let (mut fake, cx) = open_main(
+fn a_new_open_session_sends_the_query_in_force_naming_it(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot());
+    assert_eq!(
+        sent_queries(&mut fake),
+        [json!({ "selected": "a" })],
+        "the startup selection is named"
+    );
+    click(cx, "session-status-Running");
+    accept_one(
+        &mut fake,
         cx,
-        vec![
-            listing(&["a", "b"], &rows),
-            preferences(&["a"], None),
-            hosts(&fleet_hosts()),
-        ],
+        json!({ "status": "running", "selected": "a" }),
     );
-    answer_everything(&mut fake);
-    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
-    click(cx, "session-status-Waiting");
-    answer_empty(&mut fake, cx, &["a", "b"]);
-    assert!(
-        node(&frame(cx), "session-row-a").is_none(),
-        "the premise: a's row is gone"
+
+    click(cx, "session-row-b");
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b opened");
+    assert_eq!(
+        sent_queries(&mut fake),
+        [json!({ "status": "running", "selected": "b" })]
     );
-    assert_eq!(selected(cx).as_deref(), Some("a"));
-    assert_eq!(fake.commands(), [], "nothing but the query was sent");
-    assert!(
-        node(&frame(cx), "terminal-grid").is_some(),
-        "a's terminal is still drawn"
-    );
+    click(cx, "session-row-b");
+    assert_eq!(sent_queries(&mut fake), Vec::<Value>::new());
+    assert!(pressed(&frame(cx), "session-status-Running"));
 }
 
 // ---- Pure functions ------------------------------------------------------------------------------------------------
@@ -434,13 +458,13 @@ fn a_refusal_undoes_only_the_latest_choice() {
     };
     let mut choice = Choice::default();
     assert_eq!(
-        choice.choose(Query::default()),
+        choice.choose(Query::default(), None),
         None,
         "All is the choice to begin with"
     );
-    let first = choice.choose(host(Some(3))).unwrap();
-    let second = choice.choose(host(Some(2))).unwrap();
-    choice.settle(first, host(Some(3)), Err(HostText::from_host("no")));
+    let first = choice.choose(host(Some(3)), None).unwrap();
+    let second = choice.choose(host(Some(2)), None).unwrap();
+    choice.settle(first, host(Some(3)), None, Err(HostText::from_host("no")));
     assert_eq!(
         (choice.chosen(), choice.answered()),
         (host(Some(2)), Query::default())
@@ -449,21 +473,72 @@ fn a_refusal_undoes_only_the_latest_choice() {
         choice.refusal().is_none(),
         "a superseded refusal is not shown"
     );
-    choice.settle(second, host(Some(2)), Ok(()));
+    choice.settle(second, host(Some(2)), None, Ok(()));
     assert_eq!(choice.answered(), host(Some(2)));
     let both = Query {
         host: None,
         status: Status::Idle,
     };
-    let third = choice.choose(both).unwrap();
-    choice.settle(third, both, Err(HostText::from_host("no")));
+    let third = choice.choose(both, None).unwrap();
+    choice.settle(third, both, None, Err(HostText::from_host("no")));
     assert_eq!(
         (choice.chosen(), choice.answered()),
         (host(Some(2)), host(Some(2)))
     );
     assert_eq!(choice.refusal(), Some(&HostText::from_host("no")));
-    assert!(choice.choose(both).is_some());
+    assert!(choice.choose(both, None).is_some());
     assert!(choice.refusal().is_none(), "a new choice drops the words");
+}
+
+/// The body is the wire contract with the helm's `SessionQuery`, which refuses unknown fields. The GUI tests pin every
+/// body that names a filter or an open session; this is the one they never see. Specified: All and All with nothing
+/// open encode as exactly `{}`, with no `selected` and never a `sort`.
+#[test]
+fn the_unfiltered_query_with_nothing_open_is_an_empty_body() {
+    assert_eq!(
+        serde_json::to_value(Query::default().body(None)).unwrap(),
+        json!({})
+    );
+}
+
+/// The quick switcher's widening of a hidden pick changes the filters and the open session in one send, and the helm
+/// can refuse it. It then still serves the accepted filters naming the old open session, so the picked session would go
+/// uncarried (no header actions, no details bar, no Rename) until the next change, unless the refusal puts that naming
+/// back for the reply's handler to correct. The correction must not loop either. Specified, with All answered naming a:
+/// host 3 naming c is refused, which puts All back and makes All naming c a send again, which keeps the refusal's
+/// words; that send, refused in turn, leaves All naming c as already sent, so the same pair sends nothing.
+#[test]
+fn a_refused_filter_change_names_the_open_session_again_once() {
+    let mut choice = Choice::default();
+    let first = choice.choose(Query::default(), Some("a")).unwrap();
+    choice.settle(first, Query::default(), Some("a"), Ok(()));
+    let widened = Query {
+        host: Some(3),
+        status: Status::All,
+    };
+    let refused = choice.choose(widened, Some("c")).unwrap();
+    choice.settle(refused, widened, Some("c"), Err(HostText::from_host("no")));
+    assert_eq!(
+        choice.chosen(),
+        Query::default(),
+        "the premise: All is back"
+    );
+
+    let again = choice
+        .choose(Query::default(), Some("c"))
+        .expect("the accepted filters are sent again, naming c");
+    assert_eq!(
+        choice.refusal(),
+        Some(&HostText::from_host("no")),
+        "the re-send keeps the refusal's words"
+    );
+    choice.settle(
+        again,
+        Query::default(),
+        Some("c"),
+        Err(HostText::from_host("no")),
+    );
+    assert_eq!(choice.choose(Query::default(), Some("c")), None, "no loop");
 }
 
 /// A refused query must put the answered choice back rather than leave a choice shown that the helm is not serving,
@@ -499,9 +574,9 @@ fn a_refused_or_lost_query_puts_the_answered_choice_back_with_one_line() {
         ),
     ] {
         let mut choice = Choice::default();
-        let number = choice.choose(idle_on_2).unwrap();
+        let number = choice.choose(idle_on_2, None).unwrap();
         let answer = operations::answer(answer, "PUT /ui/session-query");
-        choice.settle(number, idle_on_2, answer.map(|_| ()));
+        choice.settle(number, idle_on_2, None, answer.map(|_| ()));
         assert_eq!(choice.chosen(), Query::default(), "{line}");
         let words = choice.refusal().expect("the refusal is kept");
         let shown = refusal_sentence(words).accessible_name();
@@ -565,8 +640,8 @@ fn a_pick_is_hidden_by_the_answered_listing_or_else_by_its_row() {
         status: Status::Idle,
     };
     let mut answered = Choice::default();
-    let number = answered.choose(idle_on_2).unwrap();
-    answered.settle(number, idle_on_2, Ok(()));
+    let number = answered.choose(idle_on_2, None).unwrap();
+    answered.settle(number, idle_on_2, None, Ok(()));
     let mut listing_b = listing(&["b"], &[session("b")]);
     listing_b.meta = filtered(&["b"], 3, 1);
     let current = collections(vec![listing_b.clone()]);
@@ -574,7 +649,7 @@ fn a_pick_is_hidden_by_the_answered_listing_or_else_by_its_row() {
     assert!(pick_hidden(&answered, &current, &row("a", 2, "idle")));
 
     let mut in_flight = Choice::default();
-    in_flight.choose(idle_on_2).unwrap();
+    in_flight.choose(idle_on_2, None).unwrap();
     assert!(!pick_hidden(&in_flight, &current, &row("a", 2, "idle")));
     assert!(pick_hidden(&in_flight, &current, &row("a", 2, "running")));
     assert!(pick_hidden(&in_flight, &current, &row("a", 3, "idle")));

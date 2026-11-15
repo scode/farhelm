@@ -15,6 +15,16 @@
 //! status, and the other way round. The query never names a sort, so the channel keeps following the stored order
 //! (SPEC_impl.md, "The UI channel"). Nothing is persisted, and a choice equal to the current one sends nothing.
 //!
+//! **The query names the open session.** Every send also carries the open session's key as `selected`, and the list
+//! sends the chosen query again whenever the open session changes ([`SessionList::name_open_session`]), so the helm
+//! always knows which session to keep in the pushed collection when the filters or its listing cap leave it out
+//! (SPEC_impl.md, "What is pushed, and how changes are found"). That carried session is outside the collection's order,
+//! so the list never draws it and its counts stay the query's own, while the pane, its header, its details bar and
+//! Rename find it by key. A re-send for a new open session carries the choice in force and leaves the line a refused
+//! query left, since the user changed no filter; only a new choice of the filters takes the line away. A refused change
+//! of the filters also puts back the open session the accepted query named, so the session open now is named again
+//! under the filters the helm serves ([`Choice`]), while the refusal's words stay shown.
+//!
 //! **Two moments.** What the window shows follows two different moments, as in the old app ([`Choice`]): the rail's
 //! pressed entry, the segments and the chip follow the user's choice at once, while the empty sentence names the query
 //! the helm has answered, so a held reply leaves the sentence describing the listing still on screen. A refused query
@@ -22,7 +32,8 @@
 //! choice.
 //!
 //! **What filtering leaves alone.** Hiding the open session changes neither the selection nor its terminal: the
-//! selection rules never treat a filtered listing as proof that a session is gone (`session::listing_proves_gone`).
+//! selection rules never treat a filtered listing as proof that a session is gone (`session::listing_proves_gone`), and
+//! the helm keeps pushing the hidden open session's current state, so the pane goes on naming it.
 //! Ended sessions show only under All, which is the helm's doing: its status filter matches the status word exactly, so
 //! Idle never lists an exited session.
 //!
@@ -65,7 +76,7 @@ use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::host_mark;
 use crate::theme::{self, Palette, metrics};
-use crate::{operations, session};
+use crate::{local_state, operations, session};
 
 /// `.host-filter-chip`'s gap between its mark, the host's name and the ✕.
 const CHIP_GAP: f32 = 5.;
@@ -173,27 +184,40 @@ impl Query {
         self.host.is_some() || self.status != Status::All
     }
 
-    /// The body the channel's query command carries: both dimensions, never a sort (see the module docs).
-    fn body(self) -> SessionQuery {
+    /// The body the channel's query command carries: both dimensions and `selected`, the key of the open session (none
+    /// with nothing open), never a sort (see the module docs).
+    fn body(self, selected: Option<&str>) -> SessionQuery {
         SessionQuery {
             host: self.host,
             status: self.status.segment().word.map(str::to_owned),
+            selected: selected.map(str::to_owned),
             ..SessionQuery::default()
         }
     }
 }
 
 /// What the list's query is in one UI session: the query the user chose and the query the helm last accepted, which
-/// differ while a query is in flight, and the helm's words for a refused one.
+/// differ while a query is in flight, the open session the last send named, and the helm's words for a refused one.
 ///
 /// Replies arrive in the order the queries were sent (the channel admits one command at a time), and each query
 /// replaces the whole previous one on the helm's side, so the helm serves the last query it accepted: that is
 /// `answered`. A refusal of the latest query puts the choice back to `answered`; a refusal of a query a later one
 /// already superseded changes nothing, since the user has moved on from it and the later one is still on its way.
+///
+/// The open session is part of what was sent but not of the choice: [`Query`] compares only the filters, so the
+/// switcher's pick and the empty sentence never see a difference that only the open session makes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Choice {
     /// The query the user chose: what the rail presses, the segments check and the chip names.
     chosen: Query,
+    /// The open session's key as the last send named it (`None` before any send and for a send with nothing open).
+    ///
+    /// NOTE: A refusal of a send that changed the filters puts back the key the accepted query named
+    /// (`answered_named`), since the helm still serves that query and so still carries that session. The refusal's
+    /// handler then sends the accepted filters once more, naming the session open now (the quick switcher's refused
+    /// widening of a hidden pick is the case). A refusal of a send that only named another session puts nothing back:
+    /// its filters are already the accepted ones, so sending them again could only be refused again.
+    named: Option<String>,
     /// The query the helm last accepted (unfiltered, as a new channel starts): what the listing on screen answers, and
     /// so what its empty sentence names.
     ///
@@ -201,6 +225,8 @@ pub(crate) struct Choice {
     /// Between the two, possibly for one frame, a new empty listing can be drawn naming the previous query. The
     /// listing's metadata does not say which query it answers, so nothing closer is known.
     answered: Query,
+    /// The open session's key as the query the helm last accepted named it.
+    answered_named: Option<String>,
     /// How many queries this UI session sent; the last one's number.
     sent: u64,
     /// The helm's words for the latest query, when it refused it.
@@ -223,23 +249,42 @@ impl Choice {
         self.refusal.as_ref()
     }
 
-    /// The user chose `query`: take it as the choice and return the number to send it under, or `None` when it is the
-    /// choice already, which sends nothing. A new choice drops the last refusal's words.
-    pub(crate) fn choose(&mut self, query: Query) -> Option<u64> {
-        if self.chosen == query {
+    /// `query` is to be sent with `selected` as the open session: take both and return the number to send them under,
+    /// or `None` when neither changed since the last send, which sends nothing. A send that changes the filters drops
+    /// the last refusal's words; one that only names another open session keeps them, or the re-send that follows a
+    /// refused widening (`named`'s NOTE) would erase the words of the refusal it follows.
+    pub(crate) fn choose(&mut self, query: Query, selected: Option<&str>) -> Option<u64> {
+        if self.chosen == query && self.named.as_deref() == selected {
             return None;
         }
+        if self.chosen != query {
+            self.refusal = None;
+        }
         self.chosen = query;
-        self.refusal = None;
+        self.named = selected.map(str::to_owned);
         self.sent += 1;
         Some(self.sent)
     }
 
-    /// The helm answered query number `number`, which asked for `query`: accepted (`Ok`), or refused in its words.
-    pub(crate) fn settle(&mut self, number: u64, query: Query, answer: Result<(), HostText>) {
+    /// The helm answered query number `number`, which asked for `query` naming `selected` as the open session: accepted
+    /// (`Ok`), or refused in its words.
+    pub(crate) fn settle(
+        &mut self,
+        number: u64,
+        query: Query,
+        selected: Option<&str>,
+        answer: Result<(), HostText>,
+    ) {
         match answer {
-            Ok(()) => self.answered = query,
+            Ok(()) => {
+                self.answered = query;
+                self.answered_named = selected.map(str::to_owned);
+            }
             Err(words) if number == self.sent => {
+                // `named`'s NOTE: only a refused change of the filters puts the accepted naming back.
+                if self.chosen != self.answered {
+                    self.named = self.answered_named.clone();
+                }
                 self.chosen = self.answered;
                 self.refusal = Some(words);
             }
@@ -311,22 +356,41 @@ impl SessionList {
         }
     }
 
-    /// Take `query` as the choice and send it on the UI channel, unless it is the choice already; its reply settles
-    /// the choice ([`Choice`]). Nothing happens while the window is inert.
+    /// The open session may have changed (the list's settle calls this after every selection change it applies or
+    /// observes, and after a reset; a query's reply calls it after a refusal): send the query in force again if the
+    /// last send named another open session, or none, so the helm carries the session now open. Nothing is sent when
+    /// the last send already named it.
+    ///
+    /// A reset's new channel starts unfiltered and names no session, so with a session open the first settle under
+    /// it sends the unfiltered query naming that session.
+    pub(super) fn name_open_session(&mut self, cx: &mut Context<Self>) {
+        let query = self.current.current(cx).filters.chosen();
+        self.send_query(query, cx);
+    }
+
+    /// Take `query` as the choice and send it on the UI channel, naming the open session, unless neither the choice nor
+    /// the open session changed since the last send; its reply settles the choice ([`Choice`]). Nothing happens while
+    /// the window is inert.
     fn send_query(&mut self, query: Query, cx: &mut Context<Self>) {
         if !connected(cx) {
             return;
         }
+        let selected = local_state::selected(cx);
         // Encoded before the choice is taken: a query that could not be sent must not leave a choice shown that no
         // reply will ever settle.
-        let body = match serde_json::to_value(query.body()) {
+        let body = match serde_json::to_value(query.body(selected.as_deref())) {
             Ok(body) => body,
             Err(error) => {
                 tracing::warn!(%error, "could not encode the session query");
                 return;
             }
         };
-        let Some(number) = self.current.current(cx).filters.choose(query) else {
+        let Some(number) = self
+            .current
+            .current(cx)
+            .filters
+            .choose(query, selected.as_deref())
+        else {
             return;
         };
         cx.notify();
@@ -343,10 +407,16 @@ impl SessionList {
             cx,
             move |answer, cx| {
                 let _ = list.update(cx, |list, cx| {
-                    list.current
-                        .current(cx)
-                        .filters
-                        .settle(number, query, answer.map(|_| ()));
+                    list.current.current(cx).filters.settle(
+                        number,
+                        query,
+                        selected.as_deref(),
+                        answer.map(|_| ()),
+                    );
+                    // A refused change of the filters put the accepted naming back (`Choice::named`'s NOTE); correct
+                    // it now rather than at the next pushed change, which may be a long way off. Otherwise this sends
+                    // nothing.
+                    list.name_open_session(cx);
                     cx.notify();
                 });
             },
