@@ -85,7 +85,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   (which also checks the group's name and role), `a_link_choice_saves_only_its_preference_field_and_follows_the_helm`,
   `a_refused_link_choice_shows_the_stored_choice_and_a_failure_line`,
   `an_unset_or_unknown_link_choice_reads_as_intercept`. The arrows, Space and the description lines as accessible
-  descriptions are the radio group's own, which its tests in `components/tests.rs` cover.
+  descriptions are the radio group's own, which its tests in `components/tests/radio_group.rs` cover.
 - Agent trust's hint switches ("settings reports and reverts a refused ${choice.field} save" for
   `claude_trust_hint_dismissed` and `codex_trust_hint_dismissed`): they save and refuse as every preference switch does,
   in `a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switch`, and
@@ -329,8 +329,8 @@ which hands the stored choice to the theme. Replacing tests, in `crates/gui/farh
   `an_unset_or_unknown_appearance_reads_as_system`, `the_stored_appearance_paints_the_window_from_the_first_snapshot_on`
   (the stored choice applied at the first snapshot, on every push and after a reset) and
   `system_follows_the_operating_system_and_an_explicit_choice_does_not`. The arrows and Space on the radios are the
-  radio group's own keyboard, which its tests in `components/tests.rs` cover. The terminal staying dark needs no test of
-  its own here: the theme holds one terminal palette for both (`theme::TERMINAL`).
+  radio group's own keyboard, which its tests in `components/tests/radio_group.rs` cover. The terminal staying dark
+  needs no test of its own here: the theme holds one terminal palette for both (`theme::TERMINAL`).
 - Another client's choice ("another same-origin page updates appearance and clearing restores System", which is now
   another client of the same helm, and clearing is a row with no appearance):
   `an_open_appearance_section_follows_a_choice_made_elsewhere`, and the window's palette in
