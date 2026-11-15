@@ -11,6 +11,11 @@
 //! that the approval cards, its second consumer, need not reach into the session list's private modules. It stays
 //! that area's code. What a surface says about the shield (the row's description, a card's chip words) is that
 //! surface's own; only the classification into the four drawings, and the drawings themselves, live here.
+//!
+//! [`words`] is the permission and effort choices' shared names and help (the launcher area's code, moved out of the
+//! launcher once other surfaces read them); it sits here because the same surfaces show both.
+
+pub(crate) mod words;
 
 use farhelm_proto::{LaunchPermission, SessionLaunch};
 

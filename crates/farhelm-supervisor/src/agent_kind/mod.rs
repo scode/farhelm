@@ -76,8 +76,11 @@
 //!   `docs/harness-marks.md`. The launcher's harness names and permission
 //!   names are `harness_label` and `permission_name` in
 //!   `crates/gui/farhelm-gui/src/launcher/draft.rs`; its harness chip order
-//!   (checked against `LaunchHarness::ALL`), its permission help and the
-//!   Cursor support notice are in `crates/gui/farhelm-gui/src/launcher/words.rs`,
+//!   (checked against `LaunchHarness::ALL`), Guarded's help before an agent
+//!   is chosen and the Cursor support notice are in
+//!   `crates/gui/farhelm-gui/src/launcher/words.rs`, the permission and effort
+//!   names and help every surface shares are in
+//!   `crates/gui/farhelm-gui/src/permission/words.rs`,
 //!   and its conversation selector's label is `conversation_label` in
 //!   `launcher/view.rs`. Settings' Agent trust section names its agents with
 //!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`,

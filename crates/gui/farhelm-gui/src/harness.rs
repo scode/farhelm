@@ -8,8 +8,8 @@
 //! the app level rather than in the session list because the launcher, the quick switcher, templates and Settings are
 //! expected to read the same answers; the migration's orchestrator placed it here on 2026-11-14. Each is one
 //! exhaustive match over one enum, under `#[warn(clippy::wildcard_enum_match_arm)]`, so a new harness is a compile
-//! error at every decision it needs here and a `_` arm fails the Clippy gate. The mark's geometry is `crate::marks`'s and the launcher's permission help is
-//! `launcher/words.rs`'s; nothing here repeats them.
+//! error at every decision it needs here and a `_` arm fails the Clippy gate. The mark's geometry is `crate::marks`'s and the shared permission help is
+//! `permission/words.rs`'s; nothing here repeats them.
 //!
 //! Ported from the old app's `list/row.rs` (`harness_glyph`, `harness_name`, `kind_glyph`), `launch_composer.rs`
 //! (`screen_yolo_mode`) and the stylesheet's `.harness-glyph` color rules at the reference commit.

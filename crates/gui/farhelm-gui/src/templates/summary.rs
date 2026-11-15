@@ -18,7 +18,7 @@ use farhelm_proto::LaunchPermission;
 use farhelm_proto::launcher::{LauncherKind, TemplateFields};
 
 use crate::launcher::draft::harness_label;
-use crate::launcher::words::{effort_label, guarded_mode_name, permission_display};
+use crate::permission::words::{effort_label, guarded_mode_name, permission_display};
 
 /// One run of a summary. Runs are drawn one after another on one line.
 #[derive(Clone, Debug, PartialEq, Eq)]
