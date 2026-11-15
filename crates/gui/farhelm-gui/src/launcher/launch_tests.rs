@@ -293,3 +293,133 @@ fn a_repeated_enter_on_launch_still_opens_the_session(cx: &mut gpui::TestAppCont
         "b's terminal took focus"
     );
 }
+
+/// A host-registry change one of the hosts area's dialogs starts, for the exclusion tests.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum HostChange {
+    /// Add host's probe of a new destination, under a fresh host-add key.
+    Probe,
+    /// A new host's setup, under a fresh host-add key.
+    Setup,
+    /// A save on a registered host's own key: host1's alias, as its settings dialog sends it.
+    HostSave,
+    /// Remove host for host2, which the window does not list, so only its kind of work can count it.
+    Remove,
+}
+
+/// Start `change` in the window's operation store as the hosts area does, and return the path it sends, so a test
+/// can find and answer it.
+pub(super) fn start_host_change(cx: &mut VisualTestContext, change: HostChange) -> &'static str {
+    use crate::operations::{Command, OpKey, Work};
+    use farhelm_helm_client::{ApiPath, Method};
+    let (key, command, path) = match change {
+        HostChange::Probe => (
+            OpKey::new_host_add(),
+            crate::hosts::add::probe_command("builder@example.test", "").unwrap(),
+            "/api/hosts/probe",
+        ),
+        HostChange::Setup => (
+            OpKey::new_host_add(),
+            Command::new(
+                Work::Setup,
+                Method::Post,
+                ApiPath::api(&["hosts", "provision"]).unwrap(),
+                Some(json!({})),
+                "POST /api/hosts/provision",
+            ),
+            "/api/hosts/provision",
+        ),
+        HostChange::HostSave => (
+            OpKey::host("1"),
+            Command::new(
+                Work::Save,
+                Method::Put,
+                ApiPath::api(&["hosts", "1", "alias"]).unwrap(),
+                Some(json!({ "alias": "builder" })),
+                "PUT /api/hosts/[host]/alias",
+            ),
+            "/api/hosts/1/alias",
+        ),
+        HostChange::Remove => (
+            OpKey::host("2"),
+            Command::new(
+                Work::RemoveHost,
+                Method::Delete,
+                ApiPath::api(&["hosts", "2"]).unwrap(),
+                None,
+                "DELETE /api/hosts/[host]",
+            ),
+            "/api/hosts/2",
+        ),
+    };
+    cx.update(|_, cx| {
+        let operations = crate::session::current_operations(cx).expect("a UI session");
+        operations
+            .update(cx, |operations, cx| {
+                operations.start(&key, command, cx, |_, _| {})
+            })
+            .expect("the host change started");
+    });
+    settle(cx);
+    path
+}
+
+/// SPEC.md, "Creation": "Launches and changes to the host registry still exclude each other." A launch that picked
+/// its host while the registry was changing could aim at an entry the change is about to rewrite, which is why the old
+/// app held one token for both. Each kind of change counts: a new host's probe (the migration's orchestrator decided
+/// it counts, though the old token left it out) and setup, a host's removal, and any save on a registered host's own
+/// key. Specified: for
+/// each, while it is in flight a press of Launch on a complete draft sends no create and says why after "Not
+/// launched."; once it is answered, the same press launches.
+#[gpui::test]
+fn launch_waits_for_a_host_change(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, command_draft());
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "the premise: opening sends no create"
+    );
+    for change in [
+        HostChange::Probe,
+        HostChange::Setup,
+        HostChange::HostSave,
+        HostChange::Remove,
+    ] {
+        let path = start_host_change(cx, change);
+        cx.run_until_parked();
+        let sent = helm.commands();
+        let [command] = &sent[..] else {
+            panic!(
+                "{change:?}: only the host change is out, not {} commands",
+                sent.len()
+            );
+        };
+        assert_eq!(
+            command.path, path,
+            "{change:?}: the premise: the change is in flight"
+        );
+        test_support::click(cx, "launcher-launch");
+        assert!(
+            helm.commands().is_empty(),
+            "{change:?}: Launch sent nothing"
+        );
+        assert_eq!(
+            shown_refusal(cx).as_deref(),
+            Some("Not launched. Wait for the host change to finish"),
+            "{change:?}"
+        );
+        assert!(any_open(cx), "{change:?}: the launcher stayed open");
+        helm.reply(command.id, 200, Some(json!({})));
+        settle(cx);
+        assert_eq!(
+            shown_refusal(cx),
+            None,
+            "{change:?}: the reason went with the change"
+        );
+    }
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
+        creates(&mut helm, cx).len(),
+        1,
+        "with every change answered, Launch launches"
+    );
+}

@@ -465,12 +465,16 @@ impl Launcher {
             .map(|row| row.info.launch.clone())
     }
 
-    /// Why the draft cannot launch now, if it cannot.
+    /// Why the draft cannot launch now, if it cannot. A host change in flight comes before every other reason, in every
+    /// mode: the draft may be complete, and it is the window, not the draft, that is not ready.
     ///
     /// Restart with also refuses while the model field holds a model not yet applied (typed into its open list, or
     /// said under it as not applicable), after the host's own reasons and before the draft's others, as the old
     /// launcher did: restarting then would quietly keep the session's old model while the field shows another.
     fn refusal(&self, cx: &App) -> Option<String> {
+        if launch::host_change_in_flight(cx) {
+            return Some(launch::HOST_CHANGE_IN_FLIGHT.to_owned());
+        }
         let hosts = self.hosts(cx);
         if matches!(self.draft.mode, Mode::RestartWith(_)) && self.model_pending(cx) {
             return self
