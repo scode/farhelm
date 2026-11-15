@@ -774,7 +774,8 @@ pub(crate) fn launch_in_flight(cx: &App) -> bool {
 /// Whether `work` creates a session on a host, which is what "a launch in flight" means for a host registry change:
 /// the launcher's New and Clone, and a session's Restart and Replace, each of which starts a session on its host
 /// (decided by the migration's orchestrator on 2026-11-14). Exhaustive with no catch-all, so a new kind of work must
-/// decide whether it counts.
+/// decide whether it counts. An answer to an agent's approval card does not count even when it allows a launch: the
+/// helm runs what was approved, as the orchestrator decided on 2026-11-14.
 fn creates_a_session(work: Work) -> bool {
     match work {
         Work::Launch | Work::Restart | Work::Replace => true,
@@ -787,7 +788,8 @@ fn creates_a_session(work: Work) -> bool {
         | Work::Setup
         | Work::TunnelOpen
         | Work::TunnelClose
-        | Work::RemoveHost => false,
+        | Work::RemoveHost
+        | Work::Answer => false,
     }
 }
 

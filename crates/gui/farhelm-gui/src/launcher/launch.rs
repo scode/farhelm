@@ -164,7 +164,9 @@ fn changes_host_registry(work: Work) -> bool {
         | Work::Restart
         | Work::TunnelOpen
         | Work::TunnelClose
-        | Work::Launch => false,
+        | Work::Launch
+        // An answer to a host add's card only opens the way: the add's own probe and setup are what register a host.
+        | Work::Answer => false,
     }
 }
 

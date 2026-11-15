@@ -122,7 +122,10 @@ impl Render for MainView {
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
         let body = if state == ChannelState::Connected {
-            let posted = notices::posted(cx);
+            let posted: Vec<Notice> = notices::posted(cx)
+                .into_iter()
+                .filter(|notice| is_banner(*notice))
+                .collect();
             // In the macOS window a posted notice's banner would sit under the traffic lights, so a strip of the title
             // band goes above the banners while any is shown.
             let above_banners = (!posted.is_empty())
@@ -284,6 +287,16 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// Whether `notice` shows as a banner across the top of the window. Exhaustive, so a new notice decides where it is
+/// drawn: a late answer to an approval card shows in the approval region above its waiting list, as the old app drew it
+/// (`approvals.rs` at `24bc0580`), not across the window.
+fn is_banner(notice: Notice) -> bool {
+    match notice {
+        Notice::ConnectionLost | Notice::LaunchNotStarted => true,
+        Notice::LateAnswer { .. } => false,
+    }
+}
+
 /// One posted notice as a banner across the top of the window, with the way to dismiss it.
 ///
 /// The old app had no connection-lost notice, so this copies the nearest one it had: the red detach banner its
@@ -294,7 +307,8 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
 pub(crate) fn banner(notice: Notice) -> AnyElement {
     // What a notice offers besides dismissing it, before Dismiss. Exhaustive, so a new notice decides.
     let banner = match notice {
-        Notice::ConnectionLost => Banner::new(notice.text()),
+        // Never drawn as a banner ([`is_banner`]); were it one, its text and Dismiss would be all it offers.
+        Notice::ConnectionLost | Notice::LateAnswer { .. } => Banner::new(notice.text()),
         // SPEC.md, "Creation": a refused launch the user had moved on from is offered by a notice, "and the launcher
         // returns when the user opens that notice".
         Notice::LaunchNotStarted => Banner::new(notice.text()).lead_action(
