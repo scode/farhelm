@@ -19,6 +19,7 @@ use gpui::{
 };
 use serde::de::DeserializeOwned;
 
+use super::Refused;
 use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::Draft;
 use crate::host_text::HostText;
@@ -363,6 +364,12 @@ pub(super) fn failure_line(id: String, text: &'static str, cx: &App) -> Stateful
         .child(text)
 }
 
+/// The line beside the Settings control `control` (its element id) when `refused` holds its press as the one refused last
+/// for a save in flight ([`Refused::line`]), drawn as the choices' failure lines are.
+pub(super) fn busy_line(refused: &Refused, control: &str, cx: &App) -> Option<Stateful<Div>> {
+    refused.line(control, |id, words| failure_line(id, words, cx))
+}
+
 /// A help paragraph: the old `.host-settings-help` in Settings, in the quieter text color at its line height. Takes
 /// fixed text or text built at run time (Agent trust's).
 pub(super) fn help(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -374,11 +381,13 @@ pub(super) fn help(text: impl Into<SharedString>, cx: &App) -> Div {
         .child(text.into())
 }
 
-/// One switch with its help under it and, after a refused save, its failure line under that, all in one group so the
-/// help stays with its own label (`.setting-group`). `on_toggle` is what a toggle does with the new value.
+/// One switch with its help under it and, after a refused save, its failure line under that, and the line saying why a
+/// press sent nothing (`refused`, [`busy_line`]), all in one group so the help stays with its own label
+/// (`.setting-group`). `on_toggle` is what a toggle does with the new value.
 pub(super) fn group(
     switch: &Switch,
     preferences: Option<&Preferences>,
+    refused: &Refused,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
@@ -416,4 +425,5 @@ pub(super) fn group(
                 .map(|text| help(text, cx)),
         )
         .children(failure.map(|failure| failure_line(choice.error_id(), failure, cx)))
+        .children(busy_line(refused, choice.id(), cx))
 }

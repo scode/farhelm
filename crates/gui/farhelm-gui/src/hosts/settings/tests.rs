@@ -26,6 +26,7 @@ use crate::hosts::tests::{hosts, open_panel, reference_hosts};
 use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
+use crate::settings::Refused;
 use crate::test_support::{click, focused_id, frame, keys, settle};
 
 /// The dialog [`super::open_settings`] opened last, recorded in test builds only, so a test can read its fields.
@@ -551,6 +552,81 @@ fn escape_while_a_save_is_in_flight_keeps_the_field_open(cx: &mut TestAppContext
     );
 }
 
+/// Why this matters: every control in the dialog saves under the host's one key and none is drawn unavailable while
+/// another save runs, so each must say why its press sent nothing, in the place its own refusal would show. Specified:
+/// with the YOLO switch's save in flight, the alias field's Save sends nothing and draws "Not saved: another save was
+/// in progress. Try again." under the alias row, with the field still open; a click on Rocket sends nothing, keeps Cloud
+/// pressed and moves the line under the picker; a second click on YOLO, whose own save is in flight, moves it under the
+/// switch; the folder field's Use default, a view of its own, draws the line under the field too; once that save is
+/// answered, the alias Save sends and no line is left in the dialog's own controls.
+#[gpui::test]
+fn a_press_during_another_save_on_the_host_says_why_it_sent_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx) =
+        open_build_box_with_folder(cx, json!({ "root": "/srv/box", "default": null }));
+    let yolo = "host-yolo-without-asking";
+    click(cx, yolo);
+    let (id, _, _) = one_command(&mut helm);
+    assert_eq!(host_work(cx), Some(Work::Save), "the premise: in flight");
+
+    click(cx, "host-settings-edit-alias");
+    keys(cx, &format!("{SELECT_ALL} b o x"));
+    click(cx, "host-settings-alias-save");
+    assert!(helm.commands().is_empty(), "the key held the alias back");
+    assert_eq!(editing(cx), Some(Field::Alias), "the field stays open");
+    assert_eq!(
+        label(cx, "host-settings-alias-busy").as_deref(),
+        Some(Refused::WORDS)
+    );
+
+    click(cx, "host-icon-rocket");
+    assert!(helm.commands().is_empty(), "the key held the picker back");
+    assert_eq!(
+        on(cx, "host-icon-cloud"),
+        Some(true),
+        "the stored icon shows"
+    );
+    assert_eq!(
+        label(cx, "host-settings-appearance-busy").as_deref(),
+        Some(Refused::WORDS)
+    );
+    assert!(
+        drawn(cx, "host-settings-alias-save"),
+        "the premise: the alias row is drawn"
+    );
+    assert!(
+        !drawn(cx, "host-settings-alias-busy"),
+        "only the latest press"
+    );
+
+    click(cx, yolo);
+    assert!(
+        helm.commands().is_empty(),
+        "its own save is still in flight"
+    );
+    assert_eq!(
+        label(cx, &format!("{yolo}-busy")).as_deref(),
+        Some(Refused::WORDS)
+    );
+
+    click(cx, "checkout-folder-use-default");
+    assert!(helm.commands().is_empty(), "the key held Use default back");
+    assert_eq!(
+        label(cx, "checkout-folder-busy").as_deref(),
+        Some(Refused::WORDS)
+    );
+
+    push_build_box(&mut helm, |host| host.yolo_without_asking = true, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    click(cx, "host-settings-alias-save");
+    let (_, path, _) = one_command(&mut helm);
+    assert_eq!(path, "/api/hosts/2/alias");
+    assert!(
+        !drawn(cx, &format!("{yolo}-busy")),
+        "a started save took it away"
+    );
+}
+
 // ---- Appearance ------------------------------------------------------------------------------------------------------
 
 /// Why this matters: the helm stores a host's icon and color together and refuses a body without both, and a click must
@@ -779,10 +855,12 @@ fn the_host_folder_saves_under_the_hosts_key_and_use_default_clears_it(cx: &mut 
 /// Why this matters: the old dialog locked the folder field while any other write to the host ran; this port keeps
 /// the field live and leaves the ordering to the operation store's one request per key instead (the module docs'
 /// NOTE). That is only sound if the key really does hold the folder's Save back, and the folder's save holds the other
-/// controls back, or two writes to one host could cross. Specified: with a permission's save in flight, the field takes
-/// typing, and its Save sends nothing and still reads "Save"; once that save is answered, Save sends the folder; with
-/// the folder's save in flight, a permission's switch sends nothing and keeps showing the stored value; once the save is
-/// done and its read-back answered, the key is free and the field says "Checkout folder saved".
+/// controls back, or two writes to one host could cross; and since nothing is drawn unavailable, a press the key holds
+/// back must say so, or it reads as a broken control. Specified: with a permission's save in flight, the field takes
+/// typing, and its Save sends nothing, still reads "Save" and draws "Not saved: another save was in progress. Try
+/// again." under the field; once that save is answered, Save sends the folder and the line goes; with the folder's
+/// save in flight, a permission's switch sends nothing, keeps showing the stored value and draws the line under itself;
+/// once the save is done and its read-back answered, the key is free and the field says "Checkout folder saved".
 #[gpui::test]
 fn saves_on_the_host_wait_for_each_other_without_locking_the_folder(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_build_box(cx);
@@ -796,6 +874,10 @@ fn saves_on_the_host_wait_for_each_other_without_locking_the_folder(cx: &mut Tes
     click(cx, "checkout-folder-save");
     assert!(helm.commands().is_empty(), "the key held the folder back");
     assert_eq!(label(cx, "checkout-folder-save").as_deref(), Some("Save"));
+    assert_eq!(
+        label(cx, "checkout-folder-busy").as_deref(),
+        Some(Refused::WORDS)
+    );
 
     push_build_box(&mut helm, |host| host.yolo_without_asking = true, cx);
     helm.reply(id, 200, None);
@@ -803,10 +885,15 @@ fn saves_on_the_host_wait_for_each_other_without_locking_the_folder(cx: &mut Tes
     click(cx, "checkout-folder-save");
     let (id, body) = one_folder_command(&mut helm, Method::Put);
     assert_eq!(body, json!({ "root": "/srv/box" }));
+    assert!(!drawn(cx, "checkout-folder-busy"), "its save started");
 
     click(cx, yolo);
     assert!(helm.commands().is_empty(), "the key held the switch back");
     assert_eq!(on(cx, yolo), Some(true), "the stored value shows");
+    assert_eq!(
+        label(cx, "host-yolo-without-asking-busy").as_deref(),
+        Some(Refused::WORDS)
+    );
     helm.reply(id, 204, None);
     settle(cx);
     // The done save reads the folder back; answered, so the test leaves nothing in flight.

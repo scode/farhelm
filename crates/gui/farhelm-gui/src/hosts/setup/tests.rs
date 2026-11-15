@@ -369,6 +369,47 @@ fn a_refused_permanent_answer_shows_in_the_hosts_panel(cx: &mut TestAppContext) 
     );
 }
 
+/// The operation store queues nothing, so a permanent answer given while another preference save is in flight (from
+/// Settings, the templates dialog or a tunnel consent) sends nothing; dropped silently, the user would be asked again
+/// next time with no word why. Specified: with a preference save of the test's own in flight, "Set up, don't ask again"
+/// sends the provision request and no second preference save, and the panel shows "Set up new hosts without asking:"
+/// with the words Settings uses for a press refused that way.
+#[gpui::test]
+fn a_permanent_answer_refused_for_another_preference_save_says_so_in_the_hosts_panel(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _add) = open_rail_with(cx, Vec::new());
+    probe_a_plan(&mut helm, cx);
+    let started = cx.update(|_, cx| {
+        let operations = session::current_operations(cx).expect("a UI session");
+        let command = crate::settings::skip_host_setup_command().expect("the command builds");
+        operations.update(cx, |operations, cx| {
+            operations.start(&OpKey::preferences(), command, cx, |_, _| {})
+        })
+    });
+    assert_eq!(
+        started,
+        Ok(()),
+        "the premise: another preference save is out"
+    );
+    let _ = helm.commands();
+
+    click(cx, "prompt-alternative-0");
+    let paths: Vec<String> = helm
+        .commands()
+        .into_iter()
+        .map(|command| command.path)
+        .collect();
+    assert_eq!(paths, ["/api/hosts/provision"], "no second preference save");
+    assert_eq!(
+        label(cx, "hosts-stop-asking-error"),
+        Some(format!(
+            "Set up new hosts without asking: {}",
+            crate::settings::Refused::WORDS
+        ))
+    );
+}
+
 /// Refuse the permanent answer's preference save with `words`, after "Set up, don't ask again" on a probed plan, and
 /// check the premise: the panel shows the refusal.
 fn refuse_stop_asking(helm: &mut FakeHelm, cx: &mut VisualTestContext, words: &str) {

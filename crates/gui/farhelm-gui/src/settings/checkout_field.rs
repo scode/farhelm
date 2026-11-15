@@ -31,7 +31,8 @@
 //!   all-hosts configuration, as Settings' Agent trust switches do (see [`super::agent_trust`] for why helm
 //!   configuration shares that key, and the module docs of [`super`] for what sharing it means for quick saves), and
 //!   [`OpKey::host`] for a host's own folder. A save outlives the view; its outcome reaches the view only if it is
-//!   still open.
+//!   still open. A Save or Use default pressed while another save holds the key sends nothing and says so under the
+//!   field ([`Refused`]) until a save of this field starts.
 //!
 //! The deviations from the old fields (a refusal kept until the next save starts, the folder trimmed only in what is
 //! sent, no refusal over a stored carriage return) are in `docs/gpui/parity/settings-and-hosts.md`, "Deviations".
@@ -43,6 +44,7 @@ use gpui::{
     Styled as _, Window, div, px,
 };
 
+use super::Refused;
 use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use crate::components::{Button, HoverHelp, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
@@ -270,6 +272,9 @@ pub struct CheckoutField {
     has_override: bool,
     /// Whether the last save was done; the saved line shows while the user has not edited the field since.
     saved: bool,
+    /// Whether the last press of Save or Use default sent nothing because another save held the key, which the line
+    /// under the field says until a save of this field starts.
+    refused: Refused,
     /// The window the field is drawn in, where a read's answer sets the field's text.
     window: AnyWindowHandle,
 }
@@ -321,6 +326,7 @@ impl CheckoutField {
             unreadable: None,
             has_override: false,
             saved: false,
+            refused: Refused::default(),
             window,
         }
     }
@@ -376,7 +382,8 @@ impl CheckoutField {
 
     /// Save the draft, or with `use_default` clear the host's folder (the module docs). Does nothing before the read
     /// has answered, while it failed, while a save is in flight, for an untouched draft, and for Use default where it
-    /// is not offered.
+    /// is not offered, all cases in which the button is drawn busy or not drawn. A save the operation store refuses
+    /// because another save holds the key says so under the field ([`Refused`]).
     fn save(&mut self, use_default: bool, window: &mut Window, cx: &mut Context<Self>) {
         let draft = self.input.draft();
         if !self.loaded || self.unreadable.is_some() || draft.is_saving() {
@@ -407,12 +414,13 @@ impl CheckoutField {
                 }
             },
         );
+        // Another save may hold the key (any Settings save, for the all-hosts configuration), which the field then says.
+        self.refused.record(self.target.words().id, &started);
         match started {
             Ok(()) => self.saved = false,
-            // Another save holds the key (any Settings save, for the all-hosts configuration), or the window went
-            // inert.
             Err(not_started) => tracing::debug!(?not_started, "checkout field not saved"),
         }
+        cx.notify();
     }
 
     /// The field's text, for tests (Settings' and the host dialog's), which find no other way to it: GPUI Kit's field
@@ -548,6 +556,14 @@ impl Render for CheckoutField {
                 .aria_label(sentence.accessible_name())
                 .child(sentence)
         });
+        let refused = self.refused.line(words.id, |id, text| {
+            Self::line(theme::color(palette.danger))
+                .id(ElementId::Name(id.clone().into()))
+                .debug_selector(move || id)
+                .role(Role::Alert)
+                .aria_label(text)
+                .child(text)
+        });
         let saved =
             (failure.is_none() && self.saved && !saving && !draft.is_touched()).then(|| {
                 Self::line(theme::color(palette.fg_1))
@@ -570,6 +586,7 @@ impl Render for CheckoutField {
             .child(Self::line(theme::color(palette.fg_1)).child(self.note.clone()))
             .children(buttons)
             .children(failure)
+            .children(refused)
             .children(saved)
     }
 }
