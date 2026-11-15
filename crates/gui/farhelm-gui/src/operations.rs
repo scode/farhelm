@@ -19,7 +19,8 @@
 //!   and `row_pending` in `list/view.rs` at reference commit `24bc0580`). The confirmation half is not here: an open
 //!   Delete question belongs to the session list, which keeps the row's menu button inert while its question is open,
 //!   and the Rename editor to its own feature. Work on different keys is independent: each keeps its own completion
-//!   handling until it settles.
+//!   handling until it settles. Where an area says that a start was refused because its key already has work in
+//!   flight, it uses one shared wording ([`NotStarted::BUSY_WORDS`]) rather than a line of its own.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
 //!   its [`Work`] variant, so that no other work can be superseded by accident.
@@ -466,13 +467,31 @@ pub struct Failure {
 /// Why [`Operations::start`] sent nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NotStarted {
-    /// The key already has this work in flight. Nothing is queued: the user acts again once it settles.
+    /// The key already has this work in flight. Nothing is queued: the user acts again once it settles. A view that
+    /// says so shows [`NotStarted::BUSY_WORDS`].
     Busy(Work),
     /// A reset retired this store, or the window is inert and there is none.
     Retired,
     /// An id in the command's route cannot be a path segment (an empty session id, say). The helm never serves one,
     /// so this is a bug report, not a user-facing state.
     Path(PathError),
+}
+
+impl NotStarted {
+    /// What a press refused with [`NotStarted::Busy`] says, wherever its key's subject is shown: the store's one
+    /// wording for "another request on this key was still out", as [`Refusal::words`] is its one wording for the helm's
+    /// refusals. An area shows these words rather than wording its own line.
+    ///
+    /// Ported from the old app's session row, whose exclusion is the closest to the store's rule (one request per key):
+    /// "Stop: not started, another operation is in progress; try again" (`list/lifecycle.rs` at reference commit
+    /// `24bc0580`). Its prefix was the label of the refused action, a word per kind of work that the store does not
+    /// hold ([`NotStarted::Busy`] carries the work holding the key, not the one refused), so the shared words open with
+    /// what happened to the press instead. They are in the past tense because the line stays shown after the key frees
+    /// (until something in the view clears or replaces it), where "is in progress" would go stale; the GPUI Settings
+    /// line chose the same shape for the same reason. Decided by the foundations owner on 2026-11-14 at review.
+    ///
+    /// A plain string, not [`HostText`]: the words are the app's own and quote nothing a host wrote.
+    pub const BUSY_WORDS: &str = "Not started: another operation was in progress. Try again.";
 }
 
 /// One operation in flight: what it is, and the task that waits for its reply. Dropping the entry drops the task, and
