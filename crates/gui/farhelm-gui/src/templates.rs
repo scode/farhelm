@@ -15,10 +15,13 @@
 //! - [`sequence`]: the quick-launch sequence's state, its keys' rules, what its pill shows and what Enter resolves it
 //!   to. No GPUI types.
 //! - [`armed`]: the sequence in the window: the prefix, the key capture, its cancels, the pill and Enter.
+//! - [`dispatch`]: the quick-launch dispatcher every shortcut ends in: it resolves the templates a shortcut names,
+//!   applies them to New's prefill, and starts the launch unseen or opens New.
 //!
 //! The entry points other areas call are plain functions here: [`open`] for the list header's Templates button, with
 //! [`button_help`] for its hover text, [`open_with_hint`] for a shortcut that found nothing to launch, and, for the main
-//! view, [`begin_sequence`] for the sequence prefix with [`watch_sequence_presses`] for the press that cancels it.
+//! view, [`quick_launch`] for the ⚡ chord, and [`begin_sequence`] for the sequence prefix with
+//! [`watch_sequence_presses`] for the press that cancels it.
 //!
 //! Templates, the ⚡ mark and the number keys are read from the store the helm pushes, never with a request per use.
 //! SPEC.md says the shortcuts read "the mark and templates fresh on each use, so an agent's or the command line's
@@ -29,6 +32,7 @@
 pub mod apply;
 pub mod armed;
 pub mod dialog;
+pub mod dispatch;
 pub mod editor;
 pub mod fields;
 pub mod sequence;
@@ -41,6 +45,8 @@ mod apply_tests;
 mod armed_tests;
 #[cfg(test)]
 mod dialog_tests;
+#[cfg(test)]
+mod dispatch_tests;
 #[cfg(test)]
 mod editor_tests;
 #[cfg(test)]
@@ -115,6 +121,19 @@ pub fn open_with_hint(
     cx: &mut App,
 ) -> Option<LayerId> {
     dialog::open(ReturnTo::Opener, Some(hint), mark, window, cx)
+}
+
+/// Quick launch the template marked ⚡ (SPEC.md, "Quick launch"): the main view's handler of `QuickLaunch`, the ⚡
+/// chord. It starts the marked template directly, opens New when the template needs more choices, or opens Templates
+/// with its hint when no usable template holds the mark. With the session launcher open it applies the marked template
+/// to its draft instead; under any other dialog, or while the launcher is busy, it does nothing ([`dispatch::dispatch`]).
+pub fn quick_launch(window: &mut Window, cx: &mut App) {
+    dispatch::dispatch(
+        dispatch::Origin::Mark,
+        &[dispatch::Reference::Mark],
+        window,
+        cx,
+    );
 }
 
 /// Begin a quick-launch sequence for the prefix (SPEC.md, "Quick-launch sequences"), its pill centered over `anchor`,

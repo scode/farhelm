@@ -26,12 +26,17 @@
 //! - **The pill** is the layer manager's display-only pill, drawn by [`crate::components::SequencePill`] from the model's
 //!   view, with the template names read from the store on every draw.
 //! - **Enter** routes the model's [`Outcome`]: nothing for an empty sequence, the Templates dialog with its binding hint
-//!   for an unbound key, and everything else to [`awaiting_dispatcher`].
+//!   for an unbound key, New with the refusal for any other refusal, and the resolved names to the quick-launch
+//!   dispatcher ([`super::dispatch`]), which launches them or opens New.
 //!
-//! NOTE: The sequence inside the session launcher is not reachable yet. Nothing tells this module that the open dialog
-//! is the launcher, so the prefix is refused under it as under any other dialog, and the launcher's fields keep Cut
-//! whatever their selection. The launcher's form of the pill ("apply", at the bottom of the main area) is built and
-//! keyed on [`PillView`]'s `in_launcher`, which only that missing signal would set.
+//! - **Inside the launcher**, when it is the dialog holding the keyboard (`launcher::entry::open_launcher`), the prefix
+//!   arms the launcher's form of the sequence: the pill says "apply" and sits at the bottom of the main area, and Enter
+//!   applies the queue to the launcher's draft or shows the refusal there, opening nothing.
+//!
+//! NOTE: The launcher's text fields keep the prefix whatever their selection (on a Mac GPUI Kit's own Cut takes it, on
+//! Linux the text-field row in `actions.rs`), so inside the launcher a sequence begins only from a control that is not
+//! a text field. SPEC.md has an unselected launcher field accept the prefix; that needs Kit's Cut caught in the capture
+//! phase for those fields only, which is not built.
 //!
 //! NOTE: Input-method text is not refused while armed. A composition's committed text (a CJK input source, a dead key's
 //! accent, a Wayland commit of several characters) reaches the focused element's input handler without a key-down, so
@@ -53,6 +58,7 @@ use gpui::{
     Render, Styled as _, Subscription, Window, canvas, px,
 };
 
+use super::dispatch::{self, Origin, Reference};
 use super::sequence::{Chip, Input, Outcome, Sequence, printable};
 use super::shortcuts::Bindings;
 use crate::actions::{
@@ -61,10 +67,9 @@ use crate::actions::{
 };
 use crate::components::{SequenceChip, SequencePill};
 use crate::desktop::title_band;
-use crate::focus::Mark;
 use crate::host_text::HostText;
 use crate::layers::{self, Anchor, Pill, PillId, PillPlacement};
-use crate::{local_state, session};
+use crate::{launcher, local_state, session};
 
 /// The pill's words outside the launcher and inside it, the old indicator's.
 const LAUNCH_LABEL: &str = "Launch sequence: ";
@@ -216,22 +221,29 @@ pub(super) fn is_armed(cx: &App) -> bool {
 }
 
 /// Begin a sequence for the prefix, its pill centered over `anchor` (the main pane's): the main view's handler of
-/// `BeginSequence`. Does nothing while a dialog keeps the keyboard (SPEC.md: "Other visible dialogs keep the keyboard";
-/// the launcher counts as one until it can say it is open, the module docs' NOTE), while the window is inert, before
-/// the main pane was drawn, or while a sequence is armed already.
+/// `BeginSequence`. Does nothing while a dialog other than the launcher keeps the keyboard (SPEC.md: "Other visible
+/// dialogs keep the keyboard"; under the launcher it arms the launcher's form), while the window is inert, before
+/// the main pane was drawn, or while a sequence is armed already. On the page it also does nothing while the launcher
+/// is busy (a quick launch being prepared, a launch pending, a refused launch waiting behind its notice) or a host
+/// change is in flight, when the old app refused the prefix too and the sequence's Enter could start nothing
+/// ([`crate::launcher::entry::quick_launch_available`]); in the open launcher, as for the ⚡ chord there, none of those
+/// apply, since the sequence only edits its draft.
 ///
 /// The ⚡ mark and the number keys are copied from the store here, once: SPEC.md's "Bindings refresh when the prefix
 /// starts; Enter captures the bound names currently shown in the pill" holds because the pill and Enter both read this
 /// one copy. Template names are not copied; they are read from the store whenever they are needed.
 pub(super) fn begin(anchor: Option<Anchor>, window: &mut Window, cx: &mut App) {
-    if layers::focus_layer_open(window, cx) || is_armed(cx) || session::current_store(cx).is_none()
+    let in_launcher = launcher::entry::open_launcher(window, cx).is_some();
+    if (layers::focus_layer_open(window, cx) && !in_launcher)
+        || is_armed(cx)
+        || session::current_store(cx).is_none()
+        || (!in_launcher && !launcher::entry::quick_launch_available(cx))
     {
         return;
     }
     let Some(anchor) = anchor else {
         return;
     };
-    let in_launcher = false;
     let bindings = Bindings::current(cx);
     let view = cx.new(|_| PillView {
         sequence: Sequence::new(bindings),
@@ -284,8 +296,8 @@ fn on_key(event: &KeyDownEvent, window: &mut Window, cx: &mut App) -> Captured {
         return Captured::Cancel;
     };
     if layers::top_container(window, cx) != layer {
-        // A dialog opened since the prefix (the prefix arms only with none open): it keeps the keyboard, and this key
-        // is its.
+        // A dialog opened since the prefix (over the page, or over the launcher the sequence began in): it keeps the
+        // keyboard, and this key is its.
         end(window, cx);
         return Captured::Cancel;
     }
@@ -364,39 +376,31 @@ pub(super) fn watch_presses() -> impl IntoElement {
 
 // ---- Enter -----------------------------------------------------------------------------------------------------------
 
-/// Resolve the sequence `armed` held, already ended, against the store's templates, and act on the outcome (SPEC.md):
-/// with nothing queued nothing opens; outside the launcher, an unbound number key or ⚡ opens Templates with its binding
-/// hint; everything else waits for the quick-launch dispatcher ([`awaiting_dispatcher`]).
+/// Resolve the sequence `armed` held, already ended, against the store's templates, and act on the outcome (SPEC.md,
+/// "Quick-launch sequences"). With nothing queued nothing opens. A refusal goes to the dispatcher's one refusal path
+/// ([`dispatch::refused`]): on the page an unbound number key or ⚡ opens Templates with its binding hint and any other
+/// refusal opens New with its sentence; in the launcher the sequence began in, every refusal, an unbound key's
+/// included, is shown there, leaving the draft alone. The resolved names go to the dispatcher with the sequence origin,
+/// which launches them directly, opens New with the banner "This sequence doesn't make a complete setup; complete it
+/// below", or, in the launcher, applies them to its draft as one refusal unit. While the helm reports its templates
+/// unavailable, anything queued is refused as a failed read ([`dispatch::refused_unavailable`]). All of it happens
+/// inside the Enter press's own handling, so what opens opens for this Enter.
 fn enter(armed: &Armed, window: &mut Window, cx: &mut App) {
-    let (sequence, in_launcher) = {
-        let pill = armed.view.read(cx);
-        (pill.sequence.clone(), pill.in_launcher)
-    };
-    match sequence.enter(&current_names(cx)) {
+    let sequence = armed.view.read(cx).sequence.clone();
+    let outcome = sequence.enter(&current_names(cx));
+    // A sequence resolved against templates the helm could not read is refused as a failed read, not by its words.
+    if outcome != Outcome::Nothing && dispatch::refused_unavailable(window, cx) {
+        return;
+    }
+    match outcome {
         Outcome::Nothing => {}
-        Outcome::Refused(refusal) => match refusal.hint() {
-            Some(hint) if !in_launcher => {
-                // Taken here, inside the Enter press's own handling, so the dialog opens for this Enter.
-                let mark = Mark::take(cx);
-                super::open_with_hint(hint, &mark, window, cx);
-            }
-            _ => awaiting_dispatcher(Outcome::Refused(refusal), in_launcher),
-        },
-        outcome @ Outcome::Apply(_) => awaiting_dispatcher(outcome, in_launcher),
+        Outcome::Refused(refusal) => dispatch::refused(&refusal, window, cx),
+        Outcome::Apply(names) => {
+            let references: Vec<Reference> = names.into_iter().map(Reference::Name).collect();
+            dispatch::dispatch(Origin::Sequence, &references, window, cx);
+        }
     }
 }
-
-/// The seam the quick-launch dispatcher's piece fills: what Enter does with an `outcome` that applies templates, or
-/// with a refusal that does not open Templates, for a sequence begun inside the launcher when `in_launcher`, and on the
-/// page otherwise. Until then such a sequence ends with nothing further happening.
-///
-/// What that piece makes it do (SPEC.md, "Quick-launch sequences"): outside the launcher, an [`Outcome::Apply`]
-/// launches the templates directly through the dispatcher with the sequence origin, or opens New with them applied and
-/// the banner "This sequence doesn't make a complete setup; complete it below" when the result cannot launch; a
-/// refusal opens New with its [`super::sequence::Refusal::sentence`]. Inside the launcher, an apply edits the draft
-/// without launching, as one refusal unit, and a refusal (an unbound reference included) is shown beneath the search
-/// with [`super::sequence::Refusal::launcher_sentence`], leaving the draft alone.
-fn awaiting_dispatcher(_outcome: Outcome, _in_launcher: bool) {}
 
 // ---- The pill's view -------------------------------------------------------------------------------------------------
 

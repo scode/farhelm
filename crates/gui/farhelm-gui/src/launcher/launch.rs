@@ -1,5 +1,5 @@
 //! Launching: what happens to a New, Clone or Replace with from the press of Launch on a complete draft until its reply
-//! has been dealt with.
+//! has been dealt with, and to a quick launch prepared out of sight before it is started or shown.
 //!
 //! SPEC.md, "Creation" (the paragraphs after the launcher layout) and "Keyboard focus", "Who may move focus". Ported
 //! from the old app's submit path in `list/create_form.rs` and the reply handling in `list/view.rs` at reference commit
@@ -29,6 +29,11 @@
 //! - **The YOLO question.** A refusal saying the host asks before YOLO launches (`HelmMarker::YoloConfirmation`) is a
 //!   follow-up question, not a failure: the launcher comes back the same way, with the question asked in place
 //!   (`view::yolo_question`).
+//! - **A quick launch being prepared** (`view::prepare_unseen`): a launcher made out of sight on New's prefill waits
+//!   here while its catalog read is out, before its templates are applied. It counts as busy, as a pending launch does
+//!   ([`busy`]): New, Clone, the template shortcuts and the sequence prefix wait. Then it is started through [`start`]
+//!   like any other, or shown ([`reveal_prepared`]) under the same moved-on rule as a refusal, behind the notice if
+//!   the user moved on. Its progress pill only arms once it is started.
 //!
 //! The slot's "waiting for the reply" is the hidden launcher's own lifetime, not a copy of the operation store's busy
 //! state: the store still says whether the create is in flight, and the launcher reads the refusal it shows from the
@@ -56,7 +61,8 @@ use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::{outcome, replace, selection};
 use crate::ticker;
 
-/// Where a submitted launcher waits while it is not drawn: one per UI session, so a reset drops it.
+/// Where a launcher that is not drawn waits (one submitted, refused behind its notice, or a quick launch's being
+/// prepared): one per UI session, so a reset drops it.
 pub(crate) struct LaunchSlot {
     held: PerSession<Option<Held>>,
     /// The "Started" report's expiry, which takes it down four seconds after it shows. Kept apart from `held`, since
@@ -70,7 +76,8 @@ pub(crate) struct LaunchSlot {
 struct Held {
     launcher: Entity<Launcher>,
     waiting: Waiting,
-    /// The progress pill of the create it waits on: `None` once it waits for the user.
+    /// The progress pill of the create it waits on: `None` while it waits for the user, and while a quick launch is
+    /// being prepared, before any create.
     progress: Option<Progress>,
 }
 
@@ -84,13 +91,17 @@ struct Progress {
 /// What a hidden launcher waits for before it is drawn again or dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Waiting {
+    /// A quick launch being prepared out of sight: the launcher's catalog read, before its templates are applied and
+    /// it is started or shown (`view::prepare_unseen`). New, other shortcuts and the sequence prefix wait meanwhile, as
+    /// for a launch in flight.
+    Preparing,
     /// The helm's reply to its create.
     Reply,
     /// The user, after a refusal that arrived once they had moved on: the notice offers it.
     User,
 }
 
-/// The slot's entity, made on the first submit.
+/// The slot's entity, made the first time a launcher is held: a submit, or a quick launch's preparation.
 struct Slot(Entity<LaunchSlot>);
 
 impl Global for Slot {}
@@ -126,18 +137,97 @@ fn waiting(launcher: &Entity<Launcher>, cx: &mut App) -> Option<Waiting> {
     })
 }
 
-/// Whether a launch's create is out in the current UI session: New and the other ways of starting a launch are refused
-/// meanwhile (SPEC.md: "The same launcher remains busy and cannot accept a second launch or be replaced with another
-/// draft").
-pub(super) fn pending(cx: &mut App) -> bool {
+/// Whether the launcher is busy for New and the other ways of starting a launch: a launch's create is out, or a quick
+/// launch is being prepared (SPEC.md: "The same launcher remains busy and cannot accept a second launch or be replaced
+/// with another draft").
+pub(super) fn busy(cx: &mut App) -> bool {
+    matches!(held(cx), Some(Waiting::Reply | Waiting::Preparing))
+}
+
+/// Whether the slot holds a launcher for the current UI session at all: one being prepared, one whose create is out,
+/// or one a refusal left waiting for the user behind its notice. A quick launch is refused while any is
+/// (`entry::quick_launch_available`).
+pub(super) fn holding(cx: &mut App) -> bool {
+    held(cx).is_some()
+}
+
+/// Hold `launcher`, a quick launch's that is not drawn, in the slot while it is prepared (`view::prepare_unseen`).
+pub(super) fn preparing(launcher: Entity<Launcher>, cx: &mut App) {
+    hold(
+        Some(Held {
+            launcher,
+            waiting: Waiting::Preparing,
+            // No create is out yet, so no progress pill: the preparation is one catalog read.
+            progress: None,
+        }),
+        cx,
+    );
+}
+
+/// Whether the slot still holds `launcher` as being prepared: a reset drops it, and nothing then may act for it.
+pub(super) fn still_preparing(launcher: &Entity<Launcher>, cx: &mut App) -> bool {
+    waiting(launcher, cx) == Some(Waiting::Preparing)
+}
+
+/// Let go of `launcher`, a quick launch's prepared out of sight whose catalog read could not be sent at all, if the slot
+/// still holds it so: nothing follows to finish it, and the slot must not stay busy (New refused) until a reset.
+pub(super) fn abandon_prepared(launcher: &Entity<Launcher>, cx: &mut App) {
+    if still_preparing(launcher, cx) {
+        hold(None, cx);
+    }
+}
+
+/// Bring back `launcher`, a quick launch's prepared out of sight that did not start (its templates need more choices,
+/// were refused, or its draft's own check refused it), as a refused launch comes back: shown in `window` if the user
+/// has not moved on since the press (`mark`), otherwise kept behind the notice that offers it. Nothing happens for a
+/// launcher the slot no longer holds as being prepared.
+pub(super) fn reveal_prepared(
+    launcher: Entity<Launcher>,
+    window: AnyWindowHandle,
+    mark: Mark,
+    cx: &mut App,
+) {
+    if !still_preparing(&launcher, cx) {
+        return;
+    }
+    let user_moved_on = focus::has_moved_on(&mark, cx);
+    come_back(
+        launcher,
+        window,
+        mark,
+        user_moved_on,
+        Notice::LaunchNotStarted,
+        cx,
+    );
+}
+
+/// What the slot's launcher for the current UI session waits for, if it holds one, without making the slot.
+fn held(cx: &mut App) -> Option<Waiting> {
+    let slot = cx.try_global::<Slot>().map(|slot| slot.0.clone())?;
+    slot.update(cx, |slot, cx| {
+        slot.held.current(cx).as_ref().map(|held| held.waiting)
+    })
+}
+
+/// Whether the launch whose reply the window waits for is a quick launch that never showed the launcher
+/// (`view::prepare_unseen`): the fact SPEC.md's naming rule turns on ("When New was never shown and success selects its
+/// session, the rename dialog opens over it"). Revealing the launcher, for a refusal or the draft's own reason, clears
+/// it for good, since "A launch that revealed New gets no naming dialog, even if a later submission succeeds".
+///
+/// Only tests read it so far; naming a quick-launched session, the templates work's next piece, reads the same fact in
+/// the success path. Crate-private until then, and allowed to be unused outside tests meanwhile.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "naming a quick-launched session reads it next")
+)]
+pub(crate) fn pending_unseen_quick_launch(cx: &mut App) -> bool {
     let Some(slot) = cx.try_global::<Slot>().map(|slot| slot.0.clone()) else {
         return false;
     };
     slot.update(cx, |slot, cx| {
-        slot.held
-            .current(cx)
-            .as_ref()
-            .is_some_and(|held| held.waiting == Waiting::Reply)
+        slot.held.current(cx).as_ref().is_some_and(|held| {
+            held.waiting == Waiting::Reply && held.launcher.read(cx).quick_launch_unseen
+        })
     })
 }
 
@@ -224,13 +314,14 @@ impl Request {
     }
 }
 
-/// Send `request` for `launcher` (the open launcher in `window`) through the operation store, and hold the launcher in
-/// the slot while it is out. `mark` is the user's answer the reply's moved-on check counts from: taken in the handler
-/// of the press of Launch, or of the YOLO question's answer whose host write this request waited for. `host` is the
-/// target host's name as the launcher shows it now, which the progress pill keeps for the request's life. Returns
-/// whether the request went out; it does not without a UI session, with a request that will not encode (see
-/// [`Request::command`]), or while the source of a Replace with has another request in flight, which the launcher
-/// refuses before pressing gets here (`SOURCE_BUSY` in the view).
+/// Send `request` for `launcher` (the open launcher in `window`, or a quick launch's prepared out of sight,
+/// `view::prepare_unseen`, whose request is always a create) through the operation store, and hold the launcher in the
+/// slot while it is out. `mark` is the user's answer the reply's moved-on check counts from: taken in the handler of
+/// the press of Launch (a quick launch's shortcut press), or of the YOLO question's answer whose host write this request
+/// waited for. `host` is the target host's name as the launcher shows it now, which the progress pill keeps for the
+/// request's life. Returns whether the request went out; it does not without a UI session, with a request that will
+/// not encode (see [`Request::command`]), or while the source of a Replace with has another request in flight, which
+/// the launcher refuses before pressing gets here (`SOURCE_BUSY` in the view).
 ///
 /// A Replace with also starts the source's waiting line on its row and header (`outcome::start_clock`), as plain
 /// Replace does.
@@ -482,8 +573,9 @@ fn refused(
     come_back(launcher, window, mark, user_moved_on, notice, cx);
 }
 
-/// Bring `launcher` back for a reply the user must see (a refusal, a follow-up question): shown again in `window` if
-/// the user has not moved on since the press (`mark`), otherwise kept in the slot with `notice` offering it.
+/// Bring `launcher` back for a reply the user must see (a refusal, a follow-up question), or a quick launch prepared
+/// out of sight that did not start ([`reveal_prepared`]): shown in `window` if the user has not moved on since the
+/// press (`mark`), otherwise kept in the slot with `notice` offering it.
 fn come_back(
     launcher: Entity<Launcher>,
     window: AnyWindowHandle,

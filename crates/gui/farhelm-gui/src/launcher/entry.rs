@@ -1,16 +1,18 @@
 //! The launcher's entry points: the ordinary public functions other surfaces call to open New (the session list's New
 //! button, the quick switcher's "New session named X" row, Cmd+N), Clone and Replace with (the row menu and the session
-//! header),
-//! what those surfaces need to draw their triggers, and the YOLO question the sidebar's plain Replace asks
-//! ([`ask_yolo_for_replace`]).
+//! header), what those surfaces need to draw their triggers, the YOLO question the sidebar's plain Replace asks
+//! ([`ask_yolo_for_replace`]), and what a quick launch needs: New's prefill as a draft, which it applies templates to
+//! before deciding whether to show it ([`new_prefill`]), New opened on a draft with a banner or a refusal
+//! ([`open_with`]), and the open launcher, whose draft a shortcut applies to ([`open_launcher`]).
 //!
 //! SPEC.md, "Creation" ("Working directory", "Host"), "Lifecycle operations" (Clone), "Desktop window chrome" (Cmd+N)
 //! and the quick switcher's paragraph. Ported from the old app's New handling in `list/view.rs` at reference commit
 //! `24bc0580` (`effective_create_host`, the New button's guards and its tooltip) and its Clone prefill in
 //! `list/create_form.rs` (`resolve_clone_host`).
 //!
-//! New is refused while a launch is pending: the old New button was disabled while the page's one operation token was
-//! held, and SPEC.md keeps "a launch is pending" among what disables it ("Cmd+N ... unless a modal is open or New is
+//! New is refused while a launch is pending, and while a quick launch is being prepared out of sight before it starts
+//! (`view::prepare_unseen`), which is a launch the user has asked for: the old New button was disabled while the
+//! page's one operation token was held, and SPEC.md keeps "a launch is pending" among what disables it ("Cmd+N ... unless a modal is open or New is
 //! disabled"). It is refused too while one of this window's host-registry changes is in flight (SPEC.md: "Launches and
 //! changes to the host registry still exclude each other"; `crate::hosts::host_change_in_flight` says which work
 //! counts), as the old token's host changes disabled it. A refused launch waiting behind its notice is different: New brings that
@@ -35,12 +37,12 @@ use farhelm_proto::ui_channel::{
 use std::rc::Rc;
 
 use farhelm_proto::SessionLaunch;
-use gpui::{App, Window};
+use gpui::{App, Entity, Window};
 
 use super::draft::{LaunchDraft, remembered_permission};
 use super::launch;
 use super::view::yolo_question::{self, replace_owner};
-use super::view::{open, open_noted};
+use super::view::{Launcher, Note, Shown, open, open_noted};
 use crate::focus::Mark;
 use crate::host_text::HostText;
 use crate::hosts::offers::HostKind;
@@ -55,13 +57,22 @@ pub const NEW_SESSION_HELP: &str = if cfg!(target_os = "macos") {
     "New session: start an agent or a command on any host"
 };
 
-/// Whether New can open now: not while a launch is pending, nor while one of this window's host-registry changes is
-/// in flight, when the old New button was disabled too (its page-wide operation token covered launches and host
-/// changes, though not a new host's probe, which the migration's orchestrator decided counts here). A surface
-/// drawing a New trigger draws it disabled while this is `false`, reading it while it draws: the launch slot and the
-/// operation store both notify when what it answers from changes.
+/// Whether New can open now: not while a launch is pending or a quick launch is being prepared, nor while one of this
+/// window's host-registry changes is in flight, when the old New button was disabled too (its page-wide operation token
+/// covered launches and host changes, though not a new host's probe, which the migration's orchestrator decided counts
+/// here). A surface drawing a New trigger draws it disabled while this is `false`, reading it while it draws: the
+/// launch slot and the operation store both notify when what it answers from changes.
 pub fn new_available(cx: &mut App) -> bool {
-    !launch::pending(cx) && !crate::hosts::host_change_in_flight(cx)
+    !launch::busy(cx) && !crate::hosts::host_change_in_flight(cx)
+}
+
+/// Whether a quick launch may start now: as [`new_available`], and not while a refused launch waits behind its notice
+/// either. That launcher is hidden, and SPEC.md has a hidden launcher take a quick launch's chord without applying it
+/// ("A hidden quick-launch launcher still consumes the chord without applying it"); the old app's shortcuts did nothing
+/// while its returned launcher stayed mounted behind the notice. New differs because it can bring that launcher back,
+/// which a shortcut that starts a launch unseen cannot.
+pub fn quick_launch_available(cx: &mut App) -> bool {
+    !launch::holding(cx) && !crate::hosts::host_change_in_flight(cx)
 }
 
 /// Open New in `window` with New's prefill (see the module docs), or bring back a refused launch waiting behind its
@@ -70,7 +81,7 @@ pub fn new_available(cx: &mut App) -> bool {
 /// row does), or with no UI session. While a host change is in flight, the notice's Open launcher still brings a
 /// waiting launcher back (its Launch is refused meanwhile, so that changes nothing), and New does not.
 pub fn open_new(window: &mut Window, cx: &mut App) -> bool {
-    open_with(None, window, cx)
+    new_prefill(cx).is_some_and(|draft| open_with(draft, None, window, cx))
 }
 
 /// [`open_new`] with the session name set to `name`, as the quick switcher's "New session named X" row opens it
@@ -78,29 +89,69 @@ pub fn open_new(window: &mut Window, cx: &mut App) -> bool {
 /// remembered permission defaults"). The name is a hand edit, as if typed into the Name field. A refused launch waiting
 /// behind its notice comes back as it was, keeping its own name, as the old switcher's row brought it back.
 pub fn open_new_named(name: &str, window: &mut Window, cx: &mut App) -> bool {
-    open_with(Some(name), window, cx)
+    new_prefill(cx).is_some_and(|mut draft| {
+        draft.edit_name(name.to_owned());
+        open_with(draft, None, window, cx)
+    })
 }
 
-/// [`open_new`] and [`open_new_named`]'s shared path.
-fn open_with(name: Option<&str>, window: &mut Window, cx: &mut App) -> bool {
+/// Open New on `draft`, saying `note` in its notices region until the draft is next edited: the one path every way of
+/// opening New takes ([`open_new`], [`open_new_named`], and a quick launch that did not start directly, which opens it
+/// with its templates applied and a banner or a refusal). Call it from the handler of the user's action. Refused,
+/// returning `false`, as [`open_new`] is: while New is unavailable ([`new_available`]), while a dialog or menu is
+/// open, or with no UI session; and a refused launch waiting behind its notice comes back instead, as it was, so a
+/// launch the user has not seen the end of is never replaced by a fresh draft.
+pub fn open_with(
+    draft: LaunchDraft,
+    note: Option<Note>,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
     if layers::focus_layer_open(window, cx) || !new_available(cx) {
         return false;
     }
     if launch::open_waiting(window, cx) {
         return true;
     }
-    let Some(store) = session::current_store(cx) else {
-        return false;
-    };
-    let mut draft = new_draft(
+    let mark = Mark::take(cx);
+    // Through the launcher's own `open`; a quick launch's banner or refusal, set before the first frame, needs the
+    // noted form.
+    match note {
+        None => open(draft, &mark, window, cx),
+        Some(note) => open_noted(draft, None, Some(note), &mark, window, cx),
+    }
+    .is_some()
+}
+
+/// The launcher, when it is the dialog holding the keyboard in `window` (nothing over it but lists that never take
+/// focus): template shortcuts and sequences apply to its draft then, with [`Launcher::apply_batch`], instead of
+/// launching (SPEC.md, "Quick launch": "While the session launcher is the only visible dialog, the same chord applies
+/// its template to that draft and leaves Launch to the user"). `None` while it is closed, hidden for a launch, or
+/// covered.
+///
+/// It answers from the launcher-owned slot `show` sets each time a launcher is shown, never cleared by hand: a launcher
+/// closes in several ways (Cancel, Escape through the layer manager, a submit, a reset closing every layer), and in each
+/// its container leaves the layer stack, which this checks every time. The same check rules out a launcher a menu
+/// covers.
+pub(crate) fn open_launcher(window: &Window, cx: &App) -> Option<Entity<Launcher>> {
+    let shown = cx.try_global::<Shown>()?;
+    if layers::top_container(window, cx).as_ref() != Some(&shown.container) {
+        return None;
+    }
+    shown.launcher.upgrade()
+}
+
+/// New's draft as [`open_new`] would open it, built without opening anything: for a quick launch, which applies its
+/// templates to New's prefill and then starts it unseen or opens it (SPEC.md, "Quick launch": "Applying it directly
+/// uses exactly New's defaults and ordinary launch path"; `crate::templates::dispatch`). Read from the store alone, so
+/// it is ready at once. `None` without a UI session. Unlike [`open_new`] it never brings back a refused launch waiting
+/// behind its notice and checks nothing about whether New may open; the caller decides that.
+pub fn new_prefill(cx: &App) -> Option<LaunchDraft> {
+    let store = session::current_store(cx)?;
+    Some(new_draft(
         store.read(cx).collections(),
         local_state::selected(cx).as_deref(),
-    );
-    if let Some(name) = name {
-        draft.edit_name(name.to_owned());
-    }
-    let mark = Mark::take(cx);
-    open(draft, &mark, window, cx).is_some()
+    ))
 }
 
 /// Open Clone of the session `session` (its key) in `window`: an ordinary, editable create prefilled from the
@@ -160,7 +211,7 @@ pub fn open_clone(session: &str, window: &mut Window, cx: &mut App) -> bool {
     };
     let draft = LaunchDraft::clone_of(&row.info, host);
     let mark = Mark::take(cx);
-    open_noted(draft, note, &mark, window, cx).is_some()
+    open_noted(draft, note, None, &mark, window, cx).is_some()
 }
 
 /// Open Replace with of the session `session` (its key) in `window`: the same launcher Clone opens, prefilled from the
@@ -288,8 +339,9 @@ fn local_host(collections: &Collections) -> Option<i64> {
 /// The folder a draft seeds for `host` (SPEC.md, "Working directory"): "the selected session's directory when that
 /// session is on the target host's installation", else `~`, "which each host expands to its own home". New's prefill
 /// and the host picker's re-seed of an untouched folder both take it, so picking another host and then the open
-/// session's again brings its folder back.
-pub(super) fn default_folder(
+/// session's again brings its folder back; so does a quick launch's template that changes the host, which re-seeds the
+/// folder the same way (`crate::templates::apply::Context::default_folder`).
+pub(crate) fn default_folder(
     collections: &Collections,
     selected: Option<&str>,
     host: i64,

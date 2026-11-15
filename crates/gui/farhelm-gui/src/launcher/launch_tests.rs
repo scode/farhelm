@@ -28,21 +28,39 @@ fn command_draft() -> LaunchDraft {
 }
 
 /// The creates (`POST /api/sessions`) the window sent since the last call. Every other command (the catalog read, the
-/// selection remembered) is answered at once, so the fake's in-order replies stay possible while a create waits.
+/// selection remembered) is answered at once, so the fake's in-order replies stay possible while a create waits; the
+/// catalog read is answered with an empty catalog ([`creates_answering`]).
 pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
-    cx.run_until_parked();
+    creates_answering(helm, cx, &json!([]))
+}
+
+/// [`creates`], answering the catalog read with `catalog`, round after round until a round sends nothing but creates,
+/// so a create that waited for an answer (a quick launch's catalog read) is among them.
+pub(crate) fn creates_answering(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    catalog: &serde_json::Value,
+) -> Vec<FakeCommand> {
     let mut creates = Vec::new();
-    for command in helm.commands() {
-        if command.path == "/api/sessions" {
-            creates.push(command);
-        } else if command.path.ends_with("launch-catalog") {
-            helm.reply(command.id, 200, Some(json!([])));
-        } else {
-            helm.reply(command.id, 200, None);
+    loop {
+        cx.run_until_parked();
+        let mut answered = false;
+        for command in helm.commands() {
+            if command.path == "/api/sessions" {
+                creates.push(command);
+            } else if command.path.ends_with("launch-catalog") {
+                helm.reply(command.id, 200, Some(catalog.clone()));
+                answered = true;
+            } else {
+                helm.reply(command.id, 200, None);
+                answered = true;
+            }
+        }
+        settle(cx);
+        if !answered {
+            return creates;
         }
     }
-    settle(cx);
-    creates
 }
 
 /// Open the launcher on [`command_draft`], press Launch, and return the one create it sent, checking that it sent
