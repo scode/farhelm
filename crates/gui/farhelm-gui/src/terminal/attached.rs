@@ -308,6 +308,10 @@ pub struct AttachedTerminal {
     _session: [Subscription; 2],
     /// Redraws the terminal when its tunnels change, since it draws their failure notice.
     _tunnels: Subscription,
+    /// Reads the session's tunnels when the pushed state says they are due ([`AttachedTerminal::keep_tunnels_current`]):
+    /// as the terminal is made, and whenever the store changes (the session's host becoming known as remote, the shared
+    /// tunnel consent changing).
+    _tunnel_reads: session::ObservingCurrent,
     /// How many delivery turns ran, and how many times output was applied to a view, so tests can check the per-turn
     /// bound and that consecutive output is applied as one batch.
     #[cfg(test)]
@@ -338,8 +342,10 @@ impl AttachedTerminal {
         ];
         #[cfg(any(feature = "agent", test))]
         probe::enroll(cx.weak_entity(), cx);
-        let tunnels = cx.new(|_| Tunnels::new(target.session.clone()));
+        let tunnels = cx.new(|cx| Tunnels::new(target.session.clone(), cx));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
+        let tunnel_reads =
+            session::observe_current(cx, |owner: &mut Self, cx| owner.keep_tunnels_current(cx));
         AttachedTerminal {
             target,
             hold: None,
@@ -388,6 +394,7 @@ impl AttachedTerminal {
             paste: None,
             _session: subscriptions,
             _tunnels: tunnel_watch,
+            _tunnel_reads: tunnel_reads,
             #[cfg(test)]
             turns: 0,
             #[cfg(test)]
@@ -1433,7 +1440,7 @@ impl Render for AttachedTerminal {
         });
         let disclosure_anchor = self.place_disclosure(window, cx);
         let refusal = self.refusal_line(cx);
-        let tunnel_notice = tunnels::notice_line(&self.tunnels, cx);
+        let tunnel_notice = tunnels::notice_line(&self.tunnels, window, cx);
         // The refused click's explanation and the tunnel notice, stacked at the top of the grid's area so neither
         // hides the other. Drawn outside the grid's element: a press on the notice's Dismiss must not also be a press
         // on the terminal (a selection, a mouse report, a link under it), and its button must not sit inside the
@@ -1841,6 +1848,27 @@ impl AttachedTerminal {
         }
     }
 
+    /// Read the session's tunnels when they are due ([`Tunnels::stale`]): as a remote session's terminal opens, so its
+    /// pill lists them at once, and whenever the shared consent changed since the last read. Called by the store
+    /// observer, never while drawing; the read goes out after the update that called it.
+    fn keep_tunnels_current(&mut self, cx: &mut Context<Self>) {
+        let remote = tunnels::session_is_remote(&self.target.session, cx);
+        if self.tunnels.read(cx).stale(remote, cx) {
+            let tunnels = self.tunnels.clone();
+            cx.defer(move |cx| tunnels.update(cx, |tunnels, cx| tunnels.refresh(cx)));
+        }
+    }
+
+    /// The pill for this session's open tunnels, for the session's top row to place in its left region; `None` while
+    /// there are none ([`tunnels::pill`]).
+    pub(crate) fn tunnel_pill(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        tunnels::pill(&self.tunnels, window, cx)
+    }
+
     /// The tunnel hint `link` gets in its destination display, if the session's tunnels offer one for it.
     fn tunnel_hint(&self, link: &TerminalLink, cx: &App) -> Option<HostSentence> {
         let program_owns_clicks = LinkClick::current(cx) == LinkClick::Program;
@@ -1961,9 +1989,10 @@ impl AttachedTerminal {
     }
 
     /// Open display `generation`, if it is still the one wanted: a popover that takes no focus, on the anchor drawn in
-    /// the frame that asked. A display that is still wanted but cannot open (a dialog or menu holds the keyboard, or its
-    /// anchor or view is gone) is dropped rather than left pending, so the next frame asks again: left pending, it would count as current for
-    /// as long as the same link stays hovered, showing nothing and refusing every click on it.
+    /// the frame that asked. A display that is still wanted but cannot open (a dialog or menu holds the keyboard, or
+    /// its anchor or view is gone) is dropped rather than left pending, so the next frame asks again: left pending, it
+    /// would count as current for as long as the same link stays hovered, showing nothing and refusing every click on
+    /// it.
     fn open_disclosure(
         &mut self,
         generation: u64,

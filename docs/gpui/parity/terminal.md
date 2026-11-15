@@ -54,16 +54,21 @@ stay.
   Its header has no tunnel glyph yet: the app's icon set has none until the tunnel pill brings one. The old warning's
   third paragraph, about links from other `127.0.0.1` pages into the standalone helm, is left out for good: it was about
   the browser interface, which is gone.
-- Every tunnel failure, opening included, shows in one notice at the top of the terminal until dismissed, where the old
-  app showed an opening's failure in a separate notice at the window's bottom right. SPEC.md places read and close
-  failures below the top row and says nothing of opening's; one place for all of them is meant to stay.
+- Every tunnel failure, opening included, shows in the one tunnel notice, under the top row or inside the open list,
+  where the old app showed an opening's failure in a separate notice at the window's bottom right. SPEC.md places read
+  and close failures below the top row and says nothing of opening's; one place for all of them is meant to stay.
 - The tunnel notice takes the pointer over the terminal's top rows while it shows: text under it is not hovered,
   selected or scrolled through it, and a link under it opens nothing. The old app treated its notice as covering the
   links under it too; meant to stay.
-- The terminal reads a session's tunnels the first time the pointer rests on a loopback address on a Mac, not when the
-  session opens, so the first such hover's display gains its tunnel hint a moment later, once the read answers. Most
-  sessions never print a loopback address. The tunnel pill, which must list a session's tunnels as soon as it opens,
-  will read them then for remote sessions.
+- A session on the local host reads its tunnels only the first time the pointer rests on a loopback address on a Mac, so
+  that hover's display gains its tunnel hint a moment later, once the read answers; a session on a remote host reads
+  them as it opens, for its pill. The old app read every session's.
+- The pill's listing follows this terminal's own tunnel commands and changes of the shared consent, not every change the
+  helm makes: the old app read it again on every event the helm sent. A tunnel the helm opens for an agent's approved
+  link ("Tunnel and open", which the approvals area ports) will not show in the pill until the next read; that port adds
+  its own read.
+- With several tunnels the pill's hover help and accessible name give their count ("2 open tunnels from this Mac"), as
+  the old pill's did; SPEC.md's "full mapping" applies to the one-tunnel pill.
 - The scrollback's scrollbar appears and disappears at once, where the old one faded in over 100 ms and out over 800 ms.
   An animated fade must stand still under reduced motion, and the app's animation clock, which owns that setting, gives
   a control no way to ask for it. It still hides 800 ms after the last scroll or after the pointer leaves the terminal,
