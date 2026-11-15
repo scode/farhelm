@@ -67,7 +67,7 @@ use crate::{operations, session};
 mod choices;
 mod host_picker;
 mod model_field;
-mod yolo_question;
+pub(in crate::launcher) mod yolo_question;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
 const WIDTH: f32 = 960.;

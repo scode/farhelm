@@ -1,6 +1,6 @@
-//! The launcher's entry points for New: the ordinary public functions other surfaces call to open it (the session
-//! list's New button, the quick switcher's "New session named X" row, Cmd+N), and what those surfaces need to draw
-//! their triggers.
+//! The launcher's entry points: the ordinary public functions other surfaces call to open New (the session list's New
+//! button, the quick switcher's "New session named X" row, Cmd+N), what those surfaces need to draw their triggers,
+//! and the YOLO question the sidebar's plain Replace asks ([`ask_yolo_for_replace`]).
 //!
 //! SPEC.md, "Creation" ("Working directory", "Host"), "Desktop window chrome" (Cmd+N) and the quick switcher's
 //! paragraph. Ported from the old app's New handling in `list/view.rs` at reference commit `24bc0580`
@@ -10,10 +10,10 @@
 //! held, and SPEC.md keeps "a launch is pending" among what disables it ("Cmd+N ... unless a modal is open or New is
 //! disabled"). It is refused too while one of this window's host-registry changes is in flight (SPEC.md: "Launches and
 //! changes to the host registry still exclude each other"; `launch::host_change_in_flight` says which work counts), as
-//! the old token's host changes disabled it. A refused launch waiting behind its notice is different: New brings that launcher back, with its draft
-//! and refusal, rather than starting a fresh one, as the old app did (its New revealed a returned launcher). SPEC.md
-//! leaves open whether that notice keeps New refused until it is opened; bringing the draft back answers it without
-//! refusing anything.
+//! the old token's host changes disabled it. A refused launch waiting behind its notice is different: New brings that
+//! launcher back, with its draft and refusal, rather than starting a fresh one, as the old app did (its New revealed a
+//! returned launcher). SPEC.md leaves open whether that notice keeps New refused until it is opened; bringing the draft
+//! back answers it without refusing anything.
 //!
 //! NOTE: New's prefill takes the open session's host and folder, else the helm's own host and `~`; the host picker
 //! re-seeds an untouched folder from the same per-host default ([`default_folder`]). Not built yet, each with the piece
@@ -29,13 +29,19 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
+use std::rc::Rc;
+
+use farhelm_proto::SessionLaunch;
 use gpui::{App, Window};
 
 use super::draft::{LaunchDraft, remembered_permission};
 use super::launch;
 use super::view::open;
+use super::view::yolo_question::{self, replace_owner};
 use crate::focus::Mark;
+use crate::host_text::HostText;
 use crate::hosts::offers::HostKind;
+use crate::prompt;
 use crate::{layers, local_state, session};
 
 /// New's hover text, for the button that opens it: it names the shortcut in the Mac app only, since the Linux app has
@@ -92,6 +98,48 @@ fn open_with(name: Option<&str>, window: &mut Window, cx: &mut App) -> bool {
     }
     let mark = Mark::take(cx);
     open(draft, &mark, window, cx).is_some()
+}
+
+/// What the plain Replace YOLO question asks about; its owner holds the question as `prompt::Inline<YoloAsk>`
+/// ([`ask_yolo_for_replace`]).
+pub use super::view::yolo_question::YoloAsk;
+
+/// Ask the YOLO question for a plain Replace the helm refused because the source's host asks before YOLO launches (the
+/// refusal's `HelmMarker::YoloConfirmation`), for the sidebar to draw inline where the user answered Replace: at the
+/// row, in the session header, or on the interrupted card (SPEC.md, "Creation": the confirmation is "shown with the
+/// control or surface that started the launch").
+///
+/// `host` is the source's host and `host_name` its name as the rest of the app shows it
+/// (`hosts::identity::display_name`), `launch` its stored launch (which says why it is YOLO), and `mark` the mark taken
+/// when the user answered Replace: the question takes focus, on Cancel, only if the user has not moved on since
+/// (SPEC.md: "a plain Replace's question, which arrives after its reply, takes focus only if the user has not moved on
+/// since answering Replace"). There is no guarded answer: plain Replace keeps the stored launch.
+///
+/// `retry` sends the Replace again with `confirm_yolo` set, the caller's own command under its own key, as the
+/// sidebar's Replace flow owns its launch and its retry. It runs at most once: for the one-off answer, or for the
+/// permanent answer only after that answer's host write (the host settings' own "Start YOLO sessions without asking")
+/// has succeeded; a failed write runs nothing and keeps the question up with the reason. It is handed the mark of the
+/// answer's press, which the caller combines with its own operation's moved-on flag for what the Replace's reply may
+/// open: the permanent answer's retry runs from the write's reply, after any press the user made meanwhile.
+///
+/// Drawing is the caller's: draw what this returns as a child (`.child(question.clone())`) from the next frame on,
+/// where it is visible, scrolling its row, header or card into view (SPEC.md: "scrolled into view"); on the page, focus
+/// moves to Cancel at once, and a question not drawn in the next frame loses it. Once answered it draws nothing. While
+/// `question.in_flight(cx)` the permanent answer's write is out: if the caller stops drawing it meanwhile (the row
+/// scrolled away, the selection changed), the write still runs on and its success still calls `retry`, which must cope
+/// with the source having moved on. A reset drops the write's reply, leaving the question in flight for good, so drop
+/// it with the UI session.
+pub fn ask_yolo_for_replace(
+    host: i64,
+    host_name: HostText,
+    launch: &SessionLaunch,
+    mark: &Mark,
+    retry: impl Fn(Mark, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> prompt::Inline<YoloAsk> {
+    let ask = YoloAsk::for_stored_launch(host, host_name, launch);
+    yolo_question::ask_question(&ask, None, replace_owner(Rc::new(retry)), mark, window, cx)
 }
 
 /// New's draft from what the store holds and the selected session `selected`: the open session's host and folder when
