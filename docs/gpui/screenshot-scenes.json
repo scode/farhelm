@@ -756,6 +756,45 @@
           "text:Recently active"
         ]
       ]
+    },
+    {
+      "id": "app-launcher-managed-checkout",
+      "title": "New with Managed checkout chosen on the Where row: the repository field holding a typed acme/bar with its suggestions list offering the typed pair, the read-only folder field waiting for a repository, and the sentence on the checkout folder's lifetime",
+      "reference": null,
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:launcher-destination-Managed checkout"
+        ],
+        [
+          "click",
+          "id:launcher-repository"
+        ],
+        [
+          "type",
+          "id:launcher-repository",
+          "acme/bar"
+        ],
+        [
+          "wait",
+          "--text",
+          "acme/bar"
+        ],
+        [
+          "wait",
+          "1000"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
