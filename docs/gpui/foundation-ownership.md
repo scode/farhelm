@@ -165,9 +165,12 @@ menu a toggle opens names the toggle with `returns_to(focus::ReturnTo::Control(.
 may let Tab through, walking its controls in the page's order after the toggle and closing once focus leaves it, with
 `tab_through()` and `returns_to` naming the toggle. A feature draws one display-only element above every layer, the
 pill, through `layers::show_pill` and `layers::hide_pill` from its own code, not a change here; its view must take no
-input, per the `layers::Pill` docs. And the approvals feature installs the region that draws agent approval cards above
-every dialog, once per window, through `layers::install_approval_region` from its own code; its view must occlude what
-it draws and draw nothing with a size or a listener when empty, per that function's docs.
+input, per the `layers::Pill` docs. The launcher draws the second, the launch pill (its progress pill and "Started"
+report), at the window's bottom through `layers::show_launch_pill` and `layers::hide_pill` from its own code, under the
+same rule for its view; the two show at once, and neither replaces the other's. And the approvals feature installs the
+region that draws agent approval cards above every dialog, once per window, through `layers::install_approval_region`
+from its own code; its view must occlude what it draws and draw nothing with a size or a listener when empty, per that
+function's docs.
 
 Lint exceptions: 1: `deferred` and `anchored` in `layers::overlay`.
 
