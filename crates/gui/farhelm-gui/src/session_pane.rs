@@ -321,7 +321,10 @@ impl Render for SessionPane {
                     .flex_1()
                     .min_h_0()
                     .child(terminal)
-                    .children(deleting.map(|guard| delete_scrim(guard, step, cx))),
+                    .children(deleting.map(|guard| delete_scrim(guard, step, cx)))
+                    // The approval region starts its cards below this box's top, clear of the tabs and the lines
+                    // above the terminal, as the old cards started below `.terminal-panes`.
+                    .child(crate::approvals::region::track_terminal_area(window, cx)),
             )
             .children(bar)
             .into_any_element()

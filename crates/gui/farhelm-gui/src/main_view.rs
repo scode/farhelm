@@ -102,13 +102,16 @@ impl MainView {
             observed.push(cx.observe(&notices, |_, _, cx| cx.notify()));
         }
         let session_list = cx.new(SessionList::new);
+        let root = root::attach(window, cx);
+        // The agent approval cards' slot, once per window, as the layer stack it belongs to is attached.
+        crate::approvals::region::install(window, cx);
         MainView {
             _appearance: theme::observe_window(window),
             _decorations: linux_title_bar::follow_decorations(window),
             _appearance_choice: session::observe_current(cx, |_, cx| {
                 settings::follow_stored_appearance(cx)
             }),
-            root: root::attach(window, cx),
+            root,
             _observed: observed,
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
@@ -144,6 +147,8 @@ impl Render for MainView {
             let pane_anchor = Anchor::for_element("main-pane-anchor", window, cx);
             let pane_tracker = pane_anchor.track();
             self.pane_anchor = Some(pane_anchor.clone());
+            // The approval region centers its cards in this pane and reaches at most its height.
+            crate::approvals::region::set_pane(pane_anchor.clone(), cx);
             let posted: Vec<Notice> = notices::posted(cx)
                 .into_iter()
                 .filter(|notice| is_banner(*notice))

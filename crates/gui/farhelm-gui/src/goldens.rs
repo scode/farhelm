@@ -884,6 +884,8 @@ fn approval_scene(
         waiting: 1,
         busy: false,
         refusal: None,
+        measure: None,
+        body_scroll: None,
     };
     div()
         .p(px(12.))
