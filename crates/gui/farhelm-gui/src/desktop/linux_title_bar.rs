@@ -96,25 +96,22 @@ pub(crate) enum Command {
     Close,
 }
 
-/// Where tests see the bar's commands: GPUI's test platform cannot minimize or zoom a window, so with this installed a
-/// command is recorded instead of performed. Test builds only.
-#[cfg(test)]
+/// Where the bar's commands go instead of to the window, while one is installed: a test installs it, since GPUI's test
+/// platform cannot minimize or zoom a window, and the app never does. It exists in every build, so the buttons a test
+/// clicks go through the same [`perform`] the app's do, and only the window behind them is swapped
+/// (SPEC_impl.md, "GPUI cookbook: traps", on `cfg(test)` branches).
 #[derive(Default)]
 pub(crate) struct Commands(pub(crate) Vec<Command>);
 
-#[cfg(test)]
 impl gpui::Global for Commands {}
 
-/// Perform `command` on `window` (or, in a test that installed [`Commands`], record it). Closing the main window quits
-/// the app through `desktop::quit_when_closed`, the ordinary way; closing the notices window closes only it.
+/// Perform `command` on `window`, or record it while [`Commands`] is installed. Closing the main window quits the app
+/// through `desktop::quit_when_closed`, the ordinary way; closing the notices window closes only it.
 fn perform(command: Command, window: &mut Window, cx: &mut App) {
-    #[cfg(test)]
     if cx.has_global::<Commands>() {
         cx.default_global::<Commands>().0.push(command);
         return;
     }
-    #[cfg(not(test))]
-    let _ = cx;
     match command {
         Command::Minimize => window.minimize_window(),
         Command::Zoom => window.zoom_window(),
