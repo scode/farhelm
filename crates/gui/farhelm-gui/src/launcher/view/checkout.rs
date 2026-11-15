@@ -30,10 +30,24 @@
 //!   from Settings or the command line, and a preview taken before the change is stale. The launcher learns the
 //!   current revision from its launch-history read ([`Launcher::observe_checkout_config_revision`]); a preview is
 //!   asked again when it rises, and an answer from before the last observed revision is never accepted.
-//!
-//! NOTE: Not built yet, with the piece that brings them: the checkout naming rules beyond an untouched copied title
-//! (Clone's `<title>-clone` default and its numbering), a lost race's refreshed preview, the inline checkout-folder setup
-//! for a host without one, and a Clone of a managed-checkout session starting a checkout of its repository.
+//! - **Names.** The name a checkout's folder is named after is the draft's ([`LaunchDraft::checkout_title`]); a
+//!   numbered default (Clone's `<title>-clone`, a template's base name) whose preview the helm refuses as taken moves on
+//!   to its next candidate ([`LaunchDraft::advance_checkout_name`]), which is previewed in turn. The supervisor says
+//!   "taken" in fixed words, which this matches, as the folder check matches the folder words: matching only proposes
+//!   another name, which still takes the user's press of Launch.
+//! - **A lost race.** A create the helm proves it never accepted (another create took the previewed folder, or the
+//!   preview went stale) comes back with "nothing was accepted" after the helm's words, and a new preview is asked for;
+//!   nothing is sent again until the user presses Launch (SPEC.md: "it never submits automatically or silently chooses
+//!   another directory").
+//! - **No checkout folder.** When the host has no checkout folder in effect (the suggestions read says so), the shared
+//!   explicit-save field for the default folder shows above the repository field (`settings::checkout_field`); a save
+//!   reads the suggestions and the preview again without reopening the launcher (SPEC.md, "Managed checkouts").
+//! - **Launches that wait for the preview.** The YOLO question's "Start guarded session instead" changes the
+//!   permission, which makes the preview stale, and a quick launch (a launch template's shortcut, started without
+//!   showing the launcher) has not asked for its preview yet. Instead of refusing, either waits for the preview and
+//!   starts once it is ready, as the old launcher's guarded submit and quick launch did; any edit, a close, a failed
+//!   preview or another preview cancels the wait, and a quick launch that does not start is shown
+//!   ([`Launcher::submit_or_wait_for_preview`]).
 
 use std::time::Duration;
 
@@ -44,9 +58,9 @@ use farhelm_proto::session_requests::{
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use farhelm_proto::{AcceptedGithubPreview, GithubRepo, parse_github_repo};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, WeakEntity, Window, div, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, row};
@@ -60,7 +74,9 @@ use crate::launcher::draft::{
     AgentChoices, CommandChoices, DestinationKind, Field, Tab, repo_identifier,
 };
 use crate::launcher::request::Preview;
+use crate::launcher::request::WAIT_FOR_PREVIEW;
 use crate::layers::{self, Anchor, LayerId, Popover};
+use crate::settings::{CheckoutField, FolderScope, Saved};
 use crate::theme::{self, metrics};
 use crate::{operations, ticker};
 
@@ -86,6 +102,16 @@ const INCOMPLETE: &str =
     "Repository search is incomplete; a valid owner/repo can still be selected";
 /// The words for an answer about another installation than the one the launcher sees now.
 const OTHER_INSTALLATION: &str = "Repository suggestions belong to a different host installation";
+/// The supervisor's words refusing a checkout name that is taken (its `NameError::Occupied`), found anywhere in the
+/// refusal since the helm passes them on whole.
+const OCCUPIED: &str = "a directory with that checkout name already exists";
+/// What a create the helm proves it never accepted adds after the helm's words, the old launcher's.
+pub(super) const NOTHING_ACCEPTED: &str =
+    "; nothing was accepted; review the refreshed preview and press Launch again";
+/// The note under the inline checkout-folder field, the old launcher's.
+const SETUP_NOTE: &str = "Sets the default checkout folder for every host without its own. ~ means each host's home \
+                          folder. Change the default later in Settings → Checkouts, or set a host's own folder in its \
+                          settings.";
 const STALE_PREVIEW: &str =
     "The preview is stale or belongs to a different host installation; select the repository again";
 
@@ -151,6 +177,9 @@ struct SuggestKey {
     incarnation: u64,
     identity: String,
     query: String,
+    /// How many times the suggestions were asked for again (after the inline setup saved a folder), so a save reads
+    /// them again even for the same text.
+    reread: u64,
 }
 
 /// What a preview answers for (the module docs): a change to any of it asks again.
@@ -167,6 +196,27 @@ struct PreviewKey {
     agent: (Tab, AgentChoices, CommandChoices),
     /// The configuration revision last observed when this was asked.
     revision: Option<i64>,
+    /// How many times the preview was asked for again without the draft changing (a lost race, a saved checkout
+    /// folder), so it is asked again.
+    retry: u64,
+}
+
+/// A launch waiting for its managed checkout's preview ([`Launcher::submit_or_wait_for_preview`]): the mark it counts
+/// from, the one preview it waits for, the window it starts in, and whether it is a quick launch never shown (which
+/// stays out of sight while it waits, and is shown if it does not start).
+struct Armed {
+    mark: Mark,
+    key: PreviewKey,
+    window: AnyWindowHandle,
+    unseen: bool,
+}
+
+/// A host connection and installation, which whether a host has a checkout folder is known for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HostKey {
+    host: i64,
+    incarnation: u64,
+    identity: String,
 }
 
 /// The helm's answer to a preview: the folder, or its refusal in its words.
@@ -203,6 +253,25 @@ pub(super) struct CheckoutState {
     /// leaves the fields alone (setting one redraws its field).
     path_placeholder: &'static str,
     pub(super) name_placeholder: String,
+    /// See [`SuggestKey::reread`] and [`PreviewKey::retry`].
+    reread: u64,
+    retry: u64,
+    /// Whether the host, as of the last suggestions answer about it, needs a checkout folder set up (the reply's
+    /// `needs_checkout_root`, the helm's reading of the host's effective configuration). Kept across a re-read, so the
+    /// setup field stays put, with its draft and focus, while a save is checked.
+    needs_root: Option<(HostKey, bool)>,
+    /// Set by a save in the setup field until the next suggestions answer: whether the host needs a folder is to be
+    /// asked again, even with a repository chosen.
+    root_recheck: bool,
+    /// Set by a save in the setup field, to the save's moment: if the re-check then finds the host no longer needs a
+    /// folder and the field goes, focus moves on to the repository field (the next thing to fill in) unless the user has
+    /// moved on since. Without it, focus would fall to whatever the focus coordinator recovers to, rows further down.
+    focus_after_setup: Option<Mark>,
+    /// The inline setup field, made the first time it shows and kept while the launcher lives, with its subscription.
+    setup: Option<(Entity<CheckoutField>, Subscription)>,
+    /// The guarded answer's launch, waiting for the preview: the answer's mark, which the launch's moved-on check counts
+    /// from ([`Launcher::submit_or_wait_for_preview`]).
+    armed: Option<Armed>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -252,6 +321,13 @@ impl CheckoutState {
             revision: None,
             path_placeholder: "",
             name_placeholder: String::new(),
+            reread: 0,
+            retry: 0,
+            needs_root: None,
+            root_recheck: false,
+            focus_after_setup: None,
+            setup: None,
+            armed: None,
             _subscriptions: vec![events, focus, blur],
         }
     }
@@ -310,18 +386,44 @@ impl Launcher {
             || self.repository_list_open(window, cx)
     }
 
-    /// What a suggestions read would ask now, if the user is choosing on a host that can be asked.
-    fn suggest_key(&self, window: &Window, cx: &App) -> Option<SuggestKey> {
-        let checkout = self.draft.checkout.as_ref()?;
-        if !self.choosing_repository(window, cx) {
-            return None;
-        }
+    /// The chosen host's connection and installation, while it can be asked.
+    fn checkout_host_key(&self, cx: &App) -> Option<HostKey> {
         let host = self.checkout_host(cx)?;
-        Some(SuggestKey {
+        Some(HostKey {
             host: host.id,
             incarnation: host.incarnation,
             identity: host.identity.unwrap_or_default(),
+        })
+    }
+
+    /// Whether the chosen host needs a checkout folder set up, as last answered about it; `None` while unknown.
+    fn needs_root(&self, cx: &App) -> Option<bool> {
+        let host = self.checkout_host_key(cx)?;
+        self.checkout
+            .needs_root
+            .as_ref()
+            .filter(|(known, _)| *known == host)
+            .map(|(_, needs)| *needs)
+    }
+
+    /// What a suggestions read would ask now: while the user is choosing, and also, with a repository chosen, once per
+    /// host while whether it needs a checkout folder is not known (so a Clone's checkout still learns it), on a host
+    /// that can be asked.
+    fn suggest_key(&self, window: &Window, cx: &App) -> Option<SuggestKey> {
+        let checkout = self.draft.checkout.as_ref()?;
+        if !self.choosing_repository(window, cx)
+            && self.needs_root(cx).is_some()
+            && !self.checkout.root_recheck
+        {
+            return None;
+        }
+        let host = self.checkout_host_key(cx)?;
+        Some(SuggestKey {
+            host: host.host,
+            incarnation: host.incarnation,
+            identity: host.identity,
             query: checkout.field_text(),
+            reread: self.checkout.reread,
         })
     }
 
@@ -343,6 +445,7 @@ impl Launcher {
                 self.draft.command.clone(),
             ),
             revision: self.checkout.revision,
+            retry: self.checkout.retry,
         })
     }
 
@@ -359,11 +462,134 @@ impl Launcher {
                     let _ = launcher.update(cx, |launcher, cx| launcher.send_suggestions(key, cx));
                 }));
         }
+        self.follow_preview(cx);
+        self.show_checkout_path(window, cx);
+        // The name field follows a name the draft changed on its own: a numbered default moving on, or the copied title
+        // ignored or shown again as the destination changes. Typing changes the draft to the field's text, so this
+        // never fights the user.
+        let shown = self.draft.shown_name();
+        if self.name.text(cx).as_ref() != shown {
+            self.name.set_text(shown, window, cx);
+        }
+    }
+
+    /// Ask for the preview as soon as what it answers for changes (one at a time; the module docs). Part of following
+    /// the destination while drawing, and called on its own for a quick launch, which is never drawn.
+    fn follow_preview(&mut self, cx: &mut Context<Self>) {
         let key = self.preview_key(cx);
         if let Some(key) = self.checkout.preview.follow(key) {
             self.send_preview(key, cx);
         }
-        self.show_checkout_path(window, cx);
+    }
+
+    /// A launch to start once its managed checkout's preview is ready: the YOLO question's guarded answer, whose
+    /// switch to Guarded made the preview stale, and a quick launch prepared out of sight (`prepare_unseen`), whose
+    /// preview has not been asked for yet. When the first thing the launch waits for is that preview, it waits for it
+    /// ([`Self::settle_waiting_launch`]) and returns `true`; otherwise it is submitted now, refused as a press would be,
+    /// and this returns `false`. A quick launch waits out of sight, as the old app's did ("quick launch waits for a
+    /// managed preview and starts directly").
+    pub(in crate::launcher) fn submit_or_wait_for_preview(
+        &mut self,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // A quick launch's launcher is never drawn, so its preview is asked for here rather than while drawing.
+        self.follow_preview(cx);
+        // Compared with the launcher's own constant, never with helm words: a reworded reason must reword the constant.
+        if self.refusal(cx).as_deref() == Some(WAIT_FOR_PREVIEW)
+            && self.checkout_preview(cx) == Preview::Waiting
+            && let Some(key) = self.preview_key(cx)
+        {
+            self.checkout.armed = Some(Armed {
+                mark,
+                key,
+                window: window.window_handle(),
+                unseen: self.quick_launch_unseen,
+            });
+            cx.notify();
+            return true;
+        }
+        self.submit(false, mark, window, cx);
+        false
+    }
+
+    /// A preview answered: settle the launch waiting for one, if there is one. It waits for one preview only, the one
+    /// due when it was armed; anything else that asked for a new preview meanwhile (the host reconnecting, a numbered
+    /// name moving on after a taken folder, a newer configuration revision, a save in the inline setup) drops it, since
+    /// its folder is one the user has not seen yet (SPEC.md: Launch "never submits automatically or silently chooses
+    /// another directory"), as does a failed preview. A ready one starts it with its mark, if its launcher is still
+    /// showing or was never shown. A quick launch that does not start comes back to be seen, with the failed preview's
+    /// line or the new preview, as any quick launch that did not start does. The old launcher's guarded submit compared
+    /// the whole preview identity the same way.
+    fn settle_waiting_launch(launcher: &WeakEntity<Launcher>, cx: &mut App) {
+        let Some(entity) = launcher.upgrade() else {
+            return;
+        };
+        let settled = entity.update(cx, |launcher, cx| {
+            let armed = launcher.checkout.armed.as_ref()?;
+            let start = if launcher.preview_key(cx).as_ref() != Some(&armed.key) {
+                false
+            } else {
+                match launcher.checkout_preview(cx) {
+                    Preview::Waiting => return None,
+                    Preview::Failed => false,
+                    Preview::Ready(_) => true,
+                }
+            };
+            let armed = launcher.checkout.armed.take()?;
+            let start = start && (armed.unseen || launcher.layer.is_some());
+            Some((start, armed))
+        });
+        let Some((start, armed)) = settled else {
+            return;
+        };
+        if start {
+            let _ = cx.update_window(armed.window, |_, window, cx| {
+                entity.update(cx, |launcher, cx| {
+                    launcher.submit(false, armed.mark, window, cx)
+                });
+            });
+        }
+        // A launch that went out moved the quick launch's launcher to waiting for its reply; one that did not comes
+        // back to be seen.
+        if armed.unseen {
+            super::super::launch::reveal_prepared(entity, armed.window, armed.mark, cx);
+        }
+    }
+
+    /// Cancel the guarded answer's waiting launch: the draft changed, so it would launch something else than was
+    /// answered.
+    pub(super) fn disarm_checkout_launch(&mut self) {
+        self.checkout.armed = None;
+    }
+
+    /// This launcher's create came back refused ([`super::super::launch::RefusedLaunch`]): if the helm proved it never
+    /// accepted a managed checkout's create, ask for a new preview (see the module docs).
+    pub(super) fn checkout_refused(&mut self, unaccepted: bool) {
+        let checkout = self.draft.checkout.as_ref();
+        if unaccepted && checkout.is_some_and(|checkout| checkout.repo.is_some()) {
+            self.checkout.retry += 1;
+        }
+    }
+
+    /// What follows the helm's words in the refusal alert: "nothing was accepted" for a managed checkout's create the
+    /// helm proved it never accepted, else nothing.
+    pub(super) fn refusal_suffix(&self) -> &'static str {
+        let unaccepted = self
+            .refused
+            .as_ref()
+            .is_some_and(|refused| refused.unaccepted);
+        let checkout = self
+            .draft
+            .checkout
+            .as_ref()
+            .is_some_and(|checkout| checkout.repo.is_some());
+        if unaccepted && checkout {
+            NOTHING_ACCEPTED
+        } else {
+            ""
+        }
     }
 
     /// Read the suggestions for `key`, if it is still what the launcher would ask and no read is out (then the
@@ -417,6 +643,19 @@ impl Launcher {
                                 Err(HostText::from_host(OTHER_INSTALLATION))
                             }
                         }));
+                        if let Some(Ok(reply)) = &state.answered {
+                            let host = HostKey {
+                                host: key.host,
+                                incarnation: key.incarnation,
+                                identity: key.identity.clone(),
+                            };
+                            launcher.checkout.needs_root = Some((host, reply.needs_checkout_root));
+                            launcher.checkout.root_recheck = false;
+                            // The field stays: the save did not give the host a folder, and focus stays in it.
+                            if reply.needs_checkout_root {
+                                launcher.checkout.focus_after_setup = None;
+                            }
+                        }
                         cx.notify();
                     }
                     if std::mem::take(&mut launcher.checkout.suggestions.due)
@@ -481,6 +720,13 @@ impl Launcher {
                                 Err(HostText::from_host(STALE_PREVIEW))
                             }
                         }));
+                        // A numbered default name that is taken moves on; its next candidate is then previewed, since
+                        // the name is part of what the preview answers for.
+                        if let Some(Err(words)) = &state.answered
+                            && words.raw().contains(OCCUPIED)
+                        {
+                            let _ = launcher.draft.advance_checkout_name(&key.title);
+                        }
                         cx.notify();
                     }
                     if std::mem::take(&mut launcher.checkout.preview.due)
@@ -489,6 +735,8 @@ impl Launcher {
                         launcher.send_preview(now, cx);
                     }
                 });
+                // A launch waiting for this preview starts, or gives up, now (it is not drawn if it is a quick launch).
+                Launcher::settle_waiting_launch(&launcher, cx);
             },
         );
         if !sent {
@@ -512,6 +760,8 @@ impl Launcher {
             return;
         }
         self.checkout.revision = Some(revision);
+        // The checkout folder setting may be what changed: ask again whether the host still needs one set up.
+        self.checkout.root_recheck = true;
         cx.notify();
     }
 
@@ -772,9 +1022,17 @@ impl Launcher {
             });
         });
         let control = div().relative().min_w_0().child(field).child(tracker);
-        let mut rows =
-            vec![row("launcher-repository-row", "Repository", control, palette).into_any_element()];
+        let mut rows = Vec::new();
+        // The old order: the setup field above the repository field, which it is the precondition for.
+        let setup = self.setup_field(window, cx);
+        let setup_shown = setup.is_some();
+        rows.extend(setup);
+        rows.push(
+            row("launcher-repository-row", "Repository", control, palette).into_any_element(),
+        );
+        // The setup field says what the note would (no checkout folder), so the note waits while it shows.
         if self.choosing_repository(window, cx)
+            && !setup_shown
             && let Some(note) = self.repository_note(window, cx)
         {
             rows.push(note);
@@ -784,6 +1042,43 @@ impl Launcher {
         }
         rows.push(help_line(EXPLANATION, palette).into_any_element());
         rows
+    }
+
+    /// The inline checkout-folder field, while the chosen host needs a checkout folder set up: the shared explicit-save
+    /// field over the default folder (SPEC.md: "When the selected host has no checkout folder in effect, the launcher's
+    /// managed-checkout destination offers the same explicit-save field"), in the control column. Made the first time it
+    /// shows; a save it reports asks for the suggestions and the preview again.
+    fn setup_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.needs_root(cx) != Some(true) {
+            // The field just went after a save: focus moves on to the repository field (see `focus_after_setup`).
+            if let Some(mark) = self.checkout.focus_after_setup.take() {
+                let handle = self.checkout.repository.focus_handle(cx);
+                cx.defer_in(window, move |_, window, cx| {
+                    crate::focus::focus_in_layer(&handle, &mark, window, cx)
+                });
+            }
+            return None;
+        }
+        if self.checkout.setup.is_none() {
+            let field =
+                cx.new(|cx| CheckoutField::folder(FolderScope::Default, SETUP_NOTE, window, cx));
+            let saved = cx.subscribe(&field, |launcher: &mut Launcher, _, _: &Saved, cx| {
+                launcher.checkout.reread += 1;
+                launcher.checkout.retry += 1;
+                launcher.checkout.root_recheck = true;
+                launcher.checkout.focus_after_setup = Some(Mark::take(cx));
+                cx.notify();
+            });
+            self.checkout.setup = Some((field, saved));
+        }
+        let (field, _) = self.checkout.setup.as_ref()?;
+        Some(
+            div()
+                .debug_selector(|| "launcher-checkout-setup".into())
+                .pl(px(LABEL_COLUMN + LABEL_GAP))
+                .child(field.clone())
+                .into_any_element(),
+        )
     }
 
     /// The note under the field on an incomplete scan, or a failed read (`.launch-composer-repository-note`): the
@@ -1040,12 +1335,8 @@ impl Render for RepositoryRows {
                         .flex()
                         .items_center()
                         .gap(px(6.))
-                        // The highlighted row's words and glyph take the fill's ink, as the model list's do.
-                        .text_color(theme::color(if active == Some(index) {
-                            palette.on_fill
-                        } else {
-                            palette.fg_0
-                        }))
+                        // The row colors its words itself (the fill's ink when highlighted); the glyph is quieter when
+                        // not, as the old list's was.
                         .child(
                             gpui::svg()
                                 .path(Icon::Branch.path())

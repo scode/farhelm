@@ -52,6 +52,10 @@ fn clone_draft() -> LaunchDraft {
     let mut info = row.info;
     info.cwd = "/src/project".into();
     info.title = "source".into();
+    // An ordinary folder session: the helm fixture's row is in a managed checkout, which a Clone would start a new
+    // checkout of, with a `-clone` name.
+    info.working_copy = None;
+    info.github_repo = None;
     info.launch = SessionLaunch::Agent {
         selection: LaunchSelection {
             harness: LaunchHarness::Codex,

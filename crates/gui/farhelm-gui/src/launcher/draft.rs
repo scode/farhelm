@@ -35,12 +35,13 @@
 //! the folder a host change should seed), a managed checkout's suggestions and preview (the view reads them from the
 //! helm; the draft holds only what the user chose), environments, and the launch's validation and request bodies.
 
+use farhelm_proto::github_checkout::CheckoutNameSequence;
 use farhelm_proto::launcher::{
     LaunchCatalogModel, TemplateNameKind, compatible_efforts, reconcile_harness_selection,
 };
 use farhelm_proto::{
     CommandLaunch, GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    SessionInfo, SessionLaunch,
+    SessionInfo, SessionLaunch, parse_github_repo,
 };
 
 use crate::drafts::Draft;
@@ -162,6 +163,11 @@ pub struct Checkout {
     /// the helm for a new preview, as the old launcher did (its `preview_revision`), so the count is part of what a
     /// preview answers for; nothing else reads it.
     pub chosen: u64,
+    /// Where a numbered default name stands: Clone's `<title>-clone`, or a launch template's base name, moves on to
+    /// `-2` and up to `-50` each time the helm previews its candidate as taken ([`LaunchDraft::advance_checkout_name`]).
+    /// It starts over for another repository or host, since what is taken there says nothing about here (SPEC.md:
+    /// "Changing hosts or repositories restarts the suffix search").
+    pub naming: CheckoutNameSequence,
 }
 
 impl Checkout {
@@ -177,6 +183,26 @@ impl Checkout {
 /// A repository's `owner/repo` pair, as the field shows it and as the preview and the create send it.
 pub fn repo_identifier(repo: &GithubRepo) -> String {
     format!("{}/{}", repo.owner, repo.name)
+}
+
+/// The repository a Clone of `session` starts a new managed checkout of: the checkout the session is in now, else the
+/// one its launch made (SPEC.md: "preferring its current checkout association over its launch provenance"). `None`
+/// when the session is in no checkout, and `Some(None)` when it is but its repository cannot be carried.
+///
+/// Only a repository the shared parser reads back as itself is carried. The helm and the supervisor accept nothing else,
+/// so anything else did not come from them; this also keeps a repository identity holding characters that would need
+/// escaping (the old launcher's "Clear repository" case) out of the editable field entirely.
+fn clone_repository(session: &SessionInfo) -> Option<Option<GithubRepo>> {
+    let repo = session
+        .working_copy
+        .as_ref()
+        .map(|copy| &copy.repo)
+        .or(session.github_repo.as_ref())?;
+    Some(
+        parse_github_repo(&repo_identifier(repo))
+            .ok()
+            .filter(|parsed| parsed == repo),
+    )
 }
 
 /// The Agent tab's choices, as the user made them. Text fields keep their raw text even while it does not parse, so a
@@ -294,6 +320,10 @@ pub struct LaunchDraft {
     pub folder: Draft<String>,
     /// The managed checkout chosen instead of the folder, or `None` for a folder destination. See [`Checkout`].
     pub checkout: Option<Checkout>,
+    /// The repository of the managed checkout a Clone's source was in, if it was in one: the Clone starts on a new
+    /// checkout of it, named after the source while that repository stays chosen ([`Self::checkout_title`]). `None` for
+    /// every other draft.
+    pub clone_source: Option<GithubRepo>,
     pub name: Draft<String>,
     /// Whether the host is a hand pick ([`Self::choose_host`], which a launch template's host goes through too), rather
     /// than New's prefill or the source session's host a Clone inherited. Save as template checks the host only after
@@ -334,6 +364,7 @@ impl LaunchDraft {
             host,
             folder: Draft::load(folder),
             checkout: None,
+            clone_source: None,
             name: Draft::load(String::new()),
             host_chosen: false,
             name_kind: None,
@@ -343,9 +374,29 @@ impl LaunchDraft {
     /// Clone of `session` on `host` (the caller resolves which host row still names the session's install): its
     /// folder, title and stored launch, with the initial prompt cleared and the conversation selector empty, so the
     /// clone starts fresh (SPEC.md, "Clone").
+    ///
+    /// A session in a managed checkout is cloned onto a new managed checkout of its repository, named `<title>-clone`
+    /// (SPEC.md, "Managed checkouts": "Clone of a session in a managed checkout starts on a managed checkout of that
+    /// repository, preferring its current checkout association over its launch provenance"). The source's folder and
+    /// title are seeded as for any Clone, so choosing Folder brings them back. Seeded, not chosen: nothing is touched.
     pub fn clone_of(session: &SessionInfo, host: Option<i64>) -> LaunchDraft {
         let mut draft = LaunchDraft::seeded(Mode::Clone, session, host);
         draft.seed_launch(&session.launch);
+        match clone_repository(session) {
+            Some(Some(repo)) => {
+                draft.checkout = Some(Checkout {
+                    query: repo_identifier(&repo),
+                    repo: Some(repo.clone()),
+                    chosen: 1,
+                    naming: CheckoutNameSequence::default(),
+                });
+                draft.clone_source = Some(repo);
+            }
+            // A checkout whose repository cannot be carried: still a managed checkout, with nothing chosen, so one press
+            // of Launch cannot start the clone inside the source's own checkout folder.
+            Some(None) => draft.checkout = Some(Checkout::default()),
+            None => {}
+        }
         draft
     }
 
@@ -410,6 +461,7 @@ impl LaunchDraft {
             host,
             folder: Draft::load(session.cwd.clone()),
             checkout: None,
+            clone_source: None,
             name: Draft::load(session.title.clone()),
             host_chosen: false,
             name_kind: None,
@@ -785,6 +837,10 @@ impl LaunchDraft {
         }
         self.host = Some(host);
         self.seed_folder(default_folder);
+        // What was taken on the old host says nothing about this one.
+        if let Some(checkout) = &mut self.checkout {
+            checkout.naming = CheckoutNameSequence::default();
+        }
     }
 
     /// The folder New seeds for the chosen host, which replaces the folder only while the user has not typed or
@@ -841,6 +897,7 @@ impl LaunchDraft {
             query: text,
             repo: None,
             chosen,
+            naming: CheckoutNameSequence::default(),
         });
     }
 
@@ -852,27 +909,74 @@ impl LaunchDraft {
         if self.holds(Field::Destination) {
             return;
         }
-        let chosen = self.checkout.as_ref().map_or(0, |checkout| checkout.chosen) + 1;
+        let previous = self.checkout.take();
+        let chosen = previous.as_ref().map_or(0, |checkout| checkout.chosen) + 1;
+        // Choosing the repository already chosen keeps its name search where it was; another starts it over.
+        let naming = previous
+            .filter(|checkout| checkout.repo.as_ref() == Some(&repo))
+            .map(|checkout| checkout.naming)
+            .unwrap_or_default();
         self.checkout = Some(Checkout {
             query: repo_identifier(&repo),
             repo: Some(repo),
             chosen,
+            naming,
         });
     }
 
     /// The name a managed checkout is previewed and launched with: its folder is named after it, and empty means an
     /// unnamed checkout, which gets the lowest free `<repo>-N` as both folder and title.
     ///
-    /// Clone and Replace with copy their source's title, and a copied title the user has not edited is ignored for a
-    /// checkout (SPEC.md: "Replace with into a managed checkout, Clone into a different repository, and Clone of a
-    /// source with no repository ignore an untouched copied title: the session is unnamed"). The name field shows this
-    /// value while a checkout is chosen, and the copied title again when Folder is chosen back.
+    /// In order (SPEC.md, "Managed checkouts"):
+    /// - A launch template's base name ([`TemplateNameKind::Base`]) is numbered when taken: the base, then `-2` up to
+    ///   `-50`. A fixed name, or one the user typed, is exact and stays a conflict when taken.
+    /// - Clone into its source's own repository, with the copied title untouched and not empty, defaults to
+    ///   `<title>-clone`, numbered the same way.
+    /// - Otherwise a copied title the user has not edited is ignored ("Replace with into a managed checkout, Clone into a
+    ///   different repository, and Clone of a source with no repository ignore an untouched copied title: the session
+    ///   is unnamed").
+    ///
+    /// The name field shows this value while a checkout is chosen, and the copied title again when Folder is chosen
+    /// back; the preview and the create use it alike.
     pub fn checkout_title(&self) -> String {
+        // `numbered_base` is only `Some` with a checkout chosen.
+        if let (Some(base), Some(checkout)) = (self.numbered_base(), &self.checkout) {
+            return checkout.naming.name(&base);
+        }
         let copied = matches!(self.mode, Mode::Clone | Mode::ReplaceWith { .. });
         if copied && !self.name.is_touched() {
             return String::new();
         }
         self.name.value().clone()
+    }
+
+    /// The base a managed checkout's name is numbered from, when it has one: a template's base name, or Clone's
+    /// `<title>-clone` while the source's repository is the one chosen and the user has not named the session.
+    fn numbered_base(&self) -> Option<String> {
+        let repo = self.checkout.as_ref()?.repo.as_ref()?;
+        let name = self.name.value();
+        if self.name_kind == Some(TemplateNameKind::Base) && !name.trim().is_empty() {
+            return Some(name.clone());
+        }
+        // Only Clone seeds `clone_source`, so this is Clone's default.
+        let clone_default = !self.name.is_touched()
+            && !name.trim().is_empty()
+            && self.clone_source.as_ref() == Some(repo);
+        clone_default.then(|| format!("{name}-clone"))
+    }
+
+    /// The helm previewed `title`'s folder as taken. A numbered default name ([`Self::numbered_base`]) moves on to its
+    /// next candidate, which the view then previews; an exact name stays as it is, a conflict the user resolves. Returns
+    /// whether the name moved. Only an answer about the name the draft holds now counts (a late one about an earlier
+    /// candidate moves nothing), and at `-50` the series stops, leaving the conflict visible (SPEC.md: "the cap leaves the
+    /// conflict visible").
+    pub fn advance_checkout_name(&mut self, title: &str) -> bool {
+        if self.numbered_base().is_none() || self.checkout_title() != title {
+            return false;
+        }
+        self.checkout
+            .as_mut()
+            .is_some_and(|checkout| checkout.naming.advance(false))
     }
 
     /// The session name the name field shows: the name as held, or, while a managed checkout is chosen, the name the

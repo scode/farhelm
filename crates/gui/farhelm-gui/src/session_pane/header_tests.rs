@@ -1309,7 +1309,10 @@ fn a_menus_plain_choice_asks_the_main_parts_question(cx: &mut TestAppContext) {
 fn the_with_choices_and_clone_open_the_launcher_and_return_focus_on_cancel(
     cx: &mut TestAppContext,
 ) {
-    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    // An ordinary folder session: Clone of one in a managed checkout names its new checkout `<title>-clone` instead
+    // (`launcher::checkout_tests` covers that), and this test is about the header's way in, not the name.
+    let a = session("a").unmanaged().not_launched_as_checkout();
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&a, 0)], false));
     cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
     pending(&mut fake);
     for (caret, with, verb) in [
@@ -1545,7 +1548,9 @@ fn creates(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> 
 /// launch to finish", and a click on it opens nothing.
 #[gpui::test]
 fn clone_says_why_it_waits_while_a_launch_is_pending(cx: &mut TestAppContext) {
-    let mut row = entry(&session("a"), 0);
+    // An ordinary folder session, so that Launch sends its create at once: a Clone of one in a managed checkout opens on
+    // a new checkout, whose Launch waits for a checkout preview this test does not answer.
+    let mut row = entry(&session("a").unmanaged().not_launched_as_checkout(), 0);
     row.value["launch"] = json!({"kind": "command", "command": "make watch", "yolo": false, "agent": null,
         "resume": null});
     let mut snapshot = snapshot_of(vec![row], false);

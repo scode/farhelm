@@ -259,7 +259,10 @@ fn launch_action(cx: &mut VisualTestContext) -> String {
 #[gpui::test]
 fn the_menus_clone_and_replace_with_open_the_launcher_on_their_row(cx: &mut TestAppContext) {
     use super::host_rail::tests::{hover_help, texts_within};
-    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    // b is an ordinary folder session: Clone of one in a managed checkout names its new checkout `<title>-clone`
+    // instead (`launcher::checkout_tests` covers that), and this test is about which row the launcher opens on.
+    let b = session("b").unmanaged().not_launched_as_checkout();
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (b, 0)], false));
     assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
     deletes(&mut fake);
     cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));

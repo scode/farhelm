@@ -552,6 +552,7 @@ fn settle(
                 key,
                 work,
                 may_still_start,
+                unaccepted: refusal.has(HelmMarker::CreateUnaccepted),
             };
             refused(launcher, refused_launch, window, mark, user_moved_on, cx);
         }
@@ -665,6 +666,12 @@ pub(super) struct RefusedLaunch {
     pub(super) key: OpKey,
     pub(super) work: Work,
     pub(super) may_still_start: bool,
+    /// The helm proved this create was never accepted ([`HelmMarker::CreateUnaccepted`]), whatever it was for: nothing
+    /// was created. For a managed checkout that means the folder it previewed was taken by another create meanwhile, or
+    /// its preview went stale; the launcher then takes a new preview and says nothing was accepted, so the user reviews
+    /// the new folder and presses Launch again (SPEC.md: "If another create wins the displayed path, Launch reports the
+    /// conflict and obtains a new preview; it never submits automatically").
+    pub(super) unaccepted: bool,
 }
 
 /// Withdraw both notices that offer a waiting launcher; at most one is up, and either has nothing left to open once it
