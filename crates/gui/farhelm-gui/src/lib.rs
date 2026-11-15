@@ -60,9 +60,10 @@
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
-//! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance) from
-//! its environment, which a screenshot batch uses to capture each theme and size; the rest of that module is compiled
-//! into every build, so ordinary test runs cover it.
+//! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance, start
+//! dialogs off) from its environment, which a screenshot batch uses to capture each theme and size and every bridge run
+//! uses to keep the Welcome card from opening over the app; the rest of that module is compiled into every build, so
+//! ordinary test runs cover it.
 
 pub mod actions;
 pub mod announcements;

@@ -7,7 +7,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
 
     scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
                                        [--lock FILE] [--window-size WxH] [--appearance light|dark]
-                                       [--scripted-hosts]
+                                       [--scripted-hosts] [--start-dialogs]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
@@ -22,8 +22,11 @@ rendering is Mesa's software Vulkan driver (lavapipe), the same as the screensho
 `--lock FILE` holds an exclusive `flock` on FILE from before the build until `stop`, for a machine whose one GUI
 session several runs share (the test Mac's convention). `--window-size` and `--appearance` start the app's window at
 that size and in that palette (agent builds only; `crates/gui/farhelm-gui/src/agent_startup.rs`), so a screenshot batch
-can capture each theme and size; they are test hooks, not the app's own appearance setting. `--scripted-hosts` makes
-the helm fake every command it runs on a host (setup, Update and the rest) with its scripted provisioning backend
+can capture each theme and size; they are test hooks, not the app's own appearance setting. A run's helm is always
+fresh, so the Welcome card would open over the app and catch the run's first click; `start` therefore turns the
+window's start dialogs (that card and the announcement batch after it) off through the same agent-build overrides, and
+`--start-dialogs` leaves them on to see the real start. `--scripted-hosts` makes the helm fake every command it runs on
+a host (setup, Update and the rest) with its scripted provisioning backend
 (SCRIPTED_HOSTS_ENV, debug builds only), controlled with `script_hosts`. Any other verb goes to the vendored
 `gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
 vendor/gpui-agent/README.md list them. docs/gui-agent.md is the guide.
@@ -226,11 +229,14 @@ def app_env_args(
     window_size: str | None = None,
     appearance: str | None = None,
     scripted_hosts: Path | None = None,
+    start_dialogs: bool = False,
 ) -> list[str]:
     """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file, plus the
     first window's size, a forced appearance and the scripted provisioning backend's directory when the run asks for
     them (unset otherwise, so the app starts at its own default size in the system's appearance and sets up hosts for
-    real)."""
+    real). The start dialogs are off unless `start_dialogs` asks for them, because every run's helm is fresh and would
+    otherwise open the Welcome card over the app. `scripts/gui-lifecycle.py` relaunches with the defaults, so its
+    relaunched app keeps them off too, as it must: the first launch marked nothing seen."""
     pairs = {
         # The app's state directory: never the default one, which could be a real installation's.
         "FARHELM_DESKTOP_STATE_DIR": str(run / "state"),
@@ -245,6 +251,8 @@ def app_env_args(
         pairs["FARHELM_DESKTOP_AGENT_WINDOW_SIZE"] = window_size
     if appearance is not None:
         pairs["FARHELM_DESKTOP_AGENT_APPEARANCE"] = appearance
+    if not start_dialogs:
+        pairs["FARHELM_DESKTOP_AGENT_START_DIALOGS"] = "off"
     if scripted_hosts is not None:
         pairs[SCRIPTED_HOSTS_ENV] = str(scripted_hosts)
     args: list[str] = []
@@ -767,6 +775,12 @@ def start(run: Path, args: list[str]) -> int:
         action="store_true",
         help="fake the commands the helm runs on hosts with its scripted backend (see docs/gui-agent.md)",
     )
+    parser.add_argument(
+        "--start-dialogs",
+        action="store_true",
+        help="let the window's start dialogs (the Welcome card, then announcements) open as in a real launch; off by "
+        "default (agent-build test hook)",
+    )
     options = parser.parse_args(args)
     if options.window_size:
         parse_size(options.window_size)
@@ -837,7 +851,14 @@ def start(run: Path, args: list[str]) -> int:
             "launch",
             "--timeout",
             str(LAUNCH_TIMEOUT_SECONDS),
-            *app_env_args(run, binaries, options.window_size, options.appearance, scripted_hosts),
+            *app_env_args(
+                run,
+                binaries,
+                window_size=options.window_size,
+                appearance=options.appearance,
+                scripted_hosts=scripted_hosts,
+                start_dialogs=options.start_dialogs,
+            ),
             "--",
             binaries["desktop"],
         ],

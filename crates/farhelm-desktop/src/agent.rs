@@ -8,8 +8,9 @@
 //!
 //! The harness (`scripts/gui-agent.py`, docs/gui-agent.md) names a file in its private run directory through
 //! `FARHELM_DESKTOP_AGENT_HELM_FILE`. With the variable unset this does nothing, so an agent build launched by hand
-//! behaves like any other. The harness's other agent-build variables, the first window's size and a forced appearance,
-//! are read by the GUI itself (`farhelm_gui::agent_startup`), because it opens the window and installs the theme.
+//! behaves like any other. The harness's other agent-build variables, the first window's size, a forced appearance and
+//! the start dialogs turned off, are read by the GUI itself (`farhelm_gui::agent_startup`), because it opens the window,
+//! installs the theme and decides what opens at the window's start.
 
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;

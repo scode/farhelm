@@ -1632,8 +1632,8 @@ fn system_follows_the_operating_system_and_an_explicit_choice_does_not(cx: &mut 
 fn the_agent_builds_start_hook_wins_over_the_stored_appearance(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(crate::agent_startup::Overrides {
-            window_size: None,
             preference: Some(theme::Preference::Dark),
+            ..Default::default()
         });
         crate::bootstrap::install_app_state(cx).unwrap();
     });
