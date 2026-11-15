@@ -150,17 +150,17 @@ pub(crate) fn open_at(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    open_dialog(section, opener, mark, window, cx).map(|(layer, _, _)| layer)
+    open_dialog(section, opener, mark, window, cx).map(|(layer, _)| layer)
 }
 
-/// [`open_at`], handing back the dialog and its own focus handle too, for an entry point that tells it more.
+/// [`open_at`], handing back the dialog too, for an entry point that tells it more.
 fn open_dialog(
     section: Section,
     opener: &FocusHandle,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
-) -> Option<(LayerId, Entity<SettingsDialog>, FocusHandle)> {
+) -> Option<(LayerId, Entity<SettingsDialog>)> {
     // An inert window has no store to draw the switches from, and nothing to save through.
     session::current_store(cx)?;
     if focus::has_moved_on(mark, cx) {
@@ -201,7 +201,7 @@ fn open_dialog(
     });
     #[cfg(test)]
     cx.set_global(tests::Opened(dialog.downgrade()));
-    Some((layer, dialog, container))
+    Some((layer, dialog))
 }
 
 /// Open Settings at Agent trust with focus on `agent`'s switch: a trust hint's "Settings and caveats" (SPEC.md: "Trust
@@ -209,23 +209,19 @@ fn open_dialog(
 /// [`open`]'s: the hint's button and the mark taken in its click handler.
 ///
 /// The switch is unavailable until the section's read of the agent's trust answers ([`agent_trust`]), and an
-/// unavailable control cannot hold focus, so the dialog opens with focus on itself and hands focus to the switch once
-/// the read has answered. The handover is skipped when the user has moved on since `mark` (any key press or click, a
-/// click that leaves focus on the dialog included), or moved focus off the dialog in the meantime. If the read fails,
-/// focus stays on the dialog, beside the failure line.
+/// unavailable control cannot hold focus, so the dialog opens with focus on itself and moves focus to the switch once
+/// the read has answered, scrolling the switch into view ([`SettingsDialog::trust_known`]). That matters because only
+/// Claude's switch is always visible when the dialog opens: Muse's and Pi's lie below the fold at the dialog's full
+/// height, and Codex's too when the window caps the dialog's height. Nothing is asked of the focus coordinator until
+/// the read answers, so until then only the user moving on since `mark` (any key press or click, a click that leaves
+/// focus on the dialog included) or focus leaving the dialog stops the move. Once the read has answered, the move waits
+/// in the coordinator for the frame that draws the switch available, and any other focus move made before it lands
+/// drops it. If the read fails, focus stays on the dialog, beside the failure line.
 ///
-/// NOTE: The switch is not scrolled into view, so Muse's and Pi's lie below the fold at the dialog's full height, and
-/// Codex's too when the window caps the dialog's height (in a window shorter than about 730 pixels; the window's
-/// minimum height is 560). Only Claude's switch is always visible. The handover borrows [`focus::move_within_control`],
-/// which moves without revealing its target and whose documented callers are a radio group and an inline question; see
-/// [`SettingsDialog::trust_known`] for why that borrowed use is safe here. It waits for `focus::focus_in_layer` to
-/// accept a target that is not drawn yet, which reveals the switch (not the agent's whole block, which SPEC.md's
-/// "scroll its block into view" asks for).
-///
-/// NOTE: Until then, opening this for any agent but Claude can focus a trust switch the user cannot see (Muse's and
-/// Pi's always, Codex's in a short window), and Space toggles it: a user who presses Space to scroll to the switch
-/// turns that agent's trust on unseen. A hint band that calls this before the reveal lands should either not call it
-/// for an agent whose switch lies below the fold, or accept that risk knowingly.
+/// NOTE: The reveal shows the switch, not the agent's whole block that SPEC.md's "scroll its block into view" names:
+/// for a switch that started below the fold, the help under it (and Muse's hint switch) can stay below the fold. This
+/// is accepted as it stands: revealing the whole block would take a change in the focus coordinator, and none is
+/// requested (`docs/gpui/parity/settings-and-hosts.md`, "Deviations").
 ///
 /// NOTE: Trust is not pushed. A hint band that shows only while its agent's trust is off (SPEC.md) does not learn from
 /// this function that the user turned trust on in Settings: it returns only the layer, and the dialog has no dismissal
@@ -238,12 +234,11 @@ pub fn open_at_agent_trust(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    let (layer, dialog, container) = open_dialog(Section::AgentTrust, opener, mark, window, cx)?;
+    let (layer, dialog) = open_dialog(Section::AgentTrust, opener, mark, window, cx)?;
     // A fresh dialog has just sent its reads, so the switch is not available yet: focus waits for the answer.
     let handover = Handover {
         agent,
         mark: *mark,
-        from: container,
         window: window.window_handle(),
     };
     dialog.update(cx, |dialog, _| dialog.focus_on = Some(handover));
@@ -378,12 +373,11 @@ struct CheckoutFields {
 }
 
 /// What a trust hint's entry point asks of the dialog ([`open_at_agent_trust`]): once `agent`'s read answers, focus
-/// moves from the dialog itself (`from`, in `window`) to that agent's switch, unless the user has moved on since
-/// `mark`.
+/// moves to that agent's switch in `window`, unless the user has moved on since `mark`, the hint's click. The window is
+/// kept because the read's answer reaches the dialog without one, and the focus move needs it.
 struct Handover {
     agent: TrustAgent,
     mark: Mark,
-    from: FocusHandle,
     window: AnyWindowHandle,
 }
 
@@ -468,8 +462,8 @@ impl SettingsDialog {
         cx.notify();
     }
 
-    /// The read of `agent`'s trust answered: the switch shows it, and takes focus if [`open_at_agent_trust`] asked for
-    /// it and the user has not moved on since.
+    /// The read of `agent`'s trust answered: the switch shows it, and takes focus, scrolled into view, if
+    /// [`open_at_agent_trust`] asked for it and the user has not moved on since.
     fn trust_known(
         &mut self,
         agent: TrustAgent,
@@ -478,23 +472,22 @@ impl SettingsDialog {
     ) {
         let trust = &mut self.trust[agent.index()];
         trust.state.read_answered(answer);
-        // The switch takes focus from the dialog itself ([`open_at_agent_trust`]). This borrows
-        // `focus::move_within_control` outside its documented callers (a radio group's arrows and an inline question).
-        // It is safe here for the same two reasons those are: it moves focus only from the dialog itself, which still
-        // holds it only if the user has not moved focus anywhere since the dialog opened, and the target is drawn in
-        // the same layer by the next frame, which this update's notify asks for (the function's contract). The mark
-        // check covers what focus alone cannot: a click that leaves focus on the dialog still counts as moving on.
-        //
-        // TODO: switch to `focus::focus_in_layer`, under the same mark, once it accepts a target that is not drawn yet;
-        // it also scrolls the switch into view.
+        // The move is asked for here, when the read answers, and not when the dialog opens. Until now the switch was
+        // drawn unavailable, and an unavailable switch is not focus-tracked, so no frame reports it drawn: a move asked
+        // at opening would sit as the window's pending move for the whole read, and after a failed read until some
+        // other focus move dropped it, which is the unnoticed wait `focus_in_layer`'s contract rules out for a target
+        // not drawn yet. Its docs name this caller: a result that arrives after the user's action. From here the
+        // switch is drawn available, and so tracked, by the frame this update's notify asks for; the coordinator keeps
+        // the move until that frame draws it and then makes it and scrolls it into view, so nothing here schedules
+        // anything. The call also checks the hint's mark (a click that leaves focus on the dialog still counts as
+        // moving on) and refuses once focus has left the dialog.
         if trust.state.available()
             && let Some(handover) = self.focus_on.take_if(|handover| handover.agent == agent)
-            && !focus::has_moved_on(&handover.mark, cx)
         {
             let to = trust.focus.clone();
             // A window that has closed meanwhile has nothing to focus, so its error is ignored.
             let _ = handover.window.update(cx, |_, window, cx| {
-                focus::move_within_control(&handover.from, &to, window, cx)
+                focus::focus_in_layer(&to, &handover.mark, window, cx)
             });
         }
         cx.notify();
