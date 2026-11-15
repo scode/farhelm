@@ -25,8 +25,8 @@ use crate::components::{Button, HoverHelp, Role};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark};
 use crate::hosts::HostsPanel;
-use crate::hosts::tests::{aliased, connected, host, hosts};
-use crate::operations::Work;
+use crate::hosts::tests::{aliased, connected, host, hosts, nothing_in_flight, start_work};
+use crate::operations::{OpKey, Work};
 use crate::test_support::{
     self, any_open, click, focused, focused_id, keys, label, one_command, settle, started,
 };
@@ -314,6 +314,82 @@ fn add_sends_the_probe_with_its_new_entry_under_the_dialogs_key(cx: &mut TestApp
         [],
         "a second Add while the probe is out sent nothing"
     );
+}
+
+/// Why this matters: adding a host while a session is being launched is the race the old app's page-wide token kept
+/// out; the migration splits that token into each side refusing its own action while the other's work is in flight, and
+/// for Add host "a launch" is any work that creates a session on a host. A refusal that sent the probe anyway, or said
+/// nothing, would bring the race back or leave the user pressing Add in silence. Specified: with each of a launcher
+/// `Launch`, a session's `Restart` and a session's `Replace` in flight in turn, Enter on a new destination sends
+/// nothing, the error line says "Add host: not started, a session launch is in progress; try again when it finishes",
+/// and the destination is kept; once that work is answered, Enter sends the probe.
+#[gpui::test]
+fn add_refuses_while_a_session_launch_restart_or_replace_is_in_flight(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail(cx);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    for (work, key) in [
+        (Work::Launch, OpKey::new_launch()),
+        (Work::Restart, OpKey::session("s1")),
+        (Work::Replace, OpKey::session("s2")),
+    ] {
+        let launch = start_work(&mut helm, cx, work, key);
+        keys(cx, "enter");
+        assert_eq!(
+            helm.commands(),
+            [],
+            "nothing was sent while {work:?} is out"
+        );
+        assert_eq!(
+            error_line(cx).as_deref(),
+            Some(
+                "Add host: not started, a session launch is in progress; try again when it finishes"
+            ),
+            "{work:?}"
+        );
+        assert_eq!(destination(cx), "dev@newbox", "the destination is kept");
+        helm.reply(launch, 200, None);
+        settle(cx);
+        assert!(nothing_in_flight(cx), "the premise: {work:?} settled");
+    }
+    keys(cx, "enter");
+    let (_, body) = one_probe(&mut helm);
+    assert_eq!(body["target"]["destination"], "dev@newbox");
+    assert_eq!(error_line(cx), None, "starting the probe cleared the line");
+}
+
+/// Why this matters: only work that creates a session on a host counts as a launch for Add host; a Stop or a preference
+/// save in flight elsewhere has nothing to do with the host registry, and refusing Add for them would block adding a
+/// host for no reason. It also tells a refusal of launch-like work apart from a refusal of any work at all. Specified:
+/// with a session's `Stop`, then a preference `Save`, in flight in turn, Enter on a new destination sends the probe and
+/// shows no error line; each piece of work and its probe settle before the next starts.
+#[gpui::test]
+fn add_probes_while_work_that_creates_no_session_is_in_flight(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail(cx);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    for (work, key) in [
+        (Work::Stop, OpKey::session("s3")),
+        (Work::Save, OpKey::preferences()),
+    ] {
+        let other = start_work(&mut helm, cx, work, key);
+        keys(cx, "enter");
+        let (probe, body) = one_probe(&mut helm);
+        assert_eq!(body["target"]["destination"], "dev@newbox", "{work:?}");
+        assert_eq!(error_line(cx), None, "{work:?} refused nothing");
+        // The fake helm answers in the order the commands were sent: the other work's first.
+        helm.reply(other, 200, None);
+        helm.reply(
+            probe,
+            200,
+            Some(json!({ "result": "manual", "reason": "no systemd" })),
+        );
+        settle(cx);
+        assert!(
+            nothing_in_flight(cx),
+            "the premise: {work:?} and its probe settled"
+        );
+    }
 }
 
 // ---- The outcomes --------------------------------------------------------------------------------------------------

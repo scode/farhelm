@@ -1,6 +1,7 @@
-//! Tests of the Hosts panel as it draws: the heading's count, a row's name, mark and phase for every host, the Details
-//! switch and the rows that open by themselves, the local host with no supervisor, the read states of the host list,
-//! host text drawn escaped, and (with the real text system) a long name giving way before the phase words.
+//! Tests of the Hosts panel as it draws: the heading's count and add button, a row's name, mark and phase for every
+//! host, the rows as the list's items, the Details switch and the rows that open by themselves, the local host with no
+//! supervisor, the read states of the host list, host text drawn escaped, and (with the real text system) a long name
+//! giving way before the phase words.
 //!
 //! The panel runs over the helm client's fake, connected with pushed hosts and host progress built here, and the
 //! tests read what it drew from GPUI's driver record of the frame, by element id (`host-row-<id>`,
@@ -284,6 +285,49 @@ fn open_panel_with(
     (fake, panel, window)
 }
 
+/// Start `work` under `key` in the current operation store, as the launcher, a session's Restart, Replace or Stop, or a
+/// preference save would, and return the id of the one command it sent, which the fake helm leaves unanswered until the
+/// test replies: the work stays in flight until then. Shared by the hosts module's tests of refusals during a launch.
+pub(crate) fn start_work(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    work: Work,
+    key: OpKey,
+) -> u64 {
+    cx.update(|_, cx| {
+        let operations = session::current_operations(cx).expect("a UI session");
+        let command = Command::new(
+            work,
+            Method::Post,
+            ApiPath::api(&["sessions"]).expect("a valid path"),
+            Some(serde_json::json!({})),
+            "POST /api/sessions",
+        );
+        operations.update(cx, |operations, cx| {
+            operations
+                .start(&key, command, cx, |_, _| {})
+                .expect("the work started");
+        });
+    });
+    test_support::settle(cx);
+    let sent = helm.commands();
+    assert_eq!(
+        sent.len(),
+        1,
+        "the premise: {work:?} is in flight on the wire"
+    );
+    sent[0].id
+}
+
+/// Whether no key in the current operation store has work in flight: a step's premise that the work an earlier step
+/// started has settled.
+pub(crate) fn nothing_in_flight(cx: &mut VisualTestContext) -> bool {
+    cx.update(|_, cx| {
+        session::current_operations(cx)
+            .is_some_and(|operations| !operations.read(cx).any_in_flight(|_| true))
+    })
+}
+
 /// The node drawn under `id`, if any.
 fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
     nodes
@@ -442,6 +486,65 @@ fn every_row_shows_its_name_mark_and_phase_words(cx: &mut TestAppContext) {
     assert_eq!(row(1), ["Local (this machine)", "Local", "Connected"]);
     assert_eq!(row(2), ["build-box", "Remote", "Old version"]);
     assert_eq!(row(3), ["dev@build-box.invalid", "Remote", "Connecting"]);
+}
+
+/// Why this matters: assistive technology reads the rows as the items of the list "Hosts", as the old markup's `ul`
+/// and `li` made them; a row drawn outside the list, or without the item role, reads as loose text and controls. The
+/// test bridge's snapshot builds its tree from the same parents. Specified: every row is drawn with the list-item role
+/// and named by its host's shown name, inside the element with the list role named "Hosts".
+#[gpui::test]
+fn every_row_is_an_item_of_the_hosts_list(cx: &mut TestAppContext) {
+    let (_fake, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    let nodes = frame(cx);
+    let list = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some("host-list"))
+        .expect("the list was drawn");
+    assert_eq!(
+        (nodes[list].role, nodes[list].label.as_deref()),
+        (Some(Role::List), Some("Hosts"))
+    );
+    let inside = |mut at: usize| loop {
+        match nodes[at].parent {
+            Some(parent) if parent == list => return true,
+            Some(parent) => at = parent,
+            None => return false,
+        }
+    };
+    for (id, name) in [(1, "Local (this machine)"), (2, "build-box"), (3, "gpu-1")] {
+        let row = nodes
+            .iter()
+            .position(|node| node.element_id.as_deref() == Some(&format!("host-row-{id}")))
+            .unwrap_or_else(|| panic!("row {id} was drawn"));
+        assert_eq!(
+            (nodes[row].role, nodes[row].label.as_deref()),
+            (Some(Role::ListItem), Some(name))
+        );
+        assert!(inside(row), "row {id} is drawn inside the list");
+    }
+}
+
+/// Why this matters: the heading's add button is the panel's own way to add a host, beside the host rail's Add host,
+/// and closing the dialog it opens must return focus to it on every platform (SPEC.md, "Opening and closing"), also on
+/// macOS, where the click leaves the button unfocused. Specified: the heading draws a button named "Add host"; under
+/// macOS's click rule a click on it opens the Add host dialog, and Escape closes it with focus on the button.
+#[gpui::test]
+fn the_headings_add_button_opens_add_host_and_gets_focus_back(cx: &mut TestAppContext) {
+    let (_fake, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    let nodes = frame(cx);
+    assert_eq!(
+        node(&nodes, "hosts-add").map(|node| (node.role, node.label.as_deref())),
+        Some((Some(Role::Button), Some("Add host")))
+    );
+    test_support::click(cx, "hosts-add");
+    assert!(
+        node(&frame(cx), "add-host").is_some(),
+        "the Add host dialog opened"
+    );
+    test_support::keys(cx, "escape");
+    assert!(node(&frame(cx), "add-host").is_none(), "Escape closed it");
+    assert_eq!(test_support::focused_id(cx).as_deref(), Some("hosts-add"));
 }
 
 // ---- Disclosure ----------------------------------------------------------------------------------------------------

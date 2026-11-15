@@ -18,6 +18,13 @@
 //!   so its refusal can come only after them, or as the timeout reply. The duplicate check reads the pushed hosts and
 //!   compares the destination exactly as typed, as the helm does; the helm checks both again, so a host added elsewhere
 //!   a moment ago is still refused, by the helm's reply instead.
+//! - **During a launch.** Add then refuses to probe while a session launch is in flight anywhere in the operation store
+//!   (the launcher's New or Clone, a session's Restart or Replace: [`super::launch_in_flight`]), and says so in the
+//!   error line ("Add host: " and [`super::LAUNCH_IN_FLIGHT`]) with both fields kept. The old app refused a host change
+//!   during a launch through one page-wide token; here each side refuses its own action while the other's work is in
+//!   flight (decided by the migration's orchestrator on 2026-11-14), and the launcher's refusal of a launch during host
+//!   work is its own. Checked after the two checks above, so the line names a mistake in the fields, which waiting will
+//!   not fix, first.
 //! - **The probe.** Add, Enter in either field, or Enter on the dialog itself sends `POST /api/hosts/probe` for the
 //!   destination with a `new_entry` carrying the alias ([`probe_command`]), as the operation store's work under one
 //!   [`OpKey::new_host_add`] key per opening of the dialog, which is the key the setup submission continues under once
@@ -42,11 +49,6 @@
 //! [`crate::operations::Settled::user_moved_on`] documents for Rename's success), and the layer manager returns focus
 //! only if it is still inside. If the user closed the dialog before the reply, the reply reaches nobody. The setup
 //! confirmation is the one outcome that would open something; [`super::setup`] says how the same rule applies to it.
-//!
-//! NOTE: Interim, until the launcher starts its launches in the operation store (under `OpKey::new_launch()`, as a
-//! launch kind of work): Add is not refused while a launch is in flight, as the old app refused it. Each side is to
-//! refuse its own action, with a reason, while the other's work is in flight in the operation store (decided by the
-//! migration's orchestrator on 2026-11-14); once launches are there, Add's refusal is one `any_in_flight` check.
 //!
 //! NOTE: Not drawn, recorded in `docs/gpui/parity/settings-and-hosts.md`: the host kind choice (SSH or Tensorlake
 //! sandbox), since this milestone adds hosts over SSH only.
@@ -99,6 +101,11 @@ const CANCEL_HELP: &str = "Cancel: close without adding a host";
 
 /// The helm's limit on an alias's length, in characters (its `validate_alias`, which the old app mirrored).
 const ALIAS_MAX_CHARS: usize = 64;
+
+/// The hover help of every control that opens this dialog (the host rail's Add host and the Hosts panel heading's add
+/// button), the old buttons' words, kept although the dialog offers SSH alone for now (the module docs record the
+/// missing Tensorlake choice). One copy, so the entry points cannot drift apart when the choice arrives.
+pub(crate) const ADD_HOST_HELP: &str = "Add host: connect a machine or create a Tensorlake sandbox";
 
 /// Open the Add host dialog on top of everything else in `window`: the entry point for the host rail's Add host and
 /// the Hosts panel heading's add button.
@@ -387,8 +394,8 @@ impl AddHostDialog {
             .is_some_and(|operations| operations.read(cx).in_flight(&self.key).is_some())
     }
 
-    /// Add: refuse what can be refused without contacting anything, else start the probe. Does nothing while the probe
-    /// is out or the window is inert.
+    /// Add: refuse what can be refused without contacting anything, then refuse while a session launch is in flight,
+    /// else start the probe. Does nothing while the probe is out or the window is inert.
     fn add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(operations) = session::current_operations(cx) else {
             return;
@@ -404,6 +411,10 @@ impl AddHostDialog {
                 &alias,
                 store.read(cx).collections().ordered::<HostView>(),
             )
+        });
+        let refused = refused.or_else(|| {
+            super::launch_in_flight(cx)
+                .then(|| error_line().text(format!("Add host: {}", super::LAUNCH_IN_FLIGHT)))
         });
         if let Some(refused) = refused {
             self.problem = Some(refused);
@@ -464,8 +475,11 @@ impl AddHostDialog {
                     mark,
                 };
                 if !setup::asks_first(cx) {
-                    setup::submit(offer, window, cx);
+                    // The close is queued first: a submission refused at once (a launch in flight) reopens Add host
+                    // on a later turn, which must come after this dialog's close, or the close would take the
+                    // reopened dialog with it (closing a layer closes everything above it).
                     self.close_later(None, window, cx);
+                    setup::submit(offer, window, cx);
                 } else if focus::has_moved_on(&mark, cx) {
                     self.problem = Some(error_line().text(setup::MOVED_ON));
                 } else {

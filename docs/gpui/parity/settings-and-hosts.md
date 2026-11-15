@@ -169,7 +169,8 @@ and rerun are in the next section.
 The app opens the dialog from the host rail's Add host, which calls `hosts::add::open` with itself as the opener; that
 button's own tests, and the end-to-end smoke step that opens the dialog and closes it with Escape, are in the sidebar's
 parity file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). The Hosts heading's add
-button, the dialog's other entry point, is not drawn yet.
+button (`+`), the dialog's other entry point, opens it the same way, with itself as the opener:
+`crates/gui/farhelm-gui/src/hosts/tests.rs` `the_headings_add_button_opens_add_host_and_gets_focus_back`.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tests.rs`:
 
@@ -610,10 +611,21 @@ Where the port does not match the old app, and why. Each stays until the work na
   words show in the error line.
 - **Add is busy, not disabled, while the probe is out**, so it keeps focus; the old button was disabled, which dropped
   focus. Its "Checking…" label is the old one.
-- Interim: **Add is not refused while a launch is in flight.** The old app refused it. Each side is to refuse its own
-  action, with a reason, while the other's work is in flight in the operation store (decided by the migration's
-  orchestrator on 2026-11-14); this waits until the launcher starts its launches in the operation store, after which Add
-  refuses with a reason.
+- **Add refuses during a launch with a reason, rather than being disabled.** The old app disabled Add host's entry
+  points and its submit while its one page-wide token for launches and host registry changes was held. Here each side
+  refuses its own action while the other's work is in flight in the operation store (decided by the migration's
+  orchestrator on 2026-11-14): Add, pressed while a launcher New or Clone or a session's Restart or Replace is in
+  flight, sends nothing and says "Add host: not started, a session launch is in progress; try again when it finishes" in
+  its error line, the fields kept (`add_refuses_while_a_session_launch_restart_or_replace_is_in_flight`); other work,
+  such as a Stop or a preference save, does not hold it back
+  (`add_probes_while_work_that_creates_no_session_is_in_flight`). The setup question's Set up and a row's Re-run refuse
+  too: a new host's Add host reopens saying so while the user has not moved on, and otherwise the Hosts panel's line
+  names the host ("Set up build-box: not started, …", "Re-run build-box: not started, …"), as Remove's does
+  (`hosts/setup/tests.rs` `set_up_during_a_launch_sends_nothing_and_reopens_add_host_saying_why`,
+  `without_asking_a_setup_refused_during_a_launch_reopens_add_host`,
+  `set_up_of_a_rerun_during_a_launch_says_why_on_the_panel`,
+  `re_run_during_a_launch_sends_nothing_and_says_why_on_the_panel`). "Set up, don't ask again" refused that way leaves
+  the preference off (`the_permanent_answer_during_a_launch_leaves_the_preference_off`).
 
 ### SSH help
 
@@ -664,6 +676,12 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### The host menu and host settings
 
+- **Focus starts on the first command that can act**, Re-run or Settings, never on the greyed Update. The old menu
+  started on its first command, which was always Retry, so it never started on the greyed Update either; Retry is not
+  ported, and starting on the greyed Update showed no mark of where focus was, since a greyed command takes no
+  highlight. The arrow keys still reach the greyed Update, as the old ones did, and it still draws no highlight there.
+- **A host that reports no build reads "Farhelm not connected"** in the header. The old header showed the host's
+  recorded install path (`remote_farhelm`) in the build's place.
 - **The menu offers Re-run, Settings and Remove so far,** with the local host's greyed Update and its reason before
   Settings. Re-run is drawn for a failed setup on an SSH host only: a Tensorlake sandbox's rerun probes through the
   Tensorlake route and comes with those pieces, and a container's setup belongs to its environment's launch. Remove: see
@@ -682,6 +700,12 @@ Where the port does not match the old app, and why. Each stays until the work na
   and a Save or Use default the key refuses sends nothing, keeps reading "Save" or "Use default", and shows the same
   line under the field. Covered by `a_press_during_another_save_on_the_host_says_why_it_sent_nothing` and
   `saves_on_the_host_wait_for_each_other_without_locking_the_folder` (`hosts/settings/tests.rs`).
+- **Only the destination waits for a session launch.** The old dialog's saves all went through the one page-wide token
+  that launches held, so every one of them waited while a session launched. Here only the SSH destination's Save refuses
+  while a launcher New or Clone or a session's Restart or Replace is in flight, saying "Destination: not started, a
+  session launch is in progress; try again when it finishes" under the field with the draft kept; the alias, the look,
+  the checkout folder and the permissions save as usual (decided by the migration's orchestrator on 2026-11-14). Covered
+  by `the_destination_waits_for_a_launch_and_the_alias_does_not` (`hosts/settings/tests.rs`).
 - **The alias is not checked before it is sent.** The old dialog refused control characters and more than 64 characters
   itself; the helm refuses both, in its own words, which show under the row as any refusal does.
 - **A refused save also shows under the host's row** in the Hosts panel, which opens, as every refused work on a host
@@ -737,10 +761,10 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### The Hosts panel
 
-- Not drawn yet, each until the piece that gives it something to do: the Hosts heading's Update all and add button (the
-  heading keeps its old 32-pixel height meanwhile, and Details sits at the heading's end rather than between the count
-  and them), the inline `↑ Update` button, and Update's progress (its inline status and step list are the setup's, drawn
-  for Update by the Update piece; an Uninstall's come with Uninstall).
+- Not drawn yet, each until the piece that gives it something to do: the Hosts heading's Update all (meanwhile the room
+  it took goes to the automatic margins of the Details switch and the add button's group, as in the old sheet, so
+  Details sits further from the count), the inline `↑ Update` button, and Update's progress (its inline status and step
+  list are the setup's, drawn for Update by the Update piece; an Uninstall's come with Uninstall).
 - **Setup progress has no hover card.** SPEC.md has hovering the inline status open the card the attention list's
   working host shows (the old `HostProgressCard`); the card is shared with the attention list, which is the sidebar's,
   and is not built yet. The status's hover is one line instead, the verb, the count and the whole current step ("Setting

@@ -18,6 +18,9 @@
 //!   will not store). Success closes the field; a refusal keeps the draft with the helm's words under it, including the
 //!   helm's answer that the change waits for a setup or Update running on the host. Escape closes an open field rather
 //!   than the dialog, and does nothing while its save is in flight.
+//! - **During a launch.** A destination's Save sends nothing while a session launch is in flight
+//!   ([`super::launch_in_flight`]), and its row says "Destination: not started, a session launch is in progress;
+//!   try again when it finishes", the draft kept as typed ([`Field::waits_for_launches`] says why only the destination).
 //! - **Appearance.** The sixteen icons and the eight colors, each a pressed-or-not choice ([`appearance`]), a click
 //!   saving icon and color together at once, and a preview of the mark as the session list draws it.
 //! - **Checkouts.** The host's own checkout folder, on every host kind: the shared explicitly saved folder field
@@ -227,6 +230,18 @@ impl Field {
         match self {
             Field::Destination => "destination",
             Field::Alias => "alias",
+        }
+    }
+
+    /// Whether a save of it waits for a session launch in flight ([`super::launch_in_flight`]), and so the words
+    /// its refusal starts with. Only the destination does: it is where a launch on the host dials, so changing it under
+    /// a launch is the race the old app's one page-wide token kept out. The migration's orchestrator decided on
+    /// 2026-11-14 that the alias and the rest of the dialog's saves go ahead during a launch, where the old app made
+    /// all of them wait.
+    fn waits_for_launches(self) -> Option<&'static str> {
+        match self {
+            Field::Destination => Some("Destination: "),
+            Field::Alias => None,
         }
     }
 
@@ -477,6 +492,10 @@ pub(crate) struct HostSettingsDialog {
     /// The control here whose press sent nothing last because another save held the host's key (a field's Save, the
     /// picker, a permission). The folder field, a view of its own, keeps its own.
     refused: Refused,
+    /// The field whose last Save sent nothing because a session launch was in flight ([`Field::waits_for_launches`]):
+    /// its row says so where its save errors show, until its next press gets past the launch check or it closes, and it
+    /// replaces the busy line of an earlier press. The draft stays as typed.
+    launch_refused: Option<Field>,
     /// Set right after the layer opens; what the close controls close.
     layer: Option<LayerId>,
     /// The store's pushes, which an open field follows while untouched.
@@ -526,6 +545,7 @@ impl HostSettingsDialog {
             }),
             layer: None,
             refused: Refused::default(),
+            launch_refused: None,
             _pushes: pushes,
         }
     }
@@ -620,6 +640,7 @@ impl HostSettingsDialog {
         let Some(field) = self.editing.take() else {
             return;
         };
+        self.launch_refused = None;
         focus::focus_in_layer(&self.edit_focus[field.index()], mark, window, cx);
         cx.notify();
     }
@@ -640,6 +661,15 @@ impl HostSettingsDialog {
         if self.editing != Some(field) || self.input(field).draft().is_saving() {
             return;
         }
+        // Each press leaves only its own line: a launch refusal replaces a busy line from an earlier press, and a press
+        // that gets past the launch check takes the launch line away, whatever then becomes of its save.
+        if field.waits_for_launches().is_some() && super::launch_in_flight(cx) {
+            self.launch_refused = Some(field);
+            self.refused.record(field.control(), &Ok(()));
+            cx.notify();
+            return;
+        }
+        self.launch_refused = None;
         let (host, mark) = (self.host, Mark::take(cx));
         let handle = window.window_handle();
         let started = DraftInput::save(
@@ -964,6 +994,18 @@ impl HostSettingsDialog {
         let busy = self.refused.line(field.control(), |id, text| {
             failure_line(id.into(), &HostText::from_host(text), palette).ml(px(ROW_LABEL + ROW_GAP))
         });
+        let during_launch = field
+            .waits_for_launches()
+            .filter(|_| self.launch_refused == Some(field))
+            .map(|prefix| {
+                let words = format!("{prefix}{}", super::LAUNCH_IN_FLIGHT);
+                failure_line(
+                    SharedString::from(format!("host-settings-{key}-launch")),
+                    &HostText::from_host(words),
+                    palette,
+                )
+                .ml(px(ROW_LABEL + ROW_GAP))
+            });
         div()
             .flex()
             .flex_col()
@@ -988,6 +1030,7 @@ impl HostSettingsDialog {
                     .child(content),
             )
             .children(refusal)
+            .children(during_launch)
             .children(busy)
             .into_any_element()
     }
