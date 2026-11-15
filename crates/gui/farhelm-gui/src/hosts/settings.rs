@@ -1,13 +1,16 @@
-//! The host settings dialog: one host's connection, identity mark and permissions, opened from its actions menu.
+//! The host settings dialog: one host's connection, identity mark, checkout folder and permissions, opened from its
+//! actions menu.
 //!
-//! SPEC.md, "Topology" (every host's settings dialog, its destination, alias and identity appearance) and
-//! "Agent-spawned sessions" (the Permissions section). Ported from the old app's `hosts/settings_dialog.rs`
-//! (`HostSettingsDialog`, `HostDialogHeader`), its `HostDestinationForm` and the settings handlers in `hosts.rs`, and
-//! the stylesheet's `.host-settings-*` rules, at reference commit `24bc0580`. Here's the TLDR of its rules:
+//! SPEC.md, "Topology" (every host's settings dialog, its destination, alias, identity appearance and Checkouts
+//! section), "Managed checkouts" (a host's own checkout folder) and "Agent-spawned sessions" (the Permissions section).
+//! Ported from the old app's `hosts/settings_dialog.rs` (`HostSettingsDialog`, `HostDialogHeader`), its
+//! `HostDestinationForm` and the settings handlers in `hosts.rs`, and the stylesheet's `.host-settings-*` rules, at
+//! reference commit `24bc0580`. Here's the TLDR of its rules:
 //!
 //! - **The frame.** 480 pixels wide, a pinned header (the host's mark in its tile, its name, its phase and the build it
-//!   reports, and the "Close host settings" control) and a pinned footer (the note on what saves how, and Close), the
-//!   sections scrolling between them in the old order: Connection, Appearance, Permissions.
+//!   reports, and the "Close host settings" control) and a pinned footer (the note that the checkout folder saves with
+//!   Save while everything else saves as you make it, and Close), the sections scrolling between them in the old order:
+//!   Connection, Appearance, Checkouts, Permissions.
 //! - **Connection.** The SSH destination (SSH hosts only) and the alias, each a value with Edit. Edit swaps the value
 //!   for a field over a [`DraftInput`] seeded with the stored raw value, with Save and Cancel; Save or Enter sends the
 //!   field as typed, except that an alias of nothing but spaces goes as `null` (clearing it), as the old dialog sent
@@ -17,23 +20,32 @@
 //!   than the dialog, and does nothing while its save is in flight.
 //! - **Appearance.** The sixteen icons and the eight colors, each a pressed-or-not choice ([`appearance`]), a click
 //!   saving icon and color together at once, and a preview of the mark as the session list draws it.
+//! - **Checkouts.** The host's own checkout folder, on every host kind: the shared explicitly saved folder field
+//!   ([`CheckoutField::folder`] over [`FolderScope::Host`]), made once per opening, which reads
+//!   `/api/hosts/{id}/checkout-root` as the dialog opens, shows the inherited default as its placeholder, and offers
+//!   Use default while the host has a folder of its own. Its draft, refusal and saved line are the field's own; the
+//!   dialog only draws it, under the old dialog's note.
 //! - **Permissions.** Five switches, each saving its own stored value at once on its own route, with help that
 //!   explains the current behavior.
-//! - **Saving.** Everything saves through the operation store under the host's key ([`OpKey::host`]), which admits one
-//!   request at a time: a click while another save on this host is in flight changes nothing. A switch or a choice shows
-//!   the value being saved only while its save is in flight and the stored value otherwise, so a refused save shows the
-//!   stored value again, with the helm's words under the control until its next save starts (SPEC.md: "A failed save
-//!   restores the last known value and shows an adjacent error"). The refusal also shows under the host's row in the
-//!   Hosts panel, as every refused work on a host does.
+//! - **Saving.** Everything saves through the operation store under the host's key ([`OpKey::host`]), the checkout
+//!   folder included, which admits one request at a time: a click while another save on this host is in flight changes
+//!   nothing, whichever control it is on. A switch or a choice shows the value being saved only while its save is in
+//!   flight and the stored value otherwise, so a refused save shows the stored value again, with the helm's words under
+//!   the control until its next save starts (SPEC.md: "A failed save restores the last known value and shows an
+//!   adjacent error"). The refusal also shows under the host's row in the Hosts panel, as every refused work on a host
+//!   does.
 //! - **Opening and closing.** [`open_settings`] is the entry point. Focus starts on the first Edit (the destination's,
 //!   or the alias's on a host without one), as the old dialog's did. Escape, the header's close control and Close close
 //!   it, and focus returns to the control it was opened from (the menu's toggle); a press outside does nothing. It closes
 //!   by itself when the registry no longer lists the host. A save in flight goes on after it closed.
 //!
-//! NOTE: Not ported yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The Checkouts section between
-//! Appearance and Permissions waits for the shared checkout-folder field, though the footer note already names it.
-//! The old dialog disabled every control while any host write ran and while a field was open; here only the other
-//! field's Edit waits for an open field, and other controls stay live.
+//! NOTE: The old dialog disabled every control while any host write ran and while a field was open, the checkout folder
+//! included (its `disabled: busy || editing.is_some()`). That lock is not ported, the folder's included: here only the
+//! other Connection field's Edit waits for an open field, and every other control stays live. The operation store's
+//! one request per key already keeps two saves on this host from running at once, so a lock would only add a second
+//! way of saying the same thing. And the old lock's other reason, that a toggle's outcome would replace an open field's
+//! refusal in the one outcome line the dialog had, does not hold here, where every control keeps its own refusal. The
+//! cost is that a click refused for the key shows nothing; the parity file's deviations record it.
 
 mod appearance;
 #[cfg(test)]
@@ -64,6 +76,7 @@ use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::layers::{self, Dialog, DismissHook, Dismissal, LayerId, Subject};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::session;
+use crate::settings::{CheckoutField, FolderScope};
 use crate::store::HelmStore;
 use crate::theme::{self, Palette, metrics};
 
@@ -89,8 +102,12 @@ const GROUP_GAP: f32 = 4.;
 /// The host's mark in the header's tile.
 const TILE_MARK: f32 = 24.;
 
-/// The footer's note, the old dialog's words (see the module docs' NOTE).
+/// The footer's note, the old dialog's words: the checkout folder is the one setting here that waits for its Save.
 const FOOTER_NOTE: &str = "Checkout folder saves with Save; other changes save as you make them";
+/// The note under the checkout folder field, the old dialog's words. The field's own words (its label, hover help, Save
+/// and Use default) are the shared field's ([`CheckoutField`]).
+const FOLDER_NOTE: &str = "An empty field uses the default from Settings → Checkouts. ~ means this host's home folder. \
+                           Changes apply to new checkouts; existing checkouts stay where they are.";
 /// The close controls' shared hover help, the old dialog's.
 const CLOSE_HELP: &str = "Close: done with this host's settings";
 
@@ -443,6 +460,9 @@ pub(crate) struct HostSettingsDialog {
     appearance: Draft<(HostIcon, HostColor)>,
     /// One per [`Permission`], by [`Permission::index`].
     switches: Vec<Switch>,
+    /// The Checkouts section's folder field, a view of its own made with the dialog, so its read of the host's folder
+    /// is sent as the dialog opens and its answer reaches only this opening.
+    checkout: Entity<CheckoutField>,
     /// Set right after the layer opens; what the close controls close.
     layer: Option<LayerId>,
     /// The store's pushes, which an open field follows while untouched.
@@ -450,8 +470,9 @@ pub(crate) struct HostSettingsDialog {
 }
 
 impl HostSettingsDialog {
-    /// A dialog over `view`, following `store` while it lives. The store is the current UI session's; a reset closes
-    /// every dialog, so the dialog never outlives it.
+    /// A dialog over `view`, following `store` while it lives, and sending the checkout folder's read now. The store is
+    /// the current UI session's, which the folder field's read needs too ([`CheckoutField`]: without a session it sends
+    /// nothing and stays read-only); a reset closes every dialog, so the dialog never outlives it.
     fn new(
         view: &HostView,
         store: &Entity<HelmStore>,
@@ -481,6 +502,14 @@ impl HostSettingsDialog {
                     focus: cx.focus_handle().tab_stop(true),
                 })
                 .collect(),
+            checkout: cx.new(|cx| {
+                CheckoutField::folder(
+                    FolderScope::Host(HostView::key(view.id)),
+                    FOLDER_NOTE,
+                    window,
+                    cx,
+                )
+            }),
             layer: None,
             _pushes: pushes,
         }
@@ -723,6 +752,14 @@ impl Render for HostSettingsDialog {
                 if kind.supports_appearance() {
                     sections.push(self.appearance_section(&view, palette, cx));
                 }
+                // On every host kind, unlike Appearance (SPEC.md, "Topology").
+                sections.push(section(
+                    "checkouts",
+                    "Checkouts",
+                    false,
+                    vec![self.checkout.clone().into_any_element()],
+                    palette,
+                ));
                 sections.push(self.permissions(&view, palette, cx));
                 let tile = kind
                     .supports_appearance()

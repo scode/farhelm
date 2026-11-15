@@ -2216,19 +2216,23 @@ fn host_menu_scene(state: &SceneState, window: &mut Window, cx: &mut App) -> Any
 }
 
 /// The reference screens' hosts, with `build-box`'s settings open as its menu opens them (reference
-/// `host-settings-dialog`): the header with its mark, name, phase and build, then Connection and Appearance, focus on
-/// the destination's Edit. The dialog opens once the connection has a UI session, whose store the snapshot made, as
-/// [`settings_scene`] opens Settings. The fake, the connection and the watch are kept for the scene's life.
+/// `host-settings-dialog`): the header with its mark, name, phase and build, then Connection, Appearance and the top of
+/// Checkouts, focus on the destination's Edit. The dialog opens once the connection has a UI session, whose store the
+/// snapshot made, as [`settings_scene`] opens Settings, and the checkout folder's read, sent as it opens, is answered
+/// at once as the reference stack had it: no folder of the host's own and no default, so the field shows "No default
+/// set". The fake, the connection and the watch are kept for the scene's life.
 fn host_settings_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    let (mut helm, handle, events) = FakeHelm::new();
+    let (helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(vec![crate::hosts::tests::hosts(
+    let helm = Rc::new(RefCell::new(helm));
+    helm.borrow_mut().connect(vec![crate::hosts::tests::hosts(
         &crate::hosts::tests::reference_hosts(),
     )]);
     let handle = window.window_handle();
     // The scene's ring handle stands in for the menu's toggle, as it stands in for the gear in the Settings scenes.
     let opener = state.ring.clone();
     let opened = Cell::new(false);
+    let answering = helm.clone();
     let watch = cx.observe(&connection, move |connection, cx| {
         if opened.get() || connection.read(cx).session().is_none() {
             return;
@@ -2238,6 +2242,13 @@ fn host_settings_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut 
             let mark = Mark::take(cx);
             crate::hosts::open_settings(2, &opener, &mark, window, cx);
         });
+        let mut helm = answering.borrow_mut();
+        for read in helm.commands() {
+            if read.path == "/api/hosts/2/checkout-root" {
+                let answer = serde_json::json!({ "root": null, "default": null });
+                helm.reply(read.id, 200, Some(answer));
+            }
+        }
     });
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));

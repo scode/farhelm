@@ -1,10 +1,15 @@
 //! Tests of the host settings dialog over the helm client's fake: where focus starts and returns, what each permission
-//! switch, the destination and alias editors and the appearance picker send, and what a refusal leaves on screen.
+//! switch, the destination and alias editors, the appearance picker and the checkout folder send, and what a refusal
+//! leaves on screen.
 //!
 //! The dialog is opened the way the user opens it: a click on a Hosts panel row's toggle, then on the menu's Settings.
 //! The hosts are the reference screens' three (the local host as 1, `build-box` at `dev@build-box` as 2, `gpu-1` as
 //! 3). The tests reach the open dialog through [`Opened`], which only test builds record. Every step ends in one of the
 //! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//!
+//! Every opening reads the host's checkout folder, and the fake answers commands only in the order they were sent, so
+//! [`open_from_menu`] answers that read before a test sends anything else; the Checkouts tests answer it themselves
+//! ([`open_with_folder`]) when the folder matters to them.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
@@ -15,7 +20,7 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
-use super::{Field, HostSettingsDialog};
+use super::{FOLDER_NOTE, Field, HostSettingsDialog};
 use crate::focus;
 use crate::hosts::tests::{hosts, open_panel, reference_hosts};
 use crate::layers;
@@ -37,24 +42,53 @@ const SELECT_ALL: &str = if cfg!(target_os = "macos") {
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
-/// The Hosts panel over the reference hosts in a window tall enough for the whole dialog, so every control can be
-/// clicked where it is drawn, and `build-box`'s settings opened from its menu.
-fn open_build_box(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
-    let (helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
-    cx.simulate_resize(size(px(1600.), px(1600.)));
-    settle(cx);
-    open_from_menu(cx, "host-menu-toggle-2");
-    (helm, cx)
+/// A window tall enough for the whole dialog, every section drawn without scrolling, so every control can be clicked
+/// where it is drawn: a control the body scrolled out of view would be clicked at a point that is not on it.
+const TALL: (f32, f32) = (1600., 2400.);
+
+/// The checkout folder read's answer for a host with no folder of its own and no default, as the reference stack had.
+fn no_folder() -> Value {
+    json!({ "root": null, "default": null })
 }
 
-/// Open the settings of the host whose toggle is `toggle`, from its menu, and check that they opened.
-fn open_from_menu(cx: &mut VisualTestContext, toggle: &'static str) {
+/// The Hosts panel over the reference hosts in a [`TALL`] window, and `build-box`'s settings opened from its menu, its
+/// checkout folder's read answered with [`no_folder`].
+fn open_build_box(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
+    open_build_box_with_folder(cx, no_folder())
+}
+
+/// Open the settings of the host whose toggle is `toggle`, from its menu, check that they opened, and answer the
+/// checkout folder's read with [`no_folder`].
+fn open_from_menu(helm: &mut FakeHelm, cx: &mut VisualTestContext, toggle: &'static str) {
+    open_with_folder(helm, cx, toggle, no_folder());
+}
+
+/// [`open_from_menu`] with `folder` as the answer to the checkout folder's read, which must be the one command the
+/// opening sent, a `GET` of the host's own route.
+fn open_with_folder(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    toggle: &'static str,
+    folder: Value,
+) {
     click(cx, toggle);
     click(cx, "host-menu-settings");
     assert!(
         node(&frame(cx), "host-settings").is_some(),
         "the premise: the settings opened"
     );
+    let host = toggle.trim_start_matches("host-menu-toggle-");
+    let sent = helm.commands();
+    assert_eq!(sent.len(), 1, "the opening read the folder alone: {sent:?}");
+    assert_eq!(
+        (sent[0].method, sent[0].path.as_str()),
+        (
+            Method::Get,
+            format!("/api/hosts/{host}/checkout-root").as_str()
+        )
+    );
+    helm.reply(sent[0].id, 200, Some(folder));
+    settle(cx);
 }
 
 /// The dialog opened last, which must still be open.
@@ -162,7 +196,7 @@ fn any_open(cx: &mut VisualTestContext) -> bool {
 /// alias".
 #[gpui::test]
 fn focus_starts_on_the_first_edit(cx: &mut TestAppContext) {
-    let (_helm, cx) = open_build_box(cx);
+    let (mut helm, cx) = open_build_box(cx);
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-settings-edit-destination")
@@ -177,7 +211,7 @@ fn focus_starts_on_the_first_edit(cx: &mut TestAppContext) {
     );
     keys(cx, "escape");
 
-    open_from_menu(cx, "host-menu-toggle-1");
+    open_from_menu(&mut helm, cx, "host-menu-toggle-1");
     assert!(!drawn(cx, "host-settings-edit-destination"));
     assert_eq!(focused_id(cx).as_deref(), Some("host-settings-edit-alias"));
     assert_eq!(
@@ -192,8 +226,8 @@ fn focus_starts_on_the_first_edit(cx: &mut TestAppContext) {
 /// settings" and the footer's Close each close the dialog, and leave focus on `build-box`'s toggle.
 #[gpui::test]
 fn escape_and_both_close_controls_return_focus_to_the_toggle(cx: &mut TestAppContext) {
-    let (helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
-    cx.simulate_resize(size(px(1600.), px(1600.)));
+    let (mut helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    cx.simulate_resize(size(px(TALL.0), px(TALL.1)));
     cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
     settle(cx);
     for close in [
@@ -201,7 +235,7 @@ fn escape_and_both_close_controls_return_focus_to_the_toggle(cx: &mut TestAppCon
         "host-settings-close",
         "host-settings-footer-close",
     ] {
-        open_from_menu(cx, "host-menu-toggle-2");
+        open_from_menu(&mut helm, cx, "host-menu-toggle-2");
         if close == "escape" {
             keys(cx, "escape");
         } else {
@@ -258,11 +292,11 @@ fn the_dialog_closes_when_the_registry_no_longer_lists_its_host(cx: &mut TestApp
 /// focus in the destination field.
 #[gpui::test]
 fn a_click_on_edit_focuses_its_field_under_the_macos_click_rule(cx: &mut TestAppContext) {
-    let (_helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
-    cx.simulate_resize(size(px(1600.), px(1600.)));
+    let (mut helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    cx.simulate_resize(size(px(TALL.0), px(TALL.1)));
     cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
     settle(cx);
-    open_from_menu(cx, "host-menu-toggle-2");
+    open_from_menu(&mut helm, cx, "host-menu-toggle-2");
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-settings-edit-destination"),
@@ -575,4 +609,217 @@ fn the_picker_is_reached_and_used_by_keyboard(cx: &mut TestAppContext) {
     assert_eq!(focused_id(cx).as_deref(), Some("host-color-lavender"));
     let (_, _, body) = one_command(&mut helm);
     assert_eq!(body, json!({ "icon": "cloud", "color": "lavender" }));
+}
+
+// ---- Checkouts -------------------------------------------------------------------------------------------------------
+
+/// The route `build-box`'s checkout folder reads and saves.
+const FOLDER_ROUTE: &str = "/api/hosts/2/checkout-root";
+
+/// [`open_build_box`] with `folder` as the answer to the checkout folder's read.
+fn open_build_box_with_folder(
+    cx: &mut TestAppContext,
+    folder: Value,
+) -> (FakeHelm, &mut VisualTestContext) {
+    let (mut helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    cx.simulate_resize(size(px(TALL.0), px(TALL.1)));
+    settle(cx);
+    open_with_folder(&mut helm, cx, "host-menu-toggle-2", folder);
+    (helm, cx)
+}
+
+/// Every line of text the frame painted, joined with single spaces, so a sentence a wrap split still matches.
+fn painted(cx: &mut VisualTestContext) -> String {
+    let lines: Vec<String> = frame(cx)
+        .into_iter()
+        .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
+        .collect();
+    lines
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The text in the checkout folder field of the dialog opened last.
+fn folder_text(cx: &mut VisualTestContext) -> String {
+    let dialog = dialog(cx);
+    cx.update(|_, cx| dialog.read(cx).checkout.read(cx).text(cx))
+}
+
+/// Click into the checkout folder field, check that the click put focus there, and type `text` over what it holds.
+fn type_folder(cx: &mut VisualTestContext, text: &str) {
+    click(cx, "checkout-folder");
+    let dialog = dialog(cx);
+    let focused = cx.update(|window, cx| dialog.read(cx).checkout.read(cx).focused(window, cx));
+    assert!(focused, "the premise: the click put focus in the field");
+    keys(cx, SELECT_ALL);
+    cx.simulate_input(text);
+    settle(cx);
+}
+
+/// The one command sent since the last call, which must be `method` on the folder's route: its id and its body.
+fn one_folder_command(helm: &mut FakeHelm, method: Method) -> (u64, Value) {
+    let sent = helm.commands();
+    assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
+    assert_eq!(
+        (sent[0].method, sent[0].path.as_str()),
+        (method, FOLDER_ROUTE)
+    );
+    (sent[0].id, sent[0].body.clone().unwrap_or_default())
+}
+
+/// Why this matters: SPEC.md, "Topology", puts every host's own checkout folder in its settings dialog, in a
+/// Checkouts section between Appearance and Permissions "for every host kind", with the default it inherits shown as
+/// the empty field's placeholder; the old dialog had it there with its own note, and the footer already says the folder
+/// waits for Save. Specified: `build-box`'s dialog reads `/api/hosts/2/checkout-root` as it opens (the open helper
+/// checks that it is the one command sent) and draws a group named "Checkouts" below Appearance and above Permissions,
+/// whose empty field shows "Default: ~/src", the old note under it, and no Use default; the local host's dialog draws
+/// the section too, and with no default set says so.
+#[gpui::test]
+fn the_checkouts_section_sits_between_appearance_and_permissions_on_every_host(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) =
+        open_build_box_with_folder(cx, json!({ "root": null, "default": "~/src" }));
+    let nodes = frame(cx);
+    let top = |id: &str| {
+        node(&nodes, id)
+            .unwrap_or_else(|| panic!("{id} is drawn"))
+            .bounds
+            .top()
+    };
+    assert!(top("host-settings-appearance") < top("host-settings-checkouts"));
+    assert!(top("host-settings-checkouts") < top("host-settings-permissions"));
+    assert_eq!(
+        label(cx, "host-settings-checkouts").as_deref(),
+        Some("Checkouts")
+    );
+    assert_eq!(folder_text(cx), "");
+    let shown = painted(cx);
+    assert!(shown.contains("Default: ~/src"), "{shown}");
+    assert!(shown.contains(FOLDER_NOTE), "the old note, whole: {shown}");
+    assert!(!drawn(cx, "checkout-folder-use-default"));
+    keys(cx, "escape");
+
+    open_from_menu(&mut helm, cx, "host-menu-toggle-1");
+    assert!(drawn(cx, "host-settings-checkouts"), "the local host's too");
+    assert!(painted(cx).contains("No default set"), "{}", painted(cx));
+}
+
+/// Why this matters: the folder decides where every new managed checkout on the host goes, so the dialog must change
+/// what the helm stores, not a local copy: `host-checkout-folder.spec.ts` saved, refused, read back and cleared it
+/// through the host's own route. And the save must be work on the host's key, which the dialog's other saves share, so
+/// that two writes to one host never race. The old case also checked that nothing in the field overflowed, which a
+/// helm refusal longer than the field once did here. Specified: a refused folder keeps its draft and shows the helm's
+/// words, wrapped inside the section however long they are; a saved one goes as `PUT /api/hosts/2/checkout-root`
+/// `{"root": ...}` under the host's key, is read back, says "Checkout folder saved" and offers Use default; Use default
+/// sends `{"root": null}`, and the read back empties the field, takes Use default away and shows the default as the
+/// placeholder again.
+#[gpui::test]
+fn the_host_folder_saves_under_the_hosts_key_and_use_default_clears_it(cx: &mut TestAppContext) {
+    let (mut helm, cx) =
+        open_build_box_with_folder(cx, json!({ "root": null, "default": "~/def" }));
+    type_folder(cx, "~another-user/work");
+    click(cx, "checkout-folder-save");
+    let (id, body) = one_folder_command(&mut helm, Method::Put);
+    assert_eq!(body, json!({ "root": "~another-user/work" }));
+    assert_eq!(host_work(cx), Some(Work::Save), "under the host's key");
+    let refusal = "checkout root must be an absolute path (or ~, ~/...), not ~user (fixture refusal, long enough \
+                   to need more than one line in the dialog)";
+    helm.reply(id, 400, Some(json!(refusal)));
+    settle(cx);
+    assert_eq!(label(cx, "checkout-folder-error").as_deref(), Some(refusal));
+    assert_eq!(folder_text(cx), "~another-user/work", "the draft was kept");
+    let nodes = frame(cx);
+    let right = |id: &str| {
+        node(&nodes, id)
+            .unwrap_or_else(|| panic!("{id} is drawn"))
+            .bounds
+            .right()
+    };
+    assert!(
+        right("checkout-folder-error") <= right("host-settings-checkouts"),
+        "the refusal wraps inside its section"
+    );
+
+    type_folder(cx, "/srv/box");
+    click(cx, "checkout-folder-save");
+    let (id, body) = one_folder_command(&mut helm, Method::Put);
+    assert_eq!(body, json!({ "root": "/srv/box" }));
+    helm.reply(id, 204, None);
+    settle(cx);
+    let (id, _) = one_folder_command(&mut helm, Method::Get);
+    helm.reply(
+        id,
+        200,
+        Some(json!({ "root": "/srv/box", "default": "~/def" })),
+    );
+    settle(cx);
+    assert_eq!(
+        label(cx, "checkout-folder-saved").as_deref(),
+        Some("Checkout folder saved")
+    );
+    assert_eq!(folder_text(cx), "/srv/box");
+    assert!(drawn(cx, "checkout-folder-use-default"));
+
+    click(cx, "checkout-folder-use-default");
+    let (id, body) = one_folder_command(&mut helm, Method::Put);
+    assert_eq!(body, json!({ "root": null }));
+    helm.reply(id, 204, None);
+    settle(cx);
+    let (id, _) = one_folder_command(&mut helm, Method::Get);
+    helm.reply(id, 200, Some(json!({ "root": null, "default": "~/def" })));
+    settle(cx);
+    assert_eq!(folder_text(cx), "");
+    assert!(!drawn(cx, "checkout-folder-use-default"));
+    assert!(painted(cx).contains("Default: ~/def"), "{}", painted(cx));
+}
+
+/// Why this matters: the old dialog locked the folder field while any other write to the host ran; this port keeps
+/// the field live and leaves the ordering to the operation store's one request per key instead (the module docs'
+/// NOTE). That is only sound if the key really does hold the folder's Save back, and the folder's save holds the other
+/// controls back, or two writes to one host could cross. Specified: with a permission's save in flight, the field takes
+/// typing, and its Save sends nothing and still reads "Save"; once that save is answered, Save sends the folder; with
+/// the folder's save in flight, a permission's switch sends nothing and keeps showing the stored value; once the save is
+/// done and its read-back answered, the key is free and the field says "Checkout folder saved".
+#[gpui::test]
+fn saves_on_the_host_wait_for_each_other_without_locking_the_folder(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_build_box(cx);
+    let yolo = "host-yolo-without-asking";
+    click(cx, yolo);
+    let (id, _, _) = one_command(&mut helm);
+    assert_eq!(host_work(cx), Some(Work::Save), "the premise: in flight");
+
+    type_folder(cx, "/srv/box");
+    assert_eq!(folder_text(cx), "/srv/box", "the field took typing");
+    click(cx, "checkout-folder-save");
+    assert!(helm.commands().is_empty(), "the key held the folder back");
+    assert_eq!(label(cx, "checkout-folder-save").as_deref(), Some("Save"));
+
+    push_build_box(&mut helm, |host| host.yolo_without_asking = true, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    click(cx, "checkout-folder-save");
+    let (id, body) = one_folder_command(&mut helm, Method::Put);
+    assert_eq!(body, json!({ "root": "/srv/box" }));
+
+    click(cx, yolo);
+    assert!(helm.commands().is_empty(), "the key held the switch back");
+    assert_eq!(on(cx, yolo), Some(true), "the stored value shows");
+    helm.reply(id, 204, None);
+    settle(cx);
+    // The done save reads the folder back; answered, so the test leaves nothing in flight.
+    let (id, _) = one_folder_command(&mut helm, Method::Get);
+    helm.reply(
+        id,
+        200,
+        Some(json!({ "root": "/srv/box", "default": null })),
+    );
+    settle(cx);
+    assert_eq!(host_work(cx), None, "the key is free again");
+    assert_eq!(
+        label(cx, "checkout-folder-saved").as_deref(),
+        Some("Checkout folder saved")
+    );
 }
