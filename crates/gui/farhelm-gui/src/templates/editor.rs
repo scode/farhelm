@@ -46,9 +46,14 @@
 //!   save for Save's busy state and the dialog's.
 //! - **Duplicate** (stored templates only) opens an unsaved copy of the template as it was opened or last saved, not of
 //!   unsaved edits, named by [`duplicate_name`] over the stored names, as a new template that needs Save.
-//!
-//! NOTE: Not here yet, each with its own piece: Delete, and the leave question (until it lands, leaving an unsaved draft,
-//! Duplicate included, discards it).
+//! - **Delete** (stored templates only) sends `DELETE /api/templates/{name}` at once, unsaved edits or not (SPEC.md:
+//!   "Delete takes effect immediately"). Its label is decided from the stored template when the footer is drawn: one
+//!   that fails today's save rules says "Delete permanently", since Undo restores through the ordinary save, which the
+//!   helm would refuse. The press carries out the kind its label said ([`DeleteKind`]). Once the helm has deleted it,
+//!   the dialog drops the editor and offers Undo ([`Ended::Deleted`]); a refusal is said in the status line.
+//! - **The leave question.** While the dialog asks "Save these changes before leaving?" ([`Editor::leave`]), the
+//!   question takes the place of the footer's buttons, as the old band at the editor's foot did. The dialog asks it and
+//!   carries out the answer; the editor only draws it.
 
 use std::collections::HashMap;
 
@@ -60,18 +65,19 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
-    AnyElement, App, Context, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, WeakEntity, Window, div, px,
+    AnyElement, AnyWindowHandle, App, Context, FocusHandle, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
-use super::dialog::TemplatesDialog;
+use super::dialog::{Departure, TemplatesDialog};
 use super::fields::{Draft, Field, capitalized, duplicate_name, name_refusal};
 use super::shortcuts::{self, Bindings};
 use crate::components::{Button, HoverHelp, TextInputEvent, TextInputState, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::prompt::Inline;
 use crate::session;
 use crate::theme::{self, Palette, metrics};
 
@@ -126,13 +132,13 @@ struct Input {
 /// dialog's `templates-editor-status`).
 const STATUS: &str = "templates-editor-status-text";
 
-/// A refusal in the app's own words, for the status line.
-fn said(words: impl Into<SharedString>) -> HostSentence {
+/// A refusal in the app's own words, for the status line (the dialog's own refusals of an Undo too).
+pub(super) fn said(words: impl Into<SharedString>) -> HostSentence {
     HostSentence::new(STATUS).text(words)
 }
 
 /// The helm's refusal, in its own words, which may quote host values, for the status line.
-fn helm_said(message: &HostText) -> HostSentence {
+pub(super) fn helm_said(message: &HostText) -> HostSentence {
     HostSentence::new(STATUS).host(message)
 }
 
@@ -147,6 +153,39 @@ enum Writing {
         new: String,
         step: Step,
     },
+    /// The stored template's Delete: `undo` is the copy to offer Undo for once it is deleted (none for "Delete
+    /// permanently"), `mark` the user's press, which focus moves for.
+    Delete {
+        undo: Option<Box<LaunchTemplate>>,
+        mark: Mark,
+    },
+}
+
+/// How one of the editor's writes ended, for the dialog to act on what reaches beyond the editor: a departure that
+/// waited for a save, or the editor's own end once its template is deleted.
+pub(super) enum Ended {
+    /// Not yet: a rename's next step is in flight.
+    Going,
+    /// The draft is saved (a rename's every step included).
+    Saved,
+    /// Refused or stopped; the status line says why, and the draft is kept.
+    Stopped,
+    /// The stored template is deleted: Undo is offered for `undo`, if the label said it would be, and focus moves for
+    /// the press at `mark`.
+    Deleted {
+        undo: Option<Box<LaunchTemplate>>,
+        mark: Mark,
+    },
+}
+
+/// Which Delete the footer offers for the stored template, decided when it is drawn: an ordinary one, which offers
+/// Undo, or "Delete permanently" for a stored template that fails today's save rules, whose Undo the helm would refuse.
+/// The press carries out the kind its label said (SPEC.md: "The label the user saw decides"), never one worked out
+/// again when the press is handled: a GPUI handler belongs to the frame that drew it, so it holds the drawn kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeleteKind {
+    Restorable,
+    Permanent,
 }
 
 /// A rename's steps, in order: the template saved under its new name, the ⚡ mark moved, the number key moved, the old
@@ -207,6 +246,12 @@ pub(super) struct Editor {
     /// What the dialog's status line says for the editor, until the next save or until another template opens.
     status: Option<HostSentence>,
     writing: Option<Writing>,
+    /// The window the editor is drawn in: a write settles outside any window's update, and what follows it (the
+    /// departure a save waited for, focus after a delete) needs the window.
+    window: AnyWindowHandle,
+    /// The leave question the dialog asked last, drawn in place of the footer's buttons while it is open. A new
+    /// departure replaces it; a new editor drops it unanswered.
+    pub(super) leave: Option<Inline<Departure>>,
 }
 
 impl Editor {
@@ -263,6 +308,8 @@ impl Editor {
             save_focus: cx.focus_handle().tab_stop(true),
             status: None,
             writing: None,
+            window: window.window_handle(),
+            leave: None,
         };
         editor.sync_inputs(window, cx);
         editor
@@ -329,9 +376,41 @@ impl Editor {
         &self.draft
     }
 
-    /// Whether the draft differs from what was opened or last saved.
-    fn dirty(&self) -> bool {
+    /// Replace the draft's name, as typing it would, for the screenshot golden that shows the leave question.
+    #[cfg(test)]
+    pub(super) fn rename_draft(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<TemplatesDialog>,
+    ) {
+        self.edit(window, cx, |editor| editor.draft.name = name.to_owned());
+    }
+
+    /// Whether the draft differs from what was opened or last saved: "Unsaved changes", and what leaving asks about.
+    pub(super) fn dirty(&self) -> bool {
         self.draft != self.baseline
+    }
+
+    /// Which Delete the footer offers ([`DeleteKind`]), judged on the stored template, not the draft: Delete removes
+    /// the stored value even when unsaved edits have repaired it, and Undo would have to save that value back. A name
+    /// the store no longer holds reads as an ordinary Delete, whose press then refuses on its own.
+    fn delete_kind(&self, cx: &App) -> DeleteKind {
+        match self.stored(cx) {
+            Some(stored) if check_template_shape(&stored).is_err() => DeleteKind::Permanent,
+            _ => DeleteKind::Restorable,
+        }
+    }
+
+    /// The stored template this editor holds, as the store has it now.
+    fn stored(&self, cx: &App) -> Option<LaunchTemplate> {
+        let name = self.previous.as_deref()?;
+        let store = session::current_store(cx)?;
+        store
+            .read(cx)
+            .collections()
+            .get::<LaunchTemplate>(name)
+            .cloned()
     }
 
     // ---- Edits ------------------------------------------------------------------------------------------------------
@@ -575,26 +654,27 @@ impl Editor {
     }
 
     /// Save: with unsaved changes and no write in flight, check the draft and write it whole. A stored template saved
-    /// under another name is renamed ([`Editor::rename_from`] takes it from there). See the module docs.
+    /// under another name is renamed ([`Editor::rename_from`] takes it from there). See the module docs. Returns
+    /// whether the write was sent, so a departure can wait for it.
     pub(super) fn save(
         &mut self,
         catalog: Option<&[LaunchCatalogModel]>,
         window: &mut Window,
         cx: &mut Context<TemplatesDialog>,
-    ) {
+    ) -> bool {
         if self.writing.is_some() || !self.dirty() {
-            return;
+            return false;
         }
         if let Some(reason) = self.refusal(catalog, cx) {
             self.status = Some(said(reason));
             cx.notify();
-            return;
+            return false;
         }
         let template = self.draft.template();
         let Some(command) = save_command(&template) else {
             self.status = Some(said("This template cannot be sent to Farhelm as it stands"));
             cx.notify();
-            return;
+            return false;
         };
         let writing = match self.previous.clone() {
             Some(old) if old != template.name => Writing::Rename {
@@ -607,15 +687,54 @@ impl Editor {
             },
         };
         self.status = None;
-        if self.start(&OpKey::template(&template.name), command, writing, cx) {
+        let sent = self.start(&OpKey::template(&template.name), command, writing, cx);
+        if sent {
+            self.sync_inputs(window, cx);
+        }
+        cx.notify();
+        sent
+    }
+
+    /// Delete the stored template this editor holds, as the footer's `kind` of Delete said. The stored template as the
+    /// store holds it now is the copy Undo restores (SPEC.md, "One GUI at a time": "Undo of a delete restores the copy
+    /// the Templates dialog had loaded rather than the one deleted"). See the module docs.
+    pub(super) fn delete(
+        &mut self,
+        kind: DeleteKind,
+        window: &mut Window,
+        cx: &mut Context<TemplatesDialog>,
+    ) {
+        if self.writing.is_some() {
+            return;
+        }
+        let Some(name) = self.previous.clone() else {
+            return;
+        };
+        let Some(stored) = self.stored(cx) else {
+            self.status = Some(said(
+                "This template is no longer stored, so there is nothing to delete",
+            ));
+            cx.notify();
+            return;
+        };
+        let Some(command) = delete_command(&name) else {
+            return;
+        };
+        let writing = Writing::Delete {
+            undo: (kind == DeleteKind::Restorable).then(|| Box::new(stored)),
+            mark: Mark::take(cx),
+        };
+        self.status = None;
+        if self.start(&OpKey::template(&name), command, writing, cx) {
             self.sync_inputs(window, cx);
         }
         cx.notify();
     }
 
-    /// Send `command` on `key` as the editor's write `writing`, its completion reaching [`Editor::settled`]. Returns
-    /// whether it was sent; the operation store refuses a key with work in flight, which the editor's own busy state
-    /// keeps from happening, and a retired store sends nothing.
+    /// Send `command` on `key` as the editor's write `writing`, its completion reaching the dialog
+    /// ([`TemplatesDialog::write_settled`]) inside the editor's window. Returns whether it was sent; the operation store
+    /// refuses a key with work in flight, which the editor's own busy state keeps from happening, and a retired store
+    /// sends nothing.
     fn start(
         &mut self,
         key: &OpKey,
@@ -627,21 +746,24 @@ impl Editor {
             return false;
         };
         let weak = cx.weak_entity();
+        let window = self.window;
         let preference = *key == OpKey::preferences();
         let started = operations.update(cx, |operations, cx| {
             operations.start(key, command, cx, move |settled, cx| {
                 let outcome = settled.outcome.clone();
-                let _ = weak.update(cx, |dialog, cx| {
-                    // A rename's preference writes are the editor's: the line under the panes that reports a refused
-                    // ⚡ or number-key write from the list must not take them for its own. Writes on a template's key
-                    // leave that line alone.
-                    if preference {
-                        dialog.forget_preference_write();
-                    }
-                    if let Some(editor) = dialog.editor.as_mut() {
-                        editor.settled(outcome, cx);
-                    }
-                    cx.notify();
+                // A completion runs from the store's own task, never inside a window's update, so the window is
+                // free to enter. A closed window has closed the dialog with it.
+                let _ = window.update(cx, |_, window, cx| {
+                    weak.update(cx, |dialog, cx| {
+                        // A rename's preference writes are the editor's: the line under the panes that reports a
+                        // refused ⚡ or number-key write from the list must not take them for its own. Writes on a
+                        // template's key leave that line alone.
+                        if preference {
+                            dialog.forget_preference_write();
+                        }
+                        dialog.write_settled(outcome, window, cx);
+                        cx.notify();
+                    })
                 });
             })
         });
@@ -660,10 +782,11 @@ impl Editor {
     /// The editor's write in flight settled. A save that succeeded makes the draft as sent the new baseline and the
     /// stored template this editor holds; a refused one puts the helm's words in the status line and keeps the draft
     /// for correction. A rename goes on to its next step, or stops with its step's words, the old template kept. Once
-    /// nothing is in flight the inputs take edits again, and focus stays where it is (on Save, which kept it).
-    fn settled(&mut self, outcome: Outcome, cx: &mut Context<TemplatesDialog>) {
+    /// nothing is in flight the inputs take edits again, and focus stays where it is (on Save, which kept it). A
+    /// deletion that succeeded is handed to the dialog, which drops this editor.
+    pub(super) fn settled(&mut self, outcome: Outcome, cx: &mut Context<TemplatesDialog>) -> Ended {
         let Some(writing) = self.writing.take() else {
-            return;
+            return Ended::Stopped;
         };
         // The template route answers a write at once and never accepts one as long work (202); the preference route
         // neither. Both mean done.
@@ -671,22 +794,41 @@ impl Editor {
             Outcome::Done(_) | Outcome::Accepted(_) => None,
             Outcome::Refused(refusal) => Some(refusal.words),
         };
-        match (writing, refused) {
-            (Writing::Save { name }, None) => self.finish_save(name),
+        let ended = match (writing, refused) {
+            (Writing::Save { name }, None) => {
+                self.finish_save(name);
+                Ended::Saved
+            }
             (Writing::Rename { old, new, step }, None) => match step.next() {
-                Some(next) => self.rename_from(old, new, next, cx),
-                None => self.finish_save(new),
+                Some(next) => {
+                    self.rename_from(old, new, next, cx);
+                    if self.writing.is_some() {
+                        Ended::Going
+                    } else {
+                        Ended::Stopped
+                    }
+                }
+                None => {
+                    self.finish_save(new);
+                    Ended::Saved
+                }
             },
-            (Writing::Save { .. }, Some(message)) => self.status = Some(helm_said(&message)),
+            (Writing::Delete { undo, mark }, None) => return Ended::Deleted { undo, mark },
+            (Writing::Save { .. } | Writing::Delete { .. }, Some(message)) => {
+                self.status = Some(helm_said(&message));
+                Ended::Stopped
+            }
             (Writing::Rename { step, .. }, Some(message)) => {
                 self.status = Some(step.refused(&message));
+                Ended::Stopped
             }
-        }
+        };
         if self.writing.is_none() {
             for (which, input) in &self.inputs {
                 input.state.set_read_only(self.read_only(*which), cx);
             }
         }
+        ended
     }
 
     /// A save, or the last step of a rename, succeeded: the draft as sent is the baseline, and `name` the stored
@@ -851,7 +993,7 @@ impl Editor {
                 "Fields not shown are left as is. Another template can supply choices this one leaves out.",
                 palette,
             ))
-            .child(self.footer(busy, weak, palette))
+            .child(self.footer(busy, weak, palette, cx))
             .into_any_element()
     }
 
@@ -988,15 +1130,31 @@ impl Editor {
     }
 
     /// The editor's own footer (`.templates-editor-footer`, the shared dialog footer's look inside the editor):
-    /// Duplicate for a stored template, then Save, at its right. Save is busy, and so greyed and inert while keeping
-    /// focus, when there is nothing unsaved and while any write of the dialog's is in flight (`busy`).
+    /// Duplicate and Delete for a stored template, then Save, at its right. Save is busy, and so greyed and inert while
+    /// keeping focus, when there is nothing unsaved and while any write of the dialog's is in flight (`busy`). While the
+    /// leave question is open it takes the buttons' place, in the same band.
     fn footer(
         &self,
         busy: bool,
         weak: &WeakEntity<TemplatesDialog>,
         palette: &Palette,
+        cx: &App,
     ) -> impl IntoElement {
         let (pad_y, pad_x) = metrics::DIALOG_FOOTER_PAD;
+        let band = div()
+            .mt_auto()
+            .py(pad_y)
+            .px(pad_x)
+            .flex()
+            .flex_wrap()
+            .justify_end()
+            .gap(px(8.))
+            .bg(theme::color(palette.bg_1))
+            .border_t_1()
+            .border_color(theme::color(palette.border_dim));
+        if let Some(question) = self.leave.as_ref().filter(|question| question.is_open(cx)) {
+            return band.child(div().w_full().child(question.clone()));
+        }
         let save = Button::new(
             "templates-save",
             "Save",
@@ -1034,19 +1192,29 @@ impl Editor {
                 let _ = weak.update(cx, |dialog, cx| dialog.duplicate(window, cx));
             })
         });
-        div()
-            .mt_auto()
-            .py(pad_y)
-            .px(pad_x)
-            .flex()
-            .flex_wrap()
-            .justify_end()
-            .gap(px(8.))
-            .bg(theme::color(palette.bg_1))
-            .border_t_1()
-            .border_color(theme::color(palette.border_dim))
-            .children(duplicate)
-            .child(save)
+        // Delete, for a stored template only, between Duplicate and Save as in the old footer. The handler holds the
+        // kind this frame's label says ([`DeleteKind`]).
+        let delete = self.previous.is_some().then(|| {
+            let weak = weak.clone();
+            let kind = self.delete_kind(cx);
+            let (label, help) = match kind {
+                DeleteKind::Restorable => (
+                    "Delete",
+                    "Delete this template now; undo is available here for about ten seconds",
+                ),
+                DeleteKind::Permanent => (
+                    "Delete permanently",
+                    "Delete this template now; it fails current save rules, so undo is not available",
+                ),
+            };
+            Button::new("templates-delete", label, HoverHelp::tooltip(help), Role::Button)
+                .tier(Tier::Danger)
+                .busy(busy)
+                .on_click(move |_, window, cx| {
+                    let _ = weak.update(cx, |dialog, cx| dialog.delete_editor(kind, window, cx));
+                })
+        });
+        band.children(duplicate).children(delete).child(save)
     }
 }
 
@@ -1265,8 +1433,8 @@ fn preferences_unavailable(cx: &App) -> Option<String> {
     }
 }
 
-/// `DELETE /api/templates/{name}`: a rename's last step, removing the old name. Work on the old name's key, of the
-/// save kind, since the store treats every editor write alike (busy on its own key, never superseded). `None` for a
+/// `DELETE /api/templates/{name}`: Delete, and a rename's last step, removing the old name. Work on the name's key, of
+/// the save kind, since the store treats every editor write alike (busy on its own key, never superseded). `None` for a
 /// name that cannot be a path segment, which a stored name never is.
 fn delete_command(name: &str) -> Option<Command> {
     let path = ApiPath::api(&["templates", name]).ok()?;

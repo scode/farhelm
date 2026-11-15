@@ -2677,6 +2677,37 @@ fn template_number_menu_scene(state: &SceneState, window: &mut Window, cx: &mut 
     div().into_any_element()
 }
 
+/// [`template_editor_setup`], then (reference `template-leave-question`) the name changed to `codex-deep-unsaved` and the
+/// header Close pressed: "Unsaved changes" in the heading, and the leave question at the editor's foot in place of its
+/// buttons, focus on its Save.
+fn template_leave_question_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    template_editor_setup(state, window, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(Cell::new(true))));
+}
+
+/// Nothing on the page, and once the dialog has drawn its editor, the edit and the Close after that frame.
+fn template_leave_question_scene(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let dialog = cx
+        .try_global::<crate::templates::dialog::Opened>()
+        .and_then(|opened| opened.0.upgrade());
+    if let Some(dialog) = dialog
+        && dialog.read(cx).key_button_drawn("codex-deep")
+        && take_pending(state)
+    {
+        window.defer(cx, move |window, cx| {
+            dialog.update(cx, |dialog, cx| dialog.ask_leave_for_golden(window, cx))
+        });
+    }
+    div().into_any_element()
+}
+
 /// Settings as the gear opens it, at Sessions.
 fn settings_sessions_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Sessions, window, cx);
@@ -4082,6 +4113,13 @@ static SCENES: &[Scene] = &[
         size: (1010., 940.),
         draw: template_number_menu_scene,
         setup: template_number_menu_setup,
+    },
+    Scene {
+        name: "template-leave-question",
+        // The reference window's 1000 pixels of height, so the question shows whole below the editor's fields.
+        size: (1010., 1000.),
+        draw: template_leave_question_scene,
+        setup: template_leave_question_setup,
     },
     Scene {
         name: "settings-sessions",

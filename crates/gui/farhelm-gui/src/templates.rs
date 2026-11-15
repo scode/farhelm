@@ -52,6 +52,8 @@ mod editor_tests;
 #[cfg(test)]
 mod fields_tests;
 #[cfg(test)]
+mod leave_tests;
+#[cfg(test)]
 mod sequence_tests;
 #[cfg(test)]
 mod shortcuts_tests;
