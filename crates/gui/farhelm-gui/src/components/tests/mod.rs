@@ -23,6 +23,7 @@
 mod button;
 mod checkbox;
 mod copy_button;
+mod custom_flags;
 mod dialog;
 mod divider;
 mod enter_choice;

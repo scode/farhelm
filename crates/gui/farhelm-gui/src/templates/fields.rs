@@ -538,7 +538,7 @@ pub fn duplicate_name(name: &str, names: &[&str]) -> String {
 }
 
 /// A shared rule's reason as a sentence: its first letter capitalized (the old app's `local_validation_notice`).
-fn capitalized(mut reason: String) -> String {
+pub(super) fn capitalized(mut reason: String) -> String {
     if let Some(first) = reason.get_mut(..1) {
         first.make_ascii_uppercase();
     }
