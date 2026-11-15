@@ -138,6 +138,21 @@ pub fn quick_launch(window: &mut Window, cx: &mut App) {
     );
 }
 
+/// Start the template holding number key `digit` (SPEC.md, "Template number shortcuts"): the main view's handler of
+/// `TemplateNumberKey`, which the physical-key table runs for Cmd+digit on a Mac and Ctrl+Shift+digit on Linux. It
+/// goes the ⚡ chord's way through the dispatcher, with two differences the number-key origin makes: an unbound key
+/// opens Templates with the binding hint, and a template that cannot launch alone (number keys may hold one) opens New
+/// with the banner explaining how to combine it with the sequence prefix.
+pub fn number_key(digit: u8, window: &mut Window, cx: &mut App) {
+    dispatch::dispatch(
+        dispatch::Origin::NumberKey,
+        // The bindings map spells its keys as the digit's decimal text ("1", ..., "0").
+        &[dispatch::Reference::Key(digit.to_string())],
+        window,
+        cx,
+    );
+}
+
 /// Begin a quick-launch sequence for the prefix (SPEC.md, "Quick-launch sequences"), its pill centered over `anchor`,
 /// the main pane as last drawn: the main view's handler of `BeginSequence`. Nothing happens while a dialog keeps the
 /// keyboard, while the window is inert, or before the pane was drawn ([`armed::begin`]).

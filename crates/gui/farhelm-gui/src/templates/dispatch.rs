@@ -37,8 +37,9 @@
 //! press; the hosts, remembered wrapper prefixes and default folders they are applied against are read from the store
 //! when they apply, which for a press that waited is a frame or two later and fresher.
 //!
-//! NOTE: The number-key banner's six-second expiry (SPEC.md, "Template number shortcuts") is not built: it comes with
-//! the number keys, and until then every banner stays until the draft is edited.
+//! The banner New opens with goes about six seconds after the templates applied, or at the user's first edit (SPEC.md,
+//! "Template number shortcuts", which the sequence's banner follows); the launcher keeps that deadline
+//! (`launcher::view::BANNER_SHOWS_FOR`).
 
 use farhelm_proto::launcher::{LaunchTemplate, stacked_quick_launch_eligible};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView, PREFERENCES_KEY, Preferences};
