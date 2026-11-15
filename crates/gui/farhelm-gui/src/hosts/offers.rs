@@ -20,9 +20,9 @@
 //! - Uninstall, Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
-//! draws Settings and the helm's own machine's greyed Update so far. The rerun, the live Update and Remove are decided
-//! here already and drawn by the pieces of the port that send them; until then only the rerun's description is unused
-//! outside tests, under its own `expect(dead_code)`.
+//! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), Settings and the helm's own machine's
+//! greyed Update so far. The rerun of a failed Update, the live Update and Remove are decided here already and drawn by
+//! the pieces of the port that send them.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
@@ -94,6 +94,19 @@ impl HostKind {
         match self {
             HostKind::Local => true,
             HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
+        }
+    }
+
+    /// Whether the menu's Re-run can run the host's failed setup again: only over SSH so far, by probing its registered
+    /// destination ([`super::setup::rerun`]). The helm's own machine never runs a setup from the panel, so it has no
+    /// failed one; a Tensorlake sandbox's rerun probes through the Tensorlake route, which comes with the Tensorlake
+    /// pieces of the port; a container is set up through its environment's launch, as the old app told the user.
+    pub(crate) fn reruns_setup(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
                 false
             }
         }
@@ -214,13 +227,6 @@ pub(crate) enum Rerun {
 
 impl Rerun {
     /// The menu item's description line, as the old menu worded it.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the menu draws the rerun with the setup and Update pieces"
-        )
-    )]
     pub(crate) fn description(self) -> &'static str {
         match self {
             Rerun::Setup => "Try the failed setup again",

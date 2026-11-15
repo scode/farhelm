@@ -7,10 +7,11 @@
 //! [`Role::Menu`] of their own, each an icon, a label and a description line, walked with Up and Down.
 //!
 //! What the menu offers is [`offers::offers`], one pure function of the pushed host, its retained run and its work in
-//! flight, read while the menu draws, so an open menu follows the host. So far it draws Settings, which opens the host
-//! settings dialog ([`super::settings`]), and on the helm's own machine the greyed Update with the reason it is greyed
-//! ("Run the installer again to update this machine"), which sends nothing (SPEC.md, "Session list"). Settings is
-//! unavailable while the host has work in flight or a run going on.
+//! flight, read while the menu draws, so an open menu follows the host. So far it draws Re-run on an SSH host whose
+//! setup failed, which runs it again ([`super::setup::rerun`]); Settings, which opens the host settings dialog
+//! ([`super::settings`]); and on the helm's own machine the greyed Update with the reason it is greyed ("Run the
+//! installer again to update this machine"), which sends nothing (SPEC.md, "Session list"). Settings is unavailable
+//! while the host has work in flight or a run going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -21,10 +22,10 @@
 //! Linux), home.
 //!
 //! NOTE: Each of the other commands arrives with the piece of the port that sends it, at its place in the old order
-//! (a rerun, Update, Settings, then Remove behind a separator), and the toggle keeps the old hover help, which names
-//! them already. Not ported: the old menu's Retry and Adopt (the migration's settings-and-hosts area left both out of
-//! the port's second milestone on 2026-11-14), opening the menu with the arrow keys from the closed toggle, and the
-//! flyout's pointer notch.
+//! (a rerun, Update, Settings, then Remove behind a separator; the rerun of a failed Update with Update), and the
+//! toggle keeps the old hover help, which names them already. Not ported: the old menu's Retry and Adopt (the
+//! migration's settings-and-hosts area left both out of the port's second milestone on 2026-11-14), opening the menu
+//! with the arrow keys from the closed toggle, and the flyout's pointer notch.
 
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
@@ -34,7 +35,7 @@ use gpui::{
 };
 
 use super::identity::{display_name, phase};
-use super::offers::{self, Offers, Update};
+use super::offers::{self, HostKind, Offers, Rerun, Update};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier};
 use crate::focus::{self, Mark};
@@ -120,19 +121,26 @@ pub fn open_menu(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    let (_, offered) = current(host, cx)?;
+    let (view, offered) = current(host, cx)?;
     if focus::has_moved_on(mark, cx) {
         return None;
     }
+    let rerun_focus = cx.focus_handle().tab_stop(true);
     let update_focus = cx.focus_handle().tab_stop(true);
     let settings_focus = cx.focus_handle().tab_stop(true);
-    let start = match offered.update {
-        Some(Update::Greyed) => update_focus.clone(),
-        Some(Update::Available) | None => settings_focus.clone(),
+    // Focus starts on the first command, as the old menu's did.
+    let start = if reruns_setup(&view, &offered) {
+        rerun_focus.clone()
+    } else {
+        match offered.update {
+            Some(Update::Greyed) => update_focus.clone(),
+            Some(Update::Available) | None => settings_focus.clone(),
+        }
     };
     let menu = cx.new(|_| HostMenu {
         host,
         opener: opener.clone(),
+        rerun_focus,
         update_focus,
         settings_focus,
         layer: None,
@@ -167,6 +175,12 @@ fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
     Some((view, offered))
 }
 
+/// Whether the menu draws Re-run for `view`: what it offers is the rerun of a failed setup, on a kind whose setup the
+/// rerun can run again so far ([`HostKind::reruns_setup`]).
+fn reruns_setup(view: &HostView, offered: &Offers) -> bool {
+    matches!(offered.rerun, Some((Rerun::Setup, _))) && HostKind::of(view).reruns_setup()
+}
+
 /// The toggle's and the menu's accessible name for a host named `name`: "Host actions for" and the name escaped as the
 /// screen shows it, cut short ([`MenuHeader::clamp_name`]). Every row has a toggle, so the name must say whose.
 fn actions_label(name: &HostText) -> String {
@@ -178,6 +192,8 @@ pub(crate) struct HostMenu {
     host: i64,
     /// The control the menu was opened from, where the settings dialog returns focus.
     opener: FocusHandle,
+    /// Re-run's focus handle, where the menu starts when it offers it.
+    rerun_focus: FocusHandle,
     /// The greyed Update's focus handle, where the menu starts when it offers one.
     update_focus: FocusHandle,
     /// Settings' focus handle, where the menu starts otherwise.
@@ -198,6 +214,33 @@ impl Render for HostMenu {
             return panel;
         };
         let name = display_name(&view);
+        let rerun = reruns_setup(&view, &offered).then(|| {
+            let (menu, host) = (cx.weak_entity(), self.host);
+            MenuItem::new(
+                "host-menu-rerun",
+                Icon::Restart,
+                "Re-run",
+                HoverHelp::tooltip("Re-run: try this host's failed setup again"),
+                Role::MenuItem,
+            )
+            .description(Rerun::Setup.description())
+            .focus(&self.rerun_focus)
+            .on_click(move |_, window, cx| {
+                // The mark of this click, taken before the menu closes, which moves focus back to the toggle; the
+                // setup confirmation opens only through it.
+                let mark = Mark::take(cx);
+                let layer = menu.upgrade().and_then(|menu| menu.read(cx).layer);
+                if let Some(layer) = layer {
+                    layers::close(layer, window, cx);
+                }
+                // Checked again at the click: a run may have started, or work gone out, since the menu last drew.
+                if let Some((view, offered)) = current(host, cx)
+                    && reruns_setup(&view, &offered)
+                {
+                    super::setup::rerun(&view, mark, window, cx);
+                }
+            })
+        });
         // Only the helm's own machine's greyed Update is drawn so far; the live one comes with the Update piece.
         let update = match offered.update {
             Some(Update::Greyed) => Some(
@@ -242,6 +285,7 @@ impl Render for HostMenu {
                 .aria_label(actions_label(&name))
                 .flex()
                 .flex_col()
+                .children(rerun)
                 .children(update)
                 .child(settings),
         )
