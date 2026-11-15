@@ -1,8 +1,8 @@
 //! Behavior tests for the layer manager, on GPUI's simulated platform: the modal dialog (its veil, its empty-space
 //! rule, its main action and its dismissal hook), the refusal to open a layer once the user has moved on, subjects
-//! and anchors, popovers and menus, the pill drawn above every layer without being one, that the layer stack redraws
-//! only the root, and how a tooltip lays out help in paragraphs (that one test with the real text system, in a
-//! headless app rather than on the simulated platform).
+//! and anchors, popovers and menus, the pill and the approval region drawn above every layer without being one, that
+//! the layer stack redraws only the root, and how a tooltip lays out help in paragraphs (that one test with the real
+//! text system, in a headless app rather than on the simulated platform).
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -873,6 +873,29 @@ fn a_press_in_a_menu_over_the_dialog_is_the_menus(cx: &mut TestAppContext) {
     click(cx, "item");
     assert!(is_open(cx, menu), "the menu stayed open");
     assert!(is_open(cx, dialog), "and so did the dialog");
+}
+
+/// The switcher's outside press is one its veil takes, read in the bubble phase, after a menu opened over it has already
+/// closed itself in the capture phase on the same press; whether the switcher was the top layer is therefore noted when
+/// the press began. Specified: with a menu open over a dialog that closes on an outside press, a press on the veil
+/// beside both closes the menu and leaves the dialog open.
+#[gpui::test]
+fn a_press_on_the_veil_beside_a_menu_over_the_dialog_closes_only_the_menu(cx: &mut TestAppContext) {
+    let OptionDialog {
+        cx,
+        dialog,
+        menu_anchor,
+        ..
+    } = open_option_dialog(cx, SWITCHER, None, Tall::No);
+    let item = handle(cx);
+    let menu = open_menu(cx, menu_anchor, vec![("item", item)]);
+    assert!(
+        !bounds(cx, "panel").intersects(&bounds(cx, "page-corner")),
+        "the premise: the press lands on the veil, outside the switcher"
+    );
+    click(cx, "page-corner");
+    assert!(!is_open(cx, menu), "the press closed the menu");
+    assert!(is_open(cx, dialog), "and only the menu");
 }
 
 /// Without the option nothing changes: an outside press is the veil's, and the dialog stays.
@@ -2617,12 +2640,14 @@ impl Render for ProbePill {
 
 /// Why this matters: the pill exists so the sequence pill stays in view above the launcher's veil (the old one at
 /// z-index 50 over the launcher's backdrop at 40); drawn under the veil it would be dimmed and, for SPEC.md, missing.
+/// The approval cards sit between the two, as the old ones did at z-index 45.
 /// The tooltip goes above it, a choice made here: the old ladder had the two level at z-index 50. A rule-abiding pill shows neither
 /// order to a press, so this test uses a probe that takes presses, and reads the order the frame drew in for the
 /// tooltip, whose card takes no press either.
 ///
 /// Specified: with a dialog open, a press on a probe pill over the page reaches the probe, not the dialog's veil; and in
-/// the drawn frame the dialog's layer comes before the probe, and the probe before a tooltip shown over it.
+/// the drawn frame the dialog's layer comes before an approval card, the card before the probe, and the probe before a
+/// tooltip shown over it.
 #[gpui::test]
 fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppContext) {
     let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
@@ -2632,6 +2657,7 @@ fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppCon
     });
     let only = handle(cx);
     let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    install_card(cx, top_right());
     let presses = Rc::new(Cell::new(0));
     let probe = presses.clone();
     let view = cx.update(move |_, cx| cx.new(|_| ProbePill { presses: probe }));
@@ -2667,6 +2693,9 @@ fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppCon
     let layer = position("the dialog's layer", &|node| {
         node.element_id.as_deref() == Some("layer-0")
     });
+    let card = position("the approval card", &|node| {
+        node.element_id.as_deref() == Some("card")
+    });
     let pill = position("the probe pill", &|node| {
         node.element_id.as_deref() == Some("probe-pill")
     });
@@ -2676,8 +2705,8 @@ fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppCon
             .any(|text| text.text.as_ref() == "Probe help")
     });
     assert!(
-        layer < pill && pill < tooltip,
-        "drawn bottom to top: the dialog ({layer}), the pill ({pill}), the tooltip ({tooltip})"
+        layer < card && card < pill && pill < tooltip,
+        "drawn bottom to top: the dialog ({layer}), the card ({card}), the pill ({pill}), the tooltip ({tooltip})"
     );
 }
 
@@ -2745,6 +2774,389 @@ fn hiding_the_pill_or_a_reset_takes_it_down(cx: &mut TestAppContext) {
             );
         }
     }
+}
+
+// ---- The approval region ---------------------------------------------------------------------------------------------
+
+/// Where a [`Card`] puts its top-left corner in the frame being drawn, or `None` for nowhere (the card draws nothing).
+type Place = Rc<dyn Fn(&Window) -> Option<gpui::Point<gpui::Pixels>>>;
+
+/// The approval region's stand-in for an agent approval card: one button, Allow, on a card placed where `place` says,
+/// or nothing while `shown` is off. It keeps the region's rule ([`layers::install_approval_region`]): the card occludes,
+/// and nothing with a size or a listener is drawn while it is hidden. A press on Allow, or Enter on it, counts an
+/// answer; the card stays until the test hides it, as a real card goes once its answer is accepted.
+struct Card {
+    allow: FocusHandle,
+    shown: Rc<Cell<bool>>,
+    answers: Rc<Cell<u32>>,
+    place: Place,
+}
+
+impl Render for Card {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let Some(at) = (self.place)(window).filter(|_| self.shown.get()) else {
+            return div().into_any_element();
+        };
+        let answers = self.answers.clone();
+        div()
+            .id("card")
+            .debug_selector(|| "card".into())
+            .absolute()
+            .left(at.x)
+            .top(at.y)
+            .w(px(180.))
+            .p(px(10.))
+            .occlude()
+            .child(
+                button("card-allow", &self.allow)
+                    .on_click(move |_, _, _| answers.set(answers.get() + 1)),
+            )
+            .into_any_element()
+    }
+}
+
+/// What a test holds of the [`Card`] it installed: Allow's focus handle, the switch that hides the card, and its count
+/// of answers.
+struct Installed {
+    allow: FocusHandle,
+    shown: Rc<Cell<bool>>,
+    answers: Rc<Cell<u32>>,
+}
+
+/// Install a shown [`Card`] placed by `place` as the window's approval region, as the approvals feature does at window
+/// start, and settle.
+fn install_card(cx: &mut VisualTestContext, place: Place) -> Installed {
+    let (allow, shown, answers) = (handle(cx), Rc::new(Cell::new(true)), Rc::new(Cell::new(0)));
+    let card = Card {
+        allow: allow.clone(),
+        shown: shown.clone(),
+        answers: answers.clone(),
+        place,
+    };
+    cx.update(move |window, cx| {
+        let view = cx.new(|_| card);
+        layers::install_approval_region(view.into(), window, cx);
+    });
+    settle(cx);
+    Installed {
+        allow,
+        shown,
+        answers,
+    }
+}
+
+/// A card in the window's top right corner, clear of a centered or top-placed dialog and of the page's top-left
+/// controls.
+fn top_right() -> Place {
+    Rc::new(|window: &Window| Some(point(window.viewport_size().width - px(200.), px(10.))))
+}
+
+/// Why this matters: an agent that asks while a dialog is open waits on the card, not the dialog, and the old app kept
+/// the card answerable over the quick switcher, the one dialog that closes on a press outside it ("approval remains
+/// answerable while the quick switcher is open"). A press on the card is outside the switcher by geometry, so the
+/// switcher's close must come from its own veil instead.
+///
+/// Specified: with the switcher open and its control focused, a press on the card's Allow answers it and the switcher
+/// stays open.
+#[gpui::test]
+fn a_press_on_an_approval_card_answers_it_and_leaves_the_quick_switcher_open(
+    cx: &mut TestAppContext,
+) {
+    let OptionDialog {
+        cx, dialog, only, ..
+    } = open_option_dialog(cx, SWITCHER, None, Tall::No);
+    let card = install_card(cx, top_right());
+    assert!(
+        focused(cx, &only),
+        "the premise: the switcher's control has focus"
+    );
+    assert!(
+        !bounds(cx, "card").intersects(&bounds(cx, "panel")),
+        "the premise: the card is drawn outside the switcher"
+    );
+    click(cx, "card-allow");
+    assert_eq!(card.answers.get(), 1, "the press answered the card");
+    assert!(is_open(cx, dialog), "and the switcher stayed open");
+}
+
+/// Why this matters: the old "Rename wraps Close through Save while a real approval remains usable". A card stays
+/// usable over an ordinary dialog, and a key meant for the card must not act on the dialog behind it: Escape there
+/// would close a Rename and lose its text. The dialog's own rules (its veil, its Escape and focus return) are the
+/// existing dialog tests'; only Tab is checked here, since the card's controls must stay out of the dialog's Tab.
+///
+/// Specified, where a click focuses controls: with a card shown, Tab in a dialog of Save and Close wraps between the
+/// two; a press on Allow answers it and leaves focus there, Enter answers again and Escape does nothing, the dialog
+/// staying open throughout; Tab from Allow goes back into the dialog; with focus back on Allow, the card going sends
+/// focus into the dialog.
+#[gpui::test]
+fn an_approval_card_stays_usable_over_a_dialog(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    let card = install_card(cx, top_right());
+    let (save, close) = (handle(cx), handle(cx));
+    let (dialog, container, _) = open_dialog(
+        cx,
+        vec![("save", save.clone()), ("close", close.clone())],
+        &save,
+    );
+    assert!(focused(cx, &save), "the premise: the dialog starts on Save");
+    keys(cx, "tab tab");
+    assert!(
+        focused(cx, &save),
+        "Tab wrapped through Close to Save, past the card"
+    );
+
+    click(cx, "card-allow");
+    assert_eq!(card.answers.get(), 1, "the press answered the card");
+    assert!(
+        focused(cx, &card.allow),
+        "and focused Allow, with the dialog open"
+    );
+    keys(cx, "enter");
+    assert_eq!(card.answers.get(), 2, "Enter on Allow answered it");
+    keys(cx, "escape");
+    assert!(is_open(cx, dialog), "Escape on Allow left the dialog open");
+    assert!(focused(cx, &card.allow), "and focus on Allow");
+    keys(cx, "tab");
+    let in_dialog =
+        |cx: &mut VisualTestContext| cx.update(|window, cx| container.contains_focused(window, cx));
+    assert!(in_dialog(cx), "Tab from Allow went back into the dialog");
+
+    click(cx, "card-allow");
+    assert!(
+        focused(cx, &card.allow),
+        "the premise: Allow has focus again"
+    );
+    card.shown.set(false);
+    redraw(cx);
+    assert!(in_dialog(cx), "the card going sent focus into the dialog");
+}
+
+/// Why this matters: the old "host retirement releases before removal and preserves approval focus" and "SSH command
+/// arrival preserves an independent approval owner". A user answering a card must not have focus pulled off it by the
+/// dialog behind finishing on its own; and a card going with no dialog open must leave focus where keys still work.
+///
+/// A dialog whose subject goes (the retired host's) closes through the same close as one its opener closes, so the
+/// opener's close stands for both.
+///
+/// Specified, where a click focuses controls: with focus put on Allow while a dialog is open, a late move the dialog
+/// makes inside itself does nothing, and the dialog closing leaves focus on Allow; with no dialog open, the card going
+/// sends focus home.
+#[gpui::test]
+fn focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card(
+    cx: &mut TestAppContext,
+) {
+    let home = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let drawn = home.clone();
+    let cx = open(cx, move |_, _| button("home", &drawn).into_any_element());
+    cx.update(|window, cx| focus::set_home(Some(&home), window, cx));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    let card = install_card(cx, top_right());
+    assert!(focused(cx, &home), "the premise: focus is home");
+
+    let save = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("save", save.clone())], &save);
+    click(cx, "card-allow");
+    assert!(
+        focused(cx, &card.allow),
+        "the premise: Allow has focus, with the dialog open"
+    );
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        focus::focus_in_layer(&save, &mark, window, cx);
+    });
+    settle(cx);
+    assert!(
+        focused(cx, &card.allow),
+        "the dialog's late move left focus on Allow"
+    );
+    cx.update(|window, cx| layers::close(dialog, window, cx));
+    settle(cx);
+    assert!(!is_open(cx, dialog), "the premise: the dialog closed");
+    assert!(focused(cx, &card.allow), "and focus stayed on Allow");
+
+    card.shown.set(false);
+    redraw(cx);
+    assert!(
+        focused(cx, &home),
+        "with no dialog open, the card going sent focus home"
+    );
+}
+
+/// Why this matters: the region is installed for the window's whole life and draws nothing most of the time. If the
+/// empty region, or the box its view is laid out in, took presses, the page under the card's place would stop
+/// working, and a press on the page's empty space would no longer send focus home. And a region counted as a layer
+/// would stop every shortcut that refuses while something is open.
+///
+/// Specified, where a click focuses controls: with the card hidden, a press where it would be clicks the page control
+/// drawn there, and a press on the page's empty space inside the card's place sends focus home; with the card shown, no
+/// layer is open (`any_open`, `focus_layer_open` and `trap` all say so). And since the approvals feature installs the
+/// region once, a reset ([`layers::close_all`]) must leave it: after one, the card is still drawn and still answers a
+/// press.
+#[gpui::test]
+fn an_empty_approval_region_covers_nothing_and_no_region_is_a_layer(cx: &mut TestAppContext) {
+    let presses = Rc::new(Cell::new(0));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let (home, under) = (
+        cx.update(|cx| cx.focus_handle().tab_stop(true)),
+        cx.update(|cx| cx.focus_handle().tab_stop(true)),
+    );
+    let (counted, out, drawn_home, drawn_under) = (
+        presses.clone(),
+        anchor_out.clone(),
+        home.clone(),
+        under.clone(),
+    );
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("under-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        let counted = counted.clone();
+        div()
+            .child(button("home", &drawn_home))
+            .child(
+                div()
+                    .relative()
+                    .child(
+                        button("under", &drawn_under)
+                            .on_click(move |_, _, _| counted.set(counted.get() + 1)),
+                    )
+                    .child(anchor.track()),
+            )
+            .into_any_element()
+    });
+    cx.update(|window, cx| focus::set_home(Some(&home), window, cx));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    // The card's place is the page control's top-left corner: it would cover the control and the space beside it.
+    let anchor = anchor_out.borrow().clone();
+    let card = install_card(
+        cx,
+        Rc::new(move |_: &Window| anchor.as_ref()?.drawn_bounds().map(|at| at.origin)),
+    );
+    let place = bounds(cx, "card");
+    card.shown.set(false);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("card").is_none(),
+        "the premise: the hidden card draws nothing"
+    );
+
+    let control = bounds(cx, "under");
+    assert!(
+        place.contains(&control.center()),
+        "the premise: the card's place covers the control"
+    );
+    click(cx, "under");
+    assert_eq!(
+        presses.get(),
+        1,
+        "a press where the card would be clicked the control"
+    );
+    assert!(focused(cx, &under), "and focused it");
+    let beside = point(control.right() + px(20.), control.center().y);
+    assert!(
+        place.contains(&beside),
+        "the premise: the card's place covers the space beside the control"
+    );
+    cx.simulate_click(beside, Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &home),
+        "a press on the empty space there sent focus home"
+    );
+
+    card.shown.set(true);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("card").is_some(),
+        "the premise: the card shows"
+    );
+    let open_layer = cx.update(|window, cx| {
+        layers::any_open(window, cx)
+            || layers::focus_layer_open(window, cx)
+            || layers::trap(window, cx).is_some()
+    });
+    assert!(!open_layer, "the region is not an open layer");
+
+    // Deferred to after this update, as the reset runs from the channel's events (see the pill's reset test).
+    cx.update(|_, cx| cx.defer(layers::close_all));
+    settle(cx);
+    assert!(
+        cx.debug_bounds("card").is_some(),
+        "after a reset the card is still drawn"
+    );
+    click(cx, "card-allow");
+    assert_eq!(card.answers.get(), 1, "and still answers a press");
+}
+
+/// Why this matters: the cards sit below the session's tabs, which move with the user-dragged sidebar width and the
+/// bands above them, so the region's view places its card from where the session view draws an element. It must do so
+/// in the frame that moves the element: a card a frame behind would stay misplaced after a single change (a session
+/// opening) until something else redrew.
+///
+/// Specified: after a frame, an anchor's `drawn_bounds` is where its element was drawn, and a card placed at its
+/// bottom-left corner sits there; after the element grows, one redraw has both at the new bounds; once the element is
+/// no longer drawn, `drawn_bounds` is `None`.
+#[gpui::test]
+fn an_anchors_drawn_bounds_follow_its_element_in_the_frame_that_moves_it(cx: &mut TestAppContext) {
+    let area_shown = Rc::new(Cell::new(true));
+    let area_size = Rc::new(Cell::new(gpui::size(px(400.), px(60.))));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let (shown_cell, size, out) = (area_shown.clone(), area_size.clone(), anchor_out.clone());
+    let cx = open(cx, move |window, cx| {
+        let page = div().pl(px(30.)).pt(px(10.));
+        if !shown_cell.get() {
+            return page.into_any_element();
+        }
+        let anchor = Anchor::for_element("tabs-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        page.child(
+            div()
+                .relative()
+                .debug_selector(|| "tabs".into())
+                .w(size.get().width)
+                .h(size.get().height)
+                .child(anchor.track()),
+        )
+        .into_any_element()
+    });
+    let anchor = anchor_out.borrow().clone().unwrap();
+    let read = anchor.clone();
+    install_card(
+        cx,
+        Rc::new(move |_: &Window| read.drawn_bounds().map(|at| at.bottom_left())),
+    );
+    let drawn = |cx: &mut VisualTestContext| cx.update(|_, _| anchor.drawn_bounds());
+
+    let tabs = bounds(cx, "tabs");
+    assert_eq!(
+        drawn(cx),
+        Some(tabs),
+        "drawn_bounds is where the element was drawn"
+    );
+    assert_eq!(
+        bounds(cx, "card").origin,
+        tabs.bottom_left(),
+        "and the card sits below it"
+    );
+
+    area_size.set(gpui::size(px(500.), px(140.)));
+    redraw(cx);
+    let tabs = bounds(cx, "tabs");
+    assert_eq!(
+        tabs.size,
+        gpui::size(px(500.), px(140.)),
+        "the premise: the element is drawn at its new size"
+    );
+    assert_eq!(drawn(cx), Some(tabs), "drawn_bounds followed the element");
+    assert_eq!(
+        bounds(cx, "card").origin,
+        tabs.bottom_left(),
+        "and in the frame that grew it, the card sits below its new bounds"
+    );
+
+    area_shown.set(false);
+    redraw(cx);
+    assert_eq!(drawn(cx), None, "an element no longer drawn has no bounds");
 }
 
 // ---- Tooltips: paragraph help, laid out with the real text system ----------------------------------------------------
