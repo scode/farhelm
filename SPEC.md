@@ -478,19 +478,21 @@ Each host serializes these deliveries and remembers successful settings independ
 remote file work and a later file's failure does not undo an earlier success. Delivery failure leaves the connection
 usable, makes the host's status and navigation mark amber, and shows a sanitized reason in its details. The next
 connection or credential replacement retries; there is no periodic retry. Saving a replacement commits its value first,
-waits at most the usual SSH command timeout for delivery (including lock waits), and reports
-`Saved; not delivered to <host>: <reason>` for failures. Ending the connected phase cancels its pending pushes before
-further transport work. The list shows each recipe's name, supported providers, base, package count, tunnel count and
-build status per place, with Rebuild per place. Size is labelled **Tensorlake sandboxes only**. The editor's Software
-block offers managed Ubuntu, Tensorlake image and snapshot bases, and a container image with its login user, each
-stating its supported providers, plus Ubuntu packages for every base. The custom-base note explains that the base must
-run systemd as its init system, allow passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git.
-The build checks these requirements first and stops with the missing requirement. Help explains that Farhelm then
-installs Claude Code and Codex with their official installers and saves a snapshot or image at that place. The editor
-replaces the list in place. Leaving it with unsaved changes, whether by its own Back or Cancel or by closing Settings
-with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding then completes
-the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be out of date,
-and offers **Retry loading**.
+waits at most the helm's 20-second host reply bound for delivery (including lock waits), and reports
+`Saved; not delivered to <host>: <reason>` for failures; a host still being delivered to when the bound passes is
+reported as not delivered because it did not answer in time, while its delivery carries on and shows its outcome in the
+host's warning (decided by the GPUI migration's orchestrator on 2026-11-15). Ending the connected phase cancels its
+pending pushes before further transport work. The list shows each recipe's name, supported providers, base, package
+count, tunnel count and build status per place, with Rebuild per place. Size is labelled **Tensorlake sandboxes only**.
+The editor's Software block offers managed Ubuntu, Tensorlake image and snapshot bases, and a container image with its
+login user, each stating its supported providers, plus Ubuntu packages for every base. The custom-base note explains
+that the base must run systemd as its init system, allow passwordless sudo, be Ubuntu or Debian with apt, and include
+bash, curl and git. The build checks these requirements first and stops with the missing requirement. Help explains that
+Farhelm then installs Claude Code and Codex with their official installers and saves a snapshot or image at that place.
+The editor replaces the list in place. Leaving it with unsaved changes, whether by its own Back or Cancel or by closing
+Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding then
+completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be out
+of date, and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft

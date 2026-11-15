@@ -27,6 +27,17 @@ const PUSH_CONCURRENCY: usize = 4;
 const STORAGE: &str = "could not read or record the host's credential delivery state";
 const TIMED_OUT: &str = "credential delivery did not finish within the SSH timeout";
 
+/// The reason a replacement's reply gives a host still being delivered to
+/// when the reply was due (see [`CredentialDelivery::push`]). It says where
+/// the late outcome shows, as the other bounded routes' timeout replies do.
+fn still_delivering() -> String {
+    format!(
+        "the host did not answer within {} seconds; delivery is still being carried out, and \
+         the host's details will show a warning if it fails",
+        crate::sessions::HOST_REPLY_BOUND.as_secs()
+    )
+}
+
 /// An active connection's choices, rather than a copy of the whole recipe.
 #[derive(Clone, Deserialize)]
 pub(crate) struct Bindings {
@@ -369,12 +380,34 @@ impl CredentialDelivery {
         result
     }
 
-    /// One deadline covers all candidates, lock waits and transport operations.
-    /// A hook that has not read any credential yet can safely be skipped: it
-    /// will read the committed replacement or publish its own failure warning.
-    pub(crate) async fn push(&self, name: &str, events: &FleetEvents) -> Vec<DeliveryFailure> {
+    /// Deliver a committed replacement to every active connection using it,
+    /// and report by `reply_by` the hosts it has not reached.
+    ///
+    /// One deadline, the SSH command timeout from now, covers all candidates,
+    /// lock waits and transport operations. A hook that has not read any
+    /// credential yet can safely be skipped: it will read the committed
+    /// replacement or publish its own failure warning.
+    ///
+    /// The replacement route passes the helm's host reply bound counted from
+    /// its own start (decided by the GPUI migration's orchestrator on
+    /// 2026-11-15), which ends before that deadline: the UI channel admits one
+    /// command at a time, so a save must not hold every later command for the
+    /// whole SSH budget (SPEC_impl.md, "The UI channel"). A host whose delivery
+    /// has not finished by `reply_by` is reported as not delivered, with a
+    /// reason saying it did not answer in time. That is not a refusal, since
+    /// the value is already saved, and the delivery is not cancelled either:
+    /// like the other bounded routes' work, it keeps running on its own task
+    /// until it finishes or meets its own deadline, and its outcome lands in the
+    /// host's warning, which a later success clears. So a host named in the
+    /// returned list may still receive the value.
+    pub(crate) async fn push(
+        self: &Arc<Self>,
+        name: &str,
+        reply_by: Instant,
+        events: &Arc<FleetEvents>,
+    ) -> Vec<DeliveryFailure> {
         let deadline = Instant::now() + self.budget;
-        let entries = self
+        let candidates = self
             .entries
             .lock()
             .unwrap()
@@ -392,27 +425,118 @@ impl CredentialDelivery {
             })
             .cloned()
             .collect::<Vec<_>>();
-        stream::iter(entries).map(|entry| async move {
-            let attempt = entry.begin_push(name)?;
-            let mut active = entry.active.subscribe();
-            let result = tokio::select! {
-                biased;
-                _ = active.wait_for(|count| *count == 0) => return None,
-                result = timeout_at(deadline, async {
-                    let guard = Arc::clone(&entry.serial).lock_owned().await;
-                    let binding = entry.live.lock().unwrap().binding.clone();
-                    let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else { return Ok(()); };
-                    self.apply(&row, bindings, None, guard).await
-                }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
-            };
-            let row = entry.live.lock().unwrap().binding.as_ref()
-                .filter(|(_, binding)| binding.uses(name)).map(|(row, _)| row.clone())?;
-            entry.warning(attempt, result.clone().err(), events);
-            result.err().map(|reason| DeliveryFailure {
-                host: row.alias.clone().or_else(|| row.environment_binding().map(|binding| binding.handle.name().to_owned())).unwrap_or_else(|| "host".into()),
-                reason,
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        // The deliveries run on a task of their own, so that answering at
+        // `reply_by` abandons only this wait. Each sends its candidate's index
+        // with its outcome, which is how the hosts still running are found.
+        let (sender, mut outcomes) = tokio::sync::mpsc::unbounded_channel();
+        let work = {
+            let (this, name, events) = (Arc::clone(self), name.to_owned(), Arc::clone(events));
+            let candidates = candidates.clone();
+            tokio::spawn(async move {
+                let (this, name, events) = (&this, name.as_str(), &*events);
+                stream::iter(candidates.into_iter().enumerate())
+                    .map(|(index, entry)| async move {
+                        (index, this.push_one(&entry, name, deadline, events).await)
+                    })
+                    .buffer_unordered(PUSH_CONCURRENCY)
+                    .for_each(|outcome| {
+                        // The reply may already have gone; the outcome then
+                        // shows only in the host's warning.
+                        let _ = sender.send(outcome);
+                        std::future::ready(())
+                    })
+                    .await;
             })
-        }).buffer_unordered(PUSH_CONCURRENCY).filter_map(|result| async { result }).collect().await
+        };
+        let mut finished = vec![false; candidates.len()];
+        let mut failures = Vec::new();
+        loop {
+            match timeout_at(reply_by, outcomes.recv()).await {
+                Ok(Some((index, failure))) => {
+                    finished[index] = true;
+                    failures.extend(failure);
+                }
+                // Every candidate reported, or the task ended early, which
+                // only a panic or the runtime's shutdown does. A panic is
+                // re-raised as it would have been inline; at shutdown the
+                // failures known so far are returned.
+                Ok(None) => {
+                    if let Err(join) = work.await
+                        && join.is_panic()
+                    {
+                        std::panic::resume_unwind(join.into_panic());
+                    }
+                    return failures;
+                }
+                Err(_) => break,
+            }
+        }
+        // A host whose last lease ended has had its push cancelled, and one
+        // whose new connection no longer uses this name reports nothing; both
+        // are left out here as they would be had they finished.
+        failures.extend(
+            candidates
+                .iter()
+                .zip(finished)
+                .filter(|(entry, done)| !done && *entry.active.borrow() != 0)
+                .filter_map(|(entry, _)| {
+                    Some(DeliveryFailure {
+                        host: Self::reported_host(entry, name)?,
+                        reason: still_delivering(),
+                    })
+                }),
+        );
+        failures
+    }
+
+    /// One host's share of [`Self::push`], under the push's shared deadline:
+    /// the failure to report, or `None` when it was delivered or has nothing
+    /// to report (its lease ended, or its connection stopped using `name`).
+    async fn push_one(
+        &self,
+        entry: &Entry,
+        name: &str,
+        deadline: Instant,
+        events: &FleetEvents,
+    ) -> Option<DeliveryFailure> {
+        let attempt = entry.begin_push(name)?;
+        let mut active = entry.active.subscribe();
+        let result = tokio::select! {
+            biased;
+            _ = active.wait_for(|count| *count == 0) => return None,
+            result = timeout_at(deadline, async {
+                let guard = Arc::clone(&entry.serial).lock_owned().await;
+                let binding = entry.live.lock().unwrap().binding.clone();
+                let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else { return Ok(()); };
+                self.apply(&row, bindings, None, guard).await
+            }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
+        };
+        let host = Self::reported_host(entry, name)?;
+        entry.warning(attempt, result.clone().err(), events);
+        result.err().map(|reason| DeliveryFailure { host, reason })
+    }
+
+    /// The name a delivery failure gives its host (its alias, else its
+    /// environment's name), or `None` once the host's current connection no
+    /// longer uses `name`: that connection reports its own delivery.
+    fn reported_host(entry: &Entry, name: &str) -> Option<String> {
+        let live = entry.live.lock().unwrap();
+        let (row, _) = live
+            .binding
+            .as_ref()
+            .filter(|(_, binding)| binding.uses(name))?;
+        Some(
+            row.alias
+                .clone()
+                .or_else(|| {
+                    row.environment_binding()
+                        .map(|binding| binding.handle.name().to_owned())
+                })
+                .unwrap_or_else(|| "host".into()),
+        )
     }
 
     /// Resolve revisions under the host lock and record each successful file

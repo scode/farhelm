@@ -249,7 +249,10 @@ probes again), an Update's plan (nothing changed, so the user asks again), and a
 waits for any setup or update running on that host (SPEC.md, "Waiting between operations on one host") and lands when
 the run ends; those two first refuse at once what the registry already refuses, so the reply that they are still waiting
 is not given for a change that cannot land as things stand. Environment and sandbox deletes, Suspend, Resume and the
-uninstall plan are not bounded yet and are bounded, or take the accepted form, when the work that ports them needs it.
+uninstall plan are not bounded yet and are bounded, or take the accepted form, when the work that ports them needs it. A
+credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts (decided by the
+migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still being delivered to
+are reported as not delivered (see "Named credential catalog").
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -5334,10 +5337,14 @@ Host removal forgets retained runtime state.
 
 A nonblank replacement uses the existing owned-handler task around commit and push, so an HTTP disconnect cannot abandon
 delivery after saving. One absolute SSH timeout bounds all candidates, mutex waits and remote operations, with four
-hosts processed concurrently. `SavedCredential` acknowledges the committed metadata plus per-host fixed failure reasons;
-create still returns metadata directly. Runtime warning attempt ordering prevents an older timeout replacing a newer
-result. Warning changes invalidate the host feed and project through host details, rail color and attention grouping
-independently of connection phase. No timer or separate retry worker is added.
+hosts processed concurrently. The reply does not wait that long: it is due at the helm's host reply bound counted from
+the handler's start, and a host whose delivery has not finished by then is reported with a reason saying it did not
+answer in time. The deliveries run on their own task, so that delivery carries on until it finishes or meets the SSH
+timeout, and its outcome reaches only the host's warning (decided by the GPUI migration's orchestrator on 2026-11-15).
+`SavedCredential` acknowledges the committed metadata plus per-host fixed failure reasons; create still returns metadata
+directly. Runtime warning attempt ordering prevents an older timeout replacing a newer result. Warning changes
+invalidate the host feed and project through host details, rail color and attention grouping independently of connection
+phase. No timer or separate retry worker is added.
 
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
 metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.

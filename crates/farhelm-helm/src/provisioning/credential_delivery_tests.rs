@@ -13,6 +13,7 @@ use std::task::{Context, Waker};
 
 const FIRST: &str = "fictional-first-endpoint-token";
 const SECOND: &str = "fictional-replacement-endpoint-token";
+const THIRD: &str = "fictional-third-endpoint-token";
 const CODEX_FIRST: &str =
     r#"{"tokens":{"refresh_token":"fictional-codex-seed"},"vendor_field":true}"#;
 const CODEX_REFRESHED: &str = r#"{"tokens":{"refresh_token":"fictional-codex-refreshed"}}"#;
@@ -155,7 +156,7 @@ struct Fixture {
     row: HostRow,
     backend: Arc<FakeBackend>,
     delivery: Arc<CredentialDelivery>,
-    events: FleetEvents,
+    events: Arc<FleetEvents>,
 }
 
 impl Fixture {
@@ -215,7 +216,7 @@ impl Fixture {
             row,
             backend,
             delivery,
-            events: FleetEvents::new(),
+            events: Arc::new(FleetEvents::new()),
         }
     }
 
@@ -401,7 +402,12 @@ async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
     .unwrap();
     f.select_claude(Some("claude-work"), false).await;
     let before = f.operations();
-    assert!(f.delivery.push("claude-work", &f.events).await.is_empty());
+    assert!(
+        f.delivery
+            .push("claude-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert_eq!(f.operations(), before, "recipe edits remain deferred");
     assert!(!f.claude().await.contains(LOGIN));
     drop(lease);
@@ -427,7 +433,12 @@ async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
         0o600
     );
     f.replace("claude-work", REPLACED).await;
-    assert!(f.delivery.push("claude-work", &f.events).await.is_empty());
+    assert!(
+        f.delivery
+            .push("claude-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert!(f.claude().await.contains(REPLACED) && !f.claude().await.contains(LOGIN));
     let record = f.delivery.read_record(&f.row).await.unwrap();
     assert!(!serde_json::to_string(&record).unwrap().contains(REPLACED));
@@ -546,7 +557,12 @@ async fn codex_refresh_survives_reconnect_and_mode_changes_until_replacement() {
     );
     let replacement = r#"{"new_vendor_shape":{"opaque":"fictional-new-login"}}"#;
     f.replace("codex-work", replacement).await;
-    assert!(delivery.push("codex-work", &f.events).await.is_empty());
+    assert!(
+        delivery
+            .push("codex-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert_eq!(std::fs::read_to_string(&auth).unwrap(), replacement);
     assert_eq!(
         delivery.read_record(&f.row).await.unwrap().codex_auth,
@@ -777,7 +793,12 @@ async fn github_delivery_replaces_on_push_and_removes_on_reconnect() {
         1
     );
     f.replace("git-work", "fictional-github-second").await;
-    assert!(f.delivery.push("git-work", &f.events).await.is_empty());
+    assert!(
+        f.delivery
+            .push("git-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         "fictional-github-second"
@@ -812,7 +833,12 @@ async fn github_delivery_replaces_on_push_and_removes_on_reconnect() {
     );
     f.select_github(None).await;
     f.replace("git-work", "fictional-github-third").await;
-    assert!(delivery.push("git-work", &f.events).await.is_empty());
+    assert!(
+        delivery
+            .push("git-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         "fictional-github-third",
@@ -951,7 +977,10 @@ async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
     f.select_github(None).await;
     f.store.delete_credential("git-work".into()).await.unwrap();
     f.replace("work", SECOND).await;
-    let failures = f.delivery.push("work", &f.events).await;
+    let failures = f
+        .delivery
+        .push("work", past_the_ssh_budget(), &f.events)
+        .await;
     assert_eq!(failures.len(), 1);
     assert_eq!(
         failures[0].reason,
@@ -1046,13 +1075,23 @@ async fn replacement_defers_recipe_edits_until_the_next_connection() {
         .unwrap()
         .unwrap();
     f.replace("work", SECOND).await;
-    assert!(f.delivery.push("work", &f.events).await.is_empty());
+    assert!(
+        f.delivery
+            .push("work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     let bytes = f.claude().await;
     assert!(bytes.contains(SECOND) && bytes.contains("https://first.example/v1"));
     assert!(!bytes.contains("next.example"));
     let before = f.operations();
     f.replace("next", "fictional-newer-next-token").await;
-    assert!(f.delivery.push("next", &f.events).await.is_empty());
+    assert!(
+        f.delivery
+            .push("next", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert_eq!(f.operations(), before);
     drop(lease);
     let _lease = f.delivery.enter(&f.row);
@@ -1062,6 +1101,178 @@ async fn replacement_defers_recipe_edits_until_the_next_connection() {
         bytes.contains("https://next.example/v1") && bytes.contains("fictional-newer-next-token")
     );
     assert!(!bytes.contains(SECOND));
+}
+
+/// A reply deadline later than the delivery's own SSH budget, for the tests of
+/// the delivery itself: every host then reports its own outcome rather than
+/// being cut off at the reply (see `CredentialDelivery::push`).
+fn past_the_ssh_budget() -> Instant {
+    Instant::now() + COMMAND_TIMEOUT * 2
+}
+
+impl Fixture {
+    /// A second connected host on the fixture's recipe, with a home of its
+    /// own so that its settings file can be told apart from the first host's.
+    /// Returns its row, home and connection lease; the lease is the premise
+    /// that makes a replacement select it.
+    async fn second_host(&self) -> (HostRow, PathBuf, ConnectionLease) {
+        let id = crate::tensorlake::hosts::test_support::plant(
+            &self.store,
+            "second host",
+            "second-sandbox",
+            "recipe",
+            Some("second-sandbox-id"),
+        )
+        .await;
+        let state = self._root.path().join("second-supervisor-state");
+        assert!(
+            self.store
+                .admit_tensorlake_install(id, "/fixture/farhelm", state.to_str().unwrap())
+                .await
+                .unwrap()
+        );
+        let row = self
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == id)
+            .unwrap();
+        let home = self._root.path().join("second-home");
+        tokio::fs::create_dir(&home).await.unwrap();
+        self.delivery
+            .remember_home(&row, home.clone())
+            .await
+            .unwrap();
+        let lease = self.delivery.enter(&row);
+        self.delivery.connect(&row, &self.events).await;
+        assert_eq!(self.delivery.warning(row.id), None);
+        let settings = home.join(".claude/settings.json");
+        assert!(
+            tokio::fs::read_to_string(&settings)
+                .await
+                .unwrap()
+                .contains(FIRST)
+        );
+        (row, home, lease)
+    }
+}
+
+/// The save's reply is due at the helm's host reply bound, because the GUI's
+/// channel admits one command at a time: one host that cannot take the value
+/// must not hold the reply for the whole SSH budget, nor hide another host's
+/// success, nor lose its own delivery. Specified: with one host's delivery
+/// held at its host lock (as it is behind another delivery to that host) and
+/// the clock paused, a push whose reply is due at `HOST_REPLY_BOUND` answers
+/// then (to the timer's millisecond), naming only the held host, as not
+/// delivered, with the reason that it did not answer in time; the quick host
+/// already has the replacement and the saved revision stands. Released after
+/// the reply, the held host's delivery finishes on its own: a late success
+/// installs the replacement and leaves no warning, and a late failure (a
+/// second replacement, whose held delivery meets a transport failure planted
+/// after its reply) becomes the host's warning, the saved revision standing.
+/// The late outcome's warning is the only place it shows, so both are checked.
+#[farhelm_testtrace::test]
+async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carries_on() {
+    let f = Fixture::new(false).await;
+    let _lease = f.connected().await;
+    let (_second, second_home, _second_lease) = f.second_host().await;
+    f.replace("work", SECOND).await;
+    let entry = f.delivery.entry(&f.row);
+    let held = entry.serial.clone().lock_owned().await;
+    // Paused, the clock moves only when every task waits on a timer; the
+    // quick host's database and file work runs on the blocking pool, which
+    // holds the clock still until it is done.
+    tokio::time::pause();
+    let started = Instant::now();
+    let failures = f
+        .delivery
+        .push(
+            "work",
+            started + crate::sessions::HOST_REPLY_BOUND,
+            &f.events,
+        )
+        .await;
+    // The timer wheel rounds a deadline up to its next millisecond.
+    let waited = started.elapsed();
+    assert!(
+        waited >= crate::sessions::HOST_REPLY_BOUND
+            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
+        "the push answered after {waited:?}"
+    );
+    assert_eq!(
+        failures,
+        vec![DeliveryFailure {
+            host: "fixture host".into(),
+            reason: still_delivering(),
+        }]
+    );
+    assert!(
+        failures[0]
+            .reason
+            .contains("did not answer within 20 seconds")
+    );
+    assert!(
+        tokio::fs::read_to_string(second_home.join(".claude/settings.json"))
+            .await
+            .unwrap()
+            .contains(SECOND)
+    );
+    assert!(f.claude().await.contains(FIRST));
+    assert_eq!(f.store.credentials().await.unwrap()[0].revision, 2);
+
+    // The mutex is fair, so the held delivery, queued first, finishes its
+    // file work before this lock is granted. Its warning is set in the same
+    // poll that releases the lock, so it is already in place here too.
+    drop(held);
+    let held = entry.serial.clone().lock_owned().await;
+    assert!(f.claude().await.contains(SECOND));
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().claude,
+        Some(EndpointStamp::Endpoint {
+            base_url: "https://first.example/v1".into(),
+            credential: Some(f.stamp("work", 2).await),
+        })
+    );
+    assert_eq!(f.delivery.warning(f.row.id), None);
+
+    // A second replacement, held again (the lock that waited for the first
+    // one's late success is kept as the hold). The failure is planted only
+    // after the reply, when the quick host has already finished, so the held
+    // host's late delivery is the only one that meets it.
+    f.replace("work", THIRD).await;
+    let started = Instant::now();
+    let failures = f
+        .delivery
+        .push(
+            "work",
+            started + crate::sessions::HOST_REPLY_BOUND,
+            &f.events,
+        )
+        .await;
+    assert_eq!(
+        failures,
+        vec![DeliveryFailure {
+            host: "fixture host".into(),
+            reason: still_delivering(),
+        }]
+    );
+    assert!(
+        tokio::fs::read_to_string(second_home.join(".claude/settings.json"))
+            .await
+            .unwrap()
+            .contains(THIRD)
+    );
+    *f.backend.fail.lock().unwrap() = Some("read-agent-settings".into());
+    drop(held);
+    let _settled = entry.serial.clone().lock_owned().await;
+    assert_eq!(
+        f.delivery.warning(f.row.id).as_deref(),
+        Some("could not read the agent settings")
+    );
+    assert!(f.claude().await.contains(SECOND));
+    assert_eq!(f.store.credentials().await.unwrap()[0].revision, 3);
 }
 
 /// A saved replacement cannot wait indefinitely behind another delivery. The
@@ -1075,7 +1286,7 @@ async fn replacement_deadline_includes_waiting_for_the_host_lock() {
     let entry = f.delivery.entry(&f.row);
     let _held = entry.serial.clone().lock_owned().await;
     tokio::time::pause();
-    let mut push = Box::pin(f.delivery.push("work", &f.events));
+    let mut push = Box::pin(f.delivery.push("work", past_the_ssh_budget(), &f.events));
     assert_pending(push.as_mut());
     tokio::time::advance(COMMAND_TIMEOUT + Duration::from_millis(1)).await;
     let failures = push.await;
@@ -1101,7 +1312,7 @@ async fn an_early_replacement_does_not_hide_an_unready_connections_timeout() {
     assert!(entry.live.lock().unwrap().binding.is_none());
     f.replace("work", SECOND).await;
     tokio::time::pause();
-    let mut push = Box::pin(f.delivery.push("work", &f.events));
+    let mut push = Box::pin(f.delivery.push("work", past_the_ssh_budget(), &f.events));
     let first_poll = push.as_mut().poll(&mut Context::from_waker(Waker::noop()));
     tokio::time::advance(COMMAND_TIMEOUT + Duration::from_millis(1)).await;
     connect.await;
@@ -1123,7 +1334,7 @@ async fn last_connection_lease_cancels_an_in_progress_push() {
     let lease = f.connected().await;
     f.replace("work", SECOND).await;
     f.backend.block_first.store(true, Ordering::SeqCst);
-    let mut push = Box::pin(f.delivery.push("work", &f.events));
+    let mut push = Box::pin(f.delivery.push("work", past_the_ssh_budget(), &f.events));
     tokio::select! {
         _ = f.backend.entered.notified() => {},
         result = &mut push => panic!("push finished before its transport gate: {} failures", result.len()),
@@ -1152,7 +1363,12 @@ async fn an_old_lease_cannot_cancel_a_second_live_connection() {
     let _new = f.delivery.enter(&f.row);
     drop(old);
     f.replace("work", SECOND).await;
-    assert!(f.delivery.push("work", &f.events).await.is_empty());
+    assert!(
+        f.delivery
+            .push("work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
     assert!(f.claude().await.contains(SECOND));
 }
 
@@ -1224,7 +1440,10 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
         f.delivery.connect(&f.row, &f.events).await;
         assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(reason));
         f.replace("work", SECOND).await;
-        let failures = f.delivery.push("work", &f.events).await;
+        let failures = f
+            .delivery
+            .push("work", past_the_ssh_budget(), &f.events)
+            .await;
         assert_eq!(failures.len(), 1);
         assert_eq!(failures[0].reason, reason);
         assert!(
@@ -1235,7 +1454,12 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
         assert_eq!(f.store.credentials().await.unwrap()[0].revision, 2);
         assert!(!f.home.join(".claude/settings.json").exists());
         *f.backend.fail.lock().unwrap() = None;
-        assert!(f.delivery.push("work", &f.events).await.is_empty());
+        assert!(
+            f.delivery
+                .push("work", past_the_ssh_budget(), &f.events)
+                .await
+                .is_empty()
+        );
         assert_eq!(f.delivery.warning(f.row.id), None);
         assert!(f.claude().await.contains(SECOND));
     }
@@ -1573,6 +1797,46 @@ async fn route_replacement_covers_the_hook_publication_gap_and_reports_failures(
             .contains("fictional-disconnected-caller-token")
     );
     assert_eq!(f.store.credentials().await.unwrap()[0].revision, 5);
+}
+
+/// The reply bound is on the real save route, not only on the delivery: the
+/// route is what the GUI's one-at-a-time channel waits on. Specified: against
+/// a connected host whose delivery is held at its host lock, with the clock
+/// paused, `PUT /api/credentials/{name}` answers 200 once `HOST_REPLY_BOUND`
+/// has passed and before the SSH budget would have, acknowledging the new
+/// revision and naming the host as not delivered because it did not answer
+/// in time. The held delivery then completes after the reply.
+#[farhelm_testtrace::test]
+async fn the_save_route_answers_at_the_reply_bound_while_a_host_is_held() {
+    let (harness, f, _gate) = actor_fixture(false, false).await;
+    harness
+        .await_state(f.row.id, |state| {
+            matches!(state, HostState::Connected { .. })
+        })
+        .await;
+    let entry = f.delivery.entry(&f.row);
+    assert!(f.claude().await.contains(FIRST));
+    assert_eq!(*entry.active.borrow(), 1);
+    let held = entry.serial.clone().lock_owned().await;
+    tokio::time::pause();
+    let started = Instant::now();
+    let ack = replace_route(&harness, SECOND).await;
+    let waited = started.elapsed();
+    assert!(
+        waited >= crate::sessions::HOST_REPLY_BOUND && waited < COMMAND_TIMEOUT,
+        "the save answered after {waited:?}"
+    );
+    assert_eq!(ack.credential.revision, 2);
+    assert_eq!(
+        ack.delivery_failures,
+        vec![DeliveryFailure {
+            host: "fixture host".into(),
+            reason: still_delivering(),
+        }]
+    );
+    drop(held);
+    let _settled = entry.serial.clone().lock_owned().await;
+    assert!(f.claude().await.contains(SECOND));
 }
 
 /// Parking an actual connection actor cancels its acquisition before replying.
