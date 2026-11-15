@@ -53,6 +53,8 @@
 //!   synthesized into WAV bytes; observing the store and playing them come later.
 //! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
 //! - [`feedback`]: the Send feedback dialog, a private message to the maintainer sent through the helm.
+//! - [`trash`]: the session list header's Trash button, the archived-checkout reads behind its count, and the Trash
+//!   dialog it opens.
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -104,6 +106,7 @@ pub mod templates;
 pub mod terminal;
 pub mod theme;
 pub mod ticker;
+pub mod trash;
 pub mod update_readout;
 
 /// The license notices for the code this crate links from `farhelm-grid-model` and `farhelm-input-mapping`, verbatim.

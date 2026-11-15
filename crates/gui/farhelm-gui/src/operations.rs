@@ -146,6 +146,10 @@ pub enum Work {
     /// ([`OpKey::feedback`]). Not supersedable: the dialog sends once per press and keeps itself open until the send
     /// settles, so no second send can be waiting behind it.
     SendFeedback,
+    /// A permanent cleanup of archived checkouts on one host (`POST /api/checkout-trash/delete`), under the host's trash
+    /// key ([`OpKey::trash`]): the Trash dialog's own Delete or Retry of one checkout (`crate::trash`). Not supersedable:
+    /// the trash control prevents overlapping deletes of its own (SPEC.md, "Managed checkouts").
+    TrashDelete,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -190,6 +194,7 @@ impl Work {
             Work::Answer => false,
             Work::UpdateHost => false,
             Work::SendFeedback => false,
+            Work::TrashDelete => false,
         }
     }
 
@@ -217,6 +222,7 @@ impl Work {
             Work::Answer => false,
             Work::UpdateHost => true,
             Work::SendFeedback => false,
+            Work::TrashDelete => false,
         }
     }
 }
@@ -245,6 +251,9 @@ enum Key {
     Approval(String),
     /// The Send feedback dialog's one submission at a time ([`OpKey::feedback`]).
     Feedback,
+    /// A host's trash, by the host's registry id: apart from the host's own key, so a trash delete never blocks the
+    /// host's other operations (SPEC.md: "Trash deletes do not block other actions").
+    Trash(String),
 }
 
 impl OpKey {
@@ -300,6 +309,11 @@ impl OpKey {
     /// because the dialog is modal and stays open while its send is out, so there is never a second one to keep apart.
     pub fn feedback() -> OpKey {
         OpKey(Key::Feedback)
+    }
+    /// The trash of a host, by its registry id: one key per host, so one trash delete runs at a time per host
+    /// ([`Work::TrashDelete`]). Distinct from [`OpKey::host`], whose busy state is the host's registry operations'.
+    pub fn trash(host: &str) -> OpKey {
+        OpKey(Key::Trash(host.to_owned()))
     }
 }
 

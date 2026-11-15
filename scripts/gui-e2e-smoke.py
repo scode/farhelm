@@ -12,12 +12,13 @@ host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's
 rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
 and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's
 Help menu and SSH help; 46, the session list's order menu; 47, the settings-and-hosts area's host Update, its
-progress, failure and rerun; 48, the other-dialogs area's Send feedback, up to but never including Send). The behavior
-itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
-`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`); nothing here
-checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
-(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
-Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+progress, failure and rerun; 48, the other-dialogs area's Send feedback, up to but never including Send; 49, the
+session list header's Trash). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
+`hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`); nothing here checks layout or wording beyond the names
+it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
+session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match
+in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -128,6 +129,10 @@ FEEDBACK_NOTE = "Nothing is sent until you press Send"
 
 # The feedback dialog's contact reuse choice, drawn only while the contact field is not blank (step 48).
 FEEDBACK_REUSE = "Re-use for future feedback"
+
+# The Trash dialog's opening words: drawn whatever the hosts' trash holds, so the oracle for the dialog open and closed
+# (step 49).
+TRASH_INTRO = "Folders of managed checkouts whose last session was deleted."
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -1214,6 +1219,44 @@ class Smoke(unittest.TestCase):
         self.ok("click", "id:feedback-cancel")
         self.ok("wait", "--gone", FEEDBACK_NOTE)
         self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
+
+    # ---- The other-dialogs area's Trash (49) ---------------------------------------------------------------------
+
+    def test_49_the_headers_trash_opens_its_dialog_and_escape_returns_to_it(self) -> None:
+        """The session list header's Trash button is the way into the archived-checkout trash, and its dialog reads
+        each connected host's trash through the real helm and supervisor. The bridge's fleet holds no managed
+        checkout (its sessions run in `/tmp`), so this step sees an empty trash and deletes nothing; it seeds and
+        touches no session. Specified: with the dialog not open, a click on Trash opens it with focus on its footer
+        Close and, once the local host's measured listing answers, the line saying the trash is empty on reachable
+        hosts; Escape closes it with focus back on the Trash button. The dialog's opening words are the oracle for
+        open and closed, since only the open dialog draws them."""
+        self.assertNotIn(TRASH_INTRO, self.ok("snapshot"), "premise: the Trash dialog is not open")
+        self.ok("click", "id:checkout-trash-button")
+        self.ok("wait", "--text", TRASH_INTRO)
+        self.assertTrue(trash_close_focused(self.ok("snapshot", "-i")), "focus starts on the dialog's footer Close")
+        self.ok("wait", "--text", "The trash is empty on reachable hosts.")
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", TRASH_INTRO)
+        self.assertRegex(
+            self.ok("snapshot", "-i"), r'button "Checkout trash, [^"]*" \[focused\]', "focus is back on Trash"
+        )
+
+
+def trash_close_focused(snapshot: str) -> bool:
+    """Whether a `snapshot -i` tree shows focus on a Close button inside the Trash dialog: a focused `button "Close"`
+    nested under the `dialog "Trash"` line, deeper than it, before the tree comes back to the dialog's depth. Matching
+    the button alone would also accept the title bar's own Close, which Linux draws in the window."""
+    lines = snapshot.splitlines()
+    for at, line in enumerate(lines):
+        if 'dialog "Trash"' not in line:
+            continue
+        depth = len(line) - len(line.lstrip())
+        for inner in lines[at + 1 :]:
+            if len(inner) - len(inner.lstrip()) <= depth:
+                break
+            if re.search(r'button "Close" \[focused\]', inner):
+                return True
+    return False
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
 # OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived

@@ -13,8 +13,9 @@
 //! and the setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to
 //! its end, the host refusal dialog for a refused Update, the version readout while an updater runs (the check button
 //! at rest, lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and
-//! the reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), and the Open-Source
-//! Notices window over a short fixture, in both appearances, compared pixel for pixel.
+//! the reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), the Open-Source
+//! Notices window over a short fixture, and the Trash button empty, full and freeing space, and the Trash dialog, in
+//! both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -3984,6 +3985,30 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "trash-button-empty",
+        size: (120., 56.),
+        draw: trash_scenes,
+        setup: trash_button_empty_setup,
+    },
+    Scene {
+        name: "trash-button-full",
+        size: (120., 56.),
+        draw: trash_scenes,
+        setup: trash_button_full_setup,
+    },
+    Scene {
+        name: "trash-button-emptying",
+        size: (120., 56.),
+        draw: trash_scenes,
+        setup: trash_button_emptying_setup,
+    },
+    Scene {
+        name: "checkout-trash-dialog",
+        size: (760., 720.),
+        draw: trash_scenes,
+        setup: checkout_trash_dialog_setup,
+    },
+    Scene {
         name: "session-order-menu",
         size: (420., 418.),
         draw: session_lists_then,
@@ -4050,6 +4075,193 @@ static SCENES: &[Scene] = &[
         setup: focus_ring_setup,
     },
 ];
+
+/// A capable host's trash listing as the trash scenes answer it: `checkouts` (each its id, name, repository, archive
+/// time and size), in `root`'s `.farhelm-trash`, with removal active when `removing`.
+fn trash_listing(
+    root: &str,
+    checkouts: &[(&str, &str, &str, i64, u64)],
+    removing: bool,
+) -> serde_json::Value {
+    let checkouts: Vec<serde_json::Value> = checkouts
+        .iter()
+        .map(|(id, name, repository, archived_at, bytes)| {
+            serde_json::json!({
+                "id": id,
+                "name": name,
+                "repository": repository,
+                "path": format!("{root}/.farhelm-trash/{name}"),
+                "archived_at": archived_at,
+                "bytes": bytes,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "checkouts": checkouts,
+        "issues": [],
+        "removing": removing,
+        "reports_retired": true,
+    })
+}
+
+/// The reference screens' trash (`checkout-trash-dialog`): two archives on this machine and one on `build-box`, with
+/// their sizes, repositories and archive times; `gpu-1`'s trash is empty.
+fn trash_reference(host: i64) -> serde_json::Value {
+    match host {
+        1 => trash_listing(
+            "/Users/you/work",
+            &[
+                (
+                    "web-fix-login",
+                    "web-fix-login-20261113T174055Z",
+                    "acme/web",
+                    1_794_591_655,
+                    48_234_496,
+                ),
+                (
+                    "api-2",
+                    "api-2-20261110T191055Z",
+                    "acme/api",
+                    1_794_337_855,
+                    212_965_785,
+                ),
+            ],
+            false,
+        ),
+        2 => trash_listing(
+            "/home/dev/work",
+            &[(
+                "api-1",
+                "api-1-20261112T191055Z",
+                "acme/api",
+                1_794_510_655,
+                186_961_100,
+            )],
+            false,
+        ),
+        _ => trash_listing("/home/dev/work", &[], false),
+    }
+}
+
+/// The reference screens' three hosts, all connected, with a Trash button over them that reads each host's trash and
+/// gets `listing_of(host)` back at once; once every host has answered, the dialog opens when `open` asks for it, its
+/// settle pause off, and its measured reads are answered the same way. The fake, the connection, the button and the
+/// watch that answers are kept for the scene's life.
+fn trash_scene(
+    state: &SceneState,
+    listing_of: fn(i64) -> serde_json::Value,
+    open: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::trash::TrashButton;
+    let (helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let helm = Rc::new(RefCell::new(helm));
+    helm.borrow_mut().connect(vec![crate::hosts::tests::hosts(
+        &crate::hosts::tests::reference_hosts(),
+    )]);
+    let button = cx.new(TrashButton::new);
+    let window = window.window_handle();
+    let answering = helm.clone();
+    let opened = Cell::new(!open);
+    let watch = cx.observe(&button, move |button, cx| {
+        {
+            let mut helm = answering.borrow_mut();
+            for read in helm.commands() {
+                let host = read
+                    .body
+                    .as_ref()
+                    .and_then(|body| body["host"].as_i64())
+                    .unwrap_or_default();
+                helm.reply(read.id, 200, Some(listing_of(host)));
+            }
+        }
+        if opened.get()
+            || !button
+                .update(cx, |button, cx| button.snapshot(cx))
+                .all_ready()
+        {
+            return;
+        }
+        opened.set(true);
+        let _ = window.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            button.update(cx, |button, cx| {
+                button.open(focus::ReturnTo::Opener, &mark, window, cx);
+                if let Some(dialog) = button.dialog_view() {
+                    dialog.update(cx, |dialog, _| dialog.without_pause());
+                }
+            });
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(button));
+    keep.push(Box::new(watch));
+}
+
+/// The Trash button a trash scene made, at the top left of the sidebar's raised heading surface.
+fn trash_scenes(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let button = state.keep.borrow().iter().find_map(|kept| {
+        kept.downcast_ref::<Entity<crate::trash::TrashButton>>()
+            .cloned()
+    });
+    div()
+        .size_full()
+        .flex()
+        .items_start()
+        .p(px(8.))
+        .bg(theme::color(palette.bg_2))
+        .children(button)
+        .into_any_element()
+}
+
+/// The Trash button over hosts whose trash is empty: the outline can, no count.
+fn trash_button_empty_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    trash_scene(
+        state,
+        |_| trash_listing("/work", &[], false),
+        false,
+        window,
+        cx,
+    );
+}
+
+/// The Trash button over the reference trash (reference `main-running-session`'s header): the open-lid can and its
+/// count, 3.
+fn trash_button_full_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    trash_scene(state, trash_reference, false, window, cx);
+}
+
+/// The Trash button while this machine frees space, under reduced motion so the picture holds still: the can upside
+/// down, unlifted, with its count.
+fn trash_button_emptying_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    ticker::set_reduced_motion(true, cx);
+    trash_scene(
+        state,
+        |host| {
+            let mut listing = trash_reference(host);
+            if host == 1 {
+                listing["removing"] = serde_json::json!(true);
+            }
+            listing
+        },
+        false,
+        window,
+        cx,
+    );
+}
+
+/// The Trash dialog over the reference trash (reference `checkout-trash-dialog`): its title with the open can and the
+/// total, the intro, this machine's two archives and build-box's one with their sizes, repositories, archive times
+/// and Deletes, each host's folder, and the footer's Close, where focus starts; its ring shows only under keyboard
+/// focus, so the picture shows none.
+fn checkout_trash_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    trash_scene(state, trash_reference, true, window, cx);
+}
 
 /// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
 fn settle(
