@@ -6765,8 +6765,9 @@ helper replaces itself with the tab's shell, which needs no version afterwards.
 
 The updater is native code in the desktop app (`crates/farhelm-desktop/src/updater.rs`), in the same process as the
 window, which reaches it through its `UpdaterHandle`. It has no helm part: no endpoint, no helm state, nothing a
-standalone helm could see. Its network requests are the app's own reqwest calls. `update_readout.rs` beside it turns its
-state into the words the window shows.
+standalone helm could see. Its network requests are the app's own reqwest calls. The GUI crate's `update_readout.rs`
+turns its state into the words the window shows; it lives there, not beside the updater, so the updater builds the very
+value the window draws without a copy of its type in the GUI crate, which cannot depend on the desktop crate.
 
 It is active only when the running program is the main program of `$HOME/Applications/Farhelm.app` (both sides
 canonicalized; `app_bundle::bundle_contents_of_main_program` recognizes the layout), that bundle has

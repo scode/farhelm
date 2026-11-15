@@ -1,9 +1,12 @@
 //! The updater's state as words and marks: the pure presentation the desktop app shows for it.
 //!
-//! The updater itself is [`crate::updater`]. This module turns its published state into what a window shows next to
-//! the version (the readout, its hover text, the short inline status after a check, and the marks that lead it), with
-//! no UI framework involved, so the wording and its rules are tested without a window. It moved here unchanged from the
-//! old Dioxus UI crate, minus that UI's components and hooks; the GPUI app renders the same values.
+//! The updater itself is the desktop crate's (`farhelm_desktop::updater`). This module turns its published state into
+//! what a window shows next to the version (the readout, its hover text, the short inline status after a check, and the
+//! marks that lead it), with no UI framework involved, so the wording and its rules are tested without a window. It came
+//! from the old Dioxus UI crate, minus that UI's components and hooks, by way of the desktop crate, and lives in the
+//! GUI crate so the desktop's updater builds the very value the window draws: the desktop crate depends on this one,
+//! never the other way round, so a type defined there would need a copy here (the migration's coordinator approved the
+//! move on 2026-11-14).
 
 /// The updater activity exposed to presentation, without a renderer dependency.
 ///
@@ -25,7 +28,7 @@ pub enum Activity {
 }
 
 /// How the sidebar's version readout looks for the updater's current state
-/// (see `desktop::updater::readout`).
+/// (see `farhelm_desktop::updater::readout`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Readout {
     /// A newer version is installed than the one running and is not known to
@@ -258,12 +261,12 @@ pub fn idle_tooltip(running: &str, has_updater: bool) -> String {
     if farhelm_proto::is_development_build(running) {
         "This is a development build of Farhelm, not a release.".to_owned()
     } else if has_updater {
-        let running = crate::local_host::display_peer(running);
+        let running = shown_build(running);
         format!(
             "This is Farhelm {running}. When a newer version is installed, this turns red and opens the Restart to update / What's new menu."
         )
     } else {
-        let running = crate::local_host::display_peer(running);
+        let running = shown_build(running);
         format!("This is Farhelm {running}.")
     }
 }
@@ -277,13 +280,13 @@ pub fn idle_tooltip(running: &str, has_updater: bool) -> String {
 /// through the same display boundary as the visible version number.
 pub fn version_tooltip(running: &str, reported: Option<&str>, updater: Option<&Readout>) -> String {
     if let Some(reported) = reported.filter(|reported| *reported != running) {
-        let helm = crate::local_host::display_peer(reported);
+        let helm = shown_build(reported);
         if farhelm_proto::is_development_build(running) {
             return format!(
                 "The helm runs Farhelm {helm}; this window is a development build of Farhelm."
             );
         }
-        let window = crate::local_host::display_peer(running);
+        let window = shown_build(running);
         return format!("The helm runs Farhelm {helm}; this window was built as Farhelm {window}.");
     }
     if farhelm_proto::is_development_build(running) {
@@ -295,6 +298,24 @@ pub fn version_tooltip(running: &str, reported: Option<&str>, updater: Option<&R
     )
 }
 
+/// A build stamp as the readout's words show it: escaped with the shared table (`farhelm_proto::text::escaped`), and an
+/// empty or whitespace-only stamp named rather than shown as nothing. The same rule as the desktop crate's
+/// `local_host::display_peer`, which this crate cannot call (the desktop crate depends on this one); a stamp may come
+/// from a peer (the helm's), so it is never shown raw.
+fn shown_build(raw: &str) -> String {
+    if raw.is_empty() {
+        return "(empty)".to_string();
+    }
+    if raw
+        .chars()
+        .any(|ch| farhelm_proto::text::is_presentation_unsafe(ch) || !ch.is_whitespace())
+    {
+        farhelm_proto::text::escaped(raw)
+    } else {
+        format!("(whitespace only: {} characters)", raw.chars().count())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,7 +323,7 @@ mod tests {
     /// Movement follows the visible words and ring after dismissal/expiry.
     /// Readiness announcements, notice identity and failure details must not
     /// acquire width merely because the native worker published a new readout.
-    #[farhelm_testtrace::test]
+    #[test]
     fn inline_presentation_tracks_only_rendered_feedback() {
         let mut readout = Readout {
             update_ready: true,
@@ -382,7 +403,7 @@ mod tests {
     /// work runs; a reinstall warning never takes the retry away. The status
     /// line's own spinner shows only when the control is the update menu, so
     /// a running check is never shown spinning twice.
-    #[farhelm_testtrace::test]
+    #[test]
     fn the_readout_control_and_progress_owner_follow_the_updater_state() {
         assert_eq!(readout_control(None), ReadoutControl::Plain);
         for ready in [false, true] {
@@ -426,7 +447,7 @@ mod tests {
     /// An uninstalled desktop build has no update control to promise.
     /// Release candidates and dev releases still identify their real version;
     /// only the shared development-build rule replaces it with non-release text.
-    #[farhelm_testtrace::test]
+    #[test]
     fn a_window_without_an_updater_names_its_build_without_update_advice() {
         for release in ["1.2.3", "1.2.3-rc.1", "1.2.3-dev.1"] {
             assert_eq!(
@@ -449,7 +470,7 @@ mod tests {
     /// When the bar displays a different helm build, its hover must explain
     /// both identities instead of describing that number as the window's.
     /// Development windows must not claim that their stamp names a release.
-    #[farhelm_testtrace::test]
+    #[test]
     fn a_build_mismatch_names_the_helm_and_the_window() {
         assert_eq!(
             version_tooltip("1.2.3", Some("1.2.4"), None),
@@ -468,7 +489,7 @@ mod tests {
     /// The existing updater owns activity words; the selector must preserve
     /// them for a matching release window and explain a mismatch instead when
     /// one is reported. This keeps the two app-bar renderings on the same text.
-    #[farhelm_testtrace::test]
+    #[test]
     fn an_updater_readout_supplies_the_release_windows_hover() {
         let state = Readout {
             update_ready: false,
@@ -500,7 +521,7 @@ mod tests {
     /// Why: the first version of the toggle drew only the arrow, so a
     /// verification failure during a waiting update showed no warning at
     /// all; both renderings now take their marks from this one function.
-    #[farhelm_testtrace::test]
+    #[test]
     fn the_warning_mark_survives_a_waiting_update() {
         let readout = |update_ready, needs_reinstall, withdrawn| Readout {
             update_ready,
@@ -532,7 +553,7 @@ mod tests {
     /// Progress and failure remain visible alongside a waiting update, while
     /// success yields to the red readout. Restart failures and idle automatic
     /// work never acquire inline check feedback.
-    #[farhelm_testtrace::test]
+    #[test]
     fn inline_feedback_follows_activity_and_waiting_update_precedence() {
         for ready in [false, true] {
             for (activity, expected) in [
@@ -578,7 +599,7 @@ mod tests {
 
     /// A success expires once and unrelated published changes cannot revive it.
     /// A newer result, even for the same release, must get its own full lifetime.
-    #[farhelm_testtrace::test]
+    #[test]
     fn expiry_belongs_to_one_success_not_the_next_check() {
         let success = Activity::UpToDate("1.2.0".into());
         let mut feedback = InlineFeedback::default();
@@ -620,7 +641,7 @@ mod tests {
 
     /// Only a click on the current failure suppresses it. The next check clears
     /// that dismissal, including when it later fails for the identical reason.
-    #[farhelm_testtrace::test]
+    #[test]
     fn failure_dismissal_survives_refreshes_but_not_another_check() {
         let failure = Activity::Failed("offline".into());
         let mut feedback = InlineFeedback::default();
@@ -664,7 +685,7 @@ mod tests {
 
     /// Watch delivery can skip every intermediate activity. Request identity
     /// must still give identical outcomes a fresh lifetime and dismissal state.
-    #[farhelm_testtrace::test]
+    #[test]
     fn coalesced_identical_results_belong_to_different_requests() {
         let success = Activity::UpToDate("1.2.0".into());
         let mut feedback = InlineFeedback::default();
@@ -699,7 +720,7 @@ mod tests {
     /// The red toggle replaces visible success, but user-check completion still
     /// needs words in the live region. Automatic readiness and failures cannot
     /// masquerade as that successful outcome.
-    #[farhelm_testtrace::test]
+    #[test]
     fn ready_announcements_require_a_successful_user_check() {
         for update_ready in [false, true] {
             for captured in [false, true] {
@@ -730,5 +751,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A build stamp in the readout's words may be a peer's (the helm's), so it is escaped and never shown raw or as
+    /// nothing, by the same rule as every other peer value the desktop app shows. Specified: an invisible or
+    /// direction-changing character is written in `<U+XXXX>` notation, an empty stamp reads "(empty)" and a
+    /// whitespace-only one names its length.
+    #[test]
+    fn a_build_stamp_is_escaped_and_never_shown_as_nothing() {
+        assert_eq!(shown_build("1.2.3"), "1.2.3");
+        assert_eq!(shown_build("1.2\u{202E}3"), "1.2<U+202E>3");
+        assert_eq!(shown_build(""), "(empty)");
+        assert_eq!(shown_build("  "), "(whitespace only: 2 characters)");
     }
 }

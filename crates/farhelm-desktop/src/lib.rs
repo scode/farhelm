@@ -14,8 +14,8 @@
 //!
 //! This file holds the bootstrap of the helm and supervisor and the pre-window refusal path. The rest is split by
 //! concern: `window_state` keeps the saved window frame's format and restore rules, `state` owns the app's private state
-//! file and the atomic write both state files share, `bundle` finds the pieces installed beside the app, `updater`
-//! keeps an installed app up to date, and `update_readout` turns the updater's state into the words a window shows.
+//! file and the atomic write both state files share, `bundle` finds the pieces installed beside the app, and `updater`
+//! keeps an installed app up to date (the words a window shows for its state are `farhelm_gui::update_readout`).
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,6 @@ mod local_host;
 mod reduced_motion;
 pub mod state;
 mod tab_reach;
-pub mod update_readout;
 pub mod updater;
 pub mod window_state;
 
