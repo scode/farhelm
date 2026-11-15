@@ -26,8 +26,9 @@
 //! A view that must act on pushed state as it changes, not only draw it (apply a stored preference, settle a rule),
 //! follows the current session with [`observe_current`]. That is the one place that knows a reset replaces the store
 //! under the view, so the view never keeps a subscription to a store the reset retired, and never misses the first
-//! change of the store that replaced it. The session list and the session pane predate it and still follow the
-//! session by hand.
+//! change of the store that replaced it. The session list follows the current store through it. The session pane
+//! does not: it follows the connection, never the store, and keeps its terminal per session, since what it mounts
+//! depends only on the UI session and the selection.
 //!
 //! The connection's pump is the one task that reads the feed. It never awaits a command (that would deadlock, see the
 //! helm client's `ChannelEvents`); commands are awaited by tasks the UI session owns.
@@ -300,8 +301,8 @@ fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
 /// State a view keeps for one UI session, started over when the session changes.
 ///
 /// Views must not keep a session's handles across draws or events (see [`UiSession`]), but some keep state that only
-/// means something for the session it was made under: the session list's subscription to the current store, and what
-/// it last stamped as seen. A reset makes a new UI session, and state from the old one would act for a connection that
+/// means something for the session it was made under: what the session list last stamped as seen, or the terminal the
+/// session pane mounted. A reset makes a new UI session, and state from the old one would act for a connection that
 /// is gone. So the view keeps that state here and reaches it only through [`PerSession::current`], which compares the
 /// current UI session's entity id with the one the state was made under and starts the state over from its default when
 /// they differ. While the window is inert there is no session, and the state is the default too.
