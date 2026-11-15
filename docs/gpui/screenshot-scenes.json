@@ -635,6 +635,24 @@
       ]
     },
     {
+      "id": "app-terminal-text-size",
+      "title": "The terminal text size stepped up four times from the top row's − / + group, its readout showing 18 and + naming its shortcut",
+      "reference": null,
+      "mockup": false,
+      "start": ["--sessions", "1"],
+      "steps": [
+        ["click", "text:Fixture 1"],
+        ["terminal-text", "--wait", "FAKE-AGENT READY"],
+        ["click", "id:terminal-text-size-larger"],
+        ["click", "id:terminal-text-size-larger"],
+        ["click", "id:terminal-text-size-larger"],
+        ["click", "id:terminal-text-size-larger"],
+        ["hover", "text:Fixture 1"],
+        ["hover", "id:terminal-text-size-larger"],
+        ["wait", "--idle"]
+      ]
+    },
+    {
       "id": "app-help-menu",
       "title": "The Help menu, opened from the host rail foot's ? button",
       "reference": "help-menu",

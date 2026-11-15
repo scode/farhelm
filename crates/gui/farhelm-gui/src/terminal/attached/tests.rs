@@ -4808,3 +4808,83 @@ fn program_input_routes_keys_to_the_program_or_text_input() {
 fn first_line(text: &str) -> &str {
     text.lines().next().unwrap_or("")
 }
+
+// ---- Text size -----------------------------------------------------------------------------------------------------
+
+/// SPEC.md, "Terminal experience": a text size step reaches "every open terminal's text size together, hidden tabs
+/// included", and "each terminal is resized so the program inside sees its new rows and columns". A terminal that
+/// redrew at the new size without telling its program would leave the program drawing for the old grid, wrapping and
+/// cropping wrongly. Specified: with two live terminals, one step up draws both at the font measured at 15 points and
+/// sends each fake stream exactly one resize, to the size that font fits in its own pane; a redraw sends nothing more.
+#[gpui::test]
+fn a_text_size_step_resizes_every_open_terminal(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, true);
+    h.attach_showing("first");
+    let (second, second_opened) = h.second.clone().unwrap();
+    let asked = second_opened.borrow_mut().as_mut().unwrap().0.attach();
+    for message in screen(asked.cols, asked.rows, "second", serde_json::Value::Null) {
+        second_opened
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .0
+            .output(message);
+    }
+    second_opened
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .0
+        .replay_complete();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().received(),
+        [],
+        "the premise: both are live at their fitted size"
+    );
+    assert_eq!(
+        second_opened.borrow_mut().as_mut().unwrap().0.received(),
+        []
+    );
+
+    h.cx.update(|_, cx| super::super::text_size::step(1, cx));
+    settle(h.cx);
+    let larger =
+        h.cx.update(|_, cx| CellMetrics::measure(super::super::TextSize::new(15), cx))
+            .expect("the test font measures");
+    let first = h.owner.clone();
+    for (owner, name) in [(&first, "first"), (&second, "second")] {
+        let (metrics, drawn) = h.cx.update(|_, cx| {
+            let owner = owner.read(cx);
+            (
+                owner.metrics,
+                owner.committed.as_ref().unwrap().read(cx).metrics,
+            )
+        });
+        assert!(
+            metrics == larger,
+            "the {name} terminal fits its grid at 15 points"
+        );
+        assert!(drawn == larger, "and its screen draws at 15 points");
+    }
+    let fits = |pane: (f32, f32)| {
+        fit(
+            larger,
+            pane.0 - 2. * PANE_PADDING,
+            pane.1 - 2. * PANE_PADDING,
+            1.,
+        )
+        .unwrap()
+    };
+    let resize = |size: (u16, u16)| FakeTerminalRequest::Resize {
+        cols: size.0,
+        rows: size.1,
+    };
+    assert_eq!(h.fake().received(), [resize(fits(PANE))]);
+    assert_eq!(
+        second_opened.borrow_mut().as_mut().unwrap().0.received(),
+        [resize(fits(SECOND_PANE))]
+    );
+    redraw(h.cx);
+    assert_eq!(h.fake().received(), [], "no second resize");
+}

@@ -303,6 +303,8 @@ impl SessionPane {
                 .flex_none()
                 .items_center()
                 .gap(px(ACTIONS_GAP))
+                // The terminal area's text size group starts the right-hand group (SPEC.md's top row).
+                .child(crate::terminal::text_size::controls(cx))
                 .children(buttons),
         )
         .into_any_element()

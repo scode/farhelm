@@ -24,10 +24,11 @@
 //!   until the helm replies to it, by which time the store holds it (the helm pushes a command's changes before its
 //!   reply); a second press meanwhile steps from the held width, not the stale one. Only the latest write's reply drops
 //!   the hold, so an earlier reply cannot pull the sidebar back. A refused write drops it too, and the sidebar shows
-//!   what the helm stores. This hold is the one exception to the store rule that views keep no copy of shared state
-//!   (SPEC_impl.md, "The store, and how views redraw", decided by the migration's orchestrator on 2026-11-14), and it
-//!   must stay that narrow: only the width the user is moving, only until its write's reply. The helm refuses a width
-//!   outside the range rather than clamping it, which is why every width is clamped before it is sent.
+//!   what the helm stores. This hold is one of the two exceptions to the store rule that views keep no copy of shared
+//!   state (SPEC_impl.md, "The store, and how views redraw", decided by the migration's orchestrator on 2026-11-14; the
+//!   terminal text size's step is the other, held the same way), and it must stay that narrow: only the width the user
+//!   is moving, only until its write's reply. The helm refuses a width outside the range rather than clamping it, which
+//!   is why every width is clamped before it is sent.
 //!
 //! The drag and the hold belong to the UI session ([`PerSession`]): a reset forgets both, and the sidebar draws what
 //! the new snapshot holds.
