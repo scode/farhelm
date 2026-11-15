@@ -309,7 +309,7 @@ impl Launcher {
             cx,
             |launcher: &mut Self, event, window, cx| match event {
                 TextInputEvent::Changed => launcher.model_typed(window, cx),
-                TextInputEvent::Submitted => launcher.model_enter(window, cx),
+                TextInputEvent::Submitted { .. } => launcher.model_enter(window, cx),
             },
         );
         // GPUI runs focus listeners inside the frame's focus phase, where a redraw request is dropped (`focus.rs` works
@@ -354,7 +354,7 @@ impl Launcher {
                         TextInputEvent::Changed => {
                             launcher.edited(which, input.text(cx).to_string(), cx)
                         }
-                        TextInputEvent::Submitted => {
+                        TextInputEvent::Submitted { .. } => {
                             if !launcher.held_enter.get() {
                                 launcher.press(window, cx);
                             }
@@ -364,9 +364,10 @@ impl Launcher {
             })
             .collect();
         // SPEC.md: "A held Enter never launches". A single-line field reports Submitted on every auto-repeat of Enter
-        // without saying it was one, so this notes, before each keystroke is dispatched, whether it is a held Enter;
-        // the fields' Submitted and the model field's Enter read it while that keystroke is handled. Buttons, the
-        // choices and the dialog's own Enter already ignore a held key.
+        // (its `held` says which; the launcher still keeps its own note of it, below), so this notes, before each
+        // keystroke is dispatched, whether it is a held Enter; the fields' Submitted and the model field's Enter read
+        // it while that keystroke is handled. Buttons, the choices and the dialog's own Enter already ignore a held
+        // key.
         let held_enter = Rc::new(Cell::new(false));
         let noting = held_enter.clone();
         let held_watch = cx.intercept_keystrokes(move |event, _, _| {

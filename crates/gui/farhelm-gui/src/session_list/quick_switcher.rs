@@ -311,7 +311,7 @@ impl QuickSwitcher {
         input.set_placeholder("Jump to a session", window, cx);
         let events = input.subscribe(window, cx, |switcher, event, window, cx| match event {
             TextInputEvent::Changed => switcher.edited(cx),
-            TextInputEvent::Submitted => switcher.pick_selected(window, cx),
+            TextInputEvent::Submitted { .. } => switcher.pick_selected(window, cx),
         });
         QuickSwitcher {
             list,
