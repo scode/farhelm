@@ -1,10 +1,12 @@
 //! The launcher's entry points: the ordinary public functions other surfaces call to open New (the session list's New
-//! button, the quick switcher's "New session named X" row, Cmd+N), what those surfaces need to draw their triggers,
-//! and the YOLO question the sidebar's plain Replace asks ([`ask_yolo_for_replace`]).
+//! button, the quick switcher's "New session named X" row, Cmd+N) and Clone (the row menu and the session header),
+//! what those surfaces need to draw their triggers, and the YOLO question the sidebar's plain Replace asks
+//! ([`ask_yolo_for_replace`]).
 //!
-//! SPEC.md, "Creation" ("Working directory", "Host"), "Desktop window chrome" (Cmd+N) and the quick switcher's
-//! paragraph. Ported from the old app's New handling in `list/view.rs` at reference commit `24bc0580`
-//! (`effective_create_host`, the New button's guards and its tooltip).
+//! SPEC.md, "Creation" ("Working directory", "Host"), "Lifecycle operations" (Clone), "Desktop window chrome" (Cmd+N)
+//! and the quick switcher's paragraph. Ported from the old app's New handling in `list/view.rs` at reference commit
+//! `24bc0580` (`effective_create_host`, the New button's guards and its tooltip) and its Clone prefill in
+//! `list/create_form.rs` (`resolve_clone_host`).
 //!
 //! New is refused while a launch is pending: the old New button was disabled while the page's one operation token was
 //! held, and SPEC.md keeps "a launch is pending" among what disables it ("Cmd+N ... unless a modal is open or New is
@@ -20,10 +22,10 @@
 //! that brings it: the rest of SPEC.md's folder default (the newest recent setup's folder on that host) with recent
 //! setups, and New preselecting an open environment session's recipe and place with the environments work; until then
 //! an open session on a host that a sandbox or container owns prefills the helm's own host, since such a host is no
-//! place for an unrelated session (the host picker leaves it out too). And the open session is read from the store, so
-//! one the sidebar's filter or host choice leaves unlisted is not found, and New falls back to the helm's own host;
-//! the old app kept the selected row's destination for that (its "New inherits a filtered selected destination"
-//! case), and nothing in the app keeps an unlisted selected session's row yet.
+//! place for an unrelated session (the host picker leaves it out too). The open session is read from the store, which
+//! holds it even while the sidebar's filter or host choice leaves it unlisted (the window's session query names the
+//! open session, and the helm keeps it in what it pushes), so New follows a hidden open session too, as the old app's
+//! "New inherits a filtered selected destination" case did.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{
@@ -36,8 +38,8 @@ use gpui::{App, Window};
 
 use super::draft::{LaunchDraft, remembered_permission};
 use super::launch;
-use super::view::open;
 use super::view::yolo_question::{self, replace_owner};
+use super::view::{open, open_noted};
 use crate::focus::Mark;
 use crate::host_text::HostText;
 use crate::hosts::offers::HostKind;
@@ -100,6 +102,78 @@ fn open_with(name: Option<&str>, window: &mut Window, cx: &mut App) -> bool {
     open(draft, &mark, window, cx).is_some()
 }
 
+/// Open Clone of the session `session` (its key) in `window`: an ordinary, editable create prefilled from the
+/// session's host, folder, title and stored launch, verbatim, with the initial prompt and the conversation selector
+/// empty (SPEC.md, "Clone"). Call it from the handler of the user's action (the row menu's or the session header's
+/// Clone). Refused, returning `false`, as [`open_new`] is: while New is unavailable (a surface drawing Clone draws it
+/// disabled then, reading [`new_available`]), while a dialog or menu is open, with no UI session, and also when the
+/// store no longer holds the session (a session the list's filter hides is still held while it is open).
+///
+/// The host is the session's own when its host row still names the install the session was listed on and is not a
+/// host a sandbox or container owns. Otherwise the host is not carried over: the draft takes New's host instead (the
+/// open session's, else the helm's own), and a note under Host says why, as the old launcher did once the registry
+/// could not confirm the source's install ([`HOST_NOT_CARRIED`], [`ENVIRONMENT_NOT_CARRIED`]). The folder stays the
+/// session's either way, as SPEC.md has it ("Other sessions keep their working directory"); like any prefilled folder
+/// it is untouched, so picking another host re-seeds it as in New.
+///
+/// A refused launch waiting behind its notice comes back instead, with its draft and refusal, as New brings it back:
+/// that refusal arrived after the user had moved on, so they have not seen it yet, and replacing its draft would lose
+/// it unseen. Clone of the session works again once that launcher is closed, or once its launch has had its reply.
+///
+/// NOTE: Not built yet: a Clone of a session in a managed checkout starting on a fresh checkout of its repository with
+/// the `-clone` name, and choosing an existing folder restoring the source's folder and title, which come with managed
+/// checkouts; until then such a Clone keeps the source's checkout directory as an existing folder. And a Clone of a
+/// sandbox or container session targeting a fresh environment from its recipe (SPEC.md, "Sandbox sessions") comes with
+/// the environments work; until then it falls back as above, with its own note.
+pub fn open_clone(session: &str, window: &mut Window, cx: &mut App) -> bool {
+    if layers::focus_layer_open(window, cx) || !new_available(cx) {
+        return false;
+    }
+    if launch::open_waiting(window, cx) {
+        return true;
+    }
+    let Some(store) = session::current_store(cx) else {
+        return false;
+    };
+    let collections = store.read(cx).collections();
+    let Some(row) = collections.get::<SessionRow>(session) else {
+        return false;
+    };
+    let source_host = collections
+        .ordered::<HostView>()
+        .into_iter()
+        .find(|host| same_install(row, host));
+    let (host, note) = match source_host {
+        Some(host) if !host.is_session_owned => (Some(host.id), None),
+        found => {
+            let selected = local_state::selected(cx);
+            let fallback =
+                open_host(collections, selected.as_deref()).or_else(|| local_host(collections));
+            let note = if found.is_some() {
+                ENVIRONMENT_NOT_CARRIED
+            } else {
+                HOST_NOT_CARRIED
+            };
+            (fallback, Some(note))
+        }
+    };
+    let draft = LaunchDraft::clone_of(&row.info, host);
+    let mark = Mark::take(cx);
+    open_noted(draft, note, &mark, window, cx).is_some()
+}
+
+/// The note under Host when a Clone's source host no longer names the install the session ran on (retargeted onto
+/// another machine, gone from the registry, or in an identity mismatch): the old launcher's words, which it showed for
+/// the same reason.
+pub(super) const HOST_NOT_CARRIED: &str = "The source session reports a different installation now, so its host was \
+     not carried over here — check the host below";
+
+/// The note under Host when a Clone's source ran on a host a sandbox or container owns, which is no place for another
+/// session. The old launcher targeted a fresh environment from the source's recipe instead; until the environments work
+/// brings that back, the Clone falls back to New's host and says so, in the words of the note above.
+pub(super) const ENVIRONMENT_NOT_CARRIED: &str = "The source session ran in its own sandbox or container, so \
+     its host was not carried over here — check the host below";
+
 /// What the plain Replace YOLO question asks about; its owner holds the question as `prompt::Inline<YoloAsk>`
 /// ([`ask_yolo_for_replace`]).
 pub use super::view::yolo_question::YoloAsk;
@@ -146,13 +220,7 @@ pub fn ask_yolo_for_replace(
 /// its host row still names the install the session was listed on, else the helm's own host and `~`; the remembered
 /// permission. Prefilled values are seeds, not edits: nothing is marked touched.
 fn new_draft(collections: &Collections, selected: Option<&str>) -> LaunchDraft {
-    let host = open_host(collections, selected).or_else(|| {
-        collections
-            .ordered::<HostView>()
-            .into_iter()
-            .find(|host| HostKind::of(host) == HostKind::Local)
-            .map(|host| host.id)
-    });
+    let host = open_host(collections, selected).or_else(|| local_host(collections));
     let folder = host.map_or_else(
         || "~".to_owned(),
         |host| default_folder(collections, selected, host),
@@ -173,6 +241,16 @@ fn open_host(collections: &Collections, selected: Option<&str>) -> Option<i64> {
         .ordered::<HostView>()
         .into_iter()
         .find(|host| same_install(row, host) && !host.is_session_owned)
+        .map(|host| host.id)
+}
+
+/// The helm's own host, New's and Clone's fallback target: "the helm's own host" in SPEC.md, "Host". `None` only
+/// before the helm has reported it.
+fn local_host(collections: &Collections) -> Option<i64> {
+    collections
+        .ordered::<HostView>()
+        .into_iter()
+        .find(|host| HostKind::of(host) == HostKind::Local)
         .map(|host| host.id)
 }
 

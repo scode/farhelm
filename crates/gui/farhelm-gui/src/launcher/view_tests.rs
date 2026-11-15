@@ -876,6 +876,82 @@ fn a_carried_effort_the_model_does_not_offer_stays_offered(cx: &mut TestAppConte
     );
 }
 
+/// The old launcher kept a flat 24 pixels above and below itself in windows at least 1000 pixels wide, where other
+/// dialogs keep 5% of the window's height (`app.css` at the reference commit, line 6629: "Leave room for populated
+/// launch rows rather than spending five percent of a desktop window above and below the dialog"). Specified: a Clone
+/// of a Codex launch, which fills the window's height, is 48 pixels shorter than a 1000 by 600 window, and 60 pixels
+/// shorter (5% of the height each side) than a 999 by 600 one. That other dialogs keep 5% in a wide window is
+/// `settings::tests::the_frame_keeps_one_size_across_sections_capped_by_the_window`'s 1000 by 600 case.
+#[gpui::test]
+fn the_launcher_keeps_a_flat_margin_in_a_wide_window(cx: &mut TestAppContext) {
+    let source = super::draft_tests::session(codex(None, Some(LaunchEffort::High), None));
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::clone_of(&source, Some(1)));
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(600.)));
+    settle(cx);
+    assert_eq!(
+        test_support::bounds(cx, "launcher").size.height,
+        gpui::px(600. - 2. * 24.)
+    );
+    cx.simulate_resize(gpui::size(gpui::px(999.), gpui::px(600.)));
+    settle(cx);
+    assert_eq!(
+        test_support::bounds(cx, "launcher").size.height,
+        gpui::px(600. - 2. * 30.)
+    );
+}
+
+/// Open a Clone of a Codex launch with High effort, fail its catalog read when `fail`, and check that it shows High
+/// chosen and that Launch sends its create with the catalog unanswered or failed.
+fn clone_launches_without_the_catalog(cx: &mut TestAppContext, fail: bool) {
+    let source = super::draft_tests::session(codex(None, Some(LaunchEffort::High), None));
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::clone_of(&source, Some(1)));
+    if fail {
+        answer_catalog(&mut helm, cx, None);
+        assert!(
+            has_node(cx, "launcher-catalog-error"),
+            "the premise: the read failed"
+        );
+    } else {
+        assert!(
+            helm.commands()
+                .iter()
+                .any(|command| command.path.ends_with("launch-catalog")),
+            "the premise: the catalog read went out, and this test leaves it unanswered"
+        );
+    }
+    assert_eq!(
+        toggled(cx, "launcher-effort-High"),
+        Some(gpui::Toggled::True),
+        "the copied effort shows"
+    );
+    test_support::click(cx, "launcher-launch");
+    cx.run_until_parked();
+    let creates = helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.path == "/api/sessions")
+        .count();
+    assert_eq!(creates, 1, "Launch sent the create");
+}
+
+/// A Clone's copied choices need no catalog to launch (the old `clone.spec.ts` case "a clone with an effort can launch
+/// while the catalog is still loading"): the catalog only offers choices, and the helm validates the launch again, so
+/// a slow read must not hold back a copy the user can already see in full. Specified: a Clone of a Codex launch with
+/// High effort shows High chosen and sends its create on Launch while the catalog read is still out.
+#[gpui::test]
+fn a_clone_launches_while_the_catalog_read_is_out(cx: &mut TestAppContext) {
+    clone_launches_without_the_catalog(cx, false);
+}
+
+/// The failed-read twin of [`a_clone_launches_while_the_catalog_read_is_out`] (the old case "a failed catalog read
+/// shows a retry and leaves the clone launchable"; the Retry line itself is
+/// [`a_failed_catalog_read_says_so_and_retry_reads_it_again`]). Specified: with the catalog read failed, the Clone still
+/// shows High chosen and sends its create on Launch.
+#[gpui::test]
+fn a_clone_launches_after_a_failed_catalog_read(cx: &mut TestAppContext) {
+    clone_launches_without_the_catalog(cx, true);
+}
+
 /// Restart with's stored effort stays offered beside the ones the model offers, even after the user picks another, so
 /// going back to the session's own effort is one click (old `displayed_efforts`'s baseline). Specified: Restart with a
 /// Codex session stored with Max, against a catalog whose model offers low, medium and high: after choosing Default,
