@@ -529,6 +529,26 @@ class CrossAreaImportTest(unittest.TestCase):
         self.assertIn("; cross-area imports not checked: UnicodeDecodeError", result.stdout)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_a_full_path_call_counts_as_an_import(self):
+        """A call written as `crate::pane::busy(..)` depends on another area's module as much as a `use` does, and a
+        check reading only `use` lines cannot see it: three such uses reached main without a row. Specified: a Lists
+        file that newly calls Panes' module by full path is reported, named by that path; a `$crate::` path, a path
+        only in a comment, an identifier merely ending in `crate`, and a full path to a module the base's copy of the
+        file already named (through a `use` in one file, through a full path in another) report nothing."""
+        self.repo.write("src/list/view.rs", "use crate::pane::Pane;\n")
+        self.repo.write("src/list/called.rs", "fn f() { crate::pane::busy() }\n")
+        self.repo.commit("base imports and calls a pane")
+        self.repo.git("tag", "-f", "base")
+        self.repo.write("src/list/view.rs", "use crate::pane::Pane;\nfn f() { crate::pane::busy() }\n")
+        self.repo.write("src/list/called.rs", "fn f() { crate::pane::busy() }\nfn g() { crate::pane::idle() }\n")
+        call = "fn f() -> bool {\n    crate::pane::busy(&key)\n        || crate::theme::dark()\n}\n"
+        quiet = "macro_rules! m { () => { $crate::pane::x() } }\n// crate::pane::y()\nfn g() { mycrate::pane::z() }\n"
+        self.repo.write("src/list/row.rs", call)
+        self.repo.write("src/list/quiet.rs", quiet)
+        self.repo.commit("full-path calls")
+        line = "reported: Lists: src/list/row.rs: cross-area import: imports crate::pane::busy, from src/pane.rs"
+        self.assertEqual(self.crossings(self.repo.check()), [line + " of Panes, which no row covers"])
+
     def test_imports_resolve_under_a_nested_crate_root_and_through_mod_rs(self):
         """Every real area lives under `crates/gui/farhelm-gui/src/`, not the fixture's root-level `src/`, and a
         module may be `x/mod.rs`. Specified: a nested file's crate root is its crate's `src/`; paths resolve to the
