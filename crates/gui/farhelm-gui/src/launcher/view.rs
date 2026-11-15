@@ -560,22 +560,30 @@ impl Launcher {
         self.refused = None;
         self.yolo = None;
         let creates = matches!(self.draft.mode, Mode::New | Mode::Clone);
+        let hosts = self.hosts(cx);
         let body = (creates && self.refusal(cx).is_none())
             .then(|| {
-                let hosts = self.hosts(cx);
                 self.draft.create_body(Target {
                     hosts: &hosts,
                     catalog: self.catalog.as_deref(),
                 })
             })
             .flatten();
-        let Some(mut body) = body else {
+        // The progress pill's host, captured now for the request's life: the registry's display name, without the
+        // footer's phase. A body exists only for a host the refusal check found among `hosts`.
+        let host = body.as_ref().and_then(|body| {
+            hosts
+                .iter()
+                .find(|host| Some(host.id) == body.host)
+                .map(display_name)
+        });
+        let (Some(mut body), Some(host)) = (body, host) else {
             self.pressed = true;
             cx.notify();
             return;
         };
         body.confirm_yolo = confirm_yolo;
-        if launch::start(cx.entity(), &body, mark, window, cx)
+        if launch::start(cx.entity(), &body, host, mark, window, cx)
             && let Some(layer) = self.layer.take()
         {
             layers::close(layer, window, cx);
