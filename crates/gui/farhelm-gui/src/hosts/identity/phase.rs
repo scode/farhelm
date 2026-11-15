@@ -206,9 +206,10 @@ pub(crate) fn detail_lines(
     lines
 }
 
-/// What the helm knows about the host's phase (the old `state_detail`), appended to the empty `line`. For a connected
-/// host this one line is its version, identity and session count.
-fn evidence(
+/// What the helm knows about the host's phase (the old `state_detail`), appended to `line`. For a connected host this
+/// one line is its version, identity and session count. Visible to the crate for the session pane's unavailable card,
+/// whose smaller diagnostics line is this one after the host's name, as the old card's was.
+pub(crate) fn evidence(
     line: HostSentence,
     state: &HostStateView,
     twin: &impl Fn(i64) -> Option<HostText>,
@@ -376,8 +377,9 @@ fn evidence(
 /// get none: one is still trying and the other is re-probed forever, so telling the user to act would invent work. The
 /// one exception is the helm's own machine with no supervisor, whose remedy is a command on the machine the user sits
 /// at: the helm's own dial failure spells it out with the right state directory, so that is shown rather than words of
-/// the app's, which cannot know the directory. The remedy is appended to the empty `line`.
-fn remedy(
+/// the app's, which cannot know the directory. The remedy is appended to `line`. Visible to the crate for the session
+/// pane's unavailable card, which explains an unreachable session with it where there is one, as the old card did.
+pub(crate) fn remedy(
     line: HostSentence,
     state: &HostStateView,
     twin: &impl Fn(i64) -> Option<HostText>,

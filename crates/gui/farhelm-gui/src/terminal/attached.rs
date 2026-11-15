@@ -477,10 +477,12 @@ impl AttachedTerminal {
     /// terminal whose stream is down, where nothing could be sent); a real release while inert is dropped like other
     /// input, and one after the terminal is usable again reaches the program.
     ///
-    /// It moves no focus itself. The caller, which puts the card up, moves focus off the terminal (to the card, or
-    /// home) and makes something else home while it stays inert, through the focus coordinator; otherwise focus rests
-    /// on a terminal that takes nothing. The card draws itself over this, with no veil of its own. Turning it off
-    /// undoes all of it.
+    /// An inert terminal holds no focus: its pane tracks no focus handle, so it is no Tab stop and a click does not
+    /// focus it. Focus it held goes home through the focus coordinator (GPUI reports it lost once a frame no longer
+    /// tracks the handle, and the coordinator's recovery sends it home), and a layer that closes while the terminal is
+    /// inert and would give focus back to it falls back the same way. The caller, which puts the card up, makes
+    /// something else home meanwhile (the card), so focus never rests on a terminal that takes nothing. The card draws
+    /// itself over this, with no veil of its own. Turning it off undoes all of it.
     pub fn set_inert(&mut self, inert: bool, cx: &mut Context<Self>) {
         if self.inert == inert {
             return;
@@ -493,8 +495,6 @@ impl AttachedTerminal {
             self.paste = None;
         }
         self.inert = inert;
-        // A handle's Tab stop is shared by every clone of it: this changes the one the pane tracks.
-        self.focus = self.focus.clone().tab_stop(!inert);
         cx.notify();
     }
 
@@ -1764,7 +1764,13 @@ impl Render for AttachedTerminal {
                     .children(disclosure_anchor),
             )
             .children(scrollbar);
-        let body = focus::track(body, &self.focus, OnPress::Focus);
+        // An inert terminal tracks no focus handle, so it holds none: focus it held is reported lost once a frame no
+        // longer tracks it, and the coordinator sends it home (see `set_inert`).
+        let body = if inert {
+            body
+        } else {
+            focus::track(body, &self.focus, OnPress::Focus)
+        };
         // Measures the whole pane, banner included (see `banner`). The measurement is handed over after the frame:
         // a notify during paint would be lost.
         let measure = canvas(

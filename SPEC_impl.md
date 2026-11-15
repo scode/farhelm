@@ -422,20 +422,20 @@ it, must move its store subscription to each new session's store and drop the ol
 retired store nor misses the store that replaced it. Views do that through the owner's helper
 (`session::observe_current`): the session list follows the store through it and keeps the rest of its per-session state
 in `PerSession`. The session pane follows the connection, keyed on the session through `PerSession`, and follows the
-store only for the open session's transitions into and out of its interrupted card (and its host's reachability), which
-decide whether it mounts terminals. The one survivor the UI keeps itself is the selected session, by id, if the new
-snapshot still has it; it lives in a small foundation of its own outside the UI-session owner
-(`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in `docs/gpui/foundation-ownership.md`), which is not a
-device-local preferences store and has no room for one. The window itself, its size included, is not part of the UI
-session and is untouched. The settings the old app kept per device (appearance, sidebar width, host rail, status sounds,
-terminal text size) become helm preferences in the new app, so they return with the new snapshot like the rest of the
-helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width, appearance, terminal text
-size or status sounds per device; it still calls the host rail per device until the change that moves it. The store fed
-by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and menus: going
-inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the ground they
-are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would keep its veil
-over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm accepted continues
-independently of the reset.
+store only for the open session's transitions into and out of its interrupted card and its host's reachability, which
+decide whether it mounts terminals and whether they are inert under the unavailable card. The one survivor the UI keeps
+itself is the selected session, by id, if the new snapshot still has it; it lives in a small foundation of its own
+outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in
+`docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one. The window
+itself, its size included, is not part of the UI session and is untouched. The settings the old app kept per device
+(appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new app, so
+they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no longer
+calls the sidebar width, appearance, terminal text size or status sounds per device; it still calls the host rail per
+device until the change that moves it. The store fed by the channel holds only helm state. Half-typed drafts do not
+survive, and neither do open dialogs and menus: going inert closes every layer through the layer manager
+(`layers::close_all`). Menus would close anyway with the ground they are anchored to, but a dialog closes only when its
+opener or its subject says so, and one left open would keep its veil over the inert window, taking the clicks and Tab
+presses meant for Take back or Retry. Work the helm accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
@@ -613,8 +613,9 @@ step: exactly one focused element, inside the topmost modal (or a layer opened a
 a modal is open (SPEC.md, "Keyboard focus"); a card is any control inside the layer manager's approval region, the one
 place outside the modal the invariant accepts, and nothing else in the coordinator treats it specially. When nothing
 else holds focus it rests where SPEC.md's "Where focus rests" says (the selected session's terminal, New, a stopped
-session's card), and on the window's root view only when none of those is on screen, so a key press always reaches
-Farhelm's own key bindings rather than GPUI Kit's.
+session's card), or on the unavailable card while it shows in the open session's terminal area, and on the window's root
+view only when none of those is on screen, so a key press always reaches Farhelm's own key bindings rather than GPUI
+Kit's.
 
 ### Overlays: the layer manager
 
@@ -998,18 +999,19 @@ the Keyboard navigation setting. Both are built on the layer's focus stop (`comp
 accessible role and name, and Tab reach without the keys, with the role and the ring's geometry given by the caller, on
 a focus handle its caller passes in (a scroll stop passes one kept in its element state). A place where focus rests that
 does not scroll (the session pane's interrupted card, SPEC.md's stopped session's card, once it lands) is to use it
-alone, with a handle it owns, so it can make the stop home before the stop is first drawn. A stop's keys are its own
-only while the stop itself holds focus. A dialog's notices region can take the body's stop too
-(`DialogFrame::notices_stop`), as the old Trash dialog's global confirmation was the same old region; its ring reaches
-out to the card's sides, where the old full-width region's lay, since the notices sit inside the footer's padding.
-Because the region holds a question's answers, it is then also scrolled by Page Up, Page Down, Home and End from a
-control inside it, as WebKit scrolled the container around a focused button. That is narrower than WebKit, which also
-scrolled on Up and Down from a button and went on to scroll the containers outside once the region reached its end: here
-the arrows stay the control's and the keys scroll the notices only. No other region takes keys from a control inside it.
-Colors come only from theme tokens, which are copied from the old stylesheet (`crates/farhelm-ui/assets/app.css` at the
-reference commit). One dialog frame keeps the answer buttons pinned and scrolls the body, and when even those do not
-fit, the whole frame scrolls, as today's dialogs do. The window's minimum size is in SPEC.md ("Desktop window chrome";
-`MIN_WINDOW_SIZE` in the app's bootstrap holds it).
+alone, with a handle it owns, so it can make the stop home before the stop is first drawn; a place where focus rests
+that scrolls (the session pane's unavailable card) takes the scroll stop on a handle it owns
+(`components::scroll_stop_on`) for the same reason. A stop's keys are its own only while the stop itself holds focus. A
+dialog's notices region can take the body's stop too (`DialogFrame::notices_stop`), as the old Trash dialog's global
+confirmation was the same old region; its ring reaches out to the card's sides, where the old full-width region's lay,
+since the notices sit inside the footer's padding. Because the region holds a question's answers, it is then also
+scrolled by Page Up, Page Down, Home and End from a control inside it, as WebKit scrolled the container around a focused
+button. That is narrower than WebKit, which also scrolled on Up and Down from a button and went on to scroll the
+containers outside once the region reached its end: here the arrows stay the control's and the keys scroll the notices
+only. No other region takes keys from a control inside it. Colors come only from theme tokens, which are copied from the
+old stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons
+pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The
+window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
 `enter_choice`. A control takes it only when its owner hands it the dialog's main action, through an `on_enter` builder

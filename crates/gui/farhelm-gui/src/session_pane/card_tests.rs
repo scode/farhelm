@@ -215,8 +215,10 @@ fn a_session_gone_unreachable_while_open_takes_no_interrupted_card(cx: &mut Test
 }
 
 /// The same rule for a session opened on a host the helm cannot reach: its last status said interrupted, but nothing
-/// can restart it there, so the interrupted card's offer would be one the helm refuses. Specified: a session opened
-/// interrupted on a stale host draws no interrupted card.
+/// can restart it there, so the interrupted card's offer would be one the helm refuses, and an attach would only meet a
+/// host that does not answer. Before the unavailable card, such a session mounted terminals, because only the
+/// interrupted card kept them away. Specified: a session opened interrupted on a stale host draws no interrupted card,
+/// opens no stream, mounts no tab strip, and draws the unavailable card.
 #[gpui::test]
 fn a_session_opened_unreachable_takes_no_interrupted_card(cx: &mut TestAppContext) {
     let main = open_main(
@@ -224,6 +226,9 @@ fn a_session_opened_unreachable_takes_no_interrupted_card(cx: &mut TestAppContex
         snapshot(&[(interrupted("a").stale(), 0), (session("b"), 0)], false),
     );
     assert!(!drawn(main.cx, CARD));
+    assert_eq!(streams(&main), [], "no stream");
+    assert!(!drawn(main.cx, STRIP_ID), "no tab strip");
+    assert!(drawn(main.cx, super::unavailable::CARD_ID));
 }
 
 // ---- Restart -------------------------------------------------------------------------------------------------------
@@ -352,12 +357,13 @@ fn an_interrupted_session_whose_host_drops_away_mounts_no_terminal(cx: &mut Test
     assert_eq!(streams(&main), [FakePhase::Attaching]);
 }
 
-/// The card's question while its host drops away: the card goes and draws nothing, so the question goes with it, or it
-/// would refuse every lifecycle command of a's with nothing on screen to answer until the host came back. The old card
-/// cleared its Replace prompt the moment it was hidden (`use_clear_when_hidden`), and a stale row hid it. Specified:
-/// with the card's Replace question open on a, a push that lists a on an unreachable host takes the card and the
-/// question away, and a's menu then offers Rename, Clone, Replace with…, Replace, Stop and Delete; once a is listed
-/// reachable and interrupted again, the card shows with no question open.
+/// The card's question while its host drops away: the interrupted card goes (the unavailable card takes its place,
+/// which has no question to draw), so the question goes with it, or it would refuse every lifecycle command of a's with
+/// nothing on screen to answer until the host came back. The old card cleared its Replace prompt the moment it was
+/// hidden (`use_clear_when_hidden`), and a stale row hid it. Specified: with the card's Replace question open on a, a
+/// push that lists a on an unreachable host takes the card and the question away and shows the unavailable card, and
+/// a's menu then offers Rename, Clone, Replace with…, Replace, Stop and Delete; once a is listed reachable and
+/// interrupted again, the card shows with no question open.
 #[gpui::test]
 fn the_cards_question_goes_when_its_host_drops_away(cx: &mut TestAppContext) {
     let mut main = open_main(
@@ -376,6 +382,10 @@ fn the_cards_question_goes_when_its_host_drops_away(cx: &mut TestAppContext) {
     assert!(
         !drawn(main.cx, CARD),
         "the premise: no card while unreachable"
+    );
+    assert!(
+        drawn(main.cx, super::unavailable::CARD_ID),
+        "the unavailable card in its place"
     );
     assert!(!drawn(main.cx, "prompt-confirm"), "no question is drawn");
     test_support::click(main.cx, "session-menu-a");

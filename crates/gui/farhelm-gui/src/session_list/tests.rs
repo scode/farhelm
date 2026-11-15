@@ -889,12 +889,16 @@ fn a_row_that_stops_running_drops_the_pulse(cx: &mut TestAppContext) {
 /// motion reads as evidence that something is happening now, and nobody can know that of an unreachable host. Still
 /// means no pulse handle at all, not a pulse drawn at full opacity. Specified: a list whose only running row is stale
 /// redraws not once in a second in an active window, and the same row pushed again on a connected host makes it
-/// redraw.
+/// redraw. The idle b is the open session: the stale a, open, would show the unavailable card, whose turning spinner
+/// redraws the window, list included, which is the card's motion and not the row's.
 #[gpui::test]
 fn a_stale_running_row_holds_no_pulse(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(
         cx,
-        vec![listing(&["a", "b"], &[session("a").stale(), idle("b")])],
+        vec![
+            listing(&["a", "b"], &[session("a").stale(), idle("b")]),
+            preferences(&["b"], None),
+        ],
     );
     assert!(
         cx.update(|window, _| window.is_window_active()),

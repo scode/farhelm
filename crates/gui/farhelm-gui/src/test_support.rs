@@ -610,9 +610,10 @@ pub(crate) struct MainWindow<'a> {
 /// its connection serving fake terminal streams, open in an active window and checked once settled.
 ///
 /// On return the channel is connected with `snapshot` taken in. If the snapshot's preferences open a session (the last
-/// visited), its pane has opened that session's terminal stream, recorded first in `terminals`, which is still
-/// attaching: no socket is open and nothing is replayed. Focus is wherever the main view puts it at startup, which with
-/// a session open is that terminal. Nothing else is assumed about the snapshot, so a test of the
+/// visited) on a host the helm reaches, its pane has opened that session's terminal stream, recorded first in
+/// `terminals`, which is still attaching: no socket is open and nothing is replayed; a stale session mounts the
+/// unavailable card instead, and opens no stream. Focus is wherever the main view puts it at startup, which with a
+/// reachable session open is that terminal. Nothing else is assumed about the snapshot, so a test of the
 /// state before the preferences arrive passes a snapshot without them.
 pub(crate) fn open_main(cx: &mut TestAppContext, snapshot: Vec<CollectionState>) -> MainWindow<'_> {
     let (mut helm, connection) = started(cx);
@@ -888,6 +889,8 @@ mod shared_helper_tests {
             // No terminal tabs, whatever the helm fixture lists: each tab of the open session attaches a terminal of
             // its own, and this test counts a's agent terminal alone.
             entry.value["tabs"] = serde_json::json!([]);
+            // On a host the helm reaches: the fixture's row is on one it cannot, which opens no terminal.
+            entry.value["stale"] = serde_json::json!(false);
         }
         listing.meta.counts = Some(ListCounts {
             total: 2,
