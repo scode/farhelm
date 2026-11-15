@@ -12,7 +12,9 @@
 //!   lists its tunnels at once ([`Tunnels::stale`]); the first time the pointer rests on a loopback link on a Mac, for
 //!   any other session ([`Tunnels::request`]), again on the next such hover after a read that failed with nothing to
 //!   show ([`Tunnels::rearm`]); after each of this terminal's own tunnel commands; and whenever the shared consent
-//!   changes, since withdrawing it closes every tunnel. Nothing else creates tunnels yet.
+//!   changes, since withdrawing it closes every tunnel. An approval card's Tunnel and open creates tunnels from outside
+//!   the terminal, and says so through [`opened_elsewhere`], which re-reads every view of that session at once and
+//!   again [`ELSEWHERE_SETTLE`] later: the helm answers the card before it has opened the tunnel.
 //! - **The offer.** On a Mac, a link whose host is the remote host's own loopback ([`tunnel_port`]) shows a hint in the
 //!   destination display beside the pointer, naming the port and host and saying that a plain click still opens it on
 //!   this Mac ([`Tunnels::hint`]). Cmd with no other modifier on a click opens it through a tunnel instead. Sessions on
@@ -35,7 +37,8 @@
 //!   the last action's failures stay until the next open or close starts, and no read, failed or not, puts them away
 //!   (SPEC.md: "refreshing the list does not dismiss a close failure"). Dismiss clears both. A declined warning shows
 //!   nothing.
-//! - **Settings' switch** asks the same warning through [`ask_consent`] and saves the same preference.
+//! - **Settings' switch** asks the same warning through [`ask_consent`] and saves the same preference, and so does an
+//!   approval card's Tunnel and open ([`ask_consent_about`]), whose warning goes with the card's request.
 //!
 //! The list takes focus as it opens, on Close all. Tab and Shift-Tab walk its controls and go on out of it, which closes
 //! it without moving focus back; Escape closes it and returns focus to the pill (SPEC.md).
@@ -48,9 +51,9 @@ use std::collections::VecDeque;
 
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, Global,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder as _, px, svg,
 };
 use serde::Deserialize;
@@ -63,7 +66,7 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::operations::{self, Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
-use crate::{session, theme};
+use crate::{session, theme, ticker};
 
 /// What a second tunnel action says while the session's first is still in flight (the old app's words).
 const BUSY: &str = "Another tunnel action is still waiting";
@@ -143,11 +146,44 @@ pub(crate) struct Tunnels {
     requested: bool,
     /// Whether the last read failed with no snapshot to show, so the next hover of a loopback link tries again.
     failed: bool,
+    /// Re-reads the listing when a tunnel for this session was opened outside the terminal ([`opened_elsewhere`]).
+    _elsewhere: Subscription,
+    /// The second read after a tunnel opened elsewhere ([`ELSEWHERE_SETTLE`]); dropping it cancels the read.
+    settle: Option<ticker::Deadline>,
+}
+
+/// The session a tunnel was last opened for outside the terminal: set by [`opened_elsewhere`], observed by every
+/// [`Tunnels`]. One value: GPUI merges a global's notifications within one update, so two calls in one update would
+/// refresh only the second session's views. Each call comes from its own answer's reply, so none share an update.
+struct OpenedElsewhere(String);
+
+/// How long after a tunnel opened elsewhere its session's views read their listing again. The helm answers an approval
+/// card's Tunnel and open as soon as the waiting request has the answer, and only then does that request open the tunnel
+/// (bind the listener, record it), so the read made on the answer can come too early to list it. The second read
+/// catches it; the old app re-read on every change the helm announced, which no pushed collection carries here.
+const ELSEWHERE_SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl Global for OpenedElsewhere {}
+
+/// A tunnel for `session` was opened outside the terminal (an approval card's Tunnel and open): every view of that
+/// session re-reads its listing now and again [`ELSEWHERE_SETTLE`] later, so its pill shows the tunnel. The terminal's
+/// own commands re-read by themselves.
+pub(crate) fn opened_elsewhere(session: &str, cx: &mut App) {
+    cx.set_global(OpenedElsewhere(session.to_owned()));
 }
 
 impl Tunnels {
     /// The tunnels of `session`, not read yet.
     pub(crate) fn new(session: String, cx: &mut Context<Self>) -> Self {
+        let elsewhere = cx.observe_global::<OpenedElsewhere>(|tunnels: &mut Self, cx| {
+            if cx.global::<OpenedElsewhere>().0 == tunnels.session {
+                tunnels.refresh(cx);
+                let again = cx.weak_entity();
+                tunnels.settle = Some(ticker::after(ELSEWHERE_SETTLE, cx, move |cx| {
+                    let _ = again.update(cx, |tunnels, cx| tunnels.refresh(cx));
+                }));
+            }
+        });
         Tunnels {
             session,
             snapshot: None,
@@ -160,6 +196,8 @@ impl Tunnels {
             list: None,
             requested: false,
             failed: false,
+            _elsewhere: elsewhere,
+            settle: None,
         }
     }
 
@@ -526,8 +564,9 @@ impl Tunnels {
 }
 
 /// Whether the helm's shared preference says the user accepted the tunnel warning. Only `true` counts; unset is not
-/// consent. Read from the pushed preferences at the moment of the click.
-fn consented(cx: &App) -> bool {
+/// consent. Read from the pushed preferences at the moment of the click (an approval card's Tunnel and open reads it
+/// too).
+pub(crate) fn consented(cx: &App) -> bool {
     session::current_store(cx).is_some_and(|store| {
         store
             .read(cx)
@@ -624,9 +663,22 @@ pub(crate) fn ask_consent(
     cx: &mut App,
     done: impl FnOnce(Result<(), HostText>, &mut App) + 'static,
 ) -> Option<LayerId> {
+    ask_consent_about(None, mark, window, cx, done)
+}
+
+/// [`ask_consent`] for an approval card's Tunnel and open: the warning goes when `subject` (the card's request) does,
+/// as the old app retired a card's warning when its card vanished, so an Allow can never save consent for a request
+/// that no longer waits. Focus returns to the card's button.
+pub(crate) fn ask_consent_about(
+    subject: Option<Subject>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+    done: impl FnOnce(Result<(), HostText>, &mut App) + 'static,
+) -> Option<LayerId> {
     prompt::ask(
         consent_question(()),
-        None,
+        subject,
         mark,
         move |(), _, cx| save_consent(cx, done),
         window,
