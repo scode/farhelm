@@ -64,6 +64,8 @@ mod fields_tests;
 #[cfg(test)]
 mod leave_tests;
 #[cfg(test)]
+mod naming_tests;
+#[cfg(test)]
 mod rows_tests;
 #[cfg(test)]
 mod save_tests;
@@ -75,7 +77,7 @@ mod shortcuts_tests;
 mod summary_tests;
 
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
-use gpui::{App, FocusHandle, IntoElement, Window};
+use gpui::{AnyWindowHandle, App, FocusHandle, IntoElement, Window};
 
 use crate::components::HoverHelp;
 use crate::focus::{Mark, ReturnTo};
@@ -209,4 +211,32 @@ pub fn button_help(cx: &App) -> HoverHelp {
             "Templates: mark one with ⚡ for quick launch ({QUICK_LAUNCH_SHORTCUT_NAME})"
         )),
     }
+}
+
+/// Name the session a quick launch just created and opened, under `key` and titled `created` by the create's reply, in
+/// `window`: the launcher's success path calls this when New was never shown and its success selected the session
+/// (SPEC.md, "Quick launch": "When New was never shown and success selects its session, the rename dialog opens over
+/// it while its agent is already starting"). The launch is already under way, so naming holds nothing up. It is the
+/// Rename editor in naming mode (`session_list::rename::open_naming`), unless the helm's preferences turn naming off:
+/// Settings' "Name sessions on quick launch", on by default, so an unset preference names too. The same for every
+/// origin, since the launcher's fact covers them all.
+pub(crate) fn name_quick_launched(key: &str, created: &str, window: AnyWindowHandle, cx: &mut App) {
+    let turned_off = session::current_store(cx)
+        .and_then(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<Preferences>(PREFERENCES_KEY)
+                .and_then(|preferences| preferences.name_session_on_quick_launch)
+        })
+        .is_some_and(|on| !on);
+    if turned_off {
+        return;
+    }
+    let _ = window.update(cx, |_, window, cx| {
+        // Taken now, at the success, rather than at the press: the caller has just found that the user has not moved
+        // on since the press, so this mark only lets the editor open over what the success selected.
+        let mark = Mark::take(cx);
+        crate::session_list::rename::open_naming(key, created, &mark, window, cx)
+    });
 }

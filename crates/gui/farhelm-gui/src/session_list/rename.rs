@@ -40,13 +40,19 @@
 //!   and the helm keeps the open session in the store while a filter or the listing cap leaves it out of the list
 //!   (`super::filters`, "The query names the open session"). So the shortcut renames the open session "including when
 //!   its row is filtered out" (SPEC.md, "Desktop window chrome"), seeded from its current title, and the editor follows
-//!   its title there as for a listed one.
+//!   its title there as for a listed one. Naming mode is the one case that opens without a store row: a just-created
+//!   session can be missing from the store at its success, so it starts from the create reply's title instead.
 //!
 //! The old app's optimistic rename overlay is not ported: the UI channel pushes every change before the reply that
 //! caused it (SPEC_impl.md, "The UI channel"), so the store already shows the new title when the save succeeds.
 //!
-//! NOTE: Not ported yet. Quick launch's naming mode of this editor (SPEC.md: "Quick launch uses the same editor in
-//! naming mode") comes with quick launch.
+//! **Naming mode.** A quick launch whose success opened its new session, New never having been shown, opens this editor
+//! over it to name it ([`open_naming`]; SPEC.md, "Quick launch uses the same editor in naming mode after creation,
+//! without holding up agent startup"). Only that mode starts with the whole name selected, so typing replaces it, and
+//! treats a save of the name the session has now as keeping it, closing with no request: the user who presses Enter on
+//! the created name accepted it, and ordinary Rename sends even an unchanged title so the supervisor judges it. A
+//! changed name is an ordinary rename. However it closes, focus goes to the new session's terminal ([`ReturnTo::Home`],
+//! as for the shortcut), which takes no input while the editor is up, since the editor is a modal dialog over it.
 
 #[cfg(test)]
 mod tests;
@@ -84,7 +90,36 @@ use crate::{local_state, session};
 /// store holds no row for the session so there is no title to start from, or the user moved on. A refusal is silent, as
 /// it was in the old app: the session's row already shows the work in flight.
 pub fn open(key: &str, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
-    open_returning(key, mark, ReturnTo::Opener, window, cx)
+    open_returning(key, mark, Mode::Ordinary(ReturnTo::Opener), window, cx)
+}
+
+/// Open the editor in naming mode (the module docs' "Naming mode") for the session a quick launch just created and
+/// opened, under `key`: the name selected, an unchanged save closing with no request, focus going to that session's
+/// terminal however it closes. The caller has decided the quick launch earned naming (New never shown, its success
+/// opened the session, the preference on); `mark` is taken by that caller, and the opening is refused as [`open`]'s is,
+/// except that a missing store row does not refuse it (below).
+///
+/// `created` is the session's title as the create's reply gave it, which the editor starts from while the store has
+/// no row for the session yet: a session a filter or the listing cap leaves out of the list reaches the store only
+/// once the list has asked the helm for the open session, which is after the success that opened it.
+pub(crate) fn open_naming(
+    key: &str,
+    created: &str,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    open_returning(key, mark, Mode::Naming { created }, window, cx)
+}
+
+/// How the editor opens: an ordinary rename, closing back where its [`ReturnTo`] says, or naming mode (the module
+/// docs), which always closes back to the new session's terminal. One enum, so naming cannot be asked for with another
+/// return target.
+enum Mode<'a> {
+    /// The row menu's or the shortcut's rename of a session the store holds, closing back where the opener asks.
+    Ordinary(ReturnTo),
+    /// Naming a session just created, whose title the create's reply gave as `created`.
+    Naming { created: &'a str },
 }
 
 /// `POST /api/sessions/{id}/rename` with `title` exactly as given: no trimming, no emptiness check, no screening of
@@ -100,11 +135,11 @@ pub(crate) fn command(session: &str, title: &str) -> Result<Command, PathError> 
     ))
 }
 
-/// [`open`], with closing returning focus where `returns_to` says.
+/// [`open`] or [`open_naming`], as `mode` says.
 fn open_returning(
     key: &str,
     mark: &Mark,
-    returns_to: ReturnTo,
+    mode: Mode<'_>,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
@@ -118,14 +153,20 @@ fn open_returning(
         tracing::debug!("rename not opened: the session's YOLO question is open");
         return None;
     }
-    let title = store
+    let stored = store
         .read(cx)
         .collections()
-        .get::<SessionRow>(key)?
-        .info
-        .title
-        .clone();
-    let editor = cx.new(|cx| RenameEditor::new(key.to_owned(), &title, &store, window, cx));
+        .get::<SessionRow>(key)
+        .map(|row| row.info.title.clone());
+    let (title, returns_to, naming) = match mode {
+        Mode::Ordinary(returns_to) => (stored?, returns_to, false),
+        Mode::Naming { created } => (
+            stored.unwrap_or_else(|| created.to_owned()),
+            ReturnTo::Home,
+            true,
+        ),
+    };
+    let editor = cx.new(|cx| RenameEditor::new(key.to_owned(), &title, naming, &store, window, cx));
     let start = editor.read(cx).title.input().focus_handle(cx);
     let weak = editor.downgrade();
     // Enter on the dialog itself (after a click on its empty space) saves, unless Save is unavailable.
@@ -185,7 +226,7 @@ pub(crate) fn open_for_selected(window: &mut Window, cx: &mut App) {
         return;
     };
     let mark = Mark::take(cx);
-    let _ = open_returning(&key, &mark, ReturnTo::Home, window, cx);
+    let _ = open_returning(&key, &mark, Mode::Ordinary(ReturnTo::Home), window, cx);
 }
 
 /// The open editor: which session it renames, its draft and field, what it shows about the session, and its layer.
@@ -199,6 +240,8 @@ pub(crate) struct RenameEditor {
     title: DraftInput,
     /// Whether a complete listing has proved the session gone, which disables Save.
     unavailable: bool,
+    /// Naming mode (the module docs): a save of the current title keeps it without a request.
+    naming: bool,
     /// Set right after the layer opens; taken when the editor closes itself, so it closes once.
     layer: Option<LayerId>,
     /// The store's pushes.
@@ -206,11 +249,13 @@ pub(crate) struct RenameEditor {
 }
 
 impl RenameEditor {
-    /// An editor over `key`, its draft and field holding `title` (raw), following `store` while it lives. The store is
-    /// the current UI session's; a reset closes every dialog (`layers::close_all`), so the editor never outlives it.
+    /// An editor over `key`, its draft and field holding `title` (raw), following `store` while it lives, in naming
+    /// mode with the whole title selected when `naming` is set. The store is the current UI session's; a reset closes
+    /// every dialog (`layers::close_all`), so the editor never outlives it.
     fn new(
         key: String,
         title: &str,
+        naming: bool,
         store: &Entity<HelmStore>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -224,6 +269,9 @@ impl RenameEditor {
             window,
             cx,
         );
+        if naming {
+            title_field.input().select_all(window, cx);
+        }
         let pushes = cx.observe_in(store, window, |editor, store, window, cx| {
             editor.pushed(&store, window, cx)
         });
@@ -232,6 +280,7 @@ impl RenameEditor {
             current: HostText::from_host(title),
             title: title_field,
             unavailable: false,
+            naming,
             layer: None,
             _pushes: pushes,
         }
@@ -253,10 +302,15 @@ impl RenameEditor {
     }
 
     /// Save the draft as the session's title, exactly as it stands. Does nothing while Save is unavailable or a save is
-    /// in flight. A success closes the editor; a refusal is kept in the draft, which the editor draws.
+    /// in flight. A success closes the editor; a refusal is kept in the draft, which the editor draws. In naming mode a
+    /// draft that is the session's current title closes the editor with nothing sent.
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.unavailable || self.title.draft().is_saving() {
             return;
+        }
+        // Naming keeps the name the session has now, byte for byte, without asking the supervisor to set it again.
+        if self.naming && self.title.input().text(cx).as_ref() == self.current.raw() {
+            return self.cancel(window, cx);
         }
         let key = self.key.clone();
         let handle = window.window_handle();
