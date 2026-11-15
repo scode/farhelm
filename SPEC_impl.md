@@ -657,10 +657,13 @@ setup, Update and Uninstall the result arrives in the hosts' pushed progress). A
 touched, since the stored value has not changed yet.
 
 A read (a GET for something the helm does not push) is not work on a key: it changes nothing, so it has no busy state
-and leaves no refusal on a key. A feature's read goes through the store's one read helper (the quick switcher's, written
-before the helper, is the one still to move onto it), which words a refusal exactly as an operation's is worded, so a
-failed read and a failed save say the helm's reason the same way; the feature shows the result itself. A reset drops a
-read's wait like any other.
+and leaves no refusal on a key. A feature's read goes through the store's one read helper, which words a refusal exactly
+as an operation's is worded, so a failed read and a failed save say the helm's reason the same way; the feature shows
+the result itself. Some writes are not work on a key either: nothing draws them busy and the store records no refusal
+for them (a remembered preference, the automatic seen mark, the host rail's session query). They go through the store's
+keyless send (the sidebar's, written before it, are still to move onto it), which words a refusal the same way and hands
+the caller the reply's body or its refusal; the caller decides what, if anything, to show. The read helper is that send
+plus a decode. A reset drops the wait of a read or a keyless send like any other.
 
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
@@ -668,7 +671,8 @@ network I/O needs lives in the helm client, outside `crates/gui/` (see "Where th
 
 Enforced by clippy `disallowed-methods` for detaching, thread and runtime spawns, sleeps and clock reads in the GUI
 crates, by a test of overlapping actions on two sessions, and by a test of work on a host and a template beside a
-session's, each with its own busy state and refusal, and by tests of a read's wording and of its send and reset.
+session's, each with its own busy state and refusal, by tests of a read's wording and of its send and reset, and by
+tests of a keyless send's wording and of its send, its refusal beside an operation's, and its reset.
 
 ### Drafts
 
@@ -729,13 +733,13 @@ old coverage rule exempted items that carry a visible description, a constructor
 One exception to keyboard reach per control, decided by the migration's orchestrator on 2026-11-14: a list's options
 driven by the field that owns them (`OptionRow`; Up and Down move the selection, Enter picks, focus stays in the field)
 are reached through that field and never take focus, as the old quick switcher's rows did. The next such list reuses
-`OptionRow`. A second exception, decided by the migration's orchestrator on 2026-11-14: a pointer shortcut inside a
-control, whose action the same control offers by keyboard elsewhere (its row menu item), may take no focus
-(`MarkToggle`, a session row's status dot that marks it read or unread). Colors come only from theme tokens, which are
-copied from the old stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the
-answer buttons pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs
-do. The window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds
-it).
+`OptionRow`. A second exception, decided by the migration's orchestrator on 2026-11-14: a pointer control whose action
+its owner offers by keyboard may take no focus. Two controls use it: `MarkToggle`, a session row's status dot that marks
+it read or unread, which the row's menu item does by keyboard, and the terminal's `Scrollbar`, whose terminal pages its
+history with Shift+PageUp and Shift+PageDown. Colors come only from theme tokens, which are copied from the old
+stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons
+pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The
+window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
 `enter_choice`. A control takes it only when its owner hands it the dialog's main action, through an `on_enter` builder
