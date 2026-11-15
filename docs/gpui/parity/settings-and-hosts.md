@@ -285,21 +285,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   2026-11-14, with no device-local cache of the choice.
 - **The Appearance help is reworded.** The old line said "for this device"; this one says the choice applies to the helm
   and that other open clients pick it up right away, and that System follows each device's own appearance.
-- **A trust hint's way into Settings focuses the agent's switch, later, and does not scroll it into view.** The old
-  entry point focused the agent's whole block (`#checkout-<agent>-trust`, which took focus with `tabindex=-1`) at once,
-  and both old specs assert that. Here the dialog opens with focus on itself and hands focus to the agent's switch once
-  the section's read of that agent has answered, since an unavailable switch cannot hold focus; it hands nothing over if
-  the user has moved on by then. That is closer to SPEC.md's "open agent trust at the relevant switch", but SPEC.md also
-  says the hint scrolls "its block into view", and nothing scrolls: Muse's and Pi's switches lie below the fold at the
-  dialog's full height, and Codex's too when the window caps the dialog's height (in a window shorter than about 730
-  pixels; the window's minimum height is 560). Only Claude's switch is always visible. The handover borrows a focus move
-  that does not reveal its target; it waits for the focus coordinator's move inside a dialog (`focus::focus_in_layer`)
-  to accept a target that is not drawn yet, which will scroll the switch into view (the switch, not the whole block: for
-  Muse and Pi the help under the switch, and Muse's hint switch, can stay below the fold). Until then, for any agent but
-  Claude the focused control can be a trust switch the user cannot see (Muse's and Pi's always, Codex's in a short
-  window), and Space toggles it, so a user who presses Space to scroll turns that agent's trust on unseen. The hint
-  band, when it is built, should not open Settings this way for an agent whose switch lies below the fold before the
-  reveal lands, or should accept that risk knowingly.
+- **A trust hint's way into Settings focuses the agent's switch, later, and reveals only the switch.** The old entry
+  point focused the agent's whole block (`#checkout-<agent>-trust`, which took focus with `tabindex=-1`) at once, and
+  both old specs assert that. Here the dialog opens with focus on itself and moves focus to the agent's switch once the
+  section's read of that agent has answered, since an unavailable switch cannot hold focus; it moves nothing if the user
+  has moved on by then. The move scrolls the switch into view. That is closer to SPEC.md's "open agent trust at the
+  relevant switch", but SPEC.md also says the hint scrolls "its block into view", and what is revealed is the switch,
+  not the whole block: for a switch that started below the fold (Muse's and Pi's at the dialog's full height), the help
+  under it, and Muse's hint switch, can stay below the fold. The switch-only reveal is accepted as it stands: revealing
+  the whole block would take a change in the focus coordinator, and none is requested.
 - **The hint switches can be used before the trust read answers, and when it fails.** The old ones were unavailable
   until the read came back. Here whether a hint was dismissed comes from the pushed preference row, not from the trust
   read, so a hint switch shows the stored dismissal from the start and saves like any preference switch.
