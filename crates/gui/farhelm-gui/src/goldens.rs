@@ -9,8 +9,10 @@
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
 //! host failing to connect, and with a host's setup running and failed), the Add host dialog and the setup confirmation
-//! it leads to, a host's actions menu, and the host settings dialog at its top and scrolled to its end, in both
-//! appearances, compared pixel for pixel.
+//! it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end, and the version
+//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
+//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), in both appearances, compared pixel for
+//! pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -44,6 +46,7 @@ use crate::components::{TabOption, TabStrip};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::desktop::updates;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::HostsPanel;
@@ -63,6 +66,8 @@ use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
 use crate::theme::{self, Preference};
 use crate::ticker;
+use crate::update_readout::view::{Pinned, VersionReadout};
+use crate::update_readout::{self, Activity, Readout};
 use farhelm_grid_model::GridOutput;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::FakeTerminal;
@@ -568,6 +573,12 @@ fn focus_ring(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
 /// Press Tab as the keyboard would, so the first button takes focus with the keyboard as the last input.
 fn focus_ring_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     window.activate_window();
+    press_tab(window, cx);
+}
+
+/// One press of Tab, dispatched as the platform would: the focus coordinator moves focus to the next tab stop, and the
+/// keyboard becomes the window's last input, which is what makes a focused control draw its ring.
+fn press_tab(window: &mut Window, cx: &mut App) {
     window.dispatch_event(
         gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
             native_key: None,
@@ -2660,6 +2671,305 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
+// ---- The version readout --------------------------------------------------------------------------------------------
+//
+// The sidebar header's version while the desktop updater runs (`update_readout::view`), one scene per group of states.
+// No reference screenshot of these states exists (the old web build ran no updater), so each picture was checked
+// against the old stylesheet's values (`crates/farhelm-ui/assets/app.css` at the reference commit) and the view's own
+// docs. The version text is this build's own (`0.0.0-unreleased` on main), so a version bump redraws every one of
+// these scenes.
+
+/// One row of a version readout scene: the readout its fixture updater shows, and what the row pins on the view.
+type ReadoutRow = (Readout, Pinned);
+
+/// The readouts a version readout scene made, one per row in the scene's order, kept among the scene's kept values.
+struct Readouts(Vec<Entity<VersionReadout>>);
+
+/// A readout in `activity`, with an update waiting when `ready`. Only the tooltip scene draws hover words, and it
+/// builds its own, so these just name the scene.
+fn golden_readout(activity: Activity, ready: bool) -> Readout {
+    Readout {
+        update_ready: ready,
+        needs_reinstall: false,
+        withdrawn: false,
+        tooltip: "Golden scene readout".to_string(),
+        activity,
+        notice_id: 1,
+        user_update_ready: false,
+    }
+}
+
+/// The readouts a version readout scene has made so far, in row order; empty before its first frame.
+fn kept_readouts(state: &SceneState) -> Vec<Entity<VersionReadout>> {
+    state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<Readouts>())
+        .map(|Readouts(readouts)| readouts.clone())
+        .unwrap_or_default()
+}
+
+/// The rows `rows` describes, each a readout over a fixture updater of its own (`updates::fixture`: the app keeps one
+/// updater, a scene shows several), in a row with the app header's look: the sidebar's width, 40 pixels high, 12
+/// pixels of padding across, `--bg-1` with the row hairline under it, and the readout at the right end, as the header
+/// draws it.
+///
+/// Unlike other scenes' entities, the readouts are made while drawing, on the scene's first frame, so that the frame
+/// drawn before the setup already shows them: a setup that gives a readout keyboard focus, opens its menu or shows its
+/// hover help needs it drawn, and a step deferred to a later frame could be missed by [`settle`], which stops at the
+/// first two identical frames. Motion is reduced before any readout exists, so no spinner ever ticks and the capture
+/// settles; a row that shows a turn pins its step instead.
+fn readout_rows(state: &SceneState, rows: fn() -> Vec<ReadoutRow>, cx: &mut App) -> AnyElement {
+    let mut readouts = kept_readouts(state);
+    if readouts.is_empty() {
+        ticker::set_reduced_motion(true, cx);
+        readouts = rows()
+            .into_iter()
+            .map(|(readout, pinned)| {
+                let updater = updates::fixture(readout, cx);
+                cx.new(|cx| VersionReadout::new(updater, cx).pinned(pinned))
+            })
+            .collect();
+        state
+            .keep
+            .borrow_mut()
+            .push(Box::new(Readouts(readouts.clone())));
+    }
+    let palette = theme::palette(cx);
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .children(readouts.into_iter().map(|readout| {
+            div()
+                .w(theme::metrics::SIDEBAR_WIDTH)
+                .h(px(40.))
+                .px(px(12.))
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_end()
+                .bg(theme::color(palette.bg_1))
+                .border_b_1()
+                .border_color(theme::color(palette.border_row))
+                // The main view's ink, which the header inherits there.
+                .text_color(theme::color(palette.fg_0))
+                .child(div().min_w_0().child(readout))
+        }))
+        .into_any_element()
+}
+
+/// Give the readout in row `row` keyboard focus as a keyboard user would have it, then press Tab `tabs` more times.
+/// The first Tab makes the keyboard the window's last input, which a focus ring needs ([`focus::shows_ring`]), and the
+/// coordinator's move puts focus on the row's check button or toggle (their shared handle) without walking every row
+/// before it; the further Tabs walk on from there, to a control the readout draws without a handle of its own (the
+/// Check failed button).
+fn focus_readout(state: &SceneState, row: usize, tabs: usize, window: &mut Window, cx: &mut App) {
+    window.activate_window();
+    press_tab(window, cx);
+    let readout = kept_readouts(state)
+        .get(row)
+        .cloned()
+        .expect("the scene's first frame made its readouts");
+    let handle = readout.read(cx).shared_focus();
+    focus::focus_control(&handle, &Mark::take(cx), window, cx);
+    for _ in 0..tabs {
+        press_tab(window, cx);
+    }
+}
+
+/// Rows of the check button with no update waiting: at rest (the version in `--fg-1`, the `↻` in `--fg-2`); lit, as
+/// under the pointer (both in `--fg-0`, the glyph a quarter turned); with a reinstall warning (`⚠` and the version in
+/// `--warn`); the warning lit (the version in `--fg-0`, as the old sheet's later hover rule won, the `⚠` still
+/// `--warn`); and the button with keyboard focus (lit, with the accent ring and no fill), which the setup gives it.
+fn version_readout_check_rows() -> Vec<ReadoutRow> {
+    let warned = Readout {
+        needs_reinstall: true,
+        ..golden_readout(Activity::Idle, false)
+    };
+    let lit = Pinned {
+        lit: true,
+        step: None,
+    };
+    vec![
+        (golden_readout(Activity::Idle, false), Pinned::default()),
+        (golden_readout(Activity::Idle, false), lit),
+        (warned.clone(), Pinned::default()),
+        (warned, lit),
+        (golden_readout(Activity::Idle, false), Pinned::default()),
+    ]
+}
+
+/// [`version_readout_check_rows`], drawn.
+fn version_readout_check(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    readout_rows(state, version_readout_check_rows, cx)
+}
+
+/// Keyboard focus on the last row's check button.
+fn version_readout_check_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    focus_readout(state, 4, 0, window, cx);
+}
+
+/// The step the progress rows pin: three eighths of a turn, clearly turned and unlike the lit quarter turn.
+const PINNED_STEP: u8 = 3;
+
+/// Rows of work in progress: a check with the glyph spinning (pinned at [`PINNED_STEP`], in `--fg-0`) and "Checking…"
+/// beside it; an install, the same with "Installing…"; and both again while an update waits, where the red toggle with
+/// `↑` has no glyph to spin, so the accent ring (at the same step) comes before the words.
+fn version_readout_progress_rows() -> Vec<ReadoutRow> {
+    let turned = Pinned {
+        lit: false,
+        step: Some(PINNED_STEP),
+    };
+    let installing = || Activity::Installing("0.40.0".to_string());
+    vec![
+        (golden_readout(Activity::Checking, false), turned),
+        (golden_readout(installing(), false), turned),
+        (golden_readout(Activity::Checking, true), turned),
+        (golden_readout(installing(), true), turned),
+    ]
+}
+
+/// [`version_readout_progress_rows`], drawn.
+fn version_readout_progress(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    readout_rows(state, version_readout_progress_rows, cx)
+}
+
+/// Rows of a check's outcome: Up to date in `--fg-1` beside the check button; Check failed, the failure button in
+/// `--warn`; Check failed beside the red toggle while an update waits; and the failure button with keyboard focus
+/// (the accent ring, no fill), which the setup gives it.
+fn version_readout_outcomes_rows() -> Vec<ReadoutRow> {
+    let failed = || Activity::Failed("the network is unreachable".to_string());
+    vec![
+        (
+            golden_readout(Activity::UpToDate("0.39.0".to_string()), false),
+            Pinned::default(),
+        ),
+        (golden_readout(failed(), false), Pinned::default()),
+        (golden_readout(failed(), true), Pinned::default()),
+        (golden_readout(failed(), false), Pinned::default()),
+    ]
+}
+
+/// [`version_readout_outcomes_rows`], drawn.
+fn version_readout_outcomes(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    readout_rows(state, version_readout_outcomes_rows, cx)
+}
+
+/// Keyboard focus on the last row's Check failed button: the row's check button first, then one Tab on to the button
+/// beside it.
+fn version_readout_outcomes_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    focus_readout(state, 3, 1, window, cx);
+}
+
+/// Rows of the update-menu toggle once an update is installed: red with `↑` before the version; with a withdrawal
+/// (`⚠` in `--warn`, then `↑`, the rest red); and the toggle with keyboard focus (the accent ring and the control-hover
+/// fill, the one readout control a focused fill is ported for), which the setup gives it.
+fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
+    let withdrawn = Readout {
+        withdrawn: true,
+        ..golden_readout(Activity::Idle, true)
+    };
+    vec![
+        (golden_readout(Activity::Idle, true), Pinned::default()),
+        (withdrawn, Pinned::default()),
+        (golden_readout(Activity::Idle, true), Pinned::default()),
+    ]
+}
+
+/// [`version_readout_update_ready_rows`], drawn.
+fn version_readout_update_ready(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    readout_rows(state, version_readout_update_ready_rows, cx)
+}
+
+/// Keyboard focus on the last row's toggle.
+fn version_readout_update_ready_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    focus_readout(state, 2, 0, window, cx);
+}
+
+/// One row, the red toggle, at the scene's top left, so the menu has room beside it.
+fn version_readout_menu(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    top_left(readout_rows(
+        state,
+        || vec![(golden_readout(Activity::Idle, true), Pinned::default())],
+        cx,
+    ))
+}
+
+/// The toggle pressed: its menu open beside it (10 pixels past its right edge, 4 above its top), headed "Farhelm update"
+/// and "An installed update is ready", with Restart to update (focus on it, as a menu opens) and What's new. The toggle
+/// keeps the readout's look with the menu open: no fill (the old toggle drew nothing for its expanded state).
+fn version_readout_menu_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let readout = kept_readouts(state)
+        .first()
+        .cloned()
+        .expect("the scene's first frame made its readout");
+    readout.update(cx, |readout, cx| readout.press_toggle(window, cx));
+    assert!(
+        layers::any_open(window, cx),
+        "the toggle's press opened the update menu (it needs the toggle drawn)"
+    );
+}
+
+/// The reinstall readout's hover words exactly as `farhelm_desktop::updater::readout` builds them for an idle updater
+/// that cannot install the newer release (`ReinstallReason::UpgradeFloor`): the advice, the idle hover for this build,
+/// then the reinstall command, last with nothing after it because the user retypes it. This is the longest of the
+/// reinstall notices, so it is the one the tooltip's eight-line cut hurts most. Copied rather than called, since this
+/// crate cannot depend on the desktop crate (it depends on this one), so a change to that wording should be copied
+/// here.
+fn reinstall_tooltip() -> String {
+    format!(
+        "This installation cannot update to the newer release. Stop local sessions and their terminal tabs, quit \
+         Farhelm, and run farhelm uninstall first; your data stays on disk but may not carry over cleanly. {} \
+         Reinstall it by running this in a terminal: curl -fsSL https://get.farhelm.io/install.sh | sh",
+        update_readout::idle_tooltip(farhelm_proto::BUILD_VERSION, true)
+    )
+}
+
+/// `content` at the scene's top left, leaving the rest of the scene free for a menu or hover help beside it.
+fn top_left(content: AnyElement) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .items_start()
+        .child(content)
+        .into_any_element()
+}
+
+/// One row, the check button with the reinstall warning, at the scene's top left, with room under it and to its right
+/// for its hover, so the card is not pushed back by the window's edge (in the app it reaches over the main view).
+fn version_readout_tooltip(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    top_left(readout_rows(
+        state,
+        || {
+            let readout = Readout {
+                needs_reinstall: true,
+                tooltip: reinstall_tooltip(),
+                ..golden_readout(Activity::Idle, false)
+            };
+            vec![(readout, Pinned::default())]
+        },
+        cx,
+    ))
+}
+
+/// The check button's hover help for the reinstall readout, as if the pointer had come to rest over its version: the
+/// short tooltip, cut at eight lines in its 280-pixel card, as the old app's was. With this notice the cut hides the
+/// reinstall command at the end of the words, a known risk the parity file records (the coordinator kept the old
+/// app's cut on 2026-11-14). The words come from the check button's own help function, shown here directly because
+/// the button hands them to the layer manager only on a real hover, which a golden has no time for.
+fn version_readout_tooltip_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let words = update_readout::view::check_help(&reinstall_tooltip());
+    layers::show_tooltip_at(
+        &state.tooltip_owner,
+        layers::Help::Line(host_text::Line::App(words.into())),
+        point(px(330.), px(32.)),
+        window,
+        cx,
+    );
+}
+
 /// Every golden scene. A slice, one scene per entry, so that a new scene only adds lines (the shape
 /// `docs/gpui/foundation-ownership.md` asks of the lists areas append to). A length in the type changed with every
 /// addition, and during two rebases jj's automatic merge left that length wrong without a conflict marker; both were
@@ -3036,6 +3346,42 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: session_order_menu_setup,
+    },
+    Scene {
+        name: "version-readout-check",
+        size: (420., 268.),
+        draw: version_readout_check,
+        setup: version_readout_check_setup,
+    },
+    Scene {
+        name: "version-readout-progress",
+        size: (420., 219.),
+        draw: version_readout_progress,
+        setup: no_setup,
+    },
+    Scene {
+        name: "version-readout-outcomes",
+        size: (420., 219.),
+        draw: version_readout_outcomes,
+        setup: version_readout_outcomes_setup,
+    },
+    Scene {
+        name: "version-readout-update-ready",
+        size: (420., 170.),
+        draw: version_readout_update_ready,
+        setup: version_readout_update_ready_setup,
+    },
+    Scene {
+        name: "version-readout-menu",
+        size: (720., 240.),
+        draw: version_readout_menu,
+        setup: version_readout_menu_setup,
+    },
+    Scene {
+        name: "version-readout-tooltip",
+        size: (640., 260.),
+        draw: version_readout_tooltip,
+        setup: version_readout_tooltip_setup,
     },
 ];
 

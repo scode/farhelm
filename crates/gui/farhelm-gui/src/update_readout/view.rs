@@ -124,6 +124,26 @@ pub struct VersionReadout {
     /// glyph's turn).
     #[cfg(test)]
     drawn_look: std::cell::Cell<Option<Look>>,
+    /// What a screenshot golden holds still on this readout (see [`Pinned`]); nothing outside test builds.
+    #[cfg(test)]
+    pinned: Pinned,
+}
+
+/// What a screenshot golden pins on a readout (`goldens.rs`'s version readout scenes): looks that no input can hold
+/// still in a headless capture. A golden has no pointer resting on the check button, so it pins the lit look the
+/// pointer would give. The spinners turn with the ticker, which those scenes stop (reduced motion) so that a capture
+/// can settle, leaving them at the first step; so it pins a later step, to show that the glyph and the ring do turn
+/// (step 0 looks like no turn at all).
+///
+/// Keyboard focus needs no pin: the scenes give it through the focus coordinator, as a keyboard user would.
+#[cfg(test)]
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Pinned {
+    /// Draw the check button lit (as under the pointer) whether or not anything lights it.
+    pub(crate) lit: bool,
+    /// Draw whatever spins (the check button's glyph, the ring beside the toggle) at this step of its eight instead of
+    /// the spinner's. Applies only while something spins, so it never turns a glyph at rest.
+    pub(crate) step: Option<u8>,
 }
 
 impl VersionReadout {
@@ -146,6 +166,8 @@ impl VersionReadout {
             _observing: observing,
             #[cfg(test)]
             drawn_look: std::cell::Cell::new(None),
+            #[cfg(test)]
+            pinned: Pinned::default(),
         };
         readout.observe_feedback(&first, cx);
         readout
@@ -184,6 +206,26 @@ impl VersionReadout {
         cx.notify();
     }
 
+    /// This readout with `pinned` held still on every frame it draws, for a screenshot golden.
+    #[cfg(test)]
+    pub(crate) fn pinned(self, pinned: Pinned) -> Self {
+        VersionReadout { pinned, ..self }
+    }
+
+    /// The focus handle the check button and the toggle share, for a golden that gives the readout keyboard focus
+    /// through the focus coordinator.
+    #[cfg(test)]
+    pub(crate) fn shared_focus(&self) -> FocusHandle {
+        self.focus.clone()
+    }
+
+    /// Press the toggle as a click would, opening the update menu beside it (or closing it), for a golden that shows
+    /// the menu open. Does nothing until a frame has drawn the toggle, since the menu opens on its drawn anchor.
+    #[cfg(test)]
+    pub(crate) fn press_toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_menu(window, cx);
+    }
+
     /// The updater's readout now.
     fn readout(&self, cx: &App) -> Readout {
         self.updater.read(cx).readout().clone()
@@ -200,8 +242,12 @@ impl VersionReadout {
     ) -> Button {
         let palette = theme::palette(cx);
         let lit = hovered || focus::shows_ring(&self.focus, window);
+        #[cfg(test)]
+        let lit = lit || self.pinned.lit;
         let warning = readout.needs_reinstall || readout.withdrawn;
         let step = spinning.then(|| self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)));
+        #[cfg(test)]
+        let step = step.map(|step| self.pinned.step.unwrap_or(step));
         let look = check_look(palette, lit, step, warning);
         #[cfg(test)]
         self.drawn_look.set(Some(look));
@@ -209,10 +255,7 @@ impl VersionReadout {
         Button::new(
             "app-version-check",
             "Check for updates",
-            HoverHelp::tooltip(format!(
-                "Select this to check for updates. {}",
-                readout.tooltip
-            )),
+            HoverHelp::tooltip(check_help(&readout.tooltip)),
             Role::Button,
         )
         .tier(Tier::Readout { focus_fill: false })
@@ -296,6 +339,8 @@ impl VersionReadout {
             .min_w_0();
         let row = row.when(presentation.separate_progress_spinner, |row| {
             let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
+            #[cfg(test)]
+            let step = self.pinned.step.unwrap_or(step);
             row.child(
                 div()
                     .flex_none()
@@ -563,6 +608,12 @@ impl Render for UpdateMenu {
                     .child(whats_new),
             )
     }
+}
+
+/// The check button's hover help: what a press does, then the readout's own hover words. One function so the
+/// version readout's tooltip golden draws exactly the words a real hover shows.
+pub(crate) fn check_help(tooltip: &str) -> String {
+    format!("Select this to check for updates. {tooltip}")
 }
 
 #[cfg(test)]
