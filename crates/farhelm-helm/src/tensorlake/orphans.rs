@@ -7,7 +7,7 @@
 
 use super::{
     Tensorlake,
-    api::{SandboxStatus, TensorlakeError, list_all_sandboxes},
+    api::{SandboxStatus, TensorlakeError, list_all_sandboxes_by},
     build::{BUILDER_PREFIX, PREPARER_PREFIX, builder_name, preparer_name},
     config::helm_tag,
 };
@@ -25,6 +25,14 @@ use std::{
 
 pub(crate) const HOST_PREFIX: &str = "farhelm-host-";
 pub(crate) const SESSION_PREFIX: &str = "farhelm-sess-";
+
+/// How long a deletion's sandbox lookup may take before its cleanup is
+/// recorded. Half the host reply bound, so that a Tensorlake that does not
+/// answer it fails the request with its own reason well before the route's
+/// timeout reply could promise a cleanup nothing has recorded; the local
+/// reads after it are milliseconds in practice. See
+/// [`Tensorlake::delete_orphan`].
+const ADMISSION_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// In-flight and failed explicit deletions, keyed by canonical vendor ID.
 /// This is operation state for one helm lifetime, not an ownership ledger
@@ -90,10 +98,24 @@ impl Tensorlake {
     /// Join live discovery with unfinished explicit cleanup. Termination
     /// removes a sandbox from Tensorlake's list, so the helm retains its
     /// canonical ID and display facts until snapshot cleanup succeeds.
-    pub(crate) async fn orphan_sandboxes(&self) -> anyhow::Result<Vec<OrphanSandbox>> {
+    ///
+    /// Discovery gives up at `reply_by` (see [`list_all_sandboxes_by`]), and
+    /// a discovery that ran out of time is treated like any other failed one:
+    /// unfinished cleanup is still listed. The bound counts from the request's
+    /// arrival, so the key read before the listing comes out of it, but
+    /// nothing bounds the local reads themselves, nor the ownership reads
+    /// after the listing, which can therefore add to the reply's wait. Those
+    /// stay after the listing on purpose: a host records its sandbox's name
+    /// before creating the sandbox, so reading ownership afterwards sees the
+    /// name of every sandbox the listing found, while reading it first would
+    /// show a sandbox created during the listing as not on this helm.
+    pub(crate) async fn orphan_sandboxes_by(
+        &self,
+        reply_by: tokio::time::Instant,
+    ) -> anyhow::Result<Vec<OrphanSandbox>> {
         let discovered = async {
             let key = self.api_key().await.map_err(anyhow::Error::msg)?;
-            Ok::<_, anyhow::Error>(list_all_sandboxes(self.api(), &key).await?)
+            Ok::<_, anyhow::Error>(list_all_sandboxes_by(reply_by, self.api(), &key).await?)
         }
         .await;
         let sandboxes = match discovered {
@@ -145,8 +167,22 @@ impl Tensorlake {
         Ok(orphans)
     }
 
+    /// [`Self::orphan_sandboxes_by`] with its bound starting now.
+    #[cfg(test)]
+    pub(crate) async fn orphan_sandboxes(&self) -> anyhow::Result<Vec<OrphanSandbox>> {
+        self.orphan_sandboxes_by(tokio::time::Instant::now() + crate::sessions::HOST_REPLY_BOUND)
+            .await
+    }
+
     /// Recheck the tag and local ownership at deletion time. A stale UI list
     /// cannot delete a sandbox that this helm has since adopted.
+    ///
+    /// Everything before the cleanup is recorded as running (the lookup and
+    /// the ownership checks) has to finish well inside the host reply bound:
+    /// the route's timeout reply says the cleanup carries on and the list
+    /// shows how it ends, which is only true once it is recorded. So the
+    /// lookup gets [`ADMISSION_LOOKUP_TIMEOUT`], and a Tensorlake that does
+    /// not answer it ends the request with its own failure first.
     async fn delete_orphan(&self, id: &str) -> anyhow::Result<()> {
         let key = self.api_key().await.map_err(anyhow::Error::msg)?;
         let previous = self
@@ -160,7 +196,11 @@ impl Tensorlake {
         let mut row = match previous {
             Some(row) => row,
             None => {
-                let sandbox = super::hosts::bounded(self.api().get_sandbox(&key, id)).await?;
+                let sandbox = super::api::bounded_by(
+                    ADMISSION_LOOKUP_TIMEOUT,
+                    self.api().get_sandbox(&key, id),
+                )
+                .await?;
                 let name = sandbox
                     .name
                     .ok_or_else(|| anyhow::anyhow!("This sandbox has no Farhelm name"))?;
@@ -265,24 +305,48 @@ fn status(status: SandboxStatus) -> &'static str {
     }
 }
 
-/// Protected Settings read. Failures remain visible, never an empty list.
+/// Protected Settings read. Failures remain visible, never an empty list,
+/// and a Tensorlake that does not answer within the host reply bound, counted
+/// from here, is one of them (see [`Tensorlake::orphan_sandboxes_by`]).
 pub(crate) async fn list(State(state): State<Arc<AppState>>) -> Response {
-    match state.tensorlake.orphan_sandboxes().await {
+    let reply_by = tokio::time::Instant::now() + crate::sessions::HOST_REPLY_BOUND;
+    match state.tensorlake.orphan_sandboxes_by(reply_by).await {
         Ok(list) => axum::Json(list).into_response(),
         Err(error) => (StatusCode::BAD_GATEWAY, error.to_string()).into_response(),
     }
 }
 
-/// Helm-owned deletion survives the confirming browser closing mid-request.
+/// Helm-owned deletion survives the confirming client closing mid-request,
+/// and answers within the host reply bound (`crate::sessions::HOST_REPLY_BOUND`).
+///
+/// A deletion makes several Tensorlake calls of up to 20 seconds each, waits
+/// up to 30 seconds for the termination, and deletes the sandbox's snapshots
+/// one call at a time, so it can take minutes, far longer than the GUI's
+/// one-at-a-time channel lets a command wait. Its work runs on a task of its
+/// own, which also keeps it going when the caller leaves, and carries on past
+/// a timeout reply. Its outcome shows in the listing: the sandbox stays
+/// "Cleanup in progress" until the work ends, and then is gone or offers a
+/// retry with its reason, and the feed bump at the end makes Settings read
+/// the listing again. In practice the timeout reply comes only once the
+/// cleanup is recorded: before that, the lookup gets half the bound and the
+/// local reads are not bounded but take milliseconds (see
+/// [`Tensorlake::delete_orphan`]).
 pub(crate) async fn delete(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    crate::run_owned(async move {
-        let result = state.tensorlake.delete_orphan(&id).await;
-        state.manager.events().bump();
-        match result {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => (StatusCode::BAD_GATEWAY, error.to_string()).into_response(),
-        }
-    })
+    crate::sessions::within_host_reply_bound_saying(
+        async move {
+            let result = state.tensorlake.delete_orphan(&id).await;
+            state.manager.events().bump();
+            match result {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(error) => (StatusCode::BAD_GATEWAY, error.to_string()).into_response(),
+            }
+        },
+        format!(
+            "Tensorlake did not finish within {} seconds; the cleanup carries on, and Sandboxes \
+             not on this helm shows how it ends",
+            crate::sessions::HOST_REPLY_BOUND.as_secs()
+        ),
+    )
     .await
 }
 

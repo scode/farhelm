@@ -686,14 +686,7 @@ pub(super) async fn wait_until_terminated(
 pub(super) async fn bounded<T>(
     call: impl std::future::Future<Output = Result<T, TensorlakeError>>,
 ) -> Result<T, TensorlakeError> {
-    tokio::time::timeout(REMOVAL_CALL_TIMEOUT, call)
-        .await
-        .unwrap_or_else(|_| {
-            Err(TensorlakeError::Transport(format!(
-                "Tensorlake did not answer within {} seconds",
-                REMOVAL_CALL_TIMEOUT.as_secs()
-            )))
-        })
+    super::api::bounded_by(REMOVAL_CALL_TIMEOUT, call).await
 }
 
 /// A refusal the REST edge reports with `kind` and `message` as they are.
