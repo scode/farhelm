@@ -412,7 +412,8 @@ fn open_launcher_banner(notice: Notice, help: &'static str) -> Banner {
 pub(crate) fn banner(notice: Notice) -> AnyElement {
     // What a notice offers besides dismissing it, before Dismiss. Exhaustive, so a new notice decides.
     let banner = match notice {
-        // Never drawn as a banner ([`is_banner`]); were it one, its text and Dismiss would be all it offers.
+        // The connection-lost notice offers nothing but Dismiss. A late answer is never drawn as a banner
+        // ([`is_banner`]); were it one, its text and Dismiss would be all it offers too.
         Notice::ConnectionLost | Notice::LateAnswer { .. } => Banner::new(notice.text()),
         // SPEC.md, "Creation": a refused launch the user had moved on from is offered by a notice, "and the launcher
         // returns when the user opens that notice".
