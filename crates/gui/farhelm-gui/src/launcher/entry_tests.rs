@@ -1,5 +1,6 @@
 //! Tests of the launcher's New entry points in the real main view over the helm client's fake: New's prefill from the
-//! open session, New named's name, Cmd+N's action, and New refused while a launch is pending.
+//! open session, New named's name, Cmd+N's action, and New refused while a launch is pending or a host change is in
+//! flight.
 //!
 //! The fleet: host1 (the helm's own host, kind `local`), host9 (a connected ssh host recorded as install `identity9`)
 //! and host11 (a sandbox a session owns), with session `a` on host9's install, `b` on host9's row but listed under an
@@ -13,7 +14,7 @@ use serde_json::json;
 
 use super::draft::{LaunchDraft, Tab};
 use super::entry::{new_available, open_new, open_new_named};
-use super::launch_tests::creates;
+use super::launch_tests::{HostChange, creates, start_host_change};
 use super::view_tests::{Opened, draft, fixture_hosts, shown_refusal};
 use crate::actions::NewSession;
 use crate::local_state;
@@ -279,4 +280,27 @@ fn picking_a_host_re_seeds_its_own_folder(cx: &mut TestAppContext) {
     test_support::click(cx, "launcher-host");
     test_support::click(cx, "launcher-host-option-9");
     assert_eq!(destination(cx), (Some(9), "/home/user/src/a".to_owned()));
+}
+
+/// New is unavailable while a host change is in flight, as the old New button was disabled while the page's one
+/// operation token was held by a host change (SPEC.md, "Creation": "Launches and changes to the host registry still
+/// exclude each other"); a probe counts by the migration's orchestrator's decision, though the old token left it out. Specified: with a host probe in flight New is unavailable and opens nothing; once it is answered New opens.
+#[gpui::test]
+fn new_waits_for_a_host_change(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, None);
+    let path = start_host_change(cx, HostChange::Probe);
+    cx.run_until_parked();
+    let probe = helm
+        .commands()
+        .into_iter()
+        .find(|command| command.path == path)
+        .expect("the premise: the probe is in flight");
+    assert!(
+        !cx.update(|_, cx| new_available(cx)),
+        "New is unavailable while the probe is out"
+    );
+    assert!(!new(cx), "and opens nothing");
+    helm.reply(probe.id, 200, Some(json!({})));
+    settle(cx);
+    assert!(new(cx), "with the probe answered, New opens");
 }
