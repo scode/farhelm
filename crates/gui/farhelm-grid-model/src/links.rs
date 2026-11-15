@@ -38,6 +38,12 @@ pub struct TerminalLink {
     pub uri: String,
     pub ranges: Vec<Selection>,
     pub evidence: BTreeSet<u64>,
+    /// A program hyperlink's visible text on its row (its runs' text, joined), so a relabel of the same cells and
+    /// target makes it a different link: what the user agreed to under a resting pointer, or between a press and its
+    /// release, includes the label the destination display judged. Only this row's text: SPEC.md lets the display skip
+    /// later redraws of other rows, and a label spread over rows is judged whole by the display itself. Empty for a
+    /// printed web address, whose text is its target (`uri`).
+    pub label: String,
 }
 
 impl TerminalLink {
@@ -260,6 +266,7 @@ impl GridModel {
                     && last.ranges[0].end.col == run.col
             }) {
                 last.ranges[0].end.col = run.col + run.width;
+                last.label.push_str(&run.text);
                 continue;
             }
             let mut first = line;
@@ -295,6 +302,7 @@ impl GridModel {
                     SelectionMode::Linear,
                 )],
                 evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
+                label: run.text.clone(),
             });
         }
         let Some((first, last)) = self.url_window(line) else {
@@ -357,6 +365,7 @@ impl GridModel {
                     uri: matched.as_str().into(),
                     ranges,
                     evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
+                    label: String::new(),
                 });
             }
         }

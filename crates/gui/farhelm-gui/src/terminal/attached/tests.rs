@@ -2219,19 +2219,10 @@ fn the_link_choice_decides_who_gets_a_click_on_a_link(cx: &mut TestAppContext) {
 impl Harness<'_> {
     /// Attach a screen whose first row is `text`, all of it a program's hyperlink (OSC 8) to `uri`.
     fn attach_hyperlink(&mut self, text: &str, uri: &str) {
-        let asked = self.fake().attach();
-        let mut replay = screen(asked.cols, asked.rows, "", serde_json::Value::Null);
-        replay[2] = serde_json::from_value(serde_json::json!({
-            "t":"rows",
-            "rows":[[0,{"w":false,"r":[[0,text.chars().count(),text,[0,-1,-1],0]]}]],
-            "links":[["1",uri]]
-        }))
-        .unwrap();
-        for message in replay {
-            self.fake().output(message);
-        }
-        self.fake().replay_complete();
-        settle(self.cx);
+        self.attach_rows(
+            serde_json::json!([[0, {"w":false,"r":[[0,text.chars().count(),text,[0,-1,-1],0]]}]]),
+            serde_json::json!([["1", uri]]),
+        );
     }
 
     /// Rest the pointer on `at` and let the destination display open (it opens after the frame that saw the hover).
@@ -2271,6 +2262,217 @@ fn a_program_hyperlink_shows_its_destination_and_opens_on_a_click(cx: &mut TestA
     );
     h.rest_on(off);
     assert_eq!(h.disclosure_shown(), (false, false), "moving off closes it");
+}
+
+impl Harness<'_> {
+    /// The program rewrites row 0 as `text`, all of it hyperlink `1` to `uri` again, as live output at revision `rev`:
+    /// the same link, relabelled.
+    fn relabel_hyperlink(&mut self, text: &str, uri: &str, rev: u64) {
+        let rows: GridOutput = serde_json::from_value(serde_json::json!({
+            "t":"rows",
+            "rows":[[0,{"w":false,"r":[[0,text.chars().count(),text,[0,-1,-1],0]]}]],
+            "links":[["1",uri]]
+        }))
+        .unwrap();
+        self.fake().output(rows);
+        let (cols, rows) = FITTED;
+        self.fake()
+            .output(serde_json::from_value(frame(rev, cols, rows)).unwrap());
+        settle(self.cx);
+    }
+}
+
+/// The display judges what the user would be agreeing to, so a program that relabels the hyperlink under a resting
+/// pointer into a lookalike, keeping its target and its cells, must be judged again: otherwise the ordinary display
+/// stays up beside a label that now names somewhere else. Specified: resting on a hyperlink labelled with plain words,
+/// the ordinary display shows; once the program rewrites the same cells, same target, as a web address naming another
+/// site, the display is the warning, without the pointer moving.
+#[gpui::test]
+fn a_hyperlink_relabelled_under_the_pointer_is_judged_again(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("open the dashboard now", "https://evil.example/");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(4, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the premise: the ordinary display"
+    );
+    h.relabel_hyperlink("https://bank.example/x", "https://evil.example/", 2);
+    redraw(h.cx);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, true),
+        "the relabel is judged again"
+    );
+}
+
+/// A press opens a link only if the release lands on the link the user agreed to, and a relabel between the two
+/// changes what they agreed to (the old app's rule: a link relabelled between press and release does not open).
+/// Specified: pressed on a plainly labelled hyperlink, then relabelled in place as a lookalike before the release, the
+/// release opens nothing and the display shows the warning; a click on the link as it now reads then opens it.
+#[gpui::test]
+fn a_hyperlink_relabelled_between_press_and_release_does_not_open(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("open the dashboard now", "https://evil.example/");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(4, 0);
+    h.rest_on(on);
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    h.relabel_hyperlink("https://bank.example/x", "https://evil.example/", 2);
+    h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.cx.opened_url(), None, "nothing opens");
+    redraw(h.cx);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, true),
+        "the relabelled link is shown as it now is"
+    );
+    h.click_at(on);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://evil.example/"),
+        "and a click on the link as it now reads opens it"
+    );
+}
+
+impl Harness<'_> {
+    /// Attach a screen whose rows are `rows` (the wire's `[line, {"w": wrapped, "r": runs}]` entries) with the
+    /// hyperlinks `links` (`[id, uri]` pairs the runs index), replayed whole.
+    fn attach_rows(&mut self, rows: serde_json::Value, links: serde_json::Value) {
+        let asked = self.fake().attach();
+        let mut replay = screen(asked.cols, asked.rows, "", serde_json::Value::Null);
+        replay[2] =
+            serde_json::from_value(serde_json::json!({"t":"rows","rows":rows,"links":links}))
+                .unwrap();
+        for message in replay {
+            self.fake().output(message);
+        }
+        self.fake().replay_complete();
+        settle(self.cx);
+    }
+}
+
+/// A program's hyperlink can spread its label over two rows, and the lookalike defence must judge the whole label,
+/// not each row's piece: "https://example.com" on one row and ".evil.test/x" on the next together name another site.
+/// The warning informs and does not block. Specified: a hyperlink to `https://example.com/x` labelled across rows 0 and
+/// 1 that way shows the warning, naming the joined label `https://example.com.evil.test/x`, when resting on either row,
+/// and a click while it is shown opens the target.
+#[gpui::test]
+fn a_two_row_lookalike_hyperlink_warns_on_both_rows_and_still_opens(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_rows(
+        serde_json::json!([
+            [0, {"w":false,"r":[[0,19,"https://example.com",[0,-1,-1],0]]}],
+            [1, {"w":false,"r":[[0,12,".evil.test/x",[0,-1,-1],0]]}]
+        ]),
+        serde_json::json!([["tag", "https://example.com/x"]]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (first, second) = (h.at_cell(4, 0), h.at_cell(4, 1));
+    h.rest_on(first);
+    assert_eq!(h.disclosure_shown(), (true, true), "the first row warns");
+    let painted = crate::session_list::tests::painted(&test_support::frame(h.cx)).join(" ");
+    assert!(
+        painted.contains("https://example.com.evil.test/x"),
+        "judged on the whole label, joined across its rows: {painted}"
+    );
+    h.rest_on(second);
+    assert_eq!(h.disclosure_shown(), (true, true), "and so does the second");
+    h.click_at(second);
+    assert_eq!(h.cx.opened_url().as_deref(), Some("https://example.com/x"));
+}
+
+/// A label is the program's text, so the display shows it as data: a right-to-left override cannot reorder what the
+/// user reads, and it shows as its escape (SPEC.md: host text is drawn escaped). A target that is not a web address
+/// never reaches the browser and gets no display offering it. Specified: a hyperlink to `https://example.com/page`
+/// labelled `https://github.com/` and a U+202E shows the warning (the label names another site) with `<U+202E>`
+/// painted; a `javascript:` hyperlink shows no display on rest, and a click opens nothing.
+#[gpui::test]
+fn hostile_hyperlink_text_and_targets_stay_data(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_rows(
+        serde_json::json!([
+            [0, {"w":false,"r":[[0,20,"https://github.com/\u{202e}",[0,-1,-1],0]]}],
+            [2, {"w":false,"r":[[0,10,"run script",[0,-1,-1],1]]}]
+        ]),
+        serde_json::json!([
+            ["a", "https://example.com/page"],
+            ["b", "javascript:alert(1)"]
+        ]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let label = h.at_cell(4, 0);
+    h.rest_on(label);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, true),
+        "the lookalike label warns"
+    );
+    let painted = crate::session_list::tests::painted(&test_support::frame(h.cx)).join(" ");
+    assert!(painted.contains("<U+202E>"), "shown escaped: {painted}");
+
+    let script = h.at_cell(4, 2);
+    h.rest_on(script);
+    assert_eq!(
+        h.disclosure_shown(),
+        (false, false),
+        "no display for a script target"
+    );
+    h.click_at(script);
+    assert_eq!(h.cx.opened_url(), None, "and nothing opens");
+}
+
+/// A printed address can run past the end of a row, and output that later extends it on the next row changes where a
+/// click goes: the click must open the address as it now reads, not as it read when first hovered. Specified: with row 0
+/// soft-wrapped and ending in `https://bank.co`, a click opens that (normalized, `https://bank.co/`); once the program
+/// prints `m` at the start of row 1, the next click opens `https://bank.com/`.
+#[gpui::test]
+fn a_printed_address_extended_on_the_next_row_opens_its_new_address(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let (cols, rows) = FITTED;
+    let pad = "x ".repeat(((cols as usize) - 15) / 2);
+    let pad = format!(
+        "{pad}{}",
+        if (cols as usize - 15) % 2 == 1 {
+            " "
+        } else {
+            ""
+        }
+    );
+    let row0 = format!("{pad}https://bank.co");
+    assert_eq!(
+        row0.chars().count(),
+        cols as usize,
+        "the premise: row 0 is full"
+    );
+    h.attach_rows(
+        serde_json::json!([[0, {"w":true,"r":[[0,cols,row0,[0,-1,-1]]]}]]),
+        serde_json::json!([]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(cols - 4, 0);
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url().as_deref(), Some("https://bank.co/"));
+
+    let extend: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"rows","rows":[[1, {"w":false,"r":[[0,1,"m",[0,-1,-1]]]}]]
+    }))
+    .unwrap();
+    h.fake().output(extend);
+    h.fake()
+        .output(serde_json::from_value(frame(2, cols, rows)).unwrap());
+    settle(h.cx);
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url().as_deref(), Some("https://bank.com/"));
 }
 
 /// When a hyperlink's text is itself a web address naming somewhere else, the display becomes the loud warning that
