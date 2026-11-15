@@ -30,7 +30,17 @@ and the old native smoke test's legs (`scripts/desktop-smoke.sh`).
   `desktop::tests::the_notices_are_wrapped_at_the_column_and_keep_every_character`,
   `desktop::tests::the_notices_window_is_titled_and_fits_its_column` and the menu description test. On Linux the `?`
   menu's item waits for the other-dialogs area, which dispatches `actions::OpenSourceNotices`; until it lands
-  `farhelm-desktop --licenses` is the Linux surface.
+  `farhelm-desktop --licenses` is the Linux surface. Checked on the test Mac in a real window: the item sits between
+  Minimize and Quit; choosing it again while the notices window is key, behind the main window or minimized brings that
+  one window forward; Cmd+W there does nothing; closing it leaves the app running; Cmd+Q quits with it open.
+- **The updater's window side** (the old app's updater wiring had no test of its own; its pure rules moved with
+  `update_readout`'s tests, now in the GUI crate). Tested by `desktop::updates::tests` (no updater means nothing runs
+  and nothing is offered; the window shows the updater's latest readout; the commands reach the updater and a failed
+  automatic-updates change comes back; Restart to update quits only when the restart started) and
+  `tests::the_updater_feed_reports_each_change_once_and_ends_with_the_updater` in `crates/farhelm-desktop`. That only
+  the installed release bundle starts one is `updater::tests::the_updater_runs_only_for_the_installed_release_bundle`.
+  The entry points other areas call are `desktop::updates::runs`, `check_now`, `automatic_updates` and
+  `set_automatic_updates`.
 
 ## Deviations
 
