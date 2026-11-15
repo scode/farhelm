@@ -11,9 +11,6 @@
 //! surface that draws it. The session rows' bells with their lists, and the rail's notices panel when it comes, are
 //! not its surfaces: they draw the notification records the helm keeps and pushes, straight from the store. Nor are the
 //! status chimes, which the one sound owner decides. The migration's orchestrator drew that line on 2026-11-14.
-//!
-//! NOTE: The approval region does not read [`posted`] yet, so a late answer's notice ([`Notice::LateAnswer`]) is
-//! posted, and replaced by the next one, but shown nowhere until it does.
 
 use gpui::{App, AppContext as _, Entity, Global, SharedString};
 
@@ -30,7 +27,7 @@ pub enum Notice {
     LaunchNotStarted,
     /// An answer to an agent's approval card arrived after its request had stopped waiting (answered elsewhere,
     /// expired, or its session gone), so it did not take effect. `always` is set after an Always allow, whose host
-    /// setting the helm stores before it looks for the request. To be drawn by the approval region above its waiting
+    /// setting the helm stores before it looks for the request. Drawn by the approval region above its waiting
     /// list, as the old app drew it, never as a banner; it stays until the user dismisses it, and a later late answer
     /// replaces it.
     LateAnswer { always: bool },

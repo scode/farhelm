@@ -935,10 +935,17 @@ impl<T: 'static> Clone for Inline<T> {
 }
 
 impl<T: Clone + 'static> Inline<T> {
-    /// Whether it is still open: no answer has run, and no fallible answer has succeeded. Test-only until an owner
-    /// needs it: an owner may simply keep drawing an answered question, which draws nothing.
-    #[cfg(test)]
-    pub(crate) fn is_open(&self, cx: &App) -> bool {
+    /// Whether it is still open: no answer has run (Cancel included), and no fallible answer has succeeded. An owner
+    /// reads it to stop drawing the question's place once it closes, to prune finished questions, and to refuse what
+    /// SPEC.md refuses while a question is open (an open lifecycle confirmation "refuses another lifecycle action").
+    ///
+    /// An owner may read it while drawing. Closing notifies the question's own entity, and GPUI redraws every view
+    /// drawn above a view that notifies, cached or not, so an owner that draws the question sees it close in its next
+    /// frame. A view that reads it without drawing the question (a menu that turns Delete off) sees it close only
+    /// because every uncached view redraws with the window, and no view is cached in production (`cache.rs`); a cached
+    /// one would have to observe the question's entity. Dropping the question, or no longer drawing it, takes it away
+    /// unanswered without closing it, so it stays `true` for any clone the owner still holds.
+    pub fn is_open(&self, cx: &App) -> bool {
         !self.prompt.read(cx).answered
     }
 

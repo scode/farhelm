@@ -1176,6 +1176,9 @@ type InlineCell = Rc<RefCell<Option<prompt::Inline<String>>>>;
 /// Reset button lower down, then the question, drawn while the test's cell holds it, as the launcher draws its YOLO
 /// question in its body. The test holds both buttons' focus handles.
 ///
+/// The question sits in a place of its own (`question-place`) that the view draws only while
+/// [`prompt::Inline::is_open`] says so, read while drawing, as a sidebar row stops drawing a closed question's place.
+///
 /// Reset sits closer to the question than Launch does, so it is what the focus coordinator's recovery would pick if a
 /// closing question let focus drop: a test that sees focus back on Launch knows the question returned it.
 struct Launcher {
@@ -1185,7 +1188,12 @@ struct Launcher {
 }
 
 impl Render for Launcher {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let open = self
+            .question
+            .borrow()
+            .clone()
+            .filter(|question| question.is_open(cx));
         div()
             .debug_selector(|| "launcher".into())
             .w(px(1100.))
@@ -1196,7 +1204,12 @@ impl Render for Launcher {
             .child(div().w(px(80.)).child(button("launch", &self.launch)))
             .child(div().h(px(40.)))
             .child(div().w(px(80.)).child(button("reset", &self.reset)))
-            .children(self.question.borrow().clone())
+            .children(open.map(|question| {
+                div()
+                    .debug_selector(|| "question-place".into())
+                    .pt(px(12.))
+                    .child(question)
+            }))
     }
 }
 
@@ -1459,6 +1472,56 @@ fn an_inline_question_answers_once_and_returns_focus_inside_its_dialog(cx: &mut 
     assert!(
         !is_open(cx, launcher.layer),
         "Escape outside the question closed the launcher"
+    );
+}
+
+/// Why this matters: an owner draws an inline question inside its own surface, so only the owner can stop drawing the
+/// question's place (its spacing, a sidebar row's slot) once the question closes, and only it can refuse what SPEC.md
+/// refuses while the question is open ("an open lifecycle confirmation ... refuses another lifecycle action"). It reads
+/// [`prompt::Inline::is_open`] for both, while drawing, and nothing notifies the owner itself when the question closes:
+/// the question notifies only its own entity, and that must be enough to redraw the owner.
+///
+/// Specified: while the question is open its owner draws its place. With focus moved to Reset, a Cancel that does not
+/// take focus (a macOS click) closes the question and leaves focus on Reset, so no focus move redraws the window (a
+/// focus return would, and would hide a missing notification); the next frame still has no place, and `is_open` is
+/// false.
+#[gpui::test]
+fn an_owner_reading_is_open_while_drawing_stops_drawing_a_closed_questions_place(
+    cx: &mut TestAppContext,
+) {
+    let (cx, launcher) = open_launcher(cx);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let cell = launcher.question.clone();
+    let question = yolo(&ran, &attempts);
+    let inline = cx.update(move |window, cx| {
+        let inline = prompt::ask_inline(question, &mark, |_, _, _| {}, window, cx);
+        cell.replace(Some(inline.clone()));
+        inline
+    });
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("question-place").is_some(),
+        "the premise: the owner draws the open question's place"
+    );
+    click(cx, "reset");
+    assert!(
+        focused(cx, &launcher.reset),
+        "the premise: the user moved focus to Reset"
+    );
+    cx.update(|window, cx| inline.cancel(window, cx));
+    settle(cx);
+    assert!(
+        focused(cx, &launcher.reset),
+        "the premise: closing moved no focus, so only the question's notification redraws"
+    );
+    assert!(
+        cx.debug_bounds("question-place").is_none(),
+        "the owner's next frame drew no place for the closed question"
+    );
+    assert!(
+        !cx.update(|_, cx| inline.is_open(cx)),
+        "Cancel closed the question"
     );
 }
 
