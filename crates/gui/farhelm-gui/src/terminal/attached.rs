@@ -18,8 +18,10 @@
 //!   80x24 attach followed by a resize). Later size changes go out as resizes, only when the size changes.
 //! - Staged replay. Each attachment replays the whole screen and history from nothing, so its output goes into a fresh
 //!   view kept off screen until the helm says the replay is complete; only then does it replace what is shown. A
-//!   reconnect, a takeover or a refusal therefore never shows half a replay, and the last complete screen stays up
-//!   while the stream is not live.
+//!   reconnect, a takeover or a refusal therefore never replaces a shown screen with half a replay, and the last
+//!   complete screen stays up while the stream is not live. The one exception is a detach (a takeover, say) during
+//!   the first replay, with no earlier screen to keep: what arrived of it is shown, once it holds a whole screen, as
+//!   the displaced client's snapshot.
 //! - Bounded delivery. Each GUI turn takes at most [`BATCH`] events from the stream, applies consecutive output as one
 //!   batch (so a flood redraws once per turn, not once per message), and then yields to the executor, so a flood cannot
 //!   hold the main thread and frames keep their turn.
@@ -220,7 +222,8 @@ pub struct AttachedTerminal {
     pump: Option<Task<()>>,
     /// The stream state last delivered.
     stream: StreamState,
-    /// The view on screen: the last attachment whose replay completed.
+    /// The view on screen: the last attachment whose replay completed, or the first attachment's cut-off replay that a
+    /// detach made the snapshot (see `stream_changed`).
     committed: Option<Entity<TerminalView>>,
     /// The current attachment's view while its replay is still arriving. Never drawn.
     staging: Option<Entity<TerminalView>>,
@@ -508,7 +511,7 @@ impl AttachedTerminal {
         &self.focus
     }
 
-    /// The shown screen's text, as the renderer reads it from its paint cache; `None` before any replay completed.
+    /// The shown screen's text, as the renderer reads it from its paint cache; `None` before any screen is shown.
     pub fn terminal_text(&self, cx: &App) -> Option<String> {
         self.committed
             .as_ref()
@@ -869,6 +872,20 @@ impl AttachedTerminal {
 
     /// The stream moved to `state`.
     fn stream_changed(&mut self, state: StreamState, cx: &mut Context<Self>) {
+        // A detach that cuts off the first replay leaves no complete screen to keep, and no end of replay will come
+        // for it, so the part that arrived becomes the non-live snapshot SPEC.md promises a displaced client, as the
+        // old app showed it. Only once a whole first screen is there (the model refuses an earlier release), and never
+        // for a reconnect, whose own replay follows. The history arrives after the screen, oldest first, so a replay
+        // cut during it keeps the screen and its oldest lines, with nothing marking the newer lines that never came.
+        if self.committed.is_none()
+            && matches!(state, StreamState::Detached { .. })
+            && let Some(staging) = self.staging.take()
+            && staging
+                .update(cx, |view, cx| view.mark_replay_complete(cx))
+                .is_ok()
+        {
+            self.committed = Some(staging);
+        }
         // Whatever the new state, a replay that had not completed will not: drop it and keep the last complete screen.
         // An attachment going live starts a new one, because its replay rebuilds the grid from nothing.
         self.staging = None;
