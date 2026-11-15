@@ -828,7 +828,7 @@
     },
     {
       "golden": "host-add-dialog",
-      "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, Cancel and Add",
+      "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, the second-factor question with its SSH help link, Cancel and Add",
       "reference": "host-add-dialog"
     },
     {

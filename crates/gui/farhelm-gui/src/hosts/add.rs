@@ -30,6 +30,11 @@
 //!   check carries on), and a reply that cannot be read all show in the dialog's error line, both fields kept for
 //!   correction. A destination with no supervisor (`provisionable`) goes on to setup; [`super::setup`]'s module docs
 //!   say how, and when a refused setup reopens the dialog ([`reopen`]).
+//! - **SSH help.** Under the alias's help, the old line asks whether the host wants a second factor on every login, and
+//!   its link, "Start its connections yourself first.", opens SSH help ([`super::ssh_help`]) over the dialog with the
+//!   commands for the destination as typed, at any time, a probe in flight included. Add host stays open below with its
+//!   draft as it was, and closing SSH help returns focus to the link (SPEC.md, "Feedback": "closing it returns to the
+//!   intact draft"). The old dialog hid itself while SSH help was open; this one stays drawn under SSH help's veil.
 //!
 //! An outcome shows in the dialog whether or not the user moved on since Add: drawing a line inside the dialog that is
 //! already open moves no focus and opens nothing, which is all SPEC.md's "Keyboard focus" rule withholds from a late
@@ -43,9 +48,8 @@
 //! refuse its own action, with a reason, while the other's work is in flight in the operation store (decided by the
 //! migration's orchestrator on 2026-11-14); once launches are there, Add's refusal is one `any_in_flight` check.
 //!
-//! NOTE: Not drawn, each recorded in `docs/gpui/parity/settings-and-hosts.md`: the host kind choice (SSH or Tensorlake
-//! sandbox), since this milestone adds hosts over SSH only, and the "Does this host ask for a second factor ...?" line
-//! with its link to SSH help, which arrives with SSH help.
+//! NOTE: Not drawn, recorded in `docs/gpui/parity/settings-and-hosts.md`: the host kind choice (SSH or Tensorlake
+//! sandbox), since this milestone adds hosts over SSH only.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -64,7 +68,7 @@ use serde::Deserialize as _;
 use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
-use super::setup;
+use super::{setup, ssh_help};
 use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark, ReturnTo};
@@ -296,6 +300,8 @@ pub(crate) struct AddHostDialog {
     destination: DraftInput,
     /// The optional alias, as typed; blank means none.
     alias: DraftInput,
+    /// The SSH help link's focus handle, which SSH help returns focus to when it closes.
+    ssh_help: FocusHandle,
     /// The error line: why Add refused or what the probe answered. Cleared when a probe starts.
     problem: Option<HostSentence>,
     /// Set right after the layer opens; taken when the dialog closes itself, so it closes once.
@@ -339,6 +345,7 @@ impl AddHostDialog {
             probe_mark: Mark::take(cx),
             destination,
             alias,
+            ssh_help: cx.focus_handle().tab_stop(true),
             problem,
             layer: None,
         }
@@ -487,6 +494,27 @@ fn dismiss(
     }
 }
 
+/// A click handler for the SSH help link: open SSH help for the destination as typed now, returning focus to the link.
+/// Called from the click, not from inside an update of the dialog, since opening reads the dialog.
+fn open_ssh_help(
+    dialog: WeakEntity<AddHostDialog>,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    move |_, window, cx| {
+        let mark = Mark::take(cx);
+        let Some(dialog) = dialog.upgrade() else {
+            return;
+        };
+        let (destination, link) = {
+            let dialog = dialog.read(cx);
+            (
+                dialog.destination.draft().value().clone(),
+                dialog.ssh_help.clone(),
+            )
+        };
+        ssh_help::open_for_draft(destination, &link, &mark, window, cx);
+    }
+}
+
 /// A labelled field (`.add-host-form label`): the label's words in the quiet ink over the input. The ink is the
 /// words' own, not the column's: the input inherits text color, and its text is the ordinary ink (`.add-host-form
 /// input`'s `--fg-0`).
@@ -559,17 +587,40 @@ impl Render for AddHostDialog {
                  the host's settings.",
                 palette,
             ))
-            .children(self.problem.clone().map(|line| {
-                // `.create-session-error`: the helm's words, which may quote the destination or the host's own text,
-                // so they are drawn as host text, as one labelled node.
+            .child(
+                // `.host-dialog-help` with its `.inline-link`: the question, then the link, which wraps to a line of
+                // its own at this width as the old one did, since GPUI has no inline flow for a control in a paragraph.
                 div()
-                    .pt(px(2.))
-                    .px(px(14.))
-                    .pb(px(8.))
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
                     .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.danger))
-                    .child(line)
-            }));
+                    .line_height(px(18.))
+                    .text_color(theme::color(palette.fg_1))
+                    .child(
+                        "Does this host ask for a second factor or other approval on every ssh login? ",
+                    )
+                    .child(
+                        Button::new(
+                            "add-host-ssh-help",
+                            "Start its connections yourself first.",
+                            HoverHelp::tooltip(
+                                "SSH needs 2FA?: see the commands for the destination you're adding",
+                            ),
+                            Role::Button,
+                        )
+                        .tier(Tier::Link)
+                        .focus(&self.ssh_help)
+                        .on_click(open_ssh_help(weak.clone())),
+                    ),
+            )
+            // The helm's words, which may quote the destination or the host's own text, so they are drawn as host
+            // text, as one labelled node.
+            .children(
+                self.problem
+                    .clone()
+                    .map(|line| super::problem_line(line, palette)),
+            );
         let cancel = Button::new(
             "add-host-cancel",
             "Cancel",

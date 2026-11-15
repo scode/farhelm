@@ -152,6 +152,9 @@ pub mod feedback;
 pub mod ntfy;
 /// The shared environment recipe catalog and validation.
 pub mod recipes;
+/// The helm's SSH connection help, the commands that start a host's shared
+/// connections by hand (see the module's own docs).
+pub mod ssh_help;
 /// The helm's Tensorlake account settings and compatibility recipe imports.
 pub mod tensorlake;
 

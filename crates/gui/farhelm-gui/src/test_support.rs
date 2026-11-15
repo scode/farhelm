@@ -566,6 +566,30 @@ pub(crate) fn terminal_focused(cx: &mut VisualTestContext) -> bool {
     })
 }
 
+/// The accessible name of what is drawn under element id `id` in a fresh [`frame`], or `None` when nothing with that id
+/// was drawn or it has no name. For a test that reads a line the app wrote (a refusal, a status, a host value drawn
+/// through a host sentence, whose name is its escaped text) or a control's label, by the id the view gave it.
+pub(crate) fn label(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .and_then(|node| node.label.map(|label| label.to_string()))
+}
+
+/// The one command the fake helm received since its commands were last taken, which must be `method` on `path`: its
+/// envelope id, to reply to, and its body (`null` when it had none). Panics when anything else, or more or less than one
+/// command, was sent, so a test that expects one request also proves nothing else went out.
+pub(crate) fn one_command(
+    helm: &mut FakeHelm,
+    method: farhelm_helm_client::Method,
+    path: &str,
+) -> (u64, serde_json::Value) {
+    let sent = helm.commands();
+    assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
+    assert_eq!((sent[0].method, sent[0].path.as_str()), (method, path));
+    (sent[0].id, sent[0].body.clone().unwrap_or_default())
+}
+
 /// Tests of the shared helpers above, one per helper, appended with it.
 mod shared_helper_tests {
     use gpui::{IntoElement as _, ParentElement as _, TestAppContext, div};
@@ -573,6 +597,8 @@ mod shared_helper_tests {
     use super::{any_open, handle, open_dialog, settle, terminal_focused};
     use super::{button, focused, focused_id, keys, open};
     use gpui::{InteractiveElement as _, Styled as _};
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     /// Why this matters: tests that hold no focus handle (a GPUI Kit field's, a list row's own) name the focused
     /// element by its id, and a helper that named nothing, or an element other than the focused one, would let a focus
@@ -674,6 +700,66 @@ mod shared_helper_tests {
             "the premise: the stand-in took focus"
         );
         assert!(terminal_focused(cx), "the terminal's own element is");
+    }
+
+    /// Why this matters: tests read the app's lines and controls' names by id, and a helper that read another element's
+    /// name, or answered for an id that was not drawn, would let a wrong or missing line pass. Specified: a button drawn
+    /// under `named` with the label "Shown words" reads as that label; an id nothing drew reads as `None`.
+    #[gpui::test]
+    fn label_reads_the_name_drawn_under_an_id(cx: &mut TestAppContext) {
+        let focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let cx = open(cx, move |_, _| {
+            div()
+                .child(
+                    crate::components::Button::new(
+                        "named",
+                        "Shown words",
+                        crate::components::HoverHelp::tooltip("Help"),
+                        crate::components::Role::Button,
+                    )
+                    .focus(&focus),
+                )
+                .into_any_element()
+        });
+        assert_eq!(super::label(cx, "named").as_deref(), Some("Shown words"));
+        assert_eq!(super::label(cx, "never-drawn"), None);
+    }
+
+    /// Why this matters: tests that expect exactly one request use this to read its id and body, and a helper that
+    /// returned a stale command, or let a second one pass unseen, would hide a duplicate or missing request.
+    /// Specified: after one keyless send of `{"a": 1}` on `POST /api/example` through a live UI session, it returns that
+    /// command's body and an id whose reply reaches the send's callback, and the fake's command list is empty
+    /// afterwards.
+    #[gpui::test]
+    fn one_command_takes_the_single_command_sent(cx: &mut TestAppContext) {
+        let (mut helm, _connection) = super::started(cx);
+        helm.connect(Vec::new());
+        cx.run_until_parked();
+        let answered = Rc::new(Cell::new(false));
+        let noted = answered.clone();
+        let sent = cx.update(|cx| {
+            let path = farhelm_helm_client::ApiPath::api(&["example"]).unwrap();
+            crate::operations::send(
+                farhelm_helm_client::Method::Post,
+                path,
+                Some(serde_json::json!({ "a": 1 })),
+                "POST /api/example",
+                cx,
+                move |_, _| noted.set(true),
+            )
+        });
+        assert!(sent, "the premise: a live UI session sent it");
+        cx.run_until_parked();
+        let (id, body) =
+            super::one_command(&mut helm, farhelm_helm_client::Method::Post, "/api/example");
+        assert_eq!(body, serde_json::json!({ "a": 1 }));
+        assert!(helm.commands().is_empty(), "the command was taken");
+        helm.reply(id, 200, None);
+        cx.run_until_parked();
+        assert!(
+            answered.get(),
+            "the id is the command's: its reply reached the send"
+        );
     }
 }
 

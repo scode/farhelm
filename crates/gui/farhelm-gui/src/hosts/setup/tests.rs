@@ -18,12 +18,13 @@ use serde_json::{Value, json};
 
 use crate::focus;
 use crate::hosts::add::tests::{
-    alias, any_open, destination, dialog_key, error_line, label, one_command, one_probe,
-    open_dialog, open_rail_with, type_text,
+    alias, destination, dialog_key, error_line, one_probe, open_dialog, open_rail_with, type_text,
 };
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::test_support::{click, focused, focused_id, frame, keys, meta, settle};
+use crate::test_support::{
+    any_open, click, focused, focused_id, frame, keys, label, meta, one_command, settle,
+};
 
 /// The plan the fake helm offers: two steps, the first with two paths and an explanation, in the helm's own shape.
 const CONFIRMATION: &str = "Farhelm will set up dev@newbox (ubuntu, x86_64):\n- Create directories\n  \
