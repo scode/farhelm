@@ -32,7 +32,7 @@ use crate::focus::{self, Mark};
 use crate::main_view::MainView;
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
-    self, any_open, bounds, click, focused, focused_id, frame, keys, meta, settle, started,
+    self, any_open, bounds, click, focused, focused_id, frame, keys, label, meta, settle, started,
 };
 use crate::{layers, root, session, theme};
 use farhelm_input_mapping::Platform;
@@ -727,11 +727,12 @@ fn a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switc
 }
 
 /// SPEC.md: "Name sessions on quick launch is on by default, including when the helm has never stored a choice", while
-/// every other switch here but the trust hints' reads an unset field as off, and a trust hint's shows the hint unless
-/// its dismissal is stored `true`. Reading naming like the opt-outs would turn naming off on every upgraded helm.
-/// Specified: with no preference row, an empty one, and one storing `false`, naming reads on, on and off; every other
-/// switch but the trust hints' reads off when unset and on when stored `true`; each trust hint's switch reads on when
-/// unset or stored `false`, and off when stored `true`.
+/// every other switch here but the trust hints' and the sounds' reads an unset field as off, and a trust hint's shows
+/// the hint unless its dismissal is stored `true`. Reading naming like the opt-outs would turn naming off on every
+/// upgraded helm. Specified: with no preference row, an empty one, and one storing `false`, naming reads on, on and off;
+/// every other switch but the trust hints' and the sounds' reads off when unset and on when stored `true`; each trust
+/// hint's switch reads on when unset or stored `false`, and off when stored `true`. The sounds' defaults are
+/// `sounds::rules`'s `the_preference_row_reads_unset_fields_as_the_defaults`'s.
 #[test]
 fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
     let empty = Preferences::default();
@@ -756,10 +757,9 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
     ];
-    for &choice in Choice::ALL
-        .iter()
-        .filter(|&&choice| choice != naming && !hints.contains(&choice))
-    {
+    for &choice in Choice::ALL.iter().filter(|&&choice| {
+        choice != naming && !hints.contains(&choice) && !SOUNDS.contains(&choice)
+    }) {
         assert!(
             !choice.stored(None) && !choice.stored(Some(&empty)),
             "{choice:?} reads unset as off"
@@ -787,6 +787,89 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         assert!(
             !hint.stored(Some(&dismissed(true))),
             "{hint:?} hides the hint once dismissed"
+        );
+    }
+}
+
+// ---- Notifications: Sounds ----------------------------------------------------------------------------------------
+
+/// The three status sound switches, in the order the Sounds sub-heading draws them.
+const SOUNDS: [Choice; 3] = [
+    Choice::SoundWaiting,
+    Choice::SoundApproval,
+    Choice::SoundTurnFinished,
+];
+
+/// The Sounds sub-heading is how the user turns each status sound on or off, and each switch must write only its own
+/// field of the shared row, so a stale copy of another choice is never written back (the helm's `put_preferences`).
+/// Ported from the old spec's settings half (`sounds.spec.ts`, "status sounds follow the current view"): the switches'
+/// names and defaults; a choice surviving a reopen is the helm's row here, not the device's storage. The defaults come
+/// from the same reading of unset fields the sounds' owner uses (`sounds::rules`'s
+/// `the_preference_row_reads_unset_fields_as_the_defaults`). Specified: Notifications shows the heading "Sounds" above
+/// ntfy alerts and the three switches by name, waiting and approval on and turn finished off with no stored choice; a
+/// click on each sends `PUT /api/preferences` with only its field, set to the opposite of what it showed, under the
+/// preference row's key; once the helm pushes the row and answers, the switch shows the stored value.
+#[gpui::test]
+fn each_sound_switch_saves_its_own_preference_field(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    // The ntfy form below the switches reads its settings when the section first shows; answered here, so the switches'
+    // saves are answered in the order the fake helm requires.
+    show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    let drawn_at = |cx: &mut VisualTestContext, id: &str| {
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| node.bounds)
+    };
+    let heading = drawn_at(cx, "settings-sounds-heading").expect("Sounds is drawn");
+    let form = drawn_at(cx, "ntfy-heading").expect("ntfy alerts is drawn");
+    assert!(
+        heading.bottom() <= form.top(),
+        "Sounds is above ntfy alerts"
+    );
+    let names: Vec<Option<String>> = SOUNDS.iter().map(|choice| label(cx, choice.id())).collect();
+    assert_eq!(
+        names,
+        [
+            Some("Session waiting".to_string()),
+            Some("Approval request".to_string()),
+            Some("Turn finished".to_string())
+        ]
+    );
+
+    let mut row = Preferences::default();
+    let fields = ["sound_waiting", "sound_approval", "sound_turn_finished"];
+    for ((choice, field), shown) in SOUNDS.into_iter().zip(fields).zip([true, true, false]) {
+        assert_eq!(
+            switch_on(cx, choice.id()),
+            Some(shown),
+            "{field}: the default shows"
+        );
+        click(cx, choice.id());
+        let (id, body) = one_save(&mut helm);
+        assert_eq!(
+            body,
+            json!({ field: !shown }),
+            "{field}: only its field is sent"
+        );
+        assert_eq!(
+            preference_work(cx),
+            Some(Work::Save),
+            "{field}: saved under the preferences key"
+        );
+        row = serde_json::from_value({
+            let mut value = serde_json::to_value(&row).unwrap();
+            value[field] = json!(!shown);
+            value
+        })
+        .unwrap();
+        push(&mut helm, &row, cx);
+        helm.reply(id, 204, None);
+        settle(cx);
+        assert_eq!(
+            switch_on(cx, choice.id()),
+            Some(!shown),
+            "{field}: the stored value shows"
         );
     }
 }
@@ -2649,8 +2732,36 @@ fn show_ntfy(helm: &mut FakeHelm, cx: &mut VisualTestContext, stored: Value) {
     settle(cx);
 }
 
-/// Replace the text of the field drawn under `selector` with `text`, as the user would.
+/// Turn the wheel by `delta` pixels over the dialog's body (negative scrolls toward the end, as a wheel turned down
+/// does). It turns inside the body's left edge, over the section list, which does not scroll itself, so the body takes
+/// the wheel rather than a field under the pointer (Checkouts' multi-line command would).
+fn wheel(cx: &mut VisualTestContext, delta: f32) {
+    let body = bounds(cx, DIALOG_BODY);
+    cx.simulate_event(gpui::ScrollEvent {
+        position: gpui::point(body.left() + px(10.), body.center().y),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(delta))),
+        ..Default::default()
+    });
+    settle(cx);
+}
+
+/// Wheel the dialog's body until the element drawn under `selector` shows whole in it, as a user scrolls to a control
+/// before clicking it. A click lands wherever the element's center is drawn, and below the body's fold that is the
+/// footer or nothing: the Sounds sub-heading above the ntfy form puts the form's lower fields there.
+fn into_view(cx: &mut VisualTestContext, selector: &'static str) {
+    for _ in 0..60 {
+        if shows_whole(cx, selector, DIALOG_BODY) {
+            return;
+        }
+        let below = bounds(cx, selector).top() > bounds(cx, DIALOG_BODY).top();
+        wheel(cx, if below { -40. } else { 40. });
+    }
+    panic!("{selector} never showed whole in the dialog's body");
+}
+
+/// Replace the text of the field drawn under `selector` with `text`, as the user would, scrolling it into view first.
 pub(super) fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
+    into_view(cx, selector);
     click(cx, selector);
     keys(cx, SELECT_ALL);
     if text.is_empty() {
@@ -3123,6 +3234,9 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
     assert_eq!(busy_line(cx, "ntfy"), None, "its save started");
     helm.reply(id, 200, Some(ntfy("https://ntfy.sh", "", "default", false)));
     settle(cx);
+    // Reaching ntfy's Save scrolled the body down, section list and all, and the body keeps its offset: scroll back up,
+    // as the user would, to reach the Checkouts button.
+    wheel(cx, 4000.);
     click(cx, section_button(Section::Checkouts));
     assert_eq!(
         busy_line(cx, "checkout-post-clone"),

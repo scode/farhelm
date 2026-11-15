@@ -1175,7 +1175,7 @@
     },
     {
       "golden": "settings-notifications",
-      "title": "Settings at Notifications, the ntfy alerts form over the helm's defaults (no Sounds sub-heading yet)",
+      "title": "Settings at Notifications, the Sounds switches at their defaults above the ntfy alerts form over the helm's defaults",
       "reference": "settings-notifications"
     },
     {

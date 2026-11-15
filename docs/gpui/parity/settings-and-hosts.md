@@ -44,9 +44,11 @@ Containers' own cases are in `tests/podman-environments.spec.ts`, and Credential
 desktop app (where its updater runs), had no browser spec, since the web interface never showed it. Notifications' own
 cases are in `tests/ntfy-settings.spec.ts`, below; of this spec's, the navigation case's Notifications half (the "ntfy
 alerts" group under its 16-pixel sub-heading, below the 18-pixel section heading) is the golden
-`settings-notifications`, and its Sounds half waits for the Sounds sub-heading (Deviations). Appearance's own cases are
-in `tests/appearance.spec.ts`, below. Agent trust's are split between `tests/workspace-trust.spec.ts` (below) and this
-spec, whose hint-switch cases are mapped in the Agent trust bullet.
+`settings-notifications`, which also shows its Sounds half (the sub-heading and its three switches, which the
+other-dialogs area added with the status sounds; their tests are listed under `tests/sounds.spec.ts` in
+`docs/gpui/parity/other-dialogs.md`). Appearance's own cases are in `tests/appearance.spec.ts`, below. Agent trust's are
+split between `tests/workspace-trust.spec.ts` (below) and this spec, whose hint-switch cases are mapped in the Agent
+trust bullet.
 
 NOTE: Terminal shows the link choice and the tunnel consent switch. Its **File types to open with Cmd-click** field
 governs opening downloaded files, so it waits for the terminal area's downloads, which are not on `main` yet; until they
@@ -818,7 +820,8 @@ Where the port does not match the old app, and why. Each stays until the work na
   a refused save leaves them skipped, the switch back on and its failure line shown. The maintainer chose this on
   2026-11-14 (follow the helm), and SPEC.md's "Errors and diagnostics" says so.
 - **The section list does not stay put while a long section scrolls** (the old `position: sticky`). Of the sections
-  built so far, Checkouts scrolls even at the dialog's full height (next item), and the list then scrolls with it.
+  built so far, Checkouts (next item) and Notifications (Sounds above the ntfy form, as in the old app) scroll even at
+  the dialog's full height, and the list then scrolls with it.
 - **Checkouts does not fit the full-size dialog.** The old section fit the 780-pixel dialog with about 25 pixels to
   spare; here it is about 30 pixels taller than the dialog's body, so the body scrolls. Unscrolled, its last control,
   the spare switch's documentation link, sits at the body's visible edge with its descenders and underline below it
@@ -845,9 +848,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Notifications
 
-- **No Sounds sub-heading.** The old section opened with Sounds and its three switches (session waiting, approval
-  request, turn finished) above ntfy alerts. Status sounds belong to the other dialogs area, which adds them to this
-  section when it builds them; until then the section holds ntfy alerts alone.
 - **A refusal stays until the next save starts.** The old form cleared its outcome line on any edit; here the helm's
   words stay under the form, as every Settings failure line does, until the next Save.
 - **A Send test after a refused Save shows its outcome below the save's refusal.** The old form had one outcome line,

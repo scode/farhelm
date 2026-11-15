@@ -41,7 +41,9 @@
 //!
 //! The main view also keeps the owner of the dialogs SPEC.md opens by themselves when the window starts or resets, the
 //! Welcome card and the first batch of announcements ([`welcome::StartDialogs`]), for the window's life; it is made
-//! after the session pane, so the selected session's terminal is home by the time a card opens over it.
+//! after the session pane, so the selected session's terminal is home by the time a card opens over it. It keeps the
+//! status sounds' owner ([`sounds::StatusSounds`]) for the window's life the same way, over the sidebar's session list,
+//! whose query tells it when the sidebar's view changes.
 //!
 //! In the macOS window the sidebar's app bar and the session pane's top row are the window's title band
 //! (`desktop::title_band`); this view draws the band's one window-wide press watcher, gives the connection screens a
@@ -67,7 +69,7 @@ use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
 use crate::templates;
 use crate::theme::metrics;
-use crate::{launcher, layers, render_count, root, session, settings, theme, welcome};
+use crate::{launcher, layers, render_count, root, session, settings, sounds, theme, welcome};
 
 /// The window's root view.
 pub struct MainView {
@@ -98,6 +100,8 @@ pub struct MainView {
     /// The owner of the window-start dialogs (the Welcome card and the first batch of announcements), kept for the
     /// window's life; it starts over by itself with each UI session.
     _start_dialogs: Entity<welcome::StartDialogs>,
+    /// The owner of the status sounds, kept for the window's life; it starts over by itself with each UI session.
+    _sounds: Entity<sounds::StatusSounds>,
     /// The main pane's anchor as last drawn, which the sequence pill is centered over (the module docs); `None` before
     /// the first connected frame. Kept weakly by the anchor itself, so a pill on it goes when the pane is not drawn.
     pane_anchor: Option<Anchor>,
@@ -115,6 +119,7 @@ impl MainView {
             observed.push(cx.observe(&notices, |_, _, cx| cx.notify()));
         }
         let session_list = cx.new(SessionList::new);
+        let status_sounds = cx.new(|cx| sounds::StatusSounds::new(&session_list, window, cx));
         let root = root::attach(window, cx);
         // The agent approval cards' slot, once per window, as the layer stack it belongs to is attached.
         crate::approvals::region::install(window, cx);
@@ -131,6 +136,7 @@ impl MainView {
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
             // After the session pane, whose first sync is deferred the same way and so runs first.
             _start_dialogs: cx.new(|cx| welcome::StartDialogs::new(window, cx)),
+            _sounds: status_sounds,
             pane_anchor: None,
         }
     }

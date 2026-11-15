@@ -322,6 +322,14 @@ impl SessionList {
         &self.notices
     }
 
+    /// Which view the listing in the current UI session's store answers, for the status sounds: `None` while a change
+    /// of the host or status filter is unanswered, otherwise a number that changes exactly when such a change is answered
+    /// ([`filters::Choice::listing_view`]). The list notifies when an answer arrives, so an observer of the list sees
+    /// the number move once the new view's listing is in the store.
+    pub(crate) fn listing_view(&mut self, cx: &App) -> Option<u64> {
+        self.current.current(cx).filters.listing_view()
+    }
+
     /// The list, settled once when it is made and again on every change it observes.
     ///
     /// The settle at the end runs while the list is being made. [`session::observe_current`]'s own first call comes

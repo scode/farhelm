@@ -3180,8 +3180,9 @@ fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut 
     settings_scene(state, crate::settings::Section::AgentTrust, window, cx);
 }
 
-/// Settings at Notifications, its ntfy alerts form over the helm's defaults, as in the reference but for the Sounds
-/// sub-heading above it, which is not built. Focus starts on the dialog itself (`Section::first`), so no ring shows.
+/// Settings at Notifications, as in the reference: the Sounds sub-heading with its switches at their defaults (the row
+/// stores no choice for them: waiting and approval on, turn finished off), and below it the ntfy alerts form over the
+/// helm's defaults. Focus starts on the dialog itself (`Section::first`), so no ring shows.
 fn settings_notifications_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Notifications, window, cx);
 }
