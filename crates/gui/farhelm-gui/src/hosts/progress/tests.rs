@@ -9,7 +9,7 @@ use farhelm_proto::provisioning::{
     ProvisioningOperation, ProvisioningView, RunStatus, StepStatus, StepView,
 };
 
-use super::{Seen, Status, clock, fold, follow, next_second, opens_row, shown, status};
+use super::{Run, Seen, Status, clock, fold, follow, next_second, opens_row, shown, status};
 use crate::host_text::HostText;
 use crate::hosts::tests::run;
 use crate::operations::Work;
@@ -93,10 +93,11 @@ fn the_panel_keeps_a_runs_first_sight_and_fold_until_the_run_changes() {
 }
 
 /// Why this matters: SPEC.md, "Topology": "the running row expands once to show the helm's steps ... The user may fold
-/// that run ... Success folds the row". Update stays folded while it runs (its own rule), and only setup is drawn so
-/// far. Specified: a running setup opens its row unless that very run was folded; a fold of the host's earlier run does
-/// not hold the new one closed; a completed or failed setup, a running Update and the helm's idle view (no run id) open
-/// nothing here (a failure opens its row through the panel's own rule); `shown` passes setup runs with an id only.
+/// that run ... Success folds the row", while "While an update is running, its host row stays folded". Specified: a
+/// running setup opens its row unless that very run was folded; a fold of the host's earlier run does not hold the new
+/// one closed; a completed or failed setup, a running Update and the helm's idle view (no run id) open nothing here (a
+/// failure opens its row through the panel's own rule); `shown` passes setup and Update runs with an id, and not an
+/// uninstall's.
 #[test]
 fn a_running_setup_opens_its_row_until_folded() {
     let running = setup("run-a", RunStatus::Running);
@@ -119,19 +120,27 @@ fn a_running_setup_opens_its_row_until_folded() {
     }
     let update = run(2, ProvisioningOperation::Update, RunStatus::Running);
     assert!(!opens_row(Some(&update), None), "Update stays folded");
-    assert!(shown(Some(&update)).is_none());
+    assert!(
+        shown(Some(&update)).is_some(),
+        "an Update's steps are drawn"
+    );
+    let uninstall = run(2, ProvisioningOperation::Uninstall, RunStatus::Running);
+    assert!(shown(Some(&uninstall)).is_none(), "not an uninstall's yet");
     let mut idle = setup("run-a", RunStatus::Running);
     idle.run_id = None;
     assert!(shown(Some(&idle)).is_none(), "the idle view is no run");
     assert!(shown(Some(&running)).is_some());
 }
 
-/// Why this matters: the inline status is the row's summary while a setup runs, folded or not (SPEC.md: it "still says
-/// setting up or uninstalling and shows the step count, current step and elapsed time"), and a rerun's probe and
-/// submission show "Setting up…" before any run exists, as the old row's planning status did. Specified: a running
-/// setup reads "Setting up", 1 done of 3 (a completed step counts; a running or pending one does not), the running
-/// step's name, and the time since first sight; unchanged, warning and failed steps count as done too; with a probe or
-/// a setup in flight and no running run it is "Setting up…"; a save in flight, a completed run and no run give none.
+/// Why this matters: the inline status is the row's summary while a setup or an Update runs, folded or not (SPEC.md: it
+/// "still says setting up or uninstalling and shows the step count, current step and elapsed time", and an Update
+/// shows "`Updating…` until a progress snapshot is available, then ... the current step, completed-step count, and
+/// client-measured elapsed time inline"), and a rerun's probe and submission show "Setting up…" before any run exists,
+/// as the old row's planning status did. Specified: a running setup reads "Setting up", 1 done of 3 (a completed step
+/// counts; a running or pending one does not), the running step's name, and the time since first sight; unchanged,
+/// warning and failed steps count as done too; a running Update is counted and timed the same way as an Update's; with
+/// a probe or a setup in flight and no running run it is pending setup, with an Update's request in flight pending
+/// Update, also over the host's earlier failed run; a save in flight, a completed run and no run give none.
 #[test]
 fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
     let running = setup("run-a", RunStatus::Running);
@@ -140,6 +149,7 @@ fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
     assert_eq!(
         status(Some(&running), seen.get(&2), None, at(7)),
         Some(Status::Running {
+            run: Run::Setup,
             done: 1,
             total: 3,
             current: Some(HostText::from_host("Upload the farhelm binary")),
@@ -159,8 +169,30 @@ fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
     assert_eq!((done, current), (3, None));
 
     for work in [Work::Probe, Work::Setup] {
-        assert_eq!(status(None, None, Some(work), at(0)), Some(Status::Pending));
+        assert_eq!(
+            status(None, None, Some(work), at(0)),
+            Some(Status::Pending(Run::Setup))
+        );
     }
+    let mut update = running.clone();
+    update.operation = Some(ProvisioningOperation::Update);
+    let Some(Status::Running {
+        run: Run::Update,
+        done: 1,
+        total: 3,
+        elapsed,
+        ..
+    }) = status(Some(&update), seen.get(&2), None, at(5))
+    else {
+        panic!("a running Update is counted as an Update");
+    };
+    assert_eq!(elapsed, Duration::from_secs(5));
+    let failed = run(2, ProvisioningOperation::Update, RunStatus::Failed);
+    assert_eq!(
+        status(Some(&failed), None, Some(Work::UpdateHost), at(0)),
+        Some(Status::Pending(Run::Update)),
+        "a new Update's requests over the failed one"
+    );
     assert_eq!(status(None, None, Some(Work::Save), at(0)), None);
     assert_eq!(
         status(

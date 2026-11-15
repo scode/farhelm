@@ -119,8 +119,8 @@ pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
         let _ = ask(host, mark, window, cx);
     } else {
         // TODO: with the preference on, the old app showed a refusal of this removal in the short host refusal dialog
-        // ("Remove host · <name>", Close), opened through `mark`; it shows under the row until that dialog is ported
-        // with Update's refusals.
+        // ("Remove host · <name>", Close), opened through `mark`; it shows under the row until this opens that dialog
+        // (`super::refusal`, which Update's refusals brought).
         submit(&removal, cx);
     }
 }

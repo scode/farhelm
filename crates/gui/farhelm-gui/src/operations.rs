@@ -137,6 +137,11 @@ pub enum Work {
     /// ([`OpKey::approval`]). Not supersedable: the first answer pressed wins, and a second waits for it to settle
     /// (SPEC.md, "Agent-spawned sessions").
     Answer,
+    /// A host's Update (`POST /api/hosts/{id}/update`), under the host's key: first the plan request without a body,
+    /// which answers 200 with a one-use plan, then the confirming request naming that plan, which the helm accepts
+    /// (202) once it has started the run whose progress it pushes (`hosts::update`). Not supersedable: the plan is
+    /// one-use, and a second Update of the same host waits for the first to settle.
+    UpdateHost,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -179,6 +184,7 @@ impl Work {
             Work::Launch => true,
             Work::RemoveHost => false,
             Work::Answer => false,
+            Work::UpdateHost => false,
         }
     }
 
@@ -187,6 +193,7 @@ impl Work {
     /// registers its new host, and a Remove forgets one. A host's destination save is not on the list: launches do not
     /// refuse during it, though it refuses during a launch (decided by the migration's orchestrator, 2026-11-14). It is
     /// [`Work::Save`] anyway, one kind for every editor's save.
+    /// A host's Update counts too: it replaces the host's installation, and the orchestrator's set names it.
     pub fn changes_host_registry(self) -> bool {
         match self {
             Work::Rename => false,
@@ -203,6 +210,7 @@ impl Work {
             Work::Launch => false,
             Work::RemoveHost => true,
             Work::Answer => false,
+            Work::UpdateHost => true,
         }
     }
 }

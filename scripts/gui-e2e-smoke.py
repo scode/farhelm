@@ -11,7 +11,8 @@ Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from th
 host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
 rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
 and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's
-Help menu and SSH help; 46, the session list's order menu). The behavior itself is specified and tested in process
+Help menu and SSH help; 46, the session list's order menu; 47, the settings-and-hosts area's host Update, its
+progress, failure and rerun). The behavior itself is specified and tested in process
 (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
 `hosts/`, `help_menu/tests.rs`); nothing here checks layout or wording beyond the names it clicks. A menu's
 commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's header has
@@ -1086,6 +1087,100 @@ class Smoke(unittest.TestCase):
         self.ok("click", "id:session-order")
         self.ok("click", "id:session-order-activity")
         eventually(lambda: stored() == "activity", "the helm storing activity again")
+
+    # ---- The settings-and-hosts area's host Update, its progress, failure and rerun (47), on a host of its own --------
+
+    def test_47_a_fake_hosts_update_shows_its_progress_and_failure_and_reruns(self) -> None:
+        """A host's Update runs without a confirmation and SPEC.md ("Topology") keeps its row folded while it runs,
+        showing the step count and current step inline, while a failure "still expands the row so its step list and
+        diagnostic remain visible in Hosts"; the menu then offers the failed Update again. Only the real helm and its
+        one-use plans show that the menu's click goes through the plan request and its confirmation to a run. This step
+        registers a fake host of its own through the helm's API (a scripted setup that completes), then updates it from
+        its row's menu with the scripted backend holding the first step, then lets the Update fail at installing the
+        binary, then reruns it from the menu with the backend succeeding. Specified: with Hosts shown and Details off,
+        the menu's Update opens no question and the row reads "Updating: 0 of ..." with no step list; released, the run
+        fails, and the row shows "Update provisioning Failed", a step marked Failed and the backend's reason "disk
+        full"; the menu's Re-run starts a second Update run that completes, after which the row shows neither the
+        inline status nor the step list. The fake host is removed again once its last run has ended, the backend's
+        script is emptied and Hosts is hidden, whatever happened; the snapshot's names of the status and the steps are
+        the oracles."""
+        destination = f"update-{uuid.uuid4().hex[:8]}.example"
+        gui_agent.script_hosts(RUN, {})
+        probe = gui_agent.helm_request(
+            RUN, "POST", "/api/hosts/probe", {"target": {"kind": "ssh", "destination": destination}, "new_entry": {}}
+        )
+        self.assertEqual(probe["result"], "provisionable", probe)
+        host = gui_agent.helm_request(RUN, "POST", "/api/hosts/provision", {"probe_id": probe["probe_id"]})["host_id"]
+
+        def run_view() -> dict:
+            """The host's retained run as the helm serves it."""
+            return gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning")
+
+        try:
+            eventually(lambda: run_view().get("status") == "completed", f"{destination}'s setup completing")
+            setup = run_view()["run_id"]
+            held = {"hold_actions": True, "fail_action": "install-farhelm", "message": "disk full"}
+            gui_agent.script_hosts(RUN, {"targets": {f"ssh:{destination}": held}})
+            if HOSTS_PANEL not in self.ok("snapshot"):
+                self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "the Hosts panel showing")
+
+            def showing(*texts: str):
+                """A check for `eventually`: the snapshot, once it names every one of `texts`."""
+
+                def check() -> str | None:
+                    shot = self.ok("snapshot")
+                    return shot if all(text in shot for text in texts) else None
+
+                return check
+
+            self.ok("click", f"id:host-menu-toggle-{host}")
+            self.ok("click", "id:host-menu-update")
+            running = eventually(showing("Updating: 0 of"), "the row showing the held Update's progress")
+            self.assertNotIn("Update provisioning", running, "the row stays folded while the Update runs")
+            self.assertNotEqual(run_view()["run_id"], setup, "the Update started a run of its own")
+
+            gui_agent.script_hosts(RUN, {"targets": {f"ssh:{destination}": {**held, "hold_actions": False}}})
+            failed = eventually(showing("Update provisioning Failed"), "the row opening on the failed Update")
+            self.assertRegex(failed, r": Failed", "a step is marked Failed")
+            self.assertIn("disk full", failed, "the backend's reason shows")
+
+            gui_agent.script_hosts(RUN, {})
+            first = run_view()["run_id"]
+            self.ok("click", f"id:host-menu-toggle-{host}")
+            self.ok("click", "id:host-menu-rerun")
+
+            def rerun_completed() -> bool:
+                """Whether an Update run other than the failed one has completed on the host."""
+                view = run_view()
+                return (
+                    view.get("run_id") not in (None, first)
+                    and view.get("operation") == "update"
+                    and view.get("status") == "completed"
+                )
+
+            eventually(rerun_completed, f"the rerun of {destination}'s Update completing")
+
+            def folded() -> bool:
+                """Whether the row shows neither the inline status nor the run's steps any more."""
+                shot = self.ok("snapshot")
+                return "Updating" not in shot and "Update provisioning" not in shot
+
+            eventually(folded, "the row folding back to its phase words after the rerun")
+        finally:
+            failing = sys.exc_info()[0] is not None
+            try:
+                gui_agent.script_hosts(RUN, {})
+                eventually(lambda: run_view().get("status") != "running", f"{destination}'s run ending")
+                gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+                agent("press", "escape")
+                if HOSTS_PANEL in self.ok("snapshot"):
+                    self.ok("click", "id:hosts-panel-toggle")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 47 left host {host} ({destination}) behind: {error}", file=sys.stderr)
+
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
 # OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived

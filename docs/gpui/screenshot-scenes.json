@@ -889,7 +889,7 @@
     },
     {
       "golden": "hosts-panel",
-      "title": "The Hosts panel over three connected hosts: the heading with its count and Details switch, each row's mark, name and phase",
+      "title": "The Hosts panel over three connected hosts: the heading with its count, Details switch and Update all, each row's mark, name and phase",
       "reference": "hosts-panel"
     },
     {
@@ -904,7 +904,7 @@
     },
     {
       "golden": "host-menu",
-      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, Settings highlighted, and Remove behind a separator (its only commands so far)",
+      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, then Update, highlighted, Settings, and Remove behind a separator",
       "reference": "host-menu"
     },
     {
@@ -990,6 +990,21 @@
     {
       "golden": "version-readout-tooltip",
       "title": "The check button's hover help for a reinstall readout, on the short tooltip cut at eight lines",
+      "reference": null
+    },
+    {
+      "golden": "hosts-panel-updates",
+      "title": "The Hosts panel with an older build's Old version and amber outlined Update, an older protocol's Needs update and red Update, and Update all (no reference shows an outdated host)",
+      "reference": null
+    },
+    {
+      "golden": "host-update-running-hosts-panel",
+      "title": "The Hosts panel with a host's Update running, its row folded and its inline status showing the count, the running step and the clock (no reference shows an Update)",
+      "reference": null
+    },
+    {
+      "golden": "host-update-refusal",
+      "title": "The host refusal dialog for an Update refused below the upgrade floor, with the helm's manual remedy (the old dialog's look is reference host-uninstall-refusal)",
       "reference": null
     }
   ],

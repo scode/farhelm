@@ -1,8 +1,8 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, the outlined
 //! danger of a permanent answer, plus the compact control that sits on the red banner, the ⋯ that opens a list row's
 //! menu, the host rail's square entries, the removable filter chip, the button that reads as a link, the version
-//! readout's controls that keep the look of their text, an entry of a navigation list such as Settings' sections, and
-//! the two swatches of the host settings' appearance picker.
+//! readout's controls that keep the look of their text, an entry of a navigation list such as Settings' sections, the
+//! two swatches of the host settings' appearance picker, and a Hosts row's outlined inline Update.
 //!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
@@ -128,6 +128,11 @@ pub enum Tier {
     /// content (the color's swatch), no fill or edge at rest and no hover fill. Chosen, it takes the accent fill inside
     /// an edge in the inverse ink.
     ColorChoice,
+    /// `.btn.host-update-button`: a Hosts row's inline `↑ Update`, outlined in its own ink on no fill, in a compact box
+    /// (`padding: 2px 5px`) that never shrinks, with the control hover fill. The ink carries the update's urgency
+    /// without borrowing a filled tier: the warning amber for an optional update, the strong danger red for a
+    /// `required` one (`[data-update-kind="required"]`).
+    HostUpdate { required: bool },
 }
 
 /// The [`Tier::QuickMark`] box's padding, vertical then horizontal (`.templates-quick-mark`: `10px 5px`).
@@ -151,6 +156,8 @@ const NAV_PAD: (f32, f32) = (8., 10.);
 const NAV_LINE_HEIGHT: f32 = 16.;
 /// The [`Tier::IconChoice`] square's side (`.host-icon-choice`'s `max-width: 36px` with `aspect-ratio: 1`).
 const ICON_CHOICE_SIZE: f32 = 36.;
+/// The [`Tier::HostUpdate`] box's padding, vertical then horizontal.
+const HOST_UPDATE_PAD: (f32, f32) = (2., 5.);
 /// The [`Tier::ColorChoice`] circle's side and the room around its swatch.
 const COLOR_CHOICE_SIZE: f32 = 26.;
 const COLOR_CHOICE_PAD: f32 = 3.;
@@ -523,6 +530,14 @@ impl Button {
             ),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
             Tier::Readout { .. } => (None, theme::TRANSPARENT, None, palette.fg_1),
+            Tier::HostUpdate { required } => {
+                let ink = if required {
+                    palette.danger_strong
+                } else {
+                    palette.warn
+                };
+                (None, palette.control_hover, Some(ink), ink)
+            }
             Tier::Primary if self.disabled || self.busy || self.refused => retired,
             Tier::Danger if self.disabled || self.busy || self.refused => retired,
             Tier::Primary => (
@@ -582,6 +597,7 @@ impl RenderOnce for Button {
             Tier::QuickMark { .. } => (px(QUICK_MARK_PAD.0), px(QUICK_MARK_PAD.1)),
             Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
             Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
+            Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
             Tier::Ghost
             | Tier::Neutral
             | Tier::Primary
@@ -617,6 +633,7 @@ impl RenderOnce for Button {
             | Tier::IconChoice
             | Tier::ColorChoice
             | Tier::Tunnel
+            | Tier::HostUpdate { .. }
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
@@ -635,6 +652,8 @@ impl RenderOnce for Button {
         // A rail entry, an appearance choice and a button given a side are squares that never give up their width.
         let square = self.side.is_some()
             || matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
+        // `.btn.host-update-button`'s `flex: 0 0 auto`: the row's name gives way first.
+        let rigid = matches!(self.tier, Tier::HostUpdate { .. });
         let enabled = !self.disabled;
         // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
         let active = enabled && !self.busy;
@@ -669,6 +688,7 @@ impl RenderOnce for Button {
             .when_some(height.filter(|_| square), |button, side| {
                 button.w(side).flex_none()
             })
+            .when(rigid, |button| button.flex_none())
             // A chip yields its width to the row it sits in (`min-width: 0; max-width: 100%`), and its content cuts
             // the host's name short.
             .when(self.tier == Tier::Chip, |button| {
@@ -793,6 +813,7 @@ impl RenderOnce for Button {
                     | Tier::NumberKey { .. }
                     | Tier::IconChoice
                     | Tier::ColorChoice
+                    | Tier::HostUpdate { .. }
             )
         {
             button = button.opacity(0.5);
