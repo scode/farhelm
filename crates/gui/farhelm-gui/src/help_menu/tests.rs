@@ -1,6 +1,6 @@
 //! Tests of the `?` button and its Help menu: the items and their order for every combination of updater, shown
-//! announcements and platform, the button's place and names at the rail's foot, opening and closing the menu, where focus goes, and what each item
-//! does.
+//! announcements and platform, the button's place and names at the rail's foot, opening and closing the menu, where
+//! focus goes, and what each item does.
 //!
 //! Like the session list's tests, these run the real main view over the helm client's fake and read controls from
 //! GPUI's driver record of the frame by their ids. Links are checked through GPUI's test platform, which records the
@@ -110,13 +110,13 @@ fn open_menu(cx: &mut VisualTestContext) {
 
 // ---- The order of the items ----------------------------------------------------------------------------------------
 
-/// SPEC.md fixes the menu's order ("in order: **Send feedback**, **Chat on Discord**, **Documentation**, ...,
-/// **Release notes**, **SSH needs 2FA?**", "Announcements appears directly after Release notes", "Check for updates
-/// last"), and the Linux-only notices item has no place in SPEC.md, so it goes at the very end where it moves nothing
-/// else. An item out of place is a menu the documentation no longer describes. Specified, for all eight combinations:
-/// Send feedback, Discord, Documentation, Release notes, SSH help always, in that order, Send feedback first; a shown
-/// announcement adds Announcements right after Release notes; an updater adds Check for updates after the fixed items;
-/// Linux adds Open-Source Notices after everything, including after Check for updates.
+/// SPEC.md fixes the menu's order ("in order: **Send feedback**, **Chat on Discord**, **Documentation**, ..., **Release
+/// notes**, **SSH needs 2FA?** and **Welcome**", "Announcements appears directly after Release notes", "Check for
+/// updates last"), and the Linux-only notices item has no place in SPEC.md, so it goes at the very end where it moves
+/// nothing else. An item out of place is a menu the documentation no longer describes. Specified, for all eight
+/// combinations: Send feedback, Discord, Documentation, Release notes, SSH help and Welcome always, in that order, Send
+/// feedback first; a shown announcement adds Announcements right after Release notes; an updater adds Check for updates
+/// after the fixed items; Linux adds Open-Source Notices after everything, including after Check for updates.
 #[test]
 fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last() {
     for updater in [false, true] {
@@ -132,6 +132,7 @@ fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last()
                     expected.push(Item::Announcements);
                 }
                 expected.push(Item::SshHelp);
+                expected.push(Item::Welcome);
                 if updater {
                     expected.push(Item::CheckForUpdates);
                 }
@@ -177,7 +178,7 @@ fn the_help_button_sits_below_the_gear_with_its_name_and_help(cx: &mut TestAppCo
     assert_eq!(
         hover_help(cx, BUTTON_ID).as_deref(),
         Some(
-            "Help: send feedback, open the documentation or release notes, chat on Discord, or get SSH 2FA help"
+            "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or show Welcome"
         )
     );
 }
@@ -342,7 +343,7 @@ fn check_for_updates_is_offered_only_with_an_updater_and_asks_it_to_check(cx: &m
     assert_eq!(
         hover_help(cx, BUTTON_ID).as_deref(),
         Some(
-            "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or check for updates"
+            "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, show Welcome, or check for updates"
         )
     );
     open_menu(cx);
@@ -448,4 +449,33 @@ fn announcements_appear_after_a_showing_and_open_the_history(cx: &mut TestAppCon
     test_support::keys(cx, "escape");
     assert!(!any_open(cx));
     assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
+}
+
+/// SPEC.md: "Welcome shows the welcome card again", and "Reopening does not reset or rewrite seen. Closing a reopened
+/// card returns focus to the help toggle". The real main view's window-start owner sits beside the menu here, so this
+/// also shows that a card reopened over a helm that has already seen it does not start the window-start flow. Specified:
+/// over preferences that say the card was seen, nothing opens by itself; choosing Welcome, the menu's last fixed item,
+/// closes the menu and opens the card with focus on Got it; Escape closes it with focus on the `?` button, and the helm
+/// received no command.
+#[gpui::test]
+fn welcome_reopens_the_card_without_writing_and_returns_focus_to_the_button(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot());
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    assert!(
+        !any_open(cx),
+        "premise: a seen card does not open by itself"
+    );
+    let _ = fake.commands();
+    open_menu(cx);
+    test_support::click(cx, "help-menu-welcome");
+    assert!(node(&frame(cx), MENU).is_none(), "the menu closed");
+    assert!(node(&frame(cx), "welcome").is_some(), "the card opened");
+    assert_eq!(focused_id(cx).as_deref(), Some("welcome-got-it"));
+    test_support::keys(cx, "escape");
+    assert!(!any_open(cx), "Escape closed the card");
+    assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
+    assert!(fake.commands().is_empty(), "reopening writes nothing");
 }

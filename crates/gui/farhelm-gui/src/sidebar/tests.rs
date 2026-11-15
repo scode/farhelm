@@ -39,6 +39,8 @@ use crate::{assets, bootstrap, focus, layers, theme};
 fn preferences_entry(width: Option<u32>) -> KeyedEntry {
     let preferences = Preferences {
         sidebar_width: width,
+        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        welcome_seen: Some(true),
         ..Preferences::default()
     };
     KeyedEntry {

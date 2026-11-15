@@ -25,8 +25,11 @@
 //!   queue's history is not empty, read when the menu draws) and opens that history
 //!   ([`crate::announcements::open_history`]) with the `?` button as its opener.
 //!
-//! NOTE: Not drawn yet, each waiting for its own surface: Keyboard shortcuts and Welcome. Each joins [`items`] in the
-//! old order when its dialog lands; a menu item whose dialog does not exist would open nothing.
+//! - **Welcome** reopens the Welcome card ([`crate::welcome::open`]) with the `?` button as its opener; a reopened card
+//!   writes nothing.
+//!
+//! NOTE: Not drawn yet: Keyboard shortcuts, waiting for its dialog. It joins [`items`] in the old order (after
+//! Documentation) when its dialog lands; a menu item whose dialog does not exist would open nothing.
 //!
 //! NOTE: Deviations from the old flyout, both from the layer manager's one beside placement (its `Placement::Beside`
 //! docs record the shared clamp): the old Help menu hung from its toggle's bottom edge and kept at least 8 pixels from
@@ -84,6 +87,8 @@ enum Item {
     Announcements,
     /// Commands to start a host's SSH connections by hand, for a host that asks for approval on every login.
     SshHelp,
+    /// The Welcome card again, writing nothing.
+    Welcome,
     /// Offered only while an updater runs (SPEC.md, "Installation and updates").
     CheckForUpdates,
     /// Linux only: the app menu's notices window, which Linux has no menu bar to reach.
@@ -100,6 +105,7 @@ impl Item {
             Item::ReleaseNotes => "Release notes",
             Item::Announcements => "Announcements",
             Item::SshHelp => "SSH needs 2FA?",
+            Item::Welcome => "Welcome",
             Item::CheckForUpdates => "Check for updates",
             Item::OpenSourceNotices => crate::desktop::licenses::TITLE,
         }
@@ -114,6 +120,7 @@ impl Item {
             Item::ReleaseNotes => "Opens the release notes in your browser",
             Item::Announcements => "Shows previously shown announcements again",
             Item::SshHelp => "Start a host's SSH connections yourself",
+            Item::Welcome => "Shows the welcome card again",
             Item::CheckForUpdates => "Installs a newer Farhelm if there is one",
             Item::OpenSourceNotices => "Licenses of the code and fonts in this app",
         }
@@ -141,6 +148,9 @@ impl Item {
             Item::SshHelp => {
                 "SSH needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every SSH login"
             }
+            Item::Welcome => {
+                "Welcome: show the welcome card with Get started and how to send feedback"
+            }
             Item::CheckForUpdates => {
                 "Check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
             }
@@ -156,7 +166,7 @@ impl Item {
             Item::SendFeedback => Icon::Feedback,
             Item::ChatOnDiscord => Icon::External,
             Item::Documentation | Item::ReleaseNotes | Item::OpenSourceNotices => Icon::Document,
-            Item::Announcements => Icon::Info,
+            Item::Announcements | Item::Welcome => Icon::Info,
             Item::SshHelp => Icon::Terminal,
             Item::CheckForUpdates => Icon::Update,
         }
@@ -171,16 +181,17 @@ impl Item {
             Item::ReleaseNotes => "help-menu-release-notes",
             Item::Announcements => "help-menu-announcements",
             Item::SshHelp => "help-menu-ssh-help",
+            Item::Welcome => "help-menu-welcome",
             Item::CheckForUpdates => "help-menu-check-for-updates",
             Item::OpenSourceNotices => "help-menu-open-source-notices",
         }
     }
 }
 
-/// The items the menu offers, in order: the fixed ones in SPEC.md's order, Send feedback first, with Announcements
-/// directly after Release notes once this helm has shown one (`announced`), then Check for updates when an updater runs
-/// (`updater`), then Open-Source Notices on Linux (`linux`). Parameters rather than lookups, so the order is tested for
-/// every combination on any platform.
+/// The items the menu offers, in order: the fixed ones in SPEC.md's order, Send feedback first and Welcome last among
+/// them, with Announcements directly after Release notes once this helm has shown one (`announced`), then Check for
+/// updates when an updater runs (`updater`), then Open-Source Notices on Linux (`linux`). Parameters rather than
+/// lookups, so the order is tested for every combination on any platform.
 fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
     let mut items = vec![
         Item::SendFeedback,
@@ -192,6 +203,7 @@ fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
         items.push(Item::Announcements);
     }
     items.push(Item::SshHelp);
+    items.push(Item::Welcome);
     if updater {
         items.push(Item::CheckForUpdates);
     }
@@ -204,9 +216,9 @@ fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
 /// The `?` button's hover help, naming what the menu offers, as the old toggle's did.
 fn button_help(updater: bool) -> &'static str {
     if updater {
-        "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or check for updates"
+        "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, show Welcome, or check for updates"
     } else {
-        "Help: send feedback, open the documentation or release notes, chat on Discord, or get SSH 2FA help"
+        "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or show Welcome"
     }
 }
 
@@ -348,6 +360,9 @@ impl HelpMenu {
             }
             Item::SshHelp => {
                 let _ = crate::hosts::ssh_help::open(opener, mark, window, cx);
+            }
+            Item::Welcome => {
+                let _ = crate::welcome::open(opener, mark, window, cx);
             }
             Item::CheckForUpdates => crate::desktop::updates::check_now(cx),
             Item::OpenSourceNotices => window.dispatch_action(Box::new(OpenSourceNotices), cx),

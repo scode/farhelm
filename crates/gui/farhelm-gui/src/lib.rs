@@ -56,6 +56,8 @@
 //! - [`trash`]: the session list header's Trash button, the archived-checkout reads behind its count, and the Trash
 //!   dialog it opens.
 //! - [`notices_bell`]: a session row's notification bell and the list of the session's notifications it opens.
+//! - [`welcome`]: the Welcome card, and the owner of the dialogs a window opens by itself when it starts or resets
+//!   (the card, then the first batch of announcements).
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -111,6 +113,7 @@ pub mod theme;
 pub mod ticker;
 pub mod trash;
 pub mod update_readout;
+pub mod welcome;
 
 /// The license notices for the code this crate links from `farhelm-grid-model` and `farhelm-input-mapping`, verbatim.
 ///

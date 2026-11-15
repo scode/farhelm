@@ -1,11 +1,15 @@
 //! Tests of the Announcements dialog opened as the `?` menu's history ([`super::open_history`]): what each announcement
-//! shows, the order, that nothing is read as markup, the link, that reopening writes nothing, and closing.
+//! shows, the order, that nothing is read as markup, the link, that reopening writes nothing, and closing. Then the
+//! automatic batch ([`super::open_pending`]) as the window-start owner opens it: its order, what its dismissal records,
+//! and when it opens nothing. Those run in the Welcome card's test window (`welcome::tests::open_start`), since the
+//! batch is that owner's to open; the card's tests cover the batch waiting behind the card.
 //!
 //! As SSH help's tests do, the dialog is opened from a stand-in for the `?` button: one button in a root view of the
 //! test's own, whose click takes a mark and calls [`super::open_history`] with its own focus handle, which is where
 //! closing must return focus. The queue comes from the fake helm's snapshot, as the helm pushes it. Every step ends in
 //! one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 
+use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::announcements::{Announcement, AnnouncementLink, AnnouncementQueue};
 use farhelm_proto::ui_channel::{ANNOUNCEMENTS_KEY, Collection, CollectionState, KeyedEntry};
@@ -19,7 +23,7 @@ use crate::focus::{self, Mark};
 use crate::layers;
 use crate::root;
 use crate::test_support::{
-    self, any_open, click, focused, focused_id, frame, keys, settle, started,
+    self, any_open, click, focused, focused_id, frame, keys, one_command, settle, started,
 };
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -61,7 +65,7 @@ impl Render for HelpBar {
 }
 
 /// An announcement with `id` and `title`, the given plain-text `body`, and no detail or link.
-fn announcement(id: &str, title: &str, body: &str) -> Announcement {
+pub(crate) fn announcement(id: &str, title: &str, body: &str) -> Announcement {
     Announcement {
         id: id.to_owned(),
         title: title.to_owned(),
@@ -72,7 +76,7 @@ fn announcement(id: &str, title: &str, body: &str) -> Announcement {
 }
 
 /// The announcements collection as the helm pushes it: one entry under its one key.
-fn queue(pending: Vec<Announcement>, history: Vec<Announcement>) -> CollectionState {
+pub(crate) fn queue(pending: Vec<Announcement>, history: Vec<Announcement>) -> CollectionState {
     CollectionState {
         collection: Collection::Announcements,
         meta: test_support::meta(&[ANNOUNCEMENTS_KEY]),
@@ -321,4 +325,135 @@ fn a_linked_history_has_no_body_stop(cx: &mut TestAppContext) {
         "the premise: the history opened with its link"
     );
     assert_eq!(test_support::label(window, "announcements-body-stop"), None);
+}
+
+// ---- The automatic batch -------------------------------------------------------------------------------------------
+
+/// The pending queue of `ids`, each titled after its id, in the helm's order (oldest first), from a helm that has
+/// already shown the Welcome card, so the batch is the window start's first dialog.
+fn pending(ids: &[&str]) -> Vec<CollectionState> {
+    vec![
+        crate::welcome::tests::seen(Some(true)),
+        queue(
+            ids.iter()
+                .map(|id| announcement(id, &format!("Notice {id}"), "Body."))
+                .collect(),
+            vec![],
+        ),
+    ]
+}
+
+/// SPEC.md: "Once per window start or reset, after the initial preference decision, the client reads pending
+/// announcements", the dialog shows "pending entries ... newest first", and "A failed preference read does not prevent
+/// this separate check". The helm sends pending entries oldest first, so drawing them as sent would put the oldest
+/// news on top. Specified: over a seen card and two pending entries, the batch opens by itself with the newer first
+/// and focus on Got it; after a reset whose snapshot holds the queue but no preferences, it opens again.
+#[gpui::test]
+fn the_pending_batch_opens_at_window_start_newest_first(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle, _home) =
+        crate::welcome::tests::open_start(cx, Some(pending(&["older", "newer"])));
+    assert!(
+        crate::welcome::tests::shows(cx, "announcements"),
+        "the batch opened by itself"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("announcements-got-it"));
+    let all = texts(&frame(cx));
+    assert!(
+        at(&all, "Notice newer") < at(&all, "Notice older"),
+        "newest first: {all:?}"
+    );
+    let without_preferences = pending(&["older", "newer"]).split_off(1);
+    crate::welcome::tests::reset(&mut helm, cx, without_preferences);
+    assert!(
+        crate::welcome::tests::shows(cx, "announcements"),
+        "a failed preference read does not stop the check"
+    );
+}
+
+/// SPEC.md: "**Got it**, the × and Escape all close it. Dismissal records only the entries that dialog showed", which
+/// the helm's `POST /api/announcements/shown` takes as an explicit list, so a newer entry the dialog did not show is
+/// never drained. A reset is not a dismissal: the entries stay pending for the next UI session. Specified: for Got it,
+/// the × and Escape in turn, closing the batch sends exactly one `POST /api/announcements/shown` naming the two shown
+/// ids, newest first, and returns focus home; a reset (over the fake, which keeps them pending) opens the batch again;
+/// a reset while it is open sends nothing.
+#[gpui::test]
+fn each_dismissal_records_exactly_the_shown_entries_once(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle, home) =
+        crate::welcome::tests::open_start(cx, Some(pending(&["older", "newer"])));
+    for way in ["announcements-got-it", "announcements-close", "escape"] {
+        assert!(
+            crate::welcome::tests::shows(cx, "announcements"),
+            "premise: the batch is open before {way}"
+        );
+        match way {
+            "escape" => keys(cx, "escape"),
+            "announcements-got-it" => click(cx, "announcements-got-it"),
+            _ => click(cx, "announcements-close"),
+        }
+        assert!(!any_open(cx), "{way} closed the batch");
+        let (id, body) = one_command(&mut helm, Method::Post, "/api/announcements/shown");
+        assert_eq!(
+            body,
+            serde_json::json!({ "ids": ["newer", "older"] }),
+            "{way} recorded what it showed"
+        );
+        helm.reply(id, 204, None);
+        settle(cx);
+        assert!(focused(cx, &home), "{way} returned focus home");
+        crate::welcome::tests::reset(&mut helm, cx, pending(&["older", "newer"]));
+    }
+    crate::welcome::tests::reset(&mut helm, cx, pending(&["older", "newer"]));
+    assert!(helm.commands().is_empty(), "a reset records nothing");
+}
+
+/// SPEC.md: "A failed write still closes the dialog and leaves them queued for a later window start or reset." A batch
+/// that stayed up behind a write the user cannot fix would trap them. Specified: Got it closes the batch; the helm
+/// refuses the record; the batch stays closed, nothing is retried, and the next reset shows it again.
+#[gpui::test]
+fn a_failed_record_still_closes_the_batch(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle, _home) =
+        crate::welcome::tests::open_start(cx, Some(pending(&["1"])));
+    click(cx, "announcements-got-it");
+    let (id, _) = one_command(&mut helm, Method::Post, "/api/announcements/shown");
+    helm.reply(id, 500, None);
+    settle(cx);
+    assert!(!any_open(cx), "the refused record left the batch closed");
+    assert!(helm.commands().is_empty(), "nothing retried the record");
+    crate::welcome::tests::reset(&mut helm, cx, pending(&["1"]));
+    assert!(
+        crate::welcome::tests::shows(cx, "announcements"),
+        "the next reset shows the batch again"
+    );
+}
+
+/// SPEC.md: "An empty queue opens nothing; a failed announcement read is logged silently", and "there is no live
+/// announcement event reader today": the check runs once per window start or reset, so an entry pushed later waits for
+/// the next one. Specified: over a seen card and an empty queue nothing opens; an entry pushed afterwards opens nothing
+/// either; a reset whose snapshot holds no queue at all opens nothing; a reset that brings the entry opens the batch;
+/// nothing was written before that.
+#[gpui::test]
+fn an_empty_queue_or_a_later_push_opens_nothing(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::CollectionChanges;
+    let (mut helm, cx, _toggle, _home) = crate::welcome::tests::open_start(cx, Some(pending(&[])));
+    assert!(!any_open(cx), "an empty queue opens nothing");
+    let later = queue(vec![announcement("1", "Later news", "Body.")], vec![]);
+    helm.push(CollectionChanges {
+        collection: Collection::Announcements,
+        meta: later.meta.clone(),
+        upsert: later.entries.clone(),
+        remove: vec![],
+    });
+    settle(cx);
+    assert!(
+        !any_open(cx),
+        "an entry pushed after the start's check opens nothing by itself"
+    );
+    crate::welcome::tests::reset(&mut helm, cx, vec![crate::welcome::tests::seen(Some(true))]);
+    assert!(!any_open(cx), "no queue read, no batch");
+    crate::welcome::tests::reset(&mut helm, cx, pending(&["1"]));
+    assert!(
+        crate::welcome::tests::shows(cx, "announcements"),
+        "the next start's check finds it"
+    );
+    assert!(helm.commands().is_empty());
 }
