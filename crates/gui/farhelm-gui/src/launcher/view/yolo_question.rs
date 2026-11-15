@@ -22,12 +22,17 @@
 //!   nothing, so the only launch is the one the answer sends. An edit of the draft retires the question, and the
 //!   write's success then starts nothing: the question it answered is gone.
 //!
-//! NOTE: Restart with's question (offering guarded only when the result still differs from the stored launch) and the
-//! plain Replace question the sidebar places come with those pieces.
+//! The sidebar's plain Replace asks the same question through `launcher::entry::ask_yolo_for_replace`, with its own
+//! retry and no guarded answer; an [`Owner`] is what differs between the two.
+//!
+//! NOTE: Restart with's question (offering guarded only when the result still differs from the stored launch) comes
+//! with Restart with.
 
 use farhelm_proto::ui_channel::HostView;
-use farhelm_proto::{LaunchPermission, LaunchSelection};
-use gpui::{AppContext as _, Context, Window};
+use farhelm_proto::{LaunchPermission, LaunchSelection, SessionLaunch};
+use std::rc::Rc;
+
+use gpui::{AppContext as _, Context, WeakEntity, Window};
 
 use super::Launcher;
 use crate::components::{HoverHelp, Tier};
@@ -43,7 +48,7 @@ use crate::session;
 /// What the question is about, frozen when the refusal arrives: the host the launch targeted and why it counts as
 /// YOLO. The question describes that launch even if the store's view of the host changes while it is up.
 #[derive(Clone, Debug)]
-pub(in crate::launcher) struct YoloAsk {
+pub struct YoloAsk {
     /// The host to stop asking on, for the permanent answer.
     host: i64,
     /// The host's name as the launcher shows it.
@@ -51,6 +56,31 @@ pub(in crate::launcher) struct YoloAsk {
     reason: YoloReason,
     /// Whether the guarded alternative is offered.
     guarded: bool,
+}
+
+impl YoloAsk {
+    /// What a plain Replace's question asks about: the source's host and its stored launch, which Replace relaunches
+    /// as it is. Never offers guarded: plain Replace keeps the stored launch (SPEC.md: the guarded answer is "in the
+    /// session launcher", for an explicit YOLO choice there).
+    pub(in crate::launcher) fn for_stored_launch(
+        host: i64,
+        host_name: HostText,
+        launch: &SessionLaunch,
+    ) -> Self {
+        let reason = match launch {
+            SessionLaunch::Agent { selection, .. } => YoloReason::of_launch(Some(selection)),
+            SessionLaunch::Command(_) => YoloReason::of_launch(None),
+            // Plain Replace refuses a launch from before launch kinds, so its question never comes; were it asked, the
+            // stored command is the agent's own setting as far as Farhelm can tell.
+            SessionLaunch::Legacy { .. } => YoloReason::OwnSetting,
+        };
+        YoloAsk {
+            host,
+            host_name,
+            reason,
+            guarded: false,
+        }
+    }
 }
 
 /// The question's state in the launcher: what it asks about, and the question once asked (`None` until the launcher
@@ -130,18 +160,20 @@ impl Launcher {
         if state.inline.is_some() {
             return;
         }
-        let question = yolo_question(&state.ask, cx.weak_entity());
-        let confirm = cx.weak_entity();
-        state.inline = Some(prompt::ask_inline(
-            question,
-            mark,
-            move |_: YoloAsk, window, cx| {
+        let guarded = state.ask.guarded.then(|| {
+            let launcher = cx.weak_entity();
+            Box::new(move |window: &mut Window, cx: &mut gpui::App| {
                 let mark = Mark::take(cx);
-                let _ = confirm.update(cx, |launcher, cx| launcher.submit(true, mark, window, cx));
-            },
-            window,
-            cx,
-        ));
+                let _ = launcher.update(cx, |launcher, cx| {
+                    launcher
+                        .draft
+                        .choose_permissions(Some(LaunchPermission::Guarded));
+                    launcher.submit(false, mark, window, cx);
+                });
+            }) as GuardedAction
+        });
+        let owner = launcher_owner(cx.weak_entity());
+        state.inline = Some(ask_question(&state.ask, guarded, owner, mark, window, cx));
         cx.notify();
     }
 
@@ -157,9 +189,83 @@ impl Launcher {
     }
 }
 
-/// The question for `ask`, with the alternatives' actions on `launcher`. The one-off answer is its confirmation, whose
-/// action [`Launcher::ask_pending_yolo`] supplies.
-fn yolo_question(ask: &YoloAsk, launcher: gpui::WeakEntity<Launcher>) -> Question<YoloAsk> {
+/// Send a launch again with consent, for the user's answer at the given mark.
+type LaunchAgain = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
+
+/// A plain Replace's retry with consent, the caller's own.
+pub(in crate::launcher) type Retry = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
+
+/// The guarded alternative's action: switch the launch to Guarded and start it without consent.
+type GuardedAction = Box<dyn FnOnce(&mut Window, &mut gpui::App)>;
+
+/// What owns a YOLO question and its launch: the launcher, for its own refused launches, or the sidebar's plain
+/// Replace, through `launcher::entry::ask_yolo_for_replace`. The question's words and answers are the same for both;
+/// only these differ.
+#[derive(Clone)]
+pub(in crate::launcher) struct Owner {
+    /// Send the launch again with consent, for the user's answer at the given mark.
+    launch: LaunchAgain,
+    /// Whether the question is still current when the permanent answer's host write succeeds: the launcher's is not
+    /// once an edit of its draft has retired it.
+    current: Rc<dyn Fn(&gpui::App) -> bool>,
+    /// Redraw the owner when the host write starts or fails (the launcher draws its controls busy meanwhile).
+    redraw: Rc<dyn Fn(&mut gpui::App)>,
+}
+
+/// A plain Replace as a question's owner: its launch is the caller's `retry`, which sends the Replace again with
+/// consent; its question stays current (there is no draft to edit), and nothing of the launcher redraws.
+pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
+    Owner {
+        launch: Rc::new(move |mark, window, cx| retry(mark, window, cx)),
+        current: Rc::new(|_| true),
+        redraw: Rc::new(|_| {}),
+    }
+}
+
+/// The launcher as a question's owner: it launches its own draft with consent, its question is current while it is in
+/// flight, and it redraws itself.
+fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
+    let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher);
+    Owner {
+        launch: Rc::new(move |mark, window, cx| {
+            let _ = launching.update(cx, |launcher, cx| launcher.submit(true, mark, window, cx));
+        }),
+        current: Rc::new(move |cx| {
+            checking
+                .upgrade()
+                .is_some_and(|launcher| launcher.read(cx).yolo_in_flight(cx))
+        }),
+        redraw: Rc::new(move |cx| {
+            let _ = redrawing.update(cx, |_, cx| cx.notify());
+        }),
+    }
+}
+
+/// Ask the YOLO question for `ask` inline, for the user's action at `mark`: the one-off answer and the permanent
+/// answer launch through `owner`, and `guarded`, when given, is the guarded alternative's action.
+pub(in crate::launcher) fn ask_question(
+    ask: &YoloAsk,
+    guarded: Option<GuardedAction>,
+    owner: Owner,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) -> Inline<YoloAsk> {
+    let launch = owner.launch.clone();
+    prompt::ask_inline(
+        question(ask, guarded, owner),
+        mark,
+        move |_: YoloAsk, window, cx| {
+            let mark = Mark::take(cx);
+            launch(mark, window, cx);
+        },
+        window,
+        cx,
+    )
+}
+
+/// The question for `ask`. Its one-off answer is the confirmation, whose action [`ask_question`] supplies.
+fn question(ask: &YoloAsk, guarded: Option<GuardedAction>, owner: Owner) -> Question<YoloAsk> {
     let mut question = Question::new(
         "Confirm YOLO launch",
         answer(
@@ -190,21 +296,14 @@ fn yolo_question(ask: &YoloAsk, launcher: gpui::WeakEntity<Launcher>) -> Questio
         "Cancel: go back without starting anything",
         Tier::Neutral,
     ));
-    if ask.guarded {
-        let guarded = launcher.clone();
+    if let Some(guarded) = guarded {
         question = question.alternative(
             answer(
                 "Start guarded session instead",
                 "Start this session in guarded mode instead, where the agent's own safety checks stay on",
                 Tier::Primary,
             ),
-            move |_, window, cx| {
-                let mark = Mark::take(cx);
-                let _ = guarded.update(cx, |launcher, cx| {
-                    launcher.draft.choose_permissions(Some(LaunchPermission::Guarded));
-                    launcher.submit(false, mark, window, cx);
-                });
-            },
+            move |_, window, cx| guarded(window, cx),
         );
     }
     question
@@ -215,7 +314,7 @@ fn yolo_question(ask: &YoloAsk, launcher: gpui::WeakEntity<Launcher>) -> Questio
                 Tier::DangerOutline,
             ),
             move |ask: YoloAsk, attempt: Attempt, window, cx| {
-                stop_asking_then_launch(ask, attempt, launcher.clone(), window, cx)
+                stop_asking_then_launch(ask, attempt, owner.clone(), window, cx)
             },
         )
         .starts_on_cancel()
@@ -223,12 +322,12 @@ fn yolo_question(ask: &YoloAsk, launcher: gpui::WeakEntity<Launcher>) -> Questio
 }
 
 /// The permanent answer: set the host to start YOLO sessions without asking (the host settings' own command, on the
-/// host's key, as its switch sends it), and only when that succeeds launch with consent. A failed or refused write
-/// starts nothing and keeps the question up with the reason.
+/// host's key, as its switch sends it), and only when that succeeds launch with consent through `owner`, if its
+/// question is still current. A failed or refused write starts nothing and keeps the question up with the reason.
 fn stop_asking_then_launch(
     ask: YoloAsk,
     attempt: Attempt,
-    launcher: gpui::WeakEntity<Launcher>,
+    owner: Owner,
     window: &mut Window,
     cx: &mut gpui::App,
 ) {
@@ -240,14 +339,14 @@ fn stop_asking_then_launch(
         attempt.failed(stop_asking_failed(&ask.host_name, &reason), cx);
         return;
     };
-    // The answer is the user's press the create's moved-on check counts from, not the write's reply.
+    // The answer is the user's press the launch's moved-on check counts from, not the write's reply.
     let mark = Mark::take(cx);
     let handle = window.window_handle();
     let host_name = ask.host_name.clone();
     // The attempt settles from the write's reply; a write the store refuses to start settles it at once instead.
-    let pending = std::rc::Rc::new(std::cell::Cell::new(Some(attempt)));
-    let launcher_for_redraw = launcher.clone();
+    let pending = Rc::new(std::cell::Cell::new(Some(attempt)));
     let settling = pending.clone();
+    let on_reply = owner.clone();
     let started = operations.update(cx, |operations, cx| {
         operations.start(
             &OpKey::host(&HostView::key(ask.host)),
@@ -262,21 +361,18 @@ fn stop_asking_then_launch(
                         // The old answer trimmed the helm's closing period, which the sentence supplies itself.
                         let words = HostText::from_host(refusal.words.raw().trim_end_matches('.'));
                         attempt.failed(stop_asking_failed(&host_name, &words), cx);
-                        let _ = launcher.update(cx, |_, cx| cx.notify());
+                        (on_reply.redraw)(cx);
                     }
                     Outcome::Done(_) | Outcome::Accepted(_) => {
-                        // Only while the question this write answered is still up: an edit of the draft since then
-                        // retired it, and launching now would send a draft the user never confirmed.
-                        let current = launcher
-                            .upgrade()
-                            .is_some_and(|launcher| launcher.read(cx).yolo_in_flight(cx));
+                        // Only while the question this write answered is still current: for the launcher, an edit
+                        // of the draft since then retired it, and launching now would send a draft the user never
+                        // confirmed.
+                        let current = (on_reply.current)(cx);
                         attempt.succeeded(cx);
                         if current {
-                            let _ = cx.update_window(handle, |_, window, cx| {
-                                let _ = launcher.update(cx, |launcher, cx| {
-                                    launcher.submit(true, mark, window, cx)
-                                });
-                            });
+                            let launch = on_reply.launch.clone();
+                            let _ =
+                                cx.update_window(handle, |_, window, cx| launch(mark, window, cx));
                         }
                     }
                 }
@@ -300,7 +396,7 @@ fn stop_asking_then_launch(
             cx,
         );
     } else {
-        // The launcher draws its controls busy while the write is out; the question refreshes only itself.
-        let _ = launcher_for_redraw.update(cx, |_, cx| cx.notify());
+        // The owner may draw itself busy while the write is out; the question refreshes only itself.
+        (owner.redraw)(cx);
     }
 }
