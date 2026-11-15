@@ -40,6 +40,7 @@ use gpui::{
 
 use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
+use crate::desktop::linux_title_bar;
 use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
 use crate::notices::{self, Notice};
@@ -53,6 +54,9 @@ use crate::{launcher, layers, render_count, root, session, settings, theme};
 pub struct MainView {
     /// Keeps the theme following the operating system's appearance for this window's lifetime.
     _appearance: Subscription,
+    /// Redraws the window when the compositor's answer about decorations changes, so the Linux window's own title bar
+    /// appears or goes with it (`desktop::linux_title_bar`).
+    _decorations: Subscription,
     /// Keeps the theme following the helm's stored appearance for this window's lifetime: at the first snapshot, on
     /// every change of the store (a no-op unless the choice changed), and again after a reset
     /// ([`settings::follow_stored_appearance`]).
@@ -88,6 +92,7 @@ impl MainView {
         let session_list = cx.new(SessionList::new);
         MainView {
             _appearance: theme::observe_window(window),
+            _decorations: linux_title_bar::follow_decorations(window),
             _appearance_choice: session::observe_current(cx, |_, cx| {
                 settings::follow_stored_appearance(cx)
             }),
@@ -201,10 +206,20 @@ impl Render for MainView {
                 launcher::entry::open_new(window, cx);
             })
             .size_full()
+            .flex()
+            .flex_col()
             .bg(theme::color(palette.bg_0))
             .text_color(theme::color(palette.fg_0))
             .font_family(crate::assets::UI_FONT)
-            .child(body)
+            // The Linux window's own title bar, where the compositor draws none, above everything else.
+            .children(linux_title_bar::bar(
+                "main-title-bar",
+                crate::bootstrap::WINDOW_TITLE,
+                "Close Farhelm",
+                window,
+                cx,
+            ))
+            .child(div().flex_1().min_h_0().w_full().child(body))
             // Once for the whole window: it lets the title band pair a double-click with the press before it, wherever
             // that press was (`desktop::title_band`).
             .child(title_band::watch_presses());

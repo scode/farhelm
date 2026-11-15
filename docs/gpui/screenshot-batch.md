@@ -39,9 +39,10 @@ non-zero when any capture failed or any app run did not start or did not stop cl
 - On Linux, only the app's own drawing. Under Mutter GPUI draws the window's decorations itself, and GPUI Kit frames the
   window with a 20-pixel margin for its shadow and a 1-pixel border, all inside the window's surface, which is what the
   bridge's screenshot captures: a 900x700 window showed the app in 858x658 pixels inside a black band. So a Linux run
-  asks for a window 42 pixels larger in each direction and crops the frame off, and the label's size is the app's. A
-  capture without that frame (a GPUI Kit release that changed it, say) is shown uncropped with a "capture failed" note
-  rather than cropped blindly. A Mac capture is not cropped (Kit draws no margin there).
+  asks for a window 42 pixels larger in each direction, and 34 taller still for the title bar the window draws for
+  itself under Mutter, and crops the frame and that bar off, and the label's size is the app's. A capture without that
+  frame (a GPUI Kit release that changed it, say) is shown uncropped with a "capture failed" note rather than cropped
+  blindly. A Mac capture is not cropped (Kit draws no margin there).
 - Foundation goldens (`crates/gui/farhelm-gui/tests/goldens/`), next to the reference scene they relate to. They are
   copied from the tree, so every platform's goldens are shown wherever the batch runs, each labelled with its platform
   (only Linux has goldens so far); only a golden that no platform has is a failed capture.

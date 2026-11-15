@@ -42,6 +42,18 @@ and the old native smoke test's legs (`scripts/desktop-smoke.sh`).
   The entry points other areas call are `desktop::updates::runs`, `check_now`, `automatic_updates` and
   `set_automatic_updates`.
 
+- **The Linux window's own title bar** (new: the old app's Linux build was never released). Under a compositor that
+  draws no window decorations (GNOME's Mutter) the main window and the notices window draw a 34 px bar with the title
+  and Minimize, Maximize or Restore, and Close; a drag on its background moves the window and a double-click maximizes
+  or restores it, through the macOS band's press rule, and the drag leaves keyboard focus where it was. Where the
+  compositor draws its own title bar (KDE) the window draws none. The minimum size grows by GPUI Kit's frame and the bar
+  so the app's content keeps 720 by 560. Tested by `desktop::linux_title_bar::tests` (when it shows, the minimum and
+  opening allowances, the named buttons, their commands, the background's drag and zoom and focus) and the screenshot
+  batch's crop test; driven through the bridge on headless Mutter (the bar inside Kit's frame, its buttons, Maximize and
+  its relabelling to Restore, Close ending the app). Pending: a drag, a double-click zoom and Minimize on a real GNOME
+  session (headless Mutter has no pointer drag and no visible minimize), and the KDE check (KWin's own bar, no drawn
+  bar, no Kit margin, the 722x596 minimum, drag, resize and close), which cannot run here.
+
 ## Deviations
 
 - **The Edit menu does nothing for a focused terminal.** The Mac app's Edit items (Undo, Redo, Cut, Copy, Paste, Select
@@ -75,5 +87,10 @@ and the old native smoke test's legs (`scripts/desktop-smoke.sh`).
   menu when the status beside it changed width is not ported (the old menu was placed from a snapshot; a GPUI popover
   follows its toggle), nor is moving focus to the Settings gear after Check failed is dismissed (SPEC.md now sends focus
   home), nor opening the menu with an arrow key.
+- **The Linux window draws a title bar of its own where the compositor draws none.** SPEC.md says the Linux window
+  layout keeps its appearance and gains no drag or zoom; under GNOME's Mutter, which draws no decorations, the window
+  would otherwise have no title bar at all and could not be moved with the pointer (settled by the migration's
+  coordinator on 2026-11-13). The bar is inert while a dialog is open, as the macOS band is, and under KDE the minimum
+  is 722 by 596, since it is set before the compositor says whether it draws the bar.
 - **No debug Help menu.** The old app's debug builds had a Help menu with the web view's developer tools and Float on
   Top; both went with the web view.
