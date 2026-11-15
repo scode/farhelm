@@ -71,11 +71,6 @@ use crate::{session, theme, ticker};
 /// What a second tunnel action says while the session's first is still in flight (the old app's words).
 const BUSY: &str = "Another tunnel action is still waiting";
 
-/// What Allow says when consent cannot be saved yet because another change to the shared preferences (an earlier
-/// Allow, or a Settings change) is still being saved. Not the old app's words: its one-action rule could not meet a
-/// Settings save, since Settings went through the same tunnel controller.
-const PREFERENCES_BUSY: &str = "Another change to the preferences is still being saved; try again";
-
 /// The notice's element id, and the bridge's selector for it.
 pub(crate) const NOTICE_ID: &str = "terminal-tunnel-notice";
 
@@ -635,7 +630,9 @@ fn save_consent(cx: &mut App, done: impl FnOnce(Result<(), HostText>, &mut App) 
         // Another preferences save is in flight (an earlier Allow, or a Settings change): say so rather than nothing.
         Err(NotStarted::Busy(_)) => {
             if let Some(done) = done.borrow_mut().take() {
-                done(Err(HostText::from_host(PREFERENCES_BUSY)), cx);
+                // A save's lead-in and the store's shared reason, as every save the store refuses as busy words it.
+                let reason = format!("Not saved: {}", NotStarted::BUSY_REASON);
+                done(Err(HostText::from_host(reason)), cx);
             }
         }
         Err(not_started) => tracing::debug!(?not_started, "tunnel consent was not saved"),
