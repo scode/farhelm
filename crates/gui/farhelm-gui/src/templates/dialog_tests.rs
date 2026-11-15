@@ -18,6 +18,7 @@ use gpui::{
 };
 
 use super::Hint;
+use super::dispatch_tests::push as push_state;
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
 use crate::host_text::tests::painted_words;
@@ -665,6 +666,100 @@ fn a_refused_write_is_reported_and_nothing_changes(cx: &mut TestAppContext) {
     );
 }
 
+/// A key write is the whole map, built from the bindings the store holds, so one sent while the helm cannot read its
+/// preferences would rest on a map that may be stale, and a mark write on a bolt drawn from it; the old list refused
+/// either edit when its fresh read of the preferences failed. Specified: with key 2 on `webbuilder` and then the
+/// preferences unavailable ("database is locked"), the key menu still shows key 2 on `webbuilder` (the store keeps the
+/// last map, so a write built from it would look right); choosing key 1 for `my-codex` sends nothing and says "The
+/// number key was not saved; shortcut bindings could not be read: database is locked", and a click on `my-codex`'s
+/// bolt sends nothing and says the same of the quick-launch mark; once the preferences are readable again, the bolt
+/// sends its write and the refusal is gone.
+#[gpui::test]
+fn unreadable_bindings_refuse_a_key_or_mark_write(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    let held = Preferences {
+        template_shortcuts: [("2".to_owned(), "webbuilder".to_owned())]
+            .into_iter()
+            .collect(),
+        ..Preferences::default()
+    };
+    let held_state = CollectionState {
+        collection: Collection::Preferences,
+        meta: meta(&[PREFERENCES_KEY]),
+        entries: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: serde_json::to_value(&held).unwrap(),
+        }],
+    };
+    push_state(&mut helm, cx, held_state.clone());
+    push_state(
+        &mut helm,
+        cx,
+        super::dispatch_tests::unreadable("database is locked"),
+    );
+    click(cx, "templates-button");
+    click(cx, "template-key-my-codex");
+    let text = painted(cx);
+    assert!(
+        text.contains("webbuilder (moves here)"),
+        "the premise: the store kept the last map: {text}"
+    );
+    click(cx, "templates-key-1-item");
+    assert!(helm.commands().is_empty(), "no key write was sent");
+    let text = painted(cx);
+    assert!(
+        text.contains(
+            "The number key was not saved; shortcut bindings could not be read: database is locked"
+        ),
+        "{text}"
+    );
+
+    click(cx, "template-bolt-my-codex");
+    assert!(helm.commands().is_empty(), "no mark write was sent");
+    let text = painted(cx);
+    assert!(
+        text.contains(
+            "The quick-launch mark was not saved; shortcut bindings could not be read: database is locked"
+        ),
+        "{text}"
+    );
+
+    push_state(&mut helm, cx, held_state);
+    click(cx, "template-bolt-my-codex");
+    let (_, body) = one_write(&mut helm);
+    assert_eq!(
+        body,
+        serde_json::json!({"quick_launch_template": "my-codex"})
+    );
+    assert!(!painted(cx).contains("not saved"), "the refusal is gone");
+}
+
+/// Before the preferences arrive the store holds no number keys at all, and a key write built from that empty map
+/// would replace every key the helm holds with the one just chosen. Specified: over a helm that pushed no preferences,
+/// choosing key 1 for `my-codex` sends nothing and says "The number key was not saved; shortcut bindings could not be
+/// read: the shortcut bindings have not arrived yet".
+#[gpui::test]
+fn bindings_that_never_arrived_refuse_a_key_write(cx: &mut TestAppContext) {
+    let (mut helm, _connection) = started(cx);
+    helm.connect(vec![templates_state(&templates(), Availability::Available)]);
+    cx.run_until_parked();
+    let (_, cx) = test_support::open_view(cx, Header::new);
+    cx.simulate_resize(size(px(1600.), px(1200.)));
+    settle(cx);
+    click(cx, "templates-button");
+    click(cx, "template-key-my-codex");
+    click(cx, "templates-key-1-item");
+    assert!(helm.commands().is_empty(), "no key write was sent");
+    let text = painted(cx);
+    assert!(
+        text.contains(
+            "The number key was not saved; shortcut bindings could not be read: the shortcut bindings have not \
+             arrived yet"
+        ),
+        "{text}"
+    );
+}
+
 /// Whether a popover menu is open over the dialog.
 fn any_open_menu(cx: &mut VisualTestContext) -> bool {
     frame(cx)
@@ -750,7 +845,10 @@ fn the_key_menu_names_holders_as_host_text(cx: &mut TestAppContext) {
 
 /// The key menu belongs to its row: when the template goes (deleted elsewhere, renamed by an agent), its row and the
 /// button the menu is anchored to go, and the menu closes with them rather than staying open for a template that no
-/// longer exists. The remaining case of the old `popover-template-movement.spec.ts`.
+/// longer exists. This is the case the foundations parity row leaves to port for the old
+/// `popover-template-movement.spec.ts`, whose own cases (a menu closing or staying when another row's change moved its
+/// button) SPEC.md's "Things changing underneath" supersedes; no old case removed the menu's own template. Specified:
+/// with `my-codex`'s key menu open, a push removing `my-codex` closes the menu and leaves the dialog open.
 #[gpui::test]
 fn the_key_menu_closes_when_its_template_is_gone(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
