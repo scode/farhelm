@@ -63,7 +63,8 @@ use crate::operations::{self, Command, OpKey};
 use crate::session;
 use crate::theme::{self, metrics};
 
-/// `.templates-dialog`'s width: `min(960px, 100%)`.
+/// `.templates-dialog`'s width: `min(960px, 100%)`; the dialog frame applies the `100%` (the window less the old
+/// backdrop's side margins).
 const WIDTH: f32 = 960.;
 /// `.templates-panes`: the list column (`minmax(0, 260px)`), the gap between the panes and their floor.
 const LIST_WIDTH: f32 = 260.;

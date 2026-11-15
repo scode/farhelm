@@ -475,8 +475,14 @@ pub mod metrics {
     pub const DIALOG_FOOTER_PAD: (Pixels, Pixels) = (px(14.), px(24.));
     /// The dialog panel's width (`width: min(480px, 100%)`).
     pub const DIALOG_WIDTH: Pixels = px(480.);
-    /// `--dialog-vertical-margin`'s floor: space kept above and below a dialog.
+    /// `--dialog-vertical-margin`'s floor: space kept above and below a dialog is 5% of the window's height, never
+    /// less than this (`max(24px, 5dvh)`, `app.css` at the reference commit, line 128). The dialog frame applies the 5%.
     pub const DIALOG_VERTICAL_MARGIN: Pixels = px(24.);
+    /// The old dialog backdrops' side padding: space kept beside a dialog, so a dialog never runs past either side of a
+    /// narrow window. `app.css` at the reference commit gives `padding: var(--dialog-vertical-margin) 20px` to
+    /// `.host-settings-backdrop` (line 3480), `.rename-dialog-backdrop` (line 4541) and `.launch-composer-backdrop`
+    /// (line 6531); a dialog's `width: min(Npx, 100%)` resolved inside that padding.
+    pub const DIALOG_SIDE_MARGIN: Pixels = px(20.);
     /// `.farhelm-tooltip`'s max width (`min(280px, 100vw - 8px)`; the layer manager applies the viewport half).
     pub const TOOLTIP_MAX_WIDTH: Pixels = px(280.);
     /// `.farhelm-tooltip`'s padding, vertical then horizontal.

@@ -14,11 +14,9 @@
 //! through the host-text element, each its own text element. The typed word is the user's own, drawn the same way so
 //! that an invisible character in it shows escaped, as it would in the names it is matched against.
 //!
-//! NOTE: The old pill came in with a 200 ms fade and scale (`launch-sequence-enter`), off under reduced motion. It is
-//! not drawn here: GPUI's one-shot animations are banned throughout the GUI crates (`crates/gui/clippy.toml`), the
-//! component layer included, and only an owner listed in the foundation ownership table's lint exceptions may switch a
-//! ban off. The pill appears at once until that exception exists; the entrance would wrap the element [`SequencePill`]
-//! renders.
+//! The old pill came in with a 200 ms fade and scale (`launch-sequence-enter`), off under reduced motion. The fade comes
+//! through the component layer's one-shot [`entrance`], which reduced motion switches off. NOTE: There is no scale-up:
+//! GPUI cannot scale a box (SPEC_impl.md, "Animation time"), so the pill fades in at its full size.
 
 use gpui::{
     App, BoxShadow, Div, InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce,
@@ -26,6 +24,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
+use super::entrance;
 use crate::host_text::{self, HostText};
 use crate::layers;
 use crate::theme::{self, metrics};
@@ -216,6 +215,9 @@ impl RenderOnce for SequencePill {
                         .child(names)
                 }))
         };
+        // Keyed on a fixed id: each armed sequence is a new pill view, so each gets its own entrance, and a redraw of the
+        // same pill (a key typed) does not start it again.
+        let group = entrance("sequence-pill-entrance", group, cx);
         div()
             .id("sequence-pill")
             .debug_selector(|| "sequence-pill".into())

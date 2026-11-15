@@ -34,11 +34,12 @@ use super::armed::{Key, PillView, armed_sequence, classify, is_armed};
 use super::sequence::{Entry, Input, Sequence};
 use super::shortcuts::Bindings;
 use crate::actions::{self, BeginSequence, SEQUENCE_PREFIX_CHORD};
-use crate::components::{HoverHelp, TextInput, TextInputState};
+use crate::components::{ENTRANCE, HoverHelp, TextInput, TextInputState};
 use crate::layers::{self, Anchor, Pill, PillPlacement};
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, painted, preferences_state, session};
-use crate::test_support::{self, bounds, frame, keys, meta, settle, started};
+use crate::test_support::{self, advance, bounds, frame, keys, meta, settle, started};
+use crate::ticker;
 
 // ---- Sorting keys ----------------------------------------------------------------------------------------------------
 
@@ -470,6 +471,62 @@ fn escape_cancels_and_never_reaches_the_program(cx: &mut TestAppContext) {
     assert_eq!(main.program_input(), 0, "neither key reached the program");
     keys(main.cx, "q");
     assert_eq!(main.program_input(), 1, "typing reaches the program again");
+}
+
+/// Deliver the next display frame, as the platform's frame source would, let the redraw it causes settle, and return
+/// how many frame requests were waiting for it: what a running fade asks for to draw again (the same reading the
+/// entrance's own tests use; the test platform has no frame source of its own).
+fn next_frame(cx: &mut VisualTestContext) -> usize {
+    let waiting = cx.update(|window, cx| window.simulate_next_frame(cx));
+    settle(cx);
+    waiting
+}
+
+/// SPEC.md: the pill comes in with "a short fade ... switched off under reduced motion, never looping". The entrance is
+/// keyed so each armed sequence fades once: a fade that restarted on every typed key would flicker, and one that never
+/// ran again would leave the second sequence without its cue. Showing the pill asks for one ordinary redraw either way,
+/// so a running fade is told apart by asking again on the frame after it. Specified: just after arming, a second frame
+/// is still asked for (the fade runs); once the fade is over, a typed key asks for no frame beyond its own redraw (no
+/// restart); a new sequence after a cancel fades again; with motion reduced, nothing is asked for after the first frame.
+#[gpui::test]
+fn the_pill_fades_in_once_per_sequence(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, true);
+    main.arm();
+    next_frame(main.cx);
+    assert!(
+        next_frame(main.cx) > 0,
+        "arming starts the fade, which keeps asking"
+    );
+    advance(main.cx, ENTRANCE * 2);
+    next_frame(main.cx);
+    assert_eq!(next_frame(main.cx), 0, "the premise: the fade is over");
+    keys(main.cx, "w");
+    assert_eq!(
+        main.state().1,
+        "w",
+        "the premise: the key joined the armed sequence"
+    );
+    next_frame(main.cx);
+    assert_eq!(
+        next_frame(main.cx),
+        0,
+        "a typed key does not start the fade again"
+    );
+    keys(main.cx, "escape");
+    assert_ended(&mut main, "after Escape");
+    main.arm();
+    next_frame(main.cx);
+    assert!(next_frame(main.cx) > 0, "a new sequence fades in again");
+    keys(main.cx, "escape");
+
+    main.cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    main.arm();
+    next_frame(main.cx);
+    assert_eq!(
+        next_frame(main.cx),
+        0,
+        "with motion reduced the pill appears at once"
+    );
 }
 
 /// SPEC.md: "Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their normal target".
