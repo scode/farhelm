@@ -205,6 +205,24 @@ pub(crate) fn new_session_binding() -> KeyBinding {
     KeyBinding::new(NEW_SESSION_MAC, NewSession, Some(CONTEXT))
 }
 
+/// The quick-launch sequence prefix's chords (SPEC.md, "Quick-launch sequences"): Cmd+X on a Mac, Ctrl+Shift+X on
+/// Linux. Spelled once here, for its binding, its row in [`TERMINAL_KEYS`], the sequence's own key rules and the tests.
+pub(crate) const SEQUENCE_PREFIX_MAC: &str = "cmd-x";
+pub(crate) const SEQUENCE_PREFIX_LINUX: &str = "ctrl-shift-x";
+
+/// The sequence prefix's chord on this platform.
+pub(crate) const SEQUENCE_PREFIX_CHORD: &str = if cfg!(target_os = "macos") {
+    SEQUENCE_PREFIX_MAC
+} else {
+    SEQUENCE_PREFIX_LINUX
+};
+
+/// The ⚡ chord (SPEC.md, "Quick launch": Cmd+P on a Mac, Ctrl+Shift+P on Linux), spelled once for its row in
+/// [`TERMINAL_KEYS`] and for an armed sequence, which queues the marked template on it. The quick launch it starts
+/// outside a sequence binds it with that feature.
+pub(crate) const QUICK_LAUNCH_MAC: &str = "cmd-p";
+pub(crate) const QUICK_LAUNCH_LINUX: &str = "ctrl-shift-p";
+
 /// The chords a focused text field keeps for itself although Farhelm binds them elsewhere. [`install`] binds each to
 /// `NoAction` in [`TEXT_INPUT_CONTEXT`], which hides every binding further out for the same chord, so the key goes on
 /// to the field's own handling (here, nothing: Kit binds none of them). Bound on every platform: on macOS the Delete
@@ -212,6 +230,11 @@ pub(crate) fn new_session_binding() -> KeyBinding {
 const TEXT_FIELD_KEYS: &[&str] = &[
     // SPEC.md, "Desktop window chrome": "The Linux chord leaves text editors other than the terminal alone."
     "ctrl-shift-backspace",
+    // SPEC.md, "Desktop window chrome": "Text fields outside the session launcher keep their normal Cut or
+    // text-direction key". On Linux the prefix is Ctrl+Shift+X, which Kit binds to nothing, so without this a focused
+    // field would hand it on to the prefix's binding. On a Mac the prefix is Cmd+X, which Kit's own Cut binding in its
+    // input context already outranks; this row changes nothing there.
+    SEQUENCE_PREFIX_LINUX,
 ];
 
 actions!(
@@ -243,6 +266,10 @@ actions!(
         /// app only, also from a focused terminal; the Linux app has no New shortcut). Runs once per press
         /// (`ONCE_PER_PRESS`).
         NewSession,
+        /// Begin a quick-launch sequence, which takes every key until Enter, Escape or a cancel (SPEC.md,
+        /// "Quick-launch sequences": Cmd+X on a Mac, Ctrl+Shift+X on Linux, also from a focused terminal; a text field
+        /// keeps the chord, `TEXT_FIELD_KEYS`). Runs once per press (`ONCE_PER_PRESS`).
+        BeginSequence,
         /// Paste the clipboard's text into the focused terminal, as a paste its program can tell from typing. The
         /// terminal handles it; its keys are its rows of [`TERMINAL_KEYS`], and a menu item that dispatches it reaches
         /// the focused terminal the same way.
@@ -357,6 +384,10 @@ pub fn install(cx: &mut App) {
         // SPEC.md, "Desktop window chrome". The main view hands it to the session list's quick switcher; it works from
         // a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
         KeyBinding::new(QUICK_SWITCHER_CHORD, QuickSwitcher, Some(CONTEXT)),
+        // SPEC.md, "Quick-launch sequences". The main view hands it to the templates module, which arms the sequence;
+        // it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut, and a text field keeps
+        // it (`TEXT_FIELD_KEYS`, and on a Mac GPUI Kit's own Cut).
+        KeyBinding::new(SEQUENCE_PREFIX_CHORD, BeginSequence, Some(CONTEXT)),
     ]);
     if cfg!(target_os = "macos") {
         // SPEC.md, "Desktop window chrome": Cmd+N in the Mac app only. The main view hands it to the launcher's New; it
@@ -613,6 +644,10 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     &QuickSwitcher,
     // Opening New, like opening the switcher above: a held Cmd+N opens it once.
     &NewSession,
+    // SPEC.md, "Quick-launch sequences": "Repeated held keys add nothing". While a sequence is armed its own capture
+    // takes the prefix's repeats; listed, a repeat that arrives after a cancel (a click while the chord is still held)
+    // cannot arm a new sequence either.
+    &BeginSequence,
     // The Mac app menu's chords (`MAC_MENU_CHORDS`): a GPUI binding runs on every repeat of a held key, so without
     // these a held Ctrl+Cmd+F would flip full screen on and off, and a held Cmd+M, Cmd+H or Cmd+Q act again on each
     // repeat, which none of them can usefully do.
@@ -723,8 +758,16 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         "open the quick switcher",
     ),
     app("cmd-j", "ctrl-shift-j", "open the template list"),
-    app("cmd-p", "ctrl-shift-p", "quick launch the marked template"),
-    app("cmd-x", "ctrl-shift-x", "begin a quick-launch sequence"),
+    app(
+        QUICK_LAUNCH_MAC,
+        QUICK_LAUNCH_LINUX,
+        "quick launch the marked template",
+    ),
+    app(
+        SEQUENCE_PREFIX_MAC,
+        SEQUENCE_PREFIX_LINUX,
+        "begin a quick-launch sequence",
+    ),
     TerminalKey {
         mac: Some(NEW_SESSION_MAC),
         // SPEC.md: the Linux app has no New shortcut.

@@ -47,6 +47,7 @@ use crate::components::{
 };
 use crate::components::{RadioGroup, RadioOption};
 use crate::components::{Select, SelectOption};
+use crate::components::{SequenceChip, SequencePill};
 use crate::components::{TabOption, TabStrip};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -867,6 +868,31 @@ fn notice_banner(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     div()
         .w_full()
         .child(crate::main_view::banner(Notice::ConnectionLost))
+        .into_any_element()
+}
+
+/// The quick-launch sequence pill as it shows outside the launcher, centered over an area the size of a small main pane:
+/// a bound number key's template, an unbound key and the ⚡ template as chips, the word `web` in progress and its
+/// candidates hanging below the pill. There is no reference picture of the old pill; it was compared with the old
+/// stylesheet's `.launch-sequence-*` rules instead.
+fn sequence_pill(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .w(px(640.))
+        .h(px(200.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            SequencePill::new(
+                "Launch sequence: ",
+                "Type names or number keys · Tab complete · Enter launch · Esc cancel",
+            )
+            .chip(SequenceChip::Name(HostText::from_host("my-codex")))
+            .chip(SequenceChip::Words("Unbound key 3".into()))
+            .chip(SequenceChip::Name(HostText::from_host("webbuilder")))
+            .word(HostText::from_host("web"))
+            .candidates(["web", "web-api", "webbuilder"].map(HostText::from_host)),
+        )
         .into_any_element()
 }
 
@@ -3610,6 +3636,12 @@ static SCENES: &[Scene] = &[
         size: (444., 336.),
         draw: attached_terminals,
         setup: terminal_status_setup,
+    },
+    Scene {
+        name: "sequence-pill",
+        size: (680., 240.),
+        draw: sequence_pill,
+        setup: no_setup,
     },
     Scene {
         name: "terminal-delete-scrim",

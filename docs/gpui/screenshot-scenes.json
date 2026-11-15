@@ -773,6 +773,11 @@
       "reference": "terminal-detached-banner"
     },
     {
+      "golden": "sequence-pill",
+      "title": "The quick-launch sequence pill outside the launcher: chips, the word in progress and its candidates (compared with the old stylesheet; there is no reference picture)",
+      "reference": null
+    },
+    {
       "golden": "terminal-delete-scrim",
       "title": "The scrim over the open session's terminal while its Delete stops the agent",
       "reference": null
