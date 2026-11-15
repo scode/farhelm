@@ -578,9 +578,13 @@ fn a_long_title_directory_and_error_stay_inside_the_row_at_the_narrowest_sidebar
         age("long"),
         age("short")
     );
+    // A sentence paints its wrapped lines as one text, so the error wraps when what it paints is at least two of the
+    // ended line's 16-pixel lines tall.
     let error_lines = texts_within(&nodes, "session-row-long-status");
     assert!(
-        error_lines.len() > 1,
+        error_lines
+            .iter()
+            .any(|text| text.bounds.size.height >= px(32.)),
         "the error wraps: {:?}",
         error_lines
             .iter()

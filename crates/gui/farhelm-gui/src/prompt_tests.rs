@@ -22,7 +22,7 @@ use gpui::{
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark, OnPress};
-use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::host_text::tests::{SPOOFING_CORPUS, painted_words, paints_isolated};
 use crate::host_text::{HostSentence, HostText, Line};
 use crate::layers::{self, Anchor, Dialog, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
@@ -536,8 +536,9 @@ fn ask_and_record_as(
 /// plain-string case guards the other direction: every existing question passes app wording as a string, and it must
 /// draw as it did before.
 ///
-/// Specification: a question whose summary is a [`HostSentence`] paints the host value in its escaped presentation,
-/// and no text the frame paints holds a presentation-unsafe character; inside the dialog the sentence is one `Label`
+/// Specification: a question whose summary is a [`HostSentence`] paints the host value in its escaped presentation
+/// inside its isolate, and no text the frame paints holds a presentation-unsafe character other than a sentence's own
+/// isolates; inside the dialog the sentence is one `Label`
 /// node under its id, named with the value escaped; the dialog's own accessible name is still the question's title.
 /// With a summary naming a title too long for one line and a sentence line of app words too long for one line, every
 /// text painted inside the dialog lies within the dialog's left and right edges and is not clipped. A question whose
@@ -582,11 +583,11 @@ fn a_summary_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestApp
     assert!(
         texts
             .iter()
-            .any(|text| text == "invoice<U+202E>fdp<U+200B>.exe"),
-        "the host value is painted escaped; painted: {texts:?}"
+            .any(|text| paints_isolated(text, "invoice<U+202E>fdp<U+200B>.exe")),
+        "the host value is painted escaped, isolated; painted: {texts:?}"
     );
     assert!(
-        !texts.iter().any(|text| text
+        !texts.iter().any(|text| painted_words(text)
             .chars()
             .any(farhelm_proto::text::is_presentation_unsafe)),
         "nothing painted holds a hidden character; painted: {texts:?}"
@@ -649,7 +650,9 @@ fn a_summary_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestApp
         .collect();
     for expected in [long, words] {
         assert!(
-            inside.iter().any(|text| text.text.as_ref() == expected),
+            inside
+                .iter()
+                .any(|text| painted_words(&text.text).contains(expected)),
             "the premise: {expected:?} is painted inside the dialog"
         );
     }
@@ -705,10 +708,10 @@ fn question_name(nodes: &[gpui::DriverNode]) -> Option<String> {
 ///
 /// Specification: for every value in the spoofing corpus, a question titled with a [`HostSentence`] "Set up host ·
 /// <value>" is named, centered and anchored alike, "Set up host · " followed by the escaped value, which is the
-/// sentence's accessible name; nothing the question paints holds a presentation-unsafe character; centered, the value
-/// is painted in its escaped presentation, and the title is one `Label` node under its id with that same name. A
-/// question titled with a plain string is
-/// named by that string in both, and paints it as one line when centered.
+/// sentence's accessible name; nothing the question paints holds a presentation-unsafe character other than a
+/// sentence's own isolates; centered, the value is painted in its escaped presentation inside its isolate, and the
+/// title is one `Label` node under its id with that same name. A question titled with a plain string is named by that
+/// string in both, and paints it as one line when centered.
 #[gpui::test]
 fn a_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppContext) {
     let (cx, row) = open_row(cx);
@@ -727,15 +730,15 @@ fn a_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppCo
             );
             let texts = painted_in_question(cx);
             assert!(
-                !texts.iter().any(|text| text
+                !texts.iter().any(|text| painted_words(text)
                     .chars()
                     .any(farhelm_proto::text::is_presentation_unsafe)),
                 "{kind}: nothing painted holds a hidden character; painted: {texts:?}"
             );
             if kind == "centered" {
                 assert!(
-                    texts.iter().any(|text| text == shown),
-                    "the value is painted escaped; painted: {texts:?}"
+                    texts.iter().any(|text| paints_isolated(text, shown)),
+                    "the value is painted escaped, isolated; painted: {texts:?}"
                 );
                 let sentence = nodes
                     .iter()
@@ -774,7 +777,8 @@ fn a_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppCo
 /// itself by it, a second place a title naming a host value must stay escaped.
 ///
 /// Specification: an inline question titled with a [`HostSentence`] naming a value with a right-to-left override is
-/// named with the value escaped, which is the sentence's accessible name, and paints the value escaped.
+/// named with the value escaped, which is the sentence's accessible name, and paints the value escaped inside its
+/// isolate.
 #[gpui::test]
 fn an_inline_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppContext) {
     let (cx, launcher) = open_launcher(cx);
@@ -789,8 +793,10 @@ fn an_inline_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut T
     );
     let texts = painted_in_question(cx);
     assert!(
-        texts.iter().any(|text| text == "invoice<U+202E>fdp.exe"),
-        "painted escaped; painted: {texts:?}"
+        texts
+            .iter()
+            .any(|text| paints_isolated(text, "invoice<U+202E>fdp.exe")),
+        "painted escaped, isolated; painted: {texts:?}"
     );
 }
 

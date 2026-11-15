@@ -1070,10 +1070,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 - A row also opens while the last work on its host was refused, with the helm's words under it, until the next work on
   that host starts; the old app opened it only for provisioning errors, and showed other refusals under the row closed.
   Both kinds of refusal now go through the one operation key a host has.
-- Detail lines mix the app's words with host values (builds, identities, destinations, errors), each part its own text
-  element so a host value cannot reorder the words around it; a part that does not fit starts on a new line and wraps
-  inside itself, where the old page broke a long identity or error mid-run after the words before it. Rows with long
-  values are a line or two taller than in the reference screens.
 - Install ids in the details (a connected host's identity, and the mismatch, unverified and duplicate lines) use the
   host text foundation's identity spelling, as the old app's `display_identity` did: spaces, variation selectors and
   non-ASCII look-alikes are written out as `<U+XXXX>`, so two ids the user compares never look alike

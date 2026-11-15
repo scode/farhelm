@@ -13,12 +13,20 @@
 //! presentation-unsafe character becomes `<U+XXXX>`, and a literal `<U+` the host typed has its `<` escaped so it cannot
 //! pose as one.
 //!
-//! Direction isolation is structural: every piece of host text is laid out as its own text element, never concatenated
-//! into a string with the app's own words. GPUI shapes each text element on its own, so right-to-left letters in a
-//! session title reorder only within that title, the way HTML's `<bdi>` isolated them in the old app; the explicit
-//! direction controls that could reach further are escaped by the shared table. A sentence that mixes the app's words
-//! with host text is built with [`HostSentence`], which keeps every part its own element and exposes the whole to
-//! assistive technology as one label whose name is made of the same escaped parts.
+//! Direction isolation comes in two shapes. A host value drawn alone ([`element`], [`marked`]) is its own text element,
+//! which GPUI shapes as a bidirectional paragraph of its own, so right-to-left letters in a session title reorder only
+//! within that title. A sentence that mixes the app's words with host text ([`HostSentence`]) is one text element, so it
+//! wraps at word boundaries like the old app's inline text, and each host value in it sits inside a left-to-right
+//! isolate (U+2066 … U+2069), the Unicode form of the old app's `dir="ltr"` `unicode-bidi: isolate` spans. The isolate is
+//! load-bearing: GPUI applies the bidirectional algorithm to a whole text element across its runs (cosmic-text on Linux,
+//! one CoreText line on macOS), so without it a right-to-left value would reorder the app's words around it, and a
+//! sentence that starts with one would turn right-to-left as a whole. The isolate holds because the shared table escapes
+//! every direction control and paragraph separator a host could write, so no host value can close its isolate early or
+//! end the paragraph. Host text never meets the app's words in a string any other way. The sentence is exposed to
+//! assistive technology as one label whose name is made of the same escaped parts, without the isolates. One
+//! consequence the old app had too: a value that mixes directions ("אבג abc") takes its direction from its own first
+//! letter when drawn alone, but is always left-to-right in a sentence, so its two halves can trade places between a
+//! row and a dialog that names it.
 //!
 //! Typography is separate from trust. A technical host value inside a sentence (a destination, an executable path, a
 //! version) is set in the monospace face with [`HostSentence::mono`], as the old app's `MonoPeer` runs were, and is
@@ -48,9 +56,9 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Div, ElementId, HighlightStyle, InteractiveElement as _, IntoElement,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    StyledText, Window, div,
+    App, Div, ElementId, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, StyledText, Window,
+    div,
 };
 
 use crate::assets;
@@ -305,13 +313,16 @@ enum Part {
     Mono(HostText),
 }
 
-/// A line that mixes the app's own words with host-supplied text ("Delete «api-refactor» on «build-box»?"), drawn as a
-/// row of parts in which every host part is its own text element, and exposed to assistive technology (and to the
-/// agent bridge's element list) as one label node under its id, named by [`HostSentence::accessible_name`].
+/// A line that mixes the app's own words with host-supplied text ("Delete «api-refactor» on «build-box»?"), drawn as
+/// one text element that wraps like a sentence, and exposed to assistive technology (and to the agent bridge's element
+/// list) as one label node under its id, named by [`HostSentence::accessible_name`].
 ///
-/// The parts are never concatenated for display, which is what keeps a right-to-left host value from reordering the
-/// app's words around it. The parts themselves carry no id, so they are not nodes of their own: a screen reader reads
-/// the sentence once, by its name, rather than as a run of fragments.
+/// One text element is what lets the sentence break between words wherever the line runs out, with no wrapped line
+/// starting on the space after a host value; a row of one element per part could only wrap whole parts, so it broke
+/// early at part boundaries. Each host value is drawn as its escaped presentation inside a left-to-right isolate, which
+/// is what keeps a right-to-left value from reordering the app's words around it (the module docs say why that holds).
+/// The drawn string is never named: the accessible name has no isolates. The text carries no id of its own, so a screen
+/// reader reads the sentence once, by its name.
 ///
 /// A clone draws the same parts under the same id, so two clones drawn in one frame are two nodes with one id; a
 /// sentence is cloned to be kept (inside a frozen [`Question`](crate::prompt::Question), say), not to be drawn twice.
@@ -349,9 +360,10 @@ impl HostSentence {
     /// Append a technical host value (a destination, a path, a version), drawn in the monospace face, the
     /// terminal's face, at the sentence's size and color, as the old app set its `MonoPeer` runs in `--font-mono`.
     ///
-    /// Only the face differs from [`host`](Self::host): the part is the same escaped presentation in a text element of
-    /// its own, so its direction stays isolated, and the accessible name (and so a hover help's description) names it
-    /// escaped exactly as a host part. Equality still tells the two apart, since the sentences draw differently.
+    /// Only the face differs from [`host`](Self::host): the part is the same escaped presentation in the same isolate,
+    /// drawn as a run of the sentence's one text element, so its direction stays isolated, and the accessible name (and
+    /// so a hover help's description) names it escaped exactly as a host part. Equality still tells the two apart,
+    /// since the sentences draw differently.
     pub fn mono(mut self, text: &HostText) -> Self {
         self.parts.push(Part::Mono(text.clone()));
         self
@@ -371,39 +383,78 @@ impl HostSentence {
         }
         name.into()
     }
+
+    /// The string the sentence draws, and the byte ranges in it set in the monospace face: the app's words as they
+    /// are, and every host value as its escaped presentation inside [`LRI`] … [`PDI`]. Drawing only, never a name or a
+    /// value.
+    ///
+    /// The isolate opens before any spaces the app's words end with, so those spaces sit inside it, still spaces in
+    /// the same place. GPUI keeps a line break only where a glyph starts, and on macOS an isolate opened right after
+    /// the space took away the break before the value and wrapped the word before it onto the value's line (CoreText,
+    /// it appears, gives GPUI no glyph at the isolate). A space has a glyph on every platform.
+    ///
+    /// Every host part, whatever its face, goes through this one arm, so the isolate cannot be kept on one kind of
+    /// host part and dropped from the other. A monospace range covers the value and its closing isolate, not the spaces
+    /// before it, which keep the sentence's face.
+    fn drawn(&self) -> (SharedString, Vec<Range<usize>>) {
+        let mut text = String::new();
+        let mut mono = Vec::new();
+        for part in &self.parts {
+            let value = match part {
+                Part::App(words) => {
+                    text.push_str(words);
+                    continue;
+                }
+                Part::Host(value) | Part::Mono(value) => value,
+            };
+            text.insert(text.trim_end_matches(' ').len(), LRI);
+            let start = text.len();
+            text.push_str(&value.presentation());
+            text.push(PDI);
+            if matches!(part, Part::Mono(_)) {
+                mono.push(start..text.len());
+            }
+        }
+        (text.into(), mono)
+    }
 }
+
+/// LEFT-TO-RIGHT ISOLATE, which opens a host part, with the spaces before it, in a sentence's drawn string
+/// ([`HostSentence::drawn`]). It and [`PDI`] are default-ignorable, so the shaper draws them as nothing.
+const LRI: char = '\u{2066}';
+/// POP DIRECTIONAL ISOLATE, which closes the isolate [`LRI`] opened. A host value cannot hold one of its own, since
+/// the shared table escapes it.
+const PDI: char = '\u{2069}';
 
 impl RenderOnce for HostSentence {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let name = self.accessible_name();
+        let (text, mono) = self.drawn();
+        // GPUI applies a font family override only to runs that lie wholly inside its range, and a text with no
+        // highlights is one run, so every monospace range is also handed in as a highlight that changes nothing, which
+        // splits the runs at its edges. Both resolve against the inherited style at layout, so size and color still
+        // come from the surrounding text.
+        let text = StyledText::new(text)
+            .with_highlights(
+                mono.iter()
+                    .map(|range| (range.clone(), HighlightStyle::default())),
+            )
+            .with_font_family_overrides(
+                mono.into_iter()
+                    .map(|range| (range, SharedString::from(assets::TERMINAL_FONT))),
+            );
         // GPUI puts an element in the accessibility tree (and the bridge's record) only when it declares a role; a
         // div's label alone is dropped. `Label` is the role GPUI gives its own id-bearing text.
         div()
             .id(self.id)
             .role(Role::Label)
             .aria_label(name)
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            // `min_w_0` lets a part shrink to the row and wrap. Without it a flex item's minimum width is its whole
-            // unwrapped line (GPUI measures text with no wrap width for that query), so a long session title in a
-            // dialog summary ran past the dialog's edge and was cut off there, hiding the part that tells two
-            // look-alike titles apart. Parts still wrap as whole blocks, since each is its own element.
-            .children(self.parts.into_iter().map(|part| -> AnyElement {
-                let (text, mono) = match part {
-                    Part::App(words) => return div().min_w_0().child(words).into_any_element(),
-                    Part::Host(text) => (text, false),
-                    Part::Mono(text) => (text, true),
-                };
-                // One wrapper for every host part, whatever its face, so the escaping element and the wrap fix above
-                // cannot be dropped from one kind of host part and kept on the other.
-                let drawn = element(&text).min_w_0();
-                if mono {
-                    drawn.font_family(assets::TERMINAL_FONT).into_any_element()
-                } else {
-                    drawn.into_any_element()
-                }
-            }))
+            // `min_w_0` lets the sentence shrink to a flex row it sits in and wrap there. Without it a flex item's
+            // minimum width is its whole unwrapped line (GPUI measures text with no wrap width for that query), so a
+            // long session title in a dialog summary ran past the dialog's edge and was cut off there, hiding the part
+            // that tells two look-alike titles apart.
+            .min_w_0()
+            .child(text)
     }
 }
 
@@ -518,6 +569,49 @@ pub(crate) mod tests {
         ),
     ];
 
+    /// The words a painted line shows: `painted` (a line of text from the driver record) without the isolates a
+    /// sentence wraps each host value in, which draw as nothing. For tests that look for words on screen; a test that
+    /// checks a host value was isolated uses [`paints_isolated`] on the line as painted instead.
+    ///
+    /// Only the pairs a sentence adds go: an opening isolate with its closing one after it and no other isolate
+    /// between. A lone or unbalanced one stays, so a check for presentation-unsafe characters still catches an isolate
+    /// that reached the screen any other way.
+    pub(crate) fn painted_words(painted: &str) -> String {
+        let mut words = String::new();
+        let mut rest = painted;
+        while let Some(open) = rest.find(LRI) {
+            let (before, after) = (&rest[..open], &rest[open + LRI.len_utf8()..]);
+            words.push_str(before);
+            match after.find([LRI, PDI]) {
+                Some(close) if after[close..].starts_with(PDI) => {
+                    words.push_str(&after[..close]);
+                    rest = &after[close + PDI.len_utf8()..];
+                }
+                _ => {
+                    words.push(LRI);
+                    rest = after;
+                }
+            }
+        }
+        words.push_str(rest);
+        words
+    }
+
+    /// Whether `painted` (a line of text from the driver record) paints the host value whose presentation is `shown`
+    /// as a sentence does: escaped, inside its isolate, which also holds the spaces the app's words before it end
+    /// with. A test that finds this knows the value was drawn escaped and could not reorder the words around it.
+    pub(crate) fn paints_isolated(painted: &str, shown: &str) -> bool {
+        painted.match_indices(LRI).any(|(at, _)| {
+            let inside = &painted[at + LRI.len_utf8()..];
+            inside.find([LRI, PDI]).is_some_and(|close| {
+                inside[close..].starts_with(PDI)
+                    && inside[..close]
+                        .strip_suffix(shown)
+                        .is_some_and(|spaces| spaces.chars().all(|ch| ch == ' '))
+            })
+        })
+    }
+
     /// Why this matters: SPEC.md requires every host value the GUI shows outside a terminal to have its hidden and
     /// direction-changing characters visible, and the old app's bugs here were values reaching a label without going
     /// through the escape. The presentation is the only displayable form a `HostText` has, so it carries the whole
@@ -590,7 +684,8 @@ pub(crate) mod tests {
     /// what an automated check of a view finds.
     ///
     /// Specification: with GPUI's driver record on, a drawn sentence is a node under its own id with the `Label` role
-    /// and its escaped accessible name as the label, and none of its parts is a node with a role of its own.
+    /// and its escaped accessible name as the label, without the isolates its drawn text holds; and the nodes inside it
+    /// (its text element, at least) have no role of their own.
     #[gpui::test]
     fn a_drawn_sentence_is_one_labelled_node_with_its_escaped_name(cx: &mut gpui::TestAppContext) {
         crate::test_support::install(cx);
@@ -608,7 +703,7 @@ pub(crate) mod tests {
             nodes[sentence].label.as_deref(),
             Some("Delete invoice<U+202E>fdp.exe?")
         );
-        // Every node recorded below the sentence, at any depth: the part wrappers and their text.
+        // Every node recorded below the sentence, at any depth: its text element.
         let inside = |mut index: usize| loop {
             match nodes[index].parent {
                 Some(parent) if parent == sentence => return true,
@@ -617,15 +712,18 @@ pub(crate) mod tests {
             }
         };
         let parts: Vec<_> = (0..nodes.len()).filter(|&index| inside(index)).collect();
-        assert!(!parts.is_empty(), "the sentence's parts were not recorded");
+        assert!(
+            !parts.is_empty(),
+            "premise: the sentence's text element was recorded"
+        );
         assert!(
             parts.iter().all(|&index| nodes[index].role.is_none()),
-            "a part of the sentence has a role of its own"
+            "something inside the sentence has a role of its own"
         );
     }
 
     /// The index of the node drawn under `id` in a frame's driver record, and every line of text painted by it or by
-    /// any node inside it, at any depth: a part's text is painted by the text element inside the part, never by the
+    /// any node inside it, at any depth: a sentence's text is painted by the text element inside it, never by the
     /// sentence's own node. Panics when nothing was drawn under `id`.
     fn painted(nodes: &[gpui::DriverNode], id: &str) -> (usize, Vec<gpui::DriverText>) {
         let Some(top) = nodes
@@ -679,14 +777,14 @@ pub(crate) mod tests {
     }
 
     /// Why this matters: a monospace part exists only to change the face a technical host value is drawn in. Its
-    /// escaping and direction isolation come from how it is drawn (its escaped presentation as a text element of its
-    /// own), and its accessible name (which is also a hover help's description) from how the sentence is named; a mono
-    /// part that differed from a host part in either would put a path's hidden characters on screen or in a screen
-    /// reader raw.
+    /// escaping and direction isolation come from how it is drawn (its escaped presentation inside an isolate), and its
+    /// accessible name (which is also a hover help's description) from how the sentence is named; a mono part that
+    /// differed from a host part in either would put a path's hidden characters on screen or in a screen reader raw.
     ///
     /// Specification: with GPUI's driver record on, for every string in the spoofing corpus, the monospace sentence is
-    /// one `Label` node named like the host sentence, the app's words followed by the escaped value, paints the same
-    /// lines of text, and paints the escaped value as a line of its own, apart from the app's words.
+    /// one `Label` node named like the host sentence, the app's words followed by the escaped value, and paints the
+    /// same text as the host sentence: one line, the app's words and then the escaped value between the isolate's
+    /// opening and closing characters.
     #[gpui::test]
     fn a_drawn_mono_part_is_escaped_and_isolated_as_a_host_part(cx: &mut gpui::TestAppContext) {
         crate::test_support::install(cx);
@@ -704,9 +802,10 @@ pub(crate) mod tests {
             assert_eq!(mono.label, host.label, "{shown:?}");
             assert_eq!(mono.label.as_deref(), Some(format!("At {shown}").as_str()));
             assert_eq!(mono_painted, host_painted, "{shown:?}");
-            assert!(
-                mono_painted.iter().any(|line| line == shown),
-                "{shown:?} was not painted whole as a line of its own: {mono_painted:?}"
+            assert_eq!(
+                mono_painted,
+                [format!("At{LRI} {shown}{PDI}")],
+                "{shown:?} was not painted escaped inside its isolate"
             );
         }
     }
@@ -717,27 +816,11 @@ pub(crate) mod tests {
     ///
     /// Specification: laid out with the real text system, a monospace part of eight `i`s and one of eight `M`s are
     /// both eight advances of the terminal face wide, while the same values as host parts differ in width (the
-    /// premise: the interface face is proportional, so the comparison can tell the faces apart).
+    /// premise: the interface face is proportional, so the comparison can tell the faces apart). The isolate around
+    /// each value is inside the measured line, so this also pins that it is drawn as nothing.
     #[test]
     fn a_mono_part_is_drawn_in_the_monospace_face() {
-        use gpui::{AppContext as _, px, size};
-
-        let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
-            assets::UI_FONT,
-        ));
-        let mut cx =
-            gpui::HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
-        cx.update(crate::bootstrap::install).unwrap();
-        let window = cx
-            .open_window(size(px(800.), px(400.)), |_, cx| cx.new(|_| WidthView))
-            .unwrap();
-        let nodes = cx
-            .update_window(window.into(), |_, window, cx| {
-                window.set_driver_enabled(true);
-                window.draw(cx).clear(cx);
-                window.driver_nodes().to_vec()
-            })
-            .unwrap();
+        let (mut cx, _, nodes) = draw_real(linux_text_system(), || WidthView);
         let width = |id: &str| {
             let (_, texts) = painted(&nodes, id);
             assert_eq!(texts.len(), 1, "{id} paints one line: {texts:?}");
@@ -746,7 +829,7 @@ pub(crate) mod tests {
         let advance = cx.update(|cx| {
             let text_system = cx.text_system();
             let face = text_system.resolve_font(&gpui::font(assets::TERMINAL_FONT));
-            f32::from(text_system.advance(face, px(13.), 'M').unwrap().width)
+            f32::from(text_system.advance(face, gpui::px(13.), 'M').unwrap().width)
         });
         let (host_narrow, host_wide) = (width("host-narrow"), width("host-wide"));
         assert!(
@@ -781,6 +864,381 @@ pub(crate) mod tests {
                 .child(HostSentence::new("mono-narrow").mono(&narrow))
                 .child(HostSentence::new("mono-wide").mono(&wide))
         }
+    }
+
+    // ---- Flow and isolation, on real text systems -------------------------------------------------------------------
+    //
+    // A sentence's guarantees rest on how a real shaper treats its one text element: where it breaks lines, how it
+    // orders right-to-left letters, and whether the isolates draw as anything. The checks below take the text system
+    // as a parameter, because the platforms shape differently: the Linux engine (cosmic-text), which the goldens use,
+    // and on macOS the platform's own (CoreText, through GPUI's Mac text system), which is what a Mac user's text goes
+    // through and which the Linux engine cannot stand in for.
+
+    /// The size and line height the flow views draw at, so a test can shape the same text itself.
+    const FLOW_SIZE: f32 = 13.;
+    const FLOW_LINE: f32 = 18.;
+
+    /// The Linux engine with only the bundled fonts, as the goldens and `test_support::headless` set it up.
+    fn linux_text_system() -> Arc<dyn gpui::PlatformTextSystem> {
+        Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+            assets::UI_FONT,
+        ))
+    }
+
+    /// One run of `len` bytes in the interface face, the run a sentence with no monospace part is drawn as.
+    fn ui_run(len: usize) -> gpui::TextRun {
+        gpui::TextStyle {
+            font_family: assets::UI_FONT.into(),
+            ..gpui::TextStyle::default()
+        }
+        .to_run(len)
+    }
+
+    /// Opens `view` in a headless window over `text_system`, bootstrapped like the app (the bundled fonts installed),
+    /// draws one frame with the driver record on, and returns the context, the window and the record. No renderer:
+    /// nothing here is captured, so it runs wherever the text system does.
+    fn draw_real<V: gpui::Render>(
+        text_system: Arc<dyn gpui::PlatformTextSystem>,
+        view: impl FnOnce() -> V,
+    ) -> (
+        gpui::HeadlessAppContext,
+        gpui::AnyWindowHandle,
+        Vec<gpui::DriverNode>,
+    ) {
+        use gpui::{AppContext as _, px, size};
+
+        let mut cx =
+            gpui::HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+        cx.update(crate::bootstrap::install).unwrap();
+        let window = cx
+            .open_window(size(px(800.), px(400.)), |_, cx| cx.new(|_| view()))
+            .unwrap()
+            .into();
+        let nodes = cx
+            .update_window(window, |_, window, cx| {
+                window.set_driver_enabled(true);
+                window.draw(cx).clear(cx);
+                window.driver_nodes().to_vec()
+            })
+            .unwrap();
+        (cx, window, nodes)
+    }
+
+    /// `text` shaped in `window` in the interface face, as a sentence with no monospace part is, wrapped at `width`
+    /// when given; the byte index each wrapped line after the first starts at.
+    fn wrap_breaks(
+        cx: &mut gpui::HeadlessAppContext,
+        window: gpui::AnyWindowHandle,
+        text: &SharedString,
+        width: gpui::Pixels,
+    ) -> Vec<usize> {
+        let shaped = cx
+            .update_window(window, |_, window, _| {
+                window
+                    .text_system()
+                    .shape_text(
+                        text.clone(),
+                        gpui::px(FLOW_SIZE),
+                        &[ui_run(text.len())],
+                        Some(width),
+                        None,
+                    )
+                    .unwrap()
+            })
+            .unwrap();
+        assert_eq!(shaped.len(), 1, "premise: {text:?} holds no hard break");
+        let line = &shaped[0];
+        line.wrap_boundaries()
+            .iter()
+            .map(|at| line.unwrapped_layout.runs[at.run_ix].glyphs[at.glyph_ix].index)
+            .collect()
+    }
+
+    /// `text` shaped on one line in `window` in the interface face.
+    fn shape(
+        cx: &mut gpui::HeadlessAppContext,
+        window: gpui::AnyWindowHandle,
+        text: &str,
+    ) -> gpui::ShapedLine {
+        cx.update_window(window, |_, window, _| {
+            window.text_system().shape_line(
+                SharedString::from(text.to_string()),
+                gpui::px(FLOW_SIZE),
+                &[ui_run(text.len())],
+                None,
+            )
+        })
+        .unwrap()
+    }
+
+    /// The YOLO question's sentence, with its host value mid-sentence: the sentence the launcher reported breaking
+    /// early in the sidebar row.
+    fn mid_sentence_host(id: &'static str) -> HostSentence {
+        HostSentence::new(id)
+            .text("Farhelm stops its actions on ")
+            .host(&HostText::from_host("build-box"))
+            .text(" without asking you.")
+    }
+
+    /// The words of [`mid_sentence_host`] that [`FlowView`]'s width is fitted to: the value with app words on both
+    /// sides, so a sentence that flows must keep the value on a line with app words.
+    const FLOW_FIT: &str = "its actions on build-box without";
+
+    /// Draws [`mid_sentence_host`] as `flow`, in a box just wide enough for [`FLOW_FIT`] and far too narrow for the
+    /// whole sentence.
+    struct FlowView;
+
+    impl gpui::Render for FlowView {
+        fn render(&mut self, window: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let fit = window
+                .text_system()
+                .shape_line(
+                    FLOW_FIT.into(),
+                    gpui::px(FLOW_SIZE),
+                    &[ui_run(FLOW_FIT.len())],
+                    None,
+                )
+                .width;
+            div()
+                .font_family(assets::UI_FONT)
+                .text_size(gpui::px(FLOW_SIZE))
+                .line_height(gpui::px(FLOW_LINE))
+                .child(div().w(fit + gpui::px(2.)).child(mid_sentence_host("flow")))
+        }
+    }
+
+    /// The flow check, on the frame [`FlowView`] drew: the sentence paints one text, its drawn string, as tall as that
+    /// string's own wrapped lines at the box's width; every break follows a space, so no wrapped line starts with one;
+    /// and the line holding the host value holds app words too.
+    fn check_flow(
+        cx: &mut gpui::HeadlessAppContext,
+        window: gpui::AnyWindowHandle,
+        nodes: &[gpui::DriverNode],
+    ) {
+        let (_, texts) = painted(nodes, "flow");
+        assert_eq!(
+            texts.len(),
+            1,
+            "the sentence paints one text, not one per part: {texts:?}"
+        );
+        let drawn = &texts[0];
+        assert_eq!(drawn.text, mid_sentence_host("flow").drawn().0);
+        let breaks = wrap_breaks(cx, window, &drawn.text, drawn.bounds.size.width);
+        assert!(
+            !breaks.is_empty(),
+            "premise: the box is too narrow for one line"
+        );
+        assert_eq!(
+            f32::from(drawn.bounds.size.height),
+            (breaks.len() + 1) as f32 * FLOW_LINE,
+            "the sentence is drawn as tall as its own words wrapped at its width"
+        );
+        let text = drawn.text.as_ref();
+        let mut lines = Vec::new();
+        let mut seen = 0;
+        for at in breaks {
+            lines.push(&text[seen..at]);
+            seen = at;
+        }
+        lines.push(&text[seen..]);
+        for wrapped in &lines[..lines.len() - 1] {
+            assert!(wrapped.ends_with(' '), "a line breaks mid-word: {lines:?}");
+        }
+        let holding = lines
+            .iter()
+            .find(|wrapped| wrapped.contains("build-box"))
+            .expect("the value was drawn whole on one line");
+        assert!(
+            painted_words(holding)
+                .replace("build-box", "")
+                .chars()
+                .any(char::is_alphabetic),
+            "the value sits on a line of its own: {lines:?}"
+        );
+    }
+
+    /// The break-before-a-value check: [`mid_sentence_host`] wrapped just wider than the words before its value
+    /// breaks right before the value, so the first line is exactly those words. GPUI keeps a break opportunity only
+    /// where a glyph starts, and on macOS an isolate opened right after the space lost this break and wrapped "on"
+    /// onto the value's line ([`HostSentence::drawn`] says how the break is kept).
+    fn check_break_before_value(cx: &mut gpui::HeadlessAppContext, window: gpui::AnyWindowHandle) {
+        const BEFORE: &str = "Farhelm stops its actions on ";
+        let (text, _) = mid_sentence_host("flow").drawn();
+        let width = shape(cx, window, BEFORE).width + gpui::px(2.);
+        let breaks = wrap_breaks(cx, window, &text, width);
+        // The isolate opens before the space, so the first line may end with it; it draws as nothing.
+        let first = breaks.first().map(|&at| text[..at].replace(LRI, ""));
+        assert_eq!(
+            first.as_deref(),
+            Some(BEFORE),
+            "the line breaks right before the value: {text:?} at {breaks:?}"
+        );
+    }
+
+    /// The isolates-draw-nothing check: an all-left-to-right sentence is as wide drawn as its words alone (within half a
+    /// pixel, for kerning the isolate may interrupt), and every glyph the shaper made for an isolate rasterizes to
+    /// nothing, so no box or other mark shows at a value's edges. The width comparison carries the check on both
+    /// platforms: CoreText makes no glyph at an isolate and the Linux shaper turns it into a zero-width space, so the
+    /// raster loop only guards against a future shaper drawing a visible mark there.
+    fn check_isolates_draw_nothing(
+        cx: &mut gpui::HeadlessAppContext,
+        window: gpui::AnyWindowHandle,
+        text_system: &dyn gpui::PlatformTextSystem,
+    ) {
+        let (text, _) = mid_sentence_host("flow").drawn();
+        let drawn = shape(cx, window, &text);
+        let words = shape(cx, window, &painted_words(&text));
+        assert!(
+            (f32::from(drawn.width) - f32::from(words.width)).abs() < 0.5,
+            "the isolates take no width: {:?} drawn, {:?} without them",
+            drawn.width,
+            words.width
+        );
+        let isolates: Vec<usize> = text
+            .char_indices()
+            .filter(|(_, ch)| matches!(*ch, LRI | PDI))
+            .map(|(at, _)| at)
+            .collect();
+        for run in &drawn.runs {
+            for glyph in run
+                .glyphs
+                .iter()
+                .filter(|glyph| isolates.contains(&glyph.index))
+            {
+                let bounds = text_system
+                    .glyph_raster_bounds(&gpui::RenderGlyphParams {
+                        font_id: run.font_id,
+                        glyph_id: glyph.id,
+                        font_size: gpui::px(FLOW_SIZE),
+                        subpixel_variant: gpui::Point::default(),
+                        scale_factor: 2.,
+                        is_emoji: glyph.is_emoji,
+                        subpixel_rendering: false,
+                        dilation: 0,
+                    })
+                    .unwrap();
+                assert!(
+                    bounds.size.width.0 == 0 || bounds.size.height.0 == 0,
+                    "the isolate at byte {} draws a glyph {bounds:?}",
+                    glyph.index
+                );
+            }
+        }
+    }
+
+    /// Two right-to-left host values, three Hebrew letters each, with letters of their own so a check can tell where
+    /// each was drawn.
+    const ALEF: &str = "\u{5d0}\u{5d1}\u{5d2}";
+    const DALET: &str = "\u{5d3}\u{5d4}\u{5d5}";
+
+    /// Whether every glyph of `left` (its first occurrence) is drawn left of every glyph of `right`, with `text`
+    /// shaped on one line in `window`.
+    fn drawn_left_of(
+        cx: &mut gpui::HeadlessAppContext,
+        window: gpui::AnyWindowHandle,
+        text: &str,
+        left: &str,
+        right: &str,
+    ) -> bool {
+        let line = shape(cx, window, text);
+        let xs = |needle: &str| -> Vec<f32> {
+            let at = text.find(needle).unwrap();
+            line.runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .filter(|glyph| (at..at + needle.len()).contains(&glyph.index))
+                .map(|glyph| f32::from(glyph.position.x))
+                .collect()
+        };
+        let (left, right) = (xs(left), xs(right));
+        assert!(
+            !left.is_empty() && !right.is_empty(),
+            "nothing shaped in {text:?}"
+        );
+        left.iter().all(|l| right.iter().all(|r| l < r))
+    }
+
+    /// The isolation check, on drawn strings shaped in `window`. Three sentences, each with a premise that the threat
+    /// is real on this shaper, checked first:
+    ///
+    /// - "At «אבג», «דהו».": the first value is drawn left of the second. Premise: in one plain string with no
+    ///   isolates, the second is drawn left of the first.
+    /// - "«אבג» asks first.": the value is drawn left of the app's words. Premise: in a plain string, a leading value
+    ///   turns the line right-to-left and is drawn right of them.
+    /// - "At «אבג abc».": inside the value, `abc` is drawn right of the Hebrew, which only a left-to-right isolate
+    ///   gives, as the old app's `dir="ltr"` spans did. Premise: inside a right-to-left isolate, `abc` is drawn left.
+    fn check_isolation(cx: &mut gpui::HeadlessAppContext, window: gpui::AnyWindowHandle) {
+        let (alef, dalet) = (HostText::from_host(ALEF), HostText::from_host(DALET));
+        let mixed = format!("{ALEF} abc");
+        let pair = HostSentence::new("pair")
+            .text("At ")
+            .host(&alef)
+            .text(", ")
+            .host(&dalet)
+            .text(".");
+        let lead = HostSentence::new("lead").host(&alef).text(" asks first.");
+        let inner = HostSentence::new("inner")
+            .text("At ")
+            .host(&HostText::from_host(mixed.as_str()))
+            .text(".");
+        for (sentence, plain, first, second) in [
+            (pair, format!("At {ALEF}, {DALET}."), ALEF, DALET),
+            (lead, format!("{ALEF} asks first."), ALEF, "asks"),
+            (inner, format!("At \u{2067}{mixed}{PDI}."), ALEF, "abc"),
+        ] {
+            assert!(
+                drawn_left_of(cx, window, &plain, second, first),
+                "premise: the shaper reorders {plain:?}"
+            );
+            let (drawn, _) = sentence.drawn();
+            assert!(
+                drawn_left_of(cx, window, &drawn, first, second),
+                "{first:?} is drawn left of {second:?} in {drawn:?}"
+            );
+        }
+    }
+
+    /// Why this matters: a sentence laid out as one element per part could only wrap whole parts, so in a narrow place
+    /// (the sidebar row's question, a dialog summary) it broke early at the host value and started the next line on
+    /// the space after it. The old app's inline text broke between words, and that is the behavior being ported.
+    ///
+    /// Specification: laid out with the Linux engine, [`check_flow`] and [`check_break_before_value`] hold.
+    #[test]
+    fn a_sentence_wraps_between_words_not_at_its_parts() {
+        let (mut cx, window, nodes) = draw_real(linux_text_system(), || FlowView);
+        check_flow(&mut cx, window, &nodes);
+        check_break_before_value(&mut cx, window);
+    }
+
+    /// Why this matters: a sentence is one text element, and GPUI runs the bidirectional algorithm over a whole text
+    /// element, across its runs, so the escape table alone does not keep a right-to-left host value from reordering
+    /// the app's words around it. The isolates do, and they must draw as nothing.
+    ///
+    /// Specification: with the Linux engine, [`check_isolation`] and [`check_isolates_draw_nothing`] hold.
+    #[test]
+    fn a_right_to_left_host_part_reorders_only_within_its_isolate() {
+        let text_system = linux_text_system();
+        let (mut cx, window, _) = draw_real(text_system.clone(), || FlowView);
+        check_isolation(&mut cx, window);
+        check_isolates_draw_nothing(&mut cx, window, &*text_system);
+    }
+
+    /// Why this matters: on macOS GPUI shapes a whole line as one CoreText line, so a sentence keeps right-to-left
+    /// values to themselves only if CoreText honors the isolates, draws them as nothing, and leaves GPUI a glyph to
+    /// break before. The Linux engine's tests prove none of that for a Mac, where the maintainer runs Farhelm.
+    ///
+    /// Specification: with macOS's own text system and the bundled fonts, [`check_flow`],
+    /// [`check_break_before_value`], [`check_isolation`] and [`check_isolates_draw_nothing`] hold.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated() {
+        let text_system: Arc<dyn gpui::PlatformTextSystem> =
+            Arc::new(gpui_apple::AppleTextSystem::new());
+        let (mut cx, window, nodes) = draw_real(text_system.clone(), || FlowView);
+        check_flow(&mut cx, window, &nodes);
+        check_break_before_value(&mut cx, window);
+        check_isolation(&mut cx, window);
+        check_isolates_draw_nothing(&mut cx, window, &*text_system);
     }
 
     /// Why this matters: the quick switcher marks the characters a search matched in host values, and the marks are

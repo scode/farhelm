@@ -863,10 +863,15 @@ shows as itself, so no two identities look alike, and its compact form keeps the
 without splitting an escape. That compact form is drawn short and named in full: its accessible text is the strict
 spelling of the whole reference, as SPEC.md's From line requires.
 
-Direction isolation is structural: every piece of host text is laid out as its own text element, never concatenated into
-a string with the app's words, so a right-to-left value reorders only within itself, as HTML's `<bdi>` did in the old
-app; a sentence that mixes both keeps each part its own element. The table lists Unicode's whole format category, which
-the old app's terminal-link disclosure escaped, so that disclosure uses it too.
+Direction isolation is the element's too, so a right-to-left value reorders only within itself, as the old app's
+isolated spans (`dir="ltr"`, `unicode-bidi: isolate`) made it. A host value drawn alone is its own text element. A host
+sentence (`HostSentence`) is one text element, so it wraps between words as the old inline text did, with each host
+value inside a left-to-right isolate (U+2066 … U+2069). The isolate is required: GPUI applies the bidirectional
+algorithm to a whole text element across its styled runs, on Linux and on macOS alike, and a test on each platform's own
+text system pins that the isolates keep the order, draw as nothing and leave the line break before a host value. The
+isolate holds because the table escapes every direction control and paragraph separator, so no host value can close its
+isolate or end the paragraph. Host text is never concatenated with the app's words in any other way. The table lists
+Unicode's whole format category, which the old app's terminal-link disclosure escaped, so that disclosure uses it too.
 
 Hover help may name a host value (the agent mark's, the permission shield's) only as a host sentence, or as several, one
 per paragraph: the tooltip draws each through the escaping element, and the control's accessible description is the

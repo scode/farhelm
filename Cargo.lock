@@ -2020,6 +2020,7 @@ dependencies = [
  "gpui-base",
  "gpui-component",
  "gpui-pre",
+ "gpui-pre-apple",
  "gpui-pre-platform",
  "gpui-pre-wgpu",
  "image",

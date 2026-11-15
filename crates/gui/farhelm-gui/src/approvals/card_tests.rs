@@ -20,6 +20,7 @@ use gpui::{DriverNode, DriverText, IntoElement as _, Role, TestAppContext, Visua
 use super::card::{CardState, NARROW_WIDTH, card};
 use super::model::{Card, TunnelOffer};
 use crate::host_text::HostText;
+use crate::host_text::tests::paints_isolated;
 use crate::test_support::{self, frame};
 
 // ---- Fixtures -------------------------------------------------------------------------------------------------------
@@ -281,8 +282,10 @@ fn host_names_on_the_card_are_escaped_host_text(cx: &mut TestAppContext) {
         "approval-req-1-answer-always-allow-own-host",
     ] {
         assert!(
-            painted(&nodes, button).contains(&escaped),
-            "{button} paints the escaped host"
+            painted(&nodes, button)
+                .iter()
+                .any(|line| paints_isolated(line, &escaped)),
+            "{button} paints the escaped host, isolated"
         );
     }
     assert!(
