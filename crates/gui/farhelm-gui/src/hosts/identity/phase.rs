@@ -232,8 +232,6 @@ fn evidence(
             } else {
                 format!("Attempt {attempt}: {progress}")
             };
-            // One piece of the app's words before the error: parts wrap as whole pieces, so the lead and "; the last
-            // one failed: " would otherwise break apart at their seam.
             match last_error {
                 Some(error) => line
                     .text(format!("{lead}; the last one failed: "))

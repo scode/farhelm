@@ -17,6 +17,7 @@ use gpui::{DriverNode, TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
 
 use crate::focus::Mark;
+use crate::host_text::tests::painted_words;
 use crate::hosts::tests::{hosts, open_panel_in_column, reference_hosts};
 use crate::operations::{Command, NotStarted, OpKey, Work};
 use crate::session;
@@ -80,7 +81,7 @@ fn label(cx: &mut VisualTestContext, id: &str) -> Option<String> {
 fn painted(cx: &mut VisualTestContext) -> String {
     let lines: Vec<String> = frame(cx)
         .into_iter()
-        .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
+        .flat_map(|node| node.texts.into_iter().map(|line| painted_words(&line.text)))
         .collect();
     lines
         .join(" ")

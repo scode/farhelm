@@ -20,6 +20,7 @@ use gpui::{
 use super::Hint;
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
+use crate::host_text::tests::painted_words;
 use crate::host_text::{HostSentence, HostText};
 use crate::root;
 use crate::test_support::{self, any_open, click, frame, keys, meta, settle, started};
@@ -191,7 +192,7 @@ pub(super) fn open_header<'a>(
 pub(super) fn painted(cx: &mut VisualTestContext) -> String {
     let lines: Vec<String> = frame(cx)
         .into_iter()
-        .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
+        .flat_map(|node| node.texts.into_iter().map(|line| painted_words(&line.text)))
         .collect();
     lines
         .join(" ")

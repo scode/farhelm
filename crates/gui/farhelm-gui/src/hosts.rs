@@ -979,11 +979,7 @@ fn tone_ink(tone: Tone, palette: &Palette) -> Token {
 
 /// One detail line (`.host-detail`, `.host-destination-detail`, `.host-remedy`): 12-pixel text, the remedy in the
 /// ordinary ink and the rest in the quiet one. The sentence is the line's one labelled node for assistive technology;
-/// this wrapper adds only the line's spacing and ink, which the sentence's parts inherit.
-///
-/// NOTE: The parts wrap as whole pieces, as every sentence mixing the app's words with host text does
-/// ([`HostSentence`]): a long value starts on a line of its own and wraps inside itself, where the old page broke it
-/// mid-run after the words before it.
+/// this wrapper adds only the line's spacing and ink, which the sentence inherits.
 fn detail_line(kind: Kind, line: HostSentence, palette: &Palette) -> AnyElement {
     let ink = match kind {
         Kind::Evidence => palette.fg_1,

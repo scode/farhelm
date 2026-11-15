@@ -23,7 +23,7 @@ use super::selection::{self, Change, Listed, Open, Stamped};
 use super::status::Live;
 use super::{CountLine, SessionList, count_line, empty_fleet};
 use crate::components::pulse_opacity;
-use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::host_text::tests::{SPOOFING_CORPUS, painted_words};
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
 use crate::test_support::{frame, meta, session_entry, started};
@@ -332,11 +332,11 @@ fn row_order(nodes: &[DriverNode]) -> Vec<String> {
     rows.into_iter().map(|(_, key)| key).collect()
 }
 
-/// Every line of text the frame painted.
+/// Every line of text the frame painted, as words on screen (a sentence's isolates left out).
 pub(crate) fn painted(nodes: &[DriverNode]) -> Vec<String> {
     nodes
         .iter()
-        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .flat_map(|node| node.texts.iter().map(|text| painted_words(&text.text)))
         .collect()
 }
 

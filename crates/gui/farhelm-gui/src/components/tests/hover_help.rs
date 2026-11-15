@@ -13,6 +13,7 @@ use gpui::{
 };
 
 use crate::components::{Button, HoverHelp, Role};
+use crate::host_text::tests::{painted_words, paints_isolated};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers;
 use crate::test_support::{advance, bounds, center, check, frame, open, redraw};
@@ -546,11 +547,12 @@ const SPOOFED_HOST_SHOWN: &str = "a<U+202E><b><U+000A>";
 /// GUI shows outside a terminal escaped, in accessible names too; a tooltip is the one surface the layer manager draws
 /// on its own, so without a host form there a view would have to format a raw value into help text. Specified: hovering
 /// a control whose help is a host sentence shows that help after the hover delay, drawn in the tooltip as one `Label`
-/// node under the sentence's id, named with the host value escaped, and painting the value as host text's element does,
-/// whole and escaped, with no presentation-unsafe character anywhere in the frame; the tooltip's text, and
-/// `HoverHelp::description` (what `with_hover_help` gives the control as its accessible description), are the
-/// sentence's accessible text. The description the drawn control carries is not checked: GPUI's driver record has no
-/// description field, and the test platform cannot switch on accessibility to read the tree.
+/// node under the sentence's id, named with the host value escaped, and painting the value as a host sentence does,
+/// whole and escaped inside its isolate, with no presentation-unsafe character anywhere else in the frame (an isolate
+/// is one, but it is the sentence's own and draws as nothing); the tooltip's text, and `HoverHelp::description` (what
+/// `with_hover_help` gives the control as its accessible description), are the sentence's accessible text. The
+/// description the drawn control carries is not checked: GPUI's driver record has no description field, and the test
+/// platform cannot switch on accessibility to read the tree.
 #[gpui::test]
 fn help_naming_a_host_value_draws_it_escaped_in_the_tooltip(cx: &mut TestAppContext) {
     let help = || {
@@ -590,7 +592,7 @@ fn help_naming_a_host_value_draws_it_escaped_in_the_tooltip(cx: &mut TestAppCont
     };
     assert_eq!(nodes[sentence].role, Some(Role::Label));
     assert_eq!(nodes[sentence].label.as_deref(), Some(expected.as_str()));
-    // Every node recorded below the sentence, at any depth: its parts and their text.
+    // Every node recorded below the sentence, at any depth: its text element.
     let inside = |mut index: usize| loop {
         match nodes[index].parent {
             Some(parent) if parent == sentence => return true,
@@ -603,12 +605,14 @@ fn help_naming_a_host_value_draws_it_escaped_in_the_tooltip(cx: &mut TestAppCont
         .flat_map(|index| nodes[index].texts.iter().map(|text| text.text.to_string()))
         .collect();
     assert!(
-        painted.iter().any(|text| text == SPOOFED_HOST_SHOWN),
-        "the host value was painted whole and escaped, as its own line: {painted:?}"
+        painted
+            .iter()
+            .any(|text| paints_isolated(text, SPOOFED_HOST_SHOWN)),
+        "the host value was painted whole and escaped, isolated: {painted:?}"
     );
     let unsafe_text: Vec<String> = nodes
         .iter()
-        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .flat_map(|node| node.texts.iter().map(|text| painted_words(&text.text)))
         .filter(|text| {
             text.chars()
                 .any(farhelm_proto::text::is_presentation_unsafe)

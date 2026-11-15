@@ -264,8 +264,8 @@ fn badge_with(row: &SessionRow, id: SharedString, unknown_code: bool) -> Option<
 
 /// An ended status's wording in its two parts: the app's words, and the one host value that may follow them (a stop
 /// annotation, a launch failure's detail). [`Badge::Ended`]'s line is these parts as one sentence; a surface that has
-/// to keep the wording on one line and cut it short (the session pane's details bar) lays the parts out itself, which a
-/// sentence, whose parts wrap as blocks, cannot do.
+/// to keep the wording on one line and cut the host value short first (the session pane's details bar) lays the parts
+/// out itself, which a sentence, one text element, cannot do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EndedWords {
     pub(crate) kind: Ended,
