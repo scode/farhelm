@@ -14,8 +14,9 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{
-    App, Div, FocusHandle, InteractiveElement as _, ParentElement as _, Role, SharedString,
-    Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    App, Div, ElementId, FocusHandle, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
+    Window, div, px,
 };
 use serde::de::DeserializeOwned;
 
@@ -36,6 +37,14 @@ pub(super) const LABEL_LINE_HEIGHT: f32 = 19.4;
 pub(super) const HELP_LINE_HEIGHT: f32 = 19.2;
 /// `.host-settings-section .setting-group`'s gap: a description sits this close under its own label.
 pub(super) const GROUP_GAP: f32 = 4.;
+/// `.checkout-root-label`'s gap between a field's words and the field, which every labelled text field in Settings
+/// shares ([`labelled`]).
+pub(super) const LABEL_GAP: f32 = 6.;
+/// `.checkout-root-label input`'s `min-height`: the single-line text fields' height in Settings.
+pub(super) const FIELD_HEIGHT: f32 = 36.;
+/// `.checkout-root-error` and `.checkout-root-success`: `line-height: 1.5` at 12 pixels, the explicitly saved forms'
+/// outcome lines and notes ([`outcome_line`]).
+pub(super) const OUTCOME_LINE_HEIGHT: f32 = 18.;
 
 /// One preference switch in Settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -402,6 +411,60 @@ pub(super) fn help(text: impl Into<SharedString>, cx: &App) -> Div {
         .line_height(px(HELP_LINE_HEIGHT))
         .text_color(theme::color(palette.fg_1))
         .child(text.into())
+}
+
+/// A text field with its words above it, as wide as its column (`.checkout-root-label`): the label at the old labels'
+/// size over `field`, which is wrapped in an element drawn under `id`'s debug selector, because tests click a field by
+/// where it is drawn and GPUI Kit's field draws no selector of its own. `label` should be the field's accessible name
+/// too, as the old `<label>` made it.
+pub(super) fn labelled(label: &'static str, id: &'static str, field: impl IntoElement) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(LABEL_GAP))
+        .w_full()
+        .min_w_0()
+        .child(
+            div()
+                .text_size(px(LABEL_TEXT))
+                .line_height(px(LABEL_LINE_HEIGHT))
+                .child(label),
+        )
+        .child(
+            div()
+                .w_full()
+                .debug_selector(move || id.to_owned())
+                .child(field),
+        )
+}
+
+/// A line under an explicitly saved form (its outcome, its working line, a failure), drawn under the element id `id`
+/// with `role`, in `ink`, at the forms' 12 pixels on an 18-pixel line, as wide as its column so long words wrap there.
+/// The caller adds the words and their accessible name.
+pub(super) fn outcome_line(id: impl Into<SharedString>, role: Role, ink: Hsla) -> Stateful<Div> {
+    let id: SharedString = id.into();
+    div()
+        .id(ElementId::Name(id.clone()))
+        .debug_selector(move || id.to_string())
+        .role(role)
+        .w_full()
+        .text_size(metrics::TEXT_SM)
+        .line_height(px(OUTCOME_LINE_HEIGHT))
+        .text_color(ink)
+}
+
+/// An [`outcome_line`] holding a failure: the helm's words (or the form's own, carried the same way) as host text, so
+/// they reach the screen and assistive technology only escaped, as an alert in the danger ink.
+pub(super) fn failure_outcome(
+    id: impl Into<SharedString>,
+    reason: &HostText,
+    cx: &App,
+) -> Stateful<Div> {
+    let id: SharedString = id.into();
+    let sentence = HostSentence::new(ElementId::Name(id.clone())).host(reason);
+    outcome_line(id, Role::Alert, theme::color(theme::palette(cx).danger))
+        .aria_label(sentence.accessible_name())
+        .child(sentence)
 }
 
 /// One switch with its help under it and, after a refused save, its failure line under that, and the line saying why a

@@ -31,11 +31,11 @@
 //!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field
 //!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
 //!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
-//!   explicitly, a view of its own ([`ntfy`]). Terminal's tunnel switch saves like a switch only when turned off;
-//!   turned on, it asks the terminal's tunnel warning, whose Allow saves the consent, and shows the stored choice until
-//!   the helm pushes it ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting
-//!   through its updater, at once and with a final answer, so it has no draft and never holds the preference row's key
-//!   ([`app`]).
+//!   explicitly, a view of its own ([`ntfy`]). So is Credentials, whose named secrets each save under their own key
+//!   ([`credentials`]). Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the
+//!   terminal's tunnel warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it
+//!   ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting through its
+//!   updater, at once and with a final answer, so it has no draft and never holds the preference row's key ([`app`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -65,6 +65,9 @@ mod checkout_field;
 mod checkouts;
 mod choices;
 mod configured;
+#[cfg(test)]
+mod credential_tests;
+mod credentials;
 mod ntfy;
 mod refused;
 mod terminal;
@@ -134,8 +137,8 @@ const SUMMARY: &str = "For every host on this helm";
 
 /// The footer's note, the old desktop app's words.
 ///
-/// NOTE: It names the dialog's explicit-save editors; of them, only ntfy alerts' form and Checkouts' fields are built so
-/// far (the others come with their sections).
+/// NOTE: It names the dialog's explicit-save editors; of them, the Tensorlake API key form is not built yet (it joins
+/// Credentials next), nor is the file types field (it comes with Terminal's file downloads).
 const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
                            fields and file types use Save.";
 
@@ -320,6 +323,7 @@ pub(crate) enum Section {
     Sessions,
     Appearance,
     Hosts,
+    Credentials,
     Terminal,
     Checkouts,
     AgentTrust,
@@ -336,6 +340,7 @@ impl Section {
         Section::Sessions,
         Section::Appearance,
         Section::Hosts,
+        Section::Credentials,
         Section::Terminal,
         Section::Checkouts,
         Section::AgentTrust,
@@ -352,6 +357,7 @@ impl Section {
             Section::Sessions
             | Section::Appearance
             | Section::Hosts
+            | Section::Credentials
             | Section::Terminal
             | Section::Checkouts
             | Section::AgentTrust
@@ -365,6 +371,7 @@ impl Section {
             Section::Sessions => "sessions",
             Section::Appearance => "appearance",
             Section::Hosts => "hosts",
+            Section::Credentials => "credentials",
             Section::Terminal => "terminal",
             Section::Checkouts => "checkouts",
             Section::AgentTrust => "agent-trust",
@@ -379,6 +386,7 @@ impl Section {
             Section::Sessions => "Sessions",
             Section::Appearance => "Appearance",
             Section::Hosts => "Hosts",
+            Section::Credentials => "Credentials",
             Section::Terminal => "Terminal",
             Section::Checkouts => "Checkouts",
             Section::AgentTrust => "Agent trust",
@@ -393,6 +401,7 @@ impl Section {
             Section::Sessions => Icon::Sessions,
             Section::Appearance => Icon::Appearance,
             Section::Hosts => Icon::Hosts,
+            Section::Credentials => Icon::Lock,
             Section::Terminal => Icon::Terminal,
             Section::Checkouts => Icon::Folder,
             Section::AgentTrust => Icon::AgentTrust,
@@ -407,13 +416,15 @@ impl Section {
     /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
     /// is a text field that is read-only until its read answers, and Notifications, whose controls are unavailable
-    /// until its read answers ([`ntfy`]); only their goldens open at either. `None` for App as well, whose switch is
-    /// not a preference [`Choice`]: [`SettingsDialog::start`] gives it its own handle.
+    /// until its read answers ([`ntfy`]), and Credentials, whose controls wait for its reads too ([`credentials`]);
+    /// only their goldens open at any of these. `None` for App as well, whose switch is not a preference [`Choice`]:
+    /// [`SettingsDialog::start`] gives it its own handle.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
             Section::Appearance => None,
             Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
+            Section::Credentials => None,
             Section::Terminal => None,
             Section::Checkouts => None,
             Section::AgentTrust => None,
@@ -452,6 +463,9 @@ pub(crate) struct SettingsDialog {
     ntfy: Option<Entity<ntfy::NtfyAlerts>>,
     /// App's automatic-updates switch: its focus handle and the reason its last press was not saved ([`app`]).
     app: app::AppUpdates,
+    /// The Credentials section, made the first time it is shown in this opening; it reads the catalog then and each
+    /// time it is shown again.
+    credentials: Option<Entity<credentials::Credentials>>,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
     focus_on: Option<Handover>,
@@ -510,6 +524,7 @@ impl SettingsDialog {
             spare: Configured::new(),
             ntfy: None,
             app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
+            credentials: None,
             focus_on: None,
             layer: None,
             refused: Refused::default(),
@@ -540,11 +555,21 @@ impl SettingsDialog {
     /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
     /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
     /// its fields (which read their routes) and reads the spare switch, and showing Notifications for the first time
-    /// makes its form, which reads the helm's ntfy settings.
+    /// makes its form, which reads the helm's ntfy settings. Showing Credentials makes it the first time, and reads its
+    /// catalog every time.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
         if section == Section::Notifications && self.ntfy.is_none() {
             self.ntfy = Some(cx.new(|cx| ntfy::NtfyAlerts::new(window, cx)));
+        }
+        if section == Section::Credentials {
+            match &self.credentials {
+                // Shown again: the catalog is not pushed, so it is read again (the section's module docs).
+                Some(section) => section.update(cx, |section, cx| section.read(cx)),
+                None => {
+                    self.credentials = Some(cx.new(|cx| credentials::Credentials::new(window, cx)));
+                }
+            }
         }
         if section == Section::Checkouts && self.checkout_fields.is_none() {
             self.checkout_fields = Some(CheckoutFields {
@@ -963,6 +988,11 @@ impl SettingsDialog {
                 .map(IntoElement::into_any_element)
                 .collect()
             }
+            Section::Credentials => self
+                .credentials
+                .iter()
+                .map(|section| section.clone().into_any_element())
+                .collect(),
         }
     }
 }
