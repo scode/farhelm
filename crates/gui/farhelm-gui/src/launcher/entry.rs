@@ -8,7 +8,9 @@
 //!
 //! New is refused while a launch is pending: the old New button was disabled while the page's one operation token was
 //! held, and SPEC.md keeps "a launch is pending" among what disables it ("Cmd+N ... unless a modal is open or New is
-//! disabled"). A refused launch waiting behind its notice is different: New brings that launcher back, with its draft
+//! disabled"). It is refused too while one of this window's host-registry changes is in flight (SPEC.md: "Launches and
+//! changes to the host registry still exclude each other"; `launch::host_change_in_flight` says which work counts), as
+//! the old token's host changes disabled it. A refused launch waiting behind its notice is different: New brings that launcher back, with its draft
 //! and refusal, rather than starting a fresh one, as the old app did (its New revealed a returned launcher). SPEC.md
 //! leaves open whether that notice keeps New refused until it is opened; bringing the draft back answers it without
 //! refusing anything.
@@ -44,17 +46,20 @@ pub const NEW_SESSION_HELP: &str = if cfg!(target_os = "macos") {
     "New session: start an agent or a command on any host"
 };
 
-/// Whether New can open now: not while a launch is pending, which is when the old New button was disabled. A
-/// surface drawing a New trigger draws it disabled while this is `false`, reading it while it draws: the launch slot
-/// notifies when what it answers from changes.
+/// Whether New can open now: not while a launch is pending, nor while one of this window's host-registry changes is
+/// in flight, when the old New button was disabled too (its page-wide operation token covered launches and host
+/// changes, though not a new host's probe, which the migration's orchestrator decided counts here). A surface
+/// drawing a New trigger draws it disabled while this is `false`, reading it while it draws: the launch slot and the
+/// operation store both notify when what it answers from changes.
 pub fn new_available(cx: &mut App) -> bool {
-    !launch::pending(cx)
+    !launch::pending(cx) && !launch::host_change_in_flight(cx)
 }
 
 /// Open New in `window` with New's prefill (see the module docs), or bring back a refused launch waiting behind its
-/// notice. Call it from the handler of the user's action. Refused, returning `false`, while a launch is pending,
-/// while a dialog or menu is open (a trigger inside one closes it first, as the quick switcher's row does), or with no
-/// UI session.
+/// notice. Call it from the handler of the user's action. Refused, returning `false`, while New is unavailable
+/// ([`new_available`]), while a dialog or menu is open (a trigger inside one closes it first, as the quick switcher's
+/// row does), or with no UI session. While a host change is in flight, the notice's Open launcher still brings a
+/// waiting launcher back (its Launch is refused meanwhile, so that changes nothing), and New does not.
 pub fn open_new(window: &mut Window, cx: &mut App) -> bool {
     open_with(None, window, cx)
 }
@@ -69,7 +74,7 @@ pub fn open_new_named(name: &str, window: &mut Window, cx: &mut App) -> bool {
 
 /// [`open_new`] and [`open_new_named`]'s shared path.
 fn open_with(name: Option<&str>, window: &mut Window, cx: &mut App) -> bool {
-    if layers::focus_layer_open(window, cx) || launch::pending(cx) {
+    if layers::focus_layer_open(window, cx) || !new_available(cx) {
         return false;
     }
     if launch::open_waiting(window, cx) {

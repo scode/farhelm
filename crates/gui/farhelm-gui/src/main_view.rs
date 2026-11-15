@@ -192,8 +192,8 @@ impl Render for MainView {
                 session_list::quick_switcher::open(list.clone(), window, cx)
             })
             // Taken whatever New does with it, as a once-per-press shortcut's handler must be (`actions.rs`). New
-            // itself refuses while a dialog or menu is open or a launch is pending (SPEC.md: "unless a modal is open
-            // or New is disabled").
+            // itself refuses while a dialog or menu is open, a launch is pending or a host change is in flight
+            // (SPEC.md: "unless a modal is open or New is disabled").
             .on_action(|_: &NewSession, window, cx| {
                 launcher::entry::open_new(window, cx);
             })

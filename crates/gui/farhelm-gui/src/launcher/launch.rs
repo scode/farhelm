@@ -25,15 +25,14 @@
 //! brings it back.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: the pending pill and the "Started" pill that report a
-//! launch while the launcher is hidden; refusing Launch while one of this window's host-registry changes (a host being
-//! added or set up) is in flight, the launcher's half of SPEC.md's "Launches and changes to the host registry still
-//! exclude each other"; the YOLO question a refusal can carry; and showing the host's timeout reply without "Not
+//! launch while the launcher is hidden; the YOLO question a refusal can carry; and showing the host's timeout reply without "Not
 //! launched.", since the create may still happen. The last two wait on the operation store telling such replies apart
 //! from other refusals.
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
 use farhelm_proto::session_requests::CreateSessionBody;
+use farhelm_proto::ui_channel::HostView;
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
 use super::view::{Launcher, show};
@@ -113,6 +112,60 @@ pub(super) fn pending(cx: &mut App) -> bool {
             .as_ref()
             .is_some_and(|held| held.waiting == Waiting::Reply)
     })
+}
+
+/// Why Launch waits while one of this window's host-registry changes is in flight, as its hover text and after "Not
+/// launched." on a press: SPEC.md, "Creation": "Launches and changes to the host registry still exclude each other".
+/// The old app disabled Launch and New without a reason while its one page-wide operation token was held.
+pub(super) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to finish";
+
+/// Whether one of this window's host-registry changes is in flight in the operation store, which refuses Launch and a
+/// fresh New: the launcher's half of the exclusion, which the migration's orchestrator decided on 2026-11-14 is kept by
+/// each side refusing its own action while the other's work is in flight, rather than by the old app's shared token.
+/// (Add host's half, refusing itself while a launch is in flight, is the hosts work's.)
+///
+/// Two kinds count. A new host's probe and setup, and a host's removal, by their kind of work ([`changes_host_registry`]);
+/// the orchestrator's decision counts the probe too, which the old app left outside its token. And any work on a
+/// registered host's own key: an edit of its destination or alias, a re-run of its setup, any of its settings, as the
+/// old app's token covered every host settings write. Suspend and Resume are not registry changes (SPEC.md), and
+/// nothing done to a session is.
+pub(super) fn host_change_in_flight(cx: &App) -> bool {
+    let (Some(operations), Some(store)) =
+        (session::current_operations(cx), session::current_store(cx))
+    else {
+        return false;
+    };
+    let operations = operations.read(cx);
+    operations.any_in_flight(changes_host_registry)
+        || store
+            .read(cx)
+            .collections()
+            .ordered::<HostView>()
+            .iter()
+            .any(|host| {
+                operations
+                    .in_flight(&OpKey::host(&HostView::key(host.id)))
+                    .is_some()
+            })
+}
+
+/// Whether `work` is a registry change counted by its kind: a host probe registers a host that answers, a setup
+/// registers the host it sets up, and a removal takes a host out of the registry. Exhaustive, so a new kind of work decides. Work on a registered host's own key is counted by
+/// its key instead ([`host_change_in_flight`]).
+fn changes_host_registry(work: Work) -> bool {
+    match work {
+        Work::Probe | Work::Setup | Work::RemoveHost => true,
+        Work::Rename
+        | Work::Delete(_)
+        | Work::Save
+        | Work::Stop
+        | Work::Replace
+        | Work::Seen
+        | Work::Restart
+        | Work::TunnelOpen
+        | Work::TunnelClose
+        | Work::Launch => false,
+    }
 }
 
 /// Put `held` in the slot for the current UI session, or empty it, and notify: a surface drawing New's trigger reads
