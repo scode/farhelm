@@ -1,5 +1,6 @@
 //! The approval region: where waiting agent requests show, one expanded card at the top of the main area with the
-//! others as headers below it, over everything but the pill and the tooltip.
+//! others as headers below it, over every dialog but the raised tunnel warning (rung 5 of the layer manager's z-order
+//! ladder, `layers.rs`'s module docs).
 //!
 //! SPEC.md, "Agent-spawned sessions": the oldest waiting request opens first as one expanded card, centered at the top
 //! of the main area below the session's tabs, at most 660 pixels wide; the other waiting requests are listed below it

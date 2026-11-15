@@ -1,7 +1,7 @@
 //! Tests of hover help, the layer's shared rule in `components/mod.rs` (`HoverHelp` and `with_hover_help`): when a
 //! control's tooltip shows and goes, whose help wins when one control sits inside another, a press putting it away,
 //! and help that names a host value or comes in paragraphs. The tooltip itself is the layer manager's; how paragraph
-//! help is laid out is pinned in `layers_tests.rs`.
+//! help is laid out is pinned in `layers/tooltip_tests.rs`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -628,10 +628,10 @@ fn help_naming_a_host_value_draws_it_escaped_in_the_tooltip(cx: &mut TestAppCont
 /// also what a screen reader hears for those marks; a description that kept only the first paragraph would drop the
 /// permission's meaning and the stored command, and a tooltip that merged the paragraphs into one node would read as
 /// a run-on. How the paragraphs are laid out (wider, unclamped, a blank line apart) is pinned with the real text
-/// system in `layers_tests.rs`. Specified: hovering a control whose help is `HoverHelp::paragraphs` shows, after the
-/// hover delay, every paragraph in the tooltip as a `Label` node of its own under its sentence's id, named with its
-/// host values escaped, in the order given; the tooltip's text and the control's description are every paragraph's
-/// accessible text, a blank line between each.
+/// system in `layers/tooltip_tests.rs`. Specified: hovering a control whose help is `HoverHelp::paragraphs` shows,
+/// after the hover delay, every paragraph in the tooltip as a `Label` node of its own under its sentence's id, named
+/// with its host values escaped, in the order given; the tooltip's text and the control's description are every
+/// paragraph's accessible text, a blank line between each.
 #[gpui::test]
 fn help_in_paragraphs_shows_every_paragraph_and_describes_the_control_with_all_of_them(
     cx: &mut TestAppContext,
