@@ -15,13 +15,13 @@ session list's order menu; 47, the settings-and-hosts area's host Update, its pr
 other-dialogs area's Send feedback, up to but never including Send; 49, the session list header's Trash; 50, the session
 view's open session that a status filter hides, named and renamed; 51, the session list heading's New and the quick
 switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened from the Help menu and opened by a window
-start that asks for it; 60, the approvals area's card for an agent's request and its Allow; 61, the settings-and-hosts
-area's host uninstall, its refusal, run and removal notice). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
-`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`); nothing here checks layout or wording beyond the
-names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
-session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in
-drawing order, which is the header's.
+start that asks for it; 60 and 62 to 64, the approvals area's cards for agents' requests: Allow, the host-only grant,
+Deny over the quick switcher, and an agent's host add through the Add host dialog; 61, the settings-and-hosts area's
+host uninstall, its refusal, run and removal notice). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
+`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`); nothing
+here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
+(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
+Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -1352,87 +1352,80 @@ class Smoke(unittest.TestCase):
         self.assertEqual(set(listed_titles()), before, "neither New started a session")
         self.assertEqual(last_selected(), origin, "and the open session is unchanged")
 
-    # ---- The approvals area's steps (60), on sessions of their own --------------------------------------------------
+    # ---- The other-dialogs area's Welcome card (52, 53) --------------------------------------------------------------
 
-    def test_60_an_agent_request_waits_on_its_card_and_allow_carries_it_out(self) -> None:
-        """An agent's request that needs approval waits on a card in the window, and the user's answer is what carries
-        it out: the whole point of the approvals area, and what the desktop app refused at once before its cards
-        existed. It crosses every layer: the fake agent runs the real `farhelm spawn` inside its session, the
-        supervisor relays the request, the helm holds it and pushes it to the window, the window's approval region
-        draws its card, and the card's Allow goes back through the helm's answer route. Specified: in a session of
-        this step's own running the spawning fake agent, `spawn /tmp` makes the helm list one waiting request and the
-        window draw its card ("Agent request"); Allow on that card (pressed again until the answer bar's 700 ms pause
-        has run out) ends the request, the agent reports the child's id, and the helm lists a new session. The card
-        appears only because the local host still asks for `farhelm` commands and session actions, which the step
-        checks first. The spawner's own launch is a command Farhelm did not compose, so an agent may copy it only where
-        YOLO launches need no asking; the step turns that on for the local host while it runs, which waives no
-        approval, and turns it off again."""
-        record = json.loads((RUN / "run.json").read_text())
-        fixtures = record["binaries"]["fixtures"]
-        title = f"Approval spawner {uuid.uuid4().hex[:8]}"
-        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
-        body["title"] = title
-        body["command"]["command"] = f"{shlex.quote(fixtures)} fake-agent --script spawn"
-        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
-        self.ok("wait", f"text:{title}")
-        self.ok("click", f"text:{title}")
-        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
-        self.assertEqual(waiting_approvals(), [], "premise: no request waits yet")
-        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
-        self.assertTrue(
-            all(not h["commands_without_asking"] and not h["own_sessions_without_asking"] for h in hosts),
-            "premise: no host lets `farhelm` commands or session actions through without asking",
-        )
-        before = set(listed_titles())
-        local = next(host for host in hosts if host["kind"] == "local")
-        gui_agent.helm_request(
-            RUN, "POST", f"/api/hosts/{local['id']}/yolo-without-asking", {"yolo_without_asking": True}
-        )
-        self.addCleanup(
-            gui_agent.helm_request,
-            RUN,
-            "POST",
-            f"/api/hosts/{local['id']}/yolo-without-asking",
-            {"yolo_without_asking": False},
+    def test_52_welcome_reopens_from_the_help_menu_and_escape_returns_to_the_button(self) -> None:
+        """SPEC.md's Welcome item in the Help menu shows the Welcome card again; reopening it does not rewrite the
+        shared seen preference, and closing it returns focus to the "?" button. The step seeds and touches no session
+        and follows neither of the card's links (Read Get started would open a browser, Send feedback now the feedback
+        dialog). Specified: with the card not open, choosing Welcome from the menu closes the menu and opens the card
+        with focus on Got it; Escape closes it with focus on the "?" button, and the helm's `welcome_seen` is what it
+        was before the step. The footer's note is the oracle for open and closed, since only the open card draws it."""
+        self.assertNotIn(WELCOME_NOTE, self.ok("snapshot"), "premise: the Welcome card is not open")
+        seen = gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen")
+        self.ok("click", "id:app-help-toggle")
+        self.ok("wait", "--text", HELP_MENU_SUMMARY)
+        self.ok("click", "id:help-menu-welcome")
+        self.ok("wait", "--gone", HELP_MENU_SUMMARY)
+        self.ok("wait", "--text", WELCOME_NOTE)
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Got it" \[focused\]', "focus starts on Got it")
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", WELCOME_NOTE)
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
+        self.assertEqual(
+            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"),
+            seen,
+            "reopening the card wrote nothing",
         )
 
-        self.ok("type", "id:terminal-grid", f"spawn {gui_agent.SESSION_CWD}")
-        self.ok("press", "enter")
+    def test_53_a_window_start_opens_the_card_only_when_the_run_asks_for_it(self) -> None:
+        """Every bridge run's helm is fresh, so `gui-agent.py start` turns the window's start dialogs off unless given
+        `--start-dialogs` (`docs/gui-agent.md`); this step is the end-to-end proof of both halves, which is what lets
+        every other step and the screenshot batch rely on a default start showing no card. The default half is this
+        smoke's own app: had its start opened the card, the card would still be open or some close would have marked
+        it seen (each step's `setUp` presses Escape, which dismisses it), so the card's absence together with
+        `welcome_seen` still unset shows it never opened. The other half needs a window start of its own, so this step
+        starts a second app run of its own (no sessions, the binaries the smoke's start built) in a run directory beside
+        the smoke's, and stops it whatever happens. Specified: the smoke's app shows no card and its helm has no
+        `welcome_seen`; a run started with `--start-dialogs` shows the card by itself, without any input, and its
+        helm's `welcome_seen` is unset, since only a close of the card writes it."""
+        assert RUN is not None
+        self.assertNotIn(WELCOME_NOTE, self.ok("snapshot"), "the default start opened no card")
+        self.assertIsNone(
+            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"),
+            "nothing marked the card seen, so the default start never opened it",
+        )
+        other = RUN.parent / "start-dialogs"
+
+        def other_run(*args: str, timeout: float | None = STEP_TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [sys.executable, str(AGENT), str(other), *args], capture_output=True, text=True, timeout=timeout
+            )
+
+        stopped: subprocess.CompletedProcess | None = None
         try:
-            waiting = eventually(waiting_approvals, "the spawn request waiting for approval")
-        except AssertionError:
-            # What the fake agent printed (a `SPAWN-ERROR:` line, or `SPAWNED:` if the request went through without a
-            # card) and any session that appeared say why no card came.
-            screen = agent("terminal-text")
-            new = set(listed_titles()) - before
-            raise AssertionError(
-                f"no request waited for approval; the terminal shows:\n{screen.stdout}{screen.stderr}\n"
-                f"sessions added meanwhile: {sorted(new)}"
-            ) from None
-        self.assertEqual(len(waiting), 1, "one request waits")
-        self.ok("wait", "--text", "Agent request")
-
-        allow = f"id:approval-{waiting[0]['id']}-answer-allow"
-
-        last_click: list[subprocess.CompletedProcess] = []
-
-        def allowed() -> bool:
-            if waiting_approvals():
-                last_click[:] = [agent("click", allow)]
-            return not waiting_approvals()
-
-        try:
-            eventually(allowed, "Allow ending the request")
-        except AssertionError:
-            clicked = last_click[0] if last_click else None
-            detail = f"{clicked.stdout}{clicked.stderr}" if clicked else "no click was made"
-            raise AssertionError(f"Allow did not end the request; the last click said:\n{detail}") from None
-        # The Allow button went with its card, and focus recovery sent focus back to the spawner's terminal, which
-        # `terminal-text` reads; a click on its row makes that explicit rather than relying on recovery.
-        self.ok("click", f"text:{title}")
-        child = re.search(r"SPAWNED:(\S+)", self.ok("terminal-text", "--wait", "SPAWNED:"))
-        self.assertIsNotNone(child, "the agent reports the child's id")
-        eventually(lambda: set(listed_titles()) - before, "the helm listing the spawned session")
+            # Inside the `try`, so an interrupt during `start` (Ctrl-C, or the recorder's SIGTERM, which `main` turns
+            # into KeyboardInterrupt) still stops whatever it had started. No timeout for `start` and `stop`, as for the
+            # smoke's own: `start` may wait on a build lock and `stop` must always finish its cleanup.
+            started = other_run("start", "--sessions", "0", "--start-dialogs", "--no-build", timeout=None)
+            self.assertEqual(started.returncode, 0, f"the second run did not start:\n{started.stdout}{started.stderr}")
+            shown = other_run("wait", "--text", WELCOME_NOTE)
+            self.assertEqual(shown.returncode, 0, f"no card at the asked-for start:\n{shown.stdout}{shown.stderr}")
+            self.assertIsNone(
+                gui_agent.helm_request(other, "GET", "/api/preferences").get("welcome_seen"),
+                "opening the card wrote nothing",
+            )
+        finally:
+            # Only a run that got as far as writing `run.json` has anything to stop, as `main` checks `RUN` exists; a
+            # `start` that failed before then keeps its own error rather than `stop`'s. Nothing is asserted here, so
+            # an interrupt or an earlier failure is never replaced by this one.
+            if (other / "run.json").exists():
+                stopped = other_run("stop", timeout=None)
+                if stopped.returncode != 0:
+                    print(f"gui-e2e-smoke: the second run's `stop` failed; it is kept at {other}", file=sys.stderr)
+        self.assertIsNotNone(stopped, "the second run wrote no run.json, so it never started")
+        assert stopped is not None
+        self.assertEqual(stopped.returncode, 0, f"the second run did not stop:\n{stopped.stdout}{stopped.stderr}")
 
     # ---- The settings-and-hosts area's host uninstall (61) ----------------------------------------------------------
 
@@ -1523,85 +1516,295 @@ class Smoke(unittest.TestCase):
                     raise
                 print(f"gui-e2e-smoke: step 61 left host {host} ({destination}) behind: {error}", file=sys.stderr)
 
+    # ---- The approvals area's steps (60, 62 to 64), on sessions and hosts of their own ------------------------------
+    #
+    # These port the old app's spawn acceptance cases (and the agent host add's) to the desktop app: every request an
+    # agent makes there now waits on a card in the window, and only the user's answer carries it out. Steps 60, 62 and 63
+    # each seed a session of their own running the spawning fake agent, whose `spawn <folder>` line runs the real
+    # `farhelm spawn` inside it; each child is titled after the fresh folder it starts in, so the window's row and the
+    # helm's listing can be told apart from every other step's. Step 64 asks from a plain shell session instead, since
+    # no fake agent script asks to add a host.
+
+    def test_60_an_agent_request_waits_on_its_card_and_allow_carries_it_out(self) -> None:
+        """An agent's request that needs approval waits on a card in the window, and the user's answer is what carries
+        it out: the whole point of the approvals area, and what the desktop app refused at once before its cards
+        existed. It crosses every layer: the fake agent runs the real `farhelm spawn` inside its session, the
+        supervisor relays the request, the helm holds it and pushes it to the window, the window's approval region
+        draws its card, and the card's Allow goes back through the helm's answer route. Specified: in a session of
+        this step's own running the spawning fake agent, `spawn <folder>` makes the helm list one waiting request and
+        the window draw its card ("Agent request"); Allow on that card ends the request, the agent reports the child's
+        id, and the child's row, titled after its folder, appears in the window's list while nothing else is done to
+        it (the old app's "children appear without refreshing the observer")."""
+        title = self.open_spawner("Approval spawner")
+        folder = spawn_folder("allowed")
+        request = self.spawn_waits_on_a_card(title, folder)
+        self.ok("wait", "--text", "Agent request")
+        self.answer(request, "allow")
+        # The Allow button went with its card, and focus recovery sent focus back to the spawner's terminal, which
+        # `terminal-text` reads; a click on its row makes that explicit rather than relying on recovery.
+        self.ok("click", f"text:{title}")
+        child = re.search(r"SPAWNED:(\S+)", self.ok("terminal-text", "--wait", "SPAWNED:"))
+        self.assertIsNotNone(child, "the agent reports the child's id")
+        self.ok("wait", f"text:{folder.name}")
+        # By title, not by the reported id: the reference `farhelm spawn` prints is not spelled the way the helm's
+        # listing keys its sessions (a lookup by it found nothing on a run where the child was listed).
+        self.assertIn(folder.name, listed_titles().values(), "the helm lists the child")
+
+    def test_62_a_host_only_grant_lets_the_next_same_host_spawn_through_without_a_card(self) -> None:
+        """"Always allow on <host> only" is the narrow grant SPEC.md offers for an agent acting on its own host's
+        sessions, and its whole use is that the next such request needs no card; a grant that turned on the wider
+        `farhelm` commands setting, or one that still asked, would be wrong either way. Specified: on a local host that
+        asks for both, a spawn's card offers the host-only answer; choosing it ends the request, starts the child and
+        turns on the host's "Manage sessions on this host without asking" alone; the next spawn from the same session
+        (the fake agent's `spawn-parented` form, so its reply marker differs from the first's) then starts its child
+        without the helm ever listing a waiting request, and both children's rows appear in the window. The grant is
+        turned off again afterwards, so later steps find the host asking as before."""
+        title = self.open_spawner("Host grant spawner")
+        local = local_host()
+        self.addCleanup(
+            gui_agent.helm_request,
+            RUN,
+            "POST",
+            f"/api/hosts/{local['id']}/own-sessions-without-asking",
+            {"own_sessions_without_asking": False},
+        )
+        first = spawn_folder("granted-first")
+        request = self.spawn_waits_on_a_card(title, first)
+        self.assertTrue(request["own_host_session_action"], "premise: the helm offers the host-only grant here")
+        self.answer(request, "always-allow-own-host")
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "SPAWNED:")
+        self.ok("wait", f"text:{first.name}")
+        granted = local_host()
+        self.assertTrue(granted["own_sessions_without_asking"], "the answer turns the host-only grant on")
+        self.assertFalse(granted["commands_without_asking"], "and leaves the wider commands setting off")
+
+        second = spawn_folder("granted-second")
+        self.ok("type", "id:terminal-grid", f"spawn-parented {second}")
+        self.ok("press", "enter")
+
+        def started_without_a_card() -> bool:
+            """Whether the second child is listed yet, failing at once if a request waited on the way."""
+            self.assertEqual(waiting_approvals(), [], "the granted spawn waited for an answer")
+            return second.name in listed_titles().values()
+
+        eventually(started_without_a_card, "the granted spawn starting its child")
+        self.ok("terminal-text", "--wait", "SPAWNED-PARENTED:")
+        self.ok("wait", f"text:{second.name}")
+
+    def test_63_a_spawn_denied_over_an_open_dialog_creates_nothing_and_tells_the_agent(self) -> None:
+        """The user's no is what stops the agent, and a card stays answerable while a dialog the user opened is up
+        (SPEC.md, "Keyboard focus": approval cards stay usable over modals), without disturbing that dialog. A denied
+        spawn that still started a child, or left the agent without an answer, would make the card decorative; a card
+        the quick switcher's veil covered, or a Deny that closed the switcher, would break the other half. Specified:
+        with a spawn's card up, the quick switcher's chord from the spawner's terminal opens the switcher; Deny on the
+        card ends the request while the switcher stays open; Escape then closes it; the agent's `farhelm spawn` fails
+        saying the user declined, and no session is listed under the child's folder name."""
+        title = self.open_spawner("Denied spawner")
+        folder = spawn_folder("denied")
+        request = self.spawn_waits_on_a_card(title, folder)
+        self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
+        self.ok("wait", "--text", "Recent sessions")
+        self.answer(request, "deny")
+        self.assertIn(SWITCHER_FOOTER, self.ok("snapshot"), "the switcher stays open through the answer")
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", SWITCHER_FOOTER)
+        self.ok("click", f"text:{title}")
+        screen = self.ok("terminal-text", "--wait", "SPAWN-ERROR:")
+        # A long refusal can wrap in a narrow terminal, and the text the bridge reads breaks lines where it wraps.
+        self.assertIn("declined", screen.replace("\n", ""), "the agent is told the user declined")
+        self.assertNotIn(folder.name, listed_titles().values(), "a denied spawn starts no child")
+
+    def test_64_an_agents_host_add_goes_through_the_add_host_dialog(self) -> None:
+        """An agent may ask to add a host, but only the user's Add in the ordinary Add host dialog approves it, with
+        whatever destination and alias the dialog then holds, and an agent's add always asks before setting a host up,
+        whatever the user's preference says (SPEC.md, "Agent-spawned sessions"). Specified: from a shell session of
+        this step's own, `farhelm agent host add <destination> --alias <alias>` makes the helm list one waiting request
+        for a host add; the card's Allow opens the Add host dialog, and the request still waits (opening is not
+        approval); the dialog's Add ends the request and, with "Set up new hosts without asking" turned on for this
+        step, still asks "Set up host · <destination>"; Cancel there adds nothing; and the agent's command reports its
+        request accepted for the destination the dialog held, the agent's own. That the dialog shows the agent's
+        destination and alias is the in-process tests' (`approvals/host_add_tests.rs`). The fake destination never
+        reaches real ssh: the app's scripted backend (`start --scripted-hosts`) answers its probe. The preference is
+        put back afterwards, and a host the step left registered is removed."""
+        stamp = uuid.uuid4().hex[:8]
+        destination = f"agent-add-{stamp}.example"
+        alias = f"alias-{stamp}"
+        preferences = gui_agent.helm_request(RUN, "GET", "/api/preferences")
+        gui_agent.helm_request(RUN, "PUT", "/api/preferences", {"skip_host_setup_confirmation": True})
+        self.addCleanup(
+            gui_agent.helm_request,
+            RUN,
+            "PUT",
+            "/api/preferences",
+            {"skip_host_setup_confirmation": preferences.get("skip_host_setup_confirmation")},
+        )
+        self.addCleanup(remove_host, destination)
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"Host adder {stamp}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        body["command"]["command"] = "sh"
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", f"text:{title}")
+        self.ok("click", f"text:{title}")
+        # The shell's answer, not the typed line, carries the marker: the typed line holds `$((40+2))` instead.
+        self.ok("type", "id:terminal-grid", "echo shell-ready-$((40+2))")
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", "shell-ready-42")
+        self.assertEqual(waiting_approvals(), [], "premise: no request waits yet")
+
+        self.ok("type", "id:terminal-grid", f"farhelm agent host add {destination} --alias {alias}")
+        self.ok("press", "enter")
+        request = self.one_waiting_request("the host add request waiting for approval")
+        self.assertEqual(request["action"]["kind"], "host_add")
+
+        def dialog_open() -> bool:
+            """Whether the card's Allow opened the Add host dialog, pressing it again while the answer bar's pause
+            lasts. Each press gets a moment for the dialog to show before the next, since a press after it opened would
+            only draw the card's "Another dialog is open" refusal."""
+            agent("click", f"id:approval-{request['id']}-answer-allow")
+            return agent("wait", "--text", ADD_HOST_SUMMARY, "--timeout", "1500").returncode == 0
+
+        try:
+            eventually(dialog_open, "the card's Allow opening the Add host dialog")
+        except AssertionError:
+            # Whether the request still waits tells a press the card kept refusing from a request that went away.
+            raise AssertionError(
+                f"the card's Allow never opened the Add host dialog; requests waiting now: {waiting_approvals()}"
+            ) from None
+        self.assertEqual([r["id"] for r in waiting_approvals()], [request["id"]], "opening the dialog approves nothing")
+
+        self.ok("click", "id:add-host-submit")
+        question = f"Set up host · {destination}"
+        eventually(lambda: question in self.ok("snapshot"), "the agent's add asking before setup")
+        self.assertEqual(waiting_approvals(), [], "the dialog's Add ended the request")
+        self.ok("click", "id:prompt-cancel")
+        self.ok("wait", "--gone", question)
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        self.assertNotIn(destination, [h.get("destination") for h in hosts], "Cancel at setup adds no host")
+        self.ok("click", f"text:{title}")
+        # The reply names the destination the dialog's Add carried, the one its field held: the window cannot show
+        # that apart from the card behind it, which shows the agent's destination too. A long reply wraps, and the
+        # text the bridge reads breaks lines where it wraps.
+        reply = self.ok("terminal-text", "--wait", "accepted;").replace("\n", "")
+        self.assertIn(destination, reply, "the agent is told its add was accepted for the destination the dialog held")
+
+    # ---- Helpers for the approvals area's steps ---------------------------------------------------------------------
+
+    def open_spawner(self, prefix: str) -> str:
+        """Seed and open a session of the calling step's own running the spawning fake agent, under a fresh title
+        starting with `prefix`, and return that title once its terminal shows the agent ready.
+
+        Checks the premise every spawn step rests on, that no request waits and the local host asks for both `farhelm`
+        commands and session actions (otherwise no card would come). The spawner's own launch is a command Farhelm did
+        not compose, so an agent may copy it only where YOLO launches need no asking: this turns that on for the local
+        host until the step ends, then puts back what it was, and waives no approval. The session's body is the
+        harness's own `spawner` kind, so this step and the screenshot scene run the same fake agent."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"{prefix} {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures, "spawner")
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", f"text:{title}")
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        self.assertEqual(waiting_approvals(), [], "premise: no request waits yet")
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        self.assertTrue(
+            all(not h["commands_without_asking"] and not h["own_sessions_without_asking"] for h in hosts),
+            "premise: no host lets `farhelm` commands or session actions through without asking",
+        )
+        local = local_host()
+        gui_agent.helm_request(
+            RUN, "POST", f"/api/hosts/{local['id']}/yolo-without-asking", {"yolo_without_asking": True}
+        )
+        self.addCleanup(
+            gui_agent.helm_request,
+            RUN,
+            "POST",
+            f"/api/hosts/{local['id']}/yolo-without-asking",
+            {"yolo_without_asking": local["yolo_without_asking"]},
+        )
+        return title
+
+    def spawn_waits_on_a_card(self, title: str, folder: Path) -> dict:
+        """Type `spawn <folder>` into the open spawner titled `title` and return the one request the helm then lists
+        as waiting. A failure says what the agent printed instead, which tells a refusal from a spawn that went through
+        without asking."""
+        self.ok("type", "id:terminal-grid", f"spawn {folder}")
+        self.ok("press", "enter")
+        return self.one_waiting_request("the spawn request waiting for approval")
+
+    def one_waiting_request(self, what: str) -> dict:
+        """The one request the helm lists as waiting, once it lists any; a failure names `what` and shows the focused
+        terminal's text, where the asking command reports a refusal."""
+        try:
+            waiting = eventually(waiting_approvals, what)
+        except AssertionError:
+            screen = agent("terminal-text")
+            raise AssertionError(
+                f"{what} did not happen; the terminal shows:\n{screen.stdout}{screen.stderr}"
+            ) from None
+        self.assertEqual(len(waiting), 1, "one request waits")
+        return waiting[0]
+
+    def answer(self, request: dict, answer: str) -> None:
+        """Press the card's `answer` button (its id's last part: `allow`, `deny`, `always-allow-own-host`) until the
+        helm no longer lists `request` as waiting. The answer bar ignores presses for 700 ms after a card appears, so
+        that a click aimed at one request cannot answer the next; the first presses can land in that pause."""
+        button = f"id:approval-{request['id']}-answer-{answer}"
+        last_click: list[subprocess.CompletedProcess] = []
+
+        def answered() -> bool:
+            if any(r["id"] == request["id"] for r in waiting_approvals()):
+                last_click[:] = [agent("click", button)]
+                return False
+            return True
+
+        try:
+            eventually(answered, f"{answer} ending the request")
+        except AssertionError:
+            clicked = last_click[0] if last_click else None
+            detail = f"{clicked.stdout}{clicked.stderr}" if clicked else "no click was made"
+            raise AssertionError(f"{answer} did not end the request; the last click said:\n{detail}") from None
+
 
 def waiting_approvals() -> list[dict]:
     """The requests the helm holds for the user's answer, oldest first (`GET /api/approvals`)."""
     return gui_agent.helm_request(RUN, "GET", "/api/approvals")["approvals"]
 
-    # ---- The other-dialogs area's Welcome card (52, 53) --------------------------------------------------------------
 
-    def test_52_welcome_reopens_from_the_help_menu_and_escape_returns_to_the_button(self) -> None:
-        """SPEC.md's Welcome item in the Help menu shows the Welcome card again; reopening it does not rewrite the
-        shared seen preference, and closing it returns focus to the "?" button. The step seeds and touches no session
-        and follows neither of the card's links (Read Get started would open a browser, Send feedback now the feedback
-        dialog). Specified: with the card not open, choosing Welcome from the menu closes the menu and opens the card
-        with focus on Got it; Escape closes it with focus on the "?" button, and the helm's `welcome_seen` is what it
-        was before the step. The footer's note is the oracle for open and closed, since only the open card draws it."""
-        self.assertNotIn(WELCOME_NOTE, self.ok("snapshot"), "premise: the Welcome card is not open")
-        seen = gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen")
-        self.ok("click", "id:app-help-toggle")
-        self.ok("wait", "--text", HELP_MENU_SUMMARY)
-        self.ok("click", "id:help-menu-welcome")
-        self.ok("wait", "--gone", HELP_MENU_SUMMARY)
-        self.ok("wait", "--text", WELCOME_NOTE)
-        self.assertRegex(self.ok("snapshot", "-i"), r'button "Got it" \[focused\]', "focus starts on Got it")
-        self.ok("press", "escape")
-        self.ok("wait", "--gone", WELCOME_NOTE)
-        self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
-        self.assertEqual(
-            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"),
-            seen,
-            "reopening the card wrote nothing",
-        )
+def local_host() -> dict:
+    """The helm's row for the local host, with its permission settings as they are now."""
+    return next(h for h in gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"] if h["kind"] == "local")
 
-    def test_53_a_window_start_opens_the_card_only_when_the_run_asks_for_it(self) -> None:
-        """Every bridge run's helm is fresh, so `gui-agent.py start` turns the window's start dialogs off unless given
-        `--start-dialogs` (`docs/gui-agent.md`); this step is the end-to-end proof of both halves, which is what lets
-        every other step and the screenshot batch rely on a default start showing no card. The default half is this
-        smoke's own app: had its start opened the card, the card would still be open or some close would have marked
-        it seen (each step's `setUp` presses Escape, which dismisses it), so the card's absence together with
-        `welcome_seen` still unset shows it never opened. The other half needs a window start of its own, so this step
-        starts a second app run of its own (no sessions, the binaries the smoke's start built) in a run directory beside
-        the smoke's, and stops it whatever happens. Specified: the smoke's app shows no card and its helm has no
-        `welcome_seen`; a run started with `--start-dialogs` shows the card by itself, without any input, and its
-        helm's `welcome_seen` is unset, since only a close of the card writes it."""
-        assert RUN is not None
-        self.assertNotIn(WELCOME_NOTE, self.ok("snapshot"), "the default start opened no card")
-        self.assertIsNone(
-            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"),
-            "nothing marked the card seen, so the default start never opened it",
-        )
-        other = RUN.parent / "start-dialogs"
 
-        def other_run(*args: str, timeout: float | None = STEP_TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
-            return subprocess.run(
-                [sys.executable, str(AGENT), str(other), *args], capture_output=True, text=True, timeout=timeout
-            )
+def spawn_folder(name: str) -> Path:
+    """A new, empty folder for a spawned child to start in, inside this run's directory and named `name` plus a
+    per-call stamp. A child is titled after its folder, so the stamp makes its row and listing entry this call's alone;
+    the run directory goes with the run."""
+    assert RUN is not None
+    folder = RUN / "work" / f"{name}-{uuid.uuid4().hex[:8]}"
+    folder.mkdir(parents=True)
+    return folder
 
-        stopped: subprocess.CompletedProcess | None = None
-        try:
-            # Inside the `try`, so an interrupt during `start` (Ctrl-C, or the recorder's SIGTERM, which `main` turns
-            # into KeyboardInterrupt) still stops whatever it had started. No timeout for `start` and `stop`, as for the
-            # smoke's own: `start` may wait on a build lock and `stop` must always finish its cleanup.
-            started = other_run("start", "--sessions", "0", "--start-dialogs", "--no-build", timeout=None)
-            self.assertEqual(started.returncode, 0, f"the second run did not start:\n{started.stdout}{started.stderr}")
-            shown = other_run("wait", "--text", WELCOME_NOTE)
-            self.assertEqual(shown.returncode, 0, f"no card at the asked-for start:\n{shown.stdout}{shown.stderr}")
-            self.assertIsNone(
-                gui_agent.helm_request(other, "GET", "/api/preferences").get("welcome_seen"),
-                "opening the card wrote nothing",
-            )
-        finally:
-            # Only a run that got as far as writing `run.json` has anything to stop, as `main` checks `RUN` exists; a
-            # `start` that failed before then keeps its own error rather than `stop`'s. Nothing is asserted here, so
-            # an interrupt or an earlier failure is never replaced by this one.
-            if (other / "run.json").exists():
-                stopped = other_run("stop", timeout=None)
-                if stopped.returncode != 0:
-                    print(f"gui-e2e-smoke: the second run's `stop` failed; it is kept at {other}", file=sys.stderr)
-        self.assertIsNotNone(stopped, "the second run wrote no run.json, so it never started")
-        assert stopped is not None
-        self.assertEqual(stopped.returncode, 0, f"the second run did not stop:\n{stopped.stdout}{stopped.stderr}")
+
+def remove_host(destination: str) -> None:
+    """Remove the host registered under `destination`, if any, once no run holds it (the helm refuses a removal while
+    one does): cleanup for a step that may have added one."""
+    def registered() -> int | None:
+        rows = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        return next((row["id"] for row in rows if row.get("destination") == destination), None)
+
+    host = registered()
+    if host is None:
+        return
+    eventually(
+        lambda: gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning").get("status") != "running",
+        f"{destination}'s run ending before its host is removed",
+    )
+    gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
 
 
 def trash_close_focused(snapshot: str) -> bool:
