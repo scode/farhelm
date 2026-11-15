@@ -211,14 +211,17 @@ fn with_consent_the_answer_goes_at_once_and_the_tunnels_are_read_again(cx: &mut 
 }
 
 /// Without consent, the helm would refuse the answer, so the terminal's tunnel warning is asked first, and the answer
-/// goes out only on its Allow, after the consent was saved. Specified: the press asks the warning and sends nothing;
-/// Allow saves `{"tunnel_consent": true}`; once the save is taken, the answer goes out.
+/// goes out only on its Allow, after the consent was saved. Specified: the press asks the warning, its box drawn above
+/// the approval cards, and sends nothing; Allow saves `{"tunnel_consent": true}`; once the save is taken, the answer
+/// goes out.
 #[gpui::test]
 fn without_consent_the_warning_is_asked_and_its_allow_sends_the_answer(cx: &mut TestAppContext) {
     let (mut helm, cx, arming, _tunnels) = fixture(cx, false);
     let (pressed, _) = press(cx, &arming);
     assert_eq!(pressed, Pressed::Asking);
     assert!(any_open(cx), "the tunnel warning is up");
+    let raised = cx.update(|window, cx| crate::layers::top_is_above_approval_region(window, cx));
+    assert!(raised, "and its box is drawn above the approval cards");
     assert!(
         helm.commands().is_empty(),
         "nothing is sent before the warning is answered"

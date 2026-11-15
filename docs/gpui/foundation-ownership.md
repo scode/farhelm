@@ -168,9 +168,12 @@ pill, through `layers::show_pill` and `layers::hide_pill` from its own code, not
 input, per the `layers::Pill` docs. The launcher draws the second, the launch pill (its progress pill and "Started"
 report), at the window's bottom through `layers::show_launch_pill` and `layers::hide_pill` from its own code, under the
 same rule for its view; the two show at once, and neither replaces the other's. And the approvals feature installs the
-region that draws agent approval cards above every dialog, once per window, through `layers::install_approval_region`
-from its own code; its view must occlude what it draws and draw nothing with a size or a listener when empty, per that
-function's docs.
+region that draws agent approval cards above every dialog but a raised one, once per window, through
+`layers::install_approval_region` from its own code; its view must occlude what it draws and draw nothing with a size or
+a listener when empty, per that function's docs. The terminal's tunnel warning raises its dialog's box (not its veil)
+above that region as it opens, through `layers::above_approval_region` from its own code (`terminal/tunnels.rs`), so a
+card that asks for it cannot cover it; that function's docs say why only that warning is raised, and raising another
+layer is a decision of this foundation's owner.
 
 Lint exceptions: 1: `deferred` and `anchored` in `layers::overlay`.
 

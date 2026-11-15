@@ -2660,9 +2660,9 @@ fn no_tunnel_is_offered_when_the_program_owns_clicks(cx: &mut TestAppContext) {
 
 /// SPEC.md: "Before the first tunnel opens, the user must accept the security warning", consent being a shared helm
 /// preference that is off until accepted; and the helm, not the app, opens the browser at the tunnel's own address.
-/// Specified: a Cmd-click without consent asks the warning and sends nothing; Allow saves `tunnel_consent: true`, and
-/// once that is saved the link goes to the helm's open route as printed; nothing opens in the app itself, and the
-/// tunnels are read again after the open answers.
+/// Specified: a Cmd-click without consent asks the warning, its box drawn above the approval cards, and sends nothing;
+/// Allow saves `tunnel_consent: true`, and once that is saved the link goes to the helm's open route as printed;
+/// nothing opens in the app itself, and the tunnels are read again after the open answers.
 #[gpui::test]
 fn a_cmd_click_asks_the_warning_then_opens_the_tunnel_through_the_helm(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -2678,6 +2678,9 @@ fn a_cmd_click_asks_the_warning_then_opens_the_tunnel_through_the_helm(cx: &mut 
         h.cx.debug_bounds("prompt").is_some(),
         "the warning asks first"
     );
+    let raised =
+        h.cx.update(|window, cx| crate::layers::top_is_above_approval_region(window, cx));
+    assert!(raised, "with its box drawn above the approval cards");
     assert_eq!(
         h.helm.commands(),
         [],
@@ -3489,8 +3492,8 @@ fn a_rows_close_button_closes_only_its_tunnel(cx: &mut TestAppContext) {
 }
 
 /// Settings' tunnel switch turns tunnels on only through the same warning (SPEC.md: off "until they accept the
-/// warning"), so the terminal area offers it a way in. Specified: Allow saves `tunnel_consent: true` and reports the
-/// save as stored; Cancel saves nothing and reports nothing.
+/// warning"), so the terminal area offers it a way in. Specified: the warning's box is drawn above the approval cards;
+/// Allow saves `tunnel_consent: true` and reports the save as stored; Cancel saves nothing and reports nothing.
 #[gpui::test]
 fn settings_way_into_the_warning_saves_consent_only_on_allow(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -3506,6 +3509,12 @@ fn settings_way_into_the_warning_saves_consent_only_on_allow(cx: &mut TestAppCon
         });
     });
     settle(h.cx);
+    let raised =
+        h.cx.update(|window, cx| crate::layers::top_is_above_approval_region(window, cx));
+    assert!(
+        raised,
+        "the warning's box is drawn above the approval cards"
+    );
     click(h.cx, "prompt-cancel");
     assert_eq!(h.helm.commands(), [], "Cancel saves nothing");
     assert!(saved.borrow().is_empty(), "and reports nothing");
