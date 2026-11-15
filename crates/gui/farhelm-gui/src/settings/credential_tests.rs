@@ -1,6 +1,6 @@
 //! Tests of Settings → Credentials over the helm client's fake: the catalog's read and its three lists, the in-place
 //! editor's saves, refusals, checks and Delete, delivery failures after a done replacement, the Codex login's agent
-//! choice and file, and the storage warnings.
+//! choice and file, the storage warnings, and the Tensorlake API key form.
 //!
 //! The dialog is opened from the gear as in the dialog's own tests (`super::tests`), whose helpers these share. Every
 //! step ends in one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
@@ -30,14 +30,22 @@ fn entry(name: &str, kind: &str, revision: u64, recipes: &[&str]) -> Value {
             "revision": revision, "used_by": recipes })
 }
 
-/// The reads showing Credentials for the first time in an opening sends, by path, sorted: the catalog.
-const SHOWN_READS: &[&str] = &["/api/credentials"];
+/// The helm's Tensorlake settings as `GET /api/tensorlake` answers them, with or without a saved key.
+fn account(key_set: bool) -> Value {
+    json!({ "api_key_set": key_set, "create_without_asking": false, "helm_tag": "fixture",
+            "ssh_key": { "state": "not_created" } })
+}
 
-/// Answer `reads`, the section's reads, by path: the catalog with `catalog`.
+/// The reads showing Credentials for the first time in an opening sends, by path, sorted: the catalog, and the account
+/// the Tensorlake API key form shows.
+const SHOWN_READS: &[&str] = &["/api/credentials", "/api/tensorlake"];
+
+/// Answer `reads`, the section's reads, by path: the catalog with `catalog`, the Tensorlake account with no key saved.
 fn answer(helm: &mut FakeHelm, reads: Vec<FakeCommand>, catalog: &Value) {
     for read in reads {
         let answer = match read.path.as_str() {
             "/api/credentials" => catalog.clone(),
+            "/api/tensorlake" => account(false),
             other => panic!("an unexpected read of {other}"),
         };
         helm.reply(read.id, 200, Some(answer));
@@ -106,6 +114,20 @@ fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
             .clone()
             .expect("Credentials was shown");
         credentials.read(cx).editor().expect("an editor is open")
+    })
+}
+
+/// The key the Tensorlake API key form's draft holds. The field is masked, so what it paints cannot show it.
+fn key_typed(cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| {
+        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let credentials = dialog
+            .read(cx)
+            .credentials
+            .clone()
+            .expect("Credentials was shown");
+        let key = credentials.read(cx).key();
+        key.read(cx).typed()
     })
 }
 
@@ -794,4 +816,148 @@ fn a_cancelled_file_dialog_frees_choose_file(cx: &mut TestAppContext) {
     );
     cx.simulate_path_prompt_response(|_| None);
     settle(cx);
+}
+
+// ---- The Tensorlake API key ----------------------------------------------------------------------------------------
+
+/// SPEC.md: Credentials "includes the same Tensorlake API key form as Tensorlake, with Save, Test and Clear", the key
+/// is write-only, and "A save or clear ... updates both forms' saved-key metadata immediately". Each control must send
+/// only the field it owns, and Test must use the saved key, never the field. Specified: with no key saved the field
+/// says "No key saved"; a typed key's Save sends `PUT /api/tensorlake` with only the key under the preference row's
+/// key, and the answer shows "API key saved", empties the field's draft and says a key is saved; Test sends `POST
+/// /api/tensorlake/test` with no body and shows the count; Clear sends only the clear flag, shows "API key cleared"
+/// and "No key saved", and empties a key typed meanwhile, as the old form did; a refused Save keeps the typed key with
+/// the helm's words.
+#[gpui::test]
+fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_credentials(&mut helm, cx, json!([]));
+    assert!(painted(cx).contains("No key saved"));
+    assert_eq!(
+        available(cx, "tensorlake-key-test"),
+        Some(false),
+        "nothing saved to test"
+    );
+    fill(cx, "tensorlake-key", "fictional-tensorlake-key");
+    reach(cx, "tensorlake-key-save");
+    keys(cx, "space");
+    let (id, method, path, body) = one_command(&mut helm);
+    assert_eq!((method, path.as_str()), (Method::Put, "/api/tensorlake"));
+    assert_eq!(body, json!({ "api_key": "fictional-tensorlake-key" }));
+    let preferences = cx.update(|_, cx| {
+        session::current_operations(cx)
+            .and_then(|operations| operations.read(cx).in_flight(&OpKey::preferences()))
+    });
+    assert_eq!(preferences, Some(Work::Save));
+    helm.reply(id, 200, Some(account(true)));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-key-outcome").as_deref(),
+        Some("API key saved")
+    );
+    let text = painted(cx);
+    assert!(
+        text.contains("Key saved; paste a new one to replace it"),
+        "{text}"
+    );
+    assert_eq!(key_typed(cx), "", "the field was emptied");
+
+    reach(cx, "tensorlake-key-test");
+    keys(cx, "space");
+    let (id, method, path, body) = one_command(&mut helm);
+    assert_eq!(
+        (method, path.as_str(), body),
+        (Method::Post, "/api/tensorlake/test", Value::Null)
+    );
+    helm.reply(id, 200, Some(json!({ "sandboxes": 2 })));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-key-outcome").as_deref(),
+        Some("The key works. It can see 2 sandboxes.")
+    );
+
+    fill(cx, "tensorlake-key", "fictional-unsaved-key");
+    assert_eq!(
+        key_typed(cx),
+        "fictional-unsaved-key",
+        "the premise: a key typed"
+    );
+    reach(cx, "tensorlake-key-clear");
+    keys(cx, "space");
+    let (id, _, _, body) = one_command(&mut helm);
+    assert_eq!(body, json!({ "clear_api_key": true }));
+    helm.reply(id, 200, Some(account(false)));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-key-outcome").as_deref(),
+        Some("API key cleared")
+    );
+    assert!(painted(cx).contains("No key saved"));
+    assert_eq!(key_typed(cx), "", "Clear emptied the typed key");
+
+    fill(cx, "tensorlake-key", "fictional-bad-key");
+    reach(cx, "tensorlake-key-save");
+    keys(cx, "space");
+    let (id, _, _, _) = one_command(&mut helm);
+    helm.reply(id, 400, Some(json!("the key is not valid")));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-key-outcome").as_deref(),
+        Some("the key is not valid")
+    );
+    keys(cx, "space");
+    let (_, _, _, body) = one_command(&mut helm);
+    assert_eq!(
+        body,
+        json!({ "api_key": "fictional-bad-key" }),
+        "the typed key was kept"
+    );
+}
+
+/// The form's controls must wait for the account read: before it answers, the form does not know whether a key is
+/// saved, so Test and Clear would act on a guess, and a Save would overwrite a key the form never showed (the old "a
+/// failed load seeds nothing editable"). Specified: before the section's reads answer, the field shows neither "No key
+/// saved" nor "Key saved", typing into it leaves the draft empty, and Test, Clear and Save stay unavailable with a key
+/// typed; once the account answers that no key is saved, the field says "No key saved" and a typed key makes Save
+/// available.
+#[gpui::test]
+fn the_tensorlake_key_waits_for_the_account_read(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, section_button(Section::Credentials));
+    let reads = sent(&mut helm);
+    assert!(
+        reads.iter().any(|read| read.path == "/api/tensorlake"),
+        "the premise: the account read is out"
+    );
+    let text = painted(cx);
+    assert!(
+        !text.contains("No key saved")
+            && !text.contains("Key saved; paste a new one to replace it"),
+        "{text}"
+    );
+    fill(cx, "tensorlake-key", "fictional-early-key");
+    assert_eq!(
+        key_typed(cx),
+        "",
+        "the field is read-only until the account answers"
+    );
+    for control in [
+        "tensorlake-key-test",
+        "tensorlake-key-clear",
+        "tensorlake-key-save",
+    ] {
+        assert_eq!(
+            available(cx, control),
+            Some(false),
+            "{control} waits for the account"
+        );
+    }
+
+    answer(&mut helm, reads, &json!([]));
+    settle(cx);
+    assert!(painted(cx).contains("No key saved"));
+    fill(cx, "tensorlake-key", "fictional-tensorlake-key");
+    assert_eq!(key_typed(cx), "fictional-tensorlake-key");
+    assert_eq!(available(cx, "tensorlake-key-save"), Some(true));
 }

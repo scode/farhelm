@@ -186,9 +186,9 @@ the tint of an unavailable Save after a failed read, which no golden shows.
 ## `tests/credentials-settings.spec.ts` and `tests/credential-delivery.spec.ts`, partly
 
 Settings → Credentials is ported: the three lists, the in-place editor with its write-only secret, the agent-login kinds
-with Codex's `auth.json` pasted or chosen through the platform's file dialog, the "Not encrypted on disk" warnings, and
-delivery failures after a done replacement. The Tensorlake API key form above the lists is not built yet. Replacing
-tests, in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherwise:
+with Codex's `auth.json` pasted or chosen through the platform's file dialog, the "Not encrypted on disk" warnings,
+delivery failures after a done replacement, and the Tensorlake API key form with Save, Test and Clear. Replacing tests,
+in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherwise:
 
 - "credentials keep fixed names, replace write-only values and discard login drafts": the creation and the list read
   again, `a_new_credential_saves_its_name_kind_and_secret_and_the_list_reads_again`; the fixed name, the empty secret of
@@ -205,11 +205,16 @@ tests, in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named
   `a_failed_catalog_read_shows_its_reason_and_retry_reads_again`; a Delete answered after Back leaving a newer editor
   and its text, `a_delete_answered_after_back_leaves_a_newer_editor_open`; switching agents emptying the secret,
   `switching_agents_empties_the_secret`; a cancelled file dialog freeing Choose file…,
-  `a_cancelled_file_dialog_frees_choose_file`. The look (the warning's danger edge and fill, the three empty lists): the
-  golden `settings-credentials`. The draft kept across a section switch is the dialog's rule, tested for every section
-  in `crates/gui/farhelm-gui/src/settings/tests.rs`. Not ported: the 390-pixel width (the window's minimum is above it).
-- "the two Tensorlake key forms share acknowledged metadata and separate drafts": waits for the Tensorlake API key form
-  in Credentials and for Settings → Tensorlake.
+  `a_cancelled_file_dialog_frees_choose_file`. The look (the warning's danger edge and fill, the key form, the three
+  empty lists): the golden `settings-credentials`. The draft kept across a section switch is the dialog's rule, tested
+  for every section in `crates/gui/farhelm-gui/src/settings/tests.rs`. Not ported: the 390-pixel width (the window's
+  minimum is above it).
+- "the two Tensorlake key forms share acknowledged metadata and separate drafts": its Credentials half, Save, Test and
+  Clear with the write-only placeholders and the request bodies,
+  `the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata`, the controls locked until the account read
+  answers, `the_tensorlake_key_waits_for_the_account_read`, and `each_control_sends_only_its_own_field` and
+  `the_test_message_counts_sandboxes` (`settings/tensorlake_key.rs`). Its Tensorlake half waits for Settings →
+  Tensorlake, which draws the second form over the same account.
 - "recipe references refresh deletion guards and preserve unavailable picker choices": waits for Recipes and the recipe
   editor; an open editor's refresh by a fresh read is `an_open_editor_follows_a_fresh_read_and_keeps_its_secret`.
 - "saved credentials report delivery failures without retaining the secret draft":
@@ -870,7 +875,8 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **The editor's answers scroll with it.** The old Delete, Cancel and Save stuck to the bottom of the dialog's body
   (`position: sticky`); GPUI has no sticky positioning, so they follow the editor's content, below the warning.
 - **Saves of one credential refuse each other**, with "Not saved: another operation was in progress" under the editor:
-  every save and delete of a credential is work on that credential's own operation key, which this section added.
+  every save and delete of a credential is work on that credential's own operation key, which this section added. The
+  Tensorlake API key saves under the preference row's key, as all other helm configuration in Settings does.
 
 ### Add host
 
