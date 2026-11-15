@@ -10,8 +10,9 @@
 //! ([`QuickSwitcher`]) are handled on the window's ground, so they reach the session pane's header (Delete) and the
 //! session list (Rename, the switcher) from wherever focus is on the page (a row, the terminal), and those decide what
 //! they do. From inside a dialog or menu they reach these handlers too, because `root::wrap` draws the overlay inside
-//! the ground, and each refuses while a layer is open (`layers::any_open`), which is SPEC.md's "A visible modal keeps
-//! keyboard ownership".
+//! the ground, and each refuses while a layer that holds the keyboard is open (`layers::focus_layer_open`), which is
+//! SPEC.md's "A visible modal keeps keyboard ownership". A popover that takes no focus, such as a terminal link's
+//! destination display, does not count: it owns no keys.
 //!
 //! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
 //! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar
@@ -170,10 +171,11 @@ impl Render for MainView {
         };
         let ground = div()
             // The open session's header Delete, with its ordinary question (SPEC.md, "Desktop window chrome"), unless a
-            // dialog, menu or question keeps the keyboard. Taken whatever the header does with it, as a once-per-press
+            // dialog, menu or question keeps the keyboard (a popover that never takes focus, such as a terminal link's
+            // destination display, does not). Taken whatever the header does with it, as a once-per-press
             // shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &DeleteSession, window, cx| {
-                if layers::any_open(window, cx) {
+                if layers::focus_layer_open(window, cx) {
                     return;
                 }
                 let mark = Mark::take(cx);

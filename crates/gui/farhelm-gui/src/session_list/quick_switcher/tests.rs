@@ -401,6 +401,145 @@ fn the_chord_from_a_terminal_opens_the_switcher_and_never_reaches_the_program(
     assert_eq!(main.reads(), [], "and no second read");
 }
 
+/// Fill a's terminal with a program's hyperlink across its whole screen, so the pointer anywhere over it rests on the
+/// link, and return a point over the terminal.
+fn link_screen(main: &mut Main<'_>) -> gpui::Point<gpui::Pixels> {
+    {
+        let mut terminals = main.terminals.borrow_mut();
+        let terminal = &mut terminals[0];
+        let asked = terminal.attach();
+        let text = "x".repeat(usize::from(asked.cols));
+        let rows: Vec<Value> = (0..asked.rows)
+            .map(|y| json!([y, {"w":false,"r":[[0,asked.cols,text,[0,-1,-1],0]]}]))
+            .collect();
+        let mut replay = screen(asked.cols, asked.rows);
+        replay.insert(
+            2,
+            serde_json::from_value(
+                json!({"t":"rows","rows":rows,"links":[["1","https://example.com/"]]}),
+            )
+            .unwrap(),
+        );
+        for message in replay {
+            terminal.output(message);
+        }
+        terminal.replay_complete();
+    }
+    settle(main.cx);
+    let size = main.cx.update(|window, _| window.viewport_size());
+    gpui::point(size.width * 0.75, size.height * 0.5)
+}
+
+/// A terminal link's destination display is a popover that never takes focus, not a modal: the switcher's chord still
+/// opens the switcher while one shows, as Rename's and Delete's do (they share the rule, asking whether a layer that
+/// holds focus is open rather than whether any layer is). And the display closing beneath the switcher, as it does
+/// once the switcher's veil ends the hover, must not take the switcher with it: closing a layer once closed every layer
+/// above it. Specified: with the pointer resting on a hyperlink in a's terminal, a layer is open but none holds focus;
+/// the chord opens the switcher, which stays open through redraws and a press in its search field; after Escape the
+/// display shows again for the link under the pointer.
+#[gpui::test]
+fn the_chord_opens_the_switcher_while_a_link_display_shows(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    let over = link_screen(&mut main);
+    main.cx
+        .simulate_mouse_move(over, None, gpui::Modifiers::none());
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    assert!(
+        main.cx.update(
+            |window, cx| layers::any_open(window, cx) && !layers::focus_layer_open(window, cx)
+        ),
+        "the premise: the link's display shows, holding no focus"
+    );
+    main.open_switcher();
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    settle(main.cx);
+    let _ = switcher(main.cx);
+    assert!(
+        main.cx
+            .update(|window, cx| layers::focus_layer_open(window, cx)),
+        "the switcher opened and stays open"
+    );
+    let field = main
+        .cx
+        .debug_bounds("quick-switcher-field")
+        .expect("the premise: the search field is drawn")
+        .center();
+    main.cx
+        .simulate_mouse_down(field, gpui::MouseButton::Left, gpui::Modifiers::none());
+    main.cx
+        .simulate_mouse_up(field, gpui::MouseButton::Left, gpui::Modifiers::none());
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    assert!(
+        main.cx
+            .update(|window, cx| layers::focus_layer_open(window, cx)),
+        "a press inside the switcher leaves it open"
+    );
+    test_support::keys(main.cx, "escape");
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    assert!(
+        !main
+            .cx
+            .update(|window, cx| layers::focus_layer_open(window, cx)),
+        "the premise: Escape closed the switcher"
+    );
+    assert!(
+        main.cx.debug_bounds("terminal-link-disclosure").is_some(),
+        "and the display shows for the link under the pointer"
+    );
+}
+
+/// A menu has no veil, so the terminal keeps getting hover while one is open, but no destination display may open
+/// above the menu; once the menu closes, the link the pointer rests on must get its display, or a click on it is
+/// refused. Once, the display asked for under the menu stayed pending and nothing showed until the pointer left the
+/// link. Specified: with b's row menu open, resting on a's hyperlink shows no display; after Escape closes the menu,
+/// the display shows without the pointer moving.
+#[gpui::test]
+fn a_link_hovered_under_a_menu_shows_its_display_once_the_menu_closes(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    let over = link_screen(&mut main);
+    click(main.cx, "session-menu-b");
+    assert!(
+        main.cx
+            .update(|window, cx| layers::focus_layer_open(window, cx)),
+        "the premise: b's menu is open"
+    );
+    main.cx
+        .simulate_mouse_move(over, None, gpui::Modifiers::none());
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    settle(main.cx);
+    assert!(
+        main.cx
+            .update(|_, cx| crate::terminal::attached::any_hovered_link(cx)),
+        "the premise: with no veil, the terminal sees the link under the pointer"
+    );
+    assert!(
+        main.cx.debug_bounds("terminal-link-disclosure").is_none(),
+        "no display above the menu"
+    );
+    test_support::keys(main.cx, "escape");
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    settle(main.cx);
+    test_support::redraw(main.cx);
+    assert!(
+        !main
+            .cx
+            .update(|window, cx| layers::focus_layer_open(window, cx)),
+        "the premise: Escape closed the menu"
+    );
+    assert!(
+        main.cx.debug_bounds("terminal-link-disclosure").is_some(),
+        "the display shows once the menu is gone"
+    );
+}
+
 /// SPEC.md: the switcher "does nothing while another modal is open". Opening over a menu would leave two layers
 /// fighting over the keyboard, and the old app refused it the same way. Specified: with b's row menu open, the chord
 /// leaves the menu the only layer, opens no switcher and reads nothing.

@@ -74,6 +74,8 @@ pub struct Palette {
     pub control_hover: Token,
     /// `--fg-0`: primary text.
     pub fg_0: Token,
+    /// `--fg-bright`: emphasis on an ordinary neutral surface, such as a link's host in its destination display.
+    pub fg_bright: Token,
     /// `--fg-dim`: explanatory prose on a notice surface.
     pub fg_dim: Token,
     /// `--fg-1`: secondary text: labels, metadata, quiet status words.
@@ -164,6 +166,7 @@ pub const DARK: Palette = Palette {
     bg_2: rgb_token(0x282e3a),
     control_hover: rgb_token(0x333b49),
     fg_0: rgb_token(0xe2e6f0),
+    fg_bright: rgb_token(0xf2f5ff),
     fg_dim: rgb_token(0xbbc3d2),
     fg_1: rgb_token(0xa2aabb),
     fg_2: rgb_token(0x9ba5b8),
@@ -224,6 +227,7 @@ pub const LIGHT: Palette = Palette {
     bg_2: rgb_token(0xffffff),
     control_hover: rgb_token(0xdde3ee),
     fg_0: rgb_token(0x1b2130),
+    fg_bright: rgb_token(0x111827),
     fg_dim: rgb_token(0x414b5f),
     fg_1: rgb_token(0x4f5a70),
     fg_2: rgb_token(0x5a6579),
