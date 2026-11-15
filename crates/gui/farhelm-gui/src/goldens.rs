@@ -9,10 +9,11 @@
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
 //! host failing to connect, and with a host's setup running and failed), the Add host dialog and the setup confirmation
-//! it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end, and the version
-//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
-//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), in both appearances, compared pixel for
-//! pixel.
+//! it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end, the version readout
+//! while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
+//! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
+//! (ordinary and maximized), and the Open-Source Notices window over a short fixture, in both appearances, compared
+//! pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -2671,6 +2672,88 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
+/// The width the Linux title bar scene draws its bars at: the window width of the screenshot batch's narrow app variant,
+/// a typical small window.
+const LINUX_TITLE_BAR_WIDTH: f32 = 900.;
+
+/// The Linux window's own title bar, the one it draws where the compositor draws none (`desktop::linux_title_bar`), as
+/// the main window has it: above, the window in its ordinary state, with Maximize; below, maximized, with Restore in
+/// its place. Drawn through the bar's drawing function rather than its window predicate, since GPUI's test platform
+/// reports server-side decorations and so would never show the bar; the predicate has its own unit tests.
+fn linux_title_bars(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let bar = |id, maximized| {
+        crate::desktop::linux_title_bar::draw(
+            id,
+            crate::bootstrap::WINDOW_TITLE,
+            "Close Farhelm",
+            maximized,
+            cx,
+        )
+    };
+    div()
+        .w(px(LINUX_TITLE_BAR_WIDTH))
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .child(bar("title-bar-ordinary", false))
+        .child(bar("title-bar-maximized", true))
+        .into_any_element()
+}
+
+/// The notices scene's text: a short stand-in for `licenses_text()` with its sections' shape (a ported-code preamble,
+/// then each section opened by the 80-column `=` rule `scripts/dependency-notices.py` writes, a title line and, for a
+/// dependency, the line naming what uses it), including an unwrapped paragraph longer than the window's wrap column, so
+/// the picture shows a cut line continuing on the next, and a tab-indented line. The rule is the window's most repeated
+/// line, so the picture pins how the terminal face draws it.
+const NOTICES_FIXTURE: &str = "\
+Farhelm includes code ported from other projects, under the notices below.
+
+================================================================================
+example-terminal 1.2.3 (Apache-2.0)
+Used by: farhelm-gui
+
+\tCopyright 2020 The Example Terminal Authors.
+
+Licensed under the Apache License, Version 2.0 (the \"License\"); you may not use this file except in compliance with the License, a copy of which is printed with the dependency notices.
+================================================================================
+Example Sans (SIL Open Font License 1.1)
+
+Copyright 2021 The Example Sans Project Authors.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+No warranty is given; see the license for details.";
+
+/// The height the notices scene crops the window to: the real window's text area is 640 pixels high, mostly empty
+/// below a fixture this short, so the scene keeps the bar and the fixture's lines with some room under them.
+const NOTICES_HEIGHT: f32 = 340.;
+
+/// The Open-Source Notices window (`desktop::licenses`) over [`NOTICES_FIXTURE`], at the window's real opening width
+/// (`licenses::opening_width`, which on Linux is what is left once GPUI Kit's frame takes its allowance back) and
+/// cropped in height: the text in the terminal face, wrapped at the window's column. On Linux it has the window's own
+/// title bar above, as under a compositor that draws none, in the ordinary state the window opens in; on macOS the
+/// system draws the title bar, so the scene has none.
+fn notices_window(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    use crate::desktop::{licenses, linux_title_bar};
+    let lines: Rc<[gpui::SharedString]> = licenses::wrap(NOTICES_FIXTURE)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    let bar = cfg!(target_os = "linux").then(|| {
+        linux_title_bar::draw(
+            "notices-title-bar",
+            licenses::TITLE,
+            "Close this window",
+            false,
+            cx,
+        )
+    });
+    div()
+        .w(licenses::opening_width())
+        .h(px(NOTICES_HEIGHT))
+        .child(licenses::content(&lines, bar, cx))
+        .into_any_element()
+}
+
 // ---- The version readout --------------------------------------------------------------------------------------------
 //
 // The sidebar header's version while the desktop updater runs (`update_readout::view`), one scene per group of states.
@@ -3340,6 +3423,18 @@ static SCENES: &[Scene] = &[
         size: (560., 480.),
         draw: empty,
         setup: host_remove_confirmation_setup,
+    },
+    Scene {
+        name: "linux-title-bar",
+        size: (924., 104.),
+        draw: linux_title_bars,
+        setup: no_setup,
+    },
+    Scene {
+        name: "open-source-notices",
+        size: (800., 364.),
+        draw: notices_window,
+        setup: no_setup,
     },
     Scene {
         name: "session-order-menu",
