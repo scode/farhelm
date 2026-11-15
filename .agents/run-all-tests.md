@@ -169,7 +169,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   `crates/terminal-host/TESTING.md`: a drop in line coverage below 95% or a new surviving mutant is a finding.
 
 Deliberately not here: everything the sweep runs (workspace nextest including the e2e suite, desktop nextest, both
-doctest runs, the OMP reporter's JS harness, `test-install-sh.sh`, CentOS provisioning), and the macOS-only uninstall
+doctest runs, the OMP reporter's JS harness, `test-install-sh.sh`, CentOS provisioning), the GPUI host text tests on a
+Mac from `.agents/validation.md` (CoreText shaping, which a Linux machine cannot run), and the macOS-only uninstall
 acceptance (the rehearsal's macOS leg runs it in step 4, including legacy upgrade-floor refusal with the old
 installation preserved and uninstall through an indirect Terminal link). The focused macOS CI job's terminal host step
 (the host crate, its entry test in the CLI, and the supervisor's spawning, its client, its host terminal runtime,
