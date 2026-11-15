@@ -1,6 +1,7 @@
 //! The desktop integration: what the app does with its host platform beyond drawing its window. That is the menu bar
 //! and its shortcuts, quitting when the main window closes, the main window's saved frame, its title band and window
-//! decorations, and the open-source notices the app menu opens.
+//! decorations, the open-source notices the app menu opens, the updater, and bringing the window forward when the app
+//! is launched again.
 //!
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
 //! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
@@ -8,10 +9,11 @@
 //! main window's frame and the macOS title band (`title_band`) are built; the Linux window's decorations are not yet,
 //! so [`dress_window`] sets the macOS options only.
 //!
-//! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`] and
-//! [`FrameFollow`], and the four window options [`dress_window`] may set, nothing more: it passes a `FrameHost`
-//! through whole and never reads a field of either type, so the area reshapes every type here (the frame host's
-//! fields, the follower's contents, the frame value types the host sees) without touching `bootstrap.rs`. Only a
+//! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`],
+//! [`FrameFollow`], [`UpdaterHost`] and [`Activations`], and the four window options [`dress_window`] may set, nothing
+//! more: it passes a `FrameHost`, an `UpdaterHost` and an `Activations` through whole and never reads a field of any of
+//! these types, so the area reshapes every type here (the frame host's fields, the follower's contents, the frame value
+//! types the host sees, what the updater and the activation source hold) without touching `bootstrap.rs`. Only a
 //! changed signature, or a window option beyond those four, is a bootstrap change.
 //!
 //! The bootstrap calls into this module at fixed points, and each point is fixed for a reason the area cannot change
@@ -21,11 +23,14 @@
 //!   `set_menus` reads the shortcuts it shows once, when it runs (SPEC_impl.md, "GPUI cookbook: traps", "Mac menus
 //!   read the keymap once").
 //! - [`keep_licenses`] runs before the window opens, so the notices window can never be asked for text it lacks.
+//! - [`keep_updater`] runs right after it, also before the window opens, so the window's first frame (its version
+//!   readout) already knows whether an updater runs.
 //! - [`restore_frame`] runs before the window opens and its answer goes into the window's options, so the window's
 //!   first frame is already at its saved place (an agent run's `--window-size` still wins over it).
 //! - [`dress_window`] fills in the window's options before it opens, so the title band and decorations are chosen at
 //!   open time, which is the only time GPUI takes them.
-//! - [`quit_when_closed`] and [`follow_frame`] run once the main window exists, because both need its handle.
+//! - [`quit_when_closed`], [`follow_frame`] and [`follow_activations`] run once the main window exists, because
+//!   all three need its handle.
 //!
 //! Nothing in the bootstrap interprets what passes through these calls: the host's frame callbacks reach this module
 //! as they are, and the conversion between the host's frames and GPUI's window bounds lives here.
@@ -95,6 +100,36 @@ fn when_closed(main: AnyWindowHandle, quit: impl Fn(&mut App) + 'static, cx: &mu
 /// its answer goes with the window. The bootstrap calls this once, before the main window opens.
 pub fn keep_licenses(licenses: fn() -> String, cx: &mut App) {
     licenses::keep(licenses, cx);
+}
+
+// ---- The updater ----------------------------------------------------------------------------------------------------
+
+/// The host's updater (`Host::updater`), for the app's update surfaces. A host passes one only when an updater runs, so
+/// whether there is one is the question every update surface asks first. Empty until the desktop integration fills it
+/// in, with plain futures and boxed closures rather than the updater's own types, so the GUI crate depends on nothing of
+/// the updater's. The bootstrap passes it through whole.
+pub struct UpdaterHost {}
+
+/// Keep the host's updater for the update surfaces, `None` when no updater runs. The bootstrap calls this once, right
+/// after [`keep_licenses`] and before the window opens, so the window's first frame (its version readout) already knows
+/// whether an updater runs. The stub drops it.
+pub fn keep_updater(_updater: Option<UpdaterHost>, _cx: &mut App) {}
+
+// ---- A second launch ------------------------------------------------------------------------------------------------
+
+/// How the host reports that the app was launched again while it runs (`Host::activations`), so the running app can
+/// bring its main window forward. A host that listens for no second launch passes none. Empty until the desktop
+/// integration fills it in. The bootstrap passes it through whole.
+pub struct Activations {}
+
+/// Bring `main` forward whenever the host reports a second launch, `None` when it reports none. The bootstrap calls
+/// this once the main window is open, after [`follow_frame`], because bringing the window forward needs its handle. The
+/// stub drops it.
+pub fn follow_activations(
+    _main: AnyWindowHandle,
+    _activations: Option<Activations>,
+    _cx: &mut App,
+) {
 }
 
 // ---- The main window's frame ----------------------------------------------------------------------------------------

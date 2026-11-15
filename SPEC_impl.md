@@ -868,11 +868,13 @@ One bootstrap installs all app-wide state (globals, the channel, the stores, the
 `unwrap` or `expect` in code that platform callbacks can reach: a panic inside an AppKit callback aborts the process.
 State is saved continuously, because GPUI gives quit handlers only 200 ms.
 
-The desktop integration (menus, quitting when the main window closes, the window's saved frame, its title band and the
-notices) is area code the bootstrap calls at fixed points, passing the host's values through without interpreting them.
-Its menus install last, after every key binding, because a Mac menu reads the shortcuts it shows once, when it is set.
-The window's saved frame is read before the window opens, so the first frame is already in place; an agent run's window
-size wins over it.
+The desktop integration (menus, quitting when the main window closes, the window's saved frame, its title band, the
+notices, the updater and second launches) is area code the bootstrap calls at fixed points, passing the host's values
+through without interpreting them. Its menus install last, after every key binding, because a Mac menu reads the
+shortcuts it shows once, when it is set. The window's saved frame is read before the window opens, so the first frame is
+already in place; an agent run's window size wins over it. The updater is handed over before the window opens too, so
+the first frame already knows whether one runs. The source of second launches is handed over only once the window is
+open, since bringing the window forward needs the window.
 
 A foundation reads the global the bootstrap installed for it through one bootstrap helper (`bootstrap::installed`),
 never through GPUI's panicking `global`. A missing global fails an assertion in a debug build, which every test and
