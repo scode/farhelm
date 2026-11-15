@@ -231,6 +231,8 @@ pub fn run() -> anyhow::Result<()> {
         // gets none and shows no update surface.
         updater: updater::start(desktop.state_dir().join(APP_STATE_FILE)).map(updater_host),
         activations,
+        // No platform player yet: the window decides every status sound and plays none of them.
+        player: None,
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");
