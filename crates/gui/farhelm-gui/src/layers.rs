@@ -68,26 +68,25 @@
 //!   its place in Tab order is kept, since GPUI paints every overlay, and so orders its controls, after the whole page.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
-//!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it.
+//!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it. The
+//!   [`tooltip`] submodule holds it, and says when it shows and goes.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
-//! - **Two pill slots, drawn above the layers, that are not layers** ([`show_pill`], [`show_launch_pill`]). They are
-//!   the things a feature draws over the dialogs without opening one. The pill is SPEC.md's quick-launch sequence pill,
-//!   which stays in view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at
-//!   40; it sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and goes when that
-//!   element is no longer drawn. The launch pill is SPEC.md's launch progress pill and its "Started" report, centered
-//!   20 pixels above the window's bottom edge, where the old `.launch-progress-pill` was fixed; it is drawn under the
-//!   approval region and the pill, as the old one sat at z-index 40 under the cards' 45 and the sequence pill's 50 (the
-//!   old stylesheet's z-index ladder at `.header-confirm`), and under a raised layer ([`above_approval_region`]) and
-//!   its veil. Each slot holds one pill, and the two show at once, each hidden only through the id its show returned
-//!   ([`hide_pill`]); both go on a reset ([`close_all`]). Both are display only, like the tooltip: they ask for no
-//!   pointer input and hold no focus, so a press on one is a press on whatever it covers, and nothing that asks about
-//!   layers ([`any_open`], Tab's trap, where focus recovers, Escape's [`dismiss_top`]) sees them.
-//! - **One approval region, drawn above the launch pill and every layer but a raised one, and under the pill and the
-//!   tooltip, that is not a layer either** ([`install_approval_region`]): where SPEC.md's independent agent approval
-//!   cards stay usable while a dialog is open. Unlike the pills it takes presses and focus; like them, nothing that
-//!   asks about layers sees it, and it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays:
-//!   the layer manager", says why it has this shape and which of its behaviors follow from the rules above.
+//! - **Two pill slots that are not layers** ([`show_pill`], [`show_launch_pill`]). They are the things a feature draws
+//!   over the dialogs without opening one. The pill is SPEC.md's quick-launch sequence pill, which stays in view above
+//!   the launcher's veil; it sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and
+//!   goes when that element is no longer drawn. The launch pill is SPEC.md's launch progress pill and its "Started"
+//!   report, centered 20 pixels above the window's bottom edge, where the old `.launch-progress-pill` was fixed. The
+//!   z-order ladder below gives each its place. Each slot holds one pill, and the two show at once, each hidden only
+//!   through the id its show returned ([`hide_pill`]); both go on a reset ([`close_all`]). Both are display only, like
+//!   the tooltip: they ask for no pointer input and hold no focus, so a press on one is a press on whatever it covers,
+//!   and nothing that asks about layers ([`any_open`], Tab's trap, where focus recovers, Escape's [`dismiss_top`]) sees
+//!   them.
+//! - **One approval region that is not a layer either** ([`install_approval_region`]): where SPEC.md's independent
+//!   agent approval cards stay usable while a dialog is open, so it is drawn over every dialog but a raised one (its
+//!   rung on the z-order ladder below). Unlike the pills it takes presses and focus; like them, nothing that asks about
+//!   layers sees it, and it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays: the layer
+//!   manager", says why it has this shape and which of its behaviors follow from the rules above.
 //! - **One layer may be raised above the approval region** ([`above_approval_region`]), and every layer opened over it
 //!   goes with it: SPEC.md's tunnel warning, which the old app drew over the approval cards whatever opened it, so a
 //!   card that asks for it cannot cover it. Its box is raised and its veil is not, so the cards beside it stay usable.
@@ -98,24 +97,42 @@
 //! which draws the overlay, while cached views below it replay. A whole-window refresh would instead re-render every
 //! cached view, which on a 200-row session list is every row each time the pointer crosses a control.
 //!
-//! A tooltip waits [`HOVER_DELAY`] (the old app's 300 ms) before it shows, through a ticker deadline, and shows at once
-//! when another tooltip is showing or one went away less than that long ago, so a user scanning a row of icons does
-//! not wait at each. Escape, a press of any mouse button on a control with help ([`pointer_pressed`]) or a layer
-//! opening puts the tooltip away without that grace, as in the old app. After a press made without moving, the help
-//! stays down while the pointer rests on that control, since nothing changes whose help the pointer calls for.
+//! NOTE: Still to come here: the covered-terminal-link hit test, which needs the terminal. Menu items are plain buttons
+//! until the session row's menu brings the menu item component, so the popover golden shows centered item labels,
+//! which the old menus did not have; it is captured again with that component. The tooltip's own deviations and gaps
+//! are in the [`tooltip`] submodule's NOTE.
 //!
-//! NOTE: Known deviations from the old app's `tooltip.js`, which kept a dismissed control's help down until the pointer
-//! left it: after Escape, the next pointer move brings the help back after the delay; a key other than Escape takes
-//! help down (GPUI ends every hover on a key press, and `tooltip.js` had no key handler but Escape's); after a press, a
-//! key press and then a pointer move bring the help back; a press on a control right after a key press, or a click
-//! whose pointer moves while the button is held, brings the help back after the delay once the button is released (GPUI
-//! ends the control's hover during either and begins it again after); and after a press on a row, a visit to one of its
-//! marks and back shows the row's help again. Still to come here: the covered-terminal-link hit test, which needs the
-//! terminal; and the tooltip's pointer notch and the target ring on its control (both follow element anchoring for
-//! tooltips). Until then a tooltip sits below and right of where the pointer was, and a pointer moving inside a control
-//! does not restart the wait. Menu items are plain buttons until the session row's menu brings the menu item component,
-//! so the popover golden shows centered item labels, which the old menus did not have; it is captured again with that
-//! component.
+//! # The z-order ladder
+//!
+//! The one order in which a window draws everything, bottom to top. Every other doc in this module, and SPEC_impl.md's
+//! "Overlays: the layer manager", that says what an overlay is drawn over or under points here; a new slot gets a rung
+//! here first. [`overlay`] draws rungs 2 to 8 as `deferred` elements whose priorities follow this order. Each rung
+//! gives the old app's z-index for what it ports, from the old stylesheet's z-index ladder comment at `.header-confirm`
+//! (`crates/farhelm-ui/assets/app.css` at reference commit `24bc0580`, lines 2187-2272, cited below by line), where
+//! equal values were ordered by their place in the page.
+//!
+//! 1. **The page**: the window's ordinary content, everything the root view draws before [`overlay`], its last child.
+//! 2. **The layers**, each over the one opened before it: dialogs over their veils, popovers (menus and lists) and
+//!    anchored dialogs (questions). Old: the row menus at 20 (line 2220), the header questions at 30 (line 2227) and
+//!    the modal dialogs' backdrops at 40 (line 2243). Only the layers under the lowest raised one are on this rung; it
+//!    and every layer opened over it are on rung 6.
+//! 3. **The launch pill** ([`show_launch_pill`]). Old: 40, the progress pill inside the launcher's backdrop and the
+//!    "Started" report on its own (lines 6527 and 6564, past the ladder comment), level with the dialogs, so the page's
+//!    order put it over some and under others. Here it is over every dialog on rung 2, a deviation chosen by the
+//!    foundations owner on 2026-11-15; [`show_launch_pill`]'s NOTE has the old split and why.
+//! 4. **The raised dialog's veil**, drawn apart from its box only for the lowest raised layer, when it is a dialog
+//!    ([`above_approval_region`]). Old: the tunnel consent dialog's backdrop at 50 (line 2261), over the cards. Here it
+//!    is under them, decided by the foundations owner on 2026-11-15: SPEC.md's "remain usable" wins over the old app's
+//!    blocking backdrop ([`above_approval_region`] has the decision).
+//! 5. **The approval region** ([`install_approval_region`]). Old: the approval cards at 45 (line 2247), above every
+//!    modal backdrop.
+//! 6. **The raised layers**: the lowest raised layer's box, and every layer opened over it, whole, veils included, each
+//!    over the one before. Old: the tunnel consent dialog at 50 (line 2261). A dialog opened over it would have sat at
+//!    40, under it; here it goes over it, so that the drawn order stays the stack's ([`above_approval_region`]).
+//! 7. **The sequence pill** ([`show_pill`]). Old: `.launch-sequence-indicator` at 50 (line 2256), later in the page
+//!    than the tunnel consent dialog.
+//! 8. **The tooltip** ([`tooltip`]). Old: `.farhelm-tooltip` at 50 (line 2258), "above every panel and modal backdrop,
+//!    the approval cards included", its card appended to the page's body (`tooltip.js` line 388).
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -124,17 +141,29 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, AvailableSpace, Bounds, BoxShadow,
     Context, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId,
-    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point,
-    SharedString, Style, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId,
-    canvas, div, point, prelude::FluentBuilder as _, px,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Style,
+    Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::actions;
 use crate::bootstrap::{installed, installed_mut};
 use crate::focus::{self, Mark};
-use crate::host_text::{HostSentence, Line};
 use crate::theme::{self, metrics};
 use crate::ticker;
+
+mod tooltip;
+#[cfg(test)]
+mod tooltip_tests;
+
+// The tooltip's public items, at the paths every caller has always used (`layers::hover_began` and the like).
+#[cfg(test)]
+pub(crate) use tooltip::show_tooltip_at;
+pub use tooltip::{
+    HOVER_DELAY, Help, ShownTooltip, TooltipOwner, help_drawn, hover_began, hover_ended,
+    hover_moved, pointer_pressed, shown_tooltip,
+};
+use tooltip::{Hovered, tooltip_card};
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
 
@@ -171,32 +200,15 @@ pub struct LayerStack {
     /// calls for ([`hover_began`], "Nested hover help").
     hovered: Vec<Hovered>,
     /// The first of `hovered` when the hover news last settled. A pointer moving inside the same control changes
-    /// nothing, so it neither shows a showing tooltip again nor (not yet: see the module NOTE) starts a waiting one's
-    /// delay over, and a help a press put away stays away while the hover lasts ([`pointer_pressed`]; the module NOTE
-    /// says when GPUI ends it). A tooltip shown or waiting through a hover is always the winner's; only the goldens'
-    /// [`show_tooltip_at`] shows one that is not.
+    /// nothing, so it neither shows a showing tooltip again nor (not yet: see the [`tooltip`] module's NOTE) starts a
+    /// waiting one's delay over, and a help a press put away stays away while the hover lasts ([`pointer_pressed`];
+    /// that NOTE says when GPUI ends it). A tooltip shown or waiting through a hover is always the winner's; only the
+    /// goldens' [`show_tooltip_at`] shows one that is not.
     winner: Option<EntityId>,
-    /// The hover news of the event being handled, waiting for [`settle_hover`], which runs once after it: `Some` while
-    /// a settle is scheduled, holding the owners whose move listener ran, in the order GPUI ran them.
+    /// The hover news of the event being handled, waiting for [`tooltip::settle_hover`], which runs once after it:
+    /// `Some` while a settle is scheduled, holding the owners whose move listener ran, in the order GPUI ran them.
     round: Option<Vec<EntityId>>,
 }
-
-/// One control the pointer is over, as [`LayerStack::hovered`] keeps it.
-struct Hovered {
-    owner: WeakEntity<TooltipOwner>,
-    id: EntityId,
-    /// The help it asked for when its hover began, refreshed each time the control is drawn ([`help_drawn`]). An outer
-    /// control's help may show long after its hover began (the pointer returning from a mark onto its row), and by then
-    /// the control may say something else: a session row's help follows the session's status, and the frame that takes
-    /// a stopped session's live dot away also changes its row's help.
-    help: Help,
-    /// Drops the entry, and settles again, when the control is gone: no hover-leave fires for a control that simply
-    /// stops being drawn, and the control around it, still under the pointer, should then have its help back.
-    _release: Subscription,
-}
-
-/// How long the pointer must rest on a control before its hover help shows: the old app's tooltip delay.
-pub const HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// An open dialog or popover.
 struct Layer {
@@ -1323,415 +1335,6 @@ pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
         })
 }
 
-// ---- Tooltips --------------------------------------------------------------------------------------------------------
-
-/// The token that says which control a tooltip belongs to. It carries no data: its entity id is the owner's identity,
-/// and its release is the signal that the control is gone.
-pub struct TooltipOwner;
-
-impl TooltipOwner {
-    /// The owner token of the control being rendered under `key`, created on its first frame and kept for as long as
-    /// the control is drawn in consecutive frames (GPUI's keyed element state, which cached views carry over when they
-    /// replay). The token is unique per control instance in the window: it is keyed by the control's full element path,
-    /// not its sibling-unique id. `key` must differ from the control's own element id.
-    pub fn for_control(
-        key: impl Into<ElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Entity<TooltipOwner> {
-        window.use_keyed_state(key, cx, |_, _| TooltipOwner)
-    }
-}
-
-/// What a tooltip says, in one of the two forms the old app drew hover help in. Controls hand it over through
-/// [`crate::components::HoverHelp`], which picks the form.
-///
-/// Short help is one [`Line`] on a card at most 280 pixels wide and cut at eight lines (`.farhelm-tooltip`,
-/// `crates/farhelm-ui/assets/app.css` lines 1854-1877 at reference commit `24bc0580`). Paragraph help is for help
-/// whose last sentence matters as much as its first (the agent mark's and the permission shield's: the agent, what its
-/// permission means and the caveat that closes it, then the stored command): the old app marked such a control with
-/// `data-tooltip-paragraphs` (`tooltip.js` lines 444-445), and its card was at most 440 pixels wide with no line
-/// clamp, its text `white-space: pre-line` so a blank line set paragraphs apart (`app.css` lines 1919-1926). It kept
-/// the short card's padding and its `max-height: calc(100vh - 8px)`, so a paragraph card taller than the window is
-/// clipped at the window, not at a line count.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Help {
-    /// Short help: the app's words, or a sentence naming host values.
-    Line(Line),
-    /// Paragraph help: each sentence a paragraph of its own, drawn one below the other with a blank line's gap
-    /// between them, on the wider card, never clamped.
-    Paragraphs(Vec<HostSentence>),
-}
-
-impl Help {
-    /// The help as one string, as assistive technology reads it: for a line, its [`Line::accessible_text`]; for
-    /// paragraphs, every paragraph's [`HostSentence::accessible_name`], separated by a blank line as the old app's
-    /// one description string separated them. Each host value is escaped. For a control's accessible description and
-    /// [`ShownTooltip::text`]; never for display.
-    pub fn accessible_text(&self) -> SharedString {
-        match self {
-            Help::Line(line) => line.accessible_text(),
-            Help::Paragraphs(paragraphs) => paragraphs
-                .iter()
-                .map(|paragraph| paragraph.accessible_name().to_string())
-                .collect::<Vec<_>>()
-                .join("\n\n")
-                .into(),
-        }
-    }
-}
-
-/// Short help in the app's own words, so a caller with a plain string writes `"Save it".into()`.
-impl From<&'static str> for Help {
-    fn from(words: &'static str) -> Self {
-        Help::Line(words.into())
-    }
-}
-
-/// The hover help currently showing, if any. At most one tooltip shows at a time, which is what the old app did too.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ShownTooltip {
-    /// Which control asked for it, so only that control can take it down again.
-    pub owner: EntityId,
-    /// What the tooltip says, as one string, for tests and the bridge's snapshot: the app's wording, or for help that
-    /// names a host value the sentence's accessible text, each host value escaped ([`Help::accessible_text`]). The
-    /// card never draws it; it draws `help`.
-    pub text: SharedString,
-    /// Where the pointer was when the hover began, in window coordinates.
-    pub at: Point<Pixels>,
-    /// The help the card draws. Host values reach a tooltip only as host sentences (a [`Line::Sentence`], or the
-    /// paragraphs of [`Help::Paragraphs`]), whose host parts are drawn by host text's own element, escaped and each in
-    /// a text element of its own (SPEC_impl.md, "Host-supplied text"); a [`Line::App`] is Farhelm's own wording.
-    help: Help,
-}
-
-/// The pointer came onto the control `owner`, whose hover help is `help`. This is the hover listener's half of the
-/// tooltip rule, which [`crate::components::with_hover_help`] wires on every control, beside [`hover_moved`] and
-/// [`hover_ended`]. Which hovered control's help shows is decided once, after GPUI has finished telling every
-/// listener about the event ([`settle_hover`]). When it is this control's, it shows after [`HOVER_DELAY`] at the
-/// pointer's position, or at once while another tooltip is showing or has only just gone.
-///
-/// A host value reaches a tooltip only as part of a host sentence ([`Help`]). The app's own wording is a
-/// [`Line::App`], which a caller makes from a plain string with `.into()`.
-///
-/// # Nested hover help
-///
-/// A control with help can sit inside another that has its own (a session row's marks inside the row), so the pointer
-/// can be over several at once. The innermost one's help shows, as in the old app, whose tooltip took the help nearest
-/// the element under the pointer. Moving from it back onto the control around it shows that control's help again, and
-/// moving from the outer control onto the inner shows the inner one's. GPUI draws a child after its parent, so on a
-/// pointer move "innermost" means drawn last: of two hovered controls that overlap without nesting, the one drawn over
-/// the other wins. Under a still pointer the newest hover wins until the pointer next moves, which for a control and
-/// the ones inside it is the same answer, since they appear together or the inner one later.
-///
-/// The hover listeners alone cannot say which control is innermost, because the order they arrive in depends on why
-/// the hover changed. On a pointer move GPUI calls them from the last drawn to the first, so a pointer that lands on a
-/// mark in one move tells the mark first and the row last. When a frame moves controls under a still pointer (a
-/// scroll, a row appearing) GPUI calls them in drawing order, row first. And a pointer going from the mark back onto
-/// the row tells only the mark, because the row was hovered all along. So the layer manager keeps every hovered control
-/// ([`LayerStack::hovered`]), newest hover first, which is right for a frame's news and for a pointer that crossed
-/// into a control from the one around it. On a pointer move it takes GPUI's order instead: each hovered control's move
-/// listener ([`hover_moved`]) runs on every move, last drawn first, so the order they ran in is exact.
-pub fn hover_began(owner: &Entity<TooltipOwner>, help: Help, window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let id = owner.entity_id();
-    stack.update(cx, |stack, cx| {
-        let release = cx.observe_release(owner, move |stack, _, cx| {
-            stack.hovered.retain(|hovered| hovered.id != id);
-            stack.settle_after_this_event(cx);
-        });
-        stack.hovered.retain(|hovered| hovered.id != id);
-        stack.hovered.insert(
-            0,
-            Hovered {
-                owner: owner.downgrade(),
-                id,
-                help,
-                _release: release,
-            },
-        );
-        stack.settle_after_this_event(cx);
-    });
-}
-
-/// The pointer moved while over the control `owner`: the move listener's half of the tooltip rule. It says nothing
-/// about the help itself. GPUI runs these on every pointer move, for every hovered control, from the last drawn to the
-/// first, and that order is how [`settle_hover`] tells the innermost control from the ones around it (see "Nested
-/// hover help" at [`hover_began`]).
-pub fn hover_moved(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let id = owner.entity_id();
-    stack.update(cx, |stack, cx| {
-        stack.settle_after_this_event(cx);
-        if let Some(moved) = &mut stack.round
-            && !moved.contains(&id)
-        {
-            moved.push(id);
-        }
-    });
-}
-
-/// The control `owner` is being drawn with `help` as its hover help: refresh the copy kept while the pointer is over
-/// it, so a tooltip of it that begins later says what the control says then (see [`Hovered::help`]). It redraws
-/// nothing: a tooltip already waiting or showing keeps the words it began with. Called while the control renders, so a
-/// cached view's controls refresh exactly when they re-render, which is when their help can change.
-pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Help, window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let id = owner.entity_id();
-    stack.update(cx, |stack, _| {
-        if let Some(hovered) = stack.hovered.iter_mut().find(|hovered| hovered.id == id)
-            && hovered.help != *help
-        {
-            hovered.help = help.clone();
-        }
-    });
-}
-
-/// The pointer left the control `owner`. Its tooltip goes only if no other hovered control's help takes its place, so
-/// a control leaving never hides another's tooltip: that matters when the pointer moves straight from one control
-/// onto the next and the new control's hover arrives first, and when it moves from a mark back onto the row around
-/// it, whose help then shows.
-pub fn hover_ended(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let id = owner.entity_id();
-    stack.update(cx, |stack, cx| {
-        stack.hovered.retain(|hovered| hovered.id != id);
-        stack.settle_after_this_event(cx);
-    });
-}
-
-/// A mouse button went down on a control with help: put the tooltip away, as the old `tooltip.js` did on
-/// `pointerdown` whatever the button, and make the control under the press (the innermost hovered one) the winner, so
-/// that its help stays down while the pointer rests there and its hover lasts (the module NOTE lists when GPUI ends
-/// it): [`settle_hover`] acts only when the winner changes. Every hovered control's press listener calls this for the
-/// same press; the later calls change nothing.
-pub fn pointer_pressed(window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    stack.update(cx, |stack, cx| {
-        let shown = stack.tooltip.is_some();
-        // The press may come in the same update as the pointer move that brought the pointer here, before that move's
-        // settle (the test bridge sends a click's move, press and release together): order the hovers by that move.
-        if let Some(moved) = &stack.round {
-            innermost_first(&mut stack.hovered, moved);
-        }
-        stack.winner = stack.hovered.first().map(|hovered| hovered.id);
-        stack.put_tooltip_away();
-        if shown {
-            cx.notify();
-        }
-    });
-}
-
-/// Put `hovered` in the order a pointer move's move listeners ran in (`moved`), which is innermost first and beats the
-/// order the hovers began in. A control whose move listener did not run keeps its place after them (the sort is
-/// stable), and an empty `moved` (no pointer move: a frame's news) changes nothing.
-fn innermost_first(hovered: &mut [Hovered], moved: &[EntityId]) {
-    if moved.is_empty() {
-        return;
-    }
-    hovered.sort_by_key(|hovered| {
-        moved
-            .iter()
-            .position(|id| *id == hovered.id)
-            .unwrap_or(usize::MAX)
-    });
-}
-
-/// Decide whose help the pointer calls for now that GPUI has told every listener about the event, and show it, or
-/// take the tooltip down when the pointer is over no control with help. Nothing changes while the answer stays the
-/// same control ([`LayerStack::winner`]).
-fn settle_hover(window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let change = stack.update(cx, |stack, _| {
-        let moved = stack.round.take().unwrap_or_default();
-        stack
-            .hovered
-            .retain(|hovered| hovered.owner.upgrade().is_some());
-        innermost_first(&mut stack.hovered, &moved);
-        // This runs on every pointer move over a control with help, so the unchanged case clones nothing.
-        let winner = stack.hovered.first().map(|hovered| hovered.id);
-        if winner == stack.winner {
-            return None;
-        }
-        let previous = std::mem::replace(&mut stack.winner, winner);
-        let next = stack
-            .hovered
-            .first()
-            .and_then(|hovered| Some((hovered.owner.upgrade()?, hovered.help.clone())));
-        Some((previous, next))
-    });
-    match change {
-        None => {}
-        Some((_, Some((owner, help)))) => begin_tooltip(&owner, help, window, cx),
-        Some((previous, None)) => end_tooltip(&stack, previous, cx),
-    }
-}
-
-/// Start `owner`'s tooltip, now that its help is the one the pointer calls for: after [`HOVER_DELAY`], or at once
-/// while another tooltip is showing or has only just gone. Either way it replaces any other tooltip, shown or waiting.
-fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Help, window: &mut Window, cx: &mut App) {
-    let at = window.mouse_position();
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let at_once = {
-        let stack = stack.read(cx);
-        stack.tooltip.is_some() || stack.warm
-    };
-    if at_once {
-        show_tooltip_from(owner, help, at, window, cx);
-        return;
-    }
-    let owner_id = owner.entity_id();
-    let weak_owner = owner.downgrade();
-    let handle = window.window_handle();
-    let deadline = ticker::after(HOVER_DELAY, cx, move |cx| {
-        let Some(owner) = weak_owner.upgrade() else {
-            return;
-        };
-        let _ = handle.update(cx, |_, window, cx| {
-            show_tooltip_from(&owner, help, at, window, cx)
-        });
-    });
-    stack.update(cx, |stack, _| {
-        stack.pending_tooltip = Some((owner_id, deadline));
-    });
-}
-
-/// Take down `previous`'s tooltip, shown or waiting: the pointer has left it and is over no other control whose help
-/// shows. A tooltip some other control showed stays, so a control leaving never hides another's. A tooltip that was
-/// showing leaves the grace behind it, so the next one within the delay shows at once.
-fn end_tooltip(stack: &Entity<LayerStack>, previous: Option<EntityId>, cx: &mut App) {
-    let Some(previous) = previous else {
-        return;
-    };
-    let hidden = stack.update(cx, |stack, cx| {
-        if stack
-            .pending_tooltip
-            .as_ref()
-            .is_some_and(|(pending, _)| *pending == previous)
-        {
-            stack.pending_tooltip = None;
-        }
-        if !stack
-            .tooltip
-            .as_ref()
-            .is_some_and(|shown| shown.owner == previous)
-        {
-            return false;
-        }
-        stack.tooltip = None;
-        stack.tooltip_release = None;
-        cx.notify();
-        true
-    });
-    if hidden {
-        let weak = stack.downgrade();
-        let cool_down = ticker::after(HOVER_DELAY, cx, move |cx| {
-            let _ = weak.update(cx, |stack, _| stack.warm = false);
-        });
-        stack.update(cx, |stack, _| {
-            stack.warm = true;
-            stack.cool_down = Some(cool_down);
-        });
-    }
-}
-
-/// [`hover_began`]'s tooltip shown at once, with the hover beginning at a fixed point, for the screenshot goldens.
-#[cfg(test)]
-pub(crate) fn show_tooltip_at(
-    owner: &Entity<TooltipOwner>,
-    help: Help,
-    at: Point<Pixels>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    show_tooltip_from(owner, help, at, window, cx);
-}
-
-/// Show `help` for `owner` with the hover beginning at `at`. The one place a [`ShownTooltip`] is made, so its `text`
-/// is always its `help`'s accessible text.
-fn show_tooltip_from(
-    owner: &Entity<TooltipOwner>,
-    help: Help,
-    at: Point<Pixels>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let owner_id = owner.entity_id();
-    stack.update(cx, |stack, cx| {
-        stack.pending_tooltip = None;
-        stack.tooltip = Some(ShownTooltip {
-            owner: owner_id,
-            text: help.accessible_text(),
-            at,
-            help,
-        });
-        // The tooltip closes when its control is gone, though no hover-leave ever fires for a control that simply
-        // stops being drawn (a dialog closing on Enter, a deleted row).
-        stack.tooltip_release = Some(cx.observe_release(owner, move |stack, _, cx| {
-            if stack
-                .tooltip
-                .as_ref()
-                .is_some_and(|shown| shown.owner == owner_id)
-            {
-                stack.tooltip = None;
-                cx.notify();
-            }
-        }));
-        cx.notify();
-    });
-}
-
-impl LayerStack {
-    /// Run [`settle_hover`] once, after the event being handled: GPUI tells each hovered control's listeners about one
-    /// pointer move (or one frame's hover changes) in turn, and the help to show depends on all of them. A settle runs
-    /// as a deferred effect, which GPUI runs only once the event's listeners have all returned, and the first piece of
-    /// news schedules it.
-    fn settle_after_this_event(&mut self, cx: &mut App) {
-        if self.round.is_some() {
-            return;
-        }
-        self.round = Some(Vec::new());
-        let window = self.window;
-        // The update fails only when the window is gone, and its stack with it, so the round it leaves open is never
-        // needed again.
-        cx.defer(move |cx| {
-            let _ = window.update(cx, |_, window, cx| settle_hover(window, cx));
-        });
-    }
-
-    /// Take the tooltip down, and any waiting one, without the grace that lets the next one skip the delay: after
-    /// Escape or a layer opening, the user has just put one away.
-    fn put_tooltip_away(&mut self) {
-        self.tooltip = None;
-        self.tooltip_release = None;
-        self.pending_tooltip = None;
-        self.warm = false;
-        self.cool_down = None;
-    }
-}
-
-/// The tooltip showing now in `window`, for tests and the bridge's snapshot.
-pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
-    stack(window, cx)?.read(cx).tooltip.clone()
-}
-
 // ---- The pill --------------------------------------------------------------------------------------------------------
 
 /// A display-only element to draw above every layer ([`show_pill`]): SPEC.md's quick-launch sequence pill, with its
@@ -1789,9 +1392,9 @@ struct ShownPill {
     _drawn: Subscription,
 }
 
-/// Show `pill` in `window`, above every layer and under the tooltip, replacing any pill showing there. Returns the id
-/// that hides it, or `None` when its anchor element is already gone (there is nowhere to place it) or the window has
-/// no layer stack.
+/// Show `pill` in `window`, above every layer (rung 7 of the module docs' z-order ladder), replacing any pill showing
+/// there. Returns the id that hides it, or `None` when its anchor element is already gone (there is nowhere to place
+/// it) or the window has no layer stack.
 ///
 /// One slot per window for this pill: showing replaces whatever pill shows in it, and [`hide_pill`] hides only the pill
 /// its id names, so a feature that hides a pill another show has replaced does nothing. SPEC.md arms one sequence at a
@@ -1867,10 +1470,8 @@ const LAUNCH_PILL_INSET: Pixels = px(20.);
 /// wide as its content up to that cap and keeps its text inside it (clip or wrap); a view wider than the cap overflows
 /// it. Having no anchor, it goes only when its feature hides it or on a reset ([`close_all`]).
 ///
-/// It is drawn above every layer but a raised one ([`above_approval_region`]) and under the approval region, the
-/// sequence pill and the tooltip: the old progress pill sat inside the launcher's backdrop at z-index 40 and the old
-/// "Started" report at z-index 40 itself, above the row menus (20) and header questions (30), under the approval cards
-/// (45), the sequence pill and the tooltip (50). Like the pill it is not a layer, takes no [`Mark`], and changes
+/// It is drawn above every layer but a raised one ([`above_approval_region`]), on rung 3 of the module docs' z-order
+/// ladder, which gives the old z-indices around it. Like the pill it is not a layer, takes no [`Mark`], and changes
 /// nothing that layers decide.
 ///
 /// NOTE: The old dialogs sat at z-index 40 beside the old pills, except the tunnel consent dialog at 50, which was
@@ -1969,15 +1570,14 @@ pub fn install_approval_region(view: AnyView, window: &mut Window, cx: &mut App)
     });
 }
 
-/// Draw the open layer `id`'s own box, and every layer opened over it, above the approval region and under the pill
-/// and the tooltip, until it closes; its veil stays where an ordinary dialog's is, under the cards. Its opener calls
-/// this right after the open, before a frame shows it. Only SPEC.md's tunnel warning does, so a card that asks for the
-/// warning cannot cover it: the old app drew that dialog at z-index 50, over the approval cards' 45, whatever opened it
-/// (a Cmd-click in the terminal, Settings' switch or a card's Tunnel and open), and under the sequence pill and the
-/// tooltip, also at 50 and later in the page (`.tunnel-consent-backdrop` and `.approval-cards` in `app.css` at
-/// reference commit `24bc0580`, lines 9790 and 8842, and the z-index ladder at `.header-confirm`, line 2261). Every
-/// other old dialog, menu and question sat at 40 or lower, under the cards (the hosts dialog a card opens included), so
-/// no other opener raises its layer.
+/// Draw the open layer `id`'s own box, and every layer opened over it, above the approval region until it closes (rung
+/// 6 of the module docs' z-order ladder); its veil stays under the cards (rung 4). Its opener calls this right after
+/// the open, before a frame shows it. Only SPEC.md's tunnel warning does, so a card that asks for the warning cannot
+/// cover it: the old app drew that dialog at z-index 50, over the approval cards' 45 (`.tunnel-consent-backdrop` and
+/// `.approval-cards` in `app.css` at reference commit `24bc0580`, lines 9790 and 8842, and the z-index ladder at
+/// `.header-confirm`, line 2261), whatever opened it (a Cmd-click in the terminal, Settings' switch or a card's Tunnel
+/// and open). Every other old dialog, menu and question sat at 40 or lower, under the cards (the hosts dialog a card
+/// opens included), so no other opener raises its layer.
 ///
 /// The old warning's backdrop was at 50 too, and blocked every card while it was up. Here the veil stays under the
 /// cards, so a press on a card outside the warning's box is the card's and focus may rest there, as SPEC.md's "Opening
@@ -2028,9 +1628,8 @@ impl LayerStack {
 
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
-/// Everything above the window's content, which the root view draws as its last child, bottom to top: each open layer
-/// under the lowest raised one ([`above_approval_region`]), the launch pill, the raised dialog's veil, the approval
-/// region, the raised dialog's box and every layer opened over it, the pill and the tooltip.
+/// Everything above the window's content, which the root view draws as its last child: rungs 2 to 8 of the module
+/// docs' z-order ladder, from the layers under the lowest raised one ([`above_approval_region`]) up to the tooltip.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred and anchored"
@@ -2046,11 +1645,9 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     {
         return None;
     }
-    // The deferred priorities, bottom to top: the old z-index ladder's order (dialogs and the launch pill at 40, the
-    // approval cards at 45, the tunnel warning, the sequence pill and the tooltip at 50, in that page order), except
-    // that the lowest raised dialog's veil goes under the cards ([`above_approval_region`]). The launch pill, that
-    // veil and the region go between the layers under the lowest raised one and the rest, so a layer's priority is
-    // its place in the stack plus one, or plus four from the lowest raised one up.
+    // The deferred priorities, bottom to top, are the module docs' z-order ladder. Rungs 3 to 5 (the launch pill, the
+    // lowest raised dialog's veil and the region) go between the layers under the lowest raised one and the rest, so a
+    // layer's priority is its place in the stack plus one, or plus four from the lowest raised one up.
     let (raised, above) = (stack.raised_from(), stack.layers.len());
     let (launch_depth, veil_depth, region_depth) = (raised + 1, raised + 2, raised + 3);
     let (pill_depth, tooltip_depth) = (above + 4, above + 5);
@@ -2179,9 +1776,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         overlay = overlay.child(gpui::deferred(element).with_priority(depth));
     }
     if let Some(launch) = &stack.launch_pill {
-        // Above every layer but a raised one, as the old launch pill sat over the launcher's backdrop and above the row
-        // menus and header questions, and under the approval cards, the tunnel warning and the sequence pill. Display
-        // only, as the pill below is.
+        // Rung 3 of the ladder: above every layer but a raised one. Display only, as the pill below is.
         let placed = PlacedLate {
             place: LateBox::WindowBottom,
             child: launch.view.clone().into_any_element(),
@@ -2196,10 +1791,9 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         overlay = overlay.child(gpui::deferred(placed).with_priority(region_depth));
     }
     if let Some(pill) = &stack.pill {
-        // Above every layer, the launch pill and the approval region, as the old pill sat above the launcher's
-        // backdrop, the launch pill and the approval cards, and under the tooltip, which the old z-index ladder put
-        // above every panel. Nothing here asks for the pointer (no listener, no `occlude`), so GPUI registers no hit
-        // area for the placing wrapper and a press on the pill reaches what it covers.
+        // Rung 7 of the ladder: above every layer, under the tooltip. Nothing here asks for the pointer (no listener,
+        // no `occlude`), so GPUI registers no hit area for the placing wrapper and a press on the pill reaches what it
+        // covers.
         let placed = PlacedLate {
             place: LateBox::Pill {
                 anchor: pill.anchor.clone(),
@@ -2219,46 +1813,6 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         overlay = overlay.child(gpui::deferred(placed).with_priority(tooltip_depth));
     }
     Some(overlay.into_any_element())
-}
-
-/// The tooltip's card, styled as the old `.farhelm-tooltip`: short help cut at eight lines inside the 280-pixel cap,
-/// paragraph help one paragraph below the other inside the 440-pixel cap and never cut ([`Help`]).
-fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
-    let palette = theme::palette(cx);
-    let (pad_y, pad_x) = metrics::TOOLTIP_PAD;
-    let viewport = window.viewport_size();
-    // `max-width: min(280px, 100vw - 8px)` (440 for paragraphs) and `max-height: 100vh - 8px`, as the old tooltip.
-    let cap = match shown.help {
-        Help::Line(_) => metrics::TOOLTIP_MAX_WIDTH,
-        Help::Paragraphs(_) => metrics::TOOLTIP_PARAGRAPHS_MAX_WIDTH,
-    };
-    let card = div()
-        .max_w(cap.min(viewport.width - px(8.)))
-        .max_h(viewport.height - px(8.))
-        .overflow_hidden()
-        .py(pad_y)
-        .px(pad_x)
-        .bg(theme::color(palette.bg_2))
-        .text_color(theme::color(palette.fg_0))
-        .border_1()
-        .border_color(theme::color(palette.border))
-        .rounded(metrics::RADIUS_MD)
-        .shadow(menu_shadow(palette))
-        .text_size(metrics::TEXT_SM)
-        .line_height(metrics::TOOLTIP_LINE_HEIGHT);
-    // The help itself, not its accessible text: a sentence draws each host value through host text's element.
-    match &shown.help {
-        Help::Line(line) => card
-            .line_clamp(metrics::TOOLTIP_MAX_LINES)
-            .child(line.clone()),
-        // No clamp here: the clamp is a text style every paragraph would inherit, and it would cut each one at eight
-        // lines, which is exactly what this form exists to avoid (a guarded launch's closing caveat).
-        Help::Paragraphs(paragraphs) => card
-            .flex()
-            .flex_col()
-            .gap(metrics::TOOLTIP_PARAGRAPH_GAP)
-            .children(paragraphs.iter().cloned()),
-    }
 }
 
 /// `--shadow-menu`: `0 6px 18px` in the token's color, shared by menus, popovers and tooltips.

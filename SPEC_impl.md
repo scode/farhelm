@@ -629,69 +629,79 @@ dialog) is not an exception: it opens with a mark taken when the last of them cl
 the user's.
 
 One feature-supplied element is drawn above every layer without being one: the pill (`layers::show_pill`), for SPEC.md's
-quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil, as the old pill sat
-above the launcher's backdrop, while taking neither focus nor pointer input. It is display only, like the tooltip, which
-is drawn above it: its view has no listener, hover style, cursor, help or focus-tracked control, so GPUI gives it no hit
-area and a press on it is a press on what it covers (the control under it, or a dialog's veil). It opens no layer and is
-not counted by `layers::any_open`, Tab's trap, focus recovery or Escape. It sits centered over an anchor element or
-centered across that element's bottom edge, and goes when its feature hides it, on a reset (`layers::close_all`), and
-when the element is no longer drawn, so the feature anchors it to the element SPEC.md names for the current state (the
-terminal area, or the main area with no session open), best one element drawn under the same key in both states, and
-otherwise shows the pill again on the new anchor when a session opens or closes. A window has two pill slots: the pill,
-and the launch pill (`layers::show_launch_pill`) for SPEC.md's launch progress pill and the "Started" report after it
-(one slot for both; the launcher decides which shows), which can show while a sequence is armed. Each slot's show
-replaces only that slot's pill, and hiding takes down only the pill that show returned. The launch pill follows the
-pill's rules (display only, not a layer, gone on a reset) but has no anchor: it is centered across the window 20 pixels
-above its bottom edge and kept 20 pixels from its sides, as the old `.launch-progress-pill` was fixed there. It is drawn
-above every layer but a raised one (below) and under the approval region and the pill, as the old one sat at z-index 40
-under the cards (45) and the sequence pill (50), so where the two pills overlap (the launch pill and a sequence pill on
-the main area's bottom edge while the launcher is open) the sequence pill covers it, as in the old app. The old dialogs
-sat at 40 beside the old launch pills, except the tunnel consent dialog at 50, which was always above them; among the
-40s element order decided, so the launcher, the quick switcher, the templates dialog, the checkout trash dialog and the
-Hosts panel's dialogs sat under the pills, and Delete, Stop, Rename and the app bar's dialogs (Settings and the help
-menu's) covered them. Drawing the launch pill above every dialog but the raised tunnel consent dialog, which matches the
-launcher and the other dialogs that start a launch, is a deviation chosen by the foundations owner on 2026-11-15.
+quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil while taking neither
+focus nor pointer input. It is display only, like the tooltip: its view has no listener, hover style, cursor, help or
+focus-tracked control, so GPUI gives it no hit area and a press on it is a press on what it covers (the control under
+it, or a dialog's veil). It opens no layer and is not counted by `layers::any_open`, Tab's trap, focus recovery or
+Escape. It sits centered over an anchor element or centered across that element's bottom edge, and goes when its feature
+hides it, on a reset (`layers::close_all`), and when the element is no longer drawn, so the feature anchors it to the
+element SPEC.md names for the current state (the terminal area, or the main area with no session open), best one element
+drawn under the same key in both states, and otherwise shows the pill again on the new anchor when a session opens or
+closes. A window has two pill slots: the pill, and the launch pill (`layers::show_launch_pill`) for SPEC.md's launch
+progress pill and the "Started" report after it (one slot for both; the launcher decides which shows), which can show
+while a sequence is armed. Each slot's show replaces only that slot's pill, and hiding takes down only the pill that
+show returned. The launch pill follows the pill's rules (display only, not a layer, gone on a reset) but has no anchor:
+it is centered across the window 20 pixels above its bottom edge and kept 20 pixels from its sides, as the old
+`.launch-progress-pill` was fixed there. It is drawn above every layer but a raised one and under the sequence pill (the
+z-order ladder, below), so where the two pills overlap (the launch pill and a sequence pill on the main area's bottom
+edge while the launcher is open) the sequence pill covers it, as in the old app. The old dialogs sat at 40 beside the
+old launch pills, except the tunnel consent dialog at 50, which was always above them; among the 40s element order
+decided, so the launcher, the quick switcher, the templates dialog, the checkout trash dialog and the Hosts panel's
+dialogs sat under the pills, and Delete, Stop, Rename and the app bar's dialogs (Settings and the help menu's) covered
+them. Drawing the launch pill above every dialog but the raised tunnel consent dialog, which matches the launcher and
+the other dialogs that start a launch, is a deviation chosen by the foundations owner on 2026-11-15.
 
-Another feature-supplied element is drawn above every dialog and popover (but a raised one, below) and the launch pill
-and under the pill and the tooltip without being a layer: the approval region (`layers::install_approval_region`), where
-SPEC.md's independent agent approval cards "remain usable" while a dialog is open, in the old app's order (veils and the
-launch pill at z-index 40, cards at 45, pill and tooltip at 50). Unlike the pills it takes presses and focus. The
-approvals feature installs it once per window and never shows or hides it; its view draws nothing while no card waits,
-and a reset leaves it installed. It opens no layer and is not counted by `layers::any_open`, Tab's trap, focus recovery
-or Escape. Its view is laid out while the frame is prepared, inside a zero-size box at the window's origin that tracks
-the region's focus, so it places its card itself from the bounds of an element the session view draws
-(`layers::Anchor::drawn_bounds`, this frame's at that point) and the window's size. The box is zero-size because a
-tracked element takes every press its hitbox sees, and a full-window one would keep a press on the page's empty space
-from sending focus home. That the view occludes whatever it draws, and draws nothing with a size or a listener when
-empty, is held by review. Most of what the cards need follows from the rules above without a rule of its own, and tests
-show it: a press on a card is the card's, since it is drawn above the veil and occludes; a dialog closing, or its
-subject going, leaves focus on a card; the dialog's late focus moves refuse while focus is on a card; Tab from a card
-goes back into the dialog, while the dialog's own Tab never reaches it; and a focused card control going away sends
-focus into the topmost dialog, or home. Escape on a card does nothing, so it cannot close the dialog behind it, as the
-old app's keyboard safety net passed over the cards (decided by the GPUI migration's foundations owner, 2026-11-14). A
-view that reads `drawn_bounds` picks its anchor from its own state, not from `None`: the bounds turn `None` only after
-the frame that stopped drawing the element, and nothing redraws then. Not built yet, for want of anything to build them
-against: counting a card as covering a terminal link's disclosure (an occluding card counts with no change if that hit
-test uses occlusion), and raising a refused link's explanation above the cards.
+Another feature-supplied element is drawn above every dialog and popover but a raised one (the z-order ladder, below)
+without being a layer: the approval region (`layers::install_approval_region`), where SPEC.md's independent agent
+approval cards "remain usable" while a dialog is open, as the old cards sat above every modal backdrop. Unlike the pills
+it takes presses and focus. The approvals feature installs it once per window and never shows or hides it; its view
+draws nothing while no card waits, and a reset leaves it installed. It opens no layer and is not counted by
+`layers::any_open`, Tab's trap, focus recovery or Escape. Its view is laid out while the frame is prepared, inside a
+zero-size box at the window's origin that tracks the region's focus, so it places its card itself from the bounds of an
+element the session view draws (`layers::Anchor::drawn_bounds`, this frame's at that point) and the window's size. The
+box is zero-size because a tracked element takes every press its hitbox sees, and a full-window one would keep a press
+on the page's empty space from sending focus home. That the view occludes whatever it draws, and draws nothing with a
+size or a listener when empty, is held by review. Most of what the cards need follows from the rules above without a
+rule of its own, and tests show it: a press on a card is the card's, since it is drawn above the veil and occludes; a
+dialog closing, or its subject going, leaves focus on a card; the dialog's late focus moves refuse while focus is on a
+card; Tab from a card goes back into the dialog, while the dialog's own Tab never reaches it; and a focused card control
+going away sends focus into the topmost dialog, or home. Escape on a card does nothing, so it cannot close the dialog
+behind it, as the old app's keyboard safety net passed over the cards (decided by the GPUI migration's foundations
+owner, 2026-11-14). A view that reads `drawn_bounds` picks its anchor from its own state, not from `None`: the bounds
+turn `None` only after the frame that stopped drawing the element, and nothing redraws then. Not built yet, for want of
+anything to build them against: counting a card as covering a terminal link's disclosure (an occluding card counts with
+no change if that hit test uses occlusion), and raising a refused link's explanation above the cards.
 
 One layer's box is drawn above the approval region: SPEC.md's tunnel warning, whose opener raises it as it opens
 (`layers::above_approval_region`), however it was asked (a terminal Cmd-click, Settings' switch, a card's Tunnel and
 open), so the card that asked cannot cover it. The old app drew the warning there: its dialog sat at z-index 50, above
-the cards at 45 and under the sequence pill and the tooltip, also at 50 and later in the page
-(`.tunnel-consent-backdrop` in `app.css` at `24bc0580`). Its veil stays under the cards, as an ordinary dialog's does,
-but above the launch pill, which the old warning's backdrop covered too, so a press on a card beside the warning is the
-card's and focus may rest there, while a press on the warning's box where it overlaps a card is the warning's. The old
-warning's backdrop sat at 50 with it and blocked every card while it was up, against SPEC.md's "Opening and closing"
-("independent agent approval cards remain usable" while a modal dialog is open): decided by the foundations owner on
-2026-11-15, SPEC.md's "remain usable" wins over the old app's blocking backdrop. The order is then: the layers under the
-raised one, the launch pill, the raised dialog's veil, the approval region, the raised dialog's box and every layer
-opened over it (whole, veil included), the pill and the tooltip, so the drawn order stays the stack's and "the topmost
-layer" names the same layer for drawing, presses, Tab's trap and Escape. The old app would have drawn a dialog opened
-over the warning at 40, under it. While a layer opened over the raised one is up, its veil covers the cards too, the one
-case where they do not remain usable over a dialog: under the region, its veil would sit under the raised box, which
-would then take presses meant for the dialog above it. No other opener raises its layer: every other layer a card opens
-draws under the cards, as the old hosts dialog a card opened sat at 40; a question or menu anchored to a card would too,
-and raising one is not built.
+the cards at 45 (`.tunnel-consent-backdrop` in `app.css` at `24bc0580`). Its veil stays under the cards, as an ordinary
+dialog's does, but above the launch pill, which the old warning's backdrop covered too, so a press on a card beside the
+warning is the card's and focus may rest there, while a press on the warning's box where it overlaps a card is the
+warning's. The old warning's backdrop sat at 50 with it and blocked every card while it was up, against SPEC.md's
+"Opening and closing" ("independent agent approval cards remain usable" while a modal dialog is open): decided by the
+foundations owner on 2026-11-15, SPEC.md's "remain usable" wins over the old app's blocking backdrop. Every layer opened
+over the raised one goes above the region with it, whole, veil included (the z-order ladder, below), so the drawn order
+stays the stack's and "the topmost layer" names the same layer for drawing, presses, Tab's trap and Escape. The old app
+would have drawn a dialog opened over the warning at 40, under it. While a layer opened over the raised one is up, its
+veil covers the cards too, the one case where they do not remain usable over a dialog: under the region, its veil would
+sit under the raised box, which would then take presses meant for the dialog above it. No other opener raises its layer:
+every other layer a card opens draws under the cards, as the old hosts dialog a card opened sat at 40; a question or
+menu anchored to a card would too, and raising one is not built.
+
+The z-order ladder is the one order in which a window draws everything, bottom to top; each rung names what the old app
+drew there and at what z-index (the ladder comment at `.header-confirm` in the old `app.css`, which `layers.rs`'s module
+docs cite by line):
+
+1. The page.
+2. The layers, each over the one opened before it: dialogs over their veils, popovers and anchored questions (old: row
+   menus at 20, header questions at 30, modal backdrops at 40), up to the lowest raised one.
+3. The launch pill (old: 40, level with the dialogs; over every dialog but a raised one here, the deviation above).
+4. The lowest raised dialog's veil (old: 50 with its dialog, over the cards; under them here, the decision above).
+5. The approval region (old: the cards at 45).
+6. The lowest raised layer's box and every layer opened over it, whole (old: the tunnel consent dialog at 50).
+7. The sequence pill (old: 50).
+8. The tooltip (old: 50).
 
 One tooltip shows at a time. When a control with hover help sits inside another that has its own (a session row's marks
 inside the row), the innermost one under the pointer shows its help, as the old app's tooltip took the help nearest the
@@ -8439,11 +8449,11 @@ applies, rather than classifying command strings again; stored workspace trust a
 meaning.
 
 The approval region is the layer manager's approval slot (`layers::install_approval_region`; "Overlays: the layer
-manager" has its rules): installed once per window, drawn above every dialog and popover and below the pill and the
-tooltip, so a card stays answerable while a dialog is open, and drawing nothing while no request waits and no
-late-answer notice shows. It reads the pushed requests as it draws and keeps only what the user did there: the chosen
-request, the answer bar's pause, and why the card's last action opened nothing. It places itself from two anchors other
-views draw: the main pane, and the open session's terminal area, whose top clears the tabs and the lines above the
+manager" has its rules): installed once per window, drawn above every dialog and popover but a raised one (the layer
+manager's z-order ladder), so a card stays answerable while a dialog is open, and drawing nothing while no request waits
+and no late-answer notice shows. It reads the pushed requests as it draws and keeps only what the user did there: the
+chosen request, the answer bar's pause, and why the card's last action opened nothing. It places itself from two anchors
+other views draw: the main pane, and the open session's terminal area, whose top clears the tabs and the lines above the
 terminal; with no session open, the pane's top. Which anchor applies is decided from state (a session is selected and
 still listed), never from an anchor's last drawn bounds. Width is capped at 660px with 12px margins; the region's height
 is capped at 75% of the pane and at the space remaining below its top. Flex sizing keeps the card's header, From line
