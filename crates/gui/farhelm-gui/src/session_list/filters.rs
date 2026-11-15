@@ -234,6 +234,9 @@ pub(crate) struct Choice {
     /// The number of the last query the helm answered, accepted or refused: `sent` once no query is in flight, since
     /// replies arrive in the order the queries were sent.
     replied: u64,
+    /// The number of the latest send that changed the filters (0 before any): the send whose answer brings the listing
+    /// of the view the user chose ([`Choice::listing_view`]).
+    view_sent: u64,
     /// The helm's words for the latest query, when it refused it.
     refusal: Option<HostText>,
 }
@@ -264,6 +267,7 @@ impl Choice {
         }
         if self.chosen != query {
             self.refusal = None;
+            self.view_sent = self.sent + 1;
         }
         self.chosen = query;
         self.named = selected.map(str::to_owned);
@@ -286,6 +290,20 @@ impl Choice {
     /// filters (`session_pane/carried_tests.rs`, `a_quick_return_to_a_session_is_not_undone_by_the_query_it_overtook`).
     pub(crate) fn serves_named(&self, key: &str) -> bool {
         self.replied == self.sent && self.answered_named.as_deref() == Some(key)
+    }
+
+    /// Which view the listing in the store answers, for the status sounds, which record a changed view's statuses
+    /// silently (SPEC.md, "Status": "changing that view silently records its existing statuses"): `None` while a query
+    /// that changed the filters is unanswered, and otherwise a number that changes exactly when such a query is
+    /// answered.
+    ///
+    /// The helm pushes a new query's listing before it replies to the query, so a listing that arrives while this is
+    /// `None` may already be the new view's, and one change may hold both the old view's rows and the new one's; nothing
+    /// in the listing itself says which query it answers ([`Choice::answered`]'s NOTE). Once the answer is here, the
+    /// store holds the view the number names. A send that only names another open session leaves the number alone:
+    /// it changes which session the helm carries outside the list, never which sessions the list shows.
+    pub(crate) fn listing_view(&self) -> Option<u64> {
+        (self.replied >= self.view_sent).then_some(self.view_sent)
     }
 
     /// The helm answered query number `number`, which asked for `query` naming `selected` as the open session: accepted

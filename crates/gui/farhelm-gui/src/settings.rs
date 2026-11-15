@@ -429,11 +429,13 @@ impl Section {
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
     /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
-    /// is a text field that is read-only until its read answers, and Notifications, whose controls are unavailable
-    /// until its read answers ([`ntfy`]), and Credentials, whose controls wait for its reads too ([`credentials`]);
-    /// only their goldens open at any of these. `None` for Containers too, whose first control, Refresh, belongs to a
-    /// view made as the section first shows ([`containers`]); only its golden opens there. `None` for App as well,
-    /// whose switch is not a preference [`Choice`]: [`SettingsDialog::start`] gives it its own handle.
+    /// is a text field that is read-only until its read answers, and Credentials, whose controls wait for its reads too
+    /// ([`credentials`]); only their goldens open at any of these. `None` for Containers too, whose first control,
+    /// Refresh, belongs to a view made as the section first shows ([`containers`]); only its golden opens there. `None`
+    /// for Notifications too, although its first control, the waiting sound's switch, could take focus: nothing in the
+    /// app opens Settings there (only its golden and its tests do), and the ntfy form's tests walk Tab from the dialog
+    /// itself. `None` for App as well, whose switch is not a preference [`Choice`]: [`SettingsDialog::start`] gives it
+    /// its own handle.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
@@ -885,6 +887,46 @@ impl SettingsDialog {
         .into_any_element()
     }
 
+    /// Notifications' Sounds sub-heading: its heading, the paragraph the three switches share, and the switches for the
+    /// status sounds (SPEC.md, "Status"), in the old app's order (`SoundSettings` in `sounds.rs` at the reference
+    /// commit). They save like every other switch here; the sounds' owner reads the same fields
+    /// ([`crate::sounds::StatusSounds`]).
+    ///
+    /// The paragraph is the old one reworded: the old app kept these switches on the device ("These choices apply only
+    /// to this device"), and here they are shared helm preferences (the maintainer's decision of 2026-11-13), so it says
+    /// what the other shared switches' help says.
+    fn sounds(&self, preferences: Option<&Preferences>, cx: &Context<Self>) -> AnyElement {
+        let palette = theme::palette(cx);
+        div()
+            .id("settings-sounds")
+            .role(Role::Region)
+            .aria_label("Sounds")
+            .flex()
+            .flex_col()
+            .gap(px(SECTION_GAP))
+            .min_w_0()
+            .child(
+                div()
+                    .id("settings-sounds-heading")
+                    .role(Role::Heading)
+                    .aria_label("Sounds")
+                    .text_size(px(choices::LABEL_TEXT))
+                    .line_height(px(choices::LABEL_LINE_HEIGHT))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::color(palette.fg_0))
+                    .child("Sounds"),
+            )
+            .child(choices::help(
+                "These choices apply to this helm; other open clients pick them up right away. The session open in \
+                 an active window stays quiet.",
+                cx,
+            ))
+            .child(self.switch(Choice::SoundWaiting, preferences, cx))
+            .child(self.switch(Choice::SoundApproval, preferences, cx))
+            .child(self.switch(Choice::SoundTurnFinished, preferences, cx))
+            .into_any_element()
+    }
+
     /// The shown section's content below its heading.
     fn body(
         &self,
@@ -1005,11 +1047,21 @@ impl SettingsDialog {
                     .into_any_element()
                 })
                 .collect(),
-            Section::Notifications => self
-                .ntfy
-                .iter()
-                .map(|form| form.clone().into_any_element())
-                .collect(),
+            // Sounds above ntfy alerts, with the old sections' rule between them (`.host-settings-section +
+            // .host-settings-section`: a top border and 20 pixels above the next heading).
+            Section::Notifications => {
+                let palette = theme::palette(cx);
+                std::iter::once(self.sounds(preferences, cx))
+                    .chain(self.ntfy.iter().map(|form| {
+                        div()
+                            .border_t_1()
+                            .border_color(theme::color(palette.border_dim))
+                            .pt(px(20.))
+                            .child(form.clone())
+                            .into_any_element()
+                    }))
+                    .collect()
+            }
             Section::App => {
                 let weak = cx.weak_entity();
                 app::section(
