@@ -52,4 +52,17 @@ impl ProviderUi {
             ProviderKind::Podman => AgentLaunchPlace::NamedHost("new container on host"),
         }
     }
+
+    /// The line a recipe's row in Settings → Recipes shows when the recipe's base cannot run on this provider, in place
+    /// of the provider's build action. Tensorlake's is the old row's (`snapshot_status` in `tensorlake/recipes.rs` at
+    /// the reference commit). Podman's follows the helm's own refusal of a container rebuild for such a base ("this
+    /// recipe's base cannot run in a container"), since the old app drew no such line for a container place: its
+    /// per-place rows listed only the places a base supports. Nothing asks for Podman's words yet: the row asks only
+    /// for the Tensorlake account's, and the per-place container lines that could ask come later.
+    pub(crate) fn recipe_base_unsupported(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "This recipe's base cannot run on Tensorlake",
+            ProviderKind::Podman => "This recipe's base cannot run in a container",
+        }
+    }
 }

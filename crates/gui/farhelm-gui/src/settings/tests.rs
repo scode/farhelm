@@ -6,8 +6,8 @@
 //! takes a mark and calls [`super::open`] with its own focus handle. Every step ends in one of the shared harness's step
 //! helpers, so the focus and layer invariants are checked after each.
 //!
-//! The helpers marked `pub(super)` are shared with the Credentials section's tests (`super::credential_tests`), which
-//! open the dialog the same way.
+//! The helpers marked `pub(super)` are shared with the Credentials and Recipes sections' tests
+//! (`super::credential_tests`, `super::recipe_tests`), which open the dialog the same way.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -81,6 +81,7 @@ pub(super) fn section_button(section: Section) -> &'static str {
     match section {
         Section::Sessions => "settings-section-sessions",
         Section::Hosts => "settings-section-hosts",
+        Section::Recipes => "settings-section-recipes",
         Section::Containers => "settings-section-containers",
         Section::Credentials => "settings-section-credentials",
         Section::Appearance => "settings-section-appearance",
@@ -148,16 +149,20 @@ pub(super) fn open_rail<'a>(
     cx: &'a mut TestAppContext,
     preferences: &Preferences,
 ) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
-    open_rail_with(cx, vec![preferences_state(preferences)])
+    open_rail_with(cx, preferences, Vec::new())
 }
 
-/// [`open_rail`] over a fake helm whose first snapshot is `snapshot`, for tests that need collections besides the
-/// preferences.
-fn open_rail_with(
-    cx: &mut TestAppContext,
-    snapshot: Vec<CollectionState>,
-) -> (FakeHelm, &mut VisualTestContext, FocusHandle) {
+/// [`open_rail`], with `more` collections in the helm's first snapshot beside the preference row: the store applies
+/// pushed changes only to a collection its snapshot installed, so a test that needs hosts (Recipes' place names, say)
+/// puts them here.
+pub(super) fn open_rail_with<'a>(
+    cx: &'a mut TestAppContext,
+    preferences: &Preferences,
+    more: Vec<CollectionState>,
+) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
     let (mut helm, _connection) = started(cx);
+    let mut snapshot = vec![preferences_state(preferences)];
+    snapshot.extend(more);
     helm.connect(snapshot);
     cx.run_until_parked();
     let gear = cx.update(|cx| cx.focus_handle().tab_stop(true));
@@ -266,13 +271,13 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Containers, Credentials,
-/// Terminal, Checkouts, Agent trust and Notifications, and App only where the desktop app's updater runs, which it does
-/// not here; listing a section with nothing behind it would offer a button that shows an empty pane. The list follows
-/// SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts,
-/// Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
-/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Containers, Credentials, Terminal,
-/// Checkouts, Agent trust and Notifications buttons, in that order, Sessions pressed and the others not.
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Recipes, Containers,
+/// Credentials, Terminal, Checkouts, Agent trust and Notifications, and App only where the desktop app's updater runs,
+/// which it does not here; listing a section with nothing behind it would offer a button that shows an empty pane. The
+/// list follows SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal,
+/// Checkouts, Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
+/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Recipes, Containers, Credentials,
+/// Terminal, Checkouts, Agent trust and Notifications buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -299,6 +304,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Sessions".to_string(), Some(Toggled::True)),
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
+            ("Recipes".to_string(), Some(Toggled::False)),
             ("Containers".to_string(), Some(Toggled::False)),
             ("Credentials".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
@@ -3494,10 +3500,8 @@ fn open_rail_with_hosts<'a>(
 ) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
     open_rail_with(
         cx,
-        vec![
-            preferences_state(&Preferences::default()),
-            crate::hosts::tests::hosts(listed),
-        ],
+        &Preferences::default(),
+        vec![crate::hosts::tests::hosts(listed)],
     )
 }
 

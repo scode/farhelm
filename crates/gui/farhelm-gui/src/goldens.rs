@@ -9,16 +9,17 @@
 //! cannot reach, an empty fleet, a row's open menu, a row's notification list, a row's Delete question, and a pending
 //! and a refused Delete), the Rename editor, the Send feedback dialog (as it opens, and with a remembered contact), the
 //! select closed and open, the YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer,
-//! the Settings dialog at Sessions, at Appearance, at Hosts, at Credentials, at Terminal and at Agent trust, the Hosts
-//! panel (closed, with Details, with a host failing to connect, with a host's setup running and failed, with outdated
-//! hosts' inline Update, and with a host's Update running), the Add host dialog and the setup confirmation it leads to,
-//! a host's actions menu, the host settings dialog at its top and scrolled to its end, the host refusal dialog for a
-//! refused Update, the version readout while an updater runs (the check button at rest, lit, warned and focused; work
-//! in progress; a check's outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the
-//! Linux window draws for itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the
-//! Trash button empty, full and freeing space, and the Trash dialog, alone and asking to delete everything or one
-//! host's archives, in both appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it
-//! draws identically in both pictures; only the scene's ground around it differs.)
+//! the Settings dialog at Sessions, at Appearance, at Hosts, at Recipes (empty, and with recipes in each build state),
+//! at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to
+//! connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a host's Update
+//! running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the host settings
+//! dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version readout while
+//! an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
+//! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
+//! (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty, full and
+//! freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
+//! appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both
+//! pictures; only the scene's ground around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -2800,34 +2801,65 @@ fn keyboard_shortcuts_dialog_setup(state: &SceneState, window: &mut Window, cx: 
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-containers`, `settings-credentials`,
-/// `settings-terminal`, `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`):
-/// focus on the section's first switch (on the dialog itself at Appearance, Containers, Credentials, Terminal,
-/// Checkouts, Agent trust and Notifications), naming on because the row stores no choice for it, and automatic
-/// remote-host updates turned on so the Hosts picture shows a switch in each state. Agent trust's reads of each agent's
-/// trust, sent as it opens, are answered at once with the trust off and the hint not dismissed, Checkouts' reads as the
-/// reference stack had them: no default folder, no post-clone command, and a checkout kept ready, Notifications' read
-/// of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic, Default priority, no token),
-/// Credentials' reads with an empty catalog and no Tensorlake key saved, and Containers' reads with the reference's
-/// three container hosts, all ready, and no leftovers; nothing else is answered, so the checks Containers then asks for
-/// stay unanswered and the rows keep the first read's state. The opener is the scene's ring handle, which stands in for
-/// the gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-recipes`, `settings-containers`,
+/// `settings-credentials`, `settings-terminal`, `settings-checkouts`, `settings-agent-trust`, `settings-notifications`
+/// and `settings-app`): focus on the section's first switch (on the dialog itself at Appearance, Recipes, Containers,
+/// Credentials, Terminal, Checkouts, Agent trust and Notifications), naming on because the row stores no choice for it,
+/// and automatic remote-host updates turned on so the Hosts picture shows a switch in each state. Agent trust's reads
+/// of each agent's trust, sent as it opens, are answered at once with the trust off and the hint not dismissed,
+/// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
+/// ready, Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic, Default
+/// priority, no token), Credentials' reads with an empty catalog and no Tensorlake key saved, Recipes' read of the
+/// Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog, and Containers'
+/// reads with the reference's three container hosts, all ready, and no leftovers; nothing else is answered, so the
+/// checks Containers then asks for stay unanswered and the rows keep the first read's state. The opener is the scene's
+/// ring handle, which stands in for the gear. The fake and the connection are kept for the scene's life, like the
+/// Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
     window: &mut Window,
     cx: &mut App,
 ) {
+    settings_scene_with(state, section, Vec::new(), window, cx);
+}
+
+/// [`settings_scene`], with `recipes` (entries as `GET /api/tensorlake/recipes` lists them) as the helm's pushed recipe
+/// catalog, which the snapshot carries beside the preference row.
+fn settings_scene_with(
+    state: &SceneState,
+    section: crate::settings::Section,
+    recipes: Vec<serde_json::Value>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(vec![CollectionState {
-        collection: Collection::Preferences,
-        meta: test_support::meta(&[PREFERENCES_KEY]),
-        entries: vec![KeyedEntry {
-            key: PREFERENCES_KEY.into(),
-            value: serde_json::json!({ "auto_update_remote_hosts": true }),
-        }],
-    }]);
+    let names: Vec<String> = recipes
+        .iter()
+        .map(|recipe| recipe["name"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    let order: Vec<&str> = names.iter().map(String::as_str).collect();
+    helm.connect(vec![
+        CollectionState {
+            collection: Collection::Preferences,
+            meta: test_support::meta(&[PREFERENCES_KEY]),
+            entries: vec![KeyedEntry {
+                key: PREFERENCES_KEY.into(),
+                value: serde_json::json!({ "auto_update_remote_hosts": true }),
+            }],
+        },
+        CollectionState {
+            collection: Collection::Recipes,
+            meta: test_support::meta(&order),
+            entries: names
+                .iter()
+                .cloned()
+                .zip(recipes)
+                .map(|(key, value)| KeyedEntry { key, value })
+                .collect(),
+        },
+    ]);
     // The dialog reads the row from the store, which the snapshot reaches after this setup returns: open once the
     // connection has a UI session, and only once.
     let handle = window.window_handle();
@@ -2862,9 +2894,14 @@ fn settings_scene(
                         { "place": { "kind": "podman_host", "host": 3 }, "name": "gpu-1", "reason": null, "refreshing": false },
                     ]),
                     "/api/container-orphans" => serde_json::json!([]),
-                    "/api/tensorlake" => serde_json::json!({ "api_key_set": false,
-                        "create_without_asking": false, "helm_tag": "fixture",
-                        "ssh_key": { "state": "not_created" } }),
+                    // Credentials' key form pictures no key saved, as its reference does; Recipes pictures rows that
+                    // can build, which takes a saved key.
+                    "/api/tensorlake" => serde_json::json!({
+                        "api_key_set": section == crate::settings::Section::Recipes,
+                        "create_without_asking": false,
+                        "helm_tag": "fixture",
+                        "ssh_key": { "state": "not_created" },
+                    }),
                     "/api/ntfy-alerts" => {
                         match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
                             Ok(defaults) => defaults,
@@ -3107,6 +3144,73 @@ fn settings_appearance_setup(state: &SceneState, window: &mut Window, cx: &mut A
 /// Settings at Hosts.
 fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
+}
+
+/// Settings at Recipes with no recipes, as in the reference but for New recipe, which waits for the recipe editor.
+/// Focus starts on the dialog itself, since the section's controls wait for its reads.
+fn settings_recipes_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Recipes, window, cx);
+}
+
+/// Settings at Recipes with recipes in the states a row draws differently, against the reference `settings-recipes`,
+/// whose stack had none: one built with both agents' versions and changed packages, so it warns, and rebuilding at its
+/// fifth step, its line drawn at the pulse's full brightness and no action offered; one failed at its fourth step with
+/// the build sandbox's reason and Retry; and one on a container image, which Tensorlake cannot run, so it warns and
+/// offers nothing. Three rows, so the last one's warning fits above the footer unscrolled.
+fn settings_recipes_rows_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let recipe = |name: &str,
+                  base: serde_json::Value,
+                  build: serde_json::Value,
+                  snapshot: serde_json::Value| {
+        serde_json::json!({
+            "name": name,
+            "size": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },
+            "base": base,
+            "packages": ["jq", "ripgrep"],
+            "claude": null, "codex": null,
+            "claude_login_credential": null, "codex_login_credential": null, "github_token_credential": null,
+            "tunnels": [{ "sandbox_port": 8080, "host": "127.0.0.1", "port": 8080 }],
+            "snapshot": snapshot,
+            "build": build,
+            "prepared": null,
+            "preparation": { "state": "idle" },
+            "cleanup_pending": false,
+        })
+    };
+    let ubuntu = serde_json::json!({ "kind": "tensorlake_ubuntu" });
+    let idle = serde_json::json!({ "state": "idle" });
+    let built = serde_json::json!({
+        "id": "snap-1", "built_at": 1_793_714_525, "base": ubuntu, "disk_gb": 20, "packages": ["jq"],
+        "claude_version": "2.0.1 (Claude Code)", "codex_version": "codex-cli 0.40.0",
+    });
+    let recipes = vec![
+        recipe(
+            "rust-dev",
+            ubuntu.clone(),
+            serde_json::json!({ "state": "building", "step": "packages", "started_at": 1_793_714_525 }),
+            built,
+        ),
+        recipe(
+            "team-image",
+            serde_json::json!({ "kind": "image", "image": "team/devbox-base" }),
+            serde_json::json!({ "state": "failed", "step": "connecting", "at": 1_793_714_525,
+                "message": "the sandbox user cannot use sudo without a password" }),
+            serde_json::Value::Null,
+        ),
+        recipe(
+            "podman-dev",
+            serde_json::json!({ "kind": "container_image", "reference": "example.test/team/dev:latest", "user": "dev" }),
+            idle,
+            serde_json::Value::Null,
+        ),
+    ];
+    settings_scene_with(
+        state,
+        crate::settings::Section::Recipes,
+        recipes,
+        window,
+        cx,
+    );
 }
 
 /// Settings at Credentials, as in the reference: nothing saved in any list and no Tensorlake key saved. Focus starts
@@ -4592,6 +4696,18 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_hosts_setup,
+    },
+    Scene {
+        name: "settings-recipes",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_recipes_setup,
+    },
+    Scene {
+        name: "settings-recipes-rows",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_recipes_rows_setup,
     },
     Scene {
         name: "settings-credentials",
