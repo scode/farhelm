@@ -286,6 +286,15 @@ fn any_view_cached(view: gpui::AnyView) -> impl IntoElement {
     view.cached(gpui::StyleRefinement::default())
 }
 
+// Keystroke interception.
+
+/// Called through a `Context`, the way a view would reach it, so the demo also proves that the ban on `App`'s method
+/// covers the call through `Context`'s deref (and fails if GPUI ever gives `Context` a method of its own by that name).
+fn context_intercept_keystrokes<T: 'static>(cx: &mut Context<T>) {
+    // expect: disallowed_methods gpui::App::intercept_keystrokes
+    let _ = cx.intercept_keystrokes(|_, _, _| {});
+}
+
 // Raw colors.
 
 fn color_rgb() {
