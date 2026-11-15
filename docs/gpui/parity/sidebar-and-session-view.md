@@ -249,8 +249,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   it, usually the terminal); for Cmd+N (back to where focus was when it was pressed); and for the quick switcher's New
   row on every platform (back to where focus was when the switcher opened). A click on New on Linux focuses New, so both
   apps land on it there.
-- New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home.
-  That comes with the session pane's status-card work (M2.12), which decides home when no terminal is on screen.
+- With no session open and no sessions at all, focus rests on New (SPEC.md, "Where focus rests"), on the same proof the
+  pane's "No sessions — create one" needs: an available, complete, unfiltered listing with no rows. Before the first
+  listing, or over a failed or cut one, New is not home. While New is not drawn as a tab stop (disabled while a launch
+  or a host change is in flight, or hidden with the list's column while the Hosts panel shows), focus rests on the
+  window's root, where Tab and the other keys still work, and goes to New on the first frame that draws it, unless a
+  control has taken focus meanwhile. Tested by `session_pane/tests.rs` `with_no_sessions_focus_rests_on_new`,
+  `removing_the_last_session_sends_focus_to_new`, `a_listing_that_comes_back_empty_sends_focus_to_new`,
+  `while_new_is_disabled_focus_rests_on_the_root_and_returns_to_new` and
+  `a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal`.
 - The quick switcher's New row draws its top edge as a straight one-pixel line across the row, since GPUI gives an
   element one edge color for every side; the old top border followed the row's rounded corners.
 - Every refused session query, a host's, a status's or the quick switcher's reset of both, is worded "Could not show

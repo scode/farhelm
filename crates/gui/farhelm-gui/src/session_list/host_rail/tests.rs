@@ -760,9 +760,11 @@ fn a_reset_forgets_the_choice(cx: &mut TestAppContext) {
 
 /// SPEC.md, "Reaching everything by keyboard", and the old `filters.spec.ts` case "the rail keeps keyboard focus":
 /// every rail entry is a tab stop in order, and Space and Enter choose, each key press once. Specified (Linux's rule,
-/// where Tab reaches every control): over an empty fleet, where nothing else holds focus, Tab focuses All, the next Tab
-/// the local host's avatar, and Space then sends exactly one query, `{"host": 1}`, and presses it, with focus staying
-/// on it; Tab on to the next avatar and Enter send exactly one query, `{"host": 3}`.
+/// where Tab reaches every control and a click focuses the control clicked): over an empty fleet, a click on All, the
+/// choice already made, focuses it and sends nothing; Tab then focuses the local host's avatar, Shift+Tab All again
+/// and Tab the avatar again, and Space sends exactly one query, `{"host": 1}`, and presses it, with focus staying on
+/// it; Tab on to the next avatar and Enter send exactly one query, `{"host": 3}`. The walk starts from a click because
+/// over an empty fleet focus rests on New, not on nothing (SPEC.md, "Where focus rests").
 ///
 /// NOTE: A second run of the same choice sends nothing (a repeated choice is not sent), so "exactly one" here pins the
 /// keys' wiring rather than catching a key press that ran the handler twice; the button's own tests cover that.
@@ -770,7 +772,19 @@ fn a_reset_forgets_the_choice(cx: &mut TestAppContext) {
 fn tab_from_all_reaches_the_first_avatar_and_space_chooses_it(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
     answer_everything(&mut fake);
+    // The walk starts from a click, so it needs the rule under which a click focuses the control clicked.
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    test_support::click(cx, "host-rail-all");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
+    assert_eq!(
+        queries(&mut fake).len(),
+        0,
+        "the click on the chosen All sent nothing"
+    );
     test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-host-1"));
+    // The click could have focused a control Tab skips; Shift+Tab back shows All is a tab stop.
+    test_support::keys(cx, "shift-tab");
     assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
     test_support::keys(cx, "tab");
     assert_eq!(focused_id(cx).as_deref(), Some("host-rail-host-1"));
@@ -1198,9 +1212,9 @@ fn add_host_opens_the_dialog_and_escape_returns_focus_to_it(cx: &mut TestAppCont
 /// registry pushes the last hosts and Add host below the rail's fold (the rail holds about seven hosts at the minimum
 /// window height). The old page scrolled a focused entry into view; here the rail is a focus coordinator scroll region.
 /// Specified (Linux's rule, where Tab reaches every control): in a 1200 by 500 window over an empty fleet and 30 hosts,
-/// where the last avatar and Add host start below the rail's visible part, Tab focuses All, 30 more Tabs focus the
-/// last avatar, which then lies wholly inside the rail's visible part, and one more focuses Add host, which then does
-/// too; the rail's visible box itself stays where it was.
+/// where the last avatar and Add host start below the rail's visible part, a click focuses All (over an empty fleet
+/// focus otherwise rests on New), 30 Tabs then focus the last avatar, which then lies wholly inside the rail's visible
+/// part, and one more focuses Add host, which then does too; the rail's visible box itself stays where it was.
 #[gpui::test]
 fn tab_scrolls_the_last_avatar_and_add_host_into_view_below_the_fold(cx: &mut TestAppContext) {
     let many: Vec<Host> = (10..40)
@@ -1223,7 +1237,9 @@ fn tab_scrolls_the_last_avatar_and_add_host_into_view_below_the_fold(cx: &mut Te
         at.top() >= rail.top() && at.bottom() <= rail.bottom()
     };
 
-    test_support::keys(cx, "tab");
+    // The walk starts from a click, so it needs the rule under which a click focuses the control clicked.
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    test_support::click(cx, "host-rail-all");
     assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
     // One press at a time, each followed by its frame, as a user tabs.
     for _ in 10..40 {

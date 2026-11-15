@@ -1683,7 +1683,9 @@ fn assert_whole_on_one_line(nodes: &[gpui::DriverNode]) {
 
 /// A root view drawing the pane alone across the window, wired as every root view is. It also keeps a session list,
 /// undrawn, because the list owns the selection rules: without one nothing opens a session, and the pane has no top row
-/// to draw.
+/// to draw. The pane gets that list's New handle, as the main view passes it. The list is not drawn, so neither is New,
+/// and the focus coordinator counts an undrawn home as none; these layout tests' fleets are not empty, so New is never
+/// home in them anyway.
 struct PaneOnly {
     pane: Entity<SessionPane>,
     _list: Entity<SessionList>,
@@ -1734,11 +1736,13 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
     let window = cx
         .open_window(size(px(650.), px(300.)), |window, cx| {
             let view = cx.new(|cx| {
-                let pane = cx.new(|cx| SessionPane::new(window, cx));
+                let list = cx.new(SessionList::new);
+                let new = list.read(cx).new_focus().clone();
+                let pane = cx.new(|cx| SessionPane::new(new, window, cx));
                 kept.replace(Some(pane.clone()));
                 PaneOnly {
                     pane,
-                    _list: cx.new(SessionList::new),
+                    _list: list,
                     root: root::attach(window, cx),
                 }
             });
@@ -1842,10 +1846,12 @@ fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
     let window = cx
         .open_window(size(px(650.), px(300.)), |window, cx| {
             let view = cx.new(|cx| {
-                let pane = cx.new(|cx| SessionPane::new(window, cx));
+                let list = cx.new(SessionList::new);
+                let new = list.read(cx).new_focus().clone();
+                let pane = cx.new(|cx| SessionPane::new(new, window, cx));
                 PaneOnly {
                     pane,
-                    _list: cx.new(SessionList::new),
+                    _list: list,
                     root: root::attach(window, cx),
                 }
             });

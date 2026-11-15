@@ -122,6 +122,8 @@ impl MainView {
         }
         let session_list = cx.new(SessionList::new);
         let status_sounds = cx.new(|cx| sounds::StatusSounds::new(&session_list, window, cx));
+        // The pane makes New home when there are no sessions, so it holds New's handle.
+        let new = session_list.read(cx).new_focus().clone();
         let root = root::attach(window, cx);
         // The agent approval cards' slot, once per window, as the layer stack it belongs to is attached.
         crate::approvals::region::install(window, cx);
@@ -135,7 +137,7 @@ impl MainView {
             _observed: observed,
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
-            session_pane: cx.new(|cx| SessionPane::new(window, cx)),
+            session_pane: cx.new(|cx| SessionPane::new(new, window, cx)),
             // After the session pane, whose first sync is deferred the same way and so runs first.
             _start_dialogs: cx.new(|cx| welcome::StartDialogs::new(window, cx)),
             _sounds: status_sounds,
