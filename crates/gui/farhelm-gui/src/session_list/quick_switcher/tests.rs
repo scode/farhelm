@@ -6,6 +6,9 @@
 //! `quick-switcher-row-<key>`, and its field by the `quick-switcher-field` selector. Every step ends in one of the
 //! shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
+//! The last tests pick sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the
+//! session list makes once the pick has opened the session (`filters.rs`).
+//!
 //! No test here depends on glyph widths, so the simulated platform's fake text system is enough: the scroll test needs
 //! only the rows' heights, which come from the line height.
 
@@ -14,19 +17,24 @@ use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_proto::grid::GridOutput;
-use farhelm_proto::ui_channel::{CollectionState, SessionRow};
+use farhelm_proto::ui_channel::{CollectionState, SESSION_QUERY_PATH, SessionRow};
 use gpui::{DriverNode, Entity, Global, TestAppContext, VisualTestContext, WeakEntity};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{CAP_NOTICE, QuickSwitcher, Read, mark_positions, matching_positions, ranked};
-use crate::actions::{QUICK_SWITCHER_CHORD, TERMINAL_CONTEXT};
+use crate::actions::QUICK_SWITCHER_CHORD;
 use crate::layers;
 use crate::local_state;
 use crate::main_view::MainView;
-use crate::session_list::tests::{Fixture, listing, painted, preferences, session};
-use crate::test_support::{self, click, focused_id, frame, keys, settle, started};
+use crate::session_list::host_rail::tests::{filtered, hosts, local, node, pressed, remote};
+use crate::session_list::tests::{
+    Fixture, change, listing, painted, preferences, selected, session,
+};
+use crate::test_support::{
+    self, any_open, click, focused_id, frame, keys, settle, started, terminal_focused,
+};
 
 /// The switcher [`super::open`] opened last, recorded in test builds only, so a test can read its state.
 pub(super) struct Opened(pub(super) WeakEntity<QuickSwitcher>);
@@ -292,24 +300,10 @@ fn switcher(cx: &mut VisualTestContext) -> Entity<QuickSwitcher> {
     switcher.expect("the premise: a switcher is open")
 }
 
-fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
-}
-
 /// Whether the switcher's search field holds focus.
 fn field_focused(cx: &mut VisualTestContext) -> bool {
     let switcher = switcher(cx);
     cx.update(|window, cx| switcher.read(cx).input.focus_handle(cx).is_focused(window))
-}
-
-/// Whether a session terminal holds focus: the focused element's key context stack is a terminal's.
-fn terminal_focused(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, _| {
-        window
-            .context_stack()
-            .iter()
-            .any(|context| context.contains(TERMINAL_CONTEXT))
-    })
 }
 
 /// The keys of the switcher's rows in the order they are listed, and the key of the selected one.
@@ -772,8 +766,8 @@ fn the_selected_row_stays_in_view(cx: &mut TestAppContext) {
 /// remembered with the helm, and with its terminal focused, the already open one included (SPEC.md, "Where focus
 /// rests": "Choosing a session, including the one already selected, focuses its terminal"). Specified: typing `c` and
 /// Enter closes the switcher, selects c, writes c as the `last_selected` preference and focuses its terminal; opened
-/// again from c's row actions button, a click on c's row, the open session, closes it with focus in c's terminal
-/// (not back on the button) and nothing written.
+/// again from c's row actions button, with `c` typed so that c is listed first though the read lists it second, a click
+/// on c's row, the open session, closes it with focus in c's terminal (not back on the button) and nothing written.
 #[gpui::test]
 fn a_pick_opens_the_session_remembers_it_and_focuses_its_terminal(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
@@ -815,6 +809,9 @@ fn a_pick_opens_the_session_remembers_it_and_focuses_its_terminal(cx: &mut TestA
     );
     let read = main.open_switcher();
     main.answer(read, &[session("a"), session("c")], false);
+    // Typed first, so c is listed first though it is second in the read: a click must pick by the read's index, not
+    // by the row's place in the list.
+    type_query(main.cx, "c");
     click(main.cx, "quick-switcher-row-c");
     assert!(!any_open(main.cx));
     assert_eq!(
@@ -895,5 +892,151 @@ fn a_press_outside_closes_it_and_returns_focus(cx: &mut TestAppContext) {
     assert_eq!(
         main.cx.update(|_, cx| local_state::selected(cx)).as_deref(),
         Some("a")
+    );
+}
+
+// ---- A pick the sidebar's filters hide -----------------------------------------------------------------------------
+
+/// The sessions of the filter tests: a running on host 2 (open), b idle on host 2, c idle on host 3, over the rail's
+/// local host, host 3 and host 2.
+fn filtered_fleet() -> Vec<CollectionState> {
+    let idle = || json!({ "state": "idle" });
+    vec![
+        listing(
+            &["a", "b", "c"],
+            &[
+                session("a").host(2),
+                session("b").host(2).status(idle()),
+                session("c").host(3).status(idle()),
+            ],
+        ),
+        preferences(&["a"], None),
+        hosts(&[
+            local(),
+            remote(3, "ops@build.example.invalid"),
+            remote(2, "ops@render.example.invalid"),
+        ]),
+    ]
+}
+
+impl Main<'_> {
+    /// Choose host 2 on the rail and Idle in the segments, and have the helm accept both, with the listing it then
+    /// serves: b alone, 1 of the fleet's 3.
+    fn filter_to_idle_on_host_2(&mut self) {
+        self.reads();
+        click(self.cx, "host-rail-host-2");
+        click(self.cx, "session-status-Idle");
+        self.helm
+            .push(change(filtered(&["b"], 3, 1), &[], &["a", "c"]));
+        self.accept_commands();
+        let nodes = frame(self.cx);
+        assert!(
+            pressed(&nodes, "host-rail-host-2") && pressed(&nodes, "session-status-Idle"),
+            "the premise: host 2 and Idle are chosen"
+        );
+    }
+
+    /// Accept every command the window sent since the last look, and return the session queries among them, by body.
+    fn accept_commands(&mut self) -> Vec<Value> {
+        let mut queries = Vec::new();
+        for command in self.helm.commands() {
+            if command.path == SESSION_QUERY_PATH {
+                queries.push(command.body.clone().unwrap_or_default());
+            }
+            self.helm.reply(command.id, 204, None);
+        }
+        settle(self.cx);
+        queries
+    }
+
+    /// Open the switcher, answer its read with a, b and c as the helm lists them, type `query` and press Enter.
+    fn pick(&mut self, query: &str) {
+        let read = self.open_switcher();
+        self.answer(
+            read,
+            &[
+                session("a").host(2),
+                session("b").host(2).status(json!({ "state": "idle" })),
+                session("c").host(3).status(json!({ "state": "idle" })),
+            ],
+            false,
+        );
+        type_query(self.cx, query);
+        keys(self.cx, "enter");
+        assert!(!any_open(self.cx), "the pick closed the switcher");
+    }
+}
+
+/// SPEC.md: "Opening a session hidden by the host choice or status filter resets both to All after the open is
+/// accepted ... A pick already visible through both leaves them in place" (the old `status-filter.spec.ts` cases), so
+/// the user sees what they opened in the list without losing filters that already show it. Specified, with host 2 and
+/// Idle chosen and answered (b listed): picking b, which the list shows, opens it and sends no query, host 2 and Idle
+/// still chosen; picking c, idle but on host 3, opens it and sends one query, `{}`, pressing All on the rail and
+/// checking All in the segments; with the filters chosen again, picking a, on host 2 but running, does the same.
+#[gpui::test]
+fn a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, filtered_fleet());
+    main.filter_to_idle_on_host_2();
+
+    main.pick("b");
+    assert_eq!(selected(main.cx).as_deref(), Some("b"));
+    assert_eq!(main.accept_commands(), Vec::<Value>::new(), "a shown pick");
+    let nodes = frame(main.cx);
+    assert!(pressed(&nodes, "host-rail-host-2") && pressed(&nodes, "session-status-Idle"));
+
+    for (pick, hidden_by) in [("c", "its host"), ("a", "its status")] {
+        main.pick(pick);
+        assert_eq!(selected(main.cx).as_deref(), Some(pick));
+        assert_eq!(
+            main.accept_commands(),
+            [json!({})],
+            "{pick}, hidden by {hidden_by}"
+        );
+        let nodes = frame(main.cx);
+        assert!(pressed(&nodes, "host-rail-all"), "{pick}: the rail's All");
+        assert!(
+            pressed(&nodes, "session-status-All"),
+            "{pick}: the segments' All"
+        );
+        main.helm
+            .push(change(filtered(&["a", "b", "c"], 3, 3), &[], &[]));
+        settle(main.cx);
+        main.filter_to_idle_on_host_2();
+    }
+}
+
+/// SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick". A pick is never
+/// refused in this app (as at the reference commit), so the refused pick SPEC.md mentions has no case; what can be
+/// refused is the query that widens the list, and then both choices must come back, as for any refused query.
+/// Specified: with host 2 and Idle chosen and answered and the Hosts panel shown, picking a (hidden by its status)
+/// opens a, shows Sessions again and sends `{}`; when the helm refuses it, host 2 and Idle are chosen again.
+#[gpui::test]
+fn a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, filtered_fleet());
+    main.filter_to_idle_on_host_2();
+    click(main.cx, "hosts-panel-toggle");
+    assert!(
+        node(&frame(main.cx), "hosts-panel").is_some(),
+        "the premise: the Hosts panel shows"
+    );
+
+    main.pick("a");
+    assert_eq!(selected(main.cx).as_deref(), Some("a"));
+    assert!(
+        node(&frame(main.cx), "session-list").is_some(),
+        "the pick showed Sessions again"
+    );
+    for command in main.helm.commands() {
+        let refused = command.path == SESSION_QUERY_PATH && command.body == Some(json!({}));
+        let status = if refused { 400 } else { 204 };
+        main.helm.reply(command.id, status, None);
+    }
+    settle(main.cx);
+    let nodes = frame(main.cx);
+    assert!(
+        pressed(&nodes, "host-rail-host-2") && pressed(&nodes, "session-status-Idle"),
+        "the refused widening put both choices back"
     );
 }

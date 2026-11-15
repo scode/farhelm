@@ -511,8 +511,9 @@ fn the_seen_memory_survives_a_host_filter_that_hides_the_open_session(cx: &mut T
 /// whatever the sidebar shows, so with a host chosen the user can open sessions the list does not show. Found by the
 /// review gate, as a memory kept for whichever hidden session was open. Specified, with a open and marked unread by
 /// hand, over the local host and one remote: choosing the remote hides a and c; the quick switcher opens c, then a again,
-/// each picked by typing its title and Enter, and nothing is marked while they are hidden; choosing All, with the
-/// helm's listing showing a again unseen at the same activity, marks a seen at that activity.
+/// each picked by typing its title and Enter, and nothing is marked while they are hidden (picking the hidden c widens
+/// the query to All, `{}`, as SPEC.md's quick switcher asks, but a stays hidden until the helm's widened listing
+/// arrives); once that listing shows a again unseen at the same activity, a is marked seen at that activity.
 #[gpui::test]
 fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut TestAppContext) {
     let rows = [(idle("a"), 0), (idle("b"), 0), (idle("c"), 0)];
@@ -541,6 +542,15 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
     let fleet = [idle("a").seen(None), idle("b"), idle("c")];
     quick_switch(&mut fake, cx, "c", &fleet);
     assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
+    let sent = answered(&mut fake);
+    assert!(
+        sent.contains(&(Method::Put, SESSION_QUERY_PATH.to_owned(), json!({}))),
+        "the pick of the hidden c widened the query: {sent:?}"
+    );
+    assert!(
+        !sent.iter().any(|(_, path, _)| path.ends_with("/seen")),
+        "nothing is marked while hidden"
+    );
     quick_switch(&mut fake, cx, "a", &fleet);
     assert_eq!(
         selected(cx).as_deref(),
@@ -554,7 +564,6 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
         "nothing is marked while hidden"
     );
 
-    test_support::click(cx, "host-rail-all");
     fake.push(change(
         listing_meta(&order, 3, false),
         &[idle("a").seen(None), idle("c")],
@@ -563,10 +572,7 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
     test_support::settle(cx);
     assert_eq!(
         answered(&mut fake),
-        [
-            (Method::Put, SESSION_QUERY_PATH.to_owned(), json!({})),
-            seen_put("a", json!(100)),
-        ],
+        [seen_put("a", json!(100))],
         "a's return after the user left it is marked seen"
     );
 }

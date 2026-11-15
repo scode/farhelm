@@ -9,11 +9,11 @@ terminal's: a large paste, on a Mac only, text an input method commits, and scro
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
 Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the
 host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
-rail's Add host). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
-`session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the
-names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
-session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in
-drawing order, which is the header's.
+rail's Add host; 42, the session list's status segments). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing
+here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
+(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
+Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -700,6 +700,64 @@ class Smoke(unittest.TestCase):
         self.ok("press", "escape")
         self.ok("wait", "--gone", ADD_HOST_SUMMARY)
         self.assertRegex(self.ok("snapshot", "-i"), r'button "Add host" \[focused\]', "focus is back on Add host")
+
+
+    # ---- The session list's status segments (42), on sessions of its own ---------------------------------------------
+
+    def test_42_the_status_segments_narrow_the_list_to_one_status(self) -> None:
+        """The status segments are a query the helm serves over the UI channel (`PUT /ui/session-query`, with the
+        status beside the rail's host), so only the real helm shows that a status took effect: it lists only the
+        sessions its supervisors read in that status and counts them against the whole fleet. Specified, on a replayed
+        fake agent this step seeds to hold a running screen and another to hold an idle one, both under titles of its
+        own, once the helm lists each in its status: a click on Running lists the running one and not the idle one, with
+        the count line "N of M" (N the sessions the helm lists as running, M all it lists); a click on Idle lists the
+        idle one and not the running one, with the idle count; a click on All lists both again and the plain count. The
+        counts are read from the helm's listing each time they are checked, since other steps' basic sessions may still
+        move between running and idle. The step leaves All chosen, as it found it."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        tag = uuid.uuid4().hex[:8]
+        work = RUN / "work"
+        work.mkdir(exist_ok=True)
+        ids, titles = {}, {}
+        for index, kind in enumerate(("running", "idle"), start=1):
+            transcript = work / f"status-{tag}-{kind}.txt"
+            transcript.write_text(gui_agent.transcript(index, kind))
+            body = gui_agent.seed_body(index, gui_agent.SESSION_CWD, fixtures, kind, transcript)
+            body["title"] = titles[kind] = f"Status {kind} {tag}"
+            ids[kind] = gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"]
+        gui_agent.wait_for_statuses(lambda: gui_agent.listed_states(RUN), {ids[kind]: kind for kind in ids})
+        for title in titles.values():
+            self.ok("wait", "--text", title)
+
+        def shows(status: str | None, listed: list[str], hidden: list[str]):
+            """A check that the window lists `listed`, not `hidden`, and counts what the helm lists in `status`
+            against the whole fleet ("N of M"), or, for `None` (All), the plain total and no "N of M" count. The count
+            is matched whole, quotes included, as the snapshot names a text element, so "1 of 9" never matches "11 of
+            9"."""
+
+            def check() -> bool:
+                states = gui_agent.listed_states(RUN)
+                snapshot = self.ok("snapshot")
+                if status is None:
+                    counted = re.search(r'"\d+ of \d+"', snapshot) is None and f'"{len(states)}"' in snapshot
+                else:
+                    matching = sum(1 for state in states.values() if state == status)
+                    counted = f'"{matching} of {len(states)}"' in snapshot
+                return (
+                    counted
+                    and all(title in snapshot for title in listed)
+                    and not any(title in snapshot for title in hidden)
+                )
+
+            return check
+
+        running, idle = titles["running"], titles["idle"]
+        self.ok("click", "id:session-status-Running")
+        eventually(shows("running", [running], [idle]), "Running listing the running session and its count")
+        self.ok("click", "id:session-status-Idle")
+        eventually(shows("idle", [idle], [running]), "Idle listing the idle session and its count")
+        self.ok("click", "id:session-status-All")
+        eventually(shows(None, [running, idle], []), "All listing both sessions and the plain count")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

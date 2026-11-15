@@ -45,11 +45,14 @@
 //! drawing the stored value again. A radio group reports a choice only when the option was not already chosen, as a
 //! native radio's change event did; a button group reports every press, as the old buttons' click handlers did.
 //!
-//! Three looks, one per old stylesheet rule, picked by the owner and independent of the role's keyboard (except that
+//! Four looks, one per old stylesheet rule, picked by the owner and independent of the role's keyboard (except that
 //! plain radio circles promise the radio keyboard, so [`RadioGroup::radios`] demands it):
 //!
 //! - **Segments** (the default): `.segmented-control`, the options side by side in one rounded well, the chosen one in
 //!   the accent fill.
+//! - **Small segments** ([`RadioGroup::small_segments`]): the session list's status filter
+//!   (`.session-status-filter .segmented-control`), the same well with shorter, narrower segments of 12-pixel words,
+//!   all of one width, and the well growing to fill its row.
 //! - **Plain radios** ([`RadioGroup::radios`]): the launcher's YOLO fieldset, a circle before each option's words.
 //! - **Chips** ([`RadioGroup::chips`]): the launcher's harness row (`.launch-composer-options`), separate bordered
 //!   buttons on the well color, wrapping with an 8-pixel gap, and no well around them.
@@ -70,8 +73,6 @@
 //!   label; the option's hover help is then the tooltip alone, so the two are not both announced when they repeat each
 //!   other, as the old choices' did. A group with any described option stacks its options, one per line, as the old
 //!   `.terminal-link-choices` did, since a description beside another option's would not fit.
-//!
-//! Not built yet, for when a consumer needs them: the status filter's smaller segments.
 
 use std::rc::Rc;
 
@@ -95,6 +96,14 @@ const DOT: f32 = 6.;
 const SEGMENT_MIN_HEIGHT: f32 = 30.;
 const SEGMENT_PAD: (f32, f32) = (4., 10.);
 const SEGMENT_LINE_HEIGHT: f32 = 18.2;
+
+/// `.session-status-filter .segmented-control > .segment-radio > span`: `min-height: 28px` and `padding-inline: 5px` at
+/// 12 pixels, keeping the segment's 4-pixel `padding-block` and its `line-height: 1.4`. The well around them is
+/// `flex: 1 1 220px`: it starts at 220 pixels and shares out whatever its row has left.
+const SMALL_SEGMENT_MIN_HEIGHT: f32 = 28.;
+const SMALL_SEGMENT_PAD_X: f32 = 5.;
+const SMALL_SEGMENT_LINE_HEIGHT: f32 = 16.8;
+const SMALL_SEGMENTS_BASIS: f32 = 220.;
 
 /// The harness row's chip as the launcher drew it. The base `.launch-composer-options > button` rule says 38 pixels
 /// high, 14-pixel side padding and 14-pixel semibold words, but the launcher form's own override
@@ -213,6 +222,7 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
     Segments,
+    SmallSegments,
     Radios,
     Chips,
 }
@@ -296,6 +306,17 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// pairs it with [`Role::GenericContainer`], as its old buttons sat in no group.
     pub fn chips(mut self) -> Self {
         self.look = Look::Chips;
+        self
+    }
+
+    /// Draw the options as the session list's status filter drew its segments: the segmented well, with each segment
+    /// 28 pixels high, 5 pixels in from its sides and in 12-pixel words, every segment the same width however long its
+    /// words (`flex: 1 1 0`), and the well itself growing from 220 pixels to fill the row it sits in, or shrinking
+    /// below that when the row is narrower (`flex: 1 1 220px`). The old status filter fitted its four words into the
+    /// sidebar's narrowest list column this way. The look says nothing about the keyboard; the status filter pairs it
+    /// with [`Role::RadioGroup`], as its old inputs were native radios.
+    pub fn small_segments(mut self) -> Self {
+        self.look = Look::SmallSegments;
         self
     }
 
@@ -487,7 +508,9 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 stacked,
             };
             let element = match self.look {
-                Look::Segments => state.segment(&ids[index], option, palette),
+                Look::Segments | Look::SmallSegments => {
+                    state.segment(&ids[index], option, self.look, palette)
+                }
                 Look::Radios => state.radio(&ids[index], option, palette),
                 Look::Chips => state.chip(&ids[index], option, palette),
             };
@@ -548,13 +571,21 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             Look::Radios => group.gap_x(px(16.)).gap_y(px(8.)),
             Look::Chips => group.gap(px(CHIP_GAP)),
             // `.segmented-control`: the options in a well with a 2-pixel gap and padding inside a dim edge.
-            Look::Segments => group
+            Look::Segments | Look::SmallSegments => group
                 .gap(px(2.))
                 .p(px(2.))
                 .border_1()
                 .border_color(theme::color(palette.border_dim))
                 .rounded(metrics::RADIUS_MD)
-                .bg(theme::color(palette.well)),
+                .bg(theme::color(palette.well))
+                // The status filter's well fills its row from a 220-pixel start (`flex: 1 1 220px; min-width: 0`).
+                .when(self.look == Look::SmallSegments, |group| {
+                    group
+                        .flex_grow_1()
+                        .flex_shrink_1()
+                        .flex_basis(px(SMALL_SEGMENTS_BASIS))
+                        .min_w_0()
+                }),
         };
         // The group's help shows over its gaps and edge, and an option's over the option: the layer manager shows the
         // innermost control's help (`with_hover_help`). It is also the group's accessible description, as every
@@ -600,13 +631,17 @@ impl OptionState {
     /// One segment of `.segmented-control`: transparent with the control hover fill, or the accent fill with the
     /// inverse ink and semibold words when chosen, one step up the accent family under the pointer so hovering the
     /// choice does not hide it. Its focus ring is inset (the old `outline-offset: -3px`), in the inverse ink on the
-    /// chosen segment, so it stays visible inside the rounded well.
+    /// chosen segment, so it stays visible inside the rounded well. Under [`Look::SmallSegments`] it is the status
+    /// filter's ([`RadioGroup::small_segments`]): shorter and narrower, in smaller words, and as wide as every other
+    /// segment.
     fn segment<V>(
         self,
         id: &SharedString,
         option: &RadioOption<V>,
+        look: Look,
         palette: &Palette,
     ) -> gpui::Stateful<gpui::Div> {
+        let small = look == Look::SmallSegments;
         let (fill, hover, ring) = if self.chosen {
             (
                 palette.accent_fill,
@@ -617,13 +652,35 @@ impl OptionState {
             (theme::TRANSPARENT, palette.control_hover, palette.accent)
         };
         let ink = self.filled_ink(option, palette.fg_0, palette);
+        let (min_height, pad_x, text_size, line_height) = if small {
+            (
+                SMALL_SEGMENT_MIN_HEIGHT,
+                SMALL_SEGMENT_PAD_X,
+                metrics::TEXT_SM,
+                SMALL_SEGMENT_LINE_HEIGHT,
+            )
+        } else {
+            (
+                SEGMENT_MIN_HEIGHT,
+                SEGMENT_PAD.1,
+                metrics::TEXT_MD,
+                SEGMENT_LINE_HEIGHT,
+            )
+        };
         div()
             .id(ElementId::Name(id.clone()))
             .debug_selector(|| id.to_string())
             .relative()
             .flex()
-            .flex_grow(1.)
-            .flex_shrink_0()
+            // Small segments share the well equally whatever their words (`flex: 1 1 0; min-width: 0`); the others
+            // grow from their words' width and never shrink below it.
+            .map(|segment| {
+                if small {
+                    segment.flex_1().min_w_0()
+                } else {
+                    segment.flex_grow(1.).flex_shrink_0()
+                }
+            })
             .items_center()
             // `.terminal-link-choices > .segment-radio > span` lines a stacked option's words up at its left edge.
             .map(|segment| {
@@ -634,13 +691,13 @@ impl OptionState {
                 }
             })
             .gap(px(GLYPH_GAP))
-            .min_h(px(SEGMENT_MIN_HEIGHT))
+            .min_h(px(min_height))
             .py(px(SEGMENT_PAD.0))
-            .px(px(SEGMENT_PAD.1))
+            .px(px(pad_x))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(fill))
-            .text_size(metrics::TEXT_MD)
-            .line_height(px(SEGMENT_LINE_HEIGHT))
+            .text_size(text_size)
+            .line_height(px(line_height))
             .text_color(theme::color(ink))
             .when(self.chosen, |segment| {
                 segment.font_weight(FontWeight::SEMIBOLD)
