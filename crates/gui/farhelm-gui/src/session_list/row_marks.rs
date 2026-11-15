@@ -388,9 +388,10 @@ pub(super) fn agent_track(row_id: &str, marks: &RowMarks) -> impl IntoElement {
     )
 }
 
-/// One cell of the agent track: `icon` in `ink`, centred in a 10 by 12 box, its picture selected in tests by
-/// `picture_id`.
-fn cell(picture_id: SharedString, icon: Icon, ink: Token) -> impl IntoElement {
+/// One `.sidebar-glyph` cell: `icon` in `ink`, centred in a 10 by 12 box, its picture selected in tests by `picture_id`.
+/// The agent track's two cells, and a compact row's ended and stale marks (`super::row`), which the old sheet drew in
+/// the same box.
+pub(super) fn cell(picture_id: SharedString, icon: Icon, ink: Token) -> impl IntoElement {
     div()
         .w(px(GLYPH_WIDTH))
         .h(px(GLYPH_HEIGHT))

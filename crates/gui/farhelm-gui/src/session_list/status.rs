@@ -9,6 +9,11 @@
 //! visible instead (an exit code, a stop annotation, a launch failure's detail are facts a mark cannot carry), on a line
 //! of their own under the title. `Unknown` is plumbing, not a status, and draws nothing at all.
 //!
+//! A compact row has no line to spare, so there an ended status is a mark too, one shape per way a session ends
+//! ([`EndedGlyph`]: stopped, exited, interrupted, error), with the complete wording as its words and hover help; and a
+//! stale row's cause becomes a clock after the title ([`stale_mark_color`]). SPEC.md, "Status": those details "remain in
+//! accessible text and tooltips without expanding the row".
+//!
 //! The running mark pulses ([`pulses`]): its opacity steps down to a shallow minimum and back every two seconds
 //! ([`pulse_opacity`]), at the ticker's shared pulse phase, so every running dot in the list steps together. The pulse
 //! is a claim about the present, so a running session on a host that is not connected draws a grey, still mark, as
@@ -193,6 +198,73 @@ impl Ended {
             Ended::Interrupted => palette.warn,
             Ended::Error => palette.danger_strong,
         }
+    }
+}
+
+/// The mark a compact row draws in its status column for an ended session, in place of the live dot: the old
+/// `EndedStatusIcon`'s four shapes. SPEC.md, "Status": "Compact mode uses distinct stopped, exited, interrupted, and error
+/// icons". Stopped is not a status of its own (a user's Stop yields an exit with an annotation), so it is told apart from
+/// a plain exit by the annotation alone, as the old row did: either of the two stop annotations the supervisor writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EndedGlyph {
+    Stopped,
+    Exited,
+    Interrupted,
+    Error,
+}
+
+impl EndedGlyph {
+    /// The mark `row` draws in compact mode, or `None` for a live status or one nobody classified, which draw the live
+    /// dot or nothing.
+    pub(crate) fn of(row: &SessionRow) -> Option<EndedGlyph> {
+        match &row.info.status {
+            SessionStatus::Exited { .. } => match row.info.annotation.as_deref() {
+                Some(
+                    farhelm_proto::STOP_ANNOTATION | farhelm_proto::STOP_BEFORE_START_ANNOTATION,
+                ) => Some(EndedGlyph::Stopped),
+                _ => Some(EndedGlyph::Exited),
+            },
+            SessionStatus::Interrupted => Some(EndedGlyph::Interrupted),
+            SessionStatus::Error { .. } => Some(EndedGlyph::Error),
+            SessionStatus::Unknown
+            | SessionStatus::Running
+            | SessionStatus::Waiting
+            | SessionStatus::Idle => None,
+        }
+    }
+
+    /// The mark's drawing.
+    pub(crate) fn icon(self) -> Icon {
+        match self {
+            EndedGlyph::Stopped => Icon::EndedStopped,
+            EndedGlyph::Exited => Icon::EndedExited,
+            EndedGlyph::Interrupted => Icon::EndedInterrupted,
+            EndedGlyph::Error => Icon::EndedError,
+        }
+    }
+
+    /// The mark's ink: the ended wording's color for an exit, an interruption and an error (`.ended-status-glyph`'s
+    /// rules), and the row's own foreground, `--fg-0`, for a stop, which the old sheet gave no color of its own (the
+    /// mark inherited it through `.compact-ended-status` from the row); `--on-fill` on the selected row, as every
+    /// `.sidebar-glyph` there.
+    pub(crate) fn color(self, palette: &Palette, selected: bool) -> Token {
+        match self {
+            EndedGlyph::Stopped if selected => palette.on_fill,
+            EndedGlyph::Stopped => palette.fg_0,
+            EndedGlyph::Exited => Ended::Exited.color(palette, selected),
+            EndedGlyph::Interrupted => Ended::Interrupted.color(palette, selected),
+            EndedGlyph::Error => Ended::Error.color(palette, selected),
+        }
+    }
+}
+
+/// The ink of the clock a compact stale row draws after its title (`.compact-qualifier .qualifier-glyph`): the quiet
+/// `--fg-1`, or `--on-fill` on the selected row, where the old sheet's `.sidebar-glyph` rule came after and won.
+pub(crate) fn stale_mark_color(palette: &Palette, selected: bool) -> Token {
+    if selected {
+        palette.on_fill
+    } else {
+        palette.fg_1
     }
 }
 

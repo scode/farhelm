@@ -37,12 +37,23 @@
 //! the helm shows inside the menu as well as on the row, since the open menu covers the row's own copy
 //! ([`super::outcome`]).
 //!
+//! **The button's reveal.** The button is drawn on every row but shows only while there is a reason to: the pointer is
+//! over its row, any control in its row holds focus, the row is the open session's, or the button's own menu or
+//! question is open. Otherwise it is transparent but still there to click and to reach with Tab. These are the old
+//! `.session-row-menu` rules (`:hover`, `:focus-within`, `.selected` and `[aria-expanded="true"]` on the row); an open
+//! menu keeps the button shown with the pointer elsewhere, since the pointer leaves the row to reach the menu's
+//! commands. The row's hover is recorded by its list item (`super::row::RowHover`) rather than left to a hover style,
+//! so that a key typed while the pointer rests on the row does not hide the button (GPUI's hover styles stand down
+//! after keyboard input; the old `:hover` did not), and so that the reveal is one decision the tests can read: the
+//! button's wrapper names it in its debug selector, `session-menu-<key>:shown` or `:hidden`.
+//!
 //! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas, in the old
 //! order around these, with no placeholder meanwhile; the old row menu had no Restart, which the open session's header
-//! offers instead (`session_pane/header.rs`). Also not ported: the button staying visible while the row's open control
-//! has keyboard focus (the old `:focus-within`; here only the button's own focus shows it), opening the menu with the
-//! arrow keys from the closed button, and placing the menu beside the sidebar with a pointer notch (the layer manager
-//! places it below its anchor).
+//! offers instead (`session_pane/header.rs`). Also not ported: opening the menu with the arrow keys from the closed
+//! button, placing the menu beside the sidebar with a pointer notch (the layer manager places it below its anchor), the
+//! old reveal's 100 ms fade (the button appears and goes at once: a fade per row would need a ticker animation for
+//! each row in motion, which nothing else in the list holds), and its rule that a touch screen always shows the button
+//! (GPUI reports no coarse pointer to ask about).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -72,6 +83,10 @@ pub(crate) const BUTTON_ID_PREFIX: &str = "session-menu-";
 
 /// `.session-row-menu-panel:not(.menu-prompt)`'s width.
 const PANEL_WIDTH: f32 = 246.;
+
+/// The menu button's hover help, the old toggle's `data-tooltip` word for word.
+pub(crate) const ACTIONS_HELP: &str =
+    "Session actions: rename, clone, replace, stop, delete and more";
 
 /// The layer a row last opened from its menu button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,15 +151,22 @@ impl RowLayers {
 }
 
 /// The menu button of the row of `key`, a session titled `title` (as the host wrote it), with its anchor recorded in
-/// `rows` for the commands and the shortcut, and its focus handle for the menu to return focus to. Called from the
-/// virtualized list's item callback, once per drawn row and frame: an anchor and a control's focus handle are element
-/// state, so they are made while the row's elements are.
+/// `rows` for the commands and the shortcut, and its focus handle for the menu to return focus to. `row_active` says
+/// whether the pointer is over the row or any control in it holds focus, two of the reveal's reasons (the module docs,
+/// "The button's reveal"), which the row's drawing knows. Called from the virtualized list's item callback, once per
+/// drawn row and frame: an anchor and a control's focus handle are element state, so they are made while the row's
+/// elements are.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one row's button: its row's identity and state, and the window it is drawn in"
+)]
 pub(super) fn menu_button(
     rows: &RefCell<RowLayers>,
     list: &WeakEntity<SessionList>,
     key: &str,
     title: &str,
     selected: bool,
+    row_active: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -164,16 +186,17 @@ pub(super) fn menu_button(
     rows.borrow_mut()
         .buttons
         .insert(key.to_owned(), focus.clone());
-    // Like the old `.session-row-menu`, invisible on a row that is neither hovered, selected nor holding the button's
-    // focus and has nothing open, though still there to click and to reach with Tab.
-    let visible = selected || open || focus.is_focused(window);
+    // Like the old `.session-row-menu`, invisible while no reveal reason holds, though still there to click and to
+    // reach with Tab. None of them latches: the button goes once none holds.
+    let visible = selected || open || row_active;
+    let selector_id = id.clone();
     let list = list.clone();
     let toggled = key.to_owned();
     let toggle = IconButton::new(
         id,
         Icon::More,
         actions_label(title),
-        HoverHelp::tooltip("Open this session's actions"),
+        HoverHelp::tooltip(ACTIONS_HELP),
         Role::Button,
     )
     .tier(Tier::RowMenu { on_fill: selected })
@@ -190,7 +213,11 @@ pub(super) fn menu_button(
         .mt(px(4.))
         .mr(px(2.))
         .opacity(if visible { 1. } else { 0. })
-        .group_hover(super::row::ROW_GROUP, |style| style.opacity(1.))
+        // Tests read the reveal here, since the frame's record carries no opacity. The closure runs only in builds that
+        // record selectors, so other builds never format the string.
+        .debug_selector(move || {
+            format!("{selector_id}:{}", if visible { "shown" } else { "hidden" })
+        })
         .child(toggle)
         .child(anchor.track())
         .into_any_element()
