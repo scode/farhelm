@@ -1,5 +1,5 @@
-//! The red band across the top of a surface: the old stylesheet's `.banner`, with at most one `.banner-reclaim`
-//! button after its text.
+//! The red band across the top of a surface: the old stylesheet's `.banner`, with its `.banner-reclaim` button after
+//! its text, and at most one more before that button.
 //!
 //! The old app had one such band, the terminal's detach banner with its Take control. Here it carries the terminal's
 //! status line and the notice center's banners, and both draw it through this one builder so the two cannot drift
@@ -19,6 +19,7 @@ use crate::theme::{self, metrics};
 #[derive(IntoElement)]
 pub struct Banner {
     content: AnyElement,
+    lead: Option<Button>,
     action: Option<Button>,
 }
 
@@ -27,6 +28,7 @@ impl Banner {
     pub fn new(content: impl IntoElement) -> Self {
         Banner {
             content: content.into_any_element(),
+            lead: None,
             action: None,
         }
     }
@@ -35,6 +37,13 @@ impl Banner {
     /// had, it is drawn in [`Tier::OnBanner`]: no other tier reads on the red fill.
     pub fn action(mut self, button: Button) -> Self {
         self.action = Some(button.tier(Tier::OnBanner));
+        self
+    }
+
+    /// A button before the band's [`Banner::action`], for a band that offers something besides its one action: a
+    /// notice whose Dismiss follows what it offers (Open launcher). Drawn in [`Tier::OnBanner`] for the same reason.
+    pub fn lead_action(mut self, button: Button) -> Self {
+        self.lead = Some(button.tier(Tier::OnBanner));
         self
     }
 }
@@ -54,6 +63,9 @@ impl RenderOnce for Banner {
             .text_color(theme::color(palette.on_fill))
             .text_size(metrics::TEXT_MD)
             .child(div().min_w_0().child(self.content))
+            .when_some(self.lead, |band, button| {
+                band.child(div().ml(metrics::BANNER_BUTTON_GAP).child(button))
+            })
             .when_some(self.action, |band, button| {
                 band.child(div().ml(metrics::BANNER_BUTTON_GAP).child(button))
             })

@@ -114,6 +114,11 @@ pub enum Work {
     /// Closing one of a session's tunnels (`DELETE /api/sessions/{id}/tunnels/{tunnel}`), on the same key, so Close
     /// all closes them one after another. Not supersedable.
     TunnelClose,
+    /// The session launcher's New or Clone (`POST /api/sessions`), under a fresh launch key ([`OpKey::new_launch`])
+    /// for each submit (`launcher::launch`). Not supersedable: SPEC.md has one intended create yield one session or a
+    /// clear error, so nothing replaces a create on the wire. Restart with and Replace with act on their source session
+    /// and run as its [`Work::Restart`] and [`Work::Replace`] instead.
+    Launch,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built

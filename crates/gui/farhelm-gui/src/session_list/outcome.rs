@@ -69,14 +69,15 @@ fn prefix(work: Work) -> Option<&'static str> {
         Work::Seen => Some("Seen: "),
         Work::Restart => Some("Restart: "),
         // A probe and a setup are host work, never on a session's key, so no row line ever names them; tunnel work
-        // has a key of its own.
+        // has a key of its own, and a launch is the launcher's, on a launch key.
         Work::Rename
         | Work::Delete(_)
         | Work::Save
         | Work::Probe
         | Work::Setup
         | Work::TunnelOpen
-        | Work::TunnelClose => None,
+        | Work::TunnelClose
+        | Work::Launch => None,
     }
 }
 
@@ -176,7 +177,8 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::Probe
         | Work::Setup
         | Work::TunnelOpen
-        | Work::TunnelClose => None,
+        | Work::TunnelClose
+        | Work::Launch => None,
     }
 }
 
