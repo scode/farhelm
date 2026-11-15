@@ -91,7 +91,8 @@ struct ShellConfig {
 struct FakeConfig {
     /// API operations parked until the control file releases them. The
     /// removed browser suite used this boundary to close a browser with
-    /// cleanup still in flight; no current test sets it.
+    /// cleanup still in flight; the Tensorlake routes' reply-bound tests use
+    /// it to stand in for a Tensorlake that does not answer.
     hold_operations: std::collections::HashSet<String>,
     /// When set, only this key is accepted; any other answers 401.
     accepted_key: Option<String>,

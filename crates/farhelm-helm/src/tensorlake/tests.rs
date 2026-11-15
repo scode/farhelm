@@ -1083,3 +1083,405 @@ async fn test_lists_sandboxes_with_the_saved_key() {
         )
     );
 }
+
+// ---------------------------------------------------------------------------
+// Answering within the host reply bound
+// ---------------------------------------------------------------------------
+//
+// The GUI's channel runs one command at a time and resets the window when one
+// stays unanswered for 30 seconds, so every Tensorlake settings route that
+// waits on Tensorlake answers within `HOST_REPLY_BOUND` (SPEC_impl.md, "The UI
+// channel"). These tests park the control-file fake's operations to stand in
+// for a Tensorlake that does not answer, pause the clock, and measure the
+// reply on the clock the bound runs on.
+
+use crate::sessions::HOST_REPLY_BOUND;
+use farhelm_proto::tensorlake::{OrphanCleanup, OrphanSandbox};
+use std::time::Duration;
+use tokio::time::Instant;
+
+/// How long past the bound a test waits for a reply before failing, so a
+/// route that lost its bound fails with a message rather than parking the
+/// test until nextest's own timeout.
+const PAST_THE_BOUND: Duration = Duration::from_secs(10);
+
+/// A harness whose Tensorlake is the control-file fake, with the API key
+/// saved. The temporary directory holds the fake's control directory (the
+/// returned path) and must outlive the test.
+async fn fake_fixture() -> (
+    crate::rest_harness::Harness,
+    tempfile::TempDir,
+    std::path::PathBuf,
+    Arc<E2eTensorlake>,
+) {
+    let (state, root) = fake_dirs();
+    let fake = Arc::new(E2eTensorlake::new(root.clone(), state.path()).unwrap());
+    let harness = FleetBuilder::new()
+        .await
+        .tensorlake_api(fake.clone())
+        .start()
+        .await;
+    harness
+        .store
+        .save_tensorlake_config(save(Some(KEY), false, None))
+        .await
+        .ok()
+        .unwrap();
+    (harness, state, root, fake)
+}
+
+/// Replace the fake's `config.json` by renaming a finished file over it: the
+/// fake re-reads it on every call and every hold poll, and a half-written
+/// file would fail whichever call read it.
+fn set_fake_config(root: &std::path::Path, config: serde_json::Value) {
+    let staged = root.join("config.json.staged");
+    std::fs::write(&staged, config.to_string()).unwrap();
+    std::fs::rename(staged, root.join("config.json")).unwrap();
+}
+
+/// The operations the fake has been called with so far, in order (each is
+/// logged on entry, before any hold).
+fn fake_ops(root: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(root.join("events.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| {
+            let event: serde_json::Value = serde_json::from_str(line).unwrap();
+            event["op"].as_str().unwrap().to_string()
+        })
+        .collect()
+}
+
+/// Send `request` through the real router on a task of its own, so the test
+/// can steer the fake while the route waits. The reply comes with how long it
+/// took on the tokio clock, from just before the send.
+fn spawn_call(
+    harness: &crate::rest_harness::Harness,
+    request: Request<Body>,
+) -> tokio::task::JoinHandle<(StatusCode, String, Duration)> {
+    let router = harness.router();
+    let started = Instant::now();
+    tokio::spawn(async move {
+        let response = router.oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 16)
+            .await
+            .unwrap();
+        (
+            status,
+            String::from_utf8(bytes.to_vec()).unwrap(),
+            started.elapsed(),
+        )
+    })
+}
+
+/// Wait for a reply [`spawn_call`] started, failing once [`PAST_THE_BOUND`]
+/// has gone by after the bound without one.
+async fn reply_of(
+    call: tokio::task::JoinHandle<(StatusCode, String, Duration)>,
+) -> (StatusCode, String, Duration) {
+    tokio::time::timeout(HOST_REPLY_BOUND + PAST_THE_BOUND, call)
+        .await
+        .expect("the route should answer within the host reply bound")
+        .unwrap()
+}
+
+/// A sandbox with one of Farhelm's reserved names that no host or recipe on
+/// the harness's helm owns, plus one snapshot of it, created through the
+/// fake's own API so the model holds nothing the real API could not.
+async fn plant_orphan(fake: &E2eTensorlake) -> String {
+    let id = fake
+        .create_sandbox(
+            &key(),
+            &CreateSandbox {
+                name: "farhelm-host-k7q2-orphan-abcd".into(),
+                source: SandboxSource::Image("tensorlake/ubuntu-systemd".into()),
+                resources: Resources {
+                    cpus: 1.0,
+                    memory_mb: 1024,
+                    disk_mb: 10240,
+                },
+                timeout_secs: 900,
+                auto_resume: false,
+                max_pending_secs: 900,
+            },
+        )
+        .await
+        .unwrap()
+        .sandbox_id;
+    fake.create_snapshot(&key(), &id, SnapshotType::Filesystem)
+        .await
+        .unwrap();
+    id
+}
+
+/// Why: Test can list up to 50 pages of sandboxes at 30 seconds a call, and
+/// one stalled call alone outlasts the GUI's watchdog while every later
+/// command waits behind it.
+///
+/// Spec: with Tensorlake's listing parked, `POST /api/tensorlake/test` answers
+/// once `HOST_REPLY_BOUND` has passed and not much later, with the 502 any
+/// unanswered Tensorlake call gets, saying Tensorlake did not answer within 20
+/// seconds.
+#[farhelm_testtrace::test]
+async fn test_answers_at_the_reply_bound_while_tensorlake_stalls() {
+    let (harness, _state, root, _fake) = fake_fixture().await;
+    set_fake_config(
+        &root,
+        serde_json::json!({ "hold_operations": ["list_sandboxes"] }),
+    );
+    tokio::time::pause();
+    let (status, body, waited) = reply_of(spawn_call(
+        &harness,
+        request("POST", "/api/tensorlake/test", None),
+    ))
+    .await;
+    assert_eq!(
+        fake_ops(&root),
+        ["list_sandboxes"],
+        "premise: the listing reached the fake and was parked there"
+    );
+    assert_eq!(
+        (status, body.as_str()),
+        (
+            StatusCode::BAD_GATEWAY,
+            "Tensorlake did not answer within 20 seconds"
+        )
+    );
+    assert!(
+        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
+        "Test answered after {waited:?}"
+    );
+}
+
+/// Why: the list of sandboxes not on this helm reads the same listing as
+/// Test, and a vendor outage must not hide a cleanup the user already asked
+/// for, which a timeout must not change.
+///
+/// Spec: with Tensorlake's listing parked, `GET /api/tensorlake/orphans`
+/// answers at `HOST_REPLY_BOUND` with a 502 saying Tensorlake did not answer
+/// within 20 seconds; once a cleanup has failed (its snapshot sweep refused),
+/// the same parked listing answers at the bound with that cleanup's row, its
+/// failure kept and its state saying the list was unavailable and why.
+#[farhelm_testtrace::test]
+async fn the_leftover_list_answers_at_the_reply_bound_and_keeps_unfinished_cleanup() {
+    let (harness, _state, root, fake) = fake_fixture().await;
+    let list = || request("GET", "/api/tensorlake/orphans", None);
+    set_fake_config(
+        &root,
+        serde_json::json!({ "hold_operations": ["list_sandboxes"] }),
+    );
+    tokio::time::pause();
+    let (status, body, waited) = reply_of(spawn_call(&harness, list())).await;
+    assert_eq!(
+        fake_ops(&root),
+        ["list_sandboxes"],
+        "premise: the listing reached the fake and was parked there"
+    );
+    assert_eq!(
+        (status, body.as_str()),
+        (
+            StatusCode::BAD_GATEWAY,
+            "Tensorlake did not answer within 20 seconds"
+        )
+    );
+    assert!(
+        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
+        "the list answered after {waited:?}"
+    );
+
+    let id = plant_orphan(&fake).await;
+    set_fake_config(
+        &root,
+        serde_json::json!({ "fail": { "delete_snapshot": { "status": 503, "message": "sweep refused" } } }),
+    );
+    let (status, body) = call(
+        &harness,
+        request("DELETE", &format!("/api/tensorlake/orphans/{id}"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert!(body.contains("sweep refused"), "{body}");
+    set_fake_config(
+        &root,
+        serde_json::json!({ "hold_operations": ["list_sandboxes"] }),
+    );
+    let (status, body, waited) = reply_of(spawn_call(&harness, list())).await;
+    assert_eq!(
+        fake_ops(&root).last().map(String::as_str),
+        Some("list_sandboxes"),
+        "premise: the second listing reached the fake and was parked there"
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
+        "the list answered after {waited:?}"
+    );
+    let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].id, id);
+    assert!(
+        matches!(&rows[0].cleanup, Some(OrphanCleanup::Failed { reason }) if reason.contains("sweep refused")),
+        "{rows:?}"
+    );
+    assert_eq!(
+        rows[0].state,
+        "Sandbox list unavailable: Tensorlake did not answer within 20 seconds"
+    );
+}
+
+/// Why: deleting a leftover sandbox makes several Tensorlake calls, waits for
+/// the termination and sweeps snapshots one by one, which can take minutes;
+/// the GUI cannot wait that long, but the cleanup must still finish once the
+/// reply has gone.
+///
+/// Spec: with the sandbox lookup parked for 5 seconds and the snapshot listing
+/// after the termination parked until the test releases it (so no single
+/// call reaches its own 20-second cut before the reply bound),
+/// `DELETE /api/tensorlake/orphans/{id}` answers 504 once `HOST_REPLY_BOUND`
+/// has passed, saying the cleanup carries on; until released, the list shows
+/// the sandbox as "Cleanup in progress"; once released, the cleanup finishes
+/// on its own: the snapshot is gone and the list is empty.
+#[farhelm_testtrace::test]
+async fn deleting_a_leftover_answers_at_the_reply_bound_and_the_cleanup_finishes() {
+    let (harness, _state, root, fake) = fake_fixture().await;
+    let id = plant_orphan(&fake).await;
+    set_fake_config(
+        &root,
+        serde_json::json!({ "hold_operations": ["get_sandbox"] }),
+    );
+    let mut bumps = harness.manager.events().subscribe();
+    tokio::time::pause();
+    let delete = spawn_call(
+        &harness,
+        request("DELETE", &format!("/api/tensorlake/orphans/{id}"), None),
+    );
+    // sleep-ok: the lookup's parked time is the stimulus; it moves the snapshot listing's own 20-second cut past the reply bound
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        fake_ops(&root).last().map(String::as_str),
+        Some("get_sandbox"),
+        "premise: the deletion is parked at its lookup"
+    );
+    set_fake_config(
+        &root,
+        serde_json::json!({ "hold_operations": ["list_snapshots"] }),
+    );
+    let (status, body, waited) = reply_of(delete).await;
+    assert_eq!(
+        fake_ops(&root).last().map(String::as_str),
+        Some("list_snapshots"),
+        "premise: the deletion terminated the sandbox and is parked at its snapshot listing"
+    );
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+    assert!(
+        body.contains("the cleanup carries on, and Sandboxes not on this helm shows how it ends"),
+        "{body}"
+    );
+    assert!(
+        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
+        "the delete answered after {waited:?}"
+    );
+
+    // What the 504 promises: the list shows the cleanup running. Only the
+    // snapshot listing is parked, so this read answers at once.
+    let (status, body) = call(&harness, request("GET", "/api/tensorlake/orphans", None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
+    assert!(
+        matches!(
+            rows.as_slice(),
+            [row] if row.id == id
+                && row.cleanup == Some(OrphanCleanup::Running)
+                && row.state == "Cleanup in progress"
+        ),
+        "{rows:?}"
+    );
+
+    // The deletion bumps the feed once its cleanup has ended, which is what
+    // makes Settings read the list again. Other bumps may come first, so each
+    // one is checked against the cleanup's own record, and the last rows seen
+    // are what a timeout reports.
+    bumps.borrow_and_update();
+    set_fake_config(&root, serde_json::json!({}));
+    let mut last_rows = rows;
+    let finished = tokio::time::timeout(PAST_THE_BOUND, async {
+        loop {
+            bumps.changed().await.unwrap();
+            last_rows = harness.state.tensorlake.orphan_sandboxes().await.unwrap();
+            if last_rows.is_empty() {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(
+        finished.is_ok(),
+        "the cleanup should finish after its reply; the list still holds {last_rows:?}"
+    );
+    assert!(
+        fake.list_snapshots(&key())
+            .await
+            .unwrap()
+            .snapshots
+            .is_empty(),
+        "the cleanup swept the sandbox's snapshot"
+    );
+    let (status, body) = call(&harness, request("GET", "/api/tensorlake/orphans", None)).await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "[]"));
+}
+
+/// Why: the Delete's timeout reply promises that the cleanup carries on and
+/// that the list shows how it ends, which is only true once the cleanup is
+/// recorded. A Tensorlake that does not answer at all stalls the lookup
+/// before that, and its failure must reach the user rather than only the log.
+///
+/// Spec: with the sandbox lookup parked indefinitely,
+/// `DELETE /api/tensorlake/orphans/{id}` answers well inside
+/// `HOST_REPLY_BOUND`, after the lookup's own 10 seconds, with a 502 saying
+/// Tensorlake did not answer within 10 seconds; nothing was terminated, and
+/// the list shows the sandbox as it was, with no cleanup.
+#[farhelm_testtrace::test]
+async fn a_delete_whose_lookup_stalls_fails_before_the_reply_bound() {
+    let (harness, _state, root, fake) = fake_fixture().await;
+    let id = plant_orphan(&fake).await;
+    set_fake_config(
+        &root,
+        serde_json::json!({ "hold_operations": ["get_sandbox"] }),
+    );
+    // Planting the sandbox logged its own calls; only the delete's count.
+    let planted = fake_ops(&root).len();
+    tokio::time::pause();
+    let (status, body, waited) = reply_of(spawn_call(
+        &harness,
+        request("DELETE", &format!("/api/tensorlake/orphans/{id}"), None),
+    ))
+    .await;
+    assert_eq!(
+        fake_ops(&root)[planted..],
+        ["get_sandbox"],
+        "premise: the lookup reached the fake and was parked there, and nothing was terminated"
+    );
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert!(
+        body.contains("Tensorlake did not answer within 10 seconds"),
+        "{body}"
+    );
+    let lookup_bound = Duration::from_secs(10);
+    assert!(
+        waited >= lookup_bound && waited < lookup_bound + Duration::from_secs(1),
+        "the delete answered after {waited:?}"
+    );
+
+    set_fake_config(&root, serde_json::json!({}));
+    let (status, body) = call(&harness, request("GET", "/api/tensorlake/orphans", None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
+    assert!(
+        matches!(
+            rows.as_slice(),
+            [row] if row.id == id && row.cleanup.is_none() && row.state == "running"
+        ),
+        "{rows:?}"
+    );
+}

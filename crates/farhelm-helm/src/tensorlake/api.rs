@@ -373,6 +373,65 @@ pub(crate) async fn list_all_sandboxes(
     })
 }
 
+/// One API call cut off after `limit`; running out of time is a `Transport`
+/// failure like any other unanswered call. Host removal's per-call bound
+/// (`hosts::bounded`) is this with its own limit.
+pub(super) async fn bounded_by<T>(
+    limit: std::time::Duration,
+    call: impl std::future::Future<Output = Result<T, TensorlakeError>>,
+) -> Result<T, TensorlakeError> {
+    bounded_until(tokio::time::Instant::now() + limit, limit, call).await
+}
+
+/// One API call (or a run of them, such as a paged listing) cut off at
+/// `deadline`, for a caller whose bound started before the call did, as a
+/// route's reply bound starts when its request arrives. `limit` is that whole
+/// bound, which is what the failure names: the user waited that long, not
+/// only the part that was left for this call.
+pub(super) async fn bounded_until<T>(
+    deadline: tokio::time::Instant,
+    limit: std::time::Duration,
+    call: impl std::future::Future<Output = Result<T, TensorlakeError>>,
+) -> Result<T, TensorlakeError> {
+    tokio::time::timeout_at(deadline, call)
+        .await
+        .unwrap_or_else(|_| {
+            Err(TensorlakeError::Transport(format!(
+                "Tensorlake did not answer within {} seconds",
+                limit.as_secs()
+            )))
+        })
+}
+
+/// [`list_all_sandboxes`] for a request the GUI waits on, cut off at
+/// `reply_by`: the helm's host reply bound (`crate::sessions::HOST_REPLY_BOUND`)
+/// counted from when the request arrived, so the local reads before the
+/// listing come out of the bound rather than adding to it.
+///
+/// Unbounded, a listing may take up to [`MAX_SANDBOX_PAGES`] calls of 30
+/// seconds each, and one stalled call alone outlasts the GUI's watchdog. The
+/// UI channel runs one command at a time, so every later click would wait
+/// behind it too (SPEC_impl.md, "The UI channel"). A listing leaves nothing to
+/// finish, so it is dropped at the bound, and running out of time is a
+/// `Transport` failure like a call that times out on its own: the callers
+/// (Settings' Test, and the list of sandboxes not on this helm) already show
+/// those as Tensorlake failures. That is why this is not
+/// `crate::sessions::within_host_read_bound`, which words its timeout as the
+/// host's and returns it as a helm error, losing the classification Test
+/// uses to explain a rejected key.
+pub(crate) async fn list_all_sandboxes_by(
+    reply_by: tokio::time::Instant,
+    api: &dyn TensorlakeApi,
+    key: &ApiKey,
+) -> Result<Vec<SandboxInfo>, TensorlakeError> {
+    bounded_until(
+        reply_by,
+        crate::sessions::HOST_REPLY_BOUND,
+        list_all_sandboxes(api, key),
+    )
+    .await
+}
+
 /// The API of a helm that cannot reach Tensorlake. Every call fails as a
 /// transport failure carrying the reason, which differs by why the helm has
 /// no client.

@@ -254,12 +254,16 @@ orchestrator on 2026-11-15, under its rule that every host-waiting route the GUI
 asks the container hosts concurrently, so the bound applies to the slowest of them, and drops its read at the bound; a
 leftover's Delete replies that its cleanup carries on, and the list's next read shows whether the container is gone; and
 removing a host whose removal deletes its machine replies the same way, the host leaving the hosts list once its removal
-finishes, or staying listed with the reason only in the helm's log if it fails. A session's Delete of its environment, a
-sandbox leftover's Delete (`DELETE /api/tensorlake/orphans/{id}`, which the Tensorlake work bounds in a change of its
-own), Suspend and Resume are not bounded yet and are bounded, or take the accepted form, when the work that ports them
-needs it. A credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts
-(decided by the migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still
-being delivered to are reported as not delivered (see "Named credential catalog").
+finishes, or staying listed with the reason only in the helm's log if it fails. A session's Delete of its environment,
+Suspend and Resume are not bounded yet and are bounded, or take the accepted form, when the work that ports them needs
+it. A credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts (decided
+by the migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still being
+delivered to are reported as not delivered (see "Named credential catalog"). The Tensorlake settings routes, which wait
+on Tensorlake's API rather than on a host, answer within the same bound, counted from their handler's start (decided by
+the migration's orchestrator on 2026-11-15): the API key's Test and the list of Sandboxes not on this helm stop listing
+and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover
+sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then
+shows (see "Tensorlake account").
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -5702,7 +5706,12 @@ stored key, a non-blank one is trimmed and replaces it (visible ASCII, at most 4
 asking for both is refused, and an absent `create_without_asking` keeps the stored choice. The save is resolved against
 the stored row inside one database operation, so two windows saving different fields cannot undo each other. Refusals,
 malformed JSON included, use fixed messages. POST `/api/tensorlake/test` lists every page of sandboxes with the stored
-key and answers the count, a 400 without a key, or a 502 with the classified failure.
+key and answers the count, a 400 without a key, or a 502 with the classified failure. It stops listing at the UI
+channel's host reply bound, 20 seconds after the request arrived (the stored key's read counts against it, but nothing
+bounds that local read itself), and a listing cut off there is a transport failure saying Tensorlake did not answer
+within that time; the listing of leftover sandboxes is cut off the same way (see "The UI channel"), and its ownership
+reads come after the listing and are not bounded either, so that a sandbox created during the listing, whose name its
+host recorded first, is never shown as not on this helm.
 
 The REST client is a `TensorlakeApi` trait with one implementation per caller: reqwest against
 `https://api.tensorlake.ai` in production, the same client pointed at a loopback stub in unit tests, an offline
@@ -6284,19 +6293,22 @@ recipe. A session-owned launch or cleanup leftover with a host row stays visible
 evidence is needed to make it manageable. `/api/tensorlake/orphans/{id}` DELETE rechecks the prefix and current
 ownership under the host provisioning lock. An owned resource uses host Delete sandbox instead. It terminates the
 sandbox, waits for termination, and deletes snapshots by source sandbox ID using the existing bounded removal calls. The
-delete runs on a helm-owned task so closing Settings cannot cancel cleanup. The service retains in-flight and failed
-explicit cleanup operations in memory, including canonical sandbox ID, display facts and the failure reason; the list
-overlays those operations on vendor discovery because terminated sandboxes disappear from that discovery. Settings shows
-running cleanup and offers Retry cleanup after failure, including after closing/reopening Settings or losing the
-vendor's terminated sandbox record. A retry still rechecks local ownership. Only a successful snapshot sweep removes the
-operation; nothing retries automatically. A helm restart loses this in-memory operation state; a session-owned leftover
-still has its durable host resource record and remains visible in Hosts. Other unowned sandboxes gain no persistent
-ownership ledger, and neither path adds automatic startup reconciliation. Settings re-reads on invalidations and offers
-Refresh for changes outside this helm. A failed discovery pauses automatic reads until Refresh, a key save/clear in this
-dialog, a successful Test of the saved key, or remounting Settings; unrelated fleet changes must not keep resending a
-rejected key. Key replacement in this dialog triggers discovery even when a key was already saved. A successful Test
-resumes failed discovery with one reload. Another tab's key save is not observed automatically: this tab needs Refresh,
-Test or reopening Settings.
+delete runs on a helm-owned task so closing Settings cannot cancel cleanup, and its reply comes within the UI channel's
+host reply bound: a cleanup still running then gets a 504 saying it carries on, and the list shows it as running until
+it ends (see "The UI channel"). The sandbox lookup before the cleanup is recorded is cut off after 10 seconds, so a
+Tensorlake that does not answer it gets that lookup's own 502, not a 504 promising a cleanup nothing records. The
+service retains in-flight and failed explicit cleanup operations in memory, including canonical sandbox ID, display
+facts and the failure reason; the list overlays those operations on vendor discovery because terminated sandboxes
+disappear from that discovery. Settings shows running cleanup and offers Retry cleanup after failure, including after
+closing/reopening Settings or losing the vendor's terminated sandbox record. A retry still rechecks local ownership.
+Only a successful snapshot sweep removes the operation; nothing retries automatically. A helm restart loses this
+in-memory operation state; a session-owned leftover still has its durable host resource record and remains visible in
+Hosts. Other unowned sandboxes gain no persistent ownership ledger, and neither path adds automatic startup
+reconciliation. Settings re-reads on invalidations and offers Refresh for changes outside this helm. A failed discovery
+pauses automatic reads until Refresh, a key save/clear in this dialog, a successful Test of the saved key, or remounting
+Settings; unrelated fleet changes must not keep resending a rejected key. Key replacement in this dialog triggers
+discovery even when a key was already saved. A successful Test resumes failed discovery with one reload. Another tab's
+key save is not observed automatically: this tab needs Refresh, Test or reopening Settings.
 
 `OrphanList` keeps local checking and last-successful-check feedback beside its existing rows, discovery error and
 generation. A saved key keeps its section mounted when discovery is empty; Refresh sits beside the heading and is

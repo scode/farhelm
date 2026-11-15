@@ -55,7 +55,7 @@ pub(crate) mod tunnels;
 mod tests;
 
 use crate::{AppState, store::HelmStore};
-use api::{ApiKey, Offline, TensorlakeApi, TensorlakeError, list_all_sandboxes};
+use api::{ApiKey, Offline, TensorlakeApi, TensorlakeError, list_all_sandboxes_by};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -334,8 +334,9 @@ impl Tensorlake {
         keys.ensure(&key_name(&tag)).await.map(|_| ())
     }
 
-    /// Prove the saved key works by listing the account's sandboxes.
-    async fn test(&self) -> Result<TestResult, TestFailure> {
+    /// Prove the saved key works by listing the account's sandboxes, giving
+    /// up at `reply_by` (see [`list_all_sandboxes_by`]).
+    async fn test(&self, reply_by: tokio::time::Instant) -> Result<TestResult, TestFailure> {
         let config = self
             .0
             .store
@@ -343,7 +344,7 @@ impl Tensorlake {
             .await
             .map_err(|_| TestFailure::Storage)?;
         let key: ApiKey = config.api_key().ok_or(TestFailure::NoKey)?;
-        let sandboxes = list_all_sandboxes(self.0.api.as_ref(), &key)
+        let sandboxes = list_all_sandboxes_by(reply_by, self.0.api.as_ref(), &key)
             .await
             .map_err(TestFailure::Api)?;
         Ok(TestResult {
@@ -470,9 +471,14 @@ pub(crate) async fn create_ssh_key(State(state): State<Arc<AppState>>) -> Respon
 
 /// One user-initiated listing with the saved key. Its reply says how many
 /// sandboxes the key can see, or why it could not list them; neither ever
-/// carries the key.
+/// carries the key. It answers within the host reply bound, counted from
+/// here: a Tensorlake that has not finished the listing by then gets the same
+/// 502 as any other unanswered call, saying it did not answer within 20
+/// seconds. The stored key's read counts against the bound, but nothing
+/// bounds that local read itself.
 pub(crate) async fn test(State(state): State<Arc<AppState>>) -> Response {
-    match state.tensorlake.test().await {
+    let reply_by = tokio::time::Instant::now() + crate::sessions::HOST_REPLY_BOUND;
+    match state.tensorlake.test(reply_by).await {
         Ok(result) => axum::Json(result).into_response(),
         Err(TestFailure::NoKey) => (
             StatusCode::BAD_REQUEST,
