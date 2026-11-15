@@ -55,6 +55,11 @@ pub(crate) fn display_peer(raw: &str) -> String {
 /// so are `<` (which starts an escape) and the parentheses of the `(empty)` placeholder, so neither can be imitated.
 /// Comparisons must still use the raw bytes. Ported from the old UI's `peer.rs`.
 ///
+/// The GUI crate's `HostText::identity` spells identities the same way, and the two must agree: a refusal here and a
+/// question in the window name the same installation. This copy stays because it feeds a stderr line and a native
+/// alert, while `HostText` deliberately hands its spelling only to its own elements and accessible names; change the
+/// two together.
+///
 /// It escapes the raw value once, on its own, rather than going through [`display_peer`]: its output already holds
 /// escapes, which `display_peer` would escape a second time.
 pub(crate) fn display_identity(raw: &str) -> String {
