@@ -5415,6 +5415,7 @@ mod tests {
             kind: kind.to_string(),
             tensorlake: None,
             environment: None,
+            container_check: None,
             name: name.to_string(),
             destination: None,
             alias: None,

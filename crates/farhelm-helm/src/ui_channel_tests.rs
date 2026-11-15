@@ -1431,6 +1431,159 @@ async fn a_provisioning_step_transition_reaches_the_connected_ui() {
     assert_eq!(run.steps[0].message.as_deref(), Some("copying"));
 }
 
+/// Stand-in commands for the helm's Podman check: the check's first command
+/// (`uname -s`) waits until the test releases it, then reports a host that is
+/// not Linux, which ends the check refused with a known reason and no further
+/// command. Each command is recorded rather than asserted here: a panic would
+/// end the helm's spawned check task, and the test would fail far from the cause.
+struct HeldPlaceCommands {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+    seen: std::sync::Mutex<Vec<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl crate::environment::podman_probe::PlaceCommands for HeldPlaceCommands {
+    async fn run(
+        &self,
+        _route: &crate::access::BaseRoute,
+        argv: &[String],
+    ) -> anyhow::Result<String> {
+        self.seen.lock().unwrap().push(argv.to_vec());
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok("Darwin\n".to_string())
+    }
+}
+
+/// The `container_check` of host `id`'s entry among `entries`, decoded as the
+/// GUI decodes a hosts entry.
+fn container_check_of(
+    entries: &[KeyedEntry],
+    id: crate::store::HostId,
+) -> Option<farhelm_proto::ui_channel::ContainerCheckView> {
+    let entry = entries
+        .iter()
+        .find(|entry| entry.key == farhelm_proto::ui_channel::HostView::key(id))
+        .expect("the host's entry is among the hosts sent");
+    let host: farhelm_proto::ui_channel::HostView =
+        serde_json::from_value(entry.value.clone()).expect("a host entry");
+    host.container_check
+}
+
+/// Settings → Containers shows each host's Podman check, and the check used to
+/// change only the helm's private cache, so a connected GUI saw it finish only
+/// by re-reading on a timer. Its state now rides the host's entry in the hosts
+/// collection, and both of its changes bump the feed.
+///
+/// Specified, with the check started outside the channel (so only a feed bump
+/// can bring the change) and the local host's actor settled first (so no
+/// connection change bumps the feed meanwhile): the snapshot carries an
+/// unchecked `container_check`; starting a check pushes the entry with
+/// `refreshing` on and no result yet; the check's end pushes it again with
+/// `refreshing` off and the stored result: refused, with the check's reason and
+/// its time. Each bump is announced only once the state it announces is in
+/// place: seen from inside each bump, `refreshing` reads on, then off. That
+/// order is invisible to the channel (no await point separates storing the
+/// result from clearing the flag), so the bump observer is what pins it.
+#[farhelm_testtrace::test]
+async fn a_container_check_reaches_the_connected_ui_when_it_starts_and_when_it_ends() {
+    use farhelm_proto::ui_channel::ContainerCheckView;
+    let commands = Arc::new(HeldPlaceCommands {
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+        seen: std::sync::Mutex::new(Vec::new()),
+    });
+    let mut harness = rest_harness::FleetBuilder::new()
+        .await
+        .place_commands(commands.clone())
+        .start()
+        .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness
+        .await_state(local, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    assert_eq!(collections[1].collection, Collection::Hosts, "premise");
+    assert_eq!(
+        container_check_of(&collections[1].entries, local),
+        Some(ContainerCheckView {
+            checked_at: None,
+            refreshing: false,
+            usable: false,
+            reason: None,
+        }),
+        "premise: the local host can hold containers and was never checked"
+    );
+
+    // What a re-read would see at the instant of each bump. The publisher holds
+    // no cache lock while bumping, so the observer may take it.
+    let row = harness
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == local)
+        .unwrap();
+    let places = Arc::clone(&harness.state.podman_places);
+    let at_bumps = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = Arc::clone(&at_bumps);
+    harness.manager.events().observe_bumps(move || {
+        record
+            .lock()
+            .unwrap()
+            .push(places.view(&row).unwrap().refreshing);
+    });
+
+    let status = http(
+        &harness,
+        "POST",
+        &format!("/api/hosts/{local}/podman-probe"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    tokio::time::timeout(NOTICE, commands.entered.notified())
+        .await
+        .expect("the check runs its first command, where it is held");
+    let started = changes_of(&mut ws, Collection::Hosts).await;
+    assert_eq!(
+        container_check_of(&started.upsert, local),
+        Some(ContainerCheckView {
+            checked_at: None,
+            refreshing: true,
+            usable: false,
+            reason: None,
+        })
+    );
+
+    commands.release.notify_one();
+    let ended = changes_of(&mut ws, Collection::Hosts).await;
+    let check = container_check_of(&ended.upsert, local).expect("the entry keeps its check");
+    assert!(!check.refreshing, "{check:?}");
+    assert!(!check.usable, "{check:?}");
+    assert_eq!(
+        check.reason.as_deref(),
+        Some("containers require a Linux host")
+    );
+    assert!(check.checked_at.is_some(), "{check:?}");
+    assert_eq!(
+        *at_bumps.lock().unwrap(),
+        [true, false],
+        "each bump shows the state it announces"
+    );
+    assert_eq!(
+        *commands.seen.lock().unwrap(),
+        [["uname", "-s"]],
+        "the check ran only its first command"
+    );
+}
+
 /// A preference write sent as a command comes back as a change to the
 /// preferences collection, before the write's reply, through the real route.
 #[farhelm_testtrace::test]

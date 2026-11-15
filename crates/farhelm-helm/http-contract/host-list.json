@@ -29,7 +29,13 @@
           "status": "ok"
         }
       },
-      "is_session_owned": false
+      "is_session_owned": false,
+      "container_check": {
+        "checked_at": 1700000200,
+        "refreshing": true,
+        "usable": true,
+        "reason": null
+      }
     },
     {
       "alias": "alias2",
@@ -55,7 +61,13 @@
         "phase": "connecting",
         "stage": "setting-up"
       },
-      "is_session_owned": false
+      "is_session_owned": false,
+      "container_check": {
+        "checked_at": 1700000300,
+        "refreshing": false,
+        "usable": false,
+        "reason": "Podman is not installed on this host"
+      }
     },
     {
       "alias": "alias3",

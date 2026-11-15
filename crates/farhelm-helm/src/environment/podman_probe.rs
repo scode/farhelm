@@ -3,8 +3,12 @@
 //! The complete result stays private because proxy values may hold credentials.
 //! Public views expose readiness and its reason. A result belongs to the exact
 //! current base route, so retargeting a host immediately invalidates its cache.
+//!
+//! Host entries carry each view's readiness (`container_check`), so a check's
+//! start and end bump the fleet feed the hosts collection is re-read on.
 
 use crate::access::{BaseRoute, RemoteCommand, base_route};
+use crate::feed::FleetEvents;
 use crate::store::{HelmStore, HostId, HostRow};
 use crate::units::{MANAGER_ENVIRONMENT_BUSCTL_ARGS, ManagerEnvironment, ManagerValue};
 use anyhow::Context as _;
@@ -12,7 +16,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Launch consumers require a recent observation before using its tool path
@@ -57,6 +61,20 @@ pub(crate) struct ProbeView {
     pub(crate) reason: Option<String>,
     pub(crate) architecture: Option<String>,
     pub(crate) version: Option<String>,
+}
+
+impl ProbeView {
+    /// The part of the view a host entry carries: readiness and its reason.
+    /// Architecture and version stay on the per-host probe route, which the
+    /// launcher reads when it needs them.
+    pub(crate) fn container_check(&self) -> farhelm_proto::ui_channel::ContainerCheckView {
+        farhelm_proto::ui_channel::ContainerCheckView {
+            checked_at: self.checked_at,
+            refreshing: self.refreshing,
+            usable: self.usable,
+            reason: self.reason.clone(),
+        }
+    }
 }
 
 /// A small command seam lets tests script each prerequisite without changing
@@ -281,7 +299,15 @@ struct Cache {
 pub(crate) struct PodmanPlaces {
     commands: Arc<dyn PlaceCommands>,
     cache: Mutex<Cache>,
+    /// Wakes the helm's own waiters ([`Self::runtime`], [`Self::fresh`]).
     changed: tokio::sync::Notify,
+    /// The helm's fleet feed, which the hosts collection is re-read on. Set
+    /// once, when the helm's state adopts this cache (`AppState`'s
+    /// constructor), because the cache is built before the connection manager
+    /// that owns the feed. A check that changes state before then bumps
+    /// nothing, which loses nothing: no GUI can be connected yet, and its
+    /// first snapshot reads the cache as it is.
+    feed: OnceLock<Arc<FleetEvents>>,
 }
 
 impl PodmanPlaces {
@@ -298,7 +324,23 @@ impl PodmanPlaces {
             commands,
             cache: Mutex::new(Cache::default()),
             changed: tokio::sync::Notify::new(),
+            feed: OnceLock::new(),
         })
+    }
+
+    /// Announce this cache's changes on `feed` from now on. One cache serves
+    /// one helm, so only the first call takes effect; a later one (a test
+    /// assembling a second state over the same delivery service) is ignored.
+    pub(crate) fn publish_to(&self, feed: Arc<FleetEvents>) {
+        let _ = self.feed.set(feed);
+    }
+
+    /// Bump the feed for a change a host entry shows. Callers hold no cache
+    /// lock: the re-read this wakes takes it.
+    fn announce(&self) {
+        if let Some(feed) = self.feed.get() {
+            feed.bump();
+        }
     }
 
     /// Read locally without waiting on a host. A changed endpoint has no current
@@ -444,6 +486,9 @@ impl PodmanPlaces {
         if !self.cache.lock().unwrap().refreshing.insert(host) {
             return Ok(());
         }
+        // Only an admitted check changes the view (`refreshing` turns on); a
+        // joined one changes nothing and so announces nothing.
+        self.announce();
         let service = Arc::clone(self);
         tokio::spawn(async move {
             let _refreshing = Refreshing {
@@ -479,6 +524,12 @@ impl PodmanPlaces {
 }
 
 /// A cancelled or panicking refresh must release its in-flight admission too.
+///
+/// Its drop is also where a check's end is announced, after the result (if
+/// any) is stored and `refreshing` is off. Announcing at the store instead
+/// would let the woken re-read see the new result still marked refreshing,
+/// with nothing left to announce the flag clearing. Every drop flips
+/// `refreshing` off, so the bump is always a real change.
 struct Refreshing {
     service: Arc<PodmanPlaces>,
     host: HostId,
@@ -493,6 +544,7 @@ impl Drop for Refreshing {
             .refreshing
             .remove(&self.host);
         self.service.changed.notify_waiters();
+        self.service.announce();
     }
 }
 
