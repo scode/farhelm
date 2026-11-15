@@ -16,15 +16,16 @@
 //! - **The main action.** Launch (Replace, Restart for those modes) is drawn retired while [`LaunchDraft::refusal`]
 //!   names a reason, and the reason is its hover text; a press, or Enter on the dialog, a single-line field or a
 //!   choice, shows the reason beside it in the bordered alert, "Not launched." first ("Restart error." in Restart
-//!   with). A press of a complete New or Clone launches it ([`super::launch`]): the dialog closes, and the same
-//!   launcher comes back with the helm's words in that alert if the helm refuses. Its accessible name keeps the
+//!   with). A press of a complete New, Clone or Replace with launches it ([`super::launch`]): the dialog closes, and
+//!   the same launcher comes back with the helm's words in that alert if the helm refuses. Replace with also says
+//!   beside it what replacing stops while the source has anything alive. Its accessible name keeps the
 //!   operation and its target, as the old one did.
 //! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), and again on Retry
 //!   after a failed read. Hosts, sessions and the remembered permission are read from the store while drawing, and the
 //!   remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: sending a Restart with or Replace with (until then a press
-//! of a complete draft there does nothing); marking the folder field when the helm refuses the folder; Restart with's
+//! NOTE: Not built yet, each with the piece that brings it: sending a Restart with (until then a press of a complete
+//! draft there does nothing); marking the folder field when the helm refuses the folder; Restart with's
 //! markers for changed settings; the composer search; recent setups, Browse and the folder
 //! check, with its warning on the folder field; managed checkouts, with their folder and name placeholders; the escaped
 //! display of a prompt, wrapper prefix, Custom flags, seeded model, command line or resume command holding invisible
@@ -39,7 +40,9 @@ use farhelm_proto::launcher::LaunchCatalogModel;
 use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
-use farhelm_proto::{LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix};
+use farhelm_proto::{
+    DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix,
+};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Stateful,
@@ -47,7 +50,7 @@ use gpui::{
 };
 
 use super::draft::{Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
-use super::launch;
+use super::launch::{self, Request};
 use super::request::{Target, capitalized};
 use super::words::agent_note;
 use crate::assets::Icon;
@@ -59,7 +62,9 @@ use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
+use crate::operations::OpKey;
 use crate::permission::words::{effort_label, permission_display};
+use crate::session_list::replace;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};
@@ -85,6 +90,12 @@ const TILE_ICON: f32 = 22.;
 const NO_AGENT: &str = "none";
 /// The initial prompt starts three rows high, as the old `<textarea rows=3>`.
 const PROMPT_ROWS: usize = 3;
+
+/// Why Launch waits in Replace with or Restart with while the source has another request in flight (see
+/// [`Launcher::source_busy`]): the old app disabled Launch without a reason while its page-wide operation token was
+/// held, and this sentence is worded as the host change's (`launch::HOST_CHANGE_IN_FLIGHT`), since it is the same kind
+/// of wait.
+const SOURCE_BUSY: &str = "Wait for this session's other operation to finish";
 
 /// Open the launcher on `draft`, on top of everything in `window`. `mark` is the [`Mark`] taken in the handler of the
 /// user's action that asked for it; nothing opens if the user moved on since (the layer manager's rule) or no UI
@@ -451,11 +462,12 @@ impl Launcher {
 
     /// The helm's words refusing this launcher's last launch, as the operation store keeps them, while they are shown.
     fn refusal_words(&self, cx: &App) -> Option<HostText> {
-        let key = &self.refused.as_ref()?.key;
+        let refused = self.refused.as_ref()?;
         let operations = session::current_operations(cx)?;
         operations
             .read(cx)
-            .failure(key)
+            .failure(&refused.key)
+            .filter(|failure| failure.work == refused.work)
             .map(|failure| failure.message.clone())
     }
 
@@ -516,6 +528,9 @@ impl Launcher {
         if crate::hosts::host_change_in_flight(cx) {
             return Some(launch::HOST_CHANGE_IN_FLIGHT.to_owned());
         }
+        if self.source_busy(cx) {
+            return Some(SOURCE_BUSY.to_owned());
+        }
         let hosts = self.hosts(cx);
         if matches!(self.draft.mode, Mode::RestartWith(_)) && self.model_pending(cx) {
             return self
@@ -530,15 +545,64 @@ impl Launcher {
         self.draft.refusal(target, self.live_launch(cx).as_ref())
     }
 
+    /// Whether the source of a Replace with or Restart with has a request in flight under its own key (a Stop, a
+    /// Rename, a plain Replace from its row): the launcher's request would share that key, and the operation store
+    /// admits one request per key, so Launch waits rather than being turned away after the press.
+    fn source_busy(&self, cx: &App) -> bool {
+        let source = match &self.draft.mode {
+            Mode::ReplaceWith { source } => source,
+            Mode::RestartWith(restart) => &restart.source,
+            Mode::New | Mode::Clone => return false,
+        };
+        session::current_operations(cx).is_some_and(|operations| {
+            operations
+                .read(cx)
+                .in_flight(&OpKey::session(source))
+                .is_some()
+        })
+    }
+
+    /// What Replace with says beside its main action about its source as the store shows it now, and the Delete guard a
+    /// press sends ([`replace::launcher_warning`]): the warning follows the source's state while the launcher stays open,
+    /// and the guard is the one matching what is drawn. A source the store no longer holds shows nothing and sends the
+    /// strictest guard. `None` outside Replace with.
+    fn replace_warning(&self, cx: &App) -> Option<(Option<String>, DeleteGuard)> {
+        let Mode::ReplaceWith { source } = &self.draft.mode else {
+            return None;
+        };
+        let row = self.store.read(cx).collections().get::<SessionRow>(source);
+        Some(row.map_or((None, DeleteGuard::NothingAlive), replace::launcher_warning))
+    }
+
+    /// Replace with's warning about its source as a line for the notices region, under any refusal or YOLO question, as
+    /// the old launcher's footer notices had it (`.launch-composer-replace-warning`): the launch button is the
+    /// confirmation of the source's delete, so what it stops is said beside it, following the source while the launcher
+    /// stays open. A polite status, so a change is announced without interrupting. `None` when there is nothing to say.
+    fn replace_warning_line(&self, palette: &theme::Palette, cx: &App) -> Option<Stateful<Div>> {
+        let (warning, _) = self.replace_warning(cx)?;
+        let warning = warning?;
+        Some(
+            div()
+                .id("launcher-replace-warning")
+                .debug_selector(|| "launcher-replace-warning".into())
+                .role(Role::Status)
+                .aria_label(SharedString::from(warning.clone()))
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(palette.warn_bright))
+                .child(warning),
+        )
+    }
+
     /// The main action was pressed (the button, or Enter on the dialog, a single-line field or a choice): launch, or
     /// show why it cannot.
     ///
-    /// A complete New or Clone sends its create ([`launch::start`]) and hides: the layer closes, and the launcher waits
-    /// for the reply out of sight. The press is the user's answer the reply's moved-on check counts from, so this runs
-    /// in the handler of that press, never deferred.
+    /// A complete New or Clone sends its create, and a complete Replace with its source's Replace with this draft's
+    /// create ([`launch::start`]); either hides: the layer closes, and the launcher waits for the reply out of sight.
+    /// The press is the user's answer the reply's moved-on check counts from, so this runs in the handler of that
+    /// press, never deferred.
     ///
-    /// NOTE: Restart with and Replace with send nothing yet; they come with the pieces that port them, and until then a
-    /// press of a complete draft there does nothing.
+    /// NOTE: Restart with sends nothing yet; it comes with the piece that ports it, and until then a press of a
+    /// complete draft there does nothing.
     pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
         // without consent beside the one the answer sends with it.
@@ -560,31 +624,47 @@ impl Launcher {
     ) {
         self.refused = None;
         self.yolo = None;
-        let creates = matches!(self.draft.mode, Mode::New | Mode::Clone);
         let hosts = self.hosts(cx);
-        let body = (creates && self.refusal(cx).is_none())
-            .then(|| {
-                self.draft.create_body(Target {
-                    hosts: &hosts,
-                    catalog: self.catalog.as_deref(),
-                })
-            })
-            .flatten();
+        let target = Target {
+            hosts: &hosts,
+            catalog: self.catalog.as_deref(),
+        };
+        let request = if self.refusal(cx).is_some() {
+            None
+        } else {
+            match &self.draft.mode {
+                Mode::New | Mode::Clone => self.draft.create_body(target).map(|mut body| {
+                    body.confirm_yolo = confirm_yolo;
+                    Request::Create(body)
+                }),
+                // The guard matches the warning as the store stands at the press, which is what the last frame drew
+                // unless a push landed since; plain Replace's skipped confirmation reads its row the same way.
+                Mode::ReplaceWith { source } => self
+                    .replace_warning(cx)
+                    .and_then(|(_, guard)| self.draft.replace_body(target, guard))
+                    .map(|mut body| {
+                        // The helm counts either place; the shared body's rule is to set this one.
+                        body.confirm_yolo = confirm_yolo;
+                        Request::Replace {
+                            source: source.clone(),
+                            body,
+                        }
+                    }),
+                Mode::RestartWith(_) => None,
+            }
+        };
         // The progress pill's host, captured now for the request's life: the registry's display name, without the
-        // footer's phase. A body exists only for a host the refusal check found among `hosts`.
-        let host = body.as_ref().and_then(|body| {
-            hosts
-                .iter()
-                .find(|host| Some(host.id) == body.host)
-                .map(display_name)
-        });
-        let (Some(mut body), Some(host)) = (body, host) else {
+        // footer's phase. A request exists only for a host the refusal check found among `hosts`.
+        let host = request
+            .as_ref()
+            .and(self.draft.host)
+            .and_then(|id| hosts.iter().find(|host| host.id == id).map(display_name));
+        let (Some(request), Some(host)) = (request, host) else {
             self.pressed = true;
             cx.notify();
             return;
         };
-        body.confirm_yolo = confirm_yolo;
-        if launch::start(cx.entity(), &body, host, mark, window, cx)
+        if launch::start(cx.entity(), request, host, mark, window, cx)
             && let Some(layer) = self.layer.take()
         {
             layers::close(layer, window, cx);
@@ -1453,7 +1533,7 @@ impl Render for Launcher {
             ),
             _ => None,
         };
-        let notices = alert.map(|sentence| {
+        let alert = alert.map(|sentence| {
             let text = sentence.accessible_name();
             // `.launch-composer-refusal-alert`: a bordered alert with a warning sign, the lead before the reason, in
             // the warning colors (red is kept for danger in the launcher).
@@ -1475,6 +1555,24 @@ impl Render for Launcher {
                 .text_color(theme::color(palette.warn_bright))
                 .child(div().flex_none().child("⚠"))
                 .child(div().min_w_0().child(sentence))
+        });
+        // What a press of Launch has to say, in the old footer's order: Replace with's warning about its source first,
+        // then the YOLO question while it is up, else the refusal. The warning comes first so that a tall question,
+        // which scrolls in the notices region, cannot push it out of sight: the question's answers launch with the
+        // warning's guard, so the warning must be on screen at that click.
+        let warning = self.replace_warning_line(palette, cx);
+        let question = self.yolo_inline().cloned();
+        let notices = (warning.is_some() || question.is_some() || alert.is_some()).then(|| {
+            let last = match question {
+                Some(question) => Some(question.into_any_element()),
+                None => alert.map(IntoElement::into_any_element),
+            };
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .children(warning)
+                .children(last)
         });
 
         let mut answers = vec![
@@ -1548,10 +1646,7 @@ impl Render for Launcher {
                 holding,
                 on_launcher(weak.clone(), Launcher::cancel),
             );
-        // The YOLO question, while it is up, takes the notices' place: it is what a press of Launch has to say.
-        if let Some(question) = self.yolo_inline() {
-            frame = frame.notices(question.clone());
-        } else if let Some(notices) = notices {
+        if let Some(notices) = notices {
             frame = frame.notices(notices);
         }
         frame
