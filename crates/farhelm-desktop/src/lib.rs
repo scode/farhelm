@@ -190,6 +190,8 @@ pub fn run() -> anyhow::Result<()> {
         reduced_motion: reduced_motion::read(),
         licenses: licenses_text,
         window_frame: Some(frame_host(frame)),
+        updater: None,
+        activations: None,
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");
