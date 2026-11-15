@@ -16,7 +16,7 @@ use gpui::{
     AnyElement, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render,
     ScrollDelta, ScrollEvent, ScrollHandle, StatefulInteractiveElement as _, Styled,
-    TestAppContext, VisualTestContext, Window, div, point, px, size,
+    TestAppContext, VisualTestContext, WeakFocusHandle, Window, div, point, px, size,
 };
 
 use crate::components::{Button, DialogFrame, HoverHelp, TextInput, TextInputState};
@@ -2836,4 +2836,272 @@ fn a_dialog_naming_a_control_no_longer_drawn_returns_focus_to_its_opener(cx: &mu
         focused(cx, &elsewhere),
         "closing returned focus to what held it before the dialog opened"
     );
+}
+
+// ---- A menu naming its return target ---------------------------------------------------------------------------------
+
+/// A menu's content: its start, "menu-first", and "menu-close", whose click closes the menu as a chosen command does.
+struct ClosingMenu {
+    first: FocusHandle,
+    close: FocusHandle,
+    /// The menu's own layer, set once it opened.
+    layer: Rc<Cell<Option<layers::LayerId>>>,
+}
+
+impl Render for ClosingMenu {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let layer = self.layer.clone();
+        layers::panel(cx)
+            .debug_selector(|| "closing-menu".into())
+            .w(px(160.))
+            .child(button("menu-first", &self.first))
+            .child(
+                button("menu-close", &self.close).on_click(move |_, window, cx| {
+                    if let Some(id) = layer.get() {
+                        layers::close(id, window, cx);
+                    }
+                }),
+            )
+    }
+}
+
+/// A page of a button "elsewhere" and a menu toggle "toggle", whose click opens a [`ClosingMenu`] below it, as a
+/// session row's ⋯ does, and the handles a test checks focus against.
+struct ToggleScene<'a> {
+    cx: &'a mut VisualTestContext,
+    elsewhere: FocusHandle,
+    /// The toggle's focus handle as last drawn, held weakly. Like a real toggle's, the handle is element state
+    /// ([`focus::control_handle`]) that goes when the toggle is no longer drawn, so a test holding it strongly would
+    /// keep alive what the app lets die, and hide what happens when only the menu's return target holds it.
+    toggle: Rc<RefCell<Option<WeakFocusHandle>>>,
+    first: FocusHandle,
+    /// Whether the toggle is drawn. The anchor around it stays drawn without it, so its open menu stays open.
+    shown: Rc<Cell<bool>>,
+}
+
+/// Open a [`ToggleScene`] whose menu returns focus to the toggle when `names_toggle` ([`focus::ReturnTo::Control`]),
+/// and otherwise to what held focus when it opened ([`focus::ReturnTo::Opener`]), under macOS's click rule, where a
+/// click leaves the toggle unfocused. The toggle does not focus itself before opening, as the app's openers do not.
+fn toggle_scene(cx: &mut TestAppContext, names_toggle: bool) -> ToggleScene<'_> {
+    let elsewhere = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let toggle: Rc<RefCell<Option<WeakFocusHandle>>> = Rc::new(RefCell::new(None));
+    let first = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let close = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let shown = Rc::new(Cell::new(true));
+    let (drawn_elsewhere, drawn_toggle, drawn_shown) =
+        (elsewhere.clone(), toggle.clone(), shown.clone());
+    let (menu_first, menu_close) = (first.clone(), close.clone());
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("toggle-anchor", window, cx);
+        // Made only while the toggle is drawn, so its element state, and with it the handle, goes when it is not.
+        let toggle_focus = drawn_shown
+            .get()
+            .then(|| focus::control_handle("toggle-focus", window, cx));
+        drawn_toggle.replace(toggle_focus.as_ref().map(FocusHandle::downgrade));
+        let toggle = toggle_focus.map(|toggle_focus| {
+            let opens = anchor.clone();
+            let (named, first, close) =
+                (toggle_focus.clone(), menu_first.clone(), menu_close.clone());
+            button("toggle", &toggle_focus).on_click(move |_, window, cx| {
+                let layer = Rc::new(Cell::new(None));
+                let view = cx.new(|_| ClosingMenu {
+                    first: first.clone(),
+                    close: close.clone(),
+                    layer: layer.clone(),
+                });
+                let mark = Mark::take(cx);
+                let returns_to = if names_toggle {
+                    focus::ReturnTo::Control(named.clone())
+                } else {
+                    focus::ReturnTo::Opener
+                };
+                layer.set(layers::open_popover(
+                    layers::Popover {
+                        view: view.into(),
+                        container: cx.focus_handle(),
+                        start: Some(first.clone()),
+                        anchor: opens.clone(),
+                        returns_to,
+                    },
+                    &mark,
+                    window,
+                    cx,
+                ));
+            })
+        });
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(button("elsewhere", &drawn_elsewhere))
+            .child(
+                div()
+                    .relative()
+                    .w(px(80.))
+                    .h(px(24.))
+                    .children(toggle)
+                    .child(anchor.track()),
+            )
+            .into_any_element()
+    });
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &elsewhere),
+        "the premise: focus is on a page control away from the toggle"
+    );
+    ToggleScene {
+        cx,
+        elsewhere,
+        toggle,
+        first,
+        shown,
+    }
+}
+
+/// Whether the scene's toggle holds focus. False once the toggle's handle is gone, which nothing focused can be.
+fn toggle_focused(scene: &mut ToggleScene<'_>) -> bool {
+    let toggle = scene
+        .toggle
+        .borrow()
+        .as_ref()
+        .and_then(WeakFocusHandle::upgrade);
+    toggle.is_some_and(|toggle| focused(scene.cx, &toggle))
+}
+
+/// Whether the scene's menu was drawn in the last frame.
+fn menu_drawn(scene: &mut ToggleScene<'_>) -> bool {
+    scene.cx.debug_bounds("closing-menu").is_some()
+}
+
+/// Click the scene's toggle and check the premise: the menu opened on its first item, and the toggle never took focus.
+fn open_from_toggle(scene: &mut ToggleScene<'_>) {
+    click(scene.cx, "toggle");
+    assert!(
+        focused(scene.cx, &scene.first) && !toggle_focused(scene),
+        "the premise: the click opened the menu with focus on its first item"
+    );
+}
+
+/// SPEC.md: closing something the user opened returns focus to where it was before it opened, on every platform. On
+/// macOS the click on a menu's toggle focuses nothing, so what held focus before the menu opened is whatever held it
+/// before the click, not the toggle; the menu names its toggle instead, as a dialog names its button. Openers used to
+/// focus the toggle first, which costs a whole-window refresh.
+///
+/// Specified, under macOS's click rule: with focus on another page control, a click on a toggle that opens a menu
+/// naming it leaves the toggle unfocused, and Escape returns focus to the toggle. From the same start, a click on the
+/// menu's item that closes it returns focus to the toggle too.
+#[gpui::test]
+fn a_menu_returns_focus_to_the_toggle_its_opener_names(cx: &mut TestAppContext) {
+    let mut scene = toggle_scene(cx, true);
+    open_from_toggle(&mut scene);
+    keys(scene.cx, "escape");
+    assert!(
+        toggle_focused(&mut scene),
+        "Escape returned focus to the toggle, which never held focus"
+    );
+
+    keys(scene.cx, "shift-tab");
+    assert!(
+        focused(scene.cx, &scene.elsewhere),
+        "the premise: focus is back on the page control away from the toggle"
+    );
+    open_from_toggle(&mut scene);
+    click(scene.cx, "menu-close");
+    assert!(
+        !menu_drawn(&mut scene),
+        "the premise: the item closed the menu"
+    );
+    assert!(
+        toggle_focused(&mut scene),
+        "the item that closed the menu returned focus to the toggle"
+    );
+}
+
+/// A named toggle can go while its menu is open (the toggle hidden, its anchor still drawn): focusing it would lose
+/// focus on the next frame and send it home, where SPEC.md returns it "to where it was before it opened".
+///
+/// Specified, under macOS's click rule: with focus on a page control, a menu opened from a toggle that names it, whose
+/// toggle then stops being drawn while the menu stays open, gives focus back to that page control on Escape.
+#[gpui::test]
+fn a_menu_naming_a_toggle_no_longer_drawn_returns_focus_to_its_opener(cx: &mut TestAppContext) {
+    let mut scene = toggle_scene(cx, true);
+    open_from_toggle(&mut scene);
+    scene.shown.set(false);
+    redraw(scene.cx);
+    assert!(
+        scene.cx.debug_bounds("toggle").is_none() && menu_drawn(&mut scene),
+        "the premise: the toggle is no longer drawn and its menu is still open"
+    );
+    keys(scene.cx, "escape");
+    assert!(
+        focused(scene.cx, &scene.elsewhere),
+        "closing returned focus to what held it before the menu opened"
+    );
+}
+
+/// The popovers that keep returning to their opener (a select's list, the template editor's key menu) must keep doing
+/// so: only a menu that names a control returns there.
+///
+/// Specified, under macOS's click rule: with focus on a page control, a menu opened by a click on a toggle, returning
+/// to its opener, gives focus back to that page control on Escape, not to the toggle.
+#[gpui::test]
+fn a_menu_returning_to_its_opener_returns_to_what_held_focus_before_the_click(
+    cx: &mut TestAppContext,
+) {
+    let mut scene = toggle_scene(cx, false);
+    open_from_toggle(&mut scene);
+    keys(scene.cx, "escape");
+    assert!(
+        focused(scene.cx, &scene.elsewhere) && !toggle_focused(&mut scene),
+        "Escape returned focus to what held it before the click"
+    );
+}
+
+/// When the toggle that opened a menu held focus as it opened (reached with Tab, or a click on Linux, which focuses
+/// it) and is gone by the time the menu closes (its row deleted), the fallback to the opener names the same vanished
+/// control. The name's strong handle keeps that opener alive, so focus would land on a control nobody draws. GPUI
+/// reports focus lost only on a frame that goes from drawing the focused element to not drawing it, and when the frame
+/// on screen at the close already lacks the control (a row's removal closes its menu after the frame that drew
+/// neither), nothing reports it: the handle then dies and the window is left with nothing focused. Here the frame on
+/// screen still drew the toggle, so the next frame would report the loss and hide the wrong move; the check is made
+/// right after the close, before any frame, to see the move itself.
+///
+/// Specified: a menu opened with Enter on a toggle reached with Tab, naming that toggle, whose toggle then stops being
+/// drawn while the menu stays open, leaves focus, as Escape's dismissal closes it, on something still alive (home, or
+/// the root when there is none, as in this scene), not on the toggle.
+#[gpui::test]
+fn a_menu_naming_a_vanished_toggle_that_was_its_opener_recovers_focus(cx: &mut TestAppContext) {
+    let mut scene = toggle_scene(cx, true);
+    keys(scene.cx, "tab");
+    assert!(
+        toggle_focused(&mut scene),
+        "the premise: Tab moved focus to the toggle"
+    );
+    keys(scene.cx, "enter");
+    assert!(
+        focused(scene.cx, &scene.first),
+        "the premise: Enter on the toggle opened its menu on its first item"
+    );
+    let toggle = scene.toggle.borrow().clone();
+    scene.shown.set(false);
+    redraw(scene.cx);
+    assert!(
+        scene.cx.debug_bounds("toggle").is_none() && menu_drawn(&mut scene),
+        "the premise: the toggle is no longer drawn and its menu is still open"
+    );
+    let recovered = scene.cx.update(move |window, cx| {
+        assert!(
+            layers::dismiss_top(window, cx),
+            "the premise: Escape took the menu"
+        );
+        let toggle = toggle.as_ref().and_then(WeakFocusHandle::upgrade);
+        window
+            .focused(cx)
+            .is_some_and(|holder| Some(holder) != toggle)
+    });
+    assert!(
+        recovered,
+        "focus recovered rather than landing on the toggle nobody draws"
+    );
+    check(scene.cx);
 }

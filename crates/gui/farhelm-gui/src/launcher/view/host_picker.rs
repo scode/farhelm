@@ -263,6 +263,8 @@ impl Launcher {
                 container,
                 start: None,
                 anchor,
+                // A list that never takes focus returns none, so this is never used.
+                returns_to: focus::ReturnTo::Opener,
             },
             &mark,
             window,

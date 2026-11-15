@@ -1123,6 +1123,7 @@ fn open_floating_list(cx: &mut VisualTestContext, anchor: Anchor) -> LayerId {
             container: cx.focus_handle(),
             start: None,
             anchor,
+            returns_to: focus::ReturnTo::Opener,
         };
         layers::open_popover(list, &mark, window, cx)
     });
@@ -1689,6 +1690,7 @@ fn arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight
                 container: cx.focus_handle(),
                 start: Some(start),
                 anchor,
+                returns_to: focus::ReturnTo::Opener,
             },
             &mark,
             window,

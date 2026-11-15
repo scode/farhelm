@@ -160,17 +160,25 @@ pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 // ---- The menu ------------------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Opening and closing" and "Inside a dialog or menu, focus stays inside": a menu the user opened starts on
-/// its first command, keeps Tab inside, and Escape gives focus back to the button that opened it. Opening a row's menu
-/// is not opening its session, which would switch what the user is looking at. Specified: clicking b's menu button
-/// opens the menu below the button with focus on its first command, Rename, its header names b and says "Codex ·
-/// Running", a is still the open session and nothing is sent; Tab moves through Mark unread (b reads seen), Replace,
-/// Stop and Delete, in the old menu's order (the separators between their groups take no focus), and then wraps to
-/// Rename, staying in the menu; Escape closes the menu and focus is on b's button.
+/// its first command, keeps Tab inside, and Escape gives focus back to the button that opened it, on every platform.
+/// Opening a row's menu is not opening its session, which would switch what the user is looking at. Run under macOS's
+/// click rule, where the click leaves the button unfocused, so only the menu naming its button as the return target
+/// brings focus back there. Specified: clicking b's menu button opens the menu below the button with focus on its first
+/// command, Rename, its header names b and says "Codex · Running", a is still the open session and nothing is sent;
+/// Tab moves through Mark unread (b reads seen), Replace, Stop and Delete, in the old menu's order (the separators
+/// between their groups take no focus), and then wraps to Rename, staying in the menu; Escape closes the menu and focus
+/// is on b's button.
 #[gpui::test]
 fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
     assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
     deletes(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    assert_ne!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-b"),
+        "the premise: b's button is unfocused before the click"
+    );
 
     test_support::click(cx, "session-menu-b");
     let button = test_support::bounds(cx, "session-menu-b");
@@ -205,10 +213,14 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
 
 /// SPEC.md: a menu goes away "when the thing it is about is gone (a deleted session's open menu, say)", and focus
 /// never stays inside something that is no longer drawn. This is the popover-movement acceptance case the layer
-/// manager left to the first real menu. Specified: with b's menu open, a pushed listing without b closes the menu.
+/// manager left to the first real menu. Run under Linux's click rule, where the click focuses b's button, so the button
+/// the menu names as its return target is also what held focus when it opened, and both are gone with the row; the
+/// frame on screen at the close no longer draws the button, so GPUI would never report focus on it as lost. Specified:
+/// with b's menu open, a pushed listing without b closes the menu, and focus is held by something still alive.
 #[gpui::test]
 fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
     test_support::click(cx, "session-menu-b");
     assert!(any_layer(cx), "the premise: the menu is open");
 
@@ -217,6 +229,10 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
     test_support::redraw(cx);
     assert!(!any_layer(cx));
     assert!(!drawn(cx, "session-menu"));
+    assert!(
+        cx.update(|window, cx| window.focused(cx).is_some()),
+        "focus recovered rather than being left on b's button, which went with its row"
+    );
 }
 
 // ---- Rename --------------------------------------------------------------------------------------------------------

@@ -1868,6 +1868,8 @@ impl AttachedTerminal {
             container: cx.focus_handle(),
             start: None,
             anchor,
+            // A display that never takes focus returns none, so this is never used.
+            returns_to: focus::ReturnTo::Opener,
         };
         layers::open_popover(popover, mark, window, cx)
     }

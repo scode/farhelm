@@ -409,6 +409,7 @@ pub(crate) fn open_menu(
                 container: cx.focus_handle(),
                 start: Some(start),
                 anchor,
+                returns_to: focus::ReturnTo::Opener,
             },
             &mark,
             window,
@@ -761,6 +762,7 @@ mod self_tests {
             container: cx.focus_handle(),
             start: Some(cx.focus_handle()),
             anchor,
+            returns_to: crate::focus::ReturnTo::Opener,
         };
         if layers::open_popover(popover, &mark, window, cx).is_none() {
             panic!("the premise: the popover opened");

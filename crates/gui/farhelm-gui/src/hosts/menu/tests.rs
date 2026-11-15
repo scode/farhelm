@@ -116,8 +116,10 @@ fn a_second_press_on_the_toggle_closes_its_menu(cx: &mut TestAppContext) {
 
 /// Why this matters: SPEC.md, "Opening and closing": closing something the user opened returns focus to where it was
 /// before it opened, on every platform, including those where clicking the button that opened it did not move focus to
-/// the button. On macOS a click leaves the toggle unfocused, so the menu must still give focus back to it. Specified:
-/// under macOS's click rule, a click on `build-box`'s toggle opens its menu and Escape closes it with focus on the toggle.
+/// the button. On macOS a click leaves the toggle unfocused, so the menu must still give focus back to it, which it does
+/// by naming the toggle as its return target rather than focusing it before opening. Specified: under macOS's click
+/// rule, with focus away from `build-box`'s toggle, a click on the toggle opens its menu and Escape closes it with
+/// focus on the toggle.
 #[gpui::test]
 fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
     cx: &mut TestAppContext,
@@ -126,6 +128,11 @@ fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
     cx.simulate_resize(size(px(1600.), px(1000.)));
     cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
     test_support::settle(cx);
+    assert_ne!(
+        focused_id(cx).as_deref(),
+        Some("host-menu-toggle-2"),
+        "the premise: the toggle is unfocused before the click"
+    );
     click(cx, "host-menu-toggle-2");
     assert!(any_open(cx), "the premise: the menu opened");
     keys(cx, "escape");
