@@ -920,6 +920,36 @@
       "golden": "session-order-menu",
       "title": "The list title's order menu open below it: the shared header and the three orders, Recently active checked and highlighted (no Compact item yet)",
       "reference": "sort-menu"
+    },
+    {
+      "golden": "version-readout-check",
+      "title": "The version readout's check button: at rest, lit as under the pointer (the glyph a quarter turned), with a reinstall warning, the warning lit, and with keyboard focus",
+      "reference": null
+    },
+    {
+      "golden": "version-readout-progress",
+      "title": "The version readout during a check and an install (the glyph at a pinned step), and both again beside the red toggle with the separate ring",
+      "reference": null
+    },
+    {
+      "golden": "version-readout-outcomes",
+      "title": "The version readout after a check: Up to date, Check failed, Check failed beside the red toggle, and the failure button with keyboard focus",
+      "reference": null
+    },
+    {
+      "golden": "version-readout-update-ready",
+      "title": "The version readout's red update-menu toggle: with the update arrow, with a withdrawal warning, and with keyboard focus (ring and fill)",
+      "reference": null
+    },
+    {
+      "golden": "version-readout-menu",
+      "title": "The update menu open beside its toggle: Farhelm update, An installed update is ready, Restart to update and What's new",
+      "reference": "help-menu"
+    },
+    {
+      "golden": "version-readout-tooltip",
+      "title": "The check button's hover help for a reinstall readout, on the short tooltip cut at eight lines",
+      "reference": null
     }
   ],
   "reference_scenes": [

@@ -174,6 +174,22 @@ pub fn set_automatic_updates(on: bool, cx: &mut App) -> Result<(), String> {
     })
 }
 
+/// An updater entity that shows `readout` for good, for the screenshot goldens. A version readout scene draws several
+/// readout states side by side, each over an updater of its own, while the app keeps at most one updater ([`keep`]
+/// sets a global). This one is never kept: it follows no feed and its commands do nothing, so nothing a scene does
+/// changes what it shows, and the plain functions above, which go through the kept updater, never reach it.
+#[cfg(test)]
+pub(crate) fn fixture(readout: Readout, cx: &mut App) -> Entity<Updater> {
+    cx.new(|_| Updater {
+        readout,
+        automatic: false,
+        check_now: Box::new(|| {}),
+        restart_to_update: Box::new(|| false),
+        set_automatic_updates: Box::new(|_| Err("a fixture updater saves nothing".to_string())),
+        _feed: Task::ready(()),
+    })
+}
+
 #[cfg(test)]
 pub(crate) mod fake;
 #[cfg(test)]
