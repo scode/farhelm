@@ -32,7 +32,7 @@ use crate::main_view::MainView;
 use crate::session::Connection;
 use crate::session_list::SessionList;
 use crate::session_list::tests::{listing, painted, preferences, session};
-use crate::test_support::{self, click, keys, settle};
+use crate::test_support::{self, click, keys, settle, terminal_focused};
 use crate::test_support::{frame, meta, started};
 use crate::{focus, local_state, root};
 
@@ -144,20 +144,6 @@ impl Fleet<'_> {
             .collect()
     }
 
-    /// Whether the pane shows a terminal and that terminal holds focus.
-    fn terminal_focused(&mut self) -> bool {
-        let pane = self.pane.clone();
-        self.cx.update(|window, cx| {
-            let terminal = pane.update(cx, |pane, cx| {
-                pane.mounted
-                    .current(cx)
-                    .as_ref()
-                    .map(|mounted| mounted.terminal.clone())
-            });
-            terminal.is_some_and(|terminal| terminal.read(cx).focus_handle().is_focused(window))
-        })
-    }
-
     /// The session selected now.
     fn selected(&mut self) -> Option<String> {
         self.cx.update(|_, cx| local_state::selected(cx))
@@ -204,7 +190,7 @@ fn selecting_a_session_attaches_it_and_only_it(cx: &mut TestAppContext) {
     assert_eq!(fleet.selected().as_deref(), Some("a"), "the premise");
     assert_eq!(fleet.attached(), ["a"]);
     assert_eq!(fleet.opened.borrow()[0].1.tab, None, "the agent terminal");
-    assert!(fleet.terminal_focused());
+    assert!(terminal_focused(fleet.cx));
 }
 
 /// The old app remounted its session view on every switch, which tore the old terminal down and attached the new one
@@ -247,7 +233,7 @@ fn a_click_focuses_the_terminal_and_typed_keys_reach_its_program(cx: &mut TestAp
 
     click(fleet.cx, "session-row-b");
     settle(fleet.cx);
-    assert!(fleet.terminal_focused(), "the click focused b's terminal");
+    assert!(terminal_focused(fleet.cx), "the click focused b's terminal");
     fleet.go_live(1);
     keys(fleet.cx, "x");
     assert_eq!(fleet.input(1), [letter("x", 88)]);
@@ -256,7 +242,7 @@ fn a_click_focuses_the_terminal_and_typed_keys_reach_its_program(cx: &mut TestAp
     click(fleet.cx, "session-row-b");
     settle(fleet.cx);
     assert!(
-        fleet.terminal_focused(),
+        terminal_focused(fleet.cx),
         "choosing the open session focuses it"
     );
     assert_eq!(fleet.attached(), ["a", "b"], "and opens nothing");
@@ -340,7 +326,7 @@ fn a_click_then_typing_elsewhere_before_the_terminal_is_live_keeps_focus_there(
     keys(fleet.cx, "a b");
     fleet.go_live(1);
     keys(fleet.cx, "c");
-    assert!(!fleet.terminal_focused());
+    assert!(!terminal_focused(fleet.cx));
     assert_eq!(fleet.input(1), [], "b's program got nothing");
     let text = fleet.cx.update(|_, cx| field.text(cx));
     assert_eq!(text.as_ref(), "abc", "every letter landed in the field");
@@ -356,7 +342,7 @@ fn an_automatic_choice_never_takes_focus_from_a_control(cx: &mut TestAppContext)
     let (mut fleet, field) = open_with_field(cx);
     click(fleet.cx, "filter");
     assert!(
-        !fleet.terminal_focused(),
+        !terminal_focused(fleet.cx),
         "the premise: the field has focus"
     );
 
@@ -370,7 +356,7 @@ fn an_automatic_choice_never_takes_focus_from_a_control(cx: &mut TestAppContext)
     assert_eq!(fleet.attached(), ["a", "b"], "the premise: b opened");
     fleet.go_live(1);
     keys(fleet.cx, "x");
-    assert!(!fleet.terminal_focused());
+    assert!(!terminal_focused(fleet.cx));
     assert_eq!(fleet.input(1), []);
     let text = fleet.cx.update(|_, cx| field.text(cx));
     assert_eq!(text.as_ref(), "x");
@@ -403,7 +389,7 @@ fn a_removal_pushed_from_elsewhere_selects_the_next_session_whose_terminal_takes
     assert_eq!(fleet.selected().as_deref(), Some("b"));
     assert_eq!(fleet.attached(), ["a", "b"]);
     assert_eq!(fleet.phase(0), FakePhase::Closed);
-    assert!(fleet.terminal_focused(), "the next terminal is home");
+    assert!(terminal_focused(fleet.cx), "the next terminal is home");
     fleet.go_live(1);
     keys(fleet.cx, "y");
     assert_eq!(fleet.input(1), [letter("y", 89)]);
@@ -423,7 +409,7 @@ fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_progra
     let mut fleet = open_main(cx, a_and_b());
     fleet.go_live(0);
     assert!(
-        fleet.terminal_focused(),
+        terminal_focused(fleet.cx),
         "the premise: a's terminal has focus"
     );
     fleet.helm.commands();
@@ -444,7 +430,7 @@ fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_progra
             .any(|command| command.method == Method::Delete && command.path == "/api/sessions/a")
     );
     assert!(
-        fleet.terminal_focused(),
+        terminal_focused(fleet.cx),
         "closing the question gave focus back"
     );
 }
@@ -571,18 +557,21 @@ fn a_pending_delete_puts_a_scrim_over_the_terminal_until_the_helm_answers(cx: &m
         3,
         "the row, the header and the scrim"
     );
-    assert!(fleet.terminal_focused());
+    assert!(terminal_focused(fleet.cx));
     keys(fleet.cx, "x");
     assert_eq!(fleet.input(0), [letter("x", 88)], "keys still reach a");
 
     click(fleet.cx, "session-menu-b");
     keys(fleet.cx, "escape");
     assert!(
-        !fleet.terminal_focused(),
+        !terminal_focused(fleet.cx),
         "the premise: focus is on b's menu button"
     );
     click(fleet.cx, "terminal-delete-scrim");
-    assert!(fleet.terminal_focused(), "the press went through the scrim");
+    assert!(
+        terminal_focused(fleet.cx),
+        "the press went through the scrim"
+    );
 
     fleet
         .helm
@@ -677,7 +666,7 @@ fn after_a_successful_delete_the_next_terminal_shows_normally(cx: &mut TestAppCo
 
     fleet.go_live(1);
     assert!(!fleet.drawn("terminal-delete-scrim"));
-    assert!(fleet.terminal_focused());
+    assert!(terminal_focused(fleet.cx));
     fleet.delete_happens_to(1);
     assert_eq!(fleet.painted_count(RECONNECTING), 1);
     assert!(fleet.drawn("terminal-exit"));
@@ -739,7 +728,7 @@ fn a_reset_reattaches_the_surviving_selection(cx: &mut TestAppContext) {
         assert_ne!(opened[0].1.lease, opened[1].1.lease);
     }
     fleet.go_live(1);
-    assert!(fleet.terminal_focused());
+    assert!(terminal_focused(fleet.cx));
     keys(fleet.cx, "x");
     assert_eq!(fleet.input(1), [letter("x", 88)]);
     assert_eq!(fleet.input(0), []);

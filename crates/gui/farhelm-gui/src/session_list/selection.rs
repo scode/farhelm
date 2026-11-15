@@ -10,9 +10,9 @@
 //!   visit the helm recorded that is still listed, else (only while the helm has recorded no visits) the remembered
 //!   last selection, else the newest-created session.
 //! - **A selection stays until it is proven gone.** A selected session missing from the listing is dropped only when
-//!   the listing proves it gone ([`session::listing_proves_gone`], the rule a confirmation about a session uses too); a
-//!   truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user had open.
-//!   When it is proven gone, the automatic choice picks the next one, never the one that just went.
+//!   the listing proves it gone ([`crate::session::listing_proves_gone`], the rule a confirmation about a session uses
+//!   too); a truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user
+//!   had open. When it is proven gone, the automatic choice picks the next one, never the one that just went.
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
@@ -41,14 +41,14 @@
 //! NOTE: Not ported yet, because nothing in the app can cause it: the old app's refusal to stamp a retired
 //! environment's session, which arrives with environment sessions.
 
-use farhelm_helm_client::{ApiPath, Collections, Method};
+use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::SessionSeenRequest;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::App;
 
 use crate::focus::Mark;
 use crate::local_state;
-use crate::{session, session_pane};
+use crate::{operations, session_pane};
 
 /// One listed session: the key the helm files it under, and its row.
 #[derive(Clone, Copy)]
@@ -85,7 +85,7 @@ pub(crate) enum Change {
 }
 
 /// Where the selection should be, given what is selected, what is listed, whether the listing proves the selected
-/// session gone (`gone`, [`session::listing_proves_gone`]), and the helm's preferences (its visit history and
+/// session gone (`gone`, [`crate::session::listing_proves_gone`]), and the helm's preferences (its visit history and
 /// remembered last selection).
 pub(crate) fn settle(
     selected: Option<&str>,
@@ -246,9 +246,10 @@ fn select(key: &str, cx: &mut App) {
 
 /// Write `key` as the helm's `last_selected` preference, which also moves it to the front of the visit history.
 pub(crate) fn remember(key: &str, cx: &mut App) {
-    send(
+    put(
         ApiPath::api(&["preferences"]),
         serde_json::json!({ "last_selected": key }),
+        "PUT /api/preferences",
         "remember the selected session",
         cx,
     );
@@ -260,37 +261,28 @@ pub(crate) fn mark_seen(key: &str, activity: i64, cx: &mut App) {
     let request = SessionSeenRequest {
         seen_activity_at: Some(activity),
     };
-    send(
+    put(
         ApiPath::api(&["sessions", key, "seen"]),
         // An optional integer always encodes, so `json!` (which panics on a failed encode) cannot fail here.
         serde_json::json!(request),
+        "PUT /api/sessions/[session]/seen",
         "mark the open session seen",
         cx,
     );
 }
 
-/// Send a `PUT` through the current UI session, whose reply nobody waits for. A failure is logged, never shown: both
-/// writes here are best effort, and the next one corrects a lost one. A path that cannot be built (a key holding a
-/// slash, which no helm serves) is logged the same way.
-fn send(
-    path: Result<ApiPath, farhelm_helm_client::PathError>,
+/// Send a `PUT` whose reply nobody waits for, as a keyless write ([`operations::send`]): nothing draws it busy and the
+/// operation store keeps no refusal for it. A failure is logged as `what`, never shown: both writes here are best
+/// effort, and the next one corrects a lost one (the module docs say what a failed seen mark costs). That covers a
+/// refusal, a command the channel lost, and a path that cannot be built (a key holding a slash, which no helm serves)
+/// alike. `shown` names the route in a refusal the helm sent without words, the way the manual seen toggle's command
+/// names its own. Nothing is sent while the window is inert.
+fn put(
+    path: Result<ApiPath, PathError>,
     body: serde_json::Value,
+    shown: &'static str,
     what: &'static str,
     cx: &mut App,
-) {
-    send_then(path, body, what, cx, |_| {});
-}
-
-/// [`send`], then `then` once the helm has replied, whatever it replied (success, refusal, or a command the channel
-/// lost). Nothing is sent, and `then` never runs, when the path cannot be built or the window is inert. `then` does not
-/// run either when a reset retires the UI session first. The sidebar's width writes go through here, keeping their
-/// width on screen until `then` (`crate::sidebar`).
-pub(crate) fn send_then(
-    path: Result<ApiPath, farhelm_helm_client::PathError>,
-    body: serde_json::Value,
-    what: &'static str,
-    cx: &mut App,
-    then: impl FnOnce(&mut App) + 'static,
 ) {
     let path = match path {
         Ok(path) => path,
@@ -299,17 +291,16 @@ pub(crate) fn send_then(
             return;
         }
     };
-    let Some(current) = session::connection(cx).and_then(|c| c.read(cx).session().cloned()) else {
-        return;
-    };
-    current.update(cx, |current, cx| {
-        current.command(Method::Put, path, Some(body), cx, move |_, result, cx| {
-            match result {
-                Ok(reply) if (200..300).contains(&reply.status) => {}
-                Ok(reply) => tracing::warn!(status = reply.status, "could not {what}"),
-                Err(error) => tracing::debug!(?error, "could not {what}"),
+    operations::send(
+        Method::Put,
+        path,
+        Some(body),
+        shown,
+        cx,
+        move |answer, _| {
+            if let Err(reason) = answer {
+                tracing::warn!(?reason, "could not {what}");
             }
-            then(cx);
-        });
-    });
+        },
+    );
 }
