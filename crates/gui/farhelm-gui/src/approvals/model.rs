@@ -25,7 +25,7 @@ use farhelm_proto::approvals::{
     TemplateKeyCard,
 };
 use farhelm_proto::launcher::{TemplateDestination, TemplateFields, TemplateNameKind};
-use farhelm_proto::{DeleteGuard, LaunchPermission, SessionLaunch, SessionRef};
+use farhelm_proto::{DeleteGuard, LaunchPermission, SessionLaunch};
 
 use crate::environment_ui::{AgentLaunchPlace, ProviderUi};
 use crate::host_text::HostText;
@@ -88,13 +88,10 @@ pub struct Requester {
     pub host: HostText,
     /// The asking session's title, when the helm knows it; drawn quoted and ellipsized, its full text on hover.
     pub title: Option<HostText>,
-    /// The complete entry-prefixed reference: the hover, the accessible name and Copy ID use it, raw.
+    /// The complete entry-prefixed reference, raw. The line shows its bare ID shortened (host text's abbreviated
+    /// identity spelling, which drops the entry prefix and keeps an escape whole at either end); the hover, the
+    /// accessible name and Copy ID use the whole reference.
     pub id: String,
-    /// The bare session ID inside it (the reference with its one entry prefix removed), which the line shows
-    /// shortened; the whole reference when it does not parse as one. The shortening (the start and end of the ID,
-    /// never splitting an escape spelling) is to come from host text's abbreviated identity spelling, which is not
-    /// built yet.
-    pub bare: String,
 }
 
 /// The From line's words before the full ID in its accessible name.
@@ -194,15 +191,10 @@ impl Card {
 
 impl Requester {
     fn of(host: &str, session: &ApprovalSession) -> Self {
-        let bare = session.id.parse::<SessionRef>().map_or_else(
-            |_| session.id.clone(),
-            |reference| reference.bare_id().to_owned(),
-        );
         Requester {
             host: HostText::from_host(host),
             title: session.title.as_deref().map(HostText::from_host),
             id: session.id.clone(),
-            bare,
         }
     }
 }
@@ -370,9 +362,10 @@ fn compact(key: &'static str) -> &'static str {
     }
 }
 
-/// The app's fixed words with their first letter capitalized; a leading ⚡ stays in front, and a label that already
-/// starts with an acronym (URL) is unchanged.
-fn sentence_case(words: &str) -> String {
+/// The app's fixed words with their first letter capitalized, as the card shows its labels and its own fact words
+/// ("Generated", "None"); a leading ⚡ stays in front, and words that already start with an acronym (URL) are
+/// unchanged.
+pub fn sentence_case(words: &str) -> String {
     let mut shown = words.to_owned();
     if let Some((index, letter)) = words
         .char_indices()
