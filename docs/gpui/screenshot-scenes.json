@@ -694,6 +694,49 @@
           "Nothing is sent until you press Send"
         ]
       ]
+    },
+    {
+      "id": "app-approval-card",
+      "title": "A real agent request waiting on its card: the spawning fake agent in Fixture 1 ran `spawn /tmp`, and the card for starting a session running its own launch shows over the session, after the answer bar's 700 ms pause",
+      "reference": "approval-card",
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "spawner"
+      ],
+      "steps": [
+        [
+          "click",
+          "text:Fixture 1"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "FAKE-AGENT READY"
+        ],
+        [
+          "type",
+          "id:terminal-grid",
+          "spawn /tmp"
+        ],
+        [
+          "press",
+          "enter"
+        ],
+        [
+          "wait",
+          "--text",
+          "Agent request"
+        ],
+        [
+          "wait",
+          "1000"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
@@ -1369,7 +1412,7 @@
     },
     {
       "id": "approval-card",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-menu",

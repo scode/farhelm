@@ -697,15 +697,16 @@ systemd or SSH substrate ran.
   bridge or `FARHELM_*` variables; on Linux the run's own compositor and lavapipe; the run's state directory and
   supervisor program, the window size and appearance a run asks for, and the start dialogs off unless it asks for them),
   the seeding requests (a `--fleet` kind's replay shape, its transcript fitting a narrow terminal, and only the waiting
-  kind declaring an agent type), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text
-  shows, a helm reply without a body read as none, that a recorded pid whose start time no longer matches is never
-  signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder
-  is stopped, kept by `stop` while part of the run may still be running, given up by a holder whose `start` was killed
-  while it waited, and a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on
-  Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and
-  needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run
-  the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
-  `farhelm-desktop`, or the app's startup changes.
+  kind declaring an agent type; the `spawner` kind's spawn script by its bare name, and the local host's YOLO setting it
+  turns on), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply
+  without a body read as none, that a recorded pid whose start time no longer matches is never signalled (from /proc on
+  Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by
+  `stop` while part of the run may still be running, given up by a holder whose `start` was killed while it waited, and
+  a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on Linux and macOS. The
+  harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs `mutter`,
+  `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the tests when the
+  script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or
+  the app's startup changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
@@ -764,28 +765,33 @@ systemd or SSH substrate ran.
   opens its dialog with focus on Close and, once the helm has read the local host's trash, says the trash is empty, and
   Escape closes it with focus back on Trash; and on a session of its own, the list heading's New opens the launcher, and
   the quick switcher's `New session named` row for a typed name opens it with that name in its Name field, neither
-  starting a session; and on a session of its own running the spawning fake agent, a `farhelm spawn` from inside it
-  waits on an approval card in the window, and the card's Allow ends the request and the helm lists the spawned session;
-  from the Help menu, Welcome reopens the Welcome card with focus on Got it, and Escape closes it with focus back on the
-  ? button, the helm's `welcome_seen` unchanged; and the smoke's own run, started as every `gui-agent.py start` is with
-  the start dialogs off, shows no Welcome card and leaves it unseen, while a second app run started with
-  `--start-dialogs` (no sessions, `--no-build`, stopped whatever happens) shows the card by itself and writes nothing;
-  and on a fake SSH host of its own, a host menu's Uninstall opens the helm's refusal of a host it cannot check, and
-  once the scripted backend reports the unit file gone, the confirmation's Uninstall starts a run the row shows, after
-  which the helm forgets the host and the Hosts panel shows the removal notice until its dismiss control hides it. A
-  failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
-  recorder) still stops its app run, and the second run if one is up, for which the recorder's `--termination-grace`
-  leaves it time: 30 s covers the two `stop`s in a row, each a few seconds normally. Its 29 steps took 80 s on a build
-  worker on 2026-11-15, the second run's start and stop included (62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with
-  fewer steps), plus the app's start; it builds the app first unless given `--no-build`. Needs what `gui-agent.py start`
-  needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI
-  does not run it. Run it when the app's session list, row menu, session header, Delete, Rename, Stop, Restart, Replace,
-  Mark read and Mark unread, quick switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings
-  gear), status segments, host menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog,
-  Welcome card or the start dialogs (the Welcome card and announcements at a window start), Trash button and dialog,
-  approval cards or their region, the helm's approval path, sidebar width or divider, terminal attach, paste, text input
-  or scrollback, the order menu, the heading's New, the bridge's wiring, the app's startup or `scripts/gui-agent.py`
-  change.
+  starting a session; from the Help menu, Welcome reopens the Welcome card with focus on Got it, and Escape closes it
+  with focus back on the ? button, the helm's `welcome_seen` unchanged; and the smoke's own run, started as every
+  `gui-agent.py start` is with the start dialogs off, shows no Welcome card and leaves it unseen, while a second app run
+  started with `--start-dialogs` (no sessions, `--no-build`, stopped whatever happens) shows the card by itself and
+  writes nothing; and on a session of its own running the spawning fake agent, a `farhelm spawn` from inside it waits on
+  an approval card in the window, and the card's Allow ends the request and the spawned session's row appears in the
+  window; on another, the card's "Always allow on <host> only" turns on the local host's session grant alone, and the
+  next spawn starts its child without a card; on another, Deny on a spawn's card while the quick switcher is open ends
+  the request, keeps the switcher open, and the agent is told the user declined, with no child started; and from a shell
+  session of its own, an agent's `farhelm agent host add` card opens the Add host dialog with the agent's destination
+  and alias, the dialog's Add ends the request and asks before setup even with setup's asking turned off, and Cancel
+  there adds no host while the agent is told its request was accepted; and on a fake SSH host of its own, a host menu's
+  Uninstall opens the helm's refusal of a host it cannot check, and once the scripted backend reports the unit file
+  gone, the confirmation's Uninstall starts a run the row shows, after which the helm forgets the host and the Hosts
+  panel shows the removal notice until its dismiss control hides it. A failed run keeps its run directory under `/tmp`
+  for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, and the second run if
+  one is up, for which the recorder's `--termination-grace` leaves it time: 30 s covers the two `stop`s in a row, each a
+  few seconds normally. Its 34 steps took 91 s on a build worker on 2026-11-15, the second run's start and stop included
+  (62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first
+  unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux,
+  or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row
+  menu, session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick switcher, host rail
+  (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host menu, Remove host, host
+  Update and host Uninstall, Help menu or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and
+  announcements at a window start), Trash button and dialog, approval cards or their region, the helm's approval path,
+  sidebar width or divider, terminal attach, paste, text input or scrollback, the order menu, the heading's New, the
+  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

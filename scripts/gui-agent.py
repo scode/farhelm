@@ -16,9 +16,9 @@ a run starts lives under the run directory you name (which must not exist yet), 
 starts its supervisor from, the fake agents (`farhelm-fixtures`) and the bridge's own command line; on Linux starts a
 private headless Mutter on its own session bus; launches the app (on that Mutter, or on the Mac's GUI session) with its
 own state directory; and seeds sessions that run the fake agent, through the real helm API: `--sessions` basic ones, or
-with `--fleet` one per kind named (FLEET_KINDS), after which it waits until the supervisor has read each one as the
-status its kind names. On Linux,
-rendering is Mesa's software Vulkan driver (lavapipe), the same as the screenshot goldens; on a Mac it is Metal.
+with `--fleet` one per kind named (FLEET_KINDS), after which it waits until the supervisor has read each replayed one
+as the status its kind names. On Linux, rendering is Mesa's software Vulkan driver (lavapipe), the same as the
+screenshot goldens; on a Mac it is Metal.
 `--lock FILE` holds an exclusive `flock` on FILE from before the build until `stop`, for a machine whose one GUI
 session several runs share (the test Mac's convention). `--window-size` and `--appearance` start the app's window at
 that size and in that palette (agent builds only; `crates/gui/farhelm-gui/src/agent_startup.rs`), so a screenshot batch
@@ -265,8 +265,10 @@ def app_env_args(
 # others run the fake agent's replay script, which prints a one-line transcript and then holds the screen the
 # supervisor's classifier reads as that status (`ReplayThen` in crates/farhelm-fixtures/src/fake_agent.rs). Only those
 # four have a status to wait for: `basic` is read as running while it prints and idle a few samples after, so it never
-# settles on one the run could promise.
-FLEET_KINDS = ("basic", "running", "waiting", "idle", "exited")
+# settles on one the run could promise. `spawner` runs the fake agent's spawn script, the one way a scene gets an
+# agent's approval card: a `spawn <folder>` line typed into it runs the real `farhelm spawn`, which waits on a card in
+# the window. Like `basic`, it has no status to wait for.
+FLEET_KINDS = ("basic", "running", "waiting", "idle", "exited", "spawner")
 
 # The replay script's `--then` shape for each status a fleet session is seeded to reach.
 REPLAY_THEN = {"running": "spin", "waiting": "menu", "idle": "quiet", "exited": "exit"}
@@ -299,8 +301,8 @@ def transcript(index: int, kind: str) -> str:
 
 def seed_body(index: int, cwd: Path, fixtures: str, kind: str = "basic", transcript: Path | None = None) -> dict:
     """A `POST /api/sessions` body for the `index`th seeded session, titled `Fixture <index>`: a command launch of the
-    fake agent, the basic script for `basic` and the replay script holding `kind`'s screen otherwise (`transcript` is
-    then the file it prints first).
+    fake agent: the basic script for `basic`, the spawn script for `spawner`, and the replay script holding `kind`'s
+    screen otherwise (`transcript` is then the file it prints first).
 
     Only `waiting` declares an agent type (Claude): the generic status reading never reads a session as waiting, and
     declaring one requires the `{farhelm_args}` placeholder (SPEC.md, "Creation"), where the supervisor adds Claude's
@@ -308,7 +310,13 @@ def seed_body(index: int, cwd: Path, fixtures: str, kind: str = "basic", transcr
     """
     command = f"{shlex.quote(fixtures)} fake-agent --script basic"
     agent = None
-    if kind != "basic":
+    if kind == "spawner":
+        # By bare name, which the session's launch shim resolves: it puts the directory of the `farhelm` binary the
+        # supervisor runs, where `farhelm-fixtures` is built too, first on the session's PATH (the spawn script finds
+        # `farhelm` the same way). A spawner's command is what its approval card shows, and a scene of that card
+        # should not show the build machine's path.
+        command = "farhelm-fixtures fake-agent --script spawn"
+    elif kind != "basic":
         command = (
             f"{shlex.quote(fixtures)} fake-agent --script replay --dialect claude"
             f" --transcript {shlex.quote(str(transcript))} --then {REPLAY_THEN[kind]}"
@@ -713,12 +721,24 @@ def seed_sessions(run: Path, kinds: list[str], fixtures: str) -> list[str]:
     ids = []
     for index, kind in enumerate(kinds, start=1):
         transcript_file = None
-        if kind != "basic":
+        if kind in REPLAY_THEN:
             transcript_file = work / f"fixture-{index}.txt"
             transcript_file.write_text(transcript(index, kind))
         body = seed_body(index, SESSION_CWD, fixtures, kind, transcript_file)
         ids.append(helm_request(run, "POST", "/api/sessions", body)["id"])
     return ids
+
+
+def allow_copied_launches(run: Path) -> None:
+    """Turn on the local host's "Start YOLO sessions without asking" in this run's own helm, for a `spawner` session.
+
+    The spawn script's `farhelm spawn --inherit-agent` copies its own launch, a command Farhelm did not compose, and the
+    helm refuses that outright on a host that asks first, before any card (SPEC.md, "Agent-spawned sessions"). This
+    waives no approval: the spawn still waits on its card, which is what a scene of one shows. The run's helm is
+    fresh and private to it, so nothing outside the run sees the setting.
+    """
+    local = next(row for row in helm_request(run, "GET", "/api/hosts")["hosts"] if row["kind"] == "local")
+    helm_request(run, "POST", f"/api/hosts/{local['id']}/yolo-without-asking", {"yolo_without_asking": True})
 
 
 def wait_for_statuses(
@@ -757,7 +777,7 @@ def start(run: Path, args: list[str]) -> int:
     seeding.add_argument(
         "--fleet",
         type=parse_fleet,
-        help=f"seed one session per kind, in order, and wait for each one's status ({', '.join(FLEET_KINDS)})",
+        help=f"seed one session per kind, in order, and wait for each replayed one's status ({', '.join(FLEET_KINDS)})",
     )
     parser.add_argument("--size", help="Linux only: Mutter's virtual monitor (default 1600x1200)")
     parser.add_argument("--no-build", action="store_true", help="use the binaries already in the target directory")
@@ -875,9 +895,11 @@ def start(run: Path, args: list[str]) -> int:
         return launched.returncode
     kinds = options.fleet or ["basic"] * (2 if options.sessions is None else options.sessions)
     if kinds:
+        if "spawner" in kinds:
+            allow_copied_launches(run)
         ids = seed_sessions(run, kinds, binaries["fixtures"])
         print(f"seeded {len(ids)} fake-agent sessions: {', '.join(ids)}")
-        targets = {id: kind for id, kind in zip(ids, kinds) if kind != "basic"}
+        targets = {id: kind for id, kind in zip(ids, kinds) if kind in REPLAY_THEN}
         if targets:
             wait_for_statuses(lambda: listed_states(run), targets)
             print(f"every seeded session reached its status: {', '.join(kinds)}")

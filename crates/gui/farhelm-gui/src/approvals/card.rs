@@ -105,6 +105,11 @@ const BOX_LABEL_LINE: gpui::Pixels = px(22.4);
 /// A box's line height: `.approval-card-block`'s `line-height: 1.6` at [`BODY_TEXT`].
 const BOX_LINE: gpui::Pixels = px(25.6);
 
+/// The least a long-text box gives way to when the region is short: `.approval-card-block`'s `min-height:
+/// calc(3.2em + 14px)`, two of its lines and its padding, so a squeezed box still shows some of its text. Below that the
+/// card's body scrolls instead.
+pub(super) const BOX_MIN_HEIGHT: gpui::Pixels = px(3.2 * 16. + 14.);
+
 /// The expanded card for `card`.
 pub fn card(card: &Card, state: &CardState, on_answer: OnAnswer, cx: &App) -> AnyElement {
     let palette = theme::palette(cx);
@@ -576,7 +581,7 @@ fn long_text(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyEl
         Role::Region,
         lines,
     )
-    .min_height(px(3.2 * 16. + 14.))
+    .min_height(BOX_MIN_HEIGHT)
     .max_height(px(9.6 * 16. + 14.));
     let scroll = match fact.shape() {
         Shape::WrappedMono => scroll.monospace(),
