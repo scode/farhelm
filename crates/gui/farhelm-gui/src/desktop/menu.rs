@@ -14,7 +14,8 @@
 //! dispatches the text field's own editing actions ([`EditCommand`]), so it acts on a focused text field; elsewhere its
 //! items are disabled, except Copy, which GPUI Kit's window root also handles and which does nothing there. The old
 //! debug-only Help menu held the web view's developer tools and Float on Top, which went with the web view; it is not
-//! ported.
+//! ported. The one item the old menu lacked is Open-Source Notices, above Quit, which opens the notices window
+//! (`licenses`; the maintainer decided on 2026-11-13 that the notices live there).
 //!
 //! Every item dispatches a declared action (SPEC_impl.md, "Actions and keymap"): the window and app commands are
 //! Farhelm's (`actions.rs`), handled app-wide here because a menu command has no element of its own; their chords are
@@ -27,8 +28,10 @@
 
 use gpui::{App, Menu, MenuItem, OsAction};
 
+use super::licenses;
 use crate::actions::{
-    HideApp, HideOtherApps, MinimizeWindow, Quit, ShowAllApps, ToggleFullScreen, ZoomWindow,
+    HideApp, HideOtherApps, MinimizeWindow, OpenSourceNotices, Quit, ShowAllApps, ToggleFullScreen,
+    ZoomWindow,
 };
 use crate::bootstrap::WINDOW_TITLE;
 use crate::components::EditCommand;
@@ -46,6 +49,8 @@ pub(crate) fn menus() -> Vec<Menu> {
             MenuItem::action("Show All", ShowAllApps),
             MenuItem::action("Zoom", ZoomWindow),
             MenuItem::action("Minimize", MinimizeWindow),
+            MenuItem::separator(),
+            MenuItem::action(licenses::TITLE, OpenSourceNotices),
             MenuItem::separator(),
             MenuItem::action(format!("Quit {WINDOW_TITLE}"), Quit),
         ]),
@@ -94,6 +99,8 @@ pub(crate) fn install(cx: &mut App, mac: bool) {
     cx.on_action(|_: &ToggleFullScreen, cx| {
         with_active_window(cx, |window| window.toggle_fullscreen())
     });
+    // Deferred like the window commands below: the window brought forward may be the very one this was dispatched in.
+    cx.on_action(|_: &OpenSourceNotices, cx| cx.defer(licenses::open));
     if mac {
         cx.set_menus(menus());
     }

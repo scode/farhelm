@@ -121,9 +121,10 @@ const TERMINAL_FONT_NOTICE: &str =
 /// linked into this binary adds its notice here in the change that first links it (SPEC_impl.md, "Dependencies and
 /// licenses").
 ///
-/// `--licenses` is an interim surface, allowed on 2026-11-13 (by the migration's orchestrator) until the app's
-/// "Open-Source Notices" window exists; the maintainer decided the same day that the notices live in that window,
-/// opened from the app menu, which shows the same text and replaces this flag as the user-facing surface.
+/// The app's "Open-Source Notices" window shows this same text: the bootstrap's `Host::licenses` is this function,
+/// which the window calls each time it opens. The maintainer decided on 2026-11-13 that the notices live in that
+/// window, opened from the app menu, which is the user-facing surface; `--licenses` stays as the way to read them
+/// without opening the app.
 pub fn licenses_text() -> String {
     format!(
         "{}\n{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}\n{RULE}\nJetBrains Mono Nerd Font (SIL Open Font License 1.1)\n\n{TERMINAL_FONT_NOTICE}",
@@ -1616,7 +1617,7 @@ mod tests {
     }
 
     /// The desktop binary links the GUI terminal crates' ports of xterm.js and VS Code code, so MIT requires their
-    /// notices to travel with it; `--licenses` is how it carries them until the "Open-Source Notices" window exists.
+    /// notices to travel with it; this text is what `--licenses` prints and the "Open-Source Notices" window shows.
     /// Spec: the printed text names both crates and holds the xterm.js copyright line and the MIT permission text.
     #[farhelm_testtrace::test]
     fn licenses_carry_both_terminal_crates_ported_code_notices() {

@@ -90,7 +90,7 @@ pub mod ticker;
 /// every binary that contains them, however small the part (SPEC_impl.md, "Dependencies and licenses"). This crate is
 /// where the desktop app first links them, so the notices are embedded here and the desktop binary prints them
 /// (`farhelm-desktop --licenses`). The maintainer decided on 2026-11-13 that the notices live in an "Open-Source
-/// Notices" window opened from the app menu; that window will show the same text.
+/// Notices" window opened from the app menu, which shows the same text.
 /// Each file's own preamble says only "this crate", so a `=== crate ===` header names the crate before its file.
 pub const PORTED_CODE_NOTICES: &str = concat!(
     "=== farhelm-grid-model ===\n\n",

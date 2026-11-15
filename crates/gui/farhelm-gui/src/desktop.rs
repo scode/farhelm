@@ -4,8 +4,9 @@
 //!
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
 //! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
-//! bootstrap's seams were cut against; the menu bar (`menu`) and quitting on close are built, and each function still
-//! documented as a stub does nothing yet, so that part of the app behaves as it did before the seams existed.
+//! bootstrap's seams were cut against. The menu bar (`menu`), quitting on close, the notices window (`licenses`), the
+//! main window's frame and the macOS title band (`title_band`) are built; the Linux window's decorations are not yet,
+//! so [`dress_window`] sets the macOS options only.
 //!
 //! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`] and
 //! [`FrameFollow`], and the four window options [`dress_window`] may set, nothing more: it passes a `FrameHost`
@@ -38,6 +39,7 @@ use gpui::{
 
 use crate::ticker;
 
+pub(crate) mod licenses;
 pub(crate) mod menu;
 #[cfg(test)]
 mod tests;
@@ -87,11 +89,13 @@ fn when_closed(main: AnyWindowHandle, quit: impl Fn(&mut App) + 'static, cx: &mu
 
 // ---- Open-source notices --------------------------------------------------------------------------------------------
 
-/// Keep the host's source of the license notices (`Host::licenses`), for the "Open-Source Notices" window the app
-/// menu opens. It is a function rather than the text because the text is close to a megabyte and is needed only while
-/// that window is open: call it when the window opens, and do not hold its answer for the life of the app. The
-/// bootstrap calls this once, before the window opens. The stub drops it.
-pub fn keep_licenses(_licenses: fn() -> String, _cx: &mut App) {}
+/// Keep the host's source of the license notices (`Host::licenses`), for the "Open-Source Notices" window the app menu
+/// opens (`licenses`; the menu module handles the item's action). It is a function rather than the text because the
+/// text is close to a megabyte and is needed only while that window is open: it is called when the window opens, and
+/// its answer goes with the window. The bootstrap calls this once, before the main window opens.
+pub fn keep_licenses(licenses: fn() -> String, cx: &mut App) {
+    licenses::keep(licenses, cx);
+}
 
 // ---- The main window's frame ----------------------------------------------------------------------------------------
 //
