@@ -2554,8 +2554,8 @@ destination or installation change that leaves an Update outcome uncertain warns
 or a current version alone does not acknowledge the mark. A failed registry refresh retains the avatars and names their
 state as last-read; a failed first read invents no hosts. The rail scrolls independently while Hosts, Settings and Help
 remain reachable at its foot. A compatible supervisor whose build is older than the helm's is still connected and
-usable, but its row says `Old version` as an advisory; an incompatible protocol handshake remains `Needs update`. On an
-SSH host with Update available, an outlined `↑ Update` button accompanies those words: amber for an optional
+usable, but its row says `Old version` as an advisory; an incompatible protocol handshake remains `Needs update`. On a
+remote host with Update available, an outlined `↑ Update` button accompanies those words: amber for an optional
 compatible-build update, red for a required update when the host's protocol is lower. The dot keeps its color and the
 accessible status keeps its words. Hover names both builds (and both protocols for a skew), says whether updating is
 optional or required, and explains that clicking updates the host to the helm's version. Clicking starts the menu's
