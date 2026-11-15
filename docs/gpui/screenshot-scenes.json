@@ -396,6 +396,27 @@
       ]
     },
     {
+      "id": "app-status-filter-waiting",
+      "title": "The status segments with Waiting chosen over a fleet of three (running, waiting, idle): the list narrowed to the waiting Fixture 2, counted 1 of 3",
+      "reference": "session-list-filter-waiting",
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "running,waiting,idle"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:session-status-Waiting"
+        ],
+        [
+          "wait",
+          "--text",
+          "1 of 3"
+        ]
+      ]
+    },
+    {
       "id": "app-empty-fleet",
       "title": "The main window over an empty fleet",
       "reference": "empty-fleet",
@@ -716,6 +737,16 @@
       "reference": "session-list-filter-empty"
     },
     {
+      "golden": "session-status-segments",
+      "title": "The status segments with Waiting chosen and a host's chip beside them, over the fleet narrowed to its one waiting row",
+      "reference": "session-list-filter-waiting"
+    },
+    {
+      "golden": "filter-empty-both-links",
+      "title": "An empty answer to a host and a status: the sentence naming both, with Show all hosts and Show all statuses under it",
+      "reference": "session-list-filter-empty"
+    },
+    {
       "golden": "select",
       "title": "The select, chosen, with a placeholder, and chosen but unavailable",
       "reference": null
@@ -830,11 +861,11 @@
     },
     {
       "id": "session-list-filter-waiting",
-      "ported": false
+      "ported": true
     },
     {
       "id": "session-list-filter-empty",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-rail-host-selected",

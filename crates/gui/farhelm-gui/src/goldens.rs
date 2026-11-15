@@ -54,6 +54,7 @@ use crate::prompt::{self, Answer, Question};
 use crate::root;
 use crate::session;
 use crate::session_list::SessionList;
+use crate::session_list::filters::Status;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
 use crate::session_list::tests::{Fixture, TEST_NOW, listing, preferences, session};
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
@@ -1807,6 +1808,71 @@ fn host_filter_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     );
 }
 
+/// The fleet narrowed to `buildbox` and Waiting, the scenes' host and status: the rail chooses the host and the
+/// segments the status, the fake pushes the query's listing (`shown` of the fleet's 6, which matched as many) and then
+/// accepts both queries, answering the list's other commands before them in order, as the helm does.
+fn filtered_to_waiting_on_buildbox(
+    list: &Entity<SessionList>,
+    state: &SceneState,
+    shown: &[&str],
+    cx: &mut App,
+) {
+    list.update(cx, |list, cx| {
+        list.choose_host(Some(2), cx);
+        list.choose_status(Status::Waiting, cx);
+    });
+    let mut keep = state.keep.borrow_mut();
+    let Some(helm) = keep
+        .iter_mut()
+        .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+    else {
+        return;
+    };
+    let gone: Vec<String> = fleet()
+        .iter()
+        .map(|row| row.key.to_owned())
+        .filter(|key| !shown.contains(&key.as_str()))
+        .collect();
+    helm.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: CollectionMeta {
+            availability: Availability::Available,
+            order: shown.iter().map(|key| key.to_string()).collect(),
+            counts: Some(ListCounts {
+                total: 6,
+                matching: Some(shown.len() as u64),
+                truncated: false,
+            }),
+        },
+        upsert: Vec::new(),
+        remove: gone,
+    });
+    for command in helm.commands() {
+        helm.reply(command.id, 204, None);
+    }
+}
+
+/// The status segments with Waiting chosen and `buildbox`'s chip beside them (reference
+/// `session-list-filter-waiting`), over the fleet narrowed to its one waiting row: the small segments in their well
+/// across the column, the chosen segment in the accent fill, and the chip after them in the same wrapping row.
+fn session_status_segments_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, state, _, cx| filtered_to_waiting_on_buildbox(list, state, &["b"], cx),
+        cx,
+    );
+}
+
+/// An empty answer to a host and a status (reference `session-list-filter-empty`): "No waiting sessions on" the host's
+/// mark and name, and both links under it, Show all hosts first.
+fn filter_empty_both_links_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, state, _, cx| filtered_to_waiting_on_buildbox(list, state, &[], cx),
+        cx,
+    );
+}
+
 /// Host management shown over the fleet with `buildbox` chosen (the old `hosts-panel` reference with a host chosen, as
 /// in `host-rail-host-selected`): the Hosts panel in place of the list's column, Hosts pressed at the rail's foot, and
 /// the chosen avatar in the quieter look the rail's choice wears while the panel shows. The fake answers the host query
@@ -2497,6 +2563,18 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: host_filter_empty_setup,
+    },
+    Scene {
+        name: "session-status-segments",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: session_status_segments_setup,
+    },
+    Scene {
+        name: "filter-empty-both-links",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: filter_empty_both_links_setup,
     },
     Scene {
         name: "select",

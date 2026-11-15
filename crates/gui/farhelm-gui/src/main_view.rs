@@ -63,10 +63,9 @@ pub struct MainView {
     /// Redraws on a change of the connection's state and of the notice center.
     _observed: Vec<Subscription>,
     /// The sidebar's session list, which the sidebar keeps for the window's life (it holds only per-UI-session state,
-    /// which it starts over by itself after a reset). A handle is kept here for tests alone, which ask the list for a
-    /// row's action the way its menu does: since the Delete shortcut went to the session pane's header, nothing else
-    /// in this view reaches the list.
-    #[cfg(test)]
+    /// which it starts over by itself after a reset). A handle is kept here for the quick switcher, which this view
+    /// opens and which tells the list what a pick opened, and for tests, which ask the list for a row's action the way
+    /// its menu does.
     session_list: Entity<SessionList>,
     /// The sidebar around the list, kept for the window's life like the list.
     sidebar: Entity<Sidebar>,
@@ -95,7 +94,6 @@ impl MainView {
             root: root::attach(window, cx),
             _observed: observed,
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
-            #[cfg(test)]
             session_list,
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
         }
@@ -119,6 +117,7 @@ impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("main", cx);
         let palette = theme::palette(cx);
+        let list = self.session_list.downgrade();
         let state = session::connection(cx)
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
@@ -188,8 +187,9 @@ impl Render for MainView {
                 session_list::rename::open_for_selected(window, cx)
             })
             // Taken whatever the switcher does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
-            .on_action(|_: &QuickSwitcher, window, cx| {
-                session_list::quick_switcher::open(window, cx)
+            // The switcher holds the list weakly, so that a pick can show the session it opened.
+            .on_action(move |_: &QuickSwitcher, window, cx| {
+                session_list::quick_switcher::open(list.clone(), window, cx)
             })
             .size_full()
             .bg(theme::color(palette.bg_0))

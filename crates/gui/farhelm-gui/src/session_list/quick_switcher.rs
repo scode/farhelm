@@ -33,7 +33,11 @@
 //!   it is selected, remembered with the helm and its terminal takes focus, the already open session's included
 //!   (SPEC.md, "Where focus rests": "Choosing a session, including the one already selected, focuses its terminal").
 //!   It closes first because a terminal never takes focus from inside a layer ([`crate::focus::choose_terminal`]). A
-//!   pick goes ahead while a session action is pending; nothing here asks the operation store.
+//!   pick goes ahead while a session action is pending; nothing here asks the operation store. Once the session is
+//!   open, the session list returns from the Hosts panel to Sessions and, if its host or status filter hides the
+//!   pick, resets both to All (`SessionList::picked_from_switcher`; SPEC.md: "Opening a session hidden by the host
+//!   choice or status filter resets both to All after the open is accepted", and "All or a host avatar returns to
+//!   Sessions, as does an accepted quick-switcher pick").
 //! - **Closing.** Escape, Close and a press outside the card close it and return focus to what held it when it opened
 //!   ([`ReturnTo::Opener`]). The veil takes that press, so it never also reaches the row or terminal under it.
 //!
@@ -43,12 +47,9 @@
 //! ([`DialogPlacement::Top`]); the card keeps the old side margin by capping its own width.
 //!
 //! NOTE: Not built here, each waiting for the area that brings it: the `New session named "X"` row, the `tl:`
-//! templates section and its hint, and the Quick launch row (the launcher area); resetting the host and status filters
-//! after a pick they hide (the sidebar's filters, which do not exist yet), and, with the same reach from a pick into the
-//! session list, returning from the Hosts panel to Sessions (SPEC.md: "All or a host avatar returns to Sessions, as
-//! does an accepted quick-switcher pick", `host_rail`'s NOTE); and the host's chosen mark beside its name
-//! (host marks arrive with the sidebar's row marks). The old layout for windows narrower than 600 pixels is not ported
-//! either, because the window's minimum width is 720.
+//! templates section and its hint, and the Quick launch row (the launcher area); and the host's chosen mark beside its
+//! name (host marks arrive with the sidebar's row marks). The old layout for windows narrower than 600 pixels is not
+//! ported either, because the window's minimum width is 720.
 
 #[cfg(test)]
 mod tests;
@@ -162,11 +163,12 @@ pub(crate) fn ranked(sessions: &[SessionRow], query: &str) -> Vec<usize> {
 
 /// The shortcut ([`crate::actions::QuickSwitcher`]): open the switcher on top of the window's page. The main view calls
 /// it for the action wherever focus is, and the action is taken whatever this does, as `ONCE_PER_PRESS` requires.
+/// `list` is the window's session list, which a pick asks to show what it opened.
 ///
 /// Does nothing while a dialog or menu holds the keyboard (SPEC.md: "It does nothing while another modal is open"; a
 /// popover that never takes focus, such as a terminal link's destination display, is not a modal), while the window is
 /// inert, or before the snapshot has brought the helm's preferences.
-pub(crate) fn open(window: &mut Window, cx: &mut App) {
+pub(crate) fn open(list: WeakEntity<super::SessionList>, window: &mut Window, cx: &mut App) {
     // A key pressed inside a layer reaches the main view's ground too, since the overlay is drawn inside it; this is
     // what keeps a second switcher from opening over the first, or over any other dialog or menu.
     if layers::focus_layer_open(window, cx) {
@@ -179,7 +181,7 @@ pub(crate) fn open(window: &mut Window, cx: &mut App) {
         return;
     }
     let mark = Mark::take(cx);
-    let switcher = cx.new(|cx| QuickSwitcher::new(window, cx));
+    let switcher = cx.new(|cx| QuickSwitcher::new(list, window, cx));
     let start = switcher.read(cx).input.focus_handle(cx);
     // Near the window's top, and closed by a press outside the card, as the old switcher was: the layer manager's
     // placement for exactly this dialog. The press goes the way Escape goes, so focus returns to the opener.
@@ -257,6 +259,8 @@ enum Read {
 
 /// The open switcher: its field, its read, which row is selected, and its layer.
 pub(crate) struct QuickSwitcher {
+    /// The window's session list, told about every pick so that it can show the session the pick opened.
+    list: WeakEntity<super::SessionList>,
     /// The search field. Its text is the query; the switcher keeps no copy of it.
     input: TextInputState,
     read: Read,
@@ -275,8 +279,12 @@ pub(crate) struct QuickSwitcher {
 }
 
 impl QuickSwitcher {
-    /// A switcher, loading, with an empty field and the first row selected.
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// A switcher for `list`, loading, with an empty field and the first row selected.
+    fn new(
+        list: WeakEntity<super::SessionList>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input = TextInputState::new(window, cx);
         // The old placeholder went on with "· tl: for templates", which belongs to the launcher area's templates part.
         input.set_placeholder("Jump to a session", window, cx);
@@ -285,6 +293,7 @@ impl QuickSwitcher {
             TextInputEvent::Submitted => switcher.pick_selected(window, cx),
         });
         QuickSwitcher {
+            list,
             input,
             read: Read::Loading,
             selected: 0,
@@ -341,17 +350,27 @@ impl QuickSwitcher {
         let Some(&index) = matches.get(self.selected.min(matches.len().saturating_sub(1))) else {
             return;
         };
-        let key = list.sessions[index].info.id.clone();
-        self.pick(&key, window, cx);
+        self.pick(index, window, cx);
     }
 
-    /// Open the session filed under `key` as the user's choice, after closing the switcher (the module docs say why
-    /// in that order). The key is the row's served id, which is the key the store files the session under.
-    fn pick(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// Open the session at `index` in the switcher's listing as the user's choice, after closing the switcher (the
+    /// module docs say why in that order), then have the session list show it. The session is opened under its row's
+    /// served id, which is the key the store files it under. An index the listing does not hold picks nothing. The
+    /// listing never changes once loaded, so an index taken when a row was drawn still names that row.
+    fn pick(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Read::Loaded(listing) = &self.read else {
+            return;
+        };
+        let Some(row) = listing.sessions.get(index) else {
+            return;
+        };
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
         }
-        selection::choose(key, cx);
+        selection::choose(&row.info.id, cx);
+        let _ = self
+            .list
+            .update(cx, |list, cx| list.picked_from_switcher(row, cx));
     }
 
     /// Close: close the switcher, picking nothing.
@@ -444,7 +463,6 @@ impl Render for QuickSwitcher {
                 .enumerate()
                 .map(|(position, &index)| {
                     let row = &list.sessions[index];
-                    let key = row.info.id.clone();
                     let weak = weak.clone();
                     result_row(
                         row,
@@ -455,7 +473,7 @@ impl Render for QuickSwitcher {
                         palette,
                     )
                     .on_click(move |_, window, cx| {
-                        let _ = weak.update(cx, |switcher, cx| switcher.pick(&key, window, cx));
+                        let _ = weak.update(cx, |switcher, cx| switcher.pick(index, window, cx));
                     })
                     .into_any_element()
                 })
