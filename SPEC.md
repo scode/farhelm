@@ -3341,6 +3341,10 @@ ordinary confirmation and busy rules. With no session open it does nothing. The 
 Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app. The Linux chord
 leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
 
+The Mac app menu has an Open-Source Notices item, which opens a plain window of scrolling read-only text holding the
+notices of the open-source code and fonts the app includes; choosing it again brings that window forward, and closing it
+leaves the app running. The maintainer decided on 2026-11-13 that the notices live in that window.
+
 Cmd+L in the Mac desktop app, or Ctrl+Shift+L on Linux, opens Rename for the open session, including when its row is
 filtered out of the sidebar. Closing that shortcut-opened dialog returns focus to the terminal. Both session shortcuts
 work from terminal focus without sending their chord to the program, ignore repeat and composition, and appear in the

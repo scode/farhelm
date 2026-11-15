@@ -21,6 +21,17 @@ and the old native smoke test's legs (`scripts/desktop-smoke.sh`).
 | `crates/farhelm-ui/src/window_chrome.rs` (`press_decision_covers_buttons_reports_and_fullscreen`, `click_report_header_parsing_rejects_non_reports`) | 2     | which press on the band drags, zooms or does nothing, and the press report the JavaScript bridge sent | replaced: `desktop::tests::the_press_decision_drags_zooms_or_leaves_the_press_alone`; the report parsing is superseded, since presses reach the band through GPUI's own propagation and no report crosses a transport                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `crates/farhelm-ui/js-tests/click-detail.test.js`                                                                                                    | 20    | which presses inside a drag surface count as empty background, and when a repeat may zoom             | partly: the classification and pairing cases by `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs` and `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`; the endpoint, header and synchronous-POST cases are superseded (no JavaScript bridge); "a press over an inert descendant" waits for the terminal area's tabs (no inert band control exists yet); a positioned popover over the band is covered by the layer manager's occluding popovers, which a press never passes through; "a press inside a surface but outside its box" is GPUI's hit testing, which hands a row only presses inside it; "a replaced or disconnected spacer" is covered by pairing presses by row, not by element                                                                                                                                                                                                                                    |
 
+## Behavior with no old test
+
+- **The Open-Source Notices window** (new: the old app had no notices surface; the maintainer decided on 2026-11-13 that
+  the notices live in it). Tested by `desktop::tests::the_notices_item_opens_one_window_and_brings_it_forward` (one
+  window, the text drawn as a virtualized list, a second choice brings it forward, also when made from the notices
+  window itself, and a choice after its close opens a new one),
+  `desktop::tests::the_notices_are_wrapped_at_the_column_and_keep_every_character`,
+  `desktop::tests::the_notices_window_is_titled_and_fits_its_column` and the menu description test. On Linux the `?`
+  menu's item waits for the other-dialogs area, which dispatches `actions::OpenSourceNotices`; until it lands
+  `farhelm-desktop --licenses` is the Linux surface.
+
 ## Deviations
 
 - **The Edit menu does nothing for a focused terminal.** The Mac app's Edit items (Undo, Redo, Cut, Copy, Paste, Select
@@ -39,6 +50,9 @@ and the old native smoke test's legs (`scripts/desktop-smoke.sh`).
 - **A window on another Mac display reopens on the primary one.** GPUI reports every Mac display at the same origin and
   window positions relative to the window's own display, and the app's startup names no display, so only positions on
   the primary display are saved; the old app saved global positions and reopened on the display the window was last on.
+- **A window sized by hand to fill a Mac display counts as zoomed.** A window within 2 points of its display's visible
+  area is saved as zoomed, because GPUI's own check wants an exact match and a window GPUI zoomed as it opened comes out
+  a point short; so a window dragged by hand to fill the screen reopens zoomed rather than at that frame.
 - **A change in the last second before a crash can be lost.** The frame is saved a second after the window stops
   changing and at quit, where the old app saved once, when its window closed.
 - **A notice banner sits below a strip of the title band.** While the connection-lost notice (new in this app, so with

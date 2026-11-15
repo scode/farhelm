@@ -913,8 +913,10 @@ The license notices of every third-party crate the shipped binaries link are gen
 printed by `farhelm licenses` after the ported-code notices and by `farhelm-desktop --licenses`; the ordinary checks
 fail when the file no longer matches the graph, or when a text that must carry its copyright line carries a template
 placeholder instead. The desktop app shows the same notices, with the license of the fonts it embeds, in an "Open-Source
-Notices" window opened from its app menu (the maintainer's choice, on 2026-11-13); until that window exists,
-`farhelm-desktop --licenses` is the interim surface.
+Notices" window opened from its app menu (the maintainer's choice, on 2026-11-13); on Linux, which has no menu bar, the
+in-window `?` menu is to get the item, and until it does, `farhelm-desktop --licenses`, which prints the same text, is
+the Linux surface. The window draws the text as a virtualized list of lines, wrapped once when it opens at a fixed
+column it is never narrower than, because the text is close to a megabyte and a fixed-height list row cannot reflow.
 
 Enforced by cargo-deny: a license allowlist (no GPL, AGPL or LGPL) and a sources section that denies every git source,
 because cargo-deny cannot check a git repository's license. Copying cannot be caught by a tool, so the review gate asks.
