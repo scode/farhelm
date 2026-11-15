@@ -563,7 +563,7 @@ Farhelm's own key bindings rather than GPUI Kit's.
 
 ### Overlays: the layer manager
 
-Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the pill and tooltips.
+Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the two pills and tooltips.
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
@@ -617,32 +617,43 @@ not counted by `layers::any_open`, Tab's trap, focus recovery or Escape. It sits
 centered across that element's bottom edge, and goes when its feature hides it, on a reset (`layers::close_all`), and
 when the element is no longer drawn, so the feature anchors it to the element SPEC.md names for the current state (the
 terminal area, or the main area with no session open), best one element drawn under the same key in both states, and
-otherwise shows the pill again on the new anchor when a session opens or closes. A window has one pill slot: showing
-replaces, and hiding takes down only the pill that show returned; `layers::show_pill` says when a second pill would need
-a slot of its own.
+otherwise shows the pill again on the new anchor when a session opens or closes. A window has two pill slots: the pill,
+and the launch pill (`layers::show_launch_pill`) for SPEC.md's launch progress pill and the "Started" report after it
+(one slot for both; the launcher decides which shows), which can show while a sequence is armed. Each slot's show
+replaces only that slot's pill, and hiding takes down only the pill that show returned. The launch pill follows the
+pill's rules (display only, not a layer, gone on a reset) but has no anchor: it is centered across the window 20 pixels
+above its bottom edge and kept 20 pixels from its sides, as the old `.launch-progress-pill` was fixed there. It is drawn
+above every layer and under the approval region and the pill, as the old one sat at z-index 40 under the cards (45) and
+the sequence pill (50), so where the two pills overlap (the launch pill and a sequence pill on the main area's bottom
+edge while the launcher is open) the sequence pill covers it, as in the old app. The old dialogs sat at 40 beside the
+old launch pills, except the tunnel consent dialog at 50, which was always above them; among the 40s element order
+decided, so the launcher, the quick switcher, the templates dialog, the checkout trash dialog and the Hosts panel's
+dialogs sat under the pills, and Delete, Stop, Rename and the app bar's dialogs (Settings and the help menu's) covered
+them. Drawing the launch pill above every dialog, which matches the launcher and the other dialogs that start a launch,
+is a deviation chosen by the foundations owner on 2026-11-15.
 
-A second feature-supplied element is drawn above every dialog and popover and under the pill and the tooltip without
-being a layer: the approval region (`layers::install_approval_region`), where SPEC.md's independent agent approval cards
-"remain usable" while a dialog is open, in the old app's order (veils at z-index 40, cards at 45, pill and tooltip at
-50). Unlike the pill it takes presses and focus. The approvals feature installs it once per window and never shows or
-hides it; its view draws nothing while no card waits, and a reset leaves it installed. It opens no layer and is not
-counted by `layers::any_open`, Tab's trap, focus recovery or Escape. Its view is laid out while the frame is prepared,
-inside a zero-size box at the window's origin that tracks the region's focus, so it places its card itself from the
-bounds of an element the session view draws (`layers::Anchor::drawn_bounds`, this frame's at that point) and the
-window's size. The box is zero-size because a tracked element takes every press its hitbox sees, and a full-window one
-would keep a press on the page's empty space from sending focus home. That the view occludes whatever it draws, and
-draws nothing with a size or a listener when empty, is held by review. Most of what the cards need follows from the
-rules above without a rule of its own, and tests show it: a press on a card is the card's, since it is drawn above the
-veil and occludes; a dialog closing, or its subject going, leaves focus on a card; the dialog's late focus moves refuse
-while focus is on a card; Tab from a card goes back into the dialog, while the dialog's own Tab never reaches it; and a
-focused card control going away sends focus into the topmost dialog, or home. Escape on a card does nothing, so it
-cannot close the dialog behind it, as the old app's keyboard safety net passed over the cards (decided by the GPUI
-migration's foundations owner, 2026-11-14). A view that reads `drawn_bounds` picks its anchor from its own state, not
-from `None`: the bounds turn `None` only after the frame that stopped drawing the element, and nothing redraws then. Not
-built yet, for want of anything to build them against: counting a card as covering a terminal link's disclosure (an
-occluding card counts with no change if that hit test uses occlusion), raising a refused link's explanation above the
-cards, and drawing a layer a card opens above the region. Until that last one, any layer a card opens (the tunnel
-consent dialog, or a question or menu anchored to the card) draws under the cards.
+Another feature-supplied element is drawn above every dialog, popover and the launch pill and under the pill and the
+tooltip without being a layer: the approval region (`layers::install_approval_region`), where SPEC.md's independent
+agent approval cards "remain usable" while a dialog is open, in the old app's order (veils and the launch pill at
+z-index 40, cards at 45, pill and tooltip at 50). Unlike the pills it takes presses and focus. The approvals feature
+installs it once per window and never shows or hides it; its view draws nothing while no card waits, and a reset leaves
+it installed. It opens no layer and is not counted by `layers::any_open`, Tab's trap, focus recovery or Escape. Its view
+is laid out while the frame is prepared, inside a zero-size box at the window's origin that tracks the region's focus,
+so it places its card itself from the bounds of an element the session view draws (`layers::Anchor::drawn_bounds`, this
+frame's at that point) and the window's size. The box is zero-size because a tracked element takes every press its
+hitbox sees, and a full-window one would keep a press on the page's empty space from sending focus home. That the view
+occludes whatever it draws, and draws nothing with a size or a listener when empty, is held by review. Most of what the
+cards need follows from the rules above without a rule of its own, and tests show it: a press on a card is the card's,
+since it is drawn above the veil and occludes; a dialog closing, or its subject going, leaves focus on a card; the
+dialog's late focus moves refuse while focus is on a card; Tab from a card goes back into the dialog, while the dialog's
+own Tab never reaches it; and a focused card control going away sends focus into the topmost dialog, or home. Escape on
+a card does nothing, so it cannot close the dialog behind it, as the old app's keyboard safety net passed over the cards
+(decided by the GPUI migration's foundations owner, 2026-11-14). A view that reads `drawn_bounds` picks its anchor from
+its own state, not from `None`: the bounds turn `None` only after the frame that stopped drawing the element, and
+nothing redraws then. Not built yet, for want of anything to build them against: counting a card as covering a terminal
+link's disclosure (an occluding card counts with no change if that hit test uses occlusion), raising a refused link's
+explanation above the cards, and drawing a layer a card opens above the region. Until that last one, any layer a card
+opens (the tunnel consent dialog, or a question or menu anchored to the card) draws under the cards.
 
 One tooltip shows at a time. When a control with hover help sits inside another that has its own (a session row's marks
 inside the row), the innermost one under the pointer shows its help, as the old app's tooltip took the help nearest the
