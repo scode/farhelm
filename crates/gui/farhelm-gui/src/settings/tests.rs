@@ -5,6 +5,9 @@
 //! The dialog is opened the way the host rail's gear opens it: a button in a root view of the test's own, whose click
 //! takes a mark and calls [`super::open`] with its own focus handle. Every step ends in one of the shared harness's step
 //! helpers, so the focus and layer invariants are checked after each.
+//!
+//! The helpers marked `pub(super)` are shared with the Credentials section's tests (`super::credential_tests`), which
+//! open the dialog the same way.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -73,10 +76,11 @@ impl Render for Rail {
 }
 
 /// The section button that shows `section`. The harness finds elements by `'static` ids, so these are spelled out.
-fn section_button(section: Section) -> &'static str {
+pub(super) fn section_button(section: Section) -> &'static str {
     match section {
         Section::Sessions => "settings-section-sessions",
         Section::Hosts => "settings-section-hosts",
+        Section::Credentials => "settings-section-credentials",
         Section::Appearance => "settings-section-appearance",
         Section::Terminal => "settings-section-terminal",
         Section::Checkouts => "settings-section-checkouts",
@@ -138,7 +142,7 @@ fn push(helm: &mut FakeHelm, preferences: &Preferences, cx: &mut VisualTestConte
 
 /// The app over the fake helm holding `preferences`, in an active window as tall as a laptop screen's showing the
 /// gear, with the gear's focus handle. Nothing is open yet.
-fn open_rail<'a>(
+pub(super) fn open_rail<'a>(
     cx: &'a mut TestAppContext,
     preferences: &Preferences,
 ) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
@@ -157,7 +161,7 @@ fn open_rail<'a>(
 }
 
 /// Click the gear and check that Settings opened.
-fn open_settings(cx: &mut VisualTestContext) {
+pub(super) fn open_settings(cx: &mut VisualTestContext) {
     click(cx, "gear");
     assert!(any_open(cx), "the premise: the gear opened Settings");
 }
@@ -174,7 +178,7 @@ fn shows_whole(cx: &mut VisualTestContext, selector: &'static str, region: &'sta
 }
 
 /// The commands the window sent since the last call.
-fn sent(helm: &mut FakeHelm) -> Vec<FakeCommand> {
+pub(super) fn sent(helm: &mut FakeHelm) -> Vec<FakeCommand> {
     helm.commands()
 }
 
@@ -190,7 +194,7 @@ fn one_save(helm: &mut FakeHelm) -> (u64, Value) {
 }
 
 /// Whether the switch drawn under `id` shows on; `None` when it is not drawn.
-fn switch_on(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+pub(super) fn switch_on(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -198,14 +202,14 @@ fn switch_on(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
 }
 
 /// Whether anything is drawn under the element id `id`.
-fn drawn(cx: &mut VisualTestContext, id: &str) -> bool {
+pub(super) fn drawn(cx: &mut VisualTestContext, id: &str) -> bool {
     frame(cx)
         .into_iter()
         .any(|node| node.element_id.as_deref() == Some(id))
 }
 
 /// The work in flight on the preference row.
-fn preference_work(cx: &mut VisualTestContext) -> Option<Work> {
+pub(super) fn preference_work(cx: &mut VisualTestContext) -> Option<Work> {
     cx.update(|_, cx| {
         session::current_operations(cx)
             .and_then(|operations| operations.read(cx).in_flight(&OpKey::preferences()))
@@ -214,7 +218,7 @@ fn preference_work(cx: &mut VisualTestContext) -> Option<Work> {
 
 /// Every line of text the window painted, joined with single spaces, so a sentence the dialog wrapped over several lines
 /// reads as one.
-fn painted(cx: &mut VisualTestContext) -> String {
+pub(super) fn painted(cx: &mut VisualTestContext) -> String {
     let lines: Vec<String> = frame(cx)
         .into_iter()
         .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
@@ -251,13 +255,13 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust
-/// and Notifications, and App only where the desktop app's updater runs, which it does not here; listing a section
-/// with nothing behind it would offer a button that shows an empty pane. The list
-/// follows SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal,
-/// Checkouts, Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
-/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust and
-/// Notifications buttons, in that order, Sessions pressed and the others not.
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Credentials, Terminal,
+/// Checkouts, Agent trust and Notifications, and App only where the desktop app's updater runs, which it does not
+/// here; listing a section with nothing behind it would offer a button that shows an empty pane. The list follows
+/// SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts,
+/// Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
+/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Credentials, Terminal, Checkouts, Agent
+/// trust and Notifications buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -284,6 +288,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Sessions".to_string(), Some(Toggled::True)),
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
+            ("Credentials".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
             ("Checkouts".to_string(), Some(Toggled::False)),
             ("Agent trust".to_string(), Some(Toggled::False)),
@@ -1937,7 +1942,7 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
 
 /// Whether the control drawn under `id` (a switch, a button) is available, which an unavailable one shows by taking
 /// no focus; `None` when it is not drawn.
-fn available(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+pub(super) fn available(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -2138,7 +2143,7 @@ fn one_put(helm: &mut FakeHelm, path: &str) -> (u64, Value) {
 }
 
 /// The accessible name of what is drawn under `id`, if anything is.
-fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+pub(super) fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -2603,7 +2608,7 @@ fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut 
 // ---- Notifications: ntfy alerts ------------------------------------------------------------------------------------
 
 /// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
+pub(super) const SELECT_ALL: &str = if cfg!(target_os = "macos") {
     "cmd-a"
 } else {
     "ctrl-a"
@@ -2633,7 +2638,7 @@ fn show_ntfy(helm: &mut FakeHelm, cx: &mut VisualTestContext, stored: Value) {
 }
 
 /// Replace the text of the field drawn under `selector` with `text`, as the user would.
-fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
+pub(super) fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
     click(cx, selector);
     keys(cx, SELECT_ALL);
     if text.is_empty() {
@@ -2646,7 +2651,7 @@ fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
 
 /// Tab until the control with element id `id` holds focus, which scrolls it into view: the form is taller than the
 /// dialog's body, so a click cannot reach its lower controls.
-fn reach(cx: &mut VisualTestContext, id: &str) {
+pub(super) fn reach(cx: &mut VisualTestContext, id: &str) {
     for _ in 0..40 {
         if focused_id(cx).as_deref() == Some(id) {
             return;

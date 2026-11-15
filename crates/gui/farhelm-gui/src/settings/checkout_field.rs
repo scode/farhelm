@@ -45,7 +45,7 @@ use gpui::{
 };
 
 use super::Refused;
-use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::choices;
 use crate::components::{Button, HoverHelp, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
 use crate::host_text::{HostSentence, HostText};
@@ -54,15 +54,8 @@ use crate::theme::{self, metrics};
 
 /// `.checkout-root-field`'s gap between its label block, note, buttons and outcome line.
 const FIELD_GAP: f32 = 8.;
-/// `.checkout-root-label`'s gap between the label's words and the field.
-const LABEL_GAP: f32 = 6.;
-/// `.checkout-root-label input`'s `min-height`.
-const FOLDER_HEIGHT: f32 = 36.;
 /// The post-clone box's starting rows, the old `<textarea rows="4">`.
 const COMMAND_ROWS: usize = 4;
-/// The note's and outcome lines' line: `line-height: 1.5` at 12 pixels (`.launch-composer-repository-note`,
-/// `.checkout-root-error`).
-const NOTE_LINE_HEIGHT: f32 = 18.;
 
 /// The old post-clone field's note.
 const COMMAND_NOTE: &str = "Runs in each new managed checkout, on its host, after cloning and before the agent starts. \
@@ -447,7 +440,7 @@ impl CheckoutField {
         div()
             .w_full()
             .text_size(metrics::TEXT_SM)
-            .line_height(px(NOTE_LINE_HEIGHT))
+            .line_height(px(choices::OUTCOME_LINE_HEIGHT))
             .text_color(color)
     }
 }
@@ -469,29 +462,11 @@ impl Render for CheckoutField {
         )
         .monospace();
         let input = match self.target {
-            Target::Folder(_) => input.height(px(FOLDER_HEIGHT)),
+            Target::Folder(_) => input.height(px(choices::FIELD_HEIGHT)),
             Target::PostClone => input,
         };
         // `.checkout-root-label`: the label's words over the field, as wide as the section.
-        let label = div()
-            .flex()
-            .flex_col()
-            .gap(px(LABEL_GAP))
-            .w_full()
-            .min_w_0()
-            .child(
-                div()
-                    .text_size(px(LABEL_TEXT))
-                    .line_height(px(LABEL_LINE_HEIGHT))
-                    .child(words.label),
-            )
-            // The selector is for tests, which click the field by where it is drawn; the field draws none of its own.
-            .child(
-                div()
-                    .w_full()
-                    .debug_selector(|| words.id.to_owned())
-                    .child(input),
-            );
+        let label = choices::labelled(words.label, words.id, input);
 
         // Retry in place of Save while the read has failed, as in the old field; Use default under Save where offered.
         let mut buttons = Vec::new();

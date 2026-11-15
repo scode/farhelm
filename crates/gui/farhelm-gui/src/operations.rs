@@ -262,6 +262,8 @@ enum Key {
     /// A host's trash, by the host's registry id: apart from the host's own key, so a trash delete never blocks the
     /// host's other operations (SPEC.md: "Trash deletes do not block other actions").
     Trash(String),
+    /// A named credential of the helm's catalog, by its name, which the helm never changes after creation.
+    Credential(String),
 }
 
 impl OpKey {
@@ -322,6 +324,12 @@ impl OpKey {
     /// ([`Work::TrashDelete`]). Distinct from [`OpKey::host`], whose busy state is the host's registry operations'.
     pub fn trash(host: &str) -> OpKey {
         OpKey(Key::Trash(host.to_owned()))
+    }
+    /// A named credential of the helm's catalog, by its name: the key names the resource a save acts on (its creation,
+    /// the replacement of its secret, its deletion), one at a time, as a host's or a template's key does. A credential
+    /// not created yet takes the key of the name it is being created under, which the helm keeps unique across kinds.
+    pub fn credential(name: &str) -> OpKey {
+        OpKey(Key::Credential(name.to_owned()))
     }
 }
 

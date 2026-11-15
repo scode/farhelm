@@ -44,9 +44,9 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
 use gpui::{
-    AnyWindowHandle, App, Context, Div, ElementId, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Window, div, px,
+    AnyWindowHandle, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Window, div, px,
 };
 
 use super::Refused;
@@ -56,18 +56,12 @@ use crate::components::{
     TextInputState, Tier,
 };
 use crate::drafts::{self, Draft};
-use crate::host_text::{HostSentence, HostText};
+use crate::host_text::HostText;
 use crate::operations::{Command, OpKey, Outcome, Work};
-use crate::theme::{self, metrics};
+use crate::theme;
 
 /// `.host-settings-section`'s gap between the form's rows.
 const ROW_GAP: f32 = 14.;
-/// `.ntfy-settings .checkout-root-label`'s gap between a field's words and the field.
-const LABEL_GAP: f32 = 6.;
-/// `.checkout-root-label input`'s `min-height`.
-const FIELD_HEIGHT: f32 = 36.;
-/// `.checkout-root-error` and `.checkout-root-success`: `line-height: 1.5` at 12 pixels.
-const OUTCOME_LINE_HEIGHT: f32 = 18.;
 /// The form's name for [`Refused`]: its Save is the one control here whose press the key can refuse, and the line saying
 /// so is drawn under the id [`Refused::line`] makes of it, `ntfy-busy`.
 const REFUSED: &str = "ntfy";
@@ -477,25 +471,12 @@ impl NtfyAlerts {
         help: &'static str,
     ) -> Div {
         let input = TextInput::new(id, field.input(self), label, HoverHelp::tooltip(help))
-            .height(px(FIELD_HEIGHT));
+            .height(px(choices::FIELD_HEIGHT));
         let input = match field {
             Field::Server => input.monospace(),
             Field::Topic | Field::Token => input,
         };
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(LABEL_GAP))
-            .w_full()
-            .min_w_0()
-            .child(Self::label(label))
-            // The selector is for tests, which click the field by where it is drawn; Kit's field draws none.
-            .child(
-                div()
-                    .w_full()
-                    .debug_selector(move || id.to_owned())
-                    .child(input),
-            )
+        choices::labelled(label, id, input)
     }
 
     /// A field's or the switches' words, at the old labels' size.
@@ -534,18 +515,6 @@ impl NtfyAlerts {
                     }),
             )
     }
-
-    /// A line under the form: the danger ink for a failure, the quiet one for the rest.
-    fn outcome(id: impl Into<SharedString>, role: Role, color: gpui::Hsla) -> gpui::Stateful<Div> {
-        let id: SharedString = id.into();
-        div()
-            .id(ElementId::Name(id.clone()))
-            .debug_selector(move || id.to_string())
-            .role(role)
-            .text_size(metrics::TEXT_SM)
-            .line_height(px(OUTCOME_LINE_HEIGHT))
-            .text_color(color)
-    }
 }
 
 impl Render for NtfyAlerts {
@@ -553,12 +522,8 @@ impl Render for NtfyAlerts {
         let palette = theme::palette(cx);
         let form = self.form.value().clone();
         let weak = cx.weak_entity();
-        let failure = |id: SharedString, reason: &HostText| {
-            let sentence = HostSentence::new(ElementId::Name(id.clone())).host(reason);
-            Self::outcome(id, Role::Alert, theme::color(palette.danger))
-                .aria_label(sentence.accessible_name())
-                .child(sentence)
-        };
+        let failure =
+            |id: SharedString, reason: &HostText| choices::failure_outcome(id, reason, cx);
 
         let token_help = if form.clear {
             "The saved access token will be cleared when you save"
@@ -584,7 +549,7 @@ impl Render for NtfyAlerts {
         let priority = div()
             .flex()
             .flex_col()
-            .gap(px(LABEL_GAP))
+            .gap(px(choices::LABEL_GAP))
             .w_full()
             .min_w_0()
             .child(Self::label("Priority"))
@@ -666,13 +631,15 @@ impl Render for NtfyAlerts {
 
         let saving = self.form.is_saving();
         let tested = self.tested.as_ref().map(|tested| match tested {
-            Ok(()) => Self::outcome("ntfy-tested", Role::Status, theme::color(palette.fg_1))
-                .aria_label("Test alert sent")
-                .child("Test alert sent"),
+            Ok(()) => {
+                choices::outcome_line("ntfy-tested", Role::Status, theme::color(palette.fg_1))
+                    .aria_label("Test alert sent")
+                    .child("Test alert sent")
+            }
             Err(reason) => failure("ntfy-tested".into(), reason),
         });
         let saved = (self.saved && !saving && !self.form.is_touched()).then(|| {
-            Self::outcome("ntfy-saved", Role::Status, theme::color(palette.fg_1))
+            choices::outcome_line("ntfy-saved", Role::Status, theme::color(palette.fg_1))
                 .aria_label("ntfy alert settings saved")
                 .child("ntfy alert settings saved")
         });
@@ -755,7 +722,7 @@ impl Render for NtfyAlerts {
                 cx,
             ))
             .children((saving || self.testing).then(|| {
-                Self::outcome("ntfy-working", Role::Status, theme::color(palette.fg_0))
+                choices::outcome_line("ntfy-working", Role::Status, theme::color(palette.fg_0))
                     .aria_label("Working…")
                     .child("Working…")
             }))
