@@ -15,8 +15,16 @@
 //! click activates it, as a click on the old row did.
 //!
 //! Its constructor takes the label, hover help and role every control takes. The label is the accessible name, not
-//! drawn text: the row draws its own content, host text among it, which only host text may draw. Whether it is the
-//! selected row is its owner's to say ([`OptionRow::selected`]); it tells assistive technology through the row's own
+//! drawn text: the row draws its own content, host text among it, which only host text may draw.
+//!
+//! **The selected state.** Whether it is the selected row (the highlighted one, which Enter in the field would pick)
+//! is its owner's to say ([`OptionRow::selected`]). The row then draws the fill and the ink on it together, so no owner
+//! sets the text color that goes with the fill: the old rows (`.quick-switcher-row`, `.launcher-host-option` and the
+//! model list's `.launch-composer-listbox > button`) all set `color: var(--fg-0)` at rest (except the model list's last
+//! row, its show-all switch, which rested in `--fg-1`) and `var(--on-fill)` with the selection, and the row's content
+//! inherits that ink. Content that draws its own color keeps it, as in the old sheet, whose selected rules for such
+//! parts were rules of their own: a host's colored mark, the switcher's quieter columns (`--on-accent-dim`), its match
+//! marks. Their owners still pick those for the selected row. The row also tells assistive technology through its own
 //! selected state, since the row is the option.
 //!
 //! It paints the old row's box: a one-pixel edge, the small radius, 9 by 10 pixels of padding, transparent at rest
@@ -71,7 +79,8 @@ impl OptionRow {
         }
     }
 
-    /// Whether this is the selected row: drawn in the accent fill and reported selected.
+    /// Whether this is the selected row: drawn in the accent fill with the fill's ink as the content's text color, and
+    /// reported selected. See the module docs for which content keeps its own color.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
@@ -96,17 +105,19 @@ impl OptionRow {
 impl RenderOnce for OptionRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let (fill, edge, hover_fill) = if self.selected {
+        let (fill, edge, hover_fill, ink) = if self.selected {
             (
                 palette.accent_fill,
                 palette.accent_edge,
                 palette.accent_fill_hover,
+                palette.on_fill,
             )
         } else {
             (
                 theme::TRANSPARENT,
                 theme::TRANSPARENT,
                 palette.control_hover,
+                palette.fg_0,
             )
         };
         let row = div()
@@ -126,6 +137,7 @@ impl RenderOnce for OptionRow {
             .border_color(theme::color(edge))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(fill))
+            .text_color(theme::color(ink))
             .cursor_pointer()
             .hover(move |style| style.bg(theme::color(hover_fill)))
             // A press of any mouse button is this control's, though it takes no focus. Marked, it leaves focus on the
