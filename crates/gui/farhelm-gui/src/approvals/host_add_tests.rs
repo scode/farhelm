@@ -340,6 +340,27 @@ fn what_add_approves_is_shown_escaped(cx: &mut TestAppContext) {
     assert!(!approved.contains('\u{202e}'), "never raw: {approved}");
 }
 
+/// The card says why its Add host did not open, in words of its own for each reason, and nothing when there is nothing
+/// to say (the user moved on, the bar is paused, the request is gone). Why: the card shows exactly this sentence, and a
+/// reason that lost its words or took the other's would leave the user with no idea why the press did nothing.
+/// Specified: another dialog and another host change each give their own sentence, naming what to wait for; `Nothing`
+/// gives none.
+#[test]
+fn each_refused_open_says_why_in_its_own_words() {
+    let dialog = NotOpened::AnotherDialog
+        .reason()
+        .expect("another dialog says why");
+    let change = NotOpened::HostChangeInFlight
+        .reason()
+        .expect("a host change says why");
+    assert!(dialog.starts_with("Another dialog is open."), "{dialog}");
+    assert!(
+        change.starts_with("Another host change is still in progress."),
+        "{change}"
+    );
+    assert_eq!(NotOpened::Nothing.reason(), None);
+}
+
 /// SPEC.md: "an existing draft or another modal is kept". The old app queued the open behind the open dialog; this
 /// port refuses it with a reason (a recorded deviation), and a press during the answer bar's pause opens nothing, as
 /// it answers nothing. Specified: with another dialog open, the open reports [`NotOpened::AnotherDialog`] and that

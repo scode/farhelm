@@ -143,25 +143,6 @@ pub(super) fn pending(cx: &mut App) -> bool {
 /// The old app disabled Launch and New without a reason while its one page-wide operation token was held.
 pub(super) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to finish";
 
-/// Whether one of this window's host-registry changes is in flight in the operation store, which refuses Launch and a
-/// fresh New: the launcher's half of the exclusion, which the migration's orchestrator decided on 2026-11-14 is kept by
-/// each side refusing its own action while the other's work is in flight, rather than by the old app's shared token.
-/// (Add host's half, refusing itself while a launch is in flight, is the hosts work's.)
-///
-/// What counts is the operation store's own classification ([`Work::changes_host_registry`]): a host's probe and setup
-/// (a new host's, or a registered one's re-run), its removal and its Update. The orchestrator decided on 2026-11-14
-/// that the probe counts, which the old app left outside its token, and that a save of a registered host's settings
-/// does not, its destination and alias included: that window is one short save, so a launch does not wait for it (the
-/// hosts side is to refuse a destination change during a launch instead, in its own change). Suspend and Resume are
-/// not registry changes (SPEC.md), and nothing done to a session is.
-pub(super) fn host_change_in_flight(cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations
-            .read(cx)
-            .any_in_flight(Work::changes_host_registry)
-    })
-}
-
 /// Put `held` in the slot for the current UI session, or empty it, and notify: a surface drawing New's trigger reads
 /// [`super::entry::new_available`] while it draws, and redraws when the slot it read changes.
 fn hold(held: Option<Held>, cx: &mut App) {

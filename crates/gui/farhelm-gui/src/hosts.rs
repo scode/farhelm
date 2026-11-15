@@ -881,6 +881,25 @@ pub(crate) fn launch_in_flight(cx: &App) -> bool {
         .is_some_and(|operations| operations.read(cx).any_in_flight(Work::creates_a_session))
 }
 
+/// Whether a host-registry change is in flight anywhere in the operation store: what refuses the launcher's Launch and a
+/// fresh New, and the card's open of an agent's Add host. The other half of [`launch_in_flight`]'s exclusion, which the
+/// migration's orchestrator decided on 2026-11-14 is kept by each side refusing its own action while the other's work is
+/// in flight, rather than by the old app's shared token. `false` in an inert window.
+///
+/// What counts is the operation store's own classification ([`Work::changes_host_registry`]): a host's probe and setup
+/// (a new host's, or a registered one's re-run), its removal and its Update. The orchestrator decided on 2026-11-14
+/// that the probe counts, which the old app left outside its token, and that a save of a registered host's settings
+/// does not, its destination and alias included: that window is one short save, so a launch does not wait for it (a
+/// destination save refuses itself during a launch instead: [`settings::Field::waits_for_launches`]). Suspend and
+/// Resume are not registry changes (SPEC.md), and nothing done to a session is.
+pub(crate) fn host_change_in_flight(cx: &App) -> bool {
+    session::current_operations(cx).is_some_and(|operations| {
+        operations
+            .read(cx)
+            .any_in_flight(Work::changes_host_registry)
+    })
+}
+
 /// A host's identity mark in its row: its chosen shape and color at 12 pixels, a status named "Local" or "Remote" for
 /// assistive technology, with hover help saying what that means. It never gives way to a long name.
 fn identity_mark(host: &HostView, locality: Locality, palette: &Palette) -> AnyElement {

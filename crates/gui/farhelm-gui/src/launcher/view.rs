@@ -513,7 +513,7 @@ impl Launcher {
     /// said under it as not applicable), after the host's own reasons and before the draft's others, as the old
     /// launcher did: restarting then would quietly keep the session's old model while the field shows another.
     fn refusal(&self, cx: &App) -> Option<String> {
-        if launch::host_change_in_flight(cx) {
+        if crate::hosts::host_change_in_flight(cx) {
             return Some(launch::HOST_CHANGE_IN_FLIGHT.to_owned());
         }
         let hosts = self.hosts(cx);
