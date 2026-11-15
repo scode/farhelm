@@ -33,6 +33,10 @@
 //! - A refusal is reported where its subject is shown: [`Operations::failure`] keeps the helm's words until the next
 //!   operation on that key starts (SPEC.md, for sessions: "A failure or partial result appears on the source
 //!   session's row"). A partial result goes in the same place ([`Operations::note`]). Nothing here retries.
+//! - A refusal is more than words. Its completion gets a [`Refusal`]: the words, the reply's status and the helm-only
+//!   markers the reply carried ([`HelmMarker`]), so a feature tells a refusal it answers (a YOLO launch to confirm, a
+//!   host busy with another operation, a timeout whose work goes on) from one it only shows, without reading the
+//!   words, which can quote a supervisor. Only the words are kept on the key.
 //!
 //! A reset retires the store with its UI session ([`crate::session`]): every task, and with it every completion
 //! callback, is dropped, as are the recorded failures. A completion that was already on its way reaches nobody, and
@@ -54,6 +58,8 @@ use std::collections::HashMap;
 
 use farhelm_helm_client::{ApiPath, ChannelHandle, CommandError, Method, PathError};
 use farhelm_proto::DeleteGuard;
+/// Re-exported so a feature that branches on a refusal names its markers from the module that hands them over.
+pub use farhelm_proto::ui_channel::HelmMarker;
 use farhelm_proto::ui_channel::Reply;
 use gpui::{App, Context, Task};
 use serde::de::DeserializeOwned;
@@ -256,9 +262,34 @@ pub enum Outcome {
     /// a route whose result is not pushed (a recipe build) needs its own way to learn it. The body is the route's own
     /// reply (`{host_id, run_id}` for the host routes).
     Accepted(Option<Value>),
-    /// The helm refused, in its own words, which may quote host values (a supervisor's refusal names the title it
-    /// refused), so they are host text. A host timeout is a refusal too, though the work goes on behind it.
-    Refused(HostText),
+    /// The helm refused: every reply that is not a 2xx. A host timeout is a refusal too (504), though the work goes on
+    /// behind it, which a feature tells from the status ([`Refusal`]).
+    Refused(Refusal),
+}
+
+/// A refusal as its completion receives it: the words to show, and what a feature branches on beside them.
+///
+/// The words alone used to be all a refusal carried, which left a feature that must answer a refusal (ask the YOLO
+/// question, wait for a busy host, keep a launch's draft after a timeout) matching prose that the helm writes for
+/// people and that can quote a supervisor verbatim. The status and markers are the reply's own, unchanged; nothing
+/// here interprets them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    /// The helm's own words, which may quote host values (a supervisor's refusal names the title it refused), so they
+    /// are host text; or, when it sent none, which command got which status ([`Outcome`]'s classification).
+    pub words: HostText,
+    /// The reply's HTTP status: never a 2xx.
+    pub status: u16,
+    /// The helm-only markers the reply carried, in [`HelmMarker::ALL`]'s order: facts only the helm's own code
+    /// states, never a host's text. Usually empty.
+    pub markers: Vec<HelmMarker>,
+}
+
+impl Refusal {
+    /// Whether the reply carried `marker`.
+    pub fn has(&self, marker: HelmMarker) -> bool {
+        self.markers.contains(&marker)
+    }
 }
 
 impl Outcome {
@@ -270,7 +301,11 @@ impl Outcome {
         match reply.status {
             202 => Outcome::Accepted(reply.body),
             200..=299 => Outcome::Done(reply.body),
-            status => Outcome::Refused(refusal(reply.body, status, shown)),
+            status => Outcome::Refused(Refusal {
+                words: refusal_words(reply.body, status, shown),
+                status,
+                markers: reply.markers,
+            }),
         }
     }
 }
@@ -278,7 +313,7 @@ impl Outcome {
 /// The words of a refusal: the helm's own (a plain string, trimmed, or the JSON it sent), or, when it sent none, which
 /// command got which status, as the old app's `api::refusal_text` did. One wording for operations and for commands
 /// without a key ([`send`], [`read`]) alike.
-fn refusal(body: Option<Value>, status: u16, shown: &str) -> HostText {
+fn refusal_words(body: Option<Value>, status: u16, shown: &str) -> HostText {
     let words = match body {
         Some(Value::String(text)) => text.trim().to_owned(),
         Some(other) => other.to_string(),
@@ -341,7 +376,14 @@ pub fn send(
 }
 
 /// What the reply to the command shown as `shown` says, as [`send`] hands it on: the body of any 2xx, or the refusal
-/// in the store's words ([`refusal`]). Split from [`send`] so the wording is tested without a channel.
+/// in the store's words ([`refusal_words`]). Split from [`send`] so the wording is tested without a channel.
+///
+/// Words only, unlike an operation's [`Refusal`]: what fails here is not always a reply (a lost command, and for
+/// [`read`] a body that does not decode, have no status, so a status here would be made up), and the refusals a
+/// feature answers rather than shows (such as a YOLO launch to confirm, a busy host, an environment Delete nobody could
+/// ask, an uninstall plan to replace with removal, a stale connection, a create that never started) are refusals of
+/// work on a key, which settles through
+/// [`Operations::start`]. A keyless command whose caller must branch on a status or a marker is a change here.
 pub(crate) fn answer(
     result: Result<Reply, CommandError>,
     shown: &str,
@@ -350,7 +392,7 @@ pub(crate) fn answer(
     if (200..300).contains(&reply.status) {
         Ok(reply.body)
     } else {
-        Err(refusal(reply.body, reply.status, shown))
+        Err(refusal_words(reply.body, reply.status, shown))
     }
 }
 
@@ -544,12 +586,12 @@ impl Operations {
         self.in_flight.remove(key);
         cx.notify();
         let outcome = Outcome::from_reply(result.ok()?, shown);
-        if let Outcome::Refused(message) = &outcome {
+        if let Outcome::Refused(refusal) = &outcome {
             self.failures.insert(
                 key.clone(),
                 Failure {
                     work,
-                    message: message.clone(),
+                    message: refusal.words.clone(),
                 },
             );
         }

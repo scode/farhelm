@@ -71,6 +71,7 @@ impl Peer {
         self.send(ServerMessage::Reply(Reply {
             id,
             status: 200,
+            markers: Vec::new(),
             body: None,
         }));
     }
