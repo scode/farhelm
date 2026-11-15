@@ -1594,7 +1594,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let gate = Arc::new(RegistrySyncGate {
+            let gate = Arc::new(TestBoundaryGate {
                 reached: tokio::sync::Notify::new(),
                 release: tokio::sync::Notify::new(),
             });
@@ -1754,7 +1754,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let gate = Arc::new(RegistrySyncGate {
+            let gate = Arc::new(TestBoundaryGate {
                 reached: tokio::sync::Notify::new(),
                 release: tokio::sync::Notify::new(),
             });
@@ -2368,7 +2368,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let backend = FakeBackend::supervisor(root.path().to_path_buf());
         let service = service(&harness, backend, root.path());
-        let gate = Arc::new(service::RegistrySyncGate {
+        let gate = Arc::new(service::TestBoundaryGate {
             reached: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
         });
@@ -5246,6 +5246,115 @@ mod tests {
                 .unwrap();
         assert_eq!(progress["run_id"], run);
         assert_eq!(progress["status"], "completed");
+    }
+
+    // -----------------------------------------------------------------------------------------------------------------
+    // Removing a host the moment its run reads as ended
+    // -----------------------------------------------------------------------------------------------------------------
+
+    /// Spec: once a host's setup reads as ended, completed or failed, the
+    /// host's removal (`DELETE /api/hosts/{id}`) is accepted at once: the
+    /// route answers 200 and the row is gone, even while the run's task has
+    /// not yet finished after publishing that end.
+    ///
+    /// Why: removal refuses with a 409 ("busy with a setup, update or
+    /// uninstall") while a run holds the host's provisioning lock, and the
+    /// run task used to keep that lock until the task ended, a moment after
+    /// it published the end. A client that read "completed" and removed the
+    /// host right away could land in that moment and be refused for a run
+    /// that was over; the GPUI app's end-to-end smoke hit it on a loaded
+    /// build machine, and the command line or anyone else removing a host
+    /// right after setup could too. The run end gate parks the task right
+    /// after it published the end, which is the scheduler delay that opened
+    /// the gap, so the test sees the order and not a timing.
+    ///
+    /// The scripted provisioning backend carries the runs: one destination
+    /// completes, the other fails at the install step, so both of the run's
+    /// ways of ending are covered.
+    #[farhelm_testtrace::test]
+    async fn a_host_whose_setup_reads_as_ended_is_removed_at_once() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let scripted = root.path().join("scripted");
+        std::fs::create_dir(&scripted).unwrap();
+        std::fs::write(scripted.join("ENABLED"), "farhelm-e2e-provisioning-v1\n").unwrap();
+        std::fs::write(
+            scripted.join("config.json"),
+            serde_json::json!({
+                "default": {},
+                "targets": {"ssh:ends-failed.example": {"fail_action": "install-farhelm"}},
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            Arc::new(E2eProvisioningBackend::new(scripted.clone(), root.path()).unwrap()),
+            Arc::new(E2ePayloads(scripted.join("ENABLED"))),
+            layout(root.path()),
+            PathBuf::from("/test/farhelm"),
+        );
+        harness.state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        ));
+        let router = harness.router();
+
+        for (destination, ended) in [
+            ("ends-completed.example", RunStatus::Completed),
+            ("ends-failed.example", RunStatus::Failed),
+        ] {
+            let gate = Arc::new(service::TestBoundaryGate {
+                reached: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            });
+            *service.run_end_gate.lock().unwrap() = Some(Arc::clone(&gate));
+            let ProbeResponse::Provisionable { probe_id, .. } = service
+                .probe(new_entry_probe(destination, None))
+                .await
+                .unwrap()
+            else {
+                panic!("{destination}: the scripted backend offers a setup plan")
+            };
+            let accepted = service
+                .start_add(ProvisionRequest { probe_id })
+                .await
+                .unwrap();
+            let host = accepted.host_id;
+            tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+                .await
+                .unwrap_or_else(|_| panic!("{destination}: the run reached its end"));
+            let view = service.view(host).await.unwrap();
+            assert_eq!(
+                (view.run_id.as_deref(), view.status),
+                (Some(accepted.run_id.as_str()), ended),
+                "{destination}: test premise: this run's end is what a client reads"
+            );
+
+            let (status, text) = send(
+                &router,
+                axum::http::Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/hosts/{host}"))
+                    .header("host", "127.0.0.1:7433")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{destination}: {text}");
+            assert!(
+                harness
+                    .store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .all(|row| row.id != host),
+                "{destination}: the removal forgot the host"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------------------------------------------------

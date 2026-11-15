@@ -25,7 +25,7 @@ use super::plan::{
     OperationRefusal as _, PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan,
     ProvisioningTarget, ResolvedPath, UninstallFacts,
 };
-use crate::manager::{ConnectionManager, HostState, peer_text};
+use crate::manager::{ConnectionManager, HostState, ProvisionLockGuard, peer_text};
 use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
@@ -208,11 +208,17 @@ pub(crate) struct ProvisioningService {
     /// request that is registering a host after its row is saved and before
     /// its actor is reconciled.
     #[cfg(test)]
-    pub(super) registry_sync_gate: std::sync::Mutex<Option<Arc<RegistrySyncGate>>>,
+    pub(super) registry_sync_gate: std::sync::Mutex<Option<Arc<TestBoundaryGate>>>,
     /// Hold the next automatic attempt immediately before its admission lock,
     /// so a completed opt-out can be ordered before the final policy check.
     #[cfg(test)]
     pub(super) automatic_admission_gate: std::sync::Mutex<Option<AutomaticAdmissionHold>>,
+    /// Hold the next run's task once [`Self::end_run`] has published the
+    /// run's end, before the task goes on. It stands in for a scheduler that
+    /// parks the task right there, the gap in which a client could once read
+    /// a finished run while the run still held its host's provisioning lock.
+    #[cfg(test)]
+    pub(super) run_end_gate: std::sync::Mutex<Option<Arc<TestBoundaryGate>>>,
     /// Stands in for this helm's build in [`Self::helm_build`]: every test
     /// binary is a development build (`0.0.0-unreleased`), for which
     /// nothing is ever newer, so the downgrade refusal needs a release
@@ -221,14 +227,14 @@ pub(crate) struct ProvisioningService {
     pub(super) helm_build_override: std::sync::Mutex<Option<String>>,
 }
 
-/// A one-shot hold on a named test boundary. Registry reconciliation and
-/// automatic admission use independent instances so tests release only the
-/// operation whose lifetime they are proving.
+/// A one-shot hold on a named test boundary. Registry reconciliation,
+/// automatic admission and a run's end use independent instances so tests
+/// release only the operation whose lifetime they are proving.
 #[cfg(test)]
-pub(super) struct RegistrySyncGate {
-    /// Notified when registration reaches the reconcile.
+pub(super) struct TestBoundaryGate {
+    /// Notified when the operation reaches the boundary.
     pub(super) reached: tokio::sync::Notify,
-    /// Notified by the test to let the reconcile run.
+    /// Notified by the test to let the operation go on.
     pub(super) release: tokio::sync::Notify,
 }
 
@@ -237,7 +243,7 @@ pub(super) struct RegistrySyncGate {
 /// hold; an empty action list alone would leave detached admission unobserved.
 #[cfg(test)]
 pub(super) type AutomaticAdmissionHold = (
-    Arc<RegistrySyncGate>,
+    Arc<TestBoundaryGate>,
     Option<tokio::sync::oneshot::Sender<()>>,
 );
 
@@ -611,6 +617,8 @@ impl ProvisioningService {
             #[cfg(test)]
             automatic_admission_gate: std::sync::Mutex::new(None),
             #[cfg(test)]
+            run_end_gate: std::sync::Mutex::new(None),
+            #[cfg(test)]
             helm_build_override: std::sync::Mutex::new(None),
         }))
     }
@@ -642,6 +650,7 @@ impl ProvisioningService {
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
             registry_sync_gate: std::sync::Mutex::new(None),
             automatic_admission_gate: std::sync::Mutex::new(None),
+            run_end_gate: std::sync::Mutex::new(None),
             helm_build_override: std::sync::Mutex::new(None),
         })
     }
@@ -2178,12 +2187,15 @@ impl ProvisioningService {
         self.manager.events().bump();
         let service = Arc::clone(self);
         let task = tokio::spawn(async move {
-            let _host_write = host_write;
             let _slot = Arc::clone(&service.run_slots)
                 .acquire_owned()
                 .await
                 .expect("the provisioning semaphore is never closed");
-            service.revalidate_and_execute(host, pending).await;
+            // The run hands the lock back as it publishes its end
+            // (`Self::end_run`), not when this task ends.
+            service
+                .revalidate_and_execute(host, pending, host_write)
+                .await;
         });
         self.memory.lock().await.tasks.insert(host, task);
         Ok(RunAccepted {
@@ -2199,8 +2211,9 @@ impl ProvisioningService {
     ///
     /// The caller must already hold the host's provisioning lock. Two
     /// callers share this: the hosts panel's Remove, which takes that lock
-    /// itself and aborts any run task (there can be none while it holds the
-    /// lock, but a finished run's handle may remain), and UNINSTALL's last
+    /// itself and aborts any run task (a run that has already published its
+    /// end may still be finishing its task; aborting it then cuts off nothing
+    /// but its feed bump and slot release), and UNINSTALL's last
     /// step, which runs INSIDE the host's run and so already holds the lock
     /// and must not abort its own task. That is why Remove's own entry
     /// point cannot be reused from the run: it would wait for a lock its
@@ -2280,12 +2293,83 @@ impl ProvisioningService {
 
     /// Re-probe after confirmation but before the first mutation. ADD uses
     /// an answering supervisor as-is; UPDATE refuses a changed identity.
-    async fn revalidate_and_execute(&self, host: HostId, pending: PendingPlan) {
+    ///
+    /// `host_write` is the host's provisioning lock, held from acceptance
+    /// through every step; whichever path ends the run gives it up in
+    /// [`Self::end_run`].
+    async fn revalidate_and_execute(
+        &self,
+        host: HostId,
+        pending: PendingPlan,
+        host_write: ProvisionLockGuard,
+    ) {
         let preflight = self.revalidate(host, &pending).await;
         match preflight {
-            Ok(Revalidation::Execute) => self.execute(host, pending.plan).await,
-            Ok(Revalidation::UseAsIs(message)) => self.finish_use_as_is(host, message).await,
-            Err(error) => self.finish_preflight_failure(host, error.rendered()).await,
+            Ok(Revalidation::Execute) => self.execute(host, pending.plan, host_write).await,
+            Ok(Revalidation::UseAsIs(message)) => {
+                self.finish_use_as_is(host, message, host_write).await
+            }
+            Err(error) => {
+                self.finish_preflight_failure(host, error.rendered(), host_write)
+                    .await
+            }
+        }
+    }
+
+    /// Publish the end of `host`'s run and give up the run's hold on the
+    /// host, all in one critical section of provisioning memory.
+    ///
+    /// `publish` writes the run's final state into its progress view. In the
+    /// same section the busy marker goes, and so does `host_write`, the
+    /// host's provisioning lock. Removal refuses with a 409 while that lock
+    /// is held (see `crate::hosts::remove_host`), so the lock has to be free
+    /// before anyone can read or be told that the run ended: a client that
+    /// sees "completed" or "failed" and removes the host at once must not be
+    /// told the host is busy with a run that is over. The run task used to
+    /// keep the lock until the task itself ended, just after publishing, and
+    /// on a loaded machine the GPUI app's end-to-end smoke removed its host
+    /// in that gap often enough to fail.
+    ///
+    /// `host_write` is `None` for Tensorlake's add, which runs its inner plan
+    /// through [`Self::execute_actions`] and keeps the lock for its own task.
+    /// So the gap described above remains in two places there: a Tensorlake
+    /// host's setup that was not started for a session launch publishes its
+    /// end (completed, or failed at a step of its inner install plan) before
+    /// its task lets go of the lock; and should a session launch's setup take
+    /// the inner install plan instead of a prepared clone (a fresh launch
+    /// normally clones), that plan publishes "completed" before the launch
+    /// has created its session, while the launch still holds the lock. The
+    /// launch's own end and the add's own failure release the lock before
+    /// they publish.
+    async fn end_run(
+        &self,
+        host: HostId,
+        host_write: Option<ProvisionLockGuard>,
+        publish: impl FnOnce(&mut ProvisioningMemory),
+    ) {
+        let mut memory = self.memory.lock().await;
+        drop(host_write);
+        publish(&mut memory);
+        memory.busy.remove(&host);
+        drop(memory);
+        self.manager.events().bump();
+        #[cfg(test)]
+        self.hold_at_run_end().await;
+    }
+
+    /// Park on [`Self::run_end_gate`] when a test armed it; see that field.
+    /// Whichever run end comes first takes the gate: [`Self::end_run`], or a
+    /// session launch's end in Tensorlake's add.
+    #[cfg(test)]
+    async fn hold_at_run_end(&self) {
+        let gate = self
+            .run_end_gate
+            .lock()
+            .expect("run end gate mutex poisoned")
+            .take();
+        if let Some(gate) = gate {
+            gate.reached.notify_one();
+            gate.release.notified().await;
         }
     }
 
@@ -2611,19 +2695,23 @@ impl ProvisioningService {
         }
     }
 
-    async fn finish_use_as_is(&self, host: HostId, message: String) {
-        let mut memory = self.memory.lock().await;
-        if let Some(run) = memory.runs.get_mut(&host) {
-            run.status = RunStatus::Completed;
-            run.message = Some(message.clone());
-            for step in &mut run.steps {
-                step.status = StepStatus::Skipped;
-                step.message = Some(message.clone());
+    async fn finish_use_as_is(
+        &self,
+        host: HostId,
+        message: String,
+        host_write: ProvisionLockGuard,
+    ) {
+        self.end_run(host, Some(host_write), |memory| {
+            if let Some(run) = memory.runs.get_mut(&host) {
+                run.status = RunStatus::Completed;
+                run.message = Some(message.clone());
+                for step in &mut run.steps {
+                    step.status = StepStatus::Skipped;
+                    step.message = Some(message.clone());
+                }
             }
-        }
-        memory.busy.remove(&host);
-        drop(memory);
-        self.manager.events().bump();
+        })
+        .await;
     }
 
     /// Resolve a retained failed ADD when fresh discovery proves the install
@@ -2680,32 +2768,44 @@ impl ProvisioningService {
 
     /// Keep pre-execution refusals as failed progress with the same retry
     /// boundary as failures in a concrete installation action.
-    async fn finish_preflight_failure(&self, host: HostId, message: String) {
-        let mut memory = self.memory.lock().await;
-        if let Some(run) = memory.runs.get_mut(&host) {
-            run.status = RunStatus::Failed;
-            run.message = Some(message.clone());
-            if let Some(step) = run.steps.first_mut() {
-                step.status = StepStatus::Failed;
-                step.message = Some(message);
+    async fn finish_preflight_failure(
+        &self,
+        host: HostId,
+        message: String,
+        host_write: ProvisionLockGuard,
+    ) {
+        self.end_run(host, Some(host_write), |memory| {
+            if let Some(run) = memory.runs.get_mut(&host) {
+                run.status = RunStatus::Failed;
+                run.message = Some(message.clone());
+                if let Some(step) = run.steps.first_mut() {
+                    step.status = StepStatus::Failed;
+                    step.message = Some(message);
+                }
             }
-        }
-        self.remember_automatic_failure(&mut memory, host);
-        memory.busy.remove(&host);
-        drop(memory);
-        self.manager.events().bump();
+            self.remember_automatic_failure(memory, host);
+        })
+        .await;
     }
 
     /// Consume the plan in order, retaining every completed outcome and
     /// stopping at the first failure without rollback.
-    async fn execute(&self, host: HostId, plan: ProvisioningPlan) {
-        self.execute_actions(host, plan, 0).await;
+    async fn execute(&self, host: HostId, plan: ProvisioningPlan, host_write: ProvisionLockGuard) {
+        self.execute_actions(host, plan, 0, Some(host_write)).await;
     }
 
     /// Tensorlake setup discovers the inner plan after creation and splices
     /// its actions after the outer steps. Keep action execution and failure
     /// handling identical to ordinary SSH setup by carrying only an offset.
-    async fn execute_actions(&self, host: HostId, plan: ProvisioningPlan, offset: usize) {
+    /// `host_write` goes to [`Self::end_run`], `None` when the caller keeps
+    /// the host's provisioning lock past the plan.
+    async fn execute_actions(
+        &self,
+        host: HostId,
+        plan: ProvisioningPlan,
+        offset: usize,
+        host_write: Option<ProvisionLockGuard>,
+    ) {
         let prepared = match self.prepare_payloads(&plan).await {
             Ok(prepared) => prepared,
             Err((index, error)) => {
@@ -2715,6 +2815,7 @@ impl ProvisioningService {
                     offset + index,
                     &plan.actions[index],
                     error,
+                    host_write,
                 )
                 .await;
                 return;
@@ -2748,21 +2849,20 @@ impl ProvisioningService {
                     (StepStatus::Degraded, Some(message))
                 }
                 Err(error) => {
-                    self.fail_action(host, plan.operation, index, action, error)
+                    self.fail_action(host, plan.operation, index, action, error, host_write)
                         .await;
                     return;
                 }
             };
             self.set_step(host, index, status, message).await;
         }
-        let mut memory = self.memory.lock().await;
-        if let Some(run) = memory.runs.get_mut(&host) {
-            run.status = RunStatus::Completed;
-            run.message = (!warnings.is_empty()).then(|| warnings.join("; "));
-        }
-        memory.busy.remove(&host);
-        drop(memory);
-        self.manager.events().bump();
+        self.end_run(host, host_write, |memory| {
+            if let Some(run) = memory.runs.get_mut(&host) {
+                run.status = RunStatus::Completed;
+                run.message = (!warnings.is_empty()).then(|| warnings.join("; "));
+            }
+        })
+        .await;
     }
 
     /// Resolve and stage the plan's payload before the first plan action
@@ -2785,6 +2885,7 @@ impl ProvisioningService {
         index: usize,
         action: &ProvisioningAction,
         error: BackendFailure,
+        host_write: Option<ProvisionLockGuard>,
     ) {
         // The way to continue depends on the operation: a failed setup or
         // update reruns provisioning, a failed uninstall is chosen again.
@@ -2802,15 +2903,14 @@ impl ProvisioningService {
         );
         self.set_step(host, index, StepStatus::Failed, Some(message.clone()))
             .await;
-        let mut memory = self.memory.lock().await;
-        if let Some(run) = memory.runs.get_mut(&host) {
-            run.status = RunStatus::Failed;
-            run.message = Some(message);
-        }
-        self.remember_automatic_failure(&mut memory, host);
-        memory.busy.remove(&host);
-        drop(memory);
-        self.manager.events().bump();
+        self.end_run(host, host_write, |memory| {
+            if let Some(run) = memory.runs.get_mut(&host) {
+                run.status = RunStatus::Failed;
+                run.message = Some(message);
+            }
+            self.remember_automatic_failure(memory, host);
+        })
+        .await;
     }
 
     /// Dispatch one typed action. Attach is owned here because it joins the
