@@ -70,7 +70,7 @@ use crate::components::{
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
-use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
+use crate::layers::{self, Anchor, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::operations::OpKey;
 use crate::permission::words::{effort_label, permission_display};
 use crate::session_list::replace;
@@ -87,6 +87,12 @@ mod checkout;
 pub(super) use checkout::repository_choices as repository_choices_for_tests;
 mod choices;
 mod folder_check;
+mod folder_list;
+#[cfg(test)]
+pub(super) use folder_list::{
+    recent_folders as recent_folders_for_tests, tail_label as tail_label_for_tests,
+};
+mod history;
 mod host_picker;
 mod model_field;
 mod search;
@@ -441,6 +447,10 @@ pub(crate) struct Launcher {
     host_picker: host_picker::HostPicker,
     /// The folder check: what was last asked about the folder and what the answer found (`folder_check`).
     folder_check: folder_check::FolderCheck,
+    /// The folder field's dropdown of recent folders and resets (`folder_list`).
+    folder_list: folder_list::FolderList,
+    /// The chosen host's launch history, which the folder list offers again (`history`).
+    history: history::LaunchHistory,
     /// The managed-checkout destination's fields, suggestions and preview (`checkout`).
     checkout: checkout::CheckoutState,
     /// The host button's focus handle; leaving it closes the host list.
@@ -559,6 +569,19 @@ impl Launcher {
                 cx.notify();
             });
         });
+        // The folder field's dropdown opens while the field has focus (`folder_list`), deferred for the focus-phase
+        // reason given below for the model field.
+        let folder_handle = folder.focus_handle(cx);
+        let folder_focus = cx.on_focus(&folder_handle, window, |_, window, cx| {
+            cx.defer_in(window, |launcher, window, cx| {
+                launcher.folder_focused(window, cx)
+            });
+        });
+        let folder_blur = cx.on_blur(&folder_handle, window, |_, window, cx| {
+            cx.defer_in(window, |launcher, window, cx| {
+                launcher.folder_blurred(window, cx)
+            });
+        });
         let model_handle = model_input.focus_handle(cx);
         let model_events = model_input.subscribe(
             window,
@@ -607,15 +630,23 @@ impl Launcher {
             state.subscribe(window, cx, move |launcher: &mut Self, event, window, cx| {
                 match event {
                     TextInputEvent::Changed => {
+                        if matches!(which, Input::Folder) {
+                            launcher.folder_typed(window, cx);
+                        }
                         launcher.edited(which, input.text(cx).to_string(), cx)
                     }
                     // SPEC.md: "A held Enter never launches". A single-line field reports Submitted on every
                     // auto-repeat of Enter, and its `held` says which (buttons, the choices and the dialog's own
-                    // Enter already ignore a held key).
+                    // Enter already ignore a held key). In the folder field, Enter on a row an arrow highlighted takes
+                    // that row instead of launching (`folder_list`).
                     TextInputEvent::Submitted { held } => {
-                        if !held {
-                            launcher.press(window, cx);
+                        if held {
+                            return;
                         }
+                        if matches!(which, Input::Folder) && launcher.folder_enter(window, cx) {
+                            return;
+                        }
+                        launcher.press(window, cx);
                     }
                 }
             })
@@ -628,6 +659,8 @@ impl Launcher {
             host_blur,
             search_events,
             search_blur,
+            folder_focus,
+            folder_blur,
         ]);
         let repository = draft
             .checkout
@@ -655,6 +688,8 @@ impl Launcher {
             search_box: search::SearchBox::default(),
             host_picker: host_picker::HostPicker::default(),
             folder_check: folder_check::FolderCheck::default(),
+            folder_list: folder_list::FolderList::default(),
+            history: history::LaunchHistory::default(),
             checkout,
             host_focus,
             command,
@@ -1898,6 +1933,10 @@ impl Render for Launcher {
         // checkout's reads follow it the same way (`checkout`).
         self.follow_folder_check(cx);
         self.follow_checkout(window, cx);
+        // The launch history follows the chosen host's connection the same way (`history`), and the folder list notices
+        // a close the layer manager made on its own (`folder_list`).
+        self.follow_history(cx);
+        self.follow_folder_list(window, cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refusal = self.refusal(cx);
@@ -1922,17 +1961,31 @@ impl Render for Launcher {
                 )
                 .into_any_element()
         } else {
-            TextInput::new(
-                "launcher-folder",
-                &self.folder,
-                "Folder",
-                HoverHelp::tooltip(
-                    "Folder: an existing directory on the host, absolute or starting with ~",
-                ),
-            )
-            .monospace()
-            .invalid(self.folder_problem(cx).is_some())
-            .into_any_element()
+            // The folder list opens under the field (`folder_list`), as wide as it.
+            let anchor = Anchor::for_element("launcher-folder-anchor", window, cx).matching_width();
+            let tracker = anchor.track();
+            self.folder_list.anchor = Some(anchor.clone());
+            let on_arrow = weak.clone();
+            div()
+                .relative()
+                .child(
+                    TextInput::new(
+                        "launcher-folder",
+                        &self.folder,
+                        "Folder",
+                        HoverHelp::tooltip(
+                            "Folder: an existing directory on the host, absolute or starting with ~",
+                        ),
+                    )
+                    .monospace()
+                    .invalid(self.folder_problem(cx).is_some())
+                    .on_vertical(move |arrow, window, cx| {
+                        let _ = on_arrow
+                            .update(cx, |launcher, cx| launcher.folder_arrow(arrow, window, cx));
+                    }),
+                )
+                .child(tracker)
+                .into_any_element()
         };
         // An unnamed managed checkout's name field shows the `<repo>-N` it will get.
         let placeholder = self.checkout_name_placeholder(cx);
