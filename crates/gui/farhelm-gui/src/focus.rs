@@ -19,7 +19,7 @@
 //!   "things the user did not start never open over what they are doing" is kept. The three public moves a feature
 //!   makes after the user acted, [`choose_terminal`], [`focus_control`] and [`focus_in_layer`], take the mark of that
 //!   action for the same reason. A fourth, [`move_within_control`], needs none and is the component layer's alone: it
-//!   carries focus inside the control whose arrow key is being handled (a radio group, a tab strip).
+//!   carries focus inside the control whose arrow key is being handled (a radio group, for one).
 //! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where
 //!   focus rests" defines: the selected session's terminal, New when there are no sessions, a stopped session's card
 //!   when the selected session has stopped. The views that own those set it: [`set_home`] in general, and
@@ -41,13 +41,13 @@
 //!   of it ([`walk_through`]), and the layer manager closes it once focus has left it.
 //!   Inside the topmost layer, the app moves focus to another control of the layer (because of the user's action
 //!   there, a result that arrived later, or a question the prompt draws inline in the dialog opening and closing) only
-//!   through [`focus_in_layer`], and along a radio group or tab strip through [`move_within_control`].
+//!   through [`focus_in_layer`], and between the parts of one control through [`move_within_control`].
 //! - **The one move waiting for a frame.** A control the user's action makes appear (the launcher's flags field once
-//!   Custom is chosen, an inline question's starting answer) is not drawn while the action is handled, so
-//!   [`focus_in_layer`] keeps a move to it as the window's one pending move and makes it once a frame has drawn the
-//!   control inside the layer. The hook is the position record every control already draws ([`record_position`] and
-//!   [`track`]): when the pending target records itself while a frame is prepared, the coordinator queues the move with
-//!   `window.defer`, which GPUI runs once that frame is drawn and on screen, where the layer's containment can be read.
+//!   Custom is chosen, for one) is not drawn while the action is handled, so [`focus_in_layer`] keeps a move to it as
+//!   the window's one pending move and makes it once a frame has drawn the control inside the layer. The hook is the
+//!   position record every control already draws ([`record_position`] and [`track`]): when the pending target records
+//!   itself while a frame is prepared, the coordinator queues the move with `window.defer`, which GPUI runs once that
+//!   frame is drawn and on screen, where the layer's containment can be read.
 //!   Nothing polls, and area code never schedules a focus move on a frame itself. Any later focus move but the
 //!   coordinator's own recovery drops it (another move the app makes, Tab, a click that focuses a control, a layer
 //!   opening), and so do a layer that took focus closing with focus returned, and the user moving on since its mark.
@@ -90,9 +90,9 @@
 //!   update that shows it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A
 //!   move to another control of the open dialog goes through [`focus_in_layer`], which moves and scrolls only once a
 //!   frame has drawn the control, whether a result arrives later or the user's action there shows the control: the
-//!   launcher's Custom choice, for one, moves focus into the flags field it shows (SPEC.md), and an inline question's
-//!   starting answer is reached the same way. Nothing yet scrolls to a layer's start below the fold; SPEC.md's archive
-//!   global confirmation, whose actions are brought into view when it opens, will need it.
+//!   launcher's Custom choice, for one, moves focus into the flags field it shows (SPEC.md). Nothing yet scrolls to a
+//!   layer's start below the fold; SPEC.md's archive global confirmation, whose actions are brought into view when it
+//!   opens, will need it.
 //!
 //! NOTE: Agent approval cards (the layer manager's approval region, [`layers::install_approval_region`]) are the one
 //! place outside the topmost dialog where [`invariant_violation`] lets focus be while a dialog is open. Nothing else
@@ -545,12 +545,14 @@ pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Windo
     apply_and_reveal(Move::To(terminal), window, cx);
 }
 
-/// Move focus to the control `target` as the result of something the user did: the host rail's All taking focus after a
-/// filter clears, the session header returning focus on Escape, a moved row's menu button. It is [`choose_terminal`]'s
-/// rule without the home change: `chosen` is the mark taken when the user acted, and once they have moved on since, or
-/// while a layer that holds focus is open (focus never leaves the topmost dialog or menu for the page behind it; a
-/// popover that never takes focus does not count), it does nothing. Inside the open dialog, [`focus_in_layer`] is the
-/// move.
+/// Move focus to the control `target` on the page as the result of something the user did, at once or once a result
+/// arrives. Every focus move the app makes on the page because of the user's action goes through here, including one
+/// onto the control they acted on when the press itself focuses nothing (Hosts on macOS); a terminal they chose goes
+/// through [`choose_terminal`] instead. The host rail's All taking focus in place of a filter chip the user removed is
+/// one example. It is [`choose_terminal`]'s rule without the home change: `chosen` is the mark taken when the user
+/// acted, and once they have moved on since, or while a layer that holds focus is open (focus never leaves the topmost
+/// dialog or menu for the page behind it; a popover that never takes focus does not count), it does nothing. Inside the
+/// open dialog, [`focus_in_layer`] is the move.
 pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
     if state(window, cx).is_none()
         || has_moved_on(chosen, cx)
@@ -565,9 +567,9 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
 /// of something the user did there, and scroll it into view as after Tab; at once if a frame has drawn `target` there,
 /// or else after the first frame that does. Every move the app makes to another control of the open dialog or menu
 /// goes through here, whether it answers the user's action at once or a result that arrives later, and whether
-/// `target` was already drawn or the action makes it appear: choosing Custom in the launcher, for example, moves focus
-/// into the permission flags field that the same choice shows. The prompt moves focus this way into a question it draws
-/// inline in its owner's dialog, and back out when the question closes.
+/// `target` was already drawn or the action makes it appear, and whether the action opens or closes a question drawn
+/// inline in the dialog: choosing Custom in the launcher, for example, moves focus into the permission flags field that
+/// the same choice shows.
 ///
 /// [`focus_control`]'s rule for the topmost layer instead of the page: `chosen` is the mark taken when the user acted,
 /// and it does nothing once they have moved on since (a key press or a click), with no layer that holds focus open (the
@@ -678,10 +680,10 @@ fn apply_pending(window: &mut Window, cx: &mut App) {
 }
 
 /// Carry focus from `from` to `to`, two parts of one control, because the arrow key being handled on `from` moved the
-/// control's own position there: a radio group's arrows move the choice and focus together, as native radios do, and a
-/// tab strip's arrows move between its tabs. The component layer's controls are its only callers, and every move the
-/// app makes to another control goes through [`focus_in_layer`] or [`focus_control`]. `pub(crate)` keeps it out of
-/// other crates only: area code lives in this crate too, so the review gate is what holds the component-only rule.
+/// control's own position there: a radio group's arrows, for one, move the choice and focus together, as native radios
+/// do. Only the component layer's controls call it, and every move the app makes to another control goes through
+/// [`focus_in_layer`] or [`focus_control`]. `pub(crate)` keeps it out of other crates only: area code lives in this
+/// crate too, so the review gate is what holds the component-only rule.
 ///
 /// It moves nothing unless `from` holds focus, so it only ever carries focus along from where it is and never takes it
 /// from anywhere else; it needs no [`Mark`] of its own. Unlike [`focus_control`], it works inside a dialog. The caller
@@ -994,11 +996,10 @@ fn distance_squared(a: gpui::Point<Pixels>, b: gpui::Point<Pixels>) -> f32 {
 /// container's scroll state (`track_scroll`); keep it across frames (in the view, or in keyed element state), or the
 /// scroll position resets on every draw.
 ///
-/// For a container that scrolls vertically and draws all its content, such as a dialog's body or the sidebar's host
-/// list. Not for a virtualized list: it draws only the rows in view, so the row
-/// focus lands on next may have no position yet, and it keeps its own reveal. Regions may nest (a dialog's body inside
-/// its card): each one around the control scrolls as needed, innermost first. Style the container before wrapping it;
-/// the region adds no box of its own.
+/// For a container that scrolls vertically and draws all its content, such as a dialog's body. Not for a virtualized
+/// list: it draws only the rows in view, so the row focus lands on next may have no position yet, and it keeps its own
+/// reveal. Regions may nest (a dialog's body inside its card): each one around the control scrolls as needed, innermost
+/// first. Style the container before wrapping it; the region adds no box of its own.
 pub fn scroll_region<E>(container: E, handle: &ScrollHandle) -> ScrollRegion
 where
     E: StatefulInteractiveElement + IntoElement,

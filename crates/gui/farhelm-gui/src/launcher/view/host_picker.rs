@@ -449,8 +449,9 @@ impl Render for HostRows {
             let weak = self.launcher.clone();
             let picked = host.id;
             let selected = index == active;
-            // The highlighted row's words and mark take the fill's ink (`.launcher-host-option[aria-selected]`), so a
-            // host's own color never sits on the accent fill.
+            // The highlighted row gives its words the fill's ink, but the mark draws in the host's own color, so it
+            // takes that ink here (`.launcher-host-option[aria-selected="true"] .host-kind-icon`), and a host's color
+            // never sits on the accent fill.
             let mark = host_mark(host.icon, host.color, px(MARK), palette);
             let mark = if selected {
                 mark.text_color(theme::color(palette.on_fill))
@@ -464,11 +465,6 @@ impl Render for HostRows {
                 .min_w_0()
                 .child(mark)
                 .child(words);
-            let content = if selected {
-                content.text_color(theme::color(palette.on_fill))
-            } else {
-                content
-            };
             OptionRow::new(
                 id,
                 label,

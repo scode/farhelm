@@ -3,10 +3,11 @@
 //! These cover what a component promises beyond its looks (the goldens pin those): activation, the disabled state,
 //! hover help reaching the layer manager and leaving with its control, the dialog frame keeping its answers reachable,
 //! the text input's events, with the line breaks only the field that keeps them keeps, the arrows a field hands to its
-//! owner, the option row that never takes focus, the mark toggle that keeps its click from the control around it, and
-//! the select's list, keys and focus (with the focus coordinator's rule for a press on a dialog's empty space while a
-//! select's list is open). Each test opens its window through the shared harness ([`crate::test_support::open`]), and
-//! each step ends with its invariant checks (the focus coordinator's and the layer manager's rules).
+//! owner, the option row that never takes focus and draws its selection's fill with its ink, the mark toggle that keeps
+//! its click from the control around it, and the select's list, keys and focus (with the focus coordinator's rule for a
+//! press on a dialog's empty space while a select's list is open). Each test opens its window through the shared
+//! harness ([`crate::test_support::open`]), and each step ends with its invariant checks (the focus coordinator's and
+//! the layer manager's rules).
 //!
 //! Each component's tests live in a file named after the component's own file under `components/` (`button.rs` for
 //! `components/button.rs`, and so on), so a change to one control touches one test file rather than a file every
