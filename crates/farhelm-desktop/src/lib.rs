@@ -207,12 +207,15 @@ pub fn run() -> anyhow::Result<()> {
             }
         }),
         // The second-launch socket first, so no launch hands over to an app that is going away; then the helm, since
-        // only its stop takes time; then the frame change still pending, one small file.
+        // only its stop takes time; then the partial downloads' staging directories, which a hard exit would otherwise
+        // leave in Downloads for good (it closes admission first, so no new save starts in one);
+        // then the frame change still pending, one small file.
         on_quit: Box::new(move || {
             if SECOND_LAUNCH_FORWARDS {
                 second_launch::retire(&quit_socket);
             }
             helm_shutdown.request();
+            farhelm_helm::cleanup_native_downloads();
             if let Ok(mut frame) = quit_frame.try_borrow_mut() {
                 frame.flush();
             }

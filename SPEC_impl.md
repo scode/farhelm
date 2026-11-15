@@ -116,9 +116,10 @@ the lock could not classify, when the app could have removed its own downloads' 
 one such case. It describes cleanup that already exists; it is not a reason to choose a start-up sweep over cleanup on
 quit.
 
-The desktop event loop's `LoopDestroyed` hook closes native-download admission and removes this process's live staging
-directories before hard exit. Weak directory registrations preserve ordinary save cleanup; no transfer is awaited and
-completed files outside staging remain. Earlier-build, crash and force-quit leftovers are not reclaimed.
+The desktop app's quit handler (the bootstrap's `Host::on_quit`, which GPUI runs within its quit deadline) closes
+native-download admission and removes this process's live staging directories before hard exit. Weak directory
+registrations preserve ordinary save cleanup; no transfer is awaited and completed files outside staging remain.
+Earlier-build, crash and force-quit leftovers are not reclaimed.
 
 Approved start-up sweep: terminal hosts. The maintainer approved one start-up cleanup for terminal hosts, recorded with
 the terminal-host design as the user's decision "Approve startup reclaim": "at startup the supervisor shuts down any
