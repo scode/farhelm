@@ -141,7 +141,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
   lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
-- `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class)
+- `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class,
+  under a number and a name no other step uses)
 - The GPUI app's end-to-end smoke test from `.agents/validation.md` (`scripts/gui-e2e-smoke.py`, through the recorder),
   which needs what the harness's end-to-end run needs
 - The Linux app's lifecycle check from `.agents/validation.md` (`scripts/gui-lifecycle.py`, through the recorder), which

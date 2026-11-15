@@ -41,9 +41,10 @@ they share the one app run, and say how the one step that needs a start of its o
 
 - Steps run in name order, and unittest sorts names as strings, so a step is `test_<nn>_...` with a two-digit number
   after the last one taken (`test_10_` would sort before `test_1_`, since `0` sorts before `_`). `main` refuses to run
-  a step named otherwise, and refuses a `test_` function written anywhere but directly in `Smoke` (`stray_steps`), so
-  a module-level helper goes after the class, never between its steps. Two areas taking the same number is harmless,
-  since their steps share nothing.
+  a step named otherwise, and refuses a `test_` function written anywhere but directly in `Smoke`, so a module-level
+  helper goes after the class, never between its steps. It also refuses two steps sharing a number or a name
+  (`step_refusals` checks all three): two areas' steps meeting under one number in a merge would run in an order
+  neither chose, and of two with one name only the last runs. Whoever brings them together renames one.
 - Each area's steps seed and use sessions of their own (created through the helm's API with `gui_agent.helm_request`,
   under titles no other step uses; `gui_agent.seed_body` always titles its session `Fixture <n>`, so a body built with
   it gets its title overridden), set up the open session and focus their steps depend on rather than assume what an
@@ -1931,47 +1932,76 @@ sys.stdin.read()
 """
 
 
-def stray_steps(source: str) -> list[tuple[str, int]]:
-    """Every function named `test_...` in `source` that is not a direct method of the module-level `Smoke` class, as
-    its name and line, in line order: a step unittest will never run.
+def step_refusals(source: str) -> list[str]:
+    """Why the steps written in `source` would not all run, each once and in the order their numbers give, as one line
+    per problem; empty when every step is in place. `main` prints these and refuses to start.
 
-    A step that ends up anywhere else is skipped without a word, which is why this exists. A jj automatic merge once put
-    a module-level helper function between two areas' steps, so steps 52 and 53, which followed it, became unreachable
-    code inside that function, which every run from then on skipped with nothing saying so. The name check in `main`
-    cannot see that, since `getTestCaseNames` only lists what the class already has. The source is parsed, not
-    imported, so a stray step is found however deep it sits (in a function, at module level, or in another class) and
-    before anything starts.
+    Each area adds its steps to the one `Smoke` class, so merges and rebases keep bringing several areas' steps
+    together, and three shapes they can leave behind lose or reorder a step without a word:
+
+    - A function named `test_...` anywhere but directly in the module-level `Smoke` class is never collected. A jj
+      automatic merge once put a module-level helper function between two areas' steps, so steps 52 and 53, which
+      followed it, became unreachable code inside that function, which every run from then on skipped with nothing
+      saying so. Reported in line order.
+    - Two steps with the same name: Python keeps only the last definition, so the first never runs.
+    - Two steps with the same number: two areas took the number independently, and their steps run in whatever order
+      the rest of their names sort in. Refusing it makes the merge that brings them together surface the collision.
+
+    The name check in `main` cannot see the first two, since `getTestCaseNames` only lists what the class ends up with,
+    and it never compares numbers, so it misses the third.
+    The source is parsed, not imported, so a stray step is found however deep it sits (in a function, at module level,
+    or in another class) and before anything starts.
 
     A `test_` method under an `if` or `try` in the class body counts as stray too, although unittest would run it: no
     step needs that shape, and accepting it would make this check about what Python happens to bind rather than about
     where steps are written."""
     tree = ast.parse(source)
-    placed = {
-        id(member)
+    steps = [
+        member
         for node in tree.body
         if isinstance(node, ast.ClassDef) and node.name == "Smoke"
         for member in node.body
-        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    stray = [
-        (node.name, node.lineno)
+        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and member.name.startswith("test_")
+    ]
+    placed = {id(step) for step in steps}
+    stray = sorted(
+        (node.lineno, node.name)
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name.startswith("test_")
         and id(node) not in placed
-    ]
-    return sorted(stray, key=lambda found: found[1])
+    )
+    refusals = [f"{name} (line {line}) is not a method of Smoke, so it would never run" for line, name in stray]
+    # Grouped in class-body order (dicts keep insertion order), so each clash is reported where it first appears.
+    by_name: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    by_number: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for step in steps:
+        by_name.setdefault(step.name, []).append(step)
+        if numbered := re.match(r"test_(\d+)_", step.name):
+            by_number.setdefault(numbered[1], []).append(step)
+    for name, same in by_name.items():
+        if len(same) > 1:
+            lines = ", ".join(str(step.lineno) for step in same)
+            refusals.append(f"{name} is defined in Smoke more than once (lines {lines}), so only the last would run")
+    # A name defined twice is the clash above, not a number clash; it still lists every definition when another step
+    # shares its number.
+    for number, same in by_number.items():
+        if len({step.name for step in same}) > 1:
+            uses = ", ".join(f"{step.name} (line {step.lineno})" for step in same)
+            refusals.append(f"step {number} is used by more than one method of Smoke: {uses}")
+    return refusals
 
 
 def main(argv: list[str]) -> int:
     """Start the app, run the steps, stop the app; exit 0 only when every step passed and the run stopped cleanly."""
     global RUN
-    # First, before even the arguments: a step outside `Smoke` would be skipped without a word (`stray_steps` says how
-    # that happened once), so the run refuses rather than passing with fewer steps than the file holds.
-    stray = stray_steps(Path(__file__).read_text(encoding="utf-8"))
-    for name, line in stray:
-        print(f"gui-e2e-smoke: {name} (line {line}) is not a method of Smoke, so it would never run", file=sys.stderr)
-    if stray:
+    # First, before even the arguments: a step outside `Smoke`, or two sharing a name, would be skipped without a word,
+    # and two sharing a number would run in an order nobody chose (`step_refusals` says how), so the run refuses rather
+    # than passing with fewer steps than the file holds or with them out of order.
+    refusals = step_refusals(Path(__file__).read_text(encoding="utf-8"))
+    for refusal in refusals:
+        print(f"gui-e2e-smoke: {refusal}", file=sys.stderr)
+    if refusals:
         return 1
     # SIGTERM takes the same path as Ctrl-C, so the `finally` below stops the app run. Python's default SIGTERM ends the
     # process without running it, which left the compositor, the app, its helm and supervisor and the terminal hosts
