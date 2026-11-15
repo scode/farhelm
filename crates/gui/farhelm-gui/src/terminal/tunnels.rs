@@ -281,8 +281,8 @@ impl Tunnels {
 
     /// A tunnel command answered.
     fn settled(&mut self, outcome: Outcome, cx: &mut Context<Self>) {
-        if let Outcome::Refused(reason) = outcome {
-            self.notice = Some(reason);
+        if let Outcome::Refused(refusal) = outcome {
+            self.notice = Some(refusal.words);
         }
         self.revision += 1;
         self.read(cx);
@@ -322,8 +322,8 @@ fn allow_then_open(tunnels: WeakEntity<Tunnels>, url: String, cx: &mut App) {
         operations.start(&OpKey::preferences(), command, cx, move |settled, cx| {
             let outcome = settled.outcome.clone();
             let _ = tunnels.update(cx, |tunnels, cx| match outcome {
-                Outcome::Refused(reason) => {
-                    tunnels.notice = Some(reason);
+                Outcome::Refused(refusal) => {
+                    tunnels.notice = Some(refusal.words);
                     cx.notify();
                 }
                 Outcome::Done(_) | Outcome::Accepted(_) => tunnels.send_open(url, cx),

@@ -482,6 +482,7 @@ fn a_refused_or_lost_query_puts_the_answered_choice_back_with_one_line() {
     let refused = Reply {
         id: 0,
         status: 400,
+        markers: Vec::new(),
         body: Some(json!("unknown status \u{202E}x")),
     };
     // The lost row matches only the lead: the words after it are the helm client's, worded in another crate.

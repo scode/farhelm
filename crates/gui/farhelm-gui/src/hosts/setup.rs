@@ -245,7 +245,7 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     let new = matches!(offer.target, Target::New { .. });
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
-            let Outcome::Refused(reason) = &settled.outcome else {
+            let Outcome::Refused(refusal) = &settled.outcome else {
                 return;
             };
             let Target::New {
@@ -262,7 +262,7 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
                         let seed = add::Seed {
                             destination: destination.clone(),
                             alias: alias.clone(),
-                            problem: add::error_line().host(reason),
+                            problem: add::error_line().host(&refusal.words),
                         };
                         add::reopen(opener, &offer.mark, Some(seed), window, cx).is_some()
                     })
@@ -391,11 +391,11 @@ fn stop_asking(cx: &mut App) {
     };
     let started = operations.update(cx, |operations, cx| {
         operations.start(&OpKey::preferences(), command, cx, |settled, cx| {
-            if let Outcome::Refused(reason) = &settled.outcome {
+            if let Outcome::Refused(refusal) = &settled.outcome {
                 let store =
                     session::current_operations(cx).map(|operations| operations.entity_id());
                 show(cx, |lines| {
-                    lines.stop_asking = store.map(|store| (store, reason.clone()))
+                    lines.stop_asking = store.map(|store| (store, refusal.words.clone()))
                 });
             }
         })

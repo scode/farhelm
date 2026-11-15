@@ -23,7 +23,8 @@ use crate::drafts::{self, Draft, DraftInput};
 use crate::host_text::HostText;
 use crate::main_view::MainView;
 use crate::operations::{
-    self, Command, Failure, NotStarted, OpKey, Operations, Outcome, Settled, Work,
+    self, Command, Failure, HelmMarker, NotStarted, OpKey, Operations, Outcome, Refusal, Settled,
+    Work,
 };
 use crate::session::{self, Connection};
 use crate::test_support::{self, keys, meta, session_entry, sessions, started};
@@ -155,7 +156,11 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
 
     fake.reply(sent[0].id, 400, Some(json!("titles may not be empty ")));
     cx.run_until_parked();
-    let refused = Outcome::Refused(HostText::from_host("titles may not be empty"));
+    let refused = Outcome::Refused(Refusal {
+        words: HostText::from_host("titles may not be empty"),
+        status: 400,
+        markers: Vec::new(),
+    });
     let a_settled = Settled {
         outcome: refused.clone(),
         user_moved_on: false,
@@ -233,6 +238,84 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
             "POST /api/sessions/[session]/rename: 409"
         )),
         "a refusal with no words names the command, not the session's id"
+    );
+}
+
+/// A feature answers some refusals instead of showing them: the launcher asks its YOLO question on a 409 the helm
+/// marked for confirmation, and keeps a launch's draft on a 504 whose work goes on. Words alone cannot carry that (they
+/// are written for people and can quote a supervisor), and the store used to hand a completion nothing else. Specified:
+/// a refused operation's completion gets the reply's status and its helm markers, as sent, beside its words; the key
+/// records the words alone, as it always has; and a refusal without markers says so, so a 504 is told from a 409 by its
+/// status alone.
+#[gpui::test]
+fn a_refused_operation_keeps_its_status_and_markers_beside_its_words(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a", "b"], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    start(
+        &operations,
+        ("a", rename("a", "x")),
+        "marked",
+        &delivered,
+        cx,
+    )
+    .unwrap();
+    start(
+        &operations,
+        ("b", rename("b", "y")),
+        "timed out",
+        &delivered,
+        cx,
+    )
+    .unwrap();
+    cx.run_until_parked();
+    let sent = fake.commands();
+    assert_eq!(sent.len(), 2, "the premise: both commands reached the helm");
+
+    let markers = vec![HelmMarker::CreateUnaccepted, HelmMarker::YoloConfirmation];
+    fake.reply_marked(
+        sent[0].id,
+        409,
+        markers.clone(),
+        Some(json!("confirm YOLO")),
+    );
+    fake.reply(sent[1].id, 504, Some(json!("the host did not answer")));
+    cx.run_until_parked();
+
+    let marked = Refusal {
+        words: HostText::from_host("confirm YOLO"),
+        status: 409,
+        markers,
+    };
+    let timed_out = Refusal {
+        words: HostText::from_host("the host did not answer"),
+        status: 504,
+        markers: Vec::new(),
+    };
+    let outcomes: Vec<_> = delivered
+        .borrow()
+        .iter()
+        .map(|(label, settled)| (*label, settled.outcome.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            ("marked", Outcome::Refused(marked.clone())),
+            ("timed out", Outcome::Refused(timed_out.clone())),
+        ]
+    );
+    assert!(marked.has(HelmMarker::YoloConfirmation));
+    assert!(!timed_out.has(HelmMarker::YoloConfirmation));
+    let recorded = cx.update(|cx| {
+        operations
+            .read(cx)
+            .failure(&OpKey::session("a"))
+            .map(|failure| failure.message.clone())
+    });
+    assert_eq!(
+        recorded,
+        Some(HostText::from_host("confirm YOLO")),
+        "the key keeps the words"
     );
 }
 
@@ -713,11 +796,19 @@ fn work_on_a_host_and_a_template_keeps_its_own_busy_state_and_refusal(cx: &mut T
         vec![
             (
                 "save host",
-                Outcome::Refused(HostText::from_host("PUT /api/hosts/[host]: 409"))
+                Outcome::Refused(Refusal {
+                    words: HostText::from_host("PUT /api/hosts/[host]: 409"),
+                    status: 409,
+                    markers: Vec::new(),
+                })
             ),
             (
                 "save template",
-                Outcome::Refused(HostText::from_host("a template needs an agent"))
+                Outcome::Refused(Refusal {
+                    words: HostText::from_host("a template needs an agent"),
+                    status: 422,
+                    markers: Vec::new(),
+                })
             ),
             ("rename session", Outcome::Done(None)),
         ]
@@ -883,7 +974,12 @@ fn a_refused_save_keeps_the_draft_and_is_not_retried(cx: &mut TestAppContext) {
         );
         assert!(editor.title.is_touched() && !editor.title.is_saving());
         assert_eq!(editor.title.refusal(), Some(&words));
-        assert_eq!(editor.settled, vec![Outcome::Refused(words.clone())]);
+        let refused = Refusal {
+            words: words.clone(),
+            status: 400,
+            markers: Vec::new(),
+        };
+        assert_eq!(editor.settled, vec![Outcome::Refused(refused)]);
     });
     assert!(
         fake.commands().is_empty(),
@@ -1248,6 +1344,7 @@ fn a_keyless_sends_answer_is_its_body_and_its_refusal_is_worded_as_an_operations
         let reply = Ok(Reply {
             id: 0,
             status,
+            markers: Vec::new(),
             body,
         });
         operations::answer(reply, "PUT /api/x")
@@ -1415,6 +1512,7 @@ fn a_reads_answer_decodes_and_its_refusal_is_worded_as_an_operations() {
         let reply = Ok(Reply {
             id: 0,
             status,
+            markers: Vec::new(),
             body,
         });
         operations::decode::<Vec<String>>(operations::answer(reply, "GET /api/x"), "GET /api/x")

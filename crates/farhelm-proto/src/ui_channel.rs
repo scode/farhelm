@@ -12,6 +12,8 @@
 //! - The helm answers every command with exactly one [`ServerMessage::Reply`],
 //!   in the order the commands arrived, and pushes every change the command
 //!   caused BEFORE that reply. A GUI that sees "done" already shows the result.
+//!   A reply carries the routed response's status and body, and the helm-only
+//!   headers among its headers as [`HelmMarker`]s; no other header crosses.
 //! - State arrives as collections keyed by id: a [`ServerMessage::Snapshot`]
 //!   when the channel opens, then [`ServerMessage::Changes`] per collection,
 //!   each entry replaced whole. Every entry travels with its key
@@ -148,10 +150,105 @@ pub struct Reply {
     /// accepted long work: the watchdog is settled, the outcome arrives as
     /// pushed state, and success is not implied.
     pub status: u16,
+    /// The helm-only markers the routed response carried, in
+    /// [`HelmMarker::ALL`]'s order; empty for a reply the channel answered
+    /// itself and for one whose response set none.
+    ///
+    /// A refusal's words cannot tell the GUI what to do next: they are prose,
+    /// and they can quote a supervisor verbatim. The headers these come from
+    /// are what the helm's own code sets to say "ask for confirmation", "wait
+    /// and retry" and the like, so they travel beside the status rather than
+    /// being guessed from the body. Left out of the JSON when empty, and
+    /// absent decodes as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<HelmMarker>,
     /// The response body: its JSON when it was JSON, its text as a JSON
     /// string otherwise, absent when it was empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
+}
+
+/// A fact about a command's outcome that only the helm's own code can state:
+/// one of the machine-read response headers in [`crate::http`] that the helm
+/// sets from its typed refusals, never from a supervisor's or provider's text.
+///
+/// The UI channel relays every routed response's status and body, but a
+/// header has nowhere to go in a [`Reply`] unless it is named here. The helm
+/// sets these from the response's headers with one generic lookup over
+/// [`HelmMarker::ALL`], never per route, so a route that starts setting one of
+/// these headers reaches the GUI with no change to the channel.
+///
+/// Each marker is exactly one header with its one value
+/// ([`HelmMarker::header`]). A header carrying any other value is not the
+/// marker and is not carried. A new helm-only header gets a variant here, an
+/// arm in [`HelmMarker::header`] and an entry in [`HelmMarker::ALL`]; the
+/// last is what the helm iterates, so a variant missing from it is never set.
+///
+/// On the wire each is its snake_case name. Decoding is strict, like
+/// [`Collection`]'s: an unknown word does not decode. That is safe only
+/// because the desktop app attaches to the helm it embeds, never to another
+/// build (SPEC.md, "Non-goals for v1": a remote helm); a remote helm would need
+/// unknown markers ignored instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HelmMarker {
+    /// [`crate::http::PRECONDITION_HEADER`]: the request named a connection
+    /// the host is no longer on; re-read and ask again.
+    Precondition,
+    /// [`crate::http::CREATE_OUTCOME_HEADER`]: a failed create that provably
+    /// was never accepted. Its absence on a failed create means the create
+    /// may still happen.
+    CreateUnaccepted,
+    /// [`crate::http::YOLO_CONFIRMATION_HEADER`]: a YOLO launch on a host that
+    /// asks first; the launch may be sent again only after the user confirms.
+    YoloConfirmation,
+    /// [`crate::http::UNINSTALL_REMEDY_HEADER`]: an uninstall plan refused
+    /// because removing the host from the list is the safe next step.
+    RemoveHostInstead,
+    /// [`crate::http::HOST_BUSY_HEADER`]: refused only because another
+    /// operation still holds the host; waiting can clear it.
+    HostBusy,
+    /// [`crate::http::ENVIRONMENT_UNASKED_HEADER`]: an environment session
+    /// Delete on which nothing was decided, because the environment's own
+    /// Farhelm could not be asked.
+    EnvironmentUnasked,
+}
+
+impl HelmMarker {
+    /// Every marker, in the order a [`Reply`] lists them: what the helm
+    /// checks a response's headers against.
+    pub const ALL: [HelmMarker; 6] = [
+        HelmMarker::Precondition,
+        HelmMarker::CreateUnaccepted,
+        HelmMarker::YoloConfirmation,
+        HelmMarker::RemoveHostInstead,
+        HelmMarker::HostBusy,
+        HelmMarker::EnvironmentUnasked,
+    ];
+
+    /// The response header that states this marker, and the one value it
+    /// carries: `(name, value)`, both as [`crate::http`] spells them.
+    pub fn header(self) -> (&'static str, &'static str) {
+        use crate::http;
+        match self {
+            HelmMarker::Precondition => (http::PRECONDITION_HEADER, http::PRECONDITION_INCARNATION),
+            HelmMarker::CreateUnaccepted => (
+                http::CREATE_OUTCOME_HEADER,
+                http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
+            ),
+            HelmMarker::YoloConfirmation => (
+                http::YOLO_CONFIRMATION_HEADER,
+                http::YOLO_CONFIRMATION_REQUIRED,
+            ),
+            HelmMarker::RemoveHostInstead => {
+                (http::UNINSTALL_REMEDY_HEADER, http::UNINSTALL_REMEDY_REMOVE)
+            }
+            HelmMarker::HostBusy => (http::HOST_BUSY_HEADER, http::HOST_BUSY_OPERATION),
+            HelmMarker::EnvironmentUnasked => {
+                (http::ENVIRONMENT_UNASKED_HEADER, http::ENVIRONMENT_UNASKED)
+            }
+        }
+    }
 }
 
 /// The pushed collections, by name.
@@ -961,5 +1058,118 @@ mod tests {
                 "{foreign:?} is not a method"
             );
         }
+    }
+
+    /// Each marker stands for one helm header with one value, and the GUI
+    /// branches on the marker (the launcher asks its YOLO question on
+    /// [`HelmMarker::YoloConfirmation`]), so a marker paired with the wrong
+    /// header would make the GUI act on the wrong refusal or miss the right
+    /// one. Pins, in literal bytes as `crate::http`'s module docs ask, each
+    /// marker's header and value, its wire word, and that [`HelmMarker::ALL`]
+    /// lists every one of them once, in the order a reply carries them.
+    #[test]
+    fn each_marker_is_one_helm_header_and_value_with_its_own_wire_word() {
+        let expected = [
+            (
+                HelmMarker::Precondition,
+                "x-farhelm-precondition",
+                "incarnation",
+                "precondition",
+            ),
+            (
+                HelmMarker::CreateUnaccepted,
+                "x-farhelm-create-outcome",
+                "definitely-unaccepted",
+                "create_unaccepted",
+            ),
+            (
+                HelmMarker::YoloConfirmation,
+                "x-farhelm-yolo-confirmation",
+                "confirmation-required",
+                "yolo_confirmation",
+            ),
+            (
+                HelmMarker::RemoveHostInstead,
+                "x-farhelm-uninstall-remedy",
+                "remove-host",
+                "remove_host_instead",
+            ),
+            (
+                HelmMarker::HostBusy,
+                "x-farhelm-host-busy",
+                "operation-in-progress",
+                "host_busy",
+            ),
+            (
+                HelmMarker::EnvironmentUnasked,
+                "x-farhelm-environment-unasked",
+                "nothing-decided",
+                "environment_unasked",
+            ),
+        ];
+        assert_eq!(
+            HelmMarker::ALL.to_vec(),
+            expected
+                .iter()
+                .map(|(marker, ..)| *marker)
+                .collect::<Vec<_>>(),
+            "ALL lists every marker once, in reply order"
+        );
+        for (marker, name, value, word) in expected {
+            assert_eq!(marker.header(), (name, value), "{marker:?}");
+            let json = serde_json::Value::String(word.to_string());
+            assert_eq!(serde_json::to_value(marker).unwrap(), json);
+            assert_eq!(serde_json::from_value::<HelmMarker>(json).unwrap(), marker);
+        }
+    }
+
+    /// A reply's markers are additive on the wire: a reply that carries none
+    /// keeps the exact JSON it had before markers existed, and a reply
+    /// without the key decodes as carrying none, so the GUI reads every
+    /// marker-less reply the same way it always did. Pins both directions,
+    /// that markers present survive a round trip in order, and that the GUI's
+    /// decode of a whole channel frame (what the helm client reads off the
+    /// socket) hands them over, while a frame naming a marker this build does
+    /// not know fails to decode, as the strict policy the enum documents.
+    #[test]
+    fn a_replys_markers_are_left_out_when_empty_and_round_trip_when_present() {
+        let frame = r#"{"type":"reply","id":9,"status":409,"markers":["host_busy"],"body":"wait"}"#;
+        assert_eq!(
+            serde_json::from_str::<ServerMessage>(frame).unwrap(),
+            ServerMessage::Reply(Reply {
+                id: 9,
+                status: 409,
+                markers: vec![HelmMarker::HostBusy],
+                body: Some(serde_json::json!("wait")),
+            })
+        );
+
+        let bare = Reply {
+            id: 3,
+            status: 409,
+            markers: Vec::new(),
+            body: Some(serde_json::json!("busy")),
+        };
+        let json = serde_json::json!({ "id": 3, "status": 409, "body": "busy" });
+        assert_eq!(serde_json::to_value(&bare).unwrap(), json);
+        assert_eq!(serde_json::from_value::<Reply>(json).unwrap(), bare);
+
+        let marked = Reply {
+            markers: vec![HelmMarker::CreateUnaccepted, HelmMarker::YoloConfirmation],
+            ..bare
+        };
+        let json = serde_json::to_value(&marked).unwrap();
+        assert_eq!(
+            json["markers"],
+            serde_json::json!(["create_unaccepted", "yolo_confirmation"])
+        );
+        assert_eq!(serde_json::from_value::<Reply>(json).unwrap(), marked);
+
+        // Strict on purpose (`HelmMarker`'s docs): an unknown marker fails the whole frame rather than being dropped.
+        let unknown = r#"{"type":"reply","id":1,"status":409,"markers":["nope"]}"#;
+        assert!(
+            serde_json::from_str::<ServerMessage>(unknown).is_err(),
+            "an unknown marker does not decode"
+        );
     }
 }
