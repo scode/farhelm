@@ -27,7 +27,9 @@ run. A retained row keeps only the targets it uses. `screen_base` and `line` exp
 scrolling and selection. Clear anchors on `Damage::history_reset`, even when a rebuilt history happens to reuse their
 numbers. `selection_text` implements linear and column copy; selection gestures, word expansion, edge scrolling and
 clipboard policy outside OSC 52 belong to the UI. `display_text` strips bidi formatting controls for drawing; the stored
-and copied text stays unchanged.
+and copied text stays unchanged. `link_at` finds program hyperlinks and printed web addresses, and `path_link_at`
+printed file paths, which never take a hovered cell either of those owns. A link grants nothing: opening, and checking a
+file with the session's host, belong to the UI.
 
 ## Tests and fixtures
 
@@ -41,6 +43,8 @@ Run `cargo nextest run -p farhelm-grid-model` (or `cargo test -p farhelm-grid-mo
   `tests/fixtures/README.md`);
 - check link recognition and disclosure against an oracle generated from the old web client's own JavaScript
   (`tests/fixtures/links-oracle.json`, regenerated with `tools/generate-links.ts`);
+- check printed-path and `file://` recognition against the old web client's own unit test cases (`tests/paths.rs`, each
+  test naming the case it replaces);
 - check transitions, copy rules and a valid history append of more than 100,000 rows.
 
 Frame sequencing (rows waiting for their frame, damage, history shifts) is covered by the recorded streams and

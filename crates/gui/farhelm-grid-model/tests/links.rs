@@ -171,7 +171,7 @@ fn pinned_cell_links_and_label_join_oracle() {
             let line = question["line"].as_u64().unwrap();
             let actual: Vec<_> = model.row_links(line).iter().map(|link| {
                 let mut value = json!({
-                    "kind": match &link.kind { LinkKind::Osc { .. } => "osc", LinkKind::Text => "text" },
+                    "kind": match &link.kind { LinkKind::Osc { .. } => "osc", LinkKind::Text => "text", LinkKind::Path => "path" },
                     "uri": link.uri,
                     "ranges": link.ranges.iter().map(|range| json!({
                         "start": {"abs": range.start.line, "col": range.start.col},
