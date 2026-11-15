@@ -15,7 +15,6 @@ use farhelm_proto::ui_channel::CollectionState;
 use gpui::{DriverNode, Modifiers, Role, TestAppContext, VisualTestContext, px, size};
 
 use super::{BUTTON_ID, Item, items};
-use crate::actions::OpenSourceNotices;
 use crate::desktop::updates::{self, UpdaterHost};
 use crate::layers;
 use crate::session_list::tests::{listing, open_main, preferences, session};
@@ -361,6 +360,10 @@ fn check_for_updates_is_offered_only_with_an_updater_and_asks_it_to_check(cx: &m
 #[cfg(target_os = "linux")]
 #[gpui::test]
 fn open_source_notices_dispatches_the_app_menus_action_on_linux(cx: &mut TestAppContext) {
+    // Imported here, inside the Linux-only test that alone uses it: at the top of the file it is an unused import on
+    // macOS.
+    use crate::actions::OpenSourceNotices;
+
     let (_fake, cx) = open_main(cx, snapshot());
     let dispatched = Rc::new(Cell::new(0));
     let counted = dispatched.clone();
