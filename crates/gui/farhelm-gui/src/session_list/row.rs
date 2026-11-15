@@ -26,9 +26,13 @@
 //! Replace that has waited two seconds says so on a line under the row ([`super::replace`]). The refusal of the row's
 //! last request, or the notice its last success left, shows under the row for as long as [`super::outcome`] says.
 //!
+//! A session with notifications has a bell before its age, in the age track ([`crate::notices_bell`], which draws it
+//! and its list and keeps its press from the open control), so the track widens by the bell on that row only and its
+//! title gives way, as the old activity column did with the bell's slot in it.
+//!
 //! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
-//! start where they did in the old app. Compact rows, the managed checkout's form of the last line, the pin and the
-//! notification bell are not ported yet.
+//! start where they did in the old app. Compact rows, the managed checkout's form of the last line and the pin are not
+//! ported yet.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
@@ -134,7 +138,8 @@ impl Inks {
     }
 }
 
-/// Draw `session`'s row, its animations at the list's `steps`, and `menu`, its actions menu button, at its end. `focus`
+/// Draw `session`'s row, its animations at the list's `steps`, `menu`, its actions menu button, at its end, and `bell`,
+/// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `focus`
 /// is the row's own focus handle, which the list owns and registers with its list state: the row's item tracks it so it
 /// contains whichever of the row's controls holds focus, and never takes focus itself. `on_open` runs when the user
 /// activates the row.
@@ -148,6 +153,7 @@ pub(crate) fn row(
     selected: bool,
     steps: Steps,
     menu: AnyElement,
+    bell: Option<AnyElement>,
     focus: &FocusHandle,
     on_open: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
@@ -228,6 +234,7 @@ pub(crate) fn row(
         .child(row_marks::agent_track(&id, &marks))
         .child(age_track(
             &id,
+            bell,
             age::of(row.info.effective_activity(), steps.now),
             inks,
         ));
@@ -284,20 +291,29 @@ pub(crate) fn row(
 
 /// The first line's last track: the session's age in the row's secondary ink, right-aligned in a track at least
 /// [`age_min_width`] wide that never shrinks, with the full timestamp as its hover help. The track stays (empty) for a
-/// session with no age, so that row's title still ends where the others' do.
+/// session with no age, so that row's title still ends where the others' do. `bell`, the row's notification bell when
+/// it has one, goes first in the track, just before the age, where the old activity column reserved the bell's slot;
+/// the two are centred on one line.
 ///
 /// The age is a status mark, not a control: nothing to press, so no tab stop, and its press reaches the open control
 /// around it, which opens the row as a press anywhere else on it does. Its accessible name is the timestamp itself,
 /// since `2m` read aloud says little; its hover help is the same words, so it is not read twice. Like the old
 /// `.status-time`, it is drawn in the monospace face, so ages of the same length are the same width.
-fn age_track(row_id: &SharedString, age: Option<age::Age>, inks: Inks) -> impl IntoElement {
+fn age_track(
+    row_id: &SharedString,
+    bell: Option<AnyElement>,
+    age: Option<age::Age>,
+    inks: Inks,
+) -> impl IntoElement {
     div()
         .id(SharedString::from(format!("{row_id}{AGE_TRACK_ID_SUFFIX}")))
         .flex_none()
         .min_w(age_min_width())
         .flex()
         .flex_row()
+        .items_center()
         .justify_end()
+        .children(bell)
         .children(age.map(|age| {
             StatusMark::new(
                 format!("{row_id}{AGE_ID_SUFFIX}"),

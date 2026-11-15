@@ -17,6 +17,11 @@
 //! and so is the session list's order menu's ("Session list" over "Order and density, shared by every client"), so
 //! [`MenuHeader::app`] draws a title that is not host text; everything else about the look is shared.
 //!
+//! The session row's notification list is headed by a title alone ("Notifications"), drawn by [`MenuHeader::title`].
+//! The old list used the session menu's `.session-row-menu-header` and `.session-row-menu-title` classes without the
+//! shared `.menu-header` and `.menu-title` ones, so its header is a pixel shorter below the title (7 rather than 8) and
+//! its title bold rather than semibold; the title-only header keeps those two differences.
+//!
 //! NOTE: The old header carried hover help naming the full title and summary, for a header cut short by its line
 //! clamps. Neither row menu ported so far draws that help, and this component does not either.
 
@@ -36,11 +41,13 @@ const NAME_CHARS: usize = 64;
 /// `.menu-summary`'s size.
 const SUMMARY_TEXT: f32 = 11.;
 
-/// A menu's header: `title` over `summary`, both host text, or both the app's words (see the module docs).
+/// A menu's header: `title` over `summary`, both host text, or both the app's words, or the app's words for a title
+/// alone (see the module docs).
 #[derive(IntoElement)]
 pub struct MenuHeader {
     title: Title,
-    summary: HostSentence,
+    /// `None` for a header with a title alone ([`MenuHeader::title`]).
+    summary: Option<HostSentence>,
 }
 
 /// What a header's title is: a host value, drawn through the escaping element, or the app's own words.
@@ -55,7 +62,7 @@ impl MenuHeader {
     pub fn new(title: &HostText, summary: HostSentence) -> Self {
         MenuHeader {
             title: Title::Host(title.clone()),
-            summary,
+            summary: Some(summary),
         }
     }
 
@@ -65,7 +72,17 @@ impl MenuHeader {
     pub fn app(title: impl Into<SharedString>, summary: impl Into<SharedString>) -> Self {
         MenuHeader {
             title: Title::App(title.into()),
-            summary: HostSentence::new("menu-header-summary").text(summary),
+            summary: Some(HostSentence::new("menu-header-summary").text(summary)),
+        }
+    }
+
+    /// A header that is only a title in the app's own words, with no summary line: the session row's notification
+    /// list ("Notifications"). Drawn as the old list's header was, which differs from the others by a pixel of bottom
+    /// padding and a bold title (see the module docs).
+    pub fn title(title: impl Into<SharedString>) -> Self {
+        MenuHeader {
+            title: Title::App(title.into()),
+            summary: None,
         }
     }
 
@@ -92,6 +109,11 @@ impl MenuHeader {
 impl RenderOnce for MenuHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
+        // `.session-row-menu-header` alone, for a title-only header: 7 pixels under the title and a bold title.
+        let (pad_bottom, weight) = match self.summary {
+            Some(_) => (px(8.), FontWeight::SEMIBOLD),
+            None => (px(7.), FontWeight::BOLD),
+        };
         // `.menu-header`: the title and the summary 2 pixels apart, inside the old padding, above a hairline that sets
         // the commands off 4 pixels below.
         div()
@@ -100,7 +122,7 @@ impl RenderOnce for MenuHeader {
             .gap(px(2.))
             .min_w_0()
             .pt(px(6.))
-            .pb(px(8.))
+            .pb(pad_bottom)
             .px(px(11.))
             .mb(px(4.))
             .border_b_1()
@@ -111,17 +133,17 @@ impl RenderOnce for MenuHeader {
                     Title::App(title) => div().child(title),
                 }
                 .text_size(metrics::TEXT_SM)
-                .font_weight(FontWeight::SEMIBOLD)
+                .font_weight(weight)
                 .text_color(theme::color(palette.fg_0))
                 .line_clamp(3),
             )
-            .child(
+            .children(self.summary.map(|summary| {
                 div()
                     .text_size(px(SUMMARY_TEXT))
                     .text_color(theme::color(palette.fg_1))
                     .line_clamp(4)
-                    .child(self.summary),
-            )
+                    .child(summary)
+            }))
     }
 }
 
