@@ -1300,6 +1300,37 @@ fn a_growing_box_takes_line_breaks_keeps_tabs_and_lets_tab_move_on(cx: &mut Test
     assert_eq!(take(cx, next).0, "x", "Tab moved focus to the next field");
 }
 
+/// The masked field stands in for the old `type="password"` inputs (the ntfy access token): its owner must get the text
+/// as typed, or a save would send something else, while the window must not show it. Specified: "abc" typed into a
+/// plain field and "xyz" into a masked one each report three edits and hold what was typed; the painted frame shows
+/// "abc" (the premise that a field's text is painted at all) and nowhere "xyz".
+#[gpui::test]
+fn a_masked_input_holds_what_was_typed_and_paints_none_of_it(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("plain", TextInputState::new),
+            ("secret", TextInputState::new_masked),
+        ],
+    );
+    click(cx, "plain");
+    keys(cx, "a b c");
+    click(cx, "secret");
+    keys(cx, "x y z");
+    let edits = vec![TextInputEvent::Changed; 3];
+    assert_eq!(take(cx, &fields[0]), ("abc".into(), edits.clone()));
+    assert_eq!(take(cx, &fields[1]), ("xyz".into(), edits));
+    let painted: String = frame(cx)
+        .into_iter()
+        .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
+        .collect();
+    assert!(painted.contains("abc"), "the premise: {painted:?}");
+    assert!(
+        !painted.contains("xyz"),
+        "the secret is masked: {painted:?}"
+    );
+}
+
 /// SPEC.md's multi-line boxes have no resize corner any more (decided by the maintainer on 2026-11-13): they grow with
 /// their text up to a cap and then scroll, so a long prompt neither hides behind a fixed box nor pushes a dialog's
 /// answers off the window. Specified: the box starts at its rows; five lines make it taller; it is still growing one

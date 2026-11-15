@@ -1869,14 +1869,15 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts` and
-/// `settings-agent-trust`): focus on the section's first switch (on the dialog itself at Appearance, Terminal,
-/// Checkouts and Agent trust), naming on because the row stores no choice for it, and automatic remote-host updates
-/// turned on so the Hosts picture shows a switch in each state. Agent trust's reads of each agent's trust, sent as it
-/// opens, are answered at once with the trust off and the hint not dismissed, and Checkouts' reads as the reference
-/// stack had them: no default folder, no post-clone command, and a checkout kept ready; nothing else is answered. The
-/// opener is the scene's ring handle, which stands in for the gear. The fake and the connection are kept for the
-/// scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts`,
+/// `settings-agent-trust` and `settings-notifications`): focus on the section's first switch (on the dialog itself at
+/// Appearance, Terminal, Checkouts, Agent trust and Notifications), naming on because the row stores no choice for it,
+/// and automatic remote-host updates turned on so the Hosts picture shows a switch in each state. Agent trust's reads
+/// of each agent's trust, sent as it opens, are answered at once with the trust off and the hint not dismissed,
+/// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
+/// ready, and Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic,
+/// Default priority, no token); nothing else is answered. The opener is the scene's ring handle, which stands in for
+/// the gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -1920,6 +1921,12 @@ fn settings_scene(
                     "/api/checkout-root" => serde_json::json!({ "root": null }),
                     "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
                     "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
+                    "/api/ntfy-alerts" => {
+                        match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
+                            Ok(defaults) => defaults,
+                            Err(_) => continue,
+                        }
+                    }
                     _ => continue,
                 }
             };
@@ -2056,6 +2063,12 @@ fn settings_checkouts_setup(state: &SceneState, window: &mut Window, cx: &mut Ap
 /// dialog itself (`Section::first`), so no ring shows.
 fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::AgentTrust, window, cx);
+}
+
+/// Settings at Notifications, its ntfy alerts form over the helm's defaults, as in the reference but for the Sounds
+/// sub-heading above it, which is not built. Focus starts on the dialog itself (`Section::first`), so no ring shows.
+fn settings_notifications_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Notifications, window, cx);
 }
 
 /// The setup confirmation for the reference screens' plan (reference `host-add-setup-plan`), as a probe's plan opens it
@@ -2527,6 +2540,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_agent_trust_setup,
+    },
+    Scene {
+        name: "settings-notifications",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_notifications_setup,
     },
     Scene {
         name: "hosts-panel",
