@@ -721,7 +721,8 @@ the result itself. Some writes are not work on a key either: nothing draws them 
 for them (a remembered preference, the automatic seen mark, the session list's filter query). They go through the
 store's keyless send, which words a refusal the same way and hands the caller the reply's body or its refusal's words;
 the caller decides what, if anything, to show. The read helper is that send plus a decode. A reset drops the wait of a
-read or a keyless send like any other.
+read or a keyless send like any other. Where an area says that a start was refused because its key already has work in
+flight, it uses one shared wording (`NotStarted::BUSY_WORDS`) rather than a line of its own.
 
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
