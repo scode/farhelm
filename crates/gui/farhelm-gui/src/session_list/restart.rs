@@ -20,6 +20,7 @@
 //!   confirmations let a working agent go ahead unasked. The supervisor refuses a restart of a working agent without
 //!   that consent, so an agent that turned working after the click is refused rather than stopped unconfirmed (SPEC.md,
 //!   "Confirmed 2026-10-01").
+//! - **A host change comes first.** Restart waits for one ([`super::menu::launch_wait`]).
 //! - **A long wait says so, as Replace's does.** After two seconds the open session's header shows "Restarting on
 //!   <host>… <n> s" ([`super::outcome`]'s clock, shared with Replace's).
 //! - **A refusal stays on the session** as "Restart: <the helm's words>", in the operation store's slot for the session,
@@ -35,7 +36,7 @@ use farhelm_proto::{AgentKind, ReadinessWording, RestartOffer, SessionStatus};
 use gpui::{App, Window};
 use serde_json::json;
 
-use super::outcome;
+use super::{menu, outcome};
 use crate::components::{HoverHelp, Tier};
 use crate::operations::{Command, OpKey, Work};
 use crate::prompt::{Answer, Question};
@@ -260,8 +261,12 @@ pub(crate) fn command(session: &str, stop_if_running: bool) -> Result<Command, P
 }
 
 /// Send `key`'s Restart with `stop_if_running` through the operation store and start its wait's clock. A session that
-/// already has a request in flight sends nothing.
+/// already has a request in flight sends nothing, and nothing is sent while a host change is in flight
+/// ([`menu::refuse_for_host_change`]).
 pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
+    if menu::refuse_for_host_change(key, Work::Restart, cx) {
+        return;
+    }
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
