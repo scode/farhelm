@@ -542,19 +542,14 @@ impl Tunnels {
             start: start.clone(),
         });
         self.list = layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                start: Some(start),
-                anchor,
+            Popover::menu(view, cx.focus_handle(), anchor, start)
                 // The pill, not what held focus before: a click on the pill leaves it unfocused on macOS, and SPEC.md
                 // returns focus to the pill when Escape closes the list. Naming it also gives the list its place in the
                 // page's Tab order, right after the pill.
-                returns_to: focus::ReturnTo::Control(self.pill_focus.clone()),
+                .returns_to(focus::ReturnTo::Control(self.pill_focus.clone()))
                 // SPEC.md: "Tab follows its ordinary controls and leaving the list closes it without reclaiming
                 // focus", where a menu would hold Tab.
-                traps_tab: false,
-            },
+                .tab_through(),
             &mark,
             window,
             cx,

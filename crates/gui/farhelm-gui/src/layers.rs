@@ -524,8 +524,8 @@ pub struct Dialog {
 ///
 /// Build one through its presets, [`Popover::menu`] for a popover that takes focus and [`Popover::floating`] for one
 /// that never does, and change a default through a builder ([`Popover::returns_to`], [`Popover::tab_through`]). The
-/// fields stay public for the literals not yet moved onto the presets, but a new field gets its default in the presets
-/// rather than in every opener's file, so a struct literal is not the way to open one.
+/// fields are still public, but every opener uses the presets, so a new field gets its default in the presets rather
+/// than in every opener's file; a struct literal is not the way to open one.
 pub struct Popover {
     /// What the popover draws.
     pub view: AnyView,

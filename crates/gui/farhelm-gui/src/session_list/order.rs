@@ -283,19 +283,13 @@ impl SessionList {
             items,
         });
         let opened = layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                start: Some(start),
-                anchor,
+            // Tab stays inside the open menu (SPEC.md, "Keyboard focus": "Inside a dialog or menu, focus stays
+            // inside"), where the old sort menu closed on Tab; a parity deviation, since SPEC names Tab closing a
+            // menu only for the session view's caret menus.
+            Popover::menu(view, cx.focus_handle(), anchor, start)
                 // The title, not what held focus before: on macOS the click that opened the menu left the title
                 // unfocused, and the old menu returned focus to the title when it closed.
-                returns_to: focus::ReturnTo::Control(self.order_focus.clone()),
-                // Tab stays inside the open menu (SPEC.md, "Keyboard focus": "Inside a dialog or menu, focus stays
-                // inside"), where the old sort menu closed on Tab; a parity deviation, since SPEC names Tab closing a
-                // menu only for the session view's caret menus.
-                traps_tab: true,
-            },
+                .returns_to(focus::ReturnTo::Control(self.order_focus.clone())),
             &mark,
             window,
             cx,

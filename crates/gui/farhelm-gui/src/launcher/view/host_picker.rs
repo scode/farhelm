@@ -263,15 +263,7 @@ impl Launcher {
         let container = cx.focus_handle();
         let mark = Mark::take(cx);
         self.host_picker.layer = layers::open_popover(
-            Popover {
-                view: rows.into(),
-                container,
-                start: None,
-                anchor,
-                // A list that never takes focus returns none, so this is never used.
-                returns_to: focus::ReturnTo::Opener,
-                traps_tab: true,
-            },
+            Popover::floating(rows, container, anchor),
             &mark,
             window,
             cx,
