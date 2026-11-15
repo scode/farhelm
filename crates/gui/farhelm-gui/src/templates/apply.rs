@@ -26,10 +26,13 @@
 //! opening generation, modal snapshots, a queue that waited for template reads) is gone: templates come from the
 //! store, and a batch is applied synchronously.
 //!
-//! Not here yet: GitHub repository destinations, which the launcher cannot hold until its managed checkouts land (a
-//! template naming one is refused meanwhile, with a sentence that says so), and environment placements (recipe and
-//! place), which wait for the launcher's environments work; until then no recipe is known, so the shared fold refuses
-//! a template that names one.
+//! A destination is a folder or a GitHub repository for a managed checkout: a template's repository is chosen through
+//! [`LaunchDraft::choose_repository`], as picking it from the repository field's suggestions does, and the snapshot
+//! reports the chosen repository as the destination (typed repository text that names no chosen repository is no
+//! destination, as in the old app).
+//!
+//! Not here yet: environment placements (recipe and place), which wait for the launcher's environments work; until
+//! then no recipe is known, so the shared fold refuses a template that names one.
 
 use std::collections::BTreeMap;
 
@@ -39,10 +42,11 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use farhelm_proto::{
-    LaunchHarness, LaunchPermission, split_permission_flags, split_wrapper_prefix,
+    GithubRepo, LaunchHarness, LaunchPermission, RepoError, parse_github_repo,
+    split_permission_flags, split_wrapper_prefix,
 };
 
-use crate::launcher::draft::{Catalog, Escalation, Field, LaunchDraft, Mode, Tab};
+use crate::launcher::draft::{Catalog, Escalation, Field, LaunchDraft, Mode, Tab, repo_identifier};
 
 /// What templates are applied against besides the draft itself, as the launcher reads it from the store when the
 /// batch arrives.
@@ -76,7 +80,13 @@ pub fn install_identity(host: &HostView) -> Option<&str> {
 }
 
 /// The launcher as the shared template rules read it: the active tab's kind, both tabs' fields, the host by its install
-/// identity, the folder and the session name with the kind a template gave it.
+/// identity, the destination (the folder, or the chosen repository of a managed checkout, or none while the repository
+/// field holds only typed text), and the session name with the kind a template gave it.
+///
+/// The name is the one a template saves, and a template's base name is its unnumbered original text, never the
+/// numbered name a managed checkout resolves it to (SPEC.md, "Launch templates": "A template base is saved as its
+/// original text, never the numbered name displayed by the launcher"). Save as template and the held-value checks
+/// rely on that; see the comment where it is read.
 ///
 /// Text that does not parse (custom flags or a wrapper prefix being typed) is left out rather than guessed at; the
 /// launcher refuses to launch with it anyway. The initial prompt is the one the launch would send, so a dormant prompt
@@ -117,8 +127,22 @@ pub fn snapshot(draft: &LaunchDraft, hosts: &[HostView]) -> LauncherState {
             .map(str::to_owned),
         recipe: None,
         target: None,
-        destination: Some(TemplateDestination::Folder(draft.folder.value().clone())),
-        name: Some(draft.name.value().clone()),
+        // While a checkout is chosen the folder is set aside, kept for choosing Folder again; it is not the
+        // destination. An unchosen repository query is an editor draft, not a reusable destination: saved, it would
+        // make the template fail whenever it is applied (the old `launcher_snapshot`).
+        destination: match &draft.checkout {
+            None => Some(TemplateDestination::Folder(draft.folder.value().clone())),
+            Some(checkout) => checkout
+                .repo
+                .as_ref()
+                .map(|repo| TemplateDestination::Github(repo_identifier(repo))),
+        },
+        // The name the session would get. Today that is the name as held, or, in a managed checkout, the name the
+        // checkout gets (an untouched copied Clone title dropped). Once the launcher numbers a template's base name in a
+        // checkout, `shown_name` will return the numbered name, and this must instead read the template's own
+        // unnumbered base, with its kind: SPEC.md, "A template base is saved as its original text, never the numbered
+        // name displayed by the launcher".
+        name: Some(draft.shown_name()),
         name_kind: draft.name_kind,
     }
 }
@@ -165,17 +189,29 @@ pub fn apply(
     // The draft right after the last template that changed the agent type, and whether that template chose the
     // permission itself.
     let mut last_switch: Option<(LaunchDraft, bool)> = None;
-    for (template, applied) in &cleaned {
+    for Cleaned {
+        template,
+        applied,
+        repository,
+    } in &cleaned
+    {
         let harness = draft.agent.harness;
-        replay(draft, &template.fields, applied, context, &mut notice);
+        replay(
+            draft,
+            &template.fields,
+            applied,
+            repository.as_ref(),
+            context,
+            &mut notice,
+        );
         if draft.agent.harness != harness {
             last_switch = Some((draft.clone(), template.fields.permissions.is_some()));
         }
     }
     // The fold's final prompt, including a dormant one it cleared because a template switched to an agent that cannot
     // take one (the old app's `apply_template_prompt`). There is no hand edit that clears a prompt as a side effect.
-    if let Some((_, last)) = cleaned.last() {
-        let prompt = last.prompt.clone().unwrap_or_default();
+    if let Some(last) = cleaned.last() {
+        let prompt = last.applied.prompt.clone().unwrap_or_default();
         if draft.prompt != prompt {
             draft.edit_prompt(prompt);
         }
@@ -193,14 +229,24 @@ pub fn apply(
     })
 }
 
+/// One template as [`check`] accepted it, for the replay.
+struct Cleaned {
+    /// The template without the assignments the mode holds equal.
+    template: LaunchTemplate,
+    /// The fold's launcher state after it, which says what the draft cannot (which agent type a model goes to, whether
+    /// it is a custom id, the name's kind).
+    applied: LauncherState,
+    /// Its GitHub repository destination, parsed once here so the replay chooses exactly what was checked.
+    repository: Option<GithubRepo>,
+}
+
 /// The whole check, before anything changes: each template cleaned of the assignments the mode holds equal, then
-/// folded in order, paired with the launcher state after it. The replay needs those intermediate states for what the
-/// draft cannot tell it (which agent type a model goes to, whether it is a custom id, the name's kind).
+/// folded in order, with what the replay needs of it ([`Cleaned`]).
 fn check(
     draft: &LaunchDraft,
     templates: &[LaunchTemplate],
     context: &Context<'_>,
-) -> Result<Vec<(LaunchTemplate, LauncherState)>, String> {
+) -> Result<Vec<Cleaned>, String> {
     let held = snapshot(draft, context.hosts);
     let mut state = held.clone();
     // A partial template may name the agent type later in the same batch, so the fold starts with the prompt the
@@ -231,20 +277,45 @@ fn check(
         }
         state = apply_template(&state, &template, &fold_context)
             .map_err(|refusal| refusal.to_string())?;
-        if matches!(
-            template.fields.destination,
-            Some(TemplateDestination::Github(_))
-        ) {
-            return Err(TemplateRefusal {
-                template: template.name.clone(),
-                field: "destination",
-                reason: "is a GitHub checkout, which this launcher cannot open yet".to_owned(),
+        // A repository the shared fold accepts as text must still be one the launcher can choose; checked here, before
+        // the next template, so the first refusal in the batch is the one reported, in the old app's words.
+        let repository = match &template.fields.destination {
+            Some(TemplateDestination::Github(repo)) => {
+                Some(parse_github_repo(repo).map_err(|error| {
+                    TemplateRefusal {
+                        template: template.name.clone(),
+                        field: "destination",
+                        reason: format!(
+                            "{repo:?} is not a GitHub repository ({})",
+                            repository_refusal(&error)
+                        ),
+                    }
+                    .to_string()
+                })?)
             }
-            .to_string());
-        }
-        cleaned.push((template, state.clone()));
+            Some(TemplateDestination::Folder(_)) | None => None,
+        };
+        cleaned.push(Cleaned {
+            template,
+            applied: state.clone(),
+            repository,
+        });
     }
     Ok(cleaned)
+}
+
+/// Why `owner/repo` text is not a repository, in the old app's two sentences (its `GithubRepo::parse` at reference
+/// commit `24bc0580`): text without a pair at all, or a pair the rules refuse (a URL, a branch suffix, a bad name).
+fn repository_refusal(error: &RepoError) -> &'static str {
+    match error {
+        RepoError::Empty | RepoError::MissingSeparator => "Enter a GitHub repository as owner/repo",
+        RepoError::ExtraSeparator
+        | RepoError::InvalidOwner
+        | RepoError::InvalidRepo
+        | RepoError::TooLong => {
+            "Enter a valid GitHub owner/repo pair without a URL or branch suffix"
+        }
+    }
 }
 
 /// Remove the assignments that repeat a value the mode holds fixed, so they apply as nothing (SPEC.md, "Restart
@@ -333,12 +404,14 @@ fn restart_refusal(draft: &LaunchDraft, template: &LaunchTemplate) -> Option<Tem
 
 /// Make one cleaned template's edits through the draft's hand-edit methods, in SPEC.md's order. `applied` is the
 /// fold's state after this template, which says what the draft alone cannot: which agent type a model belongs to,
-/// whether it is a custom id, and the name's kind. `notice` is [`Applied::notice`] so far: each edit that reports a
-/// notice replaces it, and choosing the default model clears it, as the launcher's view does for the same hand edits.
+/// whether it is a custom id, and the name's kind. `repository` is the template's repository destination as `check`
+/// parsed it. `notice` is [`Applied::notice`] so far: each edit that reports a notice replaces it, and choosing the
+/// default model clears it, as the launcher's view does for the same hand edits.
 fn replay(
     draft: &mut LaunchDraft,
     fields: &TemplateFields,
     applied: &LauncherState,
+    repository: Option<&GithubRepo>,
     context: &Context<'_>,
     notice: &mut Option<Option<String>>,
 ) {
@@ -454,7 +527,11 @@ fn replay(
     {
         draft.choose_host(host.id, (context.default_folder)(host.id));
     }
-    if let Some(TemplateDestination::Folder(folder)) = &fields.destination {
+    // A repository is chosen as the repository field's suggestion is, so the launcher's own effects follow (a new
+    // checkout preview among them).
+    if let Some(repo) = repository {
+        draft.choose_repository(repo.clone());
+    } else if let Some(TemplateDestination::Folder(folder)) = &fields.destination {
         draft.edit_folder(folder.clone());
     }
     if let Some(name) = &fields.name {
