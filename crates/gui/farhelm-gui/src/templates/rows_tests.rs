@@ -13,7 +13,10 @@ use farhelm_proto::launcher::{LaunchTemplate, TemplateDestination, TemplateField
 use farhelm_proto::ui_channel::{Availability, KeyedEntry, Preferences};
 use gpui::{TestAppContext, VisualTestContext};
 
-use super::dispatch_tests::{banner, creates, marked, note, push, templates, text, unseen, window};
+use super::dispatch_tests::{
+    banner, creates, marked, note, push, templates, text, unreadable, unseen, window,
+    window_without_preferences,
+};
 use super::rows::{self, template_query};
 use super::summary;
 use crate::launcher::view::BANNER_SHOWS_FOR;
@@ -245,6 +248,57 @@ fn the_quick_launch_row_names_the_mark_and_launches_or_opens_templates(cx: &mut 
     assert_eq!(creates(&mut helm, cx).len(), 1, "go launched");
     assert!(!any_open(cx), "unseen");
     assert!(unseen(cx));
+}
+
+/// The label's text while the bindings cannot be read is what the old row showed, its own copy of the preferences:
+/// the last mark it held, or "Mark a template" before they arrived. The row's action is the ⚡ chord's, which refuses
+/// then rather than launching the last template the store knew, or opening Templates to mark one that may be marked.
+/// Specified: over a helm that pushed no preferences, the label is "Quick launch: Mark a template" and the action opens
+/// New with "Not launched. Couldn't prepare quick launch: the shortcut bindings have not arrived yet".
+#[gpui::test]
+fn the_quick_launch_row_before_the_preferences_arrive_says_mark_a_template_and_refuses(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = window_without_preferences(cx);
+    assert_eq!(label(cx), "Quick launch: Mark a template");
+    cx.update(rows::quick_launch_from_switcher);
+    settle(cx);
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+    assert_eq!(
+        note(cx).as_deref(),
+        Some(
+            "Not launched. Couldn't prepare quick launch: the shortcut bindings have not arrived yet"
+        )
+    );
+}
+
+/// The Quick launch row's label, as the switcher will draw it.
+fn label(cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| {
+        rows::quick_launch_row_label(cx)
+            .accessible_name()
+            .to_string()
+    })
+}
+
+/// The mirror of the case above, once the helm has pushed a mark and then lost its preferences: the old row went on
+/// showing the mark its copy held. Specified: with ⚡ on `go` and then the preferences unavailable ("database is
+/// locked"), the label is still "Quick launch: go", and the action sends no create and opens New with "Not launched.
+/// Couldn't prepare quick launch: database is locked".
+#[gpui::test]
+fn the_quick_launch_row_keeps_the_last_mark_and_refuses_while_the_bindings_are_unreadable(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = window(cx, Some("go"));
+    push(&mut helm, cx, unreadable("database is locked"));
+    assert_eq!(label(cx), "Quick launch: go");
+    cx.update(rows::quick_launch_from_switcher);
+    settle(cx);
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+    assert_eq!(
+        note(cx).as_deref(),
+        Some("Not launched. Couldn't prepare quick launch: database is locked")
+    );
 }
 
 /// Pick the template named `name` in the switcher's templates section, as its handler will once the switcher has

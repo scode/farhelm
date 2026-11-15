@@ -39,7 +39,8 @@
 //! - **⚡ and the number keys.** Each row starts with its bolt and its number-key button ([`super::shortcuts`]). The
 //!   bolt marks or unmarks the template; the key button opens a menu of No shortcut and the ten keys, each saying which
 //!   template holds it. Both write the helm's shared preferences, one write at a time, and show what the store holds,
-//!   never what was just clicked. A refused write is said under the panes in the helm's words.
+//!   never what was just clicked. A refused write is said under the panes in the helm's words. While the helm's
+//!   preferences are unavailable, or before they have arrived, neither is sent and the same line says why.
 //!
 //! NOTE: The old list's Retry beside a failed read is not ported: the helm pushes its templates again whenever they
 //! change, so there is nothing for the dialog to ask for (recorded in the parity file).
@@ -163,6 +164,11 @@ pub struct TemplatesDialog {
     /// What this dialog last wrote to the preferences, so a refusal on that key is worded as the write it answers. A
     /// refusal there that some other dialog's write left (a Settings switch) is not this dialog's to show.
     last_write: Option<Write>,
+    /// A ⚡ or number-key write this dialog refused before sending, because the bindings could not be known, with the
+    /// reason ([`TemplatesDialog::bindings_for`]). Shown where a refused write is, in place of the helm's refusal of an
+    /// earlier write, since it answers the user's latest click; the next write the dialog sends, or one the editor
+    /// sends, clears it.
+    unread_refusal: Option<HostSentence>,
     /// "+ New template"'s focus handle: where focus starts, as the old dialog started it there.
     new_focus: FocusHandle,
     /// The open template, once a row or "+ New template" opened one.
@@ -231,6 +237,17 @@ impl Write {
             Write::Keys => "The number key was not saved: ",
         }
     }
+
+    /// The line a write refused before sending is shown with, before the reason the bindings could not be read: the
+    /// rename's "shortcut bindings could not be read" words, so the two refusals read alike.
+    fn unread(self) -> &'static str {
+        match self {
+            Write::Mark => {
+                "The quick-launch mark was not saved; shortcut bindings could not be read: "
+            }
+            Write::Keys => "The number key was not saved; shortcut bindings could not be read: ",
+        }
+    }
 }
 
 /// Open the Templates dialog, with `hint`'s line when a shortcut opened it rather than the Templates button. `returns_to`
@@ -283,6 +300,7 @@ fn open_dialog(
         key_anchors: HashMap::new(),
         key_menu: None,
         last_write: None,
+        unread_refusal: None,
         new_focus: new_focus.clone(),
         editor: None,
         catalog: None,
@@ -753,6 +771,7 @@ impl TemplatesDialog {
     /// does not word the editor's refusal as the list's.
     pub(super) fn forget_preference_write(&mut self) {
         self.last_write = None;
+        self.unread_refusal = None;
     }
 
     /// "+ New template": an empty new draft in the editor, with focus on its name field, once any unsaved edits are
@@ -1003,20 +1022,46 @@ impl TemplatesDialog {
     /// is in flight ([`TemplatesDialog::write`]). Visible to the tests, which call it as a click delivered in the same
     /// frame as a Delete press would.
     pub(super) fn toggle_mark(&mut self, name: &str, was_lit: bool, cx: &mut Context<Self>) {
-        let stored = Bindings::current(cx).marked;
-        if let Some(wanted) = shortcuts::mark_write(name, was_lit, stored.as_deref()) {
+        let Some(bindings) = self.bindings_for(Write::Mark, cx) else {
+            return;
+        };
+        if let Some(wanted) = shortcuts::mark_write(name, was_lit, bindings.marked.as_deref()) {
             self.write(Write::Mark, shortcuts::mark_command(wanted), cx);
         }
     }
 
     /// Give `name` the number key `key`, or none, from the map the store holds now, written whole.
     fn choose_key(&mut self, name: &str, key: Option<&str>, cx: &mut Context<Self>) {
-        let bindings = Bindings::current(cx);
+        let Some(bindings) = self.bindings_for(Write::Keys, cx) else {
+            return;
+        };
         let keys = bindings.keys_with(name, key);
         if keys == bindings.keys {
             return;
         }
         self.write(Write::Keys, shortcuts::keys_command(&keys), cx);
+    }
+
+    /// The bindings a ⚡ or key `write` is built from, or `None` when it must not be sent: while a write of the
+    /// dialog's is in flight ([`TemplatesDialog::write`] says why), and while the bindings cannot be known
+    /// ([`Bindings::read`]), when the refusal says why, as the old list refused a ⚡ or key edit whose fresh read of the
+    /// preferences failed. A key write is the whole map, so one built from bindings that never arrived would wipe
+    /// every other key; a mark write is one field, but the bolt the user clicked was drawn from the same unknown state,
+    /// so its intent is no surer.
+    fn bindings_for(&mut self, write: Write, cx: &mut Context<Self>) -> Option<Bindings> {
+        if self.writing(cx) {
+            return None;
+        }
+        match Bindings::read(cx) {
+            Ok(bindings) => Some(bindings),
+            Err(unread) => {
+                self.unread_refusal = Some(unread.appended_to(
+                    HostSentence::new("templates-write-refused").text(write.unread()),
+                ));
+                cx.notify();
+                None
+            }
+        }
     }
 
     /// Send a preference write as work on the preferences' key, unless any write of the dialog's is in flight. The
@@ -1041,6 +1086,7 @@ impl TemplatesDialog {
         match started {
             Ok(()) => {
                 self.last_write = Some(write);
+                self.unread_refusal = None;
                 cx.notify();
             }
             Err(not_started) => {
@@ -1229,6 +1275,8 @@ impl Render for TemplatesDialog {
             }
             None => (false, None),
         };
+        // A write refused before sending answers a later click than any write the helm refused.
+        let refused = self.unread_refusal.clone().or(refused);
         let busy = preferences_busy
             || self.restoring
             || self.editor.as_ref().is_some_and(Editor::is_writing);
@@ -1349,7 +1397,8 @@ impl Render for TemplatesDialog {
         }
         body = body.child(panes);
         if let Some(refused) = refused {
-            // A refused mark or key: the helm's words, under the panes, until the next preference write.
+            // A refused mark or key: the helm's words, or why the bindings could not be read, under the panes, until
+            // the next preference write.
             body = body.child(
                 div()
                     .debug_selector(|| "templates-write-refused".into())

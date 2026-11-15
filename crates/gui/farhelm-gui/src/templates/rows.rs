@@ -94,6 +94,10 @@ pub use super::dispatch::pick_from_switcher;
 /// The Quick launch row's label: "Quick launch: " and the marked template's name (host text, as stored, whether or not
 /// a template still has it), or "Mark a template" when none is marked, in the old words. The row draws the ⚡ chord
 /// beside it (`super::QUICK_LAUNCH_SHORTCUT_NAME`). Read from the store each time the row draws.
+///
+/// While the bindings cannot be known it says what the old row said: whatever the store last held, which is the last
+/// mark the helm pushed while its preferences are unavailable and "Mark a template" before they have arrived, as the
+/// old row showed its own copy of the preferences. Only the row's action refuses then ([`quick_launch_from_switcher`]).
 pub fn quick_launch_row_label(cx: &App) -> HostSentence {
     let sentence = HostSentence::new("quick-switcher-quick-launch").text("Quick launch: ");
     match Bindings::current(cx).marked {
@@ -104,8 +108,9 @@ pub fn quick_launch_row_label(cx: &App) -> HostSentence {
 
 /// The Quick launch row's action: the ⚡ chord's quick launch, from the switcher (SPEC.md: the row "uses the direct
 /// quick-launch path, or opens Templates to mark one"). It launches the marked template unseen, opens New when it needs
-/// more choices, or opens Templates with the ⚡ hint when no usable template holds the mark. Call it once the switcher
-/// has closed, from the handler of the user's pick, as for [`pick_from_switcher`].
+/// more choices, or opens Templates with the ⚡ hint when no usable template holds the mark; while the bindings cannot
+/// be known it opens New with the refusal, as the chord does. Call it once the switcher has closed, from the handler of
+/// the user's pick, as for [`pick_from_switcher`].
 pub fn quick_launch_from_switcher(window: &mut Window, cx: &mut App) {
     dispatch::dispatch(Origin::Switcher, &[Reference::Mark], window, cx);
 }

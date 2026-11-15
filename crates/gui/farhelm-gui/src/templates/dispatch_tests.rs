@@ -862,7 +862,7 @@ fn a_shortcut_refusal_shows_over_a_press_reason(cx: &mut TestAppContext) {
 
 /// SPEC.md: "In the session launcher, Enter instead applies the queued templates to the current draft without
 /// launching; each completed sequence is one refusal unit, and the pill says 'apply' instead of 'launch'", and an
-/// unbound key "shows a refusal beneath the search box without changing the draft". Specified: with New open and focus
+/// unbound key "shows a refusal above the search box without changing the draft". Specified: with New open and focus
 /// moved to the host button, the prefix arms the "Apply sequence:" pill;
 /// `partial` and Enter put its folder in the draft and send nothing; `zzz` and Enter show "No template matches"; the
 /// unbound key 9 and Enter show "No template is bound to key 9" and open no Templates.
@@ -1210,4 +1210,153 @@ fn a_press_waiting_for_the_catalog_is_dropped_when_save_as_template_opens(cx: &m
         !text(cx).contains("/srv/partial"),
         "and the waiting press did not apply"
     );
+}
+
+// ---- Bindings that cannot be read ------------------------------------------------------------------------------------
+
+/// The preferences collection as the helm pushes it when it cannot read them: unavailable, with `error` as its words,
+/// and no entries, so the store keeps the last preferences it had (stale, not cleared).
+pub(super) fn unreadable(error: &str) -> CollectionState {
+    CollectionState {
+        collection: Collection::Preferences,
+        meta: CollectionMeta {
+            availability: Availability::Unavailable {
+                error: error.into(),
+            },
+            ..meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY])
+        },
+        entries: Vec::new(),
+    }
+}
+
+/// A template shortcut press, as a test makes it: the ⚡ chord or one number key.
+type Press = fn(&mut VisualTestContext);
+
+/// The real main view over a fake helm that has pushed no preferences at all: the sessions, hosts and templates of
+/// [`window`], but no ⚡ mark or number keys, known or unknown. No preferences entry also keeps the Welcome card shut.
+pub(super) fn window_without_preferences(
+    cx: &mut TestAppContext,
+) -> (FakeHelm, &mut VisualTestContext) {
+    let (mut helm, _connection) = started(cx);
+    helm.connect(vec![
+        listing(&[], &[]),
+        fixture_hosts(&[0, 1]),
+        templates(Availability::Available),
+    ]);
+    cx.run_until_parked();
+    let (_, window) = test_support::open_view(cx, MainView::new);
+    settle(window);
+    (helm, window)
+}
+
+/// The old app read the preferences afresh for every press and refused when the read failed ("Couldn't prepare quick
+/// launch:" with its words). Acting on the bindings the store last held instead launches whatever they named before
+/// the helm lost them, and acting on none opens Templates to mark a template that may already be marked. Specified:
+/// with ⚡ and key 1 on `go` and then the preferences unavailable ("database is locked"), the chord and key 1 each
+/// send no create, open no Templates, and open New with "Not launched. Couldn't prepare quick launch: database is
+/// locked".
+#[gpui::test]
+fn unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(Some("go"), &[("1", "go")]));
+    push(&mut helm, cx, unreadable("database is locked"));
+    let presses: [(&str, Press); 2] = [("chord", chord), ("key 1", |cx| number_key(cx, 1))];
+    for (what, press) in presses {
+        assert!(!any_open(cx), "{what}: the premise: nothing is open");
+        press(cx);
+        assert!(
+            creates(&mut helm, cx).is_empty(),
+            "{what}: nothing launched"
+        );
+        assert_eq!(
+            note(cx).as_deref(),
+            Some("Not launched. Couldn't prepare quick launch: database is locked"),
+            "{what}"
+        );
+        assert!(
+            !text(cx).contains("Mark a template with ⚡"),
+            "{what}: Templates did not open"
+        );
+        keys(cx, "escape");
+    }
+}
+
+/// Before the preferences have arrived the store holds no bindings, and an empty mark is no evidence that nothing is
+/// marked: opening Templates with the ⚡ hint would tell the user to mark a template that may hold ⚡ already.
+/// Specified: over a helm that pushed no preferences, the chord sends no create and opens New with "Not launched.
+/// Couldn't prepare quick launch: the shortcut bindings have not arrived yet", not Templates.
+#[gpui::test]
+fn bindings_that_never_arrived_refuse_the_chord_on_the_page(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_without_preferences(cx);
+    chord(cx);
+    assert!(creates(&mut helm, cx).is_empty(), "nothing launched");
+    assert_eq!(
+        note(cx).as_deref(),
+        Some(
+            "Not launched. Couldn't prepare quick launch: the shortcut bindings have not arrived yet"
+        )
+    );
+    assert!(
+        !text(cx).contains("Mark a template with ⚡"),
+        "Templates did not open"
+    );
+}
+
+/// In the open launcher a press with unknown bindings must change nothing, like any refused press there, and say why
+/// where the launcher says a shortcut's refusal; the old launcher said "Couldn't load templates:" with the failed
+/// read's words, since it read the preferences and the templates as one step. Specified: with ⚡ and key 1 on
+/// `partial` and then the preferences unavailable ("database is locked"), the chord and key 1, each in a New of its
+/// own that says nothing when it opens, show "Couldn't load templates: database is locked", leave the draft without
+/// `partial`'s folder, and send nothing.
+#[gpui::test]
+fn unreadable_bindings_refuse_a_press_in_the_launcher(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(Some("partial"), &[("1", "partial")]));
+    push(&mut helm, cx, unreadable("database is locked"));
+    let presses: [(&str, Press); 2] = [("chord", chord), ("key 1", |cx| number_key(cx, 1))];
+    for (what, press) in presses {
+        // A fresh New for each press, so the note read below is this press's and not one an earlier press left.
+        open_new(&mut helm, cx);
+        press(cx);
+        assert_eq!(
+            note(cx).as_deref(),
+            Some("Couldn't load templates: database is locked"),
+            "{what}"
+        );
+        assert!(
+            !text(cx).contains("/srv/partial"),
+            "{what}: the draft is unchanged"
+        );
+        assert!(
+            creates(&mut helm, cx).is_empty(),
+            "{what}: nothing was launched"
+        );
+        assert!(any_open(cx), "{what}: the launcher stays open");
+        keys(cx, "escape");
+        assert!(!any_open(cx), "{what}: the premise: Escape closed New");
+    }
+}
+
+/// A sequence copies the bindings when its prefix is accepted, so a copy taken while they could not be read cannot say
+/// what its number keys and ⚡ name; resolving through it would call a bound key unbound. A sequence of words names its
+/// templates itself and reads no binding, so refusing it too would refuse more than the failure explains. Specified:
+/// with key 1 on `go` and then the preferences unavailable ("database is locked"), the prefix, 1 and Enter send no
+/// create and open New with "Not launched. Couldn't prepare quick launch: database is locked"; once that New is closed,
+/// the prefix, `go` and Enter send one create.
+#[gpui::test]
+fn a_sequence_on_unreadable_bindings_refuses_its_keys_but_not_its_words(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(None, &[("1", "go")]));
+    push(&mut helm, cx, unreadable("database is locked"));
+    keys(cx, &format!("{SEQUENCE_PREFIX_CHORD} 1 enter"));
+    assert!(creates(&mut helm, cx).is_empty(), "key 1: nothing launched");
+    assert_eq!(
+        note(cx).as_deref(),
+        Some("Not launched. Couldn't prepare quick launch: database is locked")
+    );
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the premise: New closed");
+
+    keys(cx, &format!("{SEQUENCE_PREFIX_CHORD} g o enter"));
+    assert_eq!(creates(&mut helm, cx).len(), 1, "`go` launched by its word");
 }

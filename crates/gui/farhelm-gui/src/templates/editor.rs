@@ -851,16 +851,19 @@ impl Editor {
         step: Step,
         cx: &mut Context<TemplatesDialog>,
     ) {
-        if step != Step::Delete
-            && let Some(error) = preferences_unavailable(cx)
-        {
-            self.status = Some(
-                said("The new name was saved, but shortcut bindings could not be read; the old template was kept: ")
-                    .host(&HostText::from_host(error)),
-            );
-            return;
-        }
-        let bindings = Bindings::current(cx);
+        // Without the bindings the rename cannot tell whether the old name holds ⚡ or a key, and moving on would delete
+        // the old name and with it its mark and key (the old dialog's "shortcut bindings could not be read").
+        let bindings = match Bindings::read(cx) {
+            Ok(bindings) => bindings,
+            // The deletion, the last step, reads no binding: the match below goes straight to it.
+            Err(_) if step == Step::Delete => Bindings::default(),
+            Err(unread) => {
+                self.status = Some(unread.appended_to(said(
+                    "The new name was saved, but shortcut bindings could not be read; the old template was kept: ",
+                )));
+                return;
+            }
+        };
         let renamed_keys = shortcuts::keys_renamed(&bindings.keys, &old, &new);
         let (key, command, step) = match step {
             Step::Mark if bindings.is_marked(&old) => (
@@ -1408,28 +1411,6 @@ fn make_input(
     Input {
         state,
         _events: events,
-    }
-}
-
-/// Why the shortcut bindings cannot be known, while the helm reports its preferences unavailable or before they have
-/// arrived: a rename then cannot tell whether the old name holds the ⚡ mark or a key, and stops before moving either
-/// (the old dialog's "shortcut bindings could not be read").
-fn preferences_unavailable(cx: &App) -> Option<String> {
-    // Preferences that have not arrived prove nothing about the bindings, as a missing template list proves nothing
-    // about the names (`stored_names`): moving on would delete the old name and with it its ⚡ mark and key.
-    const NOT_ARRIVED: &str = "the shortcut bindings have not arrived yet";
-    let Some(store) = session::current_store(cx) else {
-        return Some(NOT_ARRIVED.to_owned());
-    };
-    match store
-        .read(cx)
-        .collections()
-        .meta(Collection::Preferences)
-        .map(|meta| &meta.availability)
-    {
-        Some(Availability::Unavailable { error }) => Some(error.clone()),
-        Some(Availability::Available) => None,
-        None => Some(NOT_ARRIVED.to_owned()),
     }
 }
 

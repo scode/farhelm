@@ -29,7 +29,7 @@
 //! raw strings throughout; whatever draws them escapes them as host text.
 
 use super::Hint;
-use super::shortcuts::Bindings;
+use super::shortcuts::{Bindings, Unread};
 use super::summary::Part;
 
 /// The most candidates the list under the pill shows (SPEC.md: "at most five matching template names"). It caps only
@@ -92,6 +92,17 @@ pub enum Entry {
     /// completed spelling, still use the matching rules at Enter"), so a completed name is not an exact-name reference;
     /// the old app queued both the same way.
     Word(String),
+}
+
+impl Entry {
+    /// Whether resolving this entry reads the sequence's copy of the bindings, so it cannot be resolved while that copy
+    /// was taken from bindings that could not be known.
+    pub fn reads_bindings(&self) -> bool {
+        match self {
+            Entry::Number(_) | Entry::Mark => true,
+            Entry::Word(_) => false,
+        }
+    }
 }
 
 /// The state of one armed sequence, from the accepted prefix to Enter or cancellation. `None` in the caller means idle;
@@ -306,7 +317,7 @@ pub enum Outcome {
 ///
 /// Where it is shown depends on where the shortcut was pressed (SPEC.md). Outside the launcher, [`Refusal::hint`] says
 /// whether it opens Templates with a binding hint, and otherwise New opens showing [`Refusal::sentence`]. Inside the
-/// launcher nothing opens and [`Refusal::launcher_sentence`] is shown beneath search.
+/// launcher nothing opens and [`Refusal::launcher_sentence`] is shown above the search box.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// A typed or completed word matched no template.
@@ -322,9 +333,24 @@ pub enum Refusal {
     Missing(String),
     /// A number key or ⚡ was shown unbound: the first such reference in the queue.
     Unbound(Binding),
-    /// The helm reports it could not read its templates, in these words: nothing can be resolved. The sequence model
-    /// never finds this itself; the dispatcher refuses every shortcut with it while the store says so.
+    /// The helm reports it could not read its templates, or its preferences when a shortcut needs the bindings, in
+    /// these words, the helm's: nothing can be resolved. One refusal for both, because the old app read the two as one
+    /// step and refused a failed read of either with the same words. The sequence model never finds this itself; the
+    /// dispatcher and the armed sequence's Enter refuse with it while the store says so.
     Unavailable(String),
+    /// A shortcut needs the bindings and the helm has not pushed its preferences yet: [`Refusal::Unavailable`]'s
+    /// sentences ending in the app's own words ([`Unread::NOT_ARRIVED`]) rather than the helm's.
+    BindingsNotArrived,
+}
+
+impl From<Unread> for Refusal {
+    /// The refusal of a shortcut that needs the bindings while they cannot be known (`Bindings::read`).
+    fn from(unread: Unread) -> Refusal {
+        match unread {
+            Unread::Unavailable(error) => Refusal::Unavailable(error),
+            Unread::NotArrived => Refusal::BindingsNotArrived,
+        }
+    }
 }
 
 /// The unbound number key or ⚡ a refusal is about, and whether the sequence held it alone, which decides the
@@ -363,7 +389,8 @@ impl Refusal {
             Refusal::UnknownWord(_)
             | Refusal::AmbiguousWord { .. }
             | Refusal::Missing(_)
-            | Refusal::Unavailable(_) => None,
+            | Refusal::Unavailable(_)
+            | Refusal::BindingsNotArrived => None,
         }
     }
 
@@ -405,20 +432,28 @@ impl Refusal {
             Refusal::Unavailable(error) => {
                 vec![words("Couldn't prepare quick launch: "), host(error)]
             }
+            Refusal::BindingsNotArrived => vec![
+                words("Couldn't prepare quick launch: "),
+                words(Unread::NOT_ARRIVED),
+            ],
         }
     }
 
-    /// The refusal the launcher shows beneath search, in the old launcher's words (`list/view.rs`). Word refusals read
-    /// as they do outside it. An unbound key or ⚡ is named when the sequence was that reference alone. A key or ⚡ whose
-    /// captured template is gone always gets the sentence about the sequence, alone or not: the old app turned every
-    /// bound key in a sequence into its template's name before the launcher saw it, so only an unbound reference ever
-    /// reached the launcher's by-name wording, and saying "No template is marked ⚡" while ⚡ is still set would be
-    /// false. A failed template read is the old launcher's "Couldn't load templates:" with the helm's words.
+    /// The refusal the launcher shows above the search box, in the old launcher's words (`list/view.rs`). Word refusals
+    /// read as they do outside it. An unbound key or ⚡ is named when the sequence was that reference alone. A key or ⚡
+    /// whose captured template is gone always gets the sentence about the sequence, alone or not: the old app turned
+    /// every bound key in a sequence into its template's name before the launcher saw it, so only an unbound reference
+    /// ever reached the launcher's by-name wording, and saying "No template is marked ⚡" while ⚡ is still set would be
+    /// false. A failed template or binding read is the old launcher's "Couldn't load templates:" with its reason.
     pub fn launcher_sentence(&self) -> Vec<Part> {
         match self {
             Refusal::Unbound(binding) => unbound_sentence(binding),
             Refusal::Missing(_) => vec![words(SEQUENCE_UNBOUND_OR_MISSING)],
             Refusal::Unavailable(error) => vec![words("Couldn't load templates: "), host(error)],
+            Refusal::BindingsNotArrived => vec![
+                words("Couldn't load templates: "),
+                words(Unread::NOT_ARRIVED),
+            ],
             Refusal::UnknownWord(_) | Refusal::AmbiguousWord { .. } => self.sentence(),
         }
     }

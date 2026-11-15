@@ -15,6 +15,9 @@
 //!   first, can undo an agent's or the command line's binding change that lands between that read and its write").
 //!   The store is that re-read: it holds what the helm pushed last, and the channel delivers a change before the reply
 //!   of anything sent after it.
+//! - **Unknown bindings refuse.** While the helm reports its preferences unavailable, or before they have arrived,
+//!   nothing writes them or acts on them: the writes, the ⚡ chord and the number keys, a sequence's ⚡ and number keys,
+//!   and a rename's moves are refused with the reason ([`Bindings::read`]). Only drawing uses whatever the store holds.
 //!
 //! Nothing here is optimistic. The list shows what the store holds; a write in flight shows nothing until the helm
 //! pushes the result, which on the embedded helm is the same moment its reply arrives.
@@ -23,10 +26,11 @@ use std::collections::BTreeMap;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::launcher::{LaunchTemplate, quick_launch_eligible};
-use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
+use farhelm_proto::ui_channel::{Availability, Collection, PREFERENCES_KEY, Preferences};
 use gpui::App;
 use serde_json::Value;
 
+use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
 use crate::session;
 
@@ -44,7 +48,9 @@ pub struct Bindings {
 }
 
 impl Bindings {
-    /// The bindings the store holds, or none before the helm pushed its preferences.
+    /// The bindings the store holds, or none before the helm pushed its preferences: for drawing only. Anything that
+    /// acts on the bindings (a write, a press, a rename's moves) reads them through [`Bindings::read`], which says when
+    /// this answer is empty or stale.
     pub fn current(cx: &App) -> Bindings {
         session::current_store(cx)
             .and_then(|store| {
@@ -58,6 +64,29 @@ impl Bindings {
                     })
             })
             .unwrap_or_default()
+    }
+
+    /// The bindings the store holds, or why they cannot be known ([`Unread`]): the helm reports its preferences
+    /// unavailable, or they have not arrived. Whatever acts on the bindings, rather than only drawing
+    /// them, reads them through this, because [`Bindings::current`] is empty before the first push and the last pushed
+    /// value after a failed read, and either can look like a real answer. A ⚡ chord on empty bindings opens Templates
+    /// to mark a template that may already be marked; a number-key write built from them replaces the whole stored map;
+    /// a rename that sees no ⚡ deletes the old name and the mark with it. The old app read the preferences afresh for
+    /// each of these and refused on a failed read, with the read's words.
+    pub fn read(cx: &App) -> Result<Bindings, Unread> {
+        // Preferences that have not arrived prove nothing about the bindings, as a missing template list proves nothing
+        // about the names.
+        let store = session::current_store(cx).ok_or(Unread::NotArrived)?;
+        match store
+            .read(cx)
+            .collections()
+            .meta(Collection::Preferences)
+            .map(|meta| &meta.availability)
+        {
+            Some(Availability::Unavailable { error }) => Err(Unread::Unavailable(error.clone())),
+            Some(Availability::Available) => Ok(Bindings::current(cx)),
+            None => Err(Unread::NotArrived),
+        }
     }
 
     /// Whether `name` holds ⚡.
@@ -86,6 +115,29 @@ impl Bindings {
             keys.insert(key.to_owned(), name.to_owned());
         }
         keys
+    }
+}
+
+/// Why the bindings cannot be known ([`Bindings::read`]), kept apart so a refusal draws the helm's words as host text
+/// and the app's own as its words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Unread {
+    /// The helm reports its preferences unavailable, in these words.
+    Unavailable(String),
+    /// The helm has not pushed its preferences yet ([`Unread::NOT_ARRIVED`]).
+    NotArrived,
+}
+
+impl Unread {
+    /// The app's words for [`Unread::NotArrived`], ending a refusal's sentence.
+    pub const NOT_ARRIVED: &str = "the shortcut bindings have not arrived yet";
+
+    /// `sentence` with the reason appended: the helm's words as host text, the app's own as words.
+    pub fn appended_to(&self, sentence: HostSentence) -> HostSentence {
+        match self {
+            Unread::Unavailable(error) => sentence.host(&HostText::from_host(error.clone())),
+            Unread::NotArrived => sentence.text(Unread::NOT_ARRIVED),
+        }
     }
 }
 

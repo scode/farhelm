@@ -55,8 +55,8 @@ use gpui::{
 };
 
 use super::dispatch::{self, Origin, Reference};
-use super::sequence::{Chip, Input, Outcome, Sequence, printable};
-use super::shortcuts::Bindings;
+use super::sequence::{Chip, Entry, Input, Outcome, Refusal, Sequence, printable};
+use super::shortcuts::{Bindings, Unread};
 use crate::actions::{
     self, Captured, PhysicalKey, QUICK_LAUNCH_LINUX, QUICK_LAUNCH_MAC, SEQUENCE_PREFIX_LINUX,
     SEQUENCE_PREFIX_MAC, TemplateNumberKey,
@@ -198,6 +198,11 @@ fn keypad_digit(event: &KeyDownEvent) -> bool {
 /// held the keyboard when it began (`None` on the page), and the window-activation observer that cancels it.
 struct Armed {
     view: Entity<PillView>,
+    /// Why the bindings the sequence copied could not be known when the prefix was accepted, if they could not
+    /// ([`Bindings::read`]). The copy is then empty or stale, so Enter refuses a sequence holding a number key or ⚡
+    /// rather than resolve them through it, which would call a bound key unbound. Judged at the prefix, not at Enter,
+    /// because the copy is what Enter resolves (SPEC.md: "Bindings refresh when the prefix starts").
+    unread_bindings: Option<Unread>,
     pill: PillId,
     window: AnyWindowHandle,
     layer: Option<FocusHandle>,
@@ -227,7 +232,9 @@ pub(super) fn is_armed(cx: &App) -> bool {
 ///
 /// The ⚡ mark and the number keys are copied from the store here, once: SPEC.md's "Bindings refresh when the prefix
 /// starts; Enter captures the bound names currently shown in the pill" holds because the pill and Enter both read this
-/// one copy. Template names are not copied; they are read from the store whenever they are needed.
+/// one copy. Template names are not copied; they are read from the store whenever they are needed. Bindings that could
+/// not be read still arm the sequence, as the old prefix did, since a sequence of words needs none; the copy is
+/// whatever the store holds, for the pill to draw, and Enter refuses whatever reads it ([`Armed::unread_bindings`]).
 pub(super) fn begin(anchor: Option<Anchor>, window: &mut Window, cx: &mut App) {
     let open = launcher::entry::open_launcher(window, cx);
     let in_launcher = open.is_some();
@@ -245,6 +252,7 @@ pub(super) fn begin(anchor: Option<Anchor>, window: &mut Window, cx: &mut App) {
     let Some(anchor) = anchor else {
         return;
     };
+    let unread_bindings = Bindings::read(cx).err();
     let bindings = Bindings::current(cx);
     let view = cx.new(|_| PillView {
         sequence: Sequence::new(bindings),
@@ -278,6 +286,7 @@ pub(super) fn begin(anchor: Option<Anchor>, window: &mut Window, cx: &mut App) {
     });
     let armed = Armed {
         view,
+        unread_bindings,
         pill,
         window: window.window_handle(),
         layer: layers::top_container(window, cx),
@@ -384,13 +393,21 @@ pub(super) fn watch_presses() -> impl IntoElement {
 /// included, is shown there, leaving the draft alone. The resolved names go to the dispatcher with the sequence origin,
 /// which launches them directly, opens New with the banner "This sequence doesn't make a complete setup; complete it
 /// below", or, in the launcher, applies them to its draft as one refusal unit. While the helm reports its templates
-/// unavailable, anything queued is refused as a failed read ([`dispatch::refused_unavailable`]). All of it happens
-/// inside the Enter press's own handling, so what opens opens for this Enter.
+/// unavailable, anything queued is refused as a failed read ([`dispatch::refused_unavailable`]), and so is a sequence
+/// holding a number key or ⚡ whose bindings could not be read when it began ([`Armed::unread_bindings`]), in the same
+/// words with that reason. All of it happens inside the Enter press's own handling, so what opens opens for this Enter.
 fn enter(armed: &Armed, window: &mut Window, cx: &mut App) {
     let sequence = armed.view.read(cx).sequence.clone();
+    let reads_bindings = sequence.entries().iter().any(Entry::reads_bindings);
     let outcome = sequence.enter(&current_names(cx));
     // A sequence resolved against templates the helm could not read is refused as a failed read, not by its words.
     if outcome != Outcome::Nothing && dispatch::refused_unavailable(window, cx) {
+        return;
+    }
+    // Its keys and ⚡ were copied from bindings that were not known, so what they name is not known either. A sequence
+    // of words alone reads no binding and goes on.
+    if reads_bindings && let Some(unread) = &armed.unread_bindings {
+        dispatch::refused(&Refusal::from(unread.clone()), window, cx);
         return;
     }
     match outcome {
