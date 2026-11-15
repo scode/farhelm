@@ -561,7 +561,14 @@ that holds focus, which such a popover never is. Whether a click on a dialog's e
 focus on the control in use is a property of each dialog, set as SPEC.md's list says; a dialog without it takes focus
 itself, so Enter then presses its main action. Whether a terminal link's destination disclosure is covered is a hit
 test, never a hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are
-doing (SPEC.md, "Keyboard focus").
+doing (SPEC.md, "Keyboard focus"): every open carries the mark its feature took when the user acted. The one exception
+is SPEC.md's window-start dialogs (the Welcome card, and the first batch of announcements when nothing is open ahead of
+it). Each takes its mark through its own constructor, `focus::Mark::at_ui_session_start`, when its owner first sees a
+new UI session, before that session's first snapshot is drawn. If the user types or clicks before the open, the layer
+manager refuses it and the dialog stays unseen until a later window start or reset, as the maintainer decided on
+2026-11-14. A batch that SPEC.md has wait behind the Welcome card (and, after Send feedback now, behind the feedback
+dialog) is not an exception: it opens with a mark taken when the last of them closes, which always follows a press of
+the user's.
 
 One feature-supplied element is drawn above every layer without being one: the pill (`layers::show_pill`), for SPEC.md's
 quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil, as the old pill sat
