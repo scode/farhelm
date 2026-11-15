@@ -21,8 +21,9 @@
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
 //! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), the rerun of a failed Update, Update
-//! (live, or greyed on the helm's own machine), Settings, and Remove on a host whose removal only forgets it
-//! ([`Offers::remove`]); the inline Update and Update all ask the same offer (`super::update::available`).
+//! (live, greyed on the helm's own machine, or the app's own check there in the installed desktop app), Settings, and
+//! Remove on a host whose removal only forgets it ([`Offers::remove`]); the inline Update and Update all ask the
+//! panel's own offer (`super::update::available`), which never includes the app's check.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
@@ -89,6 +90,18 @@ impl HostKind {
         match self {
             HostKind::Ssh => true,
             HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
+        }
+    }
+
+    /// Whether the desktop app's own updater updates this host: the helm's own machine, which in the desktop app is the
+    /// machine the app runs on, so a newer release the app installs is that machine's update (SPEC.md, "Session list":
+    /// "there the local row always offers Update, and choosing it checks for a newer release and installs it").
+    pub(crate) fn updates_with_the_app(self) -> bool {
+        match self {
+            HostKind::Local => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
                 false
             }
         }
@@ -249,16 +262,29 @@ pub(crate) enum Update {
     /// The panel can update the host.
     Available,
     /// The host is the helm's own machine: the item shows, greyed, and choosing it sends nothing (SPEC.md, "Session
-    /// list"). The installed desktop app's local row, whose Update checks for a newer release, is not ported yet.
+    /// list").
     Greyed,
+    /// The host is the helm's own machine in a desktop app whose updater runs: choosing it asks that updater to check
+    /// for a newer release and install it, and sends nothing to the helm ([`menu_offers`]).
+    CheckForRelease,
 }
 
 impl Update {
+    /// Whether choosing the item does something: the panel's Update and the app's check do; the greyed item, which
+    /// takes no click, does not. The menu draws an item that cannot act greyed and never starts focus on it.
+    pub(crate) fn acts(self) -> bool {
+        match self {
+            Update::Available | Update::CheckForRelease => true,
+            Update::Greyed => false,
+        }
+    }
+
     /// The item's description line: what Update does, or for the greyed item how this machine is updated instead.
     pub(crate) fn description(self) -> &'static str {
         match self {
             Update::Available => "Install the newer Farhelm version",
             Update::Greyed => "Run the installer again to update this machine",
+            Update::CheckForRelease => "Check for a newer Farhelm and install it",
         }
     }
 }
@@ -315,5 +341,31 @@ pub(crate) fn offers(
         rerun,
         update,
         remove: kind.removal_only_forgets().then_some(!busy),
+    }
+}
+
+/// What `host`'s actions menu offers: [`offers`], except that in a desktop app whose updater runs (`app_updater`, the
+/// updater's own answer, `desktop::updates::runs`) the helm's own machine's Update is [`Update::CheckForRelease`],
+/// offered and available whatever the panel's rules say about that host (SPEC.md, "Session list": "there the local row
+/// always offers Update"), as the old app offered it while setup was missing, a run was going on or work was in flight:
+/// the check plans nothing on the host, and the updater serializes checks itself.
+///
+/// Kept apart from [`offers`] because the inline Update and Update all ask that one: they are the panel's Update of
+/// remote hosts, which the app's check never is. A failed Update's rerun on the helm's own machine stays greyed here
+/// too, as in the old app: the app's check never makes the panel able to update that machine.
+pub(crate) fn menu_offers(
+    host: &HostView,
+    progress: Option<&ProvisioningView>,
+    in_flight: bool,
+    app_updater: bool,
+) -> Offers {
+    let offered = offers(host, progress, in_flight);
+    if app_updater && HostKind::of(host).updates_with_the_app() {
+        Offers {
+            update: Some(Update::CheckForRelease),
+            ..offered
+        }
+    } else {
+        offered
     }
 }

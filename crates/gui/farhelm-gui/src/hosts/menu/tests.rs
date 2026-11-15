@@ -1,5 +1,6 @@
 //! Tests of a host's actions menu as the Hosts panel opens it: what it offers on a remote host and on the helm's own
-//! machine, what its greyed Update does (nothing), the header of a host that reports no build, Settings and Remove
+//! machine, what its greyed Update does (nothing) and what that Update does in the installed desktop app (asks the
+//! app's updater to check), the header of a host that reports no build, Settings and Remove
 //! waiting for the host's own work, which hosts offer Remove, and where focus goes.
 //!
 //! The panel runs over the helm client's fake with the reference screens' three hosts (the local host as 1,
@@ -190,6 +191,37 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
     keys(cx, "enter");
     assert!(helm.commands().is_empty(), "the greyed Update sent nothing");
     assert!(any_open(cx), "and the menu stayed open");
+}
+
+/// Why this matters: in the installed desktop app the local row's Update is the app's own update check (SPEC.md,
+/// "Session list": "there the local row always offers Update, and choosing it checks for a newer release and installs
+/// it"), one of the on-demand routes "Installation and updates" lists beside the version readout and the ? menu. It
+/// must reach the updater and never the helm, which refuses to update its own machine. Specified: with a fake updater
+/// kept as the app's, the local host's menu shows "Check for a newer Farhelm and install it" in place of the installer
+/// line, and focus starts on Update, the first command that can act; Enter on it asks the updater for one check, sends
+/// the helm nothing, and closes the menu with focus back on its toggle.
+#[gpui::test]
+fn in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check(cx: &mut TestAppContext) {
+    use crate::desktop::updates::fake::{Feed, Seen, fake_host};
+    let (mut helm, cx) = open_hosts(cx);
+    let (feed, seen) = (
+        std::rc::Rc::new(Feed::default()),
+        std::rc::Rc::new(Seen::default()),
+    );
+    cx.update(|_, cx| crate::desktop::updates::keep(Some(fake_host(&feed, &seen, false)), cx));
+    click(cx, "host-menu-toggle-1");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-menu-update").is_some());
+    let text = painted(&nodes);
+    assert!(text.contains("Check for a newer Farhelm and install it"));
+    assert!(!text.contains("Run the installer again"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
+
+    keys(cx, "enter");
+    assert_eq!(seen.checks.get(), 1, "the updater was asked to check once");
+    assert!(helm.commands().is_empty(), "the helm was sent nothing");
+    assert!(!any_open(cx), "the menu closed");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-1"));
 }
 
 /// Why this matters: the header's second line says which Farhelm a host runs, and only a build the host reports is one.
