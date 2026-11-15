@@ -78,6 +78,8 @@ fn window_with<'a>(
         fixture_hosts(&[0, 4, 8, 10]),
         preferences_state(Preferences {
             remembered_permissions: Some("yolo".into()),
+            // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+            welcome_seen: Some(true),
             ..Preferences::default()
         }),
     ]);

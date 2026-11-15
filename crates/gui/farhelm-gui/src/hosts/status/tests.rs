@@ -358,7 +358,11 @@ fn snapshot(preferences: Preferences) -> Vec<CollectionState> {
 fn snapshot_with(preferences: Preferences, runs: &[ProvisioningView]) -> Vec<CollectionState> {
     vec![
         listing(&[], &[]),
-        preferences_state(preferences),
+        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        preferences_state(Preferences {
+            welcome_seen: Some(true),
+            ..preferences
+        }),
         hosts(&listed()),
         progress(runs),
     ]

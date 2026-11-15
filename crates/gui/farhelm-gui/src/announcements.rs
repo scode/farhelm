@@ -14,15 +14,24 @@
 //!   helm orders it. Reopening the history writes nothing, and closing it returns focus to the `?` button.
 //! - **Read from the store when opened.** The dialog draws the list it was opened with, and later pushes do not change
 //!   it (why: [`AnnouncementsDialog`]). Nothing new is queued while it is open anyway (SPEC.md: "there is no live
-//!   announcement event reader today"; the only producer runs at helm start).
-//!
-//! NOTE: Not here yet: the automatic batch at window start and reset (pending entries, after the Welcome card closes,
-//! recording what it showed through `POST /api/announcements/shown`). It comes with the Welcome card's automatic open,
-//! which decides when it may open.
+//!   announcement event reader today"; the only producer runs at helm start), and an entry pushed after the window
+//!   start's check opens nothing by itself: the check runs once per UI session.
+//! - **The automatic batch, at window start and reset.** [`open_pending`] opens the pending entries, newest first, when
+//!   the window-start owner ([`crate::welcome::StartDialogs`]) says the check is due: at once, or after the Welcome
+//!   card and its feedback handoff close. An empty queue opens nothing, and a queue the store does not hold (a failed
+//!   read) is logged and opens nothing; the next window start or reset checks again. Its dismissal (Got it, the ×,
+//!   Escape, Enter on the dialog itself) records exactly the entries it showed with one keyless
+//!   `POST /api/announcements/shown`; a failed write still closes it and leaves them pending. A reset closes it without
+//!   recording anything, so the next UI session shows the same entries again. Closing it returns focus home, since it
+//!   has no opener (SPEC.md: "closing an automatic batch restores ordinary initial focus").
+//! - **A keyboard stop when nothing in the body is focusable.** A long announcement without a link holds nothing Tab
+//!   reaches, so the body takes a stop of its own, named "Announcement content" as the old region was
+//!   (`DialogFrame::scroll_stop`), in both uses.
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
+use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::announcements::{Announcement, AnnouncementQueue};
 use farhelm_proto::ui_channel::ANNOUNCEMENTS_KEY;
 use std::rc::Rc;
@@ -34,7 +43,7 @@ use gpui::{
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{Mark, ReturnTo};
-use crate::layers::{self, Dialog, LayerId, MainAction};
+use crate::layers::{self, Dialog, DismissHook, Dismissal, LayerId, MainAction};
 use crate::session;
 use crate::theme::{self, metrics};
 
@@ -93,13 +102,70 @@ pub fn open_history(
     if shown.is_empty() {
         return None;
     }
-    open(shown, ReturnTo::Control(opener.clone()), mark, window, cx)
+    open(
+        shown,
+        ReturnTo::Control(opener.clone()),
+        false,
+        mark,
+        window,
+        cx,
+    )
 }
 
-/// Open the dialog over `entries`, in the order given, with closing returning focus as `returns_to` says.
+/// Open the automatic batch: this helm's pending announcements, newest first (the helm sends them oldest first), whose
+/// dismissal records exactly those as shown. Called by the window-start owner ([`crate::welcome::StartDialogs`]) once
+/// per UI session, when nothing from the window's start is open ahead of it. `mark` is the window-start mark, or the
+/// one taken when the Welcome card or its feedback handoff closed; nothing opens when the user has moved on since.
+///
+/// Opens nothing when nothing is pending, and nothing when the store holds no queue, which means the helm could not
+/// read it: SPEC.md has that failure "logged silently and retried only at a later window start or reset". Closing the
+/// batch returns focus home. Returns the dialog's layer.
+pub(crate) fn open_pending(mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+    let Some(mut pending) = with_queue(cx, |queue| queue.pending.clone()) else {
+        tracing::warn!(
+            "no announcement queue was read; announcements are checked again at the next window start"
+        );
+        return None;
+    };
+    if pending.is_empty() {
+        return None;
+    }
+    pending.reverse();
+    open(pending, ReturnTo::Home, true, mark, window, cx)
+}
+
+/// Record `ids` as shown: one keyless, best-effort `POST /api/announcements/shown` naming exactly those entries, so
+/// newer ones the dialog did not show stay pending. A failure is logged and nothing else, since the dialog has closed:
+/// the helm keeps the entries pending, and a later window start or reset shows them again.
+fn record_shown(ids: Vec<String>, cx: &mut App) {
+    let path = match ApiPath::api(&["announcements", "shown"]) {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::warn!(%error, "could not record announcements as shown");
+            return;
+        }
+    };
+    crate::operations::send(
+        Method::Post,
+        path,
+        Some(serde_json::json!({ "ids": ids })),
+        "POST /api/announcements/shown",
+        cx,
+        |answer, _| {
+            if let Err(words) = answer {
+                tracing::warn!(reason = %words.raw(), "could not record announcements as shown");
+            }
+        },
+    );
+}
+
+/// Open the dialog over `entries`, in the order given, with closing returning focus as `returns_to` says. With
+/// `records`, the first dismissal records `entries` as shown ([`record_shown`]): the automatic batch. The history
+/// records nothing.
 fn open(
     entries: Vec<Announcement>,
     returns_to: ReturnTo,
+    records: bool,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -108,6 +174,29 @@ fn open(
         entries,
         got_it: cx.focus_handle().tab_stop(true),
         layer: None,
+        unrecorded: records,
+    });
+    // Every user close (Got it, the ×, Escape, Enter on the dialog itself) is a dismissal and asks this hook; a reset
+    // closes the dialog without asking, so it records nothing and the entries stay pending for the next UI session.
+    let on_dismiss: Option<DismissHook> = records.then(|| {
+        let weak = dialog.downgrade();
+        let hook: DismissHook = Rc::new(move |_, cx| {
+            let ids = weak.update(cx, |dialog, _| {
+                // Cleared, so a second dismissal racing the close cannot record twice.
+                std::mem::take(&mut dialog.unrecorded).then(|| {
+                    dialog
+                        .entries
+                        .iter()
+                        .map(|announcement| announcement.id.clone())
+                        .collect::<Vec<_>>()
+                })
+            });
+            if let Ok(Some(ids)) = ids {
+                record_shown(ids, cx);
+            }
+            Dismissal::Close
+        });
+        hook
     });
     // Enter on the dialog itself (after a click on its text) presses Got it, the old dialog's main action.
     let weak = dialog.downgrade();
@@ -122,7 +211,7 @@ fn open(
             main_action: Some(main_action),
             keeps_focus_on_empty_click: false,
             returns_to,
-            on_dismiss: None,
+            on_dismiss,
             placement: layers::DialogPlacement::Centered,
             dismiss_on_outside_press: false,
         },
@@ -146,6 +235,9 @@ struct AnnouncementsDialog {
     got_it: FocusHandle,
     /// Set right after the layer opens; every way of closing goes through the layer manager's dismissal.
     layer: Option<LayerId>,
+    /// Whether this is the automatic batch and its dismissal has not yet recorded `entries` as shown; never set for the
+    /// history, which records nothing.
+    unrecorded: bool,
 }
 
 /// Dismiss the dialog `weak` through the layer manager, as Escape does; nothing once it is gone.

@@ -33,6 +33,10 @@
 //! connected state, session open or not, so a pill shown on it stays put when a session opens or closes. The ground also
 //! draws the sequence's one window-wide press watcher, since a click anywhere cancels it.
 //!
+//! The main view also keeps the owner of the dialogs SPEC.md opens by themselves when the window starts or resets, the
+//! Welcome card and the first batch of announcements ([`welcome::StartDialogs`]), for the window's life; it is made
+//! after the session pane, so the selected session's terminal is home by the time a card opens over it.
+//!
 //! In the macOS window the sidebar's app bar and the session pane's top row are the window's title band
 //! (`desktop::title_band`); this view draws the band's one window-wide press watcher, gives the connection screens a
 //! band strip of their own above their content, and puts a strip of the band above any notice banner.
@@ -57,7 +61,7 @@ use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
 use crate::templates;
 use crate::theme::metrics;
-use crate::{launcher, layers, render_count, root, session, settings, theme};
+use crate::{launcher, layers, render_count, root, session, settings, theme, welcome};
 
 /// The window's root view.
 pub struct MainView {
@@ -85,6 +89,9 @@ pub struct MainView {
     /// The pane beside the list, kept for the window's life like the list: it remakes the selected session's terminal
     /// by itself on every change of selection or UI session.
     session_pane: Entity<SessionPane>,
+    /// The owner of the window-start dialogs (the Welcome card and the first batch of announcements), kept for the
+    /// window's life; it starts over by itself with each UI session.
+    _start_dialogs: Entity<welcome::StartDialogs>,
     /// The main pane's anchor as last drawn, which the sequence pill is centered over (the module docs); `None` before
     /// the first connected frame. Kept weakly by the anchor itself, so a pill on it goes when the pane is not drawn.
     pane_anchor: Option<Anchor>,
@@ -116,6 +123,8 @@ impl MainView {
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
+            // After the session pane, whose first sync is deferred the same way and so runs first.
+            _start_dialogs: cx.new(|cx| welcome::StartDialogs::new(window, cx)),
             pane_anchor: None,
         }
     }

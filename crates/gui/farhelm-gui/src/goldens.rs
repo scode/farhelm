@@ -2365,6 +2365,14 @@ fn announcements_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut 
     keep.push(Box::new(watch));
 }
 
+/// The Welcome card (reference `welcome-dialog`): the title and its ×, the introduction, the two bordered pointers with
+/// Read Get started and Send feedback now, the footer's note and Got it with focus. Opened as the `?` menu's Welcome item
+/// opens it, which draws the same card as the window start does; the scene's ring handle stands in for the `?` button.
+fn welcome_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    crate::welcome::open(&state.ring, &mark, window, cx);
+}
+
 /// The Send feedback dialog as the Help menu opens it (reference `feedback-dialog`), over a preference row
 /// remembering `contact`: focus in the empty message, the contact field holding `contact`, and, when it is not empty,
 /// Re-use checked under it; then what is sent with it, the footer's note, Cancel and Send, unavailable while the
@@ -3849,7 +3857,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "help-menu",
-        size: (420., 418.),
+        size: (420., 480.),
         draw: session_lists_then,
         setup: help_menu_setup,
     },
@@ -3877,6 +3885,12 @@ static SCENES: &[Scene] = &[
         size: (640., 520.),
         draw: empty,
         setup: announcements_dialog_setup,
+    },
+    Scene {
+        name: "welcome-dialog",
+        size: (600., 440.),
+        draw: empty,
+        setup: welcome_dialog_setup,
     },
     Scene {
         name: "rename-dialog",
