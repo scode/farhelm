@@ -29,7 +29,7 @@ use farhelm_proto::{DeleteGuard, LaunchPermission, SessionLaunch, SessionRef};
 
 use crate::environment_ui::{AgentLaunchPlace, ProviderUi};
 use crate::host_text::HostText;
-use crate::launcher::words;
+use crate::permission::words;
 use crate::permission::{self, Shield};
 
 // ---- The waiting list -----------------------------------------------------------------------------------------------

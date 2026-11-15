@@ -49,7 +49,7 @@ use gpui::{
 use super::draft::{Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
 use super::launch;
 use super::request::{Target, capitalized};
-use super::words::{agent_note, effort_label, permission_display};
+use super::words::agent_note;
 use crate::assets::Icon;
 use crate::components::{
     self, Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, Select,
@@ -60,6 +60,7 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::operations::OpKey;
+use crate::permission::words::{effort_label, permission_display};
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};

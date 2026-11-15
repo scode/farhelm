@@ -31,7 +31,7 @@ use farhelm_proto::launcher::{
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 
 use super::summary::permission_label;
-use crate::launcher::words::effort_label;
+use crate::permission::words::effort_label;
 
 /// A field the editor can show. The order is the old editor's, which is the order the "Sets" list and the add menu
 /// use: the command launch's fields first when present, then the agent launch's, then placement and name.
