@@ -3450,14 +3450,8 @@ fn toggle_scene(cx: &mut TestAppContext, names_toggle: bool) -> ToggleScene<'_> 
                     focus::ReturnTo::Opener
                 };
                 layer.set(layers::open_popover(
-                    layers::Popover {
-                        view: view.into(),
-                        container: cx.focus_handle(),
-                        start: Some(first.clone()),
-                        anchor: opens.clone(),
-                        returns_to,
-                        traps_tab: true,
-                    },
+                    layers::Popover::menu(view, cx.focus_handle(), opens.clone(), first.clone())
+                        .returns_to(returns_to),
                     &mark,
                     window,
                     cx,

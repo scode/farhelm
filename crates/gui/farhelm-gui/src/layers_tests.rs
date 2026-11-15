@@ -1045,6 +1045,76 @@ fn a_dialog_can_ask_before_it_closes_and_each_answer_does_its_part(cx: &mut Test
     }
 }
 
+// ---- Layers: a popover's presets -------------------------------------------------------------------------------------
+
+/// Why this matters: openers build popovers through the presets rather than struct literals, so a preset's defaults
+/// are what every menu and floating list gets, and a field added later takes its value there instead of in every
+/// opener's file. What each default does is shown by tests that open through the presets: a menu starting on its item
+/// and keeping Tab inside ([`tab_stays_inside_an_open_menu`]), a floating list leaving focus and Tab with the field
+/// ([`a_popover_that_never_takes_focus_leaves_focus_and_tab_with_the_field`]), and the tunnel list's tests for the two
+/// builders. This one pins the values, so a preset that drifts fails under its own name.
+///
+/// What: [`Popover::menu`] starts on the handle it was given, returns focus to its opener and traps Tab;
+/// [`Popover::floating`] has no start; [`Popover::returns_to`] changes only where focus returns, and
+/// [`Popover::tab_through`] only turns the trap off.
+#[gpui::test]
+fn the_popover_presets_carry_their_documented_defaults(cx: &mut TestAppContext) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let out = anchor_out.clone();
+    let cx = open(cx, move |window, cx| {
+        anchor_element("opener", &out, window, cx).into_any_element()
+    });
+    let anchor = anchor_out
+        .borrow()
+        .clone()
+        .expect("the premise: the anchor drew");
+    let (start, toggle) = (handle(cx), handle(cx));
+    cx.update(|_, cx| {
+        let view = cx.new(|_| FloatingList);
+        let menu = Popover::menu(
+            view.clone(),
+            cx.focus_handle(),
+            anchor.clone(),
+            start.clone(),
+        );
+        assert!(
+            menu.start.as_ref() == Some(&start),
+            "a menu starts on the handle it was given"
+        );
+        assert_eq!(
+            menu.returns_to,
+            focus::ReturnTo::Opener,
+            "a menu returns focus to its opener"
+        );
+        assert!(menu.traps_tab, "a menu keeps Tab inside it");
+
+        let named = menu.returns_to(focus::ReturnTo::Control(toggle.clone()));
+        assert_eq!(
+            named.returns_to,
+            focus::ReturnTo::Control(toggle.clone()),
+            "returns_to names where focus returns"
+        );
+        assert!(
+            named.traps_tab && named.start.as_ref() == Some(&start),
+            "returns_to leaves the trap and the start alone"
+        );
+
+        let through = named.tab_through();
+        assert!(!through.traps_tab, "tab_through turns the trap off");
+        assert!(
+            through.returns_to == focus::ReturnTo::Control(toggle.clone())
+                && through.start.as_ref() == Some(&start),
+            "tab_through leaves where focus starts and returns alone"
+        );
+
+        let floating = Popover::floating(view, cx.focus_handle(), anchor.clone());
+        assert!(
+            floating.start.is_none(),
+            "a floating list never takes focus"
+        );
+    });
+}
+
 // ---- Layers: a popover placed beside its anchor ----------------------------------------------------------------------
 
 /// Open a window whose only content is an anchor element under the selector `opener`, placed by `place` (a div that
@@ -1141,14 +1211,7 @@ fn open_floating_list(cx: &mut VisualTestContext, anchor: Anchor) -> LayerId {
     let id = cx.update(move |window, cx| {
         let view = cx.new(|_| FloatingList);
         let mark = Mark::take(cx);
-        let list = Popover {
-            view: view.into(),
-            container: cx.focus_handle(),
-            start: None,
-            anchor,
-            returns_to: focus::ReturnTo::Opener,
-            traps_tab: true,
-        };
+        let list = Popover::floating(view, cx.focus_handle(), anchor);
         layers::open_popover(list, &mark, window, cx)
     });
     cx.run_until_parked();
@@ -1485,14 +1548,9 @@ impl PillPage {
             });
             let mark = Mark::take(cx);
             layers::open_popover(
-                Popover {
-                    view: view.into(),
-                    container: cx.focus_handle(),
-                    start: Some(start),
-                    anchor,
-                    returns_to: focus::ReturnTo::Control(pill),
-                    traps_tab: false,
-                },
+                Popover::menu(view, cx.focus_handle(), anchor, start)
+                    .returns_to(focus::ReturnTo::Control(pill))
+                    .tab_through(),
                 &mark,
                 window,
                 cx,
@@ -2286,14 +2344,7 @@ fn arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight
         let view = cx.new(|_| HoverMenu { items: view_items });
         let mark = Mark::take(cx);
         layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                start: Some(start),
-                anchor,
-                returns_to: focus::ReturnTo::Opener,
-                traps_tab: true,
-            },
+            Popover::menu(view, cx.focus_handle(), anchor, start),
             &mark,
             window,
             cx,

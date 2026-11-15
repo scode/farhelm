@@ -26,7 +26,7 @@
 //!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element: SPEC.md has no
 //!   menu opened at a pointer position.
 //! - **Three kinds of layer.** A dialog is centered over a veil (or near the window's top, for an opener that asks:
-//!   [`Dialog::placement`]). A popover (a menu) is drawn below its anchor, or
+//!   [`Dialog::placement`]). A popover (a menu, opened from [`Popover::menu`]) is drawn below its anchor, or
 //!   beside it when the anchor asks for that ([`Anchor::beside`], the session row's menu flying out beside the
 //!   sidebar). An anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a
 //!   subject, a main action for Enter and its own empty-space rule. It is how the prompt asks a question beside the
@@ -46,26 +46,26 @@
 //! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
 //!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
 //!   question's answer over a terminal must not also focus the terminal or click a control there.
-//! - **A popover may leave focus alone.** One opened without a start ([`Popover::start`]) never takes focus: opening
-//!   it moves none, Tab is not trapped in it, closing it returns none, and a press on it leaves focus where it was. It
-//!   is for a list that floats beside the control the user keeps typing in or pointing at, as the old launcher's
-//!   folder picker and composer search kept focus in their field (options at `tabindex: -1`, the list's mousedown
-//!   prevented). Escape, a press outside it and its anchor going still close it, as any popover, but closing it closes
-//!   only it: it owns nothing above it, so a dialog opened while it shows (a shortcut pressed in the field or the
-//!   terminal beside it) stays open, with focus inside, when it goes ([`close`]). Every rule above that names "the
+//! - **A popover may leave focus alone.** One opened through [`Popover::floating`] (no [`Popover::start`]) never takes
+//!   focus: opening it moves none, Tab is not trapped in it, closing it returns none, and a press on it leaves focus
+//!   where it was. It is for a list that floats beside the control the user keeps typing in or pointing at, as the old
+//!   launcher's folder picker and composer search kept focus in their field (options at `tabindex: -1`, the list's
+//!   mousedown prevented). Escape, a press outside it and its anchor going still close it, as any popover, but closing
+//!   it closes only it: it owns nothing above it, so a dialog opened while it shows (a shortcut pressed in the field or
+//!   the terminal beside it) stays open, with focus inside, when it goes ([`close`]). Every rule above that names "the
 //!   topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer that holds
 //!   focus, which such a popover never is (and for Tab's trap, the topmost that also traps Tab: see the next rule).
-//! - **A popover may let Tab through.** One opened with [`Popover::traps_tab`] off takes focus when it opens and
-//!   returns it on Escape like a menu, but traps no Tab: Tab and Shift+Tab walk its controls as if they stood in the
-//!   page right after its toggle (the control its [`Popover::returns_to`] names), and go on out of it to the controls
-//!   around the toggle. Focus leaving it, by Tab or by a press elsewhere, closes it and returns no focus; focus on its
-//!   toggle is not leaving, and neither is keyboard focus moving into a layer opened above it (a press inside such a
-//!   layer is still a press outside the popover, which closes it and everything above it). It is SPEC.md's tunnel
-//!   list: "Escape closes the list and returns focus to the pill; Tab follows its ordinary controls and leaving the
-//!   list closes it without reclaiming focus", and the old list closed on the pill's `focusout` once focus was outside
-//!   both the pill and the list. It holds focus, so it is the topmost layer that holds focus for recovery and the menu
-//!   highlight, and it counts for [`focus_layer_open`] (which says why). [`tab_through`] says how its place in Tab
-//!   order is kept, since GPUI paints every overlay, and so orders its controls, after the whole page.
+//! - **A popover may let Tab through.** One opened with [`Popover::tab_through`] ([`Popover::traps_tab`] off) takes
+//!   focus when it opens and returns it on Escape like a menu, but traps no Tab: Tab and Shift+Tab walk its controls as
+//!   if they stood in the page right after its toggle (the control its [`Popover::returns_to`] names), and go on out of
+//!   it to the controls around the toggle. Focus leaving it, by Tab or by a press elsewhere, closes it and returns no
+//!   focus; focus on its toggle is not leaving, and neither is keyboard focus moving into a layer opened above it (a
+//!   press inside such a layer is still a press outside the popover, which closes it and everything above it). It is
+//!   SPEC.md's tunnel list: "Escape closes the list and returns focus to the pill; Tab follows its ordinary controls
+//!   and leaving the list closes it without reclaiming focus", and the old list closed on the pill's `focusout` once
+//!   focus was outside both the pill and the list. It holds focus, so it is the topmost layer that holds focus for
+//!   recovery and the menu highlight, and it counts for [`focus_layer_open`] (which says why). [`tab_through`] says how
+//!   its place in Tab order is kept, since GPUI paints every overlay, and so orders its controls, after the whole page.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it.
@@ -521,6 +521,11 @@ pub struct Dialog {
 }
 
 /// A popover to open: a menu or a popup list.
+///
+/// Build one through its presets, [`Popover::menu`] for a popover that takes focus and [`Popover::floating`] for one
+/// that never does, and change a default through a builder ([`Popover::returns_to`], [`Popover::tab_through`]). The
+/// fields stay public for the literals not yet moved onto the presets, but a new field gets its default in the presets
+/// rather than in every opener's file, so a struct literal is not the way to open one.
 pub struct Popover {
     /// What the popover draws.
     pub view: AnyView,
@@ -564,6 +569,66 @@ pub struct Popover {
     ///
     /// Ignored for a popover that never takes focus ([`Popover::start`] `None`), which traps nothing anyway.
     pub traps_tab: bool,
+}
+
+impl Popover {
+    /// A menu or a select's list: it takes focus on `start` when it opens, keeps Tab inside it, and returns focus to
+    /// what held it when it opened ([`focus::ReturnTo::Opener`]).
+    ///
+    /// Those defaults are the shape every focus-taking popover starts from, and the one SPEC.md asks of a menu ("Inside
+    /// a dialog or menu, focus stays inside"). A menu a toggle button opens names the toggle with
+    /// [`Popover::returns_to`], since on macOS the click that opened it left the toggle unfocused; a list that sits in
+    /// the page's Tab order after its toggle adds [`Popover::tab_through`].
+    pub fn menu(
+        view: impl Into<AnyView>,
+        container: FocusHandle,
+        anchor: Anchor,
+        start: FocusHandle,
+    ) -> Self {
+        Self {
+            view: view.into(),
+            container,
+            start: Some(start),
+            anchor,
+            returns_to: focus::ReturnTo::Opener,
+            traps_tab: true,
+        }
+    }
+
+    /// A list that floats beside the control the user keeps typing in or pointing at, and never takes focus
+    /// ([`Popover::start`] `None`; the module docs, "A popover may leave focus alone"): the launcher's floating lists
+    /// and the terminal's displays on a zero-size anchor.
+    ///
+    /// It moves no focus, traps no Tab and returns none, so neither builder means anything for it: its `returns_to`
+    /// and `traps_tab` hold the menu's values only so the struct is complete, and an opener has no reason to change
+    /// them. Its content must hold nothing that takes focus, as [`Popover::start`] says.
+    pub fn floating(view: impl Into<AnyView>, container: FocusHandle, anchor: Anchor) -> Self {
+        Self {
+            view: view.into(),
+            container,
+            start: None,
+            anchor,
+            returns_to: focus::ReturnTo::Opener,
+            traps_tab: true,
+        }
+    }
+
+    /// Return focus to `returns_to` instead of the opener when the popover closes with focus inside it, under the rules
+    /// the field of the same name documents: usually [`focus::ReturnTo::Control`] naming the toggle that opened it.
+    /// Unused for a popover that never takes focus.
+    pub fn returns_to(mut self, returns_to: focus::ReturnTo) -> Self {
+        self.returns_to = returns_to;
+        self
+    }
+
+    /// Let Tab through instead of trapping it ([`Popover::traps_tab`] off): SPEC.md's tunnel list, whose Tab walks its
+    /// controls as if they stood in the page right after its toggle and goes on out, and which closes once focus
+    /// leaves it. It needs [`Popover::returns_to`] naming that toggle, which gives the list its place in Tab order
+    /// (the module docs, "A popover may let Tab through"). Unused for a popover that never takes focus.
+    pub fn tab_through(mut self) -> Self {
+        self.traps_tab = false;
+        self
+    }
 }
 
 /// A dialog drawn beside an element instead of centered over a veil: placed and followed like a [`Popover`], closed

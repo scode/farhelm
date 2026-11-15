@@ -972,14 +972,7 @@ fn popover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let mark = Mark::take(cx);
     let container = cx.focus_handle();
     layers::open_popover(
-        Popover {
-            view: view.into(),
-            container: container.clone(),
-            start: Some(container),
-            anchor,
-            returns_to: focus::ReturnTo::Opener,
-            traps_tab: true,
-        },
+        Popover::menu(view, container.clone(), anchor, container),
         &mark,
         window,
         cx,

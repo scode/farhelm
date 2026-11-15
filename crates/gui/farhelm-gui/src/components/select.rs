@@ -503,14 +503,7 @@ impl Opening {
         };
         let container = cx.focus_handle();
         let opened = layers::open_popover(
-            Popover {
-                view: list.clone().into(),
-                container,
-                start: Some(start),
-                anchor: self.anchor.clone(),
-                returns_to: focus::ReturnTo::Opener,
-                traps_tab: true,
-            },
+            Popover::menu(list.clone(), container, self.anchor.clone(), start),
             &mark,
             window,
             cx,

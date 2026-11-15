@@ -404,14 +404,7 @@ pub(crate) fn open_menu(
         let view = cx.new(|_| Menu { items });
         let mark = Mark::take(cx);
         layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                start: Some(start),
-                anchor,
-                returns_to: focus::ReturnTo::Opener,
-                traps_tab: true,
-            },
+            Popover::menu(view, cx.focus_handle(), anchor, start),
             &mark,
             window,
             cx,
@@ -845,14 +838,7 @@ mod self_tests {
         };
         let view = cx.new(|_| Empty);
         let mark = Mark::take(cx);
-        let popover = Popover {
-            view: view.into(),
-            container: cx.focus_handle(),
-            start: Some(cx.focus_handle()),
-            anchor,
-            returns_to: crate::focus::ReturnTo::Opener,
-            traps_tab: true,
-        };
+        let popover = Popover::menu(view, cx.focus_handle(), anchor, cx.focus_handle());
         if layers::open_popover(popover, &mark, window, cx).is_none() {
             panic!("the premise: the popover opened");
         }
