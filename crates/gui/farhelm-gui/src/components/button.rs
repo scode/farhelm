@@ -337,7 +337,7 @@ impl Button {
     /// The session list heading band's padding for a button that shows words or other content (the order title,
     /// `.session-heading .sort-title`): 2 pixels above and below and none at its sides, so its words line up with the
     /// band's edge. Only the padding changes: the tier still gives the colors. The band's icon buttons (the old
-    /// Templates, Trash and New) are 24-pixel squares instead ([`Button::square`]).
+    /// Templates and New) are 24-pixel squares instead ([`Button::square`]).
     pub fn heading(mut self) -> Self {
         self.heading = true;
         self

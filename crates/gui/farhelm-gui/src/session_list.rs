@@ -3,10 +3,11 @@
 //! SPEC.md, "Session list". The list is drawn from the store while it draws and keeps nothing the helm pushed: its rows
 //! are the sessions collection in the order the collection's metadata gives (the helm sorts; the channel starts in the
 //! user's stored order), so a pushed change or a reset redraws it with nothing to go stale. Above the rows, a heading
-//! band carries the order's title, which opens the menu that changes the order ([`order`]), the count ("Sessions: N"
-//! to assistive technology and on hover, as the old count said) and, at its right, the Templates button; a listing the
-//! helm's cap cut says so in an amber band in place of the count, and a failed read says so in red, while the rows it
-//! had stay (a failed read is no evidence that anything was deleted).
+//! band carries the order's title, which opens the menu that changes the order ([`order`]), the count ("Sessions: N" to
+//! assistive technology and on hover, as the old count said) and, at its right, the Trash button (a view of the trash's
+//! own, [`crate::trash`]) and the Templates button; a listing the helm's cap cut says so in an amber band in place of
+//! the count, and a failed read says so in red, while the rows it had stay (a failed read is no evidence that anything
+//! was deleted).
 //!
 //! The list also owns the selection rules ([`selection`]), and applies them from observers, never from drawing: it
 //! settles the selection and the open session's seen mark ([`SessionList::settle`]) whenever the connection changes (a
@@ -104,9 +105,9 @@
 //! The Templates button opens the Templates dialog ([`crate::templates::open`]), which returns focus to what held it
 //! when it opened, as SPEC.md's "Opening and closing" asks.
 //!
-//! NOTE: Not ported yet, each with the area that brings it: the heading's New (the launcher's entry point) and Trash
-//! with its count (milestone M3), compact rows and the order menu's Compact, marking, pins, the row menu's other
-//! commands, and the rail's host status, the foot's controls other than Hosts and Settings, Add host and expansion.
+//! NOTE: Not ported yet, each with the area that brings it: the heading's New (the launcher's entry point), compact
+//! rows and the order menu's Compact, marking, pins, the row menu's other commands, and the rail's host status, the
+//! foot's controls other than Hosts and Settings, Add host and expansion.
 
 pub(crate) mod age;
 pub(crate) mod delete;
@@ -170,6 +171,7 @@ use crate::operations;
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
+use crate::trash::TrashButton;
 use crate::{templates, ticker};
 use selection::{Change, Listed, Open, Stamped};
 
@@ -241,6 +243,9 @@ pub struct SessionList {
     /// The `?` Help button on the rail's foot, below the gear: a view of the help menu's own, which keeps its focus
     /// handle and its open menu, created here once for the window's life ([`crate::help_menu`]).
     help: Entity<HelpButton>,
+    /// The heading's Trash button: a view of the trash's own, which keeps its focus handle, its reads of every host's
+    /// trash and the dialog it opens, created here once for the window's life ([`crate::trash`]).
+    trash: Entity<TrashButton>,
     /// The order title's focus handle, a tab stop: kept here for the window's life so that the order menu names the
     /// title as where closing returns focus, whichever frame drew it ([`order`]).
     order_focus: FocusHandle,
@@ -314,6 +319,7 @@ impl SessionList {
             settings_focus: cx.focus_handle().tab_stop(true),
             hosts_focus: cx.focus_handle().tab_stop(true),
             help: cx.new(HelpButton::new),
+            trash: cx.new(TrashButton::new),
             order_focus: cx.focus_handle().tab_stop(true),
             order_anchor: None,
             rail: host_rail::Kept::new(cx),
@@ -644,7 +650,7 @@ impl Render for SessionList {
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
                 .child(
-                    list.child(heading(title, None, &self.templates_focus, cx))
+                    list.child(heading(title, None, &self.trash, &self.templates_focus, cx))
                         .child(filter_row)
                         .children(refused)
                         .child(status_line("Loading sessions…")),
@@ -660,6 +666,7 @@ impl Render for SessionList {
                 CountLine::Count(count) => Some(count.clone()),
                 CountLine::Cut(_) => None,
             },
+            &self.trash,
             &self.templates_focus,
             cx,
         );
@@ -767,11 +774,12 @@ fn draw_row(
 
 /// The list's heading band (`.session-heading`): the order's title ([`order`]), the count beside it when the list has
 /// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
-/// the heading's actions at its right edge (`.session-heading-actions`), of which only Templates is ported (the module
-/// docs' NOTE).
+/// the heading's actions at its right edge (`.session-heading-actions`), of which Trash (`trash`, a view of its own)
+/// and Templates are ported (the module docs' NOTE), in SPEC.md's order.
 fn heading(
     title: AnyElement,
     count: Option<String>,
+    trash: &Entity<TrashButton>,
     templates_focus: &FocusHandle,
     cx: &App,
 ) -> impl IntoElement {
@@ -825,6 +833,7 @@ fn heading(
                 .flex_row()
                 .items_center()
                 .gap(px(HEADING_ACTIONS_GAP))
+                .child(trash.clone())
                 .child(templates),
         )
 }

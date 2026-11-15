@@ -66,6 +66,9 @@
 //! `PermissionIcon` drawings at the reference commit, in its 12-unit box with the 1.25 stroke and round caps and joins;
 //! the own-setting shield is the plain one dashed.
 //!
+//! The Trash button's two cans are the old app's `TrashIcon`, in its 12-unit box with the 1.2 stroke and round caps and
+//! joins; the open-lid can's body is filled, as the old one's was. The Trash dialog draws the Branch glyph above.
+//!
 //! The Adjust glyph (two sliders) is the old app's `ActionGlyph::Adjust`, which its sort menu drew beside each order, in
 //! the same 14-unit action box and stroke; its knobs leave gaps in the lines rather than painting holes, as the old one
 //! did, so a highlighted item tints it with one color.
@@ -251,8 +254,8 @@ pub enum Icon {
     PermissionUnknown,
     /// A bell, unfilled: the Settings dialog's Notifications section (the old app's quiet `BellIcon`).
     Bell,
-    /// A branch: the Managed checkout choice of a template's destination (the old app's `BranchIcon`, its 12-pixel box
-    /// kept).
+    /// A branch: the Managed checkout choice of a template's destination, and a trashed checkout's repository in the
+    /// Trash dialog (the old app's `BranchIcon`, its 12-pixel box kept).
     Branch,
     /// A question mark in a circle: the host rail foot's Help button, drawn in the Settings gear's 16-pixel box and
     /// stroke so the two read as a pair (the old app's `HelpIcon`).
@@ -268,6 +271,11 @@ pub enum Icon {
     /// A speech bubble with two lines of text: send feedback, on the Help menu's Send feedback and in the feedback
     /// dialog's header tile (the old app's `ActionGlyph::Feedback`, in the 14-unit action box with the 1.2 stroke).
     Feedback,
+    /// An outline bin with its lid on: the Trash button with nothing in it (the old app's `TrashIcon` with `full: false`),
+    /// in its 12-unit box with the 1.2 stroke and round caps and joins.
+    TrashEmpty,
+    /// A filled bin with its lid tipped open: the Trash button holding checkouts (the old `TrashIcon` with `full: true`).
+    TrashFull,
 }
 
 impl Icon {
@@ -347,6 +355,8 @@ impl Icon {
         Icon::Adjust,
         Icon::Info,
         Icon::Feedback,
+        Icon::TrashEmpty,
+        Icon::TrashFull,
     ];
 }
 
@@ -425,6 +435,8 @@ impl Icon {
             Icon::Adjust => "icons/adjust.svg",
             Icon::Info => "icons/info.svg",
             Icon::Feedback => "icons/feedback.svg",
+            Icon::TrashEmpty => "icons/trash-empty.svg",
+            Icon::TrashFull => "icons/trash-full.svg",
         }
     }
 }
@@ -524,6 +536,8 @@ impl Assets {
             "icons/maximize.svg" => Some(include_bytes!("../assets/icons/maximize.svg")),
             "icons/restore.svg" => Some(include_bytes!("../assets/icons/restore.svg")),
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
+            "icons/trash-empty.svg" => Some(include_bytes!("../assets/icons/trash-empty.svg")),
+            "icons/trash-full.svg" => Some(include_bytes!("../assets/icons/trash-full.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

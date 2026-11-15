@@ -472,6 +472,27 @@
       ]
     },
     {
+      "id": "app-trash-dialog-empty",
+      "title": "The Trash dialog opened from the session list header over a machine with nothing in its trash: the outline can, the intro and the empty line",
+      "reference": "checkout-trash-dialog",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "0"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:checkout-trash-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "The trash is empty on reachable hosts."
+        ]
+      ]
+    },
+    {
       "id": "app-terminal-scrollback",
       "title": "A terminal scrolled back through its history with the wheel, its scrollbar shown while the pointer is over it",
       "reference": null,
@@ -1022,6 +1043,26 @@
       "golden": "open-source-notices",
       "title": "The Open-Source Notices window over a short fixture, at its opening width and cropped in height: the window's own title bar on Linux, then the notices in the terminal face, a long line wrapped at the window's column and a tab-indented line",
       "reference": null
+    },
+    {
+      "golden": "trash-button-empty",
+      "title": "The session list header's Trash button with nothing in the trash: the outline can, no count",
+      "reference": "main-running-session"
+    },
+    {
+      "golden": "trash-button-full",
+      "title": "The Trash button over three archived checkouts: the open-lid can and its count",
+      "reference": "main-running-session"
+    },
+    {
+      "golden": "trash-button-emptying",
+      "title": "The Trash button while a host frees space, under reduced motion: the can upside down and still, with its count",
+      "reference": "main-running-session"
+    },
+    {
+      "golden": "checkout-trash-dialog",
+      "title": "The Trash dialog over the reference trash: the title with its can and total, this machine's two archives and build-box's one with their sizes, repositories, archive times and Deletes, each host's folder, and the footer's Close (focus starts there, though its ring shows only under keyboard focus)",
+      "reference": "checkout-trash-dialog"
     },
     {
       "golden": "session-order-menu",
