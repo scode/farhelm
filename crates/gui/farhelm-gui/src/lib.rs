@@ -36,6 +36,8 @@
 //! - [`assets`]: the bundled fonts and icons.
 //! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
+//! - [`permission`]: what a launch says about permission checks (the permission shield), the session list's
+//!   classification, kept apart so the agent approval cards can show the same shield.
 //! - [`harness`]: the GUI's per-harness vocabulary: which mark an agent type draws, its picture and identity color,
 //!   the agent's product name, and its status-line words for a mode without checks.
 //! - [`launcher`]: the session launcher (New, Clone, Replace with, Restart with).
@@ -75,6 +77,7 @@ pub mod main_view;
 pub mod marks;
 pub mod notices;
 pub mod operations;
+pub mod permission;
 pub mod prompt;
 pub mod render_count;
 pub mod root;

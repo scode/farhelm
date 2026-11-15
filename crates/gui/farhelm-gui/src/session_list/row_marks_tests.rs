@@ -4,8 +4,9 @@
 //! What a mark shows is decided by pure functions ([`RowMarks::of`] and the functions under it), tested here without
 //! a window, because GPUI's driver record of a frame says nothing of colors or of which picture an element painted.
 //! The in-window tests check what the record can show: which marks a row draws, their names and hover help, where the
-//! title starts, and (by the debug selector each picture carries, [`row_marks::picture_selector`]) which picture each
-//! one drew. Launches are written in the helm's wire form, as the helm pushes them.
+//! title starts, and (by the debug selector each picture carries, [`super::row_marks::picture_selector`]) which
+//! picture each one drew. Launches are written in the helm's wire form, as the helm pushes them. The shield's
+//! classification itself lives in [`crate::permission`], shared with the approval cards; its tests stay here.
 
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::{LaunchHarness, SessionLaunch};
@@ -15,8 +16,8 @@ use serde_json::{Value, json};
 use super::host_rail::tests::{hosts, local, remote};
 use super::row::{ITEM_ID_PREFIX, ROW_ID_PREFIX};
 use super::row_marks::{
-    self, AGENT_ID_SUFFIX, Description, HOST_ID_SUFFIX, HostMark, Locality, PERMISSION_ID_SUFFIX,
-    RowMarks, Shield,
+    AGENT_ID_SUFFIX, Description, HOST_ID_SUFFIX, HostMark, Locality, PERMISSION_ID_SUFFIX,
+    RowMarks,
 };
 use super::row_tests::{help_after_crossing, node, texts_within};
 use super::tests::{Fixture, collections, listing, open_main, session};
@@ -25,6 +26,7 @@ use crate::harness;
 use crate::host_text::HostSentence;
 use crate::launcher::words;
 use crate::marks::HarnessGlyph;
+use crate::permission::{Shield, permission};
 use crate::test_support::frame;
 use crate::theme::{self, Palette};
 
@@ -344,7 +346,7 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
     ];
     for (launch, shield) in cases {
         assert_eq!(
-            row_marks::permission(&decoded(launch.clone()), false),
+            permission(&decoded(launch.clone()), false),
             shield,
             "{launch}"
         );
@@ -561,12 +563,9 @@ fn status_line_evidence_escalates_the_shield_and_keeps_the_launch_described() {
         (command("grok", false, json!("grok")), "always-approve"),
     ];
     for (launch, mode) in escalating {
-        assert_ne!(
-            row_marks::permission(&decoded(launch.clone()), false),
-            Shield::Yolo
-        );
+        assert_ne!(permission(&decoded(launch.clone()), false), Shield::Yolo);
         assert_eq!(
-            row_marks::permission(&decoded(launch.clone()), true),
+            permission(&decoded(launch.clone()), true),
             Shield::Yolo,
             "{launch}"
         );
@@ -586,17 +585,14 @@ fn status_line_evidence_escalates_the_shield_and_keeps_the_launch_described() {
         assert_eq!(row.permission.0, Shield::Yolo);
     }
     let asserted = command("claude --yolo", true, json!("claude"));
-    assert_eq!(
-        row_marks::permission(&decoded(asserted), true),
-        Shield::Yolo
-    );
+    assert_eq!(permission(&decoded(asserted), true), Shield::Yolo);
     for unread in [
         agent("codex", json!("guarded"), &["codex"]),
         legacy("claude --dangerously-skip-permissions", "claude"),
     ] {
-        let unescalated = row_marks::permission(&decoded(unread.clone()), false);
+        let unescalated = permission(&decoded(unread.clone()), false);
         assert_eq!(
-            row_marks::permission(&decoded(unread.clone()), true),
+            permission(&decoded(unread.clone()), true),
             unescalated,
             "{unread}"
         );
