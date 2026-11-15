@@ -17,8 +17,9 @@
 //!   the operation store's to say ([`sending`]); the dialog keeps no copy of it. While one is out, Send draws busy, the
 //!   fields are read-only, Cancel and the header Close are disabled, and every dismissal stays ([`may_close`], asked by
 //!   the layer manager's dismissal hook), so the user cannot lose the send's outcome or their text.
-//! - **Success thanks and closes; failure keeps the text.** On success the body becomes a thank-you line, focus moves
-//!   to the footer's Close (the fields it may have held are gone), and the dialog closes itself after
+//! - **Success thanks and closes; failure keeps the text.** On success the body becomes a thank-you line (a stop of
+//!   its own, "Feedback sent", so the keyboard can scroll it), focus moves to the footer's Close (the fields it may
+//!   have held are gone), and the dialog closes itself after
 //!   [`THANKS_SHOWN`]. On any refusal the dialog says sending failed in plain words ([`failure_words`]), keeps
 //!   everything typed, and lets the user retry or copy it. Nothing is queued or retried.
 //! - **Remembering the contact is a separate write.** Only after a successful send, a best-effort keyless
@@ -38,10 +39,6 @@
 //! failed") has no counterpart: a lost channel resets the window, which closes the dialog. And the Welcome card's
 //! "Send feedback now" handoff, which has announcements wait until this dialog closes, needs a way to hear that close
 //! that the layer manager does not offer; it comes with the Welcome card.
-//!
-//! NOTE: After a successful send the body holds only the thank-you line, nothing focusable, so in a window short enough
-//! for that body to scroll, the keyboard has no way to scroll it (SPEC.md, "Reaching everything by keyboard", wants a
-//! tab stop there). The dialog frame has no such stop yet; this dialog gets it when the frame does.
 
 #[cfg(test)]
 mod tests;
@@ -800,6 +797,13 @@ impl Render for FeedbackDialog {
                     .text_color(theme::color(palette.fg_0)),
             )
             .width(px(WIDTH))
+            // The old body's stop, named for what it held: after a successful send the body is only the thank-you
+            // line, and a short window must still be able to scroll it from the keyboard.
+            .scroll_stop(if self.phase == Phase::Sent {
+                "Feedback sent"
+            } else {
+                "Feedback"
+            })
             .close(
                 "Close send feedback",
                 HoverHelp::tooltip("Close: leave this feedback dialog"),

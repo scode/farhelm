@@ -221,10 +221,13 @@ fn escape_and_the_header_close_close_the_history(cx: &mut TestAppContext) {
 /// dialog itself, Enter closes the history with focus back on the `?` button.
 #[gpui::test]
 fn enter_on_the_dialog_itself_presses_got_it(cx: &mut TestAppContext) {
-    let (_helm, cx, toggle) = open_help_bar(
-        cx,
-        vec![queue(vec![], vec![announcement("1", "News", "Body.")])],
-    );
+    // With a link, so the body has no stop of its own: a click on a linkless body puts focus on its stop instead.
+    let mut news = announcement("1", "News", "Body.");
+    news.link = Some(AnnouncementLink {
+        label: "Release notes".to_owned(),
+        url: "https://farhelm.io/docs/release-notes/".to_owned(),
+    });
+    let (_helm, cx, toggle) = open_help_bar(cx, vec![queue(vec![], vec![news])]);
     click(cx, "help-toggle");
     // Inside the body's padding: empty space.
     let corner = test_support::bounds(cx, "announcements-body").origin;
@@ -281,4 +284,41 @@ fn with_nothing_shown_the_history_opens_nothing(cx: &mut TestAppContext) {
     );
     click(cx, "help-toggle");
     assert!(!any_open(cx), "nothing shown yet, so no history opened");
+}
+
+/// The old dialog's body was a keyboard stop of its own ("Announcement content"), so a long announcement without a link
+/// could be scrolled from the keyboard; without one, nothing in such a body takes focus and the keys cannot reach it.
+/// Specified: a history of one linkless announcement draws the body's stop under that name (the next test has the
+/// linked case, which draws none).
+#[gpui::test]
+fn a_linkless_history_has_a_body_stop_named_announcement_content(cx: &mut TestAppContext) {
+    let (_helm, window, _toggle) = open_help_bar(
+        cx,
+        vec![queue(vec![], vec![announcement("1", "News", "Body.")])],
+    );
+    click(window, "help-toggle");
+    settle(window);
+    assert_eq!(
+        test_support::label(window, "announcements-body-stop").as_deref(),
+        Some("Announcement content")
+    );
+}
+
+/// The other half of the rule above, in its own window: a body holding a link has no stop of its own.
+#[gpui::test]
+fn a_linked_history_has_no_body_stop(cx: &mut TestAppContext) {
+    let mut news = announcement("1", "News", "Body.");
+    news.link = Some(AnnouncementLink {
+        label: "Release notes".to_owned(),
+        url: "https://farhelm.io/docs/release-notes/".to_owned(),
+    });
+    let (_helm, window, _toggle) = open_help_bar(cx, vec![queue(vec![], vec![news])]);
+    click(window, "help-toggle");
+    settle(window);
+    assert_eq!(
+        test_support::label(window, "announcement-link-1").as_deref(),
+        Some("Release notes ↗"),
+        "the premise: the history opened with its link"
+    );
+    assert_eq!(test_support::label(window, "announcements-body-stop"), None);
 }
