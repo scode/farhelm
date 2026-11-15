@@ -15,7 +15,8 @@ use std::rc::Rc;
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
+    Collection, CollectionChanges, CollectionState, ContainerCheckView, HostView, KeyedEntry,
+    PREFERENCES_KEY, Preferences,
 };
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render,
@@ -147,8 +148,17 @@ pub(super) fn open_rail<'a>(
     cx: &'a mut TestAppContext,
     preferences: &Preferences,
 ) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
+    open_rail_with(cx, vec![preferences_state(preferences)])
+}
+
+/// [`open_rail`] over a fake helm whose first snapshot is `snapshot`, for tests that need collections besides the
+/// preferences.
+fn open_rail_with(
+    cx: &mut TestAppContext,
+    snapshot: Vec<CollectionState>,
+) -> (FakeHelm, &mut VisualTestContext, FocusHandle) {
     let (mut helm, _connection) = started(cx);
-    helm.connect(vec![preferences_state(preferences)]);
+    helm.connect(snapshot);
     cx.run_until_parked();
     let gear = cx.update(|cx| cx.focus_handle().tab_stop(true));
     let held = gear.clone();
@@ -3327,8 +3337,8 @@ fn answer_checks(helm: &mut FakeHelm, hosts: &[i64], cx: &mut VisualTestContext)
     settle(cx);
 }
 
-/// Show Containers with the hosts read answered by `places` and the leftovers by `leftovers`, its checks answered
-/// (202) and the read after them answered by `places` again.
+/// Show Containers with the hosts read answered by `places` and the leftovers by `leftovers`, and its checks answered
+/// (202), after which nothing is out.
 fn show_containers_with(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
@@ -3346,9 +3356,46 @@ fn show_containers_with(
         .filter_map(|place| place["place"]["host"].as_i64())
         .collect();
     answer_checks(helm, &hosts, cx);
-    let reads = sent_reads(helm);
-    assert_eq!(reads.len(), 1, "one read after the checks: {reads:?}");
-    helm.reply(reads[0].0, 200, Some(places));
+    assert_eq!(sent(helm), [], "nothing follows the checks by itself");
+}
+
+/// Container host `id` as the hosts collection carries it: an ssh host whose check is running or not (`refreshing`),
+/// with the latest finished check's `result`: `None` when it has never finished one, else when it ended and why it
+/// failed (`None`: it passed).
+fn checked_host(id: i64, refreshing: bool, result: Option<(u64, Option<&str>)>) -> HostView {
+    let mut view = crate::hosts::tests::host(id, "ssh", crate::hosts::tests::connected());
+    view.container_check = Some(ContainerCheckView {
+        checked_at: result.map(|(at, _)| at),
+        refreshing,
+        usable: matches!(result, Some((_, None))),
+        reason: result.and_then(|(_, reason)| reason.map(str::to_owned)),
+    });
+    view
+}
+
+/// The app with the hosts collection holding `listed`, as [`open_rail`] opens it otherwise.
+fn open_rail_with_hosts<'a>(
+    cx: &'a mut TestAppContext,
+    listed: &[HostView],
+) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
+    open_rail_with(
+        cx,
+        vec![
+            preferences_state(&Preferences::default()),
+            crate::hosts::tests::hosts(listed),
+        ],
+    )
+}
+
+/// The helm pushes the hosts collection as holding `listed`, as it does when a check starts or ends.
+fn push_hosts(helm: &mut FakeHelm, listed: &[HostView], cx: &mut VisualTestContext) {
+    let state = crate::hosts::tests::hosts(listed);
+    helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
     settle(cx);
 }
 
@@ -3357,9 +3404,9 @@ fn show_containers_with(
 /// then ask for fresh checks, as the old section did, without treating the Tensorlake account as a container host.
 /// Neither list is pushed, so it reads them once per opening. Specified: showing Containers sends the places read and
 /// the leftovers read, and shows both as being read; once answered, each container host shows its name and Ready or
-/// its reason, a running check adds "· Refreshing…", the Tensorlake account is not listed, and no leftovers reads
-/// "None found"; then one check goes to each container host, and once they answer, one more places read; showing
-/// another section and Containers again sends nothing.
+/// its reason, a running check adds "· Refreshing…" (the read's own state, with no hosts collection to say
+/// otherwise), the Tensorlake account is not listed, and no leftovers reads "None found"; then one check goes to each
+/// container host, and their answers send nothing; showing another section and Containers again sends nothing.
 #[gpui::test]
 fn containers_reads_the_hosts_and_leftovers_once_then_checks_each_container_host(
     cx: &mut TestAppContext,
@@ -3391,80 +3438,346 @@ fn containers_reads_the_hosts_and_leftovers_once_then_checks_each_container_host
     assert!(shown.contains("None found"), "{shown}");
 
     answer_checks(&mut helm, &[7, 8], cx);
-    let reads = sent_reads(&mut helm);
-    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
-    assert_eq!(
-        paths,
-        ["/api/environment-places"],
-        "one read after the checks"
-    );
-    helm.reply(
-        reads[0].0,
-        200,
-        Some(json!([container_place(7, "build-box", None, false)])),
-    );
-    settle(cx);
-    assert!(
-        !painted(cx).contains("gpu-1"),
-        "the later read replaces the rows"
-    );
+    assert_eq!(sent(&mut helm), [], "the checks' answers send nothing");
 
     click(cx, section_button(Section::Hosts));
     click(cx, section_button(Section::Containers));
     assert_eq!(sent(&mut helm), [], "read once per opening");
 }
 
-/// The helm pushes nothing when a background check finishes, so a host shown "· Refreshing…" would keep saying so
-/// for the whole opening. The migration's orchestrator chose one bounded later read over polling (2026-11-15).
-/// Specified: when the read after the checks shows a host still refreshing, nothing is sent until `FOLLOW_UP` has
-/// passed, then exactly one places read, whose answer shows the finished check; nothing follows it however long the
-/// dialog stays open, even if a host is still refreshing then. When the read after the checks shows no host
-/// refreshing, nothing follows it at all.
+/// The places read's reason for a host is computed from the same check the hosts collection pushes, so once a host has a
+/// result the push alone can show it, whoever started the check, and the section must not read the places again for
+/// it: reading them makes the helm check any host with no result yet, which for a host whose check never stores one
+/// would never end. "· Refreshing…" must follow the check itself, not what the places said when they were read.
+/// Specified: with build-box never checked and gpu-1 passed, the rows read the places' "this host needs a Podman
+/// check" and Ready; build-box pushed running adds "· Refreshing…"; pushed with a failed result, it reads that
+/// result's reason and drops the mark; gpu-1 pushed failed, then passed, reads its reason, then Ready; and nothing is
+/// sent throughout.
 #[gpui::test]
-fn a_running_check_is_read_again_once_after_the_follow_up_delay(cx: &mut TestAppContext) {
-    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
-    let refreshing = json!([container_place(7, "build-box", None, true)]);
-    show_containers_with(&mut helm, cx, refreshing.clone(), json!([]));
-    assert!(painted(cx).contains("build-box Ready · Refreshing…"));
-
-    test_support::advance(
+fn a_pushed_result_changes_the_row_with_no_request_sent(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail_with_hosts(
         cx,
-        super::containers::FOLLOW_UP - std::time::Duration::from_secs(1),
+        &[
+            checked_host(7, false, None),
+            checked_host(8, false, Some((100, None))),
+        ],
     );
-    assert_eq!(sent(&mut helm), [], "nothing before the delay");
-    test_support::advance(cx, std::time::Duration::from_secs(1));
-    let reads = sent_reads(&mut helm);
-    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
-    assert_eq!(paths, ["/api/environment-places"], "one later read");
-    helm.reply(reads[0].0, 200, Some(refreshing));
-    settle(cx);
-    test_support::advance(cx, super::containers::FOLLOW_UP * 3);
-    assert_eq!(
-        sent(&mut helm),
-        [],
-        "the later read is the last, whatever it shows"
+    show_containers_with(
+        &mut helm,
+        cx,
+        json!([
+            container_place(
+                7,
+                "build-box",
+                Some("this host needs a Podman check"),
+                false
+            ),
+            container_place(8, "gpu-1", None, false),
+        ]),
+        json!([]),
+    );
+    let shown = painted_words(cx);
+    assert!(
+        shown.contains("build-box this host needs a Podman check gpu-1 Ready"),
+        "{shown}"
+    );
+    assert!(
+        !shown.contains("Refreshing…"),
+        "premise: the read says not running"
     );
 
-    // Refresh starts a new chain; this one's read after the checks shows nothing running, so no later read follows.
+    let gpu_ready = checked_host(8, false, Some((100, None)));
+    push_hosts(
+        &mut helm,
+        &[checked_host(7, true, None), gpu_ready.clone()],
+        cx,
+    );
+    let shown = painted_words(cx);
+    assert!(
+        shown.contains("build-box this host needs a Podman check · Refreshing…"),
+        "{shown}"
+    );
+    let not_installed = Some((200, Some("Podman is not installed on this host")));
+    push_hosts(
+        &mut helm,
+        &[checked_host(7, false, not_installed), gpu_ready],
+        cx,
+    );
+    let shown = painted_words(cx);
+    assert!(
+        shown.contains("build-box Podman is not installed on this host"),
+        "{shown}"
+    );
+    assert!(!shown.contains("Refreshing…"), "the push ended the mark");
+
+    let cgroup = Some((300, Some("the systemd cgroup manager is not in use")));
+    push_hosts(
+        &mut helm,
+        &[
+            checked_host(7, false, not_installed),
+            checked_host(8, false, cgroup),
+        ],
+        cx,
+    );
+    assert!(painted_words(cx).contains("gpu-1 the systemd cgroup manager is not in use"));
+    push_hosts(
+        &mut helm,
+        &[
+            checked_host(7, false, not_installed),
+            checked_host(8, false, Some((400, None))),
+        ],
+        cx,
+    );
+    assert!(painted_words(cx).contains("gpu-1 Ready"));
+    assert_eq!(sent(&mut helm), [], "a pushed result sends nothing");
+}
+
+/// Before a host has a result, the pushed check says nothing a row can show, so the places read's words are the only
+/// ones: the helm's "this host needs a Podman check", or its reason for a host it cannot route to, which carries no
+/// pushed check at all. And before the hosts collection has a host, the read's own mark is all there is. Specified:
+/// build-box, pushed with no result, reads the places' "this host needs a Podman check", not Ready; gpu-1, which the
+/// hosts collection does not hold, reads Ready with the read's "· Refreshing…"; odd-box, pushed without a check,
+/// reads the places' "this host cannot run containers".
+#[gpui::test]
+fn before_a_result_the_places_read_shows(cx: &mut TestAppContext) {
+    let no_check = crate::hosts::tests::host(9, "ssh", crate::hosts::tests::connected());
+    assert!(
+        no_check.container_check.is_none(),
+        "premise: odd-box carries no check"
+    );
+    let (mut helm, cx, _gear) = open_rail_with_hosts(cx, &[checked_host(7, false, None), no_check]);
+    show_containers_with(
+        &mut helm,
+        cx,
+        json!([
+            container_place(
+                7,
+                "build-box",
+                Some("this host needs a Podman check"),
+                false
+            ),
+            container_place(8, "gpu-1", None, true),
+            container_place(9, "odd-box", Some("this host cannot run containers"), false),
+        ]),
+        json!([]),
+    );
+    let shown = painted_words(cx);
+    assert!(
+        shown.contains("build-box this host needs a Podman check gpu-1"),
+        "{shown}"
+    );
+    assert!(shown.contains("gpu-1 Ready · Refreshing…"), "{shown}");
+    assert!(
+        shown.contains("odd-box this host cannot run containers"),
+        "{shown}"
+    );
+}
+
+/// The old read replaced the hosts with the helm's refusal of a check, and that refusal must stay readable rather than
+/// be painted over by rows a later check's push would draw; the next round starts over. Specified: with build-box and
+/// gpu-1 asked for, gpu-1's check refused, the refusal shows where the hosts were; a push of a result for build-box
+/// then leaves it and sends nothing; Refresh reads again, and its rows show build-box with the pushed result.
+#[gpui::test]
+fn a_refused_check_keeps_its_reason_until_the_next_round(cx: &mut TestAppContext) {
+    let ready = |id| checked_host(id, false, Some((100, None)));
+    let (mut helm, cx, _gear) = open_rail_with_hosts(cx, &[ready(7), ready(8)]);
+    let places = json!([
+        container_place(7, "build-box", None, false),
+        container_place(8, "gpu-1", None, false),
+    ]);
+    let (places_read, leftovers_read) = show_containers(&mut helm, cx);
+    helm.reply(places_read, 200, Some(places.clone()));
+    helm.reply(leftovers_read, 200, Some(json!([])));
+    settle(cx);
+    let checks = sent(&mut helm);
+    let paths: Vec<&str> = checks.iter().map(|check| check.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["/api/hosts/7/podman-probe", "/api/hosts/8/podman-probe"],
+        "premise: a check of each host is out, gpu-1's second"
+    );
+    helm.reply(checks[0].id, 202, None);
+    helm.reply(checks[1].id, 503, Some(json!("fixture check refusal")));
+    settle(cx);
+    assert!(drawn(cx, "containers-hosts-error"));
+    assert!(painted(cx).contains("fixture check refusal"));
+
+    let not_installed = Some((200, Some("Podman is not installed on this host")));
+    push_hosts(
+        &mut helm,
+        &[checked_host(7, false, not_installed), ready(8)],
+        cx,
+    );
+    let shown = painted(cx);
+    assert!(
+        shown.contains("fixture check refusal"),
+        "the refusal stays: {shown}"
+    );
+    assert!(!shown.contains("Podman is not installed"), "{shown}");
+    assert_eq!(sent(&mut helm), [], "a push sends nothing");
+
     click(cx, "containers-refresh");
     let reads = sent_reads(&mut helm);
-    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
-    assert_eq!(paths, CONTAINER_READS, "Refresh reads both lists again");
-    let ready = json!([container_place(7, "build-box", None, false)]);
-    helm.reply(reads[0].0, 200, Some(ready.clone()));
+    helm.reply(reads[0].0, 200, Some(places));
     helm.reply(reads[1].0, 200, Some(json!([])));
     settle(cx);
-    answer_checks(&mut helm, &[7], cx);
-    let reads = sent_reads(&mut helm);
-    helm.reply(reads[0].0, 200, Some(ready));
+    answer_checks(&mut helm, &[7, 8], cx);
+    let shown = painted_words(cx);
+    assert!(!shown.contains("fixture check refusal"), "{shown}");
+    assert!(
+        shown.contains("build-box Podman is not installed on this host"),
+        "{shown}"
+    );
+}
+
+/// One places read is out, and nothing else: answer it with `places` and check that its answer asks for no check.
+fn answer_one_places_read(helm: &mut FakeHelm, places: Value, cx: &mut VisualTestContext) {
+    let reads = sent_reads(helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["/api/environment-places"],
+        "exactly one places read"
+    );
+    helm.reply(reads[0].0, 200, Some(places));
     settle(cx);
-    assert!(!painted(cx).contains("Refreshing…"));
-    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(
+        sent(helm),
+        [],
+        "a read for a fleet change asks for no check"
+    );
+}
+
+/// The places read decides which hosts the section lists and under what name, and a host whose destination changes
+/// loses its result (the helm keeps a check per route), so without a new read its row would keep the earlier read's
+/// state, possibly Ready, for a host the helm no longer vouches for. So the section reads the places again when the
+/// pushed fleet changes any of those, and only then: a read can start a check, so following check state too would
+/// read on every check's push. Specified: with build-box (an alias) listed, a push of its check running sends nothing,
+/// and neither does a Tensorlake host added; gpu-1 added sends exactly one places read and no check, and its answer
+/// lists gpu-1; build-box renamed to big-box sends one; its destination changed under the same name, pushed with no
+/// result, sends one, and that read's "this host needs a Podman check" replaces the earlier read's Ready; gpu-1 removed
+/// sends one; and each of those pushed a second time sends nothing.
+#[gpui::test]
+fn a_fleet_change_the_places_reflect_reads_them_once(cx: &mut TestAppContext) {
+    use crate::hosts::tests::{aliased, connected, host};
+    let build_box = |refreshing, alias: &str, destination: &str| {
+        aliased(
+            checked_host(7, refreshing, Some((100, None))),
+            alias,
+            destination,
+        )
+    };
+    let gpu = checked_host(8, false, None);
+    let (mut helm, cx, _gear) =
+        open_rail_with_hosts(cx, &[build_box(false, "build-box", "dev@one.invalid")]);
+    show_containers_with(
+        &mut helm,
+        cx,
+        json!([container_place(7, "build-box", None, false)]),
+        json!([]),
+    );
+
+    push_hosts(
+        &mut helm,
+        &[build_box(true, "build-box", "dev@one.invalid")],
+        cx,
+    );
+    assert_eq!(sent(&mut helm), [], "a check's push reads nothing");
+    let sandbox = host(20, "tensorlake", connected());
+    push_hosts(
+        &mut helm,
+        &[build_box(false, "build-box", "dev@one.invalid"), sandbox],
+        cx,
+    );
     assert_eq!(
         sent(&mut helm),
         [],
-        "nothing follows a read with no check running"
+        "a host that cannot hold containers reads nothing"
     );
+
+    let both = [
+        build_box(false, "build-box", "dev@one.invalid"),
+        gpu.clone(),
+    ];
+    push_hosts(&mut helm, &both, cx);
+    answer_one_places_read(
+        &mut helm,
+        json!([
+            container_place(7, "build-box", None, false),
+            container_place(8, "gpu-1", Some("this host needs a Podman check"), false),
+        ]),
+        cx,
+    );
+    assert!(painted_words(cx).contains("gpu-1 this host needs a Podman check"));
+    push_hosts(&mut helm, &both, cx);
+    assert_eq!(sent(&mut helm), [], "the same fleet again reads nothing");
+
+    let renamed = [build_box(false, "big-box", "dev@one.invalid"), gpu.clone()];
+    push_hosts(&mut helm, &renamed, cx);
+    let places = json!([
+        container_place(7, "big-box", None, false),
+        container_place(8, "gpu-1", Some("this host needs a Podman check"), false),
+    ]);
+    answer_one_places_read(&mut helm, places, cx);
+    assert!(painted_words(cx).contains("big-box Ready"));
+    push_hosts(&mut helm, &renamed, cx);
+    assert_eq!(sent(&mut helm), [], "the same name again reads nothing");
+
+    // A retarget drops the host's result (the helm keeps a check per route), as the push shows. The read's answer is
+    // what moves the row off the earlier read's Ready, so the row is asserted before the count of reads: without the
+    // read, this is the assertion that fails.
+    let unchecked = aliased(checked_host(7, false, None), "big-box", "dev@two.invalid");
+    let retargeted = [unchecked, gpu];
+    push_hosts(&mut helm, &retargeted, cx);
+    assert!(
+        painted_words(cx).contains("big-box Ready"),
+        "premise: until a read answers, the row keeps the earlier read's state"
+    );
+    let reads = sent_reads(&mut helm);
+    for (id, _) in &reads {
+        helm.reply(
+            *id,
+            200,
+            Some(json!([
+                container_place(7, "big-box", Some("this host needs a Podman check"), false),
+                container_place(8, "gpu-1", Some("this host needs a Podman check"), false),
+            ])),
+        );
+    }
+    settle(cx);
+    let shown = painted_words(cx);
+    assert!(
+        shown.contains("big-box this host needs a Podman check"),
+        "the retargeted host no longer reads Ready: {shown}"
+    );
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["/api/environment-places"],
+        "exactly one places read"
+    );
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "a read for a fleet change asks for no check"
+    );
+    push_hosts(&mut helm, &retargeted, cx);
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the same destination again reads nothing"
+    );
+
+    let alone = [build_box(false, "big-box", "dev@two.invalid")];
+    push_hosts(&mut helm, &alone, cx);
+    answer_one_places_read(
+        &mut helm,
+        json!([container_place(7, "big-box", None, false)]),
+        cx,
+    );
+    assert!(!painted_words(cx).contains("gpu-1"));
+    push_hosts(&mut helm, &alone, cx);
+    assert_eq!(sent(&mut helm), [], "the same fleet again reads nothing");
 }
 
 /// SPEC.md: a container's removal destroys every session, process, file and unpushed change in it, so Delete must
@@ -3597,14 +3910,12 @@ fn failed_container_reads_show_their_reasons_and_never_none_found(cx: &mut TestA
 }
 
 /// A Refresh pressed while the previous round's checks are still out must not let that round's later answers undo it:
-/// a stale refusal would replace the rows, and a stale read after its checks would schedule a later read nobody asked
-/// for, the polling the single later read exists to avoid. The helm answers in send order, so the old round's checks
-/// answer after Refresh but before its reads. Specified: with the first round's two checks unanswered, Refresh reads
-/// both lists again; the old checks then answering (one 202, one refused) show nothing and send nothing; the new
-/// round's reads, its checks and its read after them (no check running) show its rows, and nothing follows however
-/// long the dialog stays open.
+/// a stale refusal would replace the rows. The helm answers in send order, so the old round's checks answer after
+/// Refresh but before its reads. Specified: with the first round's two checks unanswered, Refresh reads both lists
+/// again; the old checks then answering (one 202, one refused) show nothing and send nothing; the new round's reads
+/// and its checks show its rows, and send nothing more.
 #[gpui::test]
-fn a_refresh_drops_the_older_rounds_answers_and_later_read(cx: &mut TestAppContext) {
+fn a_refresh_drops_the_older_rounds_check_answers(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let (places_read, leftovers_read) = show_containers(&mut helm, cx);
     let refreshing = json!([
@@ -3639,169 +3950,72 @@ fn a_refresh_drops_the_older_rounds_answers_and_later_read(cx: &mut TestAppConte
     assert_eq!(
         sent(&mut helm),
         [],
-        "the old round reads nothing after its checks"
+        "the old round sends nothing after its checks"
     );
 
     let ready = json!([container_place(7, "build-box", None, false)]);
-    helm.reply(reads[0].0, 200, Some(ready.clone()));
+    helm.reply(reads[0].0, 200, Some(ready));
     helm.reply(reads[1].0, 200, Some(json!([])));
     settle(cx);
     answer_checks(&mut helm, &[7], cx);
-    let reads = sent_reads(&mut helm);
-    assert_eq!(reads.len(), 1, "the new round's read after its checks");
-    helm.reply(reads[0].0, 200, Some(ready));
-    settle(cx);
     assert!(painted(cx).contains("build-box Ready"));
     assert!(!painted(cx).contains("gpu-1"));
-    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
-    assert_eq!(sent(&mut helm), [], "no later read from either round");
-}
-
-/// The later read is held by the section, so it must end with the section: an interim that outlived its dialog would
-/// become a read nobody can see, after every opening. Specified: with a later read due (a host still refreshing after
-/// the checks), closing Settings with Escape and letting `FOLLOW_UP` pass sends nothing; the same after a reset of the
-/// connection, which closes Settings, and the reconnect that follows.
-#[gpui::test]
-fn closing_settings_or_a_reset_cancels_the_later_read(cx: &mut TestAppContext) {
-    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
-    let refreshing = json!([container_place(7, "build-box", None, true)]);
-    show_containers_with(&mut helm, cx, refreshing.clone(), json!([]));
-    assert!(
-        painted(cx).contains("Refreshing…"),
-        "premise: a later read is due"
-    );
-    keys(cx, "escape");
-    assert!(!any_open(cx), "premise: Settings closed");
-    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
-    assert_eq!(sent(&mut helm), [], "closing ended the later read");
-
-    show_containers_with(&mut helm, cx, refreshing, json!([]));
-    assert!(
-        painted(cx).contains("Refreshing…"),
-        "premise: a later read is due again"
-    );
-    helm.break_channel();
-    settle(cx);
-    assert!(!any_open(cx), "premise: the reset closed Settings");
-    helm.connect(vec![preferences_state(&Preferences::default())]);
-    settle(cx);
-    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
-    assert_eq!(sent(&mut helm), [], "the reset ended the later read");
+    assert_eq!(sent(&mut helm), [], "nothing more from either round");
 }
 
 /// The overlap test above refuses one of the old round's checks, so it shows only that the checks' answers are dropped.
 /// The reads need their own guard: a read the old round sent before Refresh answers after it, in send order, and taken
-/// as the newest it would put stale rows on screen and, for the places read after the checks, arm a later read again.
-/// Specified: with the old round's read after its checks out when Refresh is pressed, its answer (a still-refreshing
-/// host named stale-box) shows nothing and arms nothing, so once the new round finishes with nothing running, nothing
-/// is sent however long the dialog stays open; and with the old round's leftovers read out when Refresh is pressed,
-/// its answer (a leftover named stale-leftover) shows nothing, and the section goes on reading until the new round's
-/// answer shows "None found".
+/// as the newest it would put stale rows on screen. Specified: with the old round's places and leftovers reads out when
+/// Refresh is pressed, their answers (a host named stale-box, a leftover named stale-leftover) show nothing, and the
+/// section goes on reading until the new round's answers show build-box and "None found".
 #[gpui::test]
 fn an_older_rounds_reads_answering_after_a_refresh_are_dropped(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let (places_read, leftovers_read) = show_containers(&mut helm, cx);
+    click(cx, "containers-refresh");
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths, CONTAINER_READS,
+        "premise: Refresh reads both lists again"
+    );
     helm.reply(
         places_read,
         200,
-        Some(json!([container_place(7, "build-box", None, true)])),
+        Some(json!([container_place(7, "stale-box", None, false)])),
     );
-    helm.reply(leftovers_read, 200, Some(json!([])));
-    settle(cx);
-    answer_checks(&mut helm, &[7], cx);
-    let old_after_checks = sent_reads(&mut helm);
-    assert_eq!(
-        old_after_checks.len(),
-        1,
-        "premise: the old round's read after its checks is out"
-    );
-
-    click(cx, "containers-refresh");
-    let reads = sent_reads(&mut helm);
     helm.reply(
-        old_after_checks[0].0,
-        200,
-        Some(json!([container_place(7, "stale-box", None, true)])),
-    );
-    settle(cx);
-    assert!(
-        !painted(cx).contains("stale-box"),
-        "the old round's places are dropped"
-    );
-    let ready = json!([container_place(7, "build-box", None, false)]);
-    helm.reply(reads[0].0, 200, Some(ready.clone()));
-    helm.reply(reads[1].0, 200, Some(json!([])));
-    settle(cx);
-    answer_checks(&mut helm, &[7], cx);
-    let after = sent_reads(&mut helm);
-    helm.reply(after[0].0, 200, Some(ready.clone()));
-    settle(cx);
-    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
-    assert_eq!(
-        sent(&mut helm),
-        [],
-        "the old round's read armed no later read"
-    );
-
-    // The leftovers: the old round's read is still out when Refresh is pressed.
-    click(cx, "containers-refresh");
-    let old_reads = sent_reads(&mut helm);
-    helm.reply(old_reads[0].0, 200, Some(ready.clone()));
-    settle(cx);
-    let old_checks = sent(&mut helm);
-    click(cx, "containers-refresh");
-    let new_reads = sent_reads(&mut helm);
-    helm.reply(
-        old_reads[1].0,
+        leftovers_read,
         200,
         Some(json!([leftover("stale-leftover", None)])),
     );
     settle(cx);
+    let shown = painted(cx);
     assert!(
-        !painted(cx).contains("stale-leftover"),
+        !shown.contains("stale-box"),
+        "the old round's places are dropped"
+    );
+    assert!(
+        !shown.contains("stale-leftover"),
         "the old round's leftovers are dropped"
     );
-    for check in old_checks {
-        helm.reply(check.id, 202, None);
-    }
-    settle(cx);
-    helm.reply(new_reads[0].0, 200, Some(ready));
-    helm.reply(new_reads[1].0, 200, Some(json!([])));
-    settle(cx);
-    assert!(painted(cx).contains("None found"));
-}
-
-/// Each Refresh starts its round without the previous round's later read, or a Refresh pressed while one is due would
-/// still send it when its time came, a read nobody asked for. Specified: with a later read due (a host still refreshing
-/// after the checks), Refresh and a new round that finishes with nothing running leave nothing to send once
-/// `FOLLOW_UP` has passed.
-#[gpui::test]
-fn a_refresh_drops_the_later_read_already_due(cx: &mut TestAppContext) {
-    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
-    show_containers_with(
-        &mut helm,
-        cx,
-        json!([container_place(7, "build-box", None, true)]),
-        json!([]),
-    );
-    assert!(
-        painted(cx).contains("Refreshing…"),
-        "premise: a later read is due"
-    );
-    click(cx, "containers-refresh");
-    let reads = sent_reads(&mut helm);
-    let ready = json!([container_place(7, "build-box", None, false)]);
-    helm.reply(reads[0].0, 200, Some(ready.clone()));
-    helm.reply(reads[1].0, 200, Some(json!([])));
-    settle(cx);
-    answer_checks(&mut helm, &[7], cx);
-    let after = sent_reads(&mut helm);
-    helm.reply(after[0].0, 200, Some(ready));
-    settle(cx);
-    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert!(shown.contains("Reading container hosts…"), "{shown}");
+    assert!(shown.contains("Reading container leftovers…"), "{shown}");
     assert_eq!(
         sent(&mut helm),
         [],
-        "the earlier round's later read was dropped"
+        "the old round's answers ask for no check"
     );
+
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!([container_place(7, "build-box", None, false)])),
+    );
+    helm.reply(reads[1].0, 200, Some(json!([])));
+    settle(cx);
+    answer_checks(&mut helm, &[7], cx);
+    let shown = painted(cx);
+    assert!(shown.contains("build-box Ready"), "{shown}");
+    assert!(shown.contains("None found"), "{shown}");
 }

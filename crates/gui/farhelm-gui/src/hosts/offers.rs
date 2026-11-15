@@ -97,6 +97,16 @@ impl HostKind {
         }
     }
 
+    /// Whether the host can hold containers, so Settings → Containers lists it: the helm's own machine and an SSH host,
+    /// the GUI's side of the helm's `can_host_environments`. A sandbox or a container cannot, and a kind this build
+    /// does not know is not assumed to.
+    pub(crate) fn holds_containers(self) -> bool {
+        match self {
+            HostKind::Local | HostKind::Ssh => true,
+            HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => false,
+        }
+    }
+
     /// Whether the desktop app's own updater updates this host: the helm's own machine, which in the desktop app is the
     /// machine the app runs on, so a newer release the app installs is that machine's update (SPEC.md, "Session list":
     /// "there the local row always offers Update, and choosing it checks for a newer release and installs it").

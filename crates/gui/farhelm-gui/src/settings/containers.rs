@@ -13,16 +13,29 @@
 //!   in an opening of the dialog (the pattern Agent trust follows), and again on Refresh, and a reply reaches only the
 //!   section it was sent for. The hosts come from `GET /api/environment-places`, the helm's cached checks, which it
 //!   answers without waiting on any host. Each read then asks the helm to check every container host again in the
-//!   background (`POST /api/hosts/{id}/podman-probe`, which the helm answers at once) and reads the places once more,
-//!   as the old section did on opening and on Refresh. A probe the helm refuses replaces the hosts with its reason, as
-//!   the old read's did.
-//! - **A check that is still running.** A host whose check is running reads "· Refreshing…". The helm pushes nothing
-//!   when a check finishes, so after the read that follows the checks, if some host was still refreshing, the section
-//!   reads the places once more [`FOLLOW_UP`] later and then stops: one bounded read, not polling. A check that takes
-//!   longer than that keeps "· Refreshing…" until the next Refresh or opening. Each Refresh starts a new round, and
-//!   answers and the later read of an older round are dropped (`Containers::round`). The old section polled while any
-//!   host was refreshing; the migration's orchestrator chose this single read on 2026-11-15 as an interim until the
-//!   helm pushes finished checks (`docs/gpui/parity/settings-and-hosts.md`, "Deviations").
+//!   background (`POST /api/hosts/{id}/podman-probe`, which the helm answers at once), as the old section did on
+//!   opening and on Refresh. A probe the helm refuses replaces the hosts with its reason, as the old read's did.
+//! - **Each host's state comes from the push once it has a result.** The places are not pushed, but each host's check
+//!   is: the hosts collection carries it (`HostView::container_check`), and the helm pushes it when a check starts and
+//!   when it ends. The places read's per-host reason is computed from that same check (`places()` in
+//!   `crates/farhelm-helm/src/environment/podman.rs`), so once a host has a result (`checked_at` set) its row draws
+//!   Ready or the pushed reason, and once the host's entry has arrived "· Refreshing…" follows the pushed state (the
+//!   read's own flag stands in before). A check therefore shows its result the moment it ends, whoever started it, and
+//!   nothing is read again when it does: reading the places makes the helm check every host that has no result yet, so
+//!   a read on a check's end could, for a host whose check never stores a result, check that host and read again
+//!   without end. The places read still decides which hosts are listed, in what order and under what name, and gives a
+//!   host's state until it has a result (the helm's "needs a Podman check", or its reason for a host it cannot route
+//!   to, which then has no pushed check at all).
+//! - **Read again when the fleet changes what the read shows.** While the section lives, it reads the places again,
+//!   with no checks, when the pushed hosts collection changes what that read reflects: a local or SSH host added or
+//!   removed, or one's name or destination changed (a retarget, which also drops the host's result, so its row would
+//!   otherwise keep the earlier read's state). The pushed entry carries no route; for these kinds the destination is
+//!   what decides it. The comparison leaves check state out ([`Fleet`]), so a check's push never reads, and the read's
+//!   own check of a new host pushes only check state, so this cannot loop. The old section re-read on every fleet
+//!   notice. Nothing orders two places reads of one round, so when they answer out of order (the opening's and a fleet
+//!   change's, or two quick fleet changes'), the older answer's rows stay until the next fleet change or Refresh.
+//! - **Refresh starts a new round.** Each Refresh starts a new round, and the answers of an older round are dropped
+//!   (`Containers::round`).
 //! - **Delete always asks.** Delete asks inline, under the lists, naming the container, with focus on Cancel since the
 //!   removal cannot be undone; its answer acts on the row as it was asked about. A leftover with a host row goes through
 //!   ordinary host removal (`DELETE /api/hosts/{id}`), whose connection hold and provisioning lock it needs; one without
@@ -35,16 +48,16 @@
 //!   answers handled here. Every name, reason and refusal is the helm's or a host's, drawn as host text.
 //!
 //! NOTE: The rows show a fresh read as soon as it answers, before the checks it then asks for, where the old section
-//! showed nothing new until its checks were asked for and the second read answered. Both reads answer without waiting
-//! on a host, so the difference is a moment; showing the first lets the rows appear on opening without waiting behind
-//! the checks.
+//! showed nothing new until its checks were asked for and its second read answered. The read answers without waiting
+//! on a host, so the difference is a moment; showing it lets the rows appear on opening without waiting behind the
+//! checks.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
 
-use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::environment::{ContainerLeftoverView, EnvironmentPlaceView};
+use farhelm_proto::ui_channel::{Availability, Collection, ContainerCheckView, HostView};
 use gpui::{
     App, Context, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _, Window, div,
@@ -55,16 +68,10 @@ use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
+use crate::hosts::offers::HostKind;
 use crate::prompt::{self, Answer, Inline, Question};
+use crate::session::{self, ObservingCurrent};
 use crate::theme::{self, metrics};
-use crate::ticker::{self, Deadline};
-
-/// How long after the read that follows the checks the section reads the places once more, when a host was still
-/// refreshing. Thirty seconds is how long a container launch waits for a host's check (`PodmanPlaces::runtime` and
-/// `fresh` in `crates/farhelm-helm/src/environment/podman_probe.rs`), so a check that finishes within what the helm
-/// itself treats as a reasonable wait shows by then. It is not the check's own limit: the check runs several commands
-/// of up to 20 seconds each and can take longer, and then keeps "· Refreshing…" until the next Refresh or opening.
-pub(super) const FOLLOW_UP: Duration = Duration::from_secs(30);
 
 /// `.host-settings-section`'s gap between the section's parts.
 const PART_GAP: f32 = 14.;
@@ -87,16 +94,18 @@ const LEFTOVERS_HELP: &str = "These containers have no completed session on this
 /// What the section shows of one list: nothing read yet, the helm's answer, or why there is none.
 type Answered<T> = Option<Result<Vec<T>, HostText>>;
 
+/// What the places read reflects of the pushed fleet: each container host's id, name and destination, in the helm's
+/// order. Check state is deliberately not in it, so a check's push never changes it (the module docs).
+type Fleet = Vec<(i64, String, Option<String>)>;
+
 /// Which places read an answer belongs to, which decides what follows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlacesRead {
     /// The read on first showing or on Refresh: its answer is followed by a check of every container host.
     Fresh,
-    /// The read after those checks were asked for: if a host is still refreshing, one [`PlacesRead::FollowUp`] follows
-    /// [`FOLLOW_UP`] later.
-    AfterChecks,
-    /// That one later read, followed by nothing.
-    FollowUp,
+    /// The read after the fleet changed what the places reflect: followed by nothing, since a new host's first check
+    /// is the helm's (it checks a host that has no result when the places are read) and the rest keep theirs.
+    FleetChanged,
 }
 
 /// The Containers section, a view of its own that Settings makes the first time Containers shows in an opening and
@@ -106,18 +115,20 @@ pub(super) struct Containers {
     leftovers: Answered<ContainerLeftoverView>,
     /// The current refresh round: 1 for the reads on first showing, and one more for each Refresh. Every read and check
     /// carries the round it belongs to, and an answer from an older round is dropped, so a Refresh pressed while the
-    /// previous round's checks are still out can neither have its rows replaced by that round's later answers nor be
-    /// followed by that round's later read.
+    /// previous round's checks or reads are still out cannot have its rows replaced by that round's later answers.
     round: u64,
+    /// The fleet as last seen ([`Fleet`]); `None` until the hosts collection has first been read whole. A change from it
+    /// reads the places again.
+    fleet: Option<Fleet>,
     /// The open Delete question, drawn under the lists until it is answered.
     question: Option<Inline<ContainerLeftoverView>>,
     /// Whether a Delete is out: Refresh and every Delete are unavailable meanwhile.
     deleting: bool,
     /// Why the last Delete did not finish, in the helm's words, until the next Delete is asked.
     failure: Option<HostText>,
-    /// The current round's one later read of the places ([`PlacesRead::FollowUp`]). A new round drops it, and so does
-    /// dropping the section with the dialog: closing Settings, or a reset, which closes it, ends the wait.
-    follow_up: Option<Deadline>,
+    /// Calls [`Containers::follow_fleet`] on every change of the current store; it ends with the section, so closing
+    /// Settings, or a reset, which closes it, stops the re-reads.
+    _following: ObservingCurrent,
 }
 
 impl Containers {
@@ -127,13 +138,33 @@ impl Containers {
             places: None,
             leftovers: None,
             round: 0,
+            fleet: None,
             question: None,
             deleting: false,
             failure: None,
-            follow_up: None,
+            _following: session::observe_current(cx, |section: &mut Self, cx| {
+                section.follow_fleet(cx)
+            }),
         };
         section.start_round(cx);
         section
+    }
+
+    /// The store changed: read the places again (in the current round) if the fleet changed what they reflect. The
+    /// first fleet seen only becomes the memo, since the read on first showing already reflects it; a hosts collection
+    /// that is not available proves nothing and changes nothing.
+    fn follow_fleet(&mut self, cx: &mut Context<Self>) {
+        let Some(store) = session::current_store(cx) else {
+            return;
+        };
+        let Some(now) = fleet(store.read(cx).collections()) else {
+            return;
+        };
+        let changed = self.fleet.as_ref().is_some_and(|before| *before != now);
+        self.fleet = Some(now);
+        if changed {
+            Self::read_places(self.round, PlacesRead::FleetChanged, cx);
+        }
     }
 
     /// Refresh: read both lists again, checking every container host again on the way (the module docs). Does nothing
@@ -145,10 +176,9 @@ impl Containers {
         self.start_round(cx);
     }
 
-    /// Start a new refresh round: drop the previous round's later read, and read both lists.
+    /// Start a new refresh round and read both lists.
     fn start_round(&mut self, cx: &mut Context<Self>) {
         self.round += 1;
-        self.follow_up = None;
         Self::read_places(self.round, PlacesRead::Fresh, cx);
         Self::read_leftovers(self.round, cx);
     }
@@ -189,7 +219,8 @@ impl Containers {
         );
     }
 
-    /// A places read of the current round answered: show it, and go on as `read` says (see [`PlacesRead`]).
+    /// A places read of the current round answered: show it, and after a [`PlacesRead::Fresh`] one ask for a check of
+    /// every container host it lists.
     fn places_answered(
         &mut self,
         read: PlacesRead,
@@ -205,28 +236,18 @@ impl Containers {
                     .collect()
             })
             .unwrap_or_default();
-        let refreshing = answer
-            .as_ref()
-            .is_ok_and(|places| container_hosts(places).any(|place| place.refreshing));
         self.places = Some(answer);
         match read {
             PlacesRead::Fresh => self.check(hosts, cx),
-            PlacesRead::AfterChecks if refreshing => {
-                let (section, round) = (cx.weak_entity(), self.round);
-                self.follow_up = Some(ticker::after(FOLLOW_UP, cx, move |cx| {
-                    let _ = section.update(cx, |_, cx| {
-                        Self::read_places(round, PlacesRead::FollowUp, cx);
-                    });
-                }));
-            }
-            PlacesRead::AfterChecks | PlacesRead::FollowUp => {}
+            PlacesRead::FleetChanged => {}
         }
         cx.notify();
     }
 
-    /// Ask the helm to check each of `hosts` again in the background, then read the places once more; a check the helm
-    /// refuses replaces the hosts with its reason instead, as the old read's did. Nothing is asked when no host can
-    /// run containers. Answers that arrive after a newer round started change nothing.
+    /// Ask the helm to check each of `hosts` again in the background; their results reach the rows through the push
+    /// (the module docs). Once every check is answered, a refusal among them replaces the hosts with its reason, as the
+    /// old read's did, until the places are read again: the next round, or a change of the fleet. Nothing is asked when
+    /// no host can run containers. Answers that arrive after a newer round started change nothing.
     fn check(&mut self, hosts: Vec<i64>, cx: &mut Context<Self>) {
         let paths: Result<Vec<ApiPath>, PathError> = hosts.into_iter().map(probe_path).collect();
         let paths = match paths {
@@ -262,12 +283,9 @@ impl Containers {
                         if section.round != round {
                             return;
                         }
-                        match refused.borrow_mut().take() {
-                            Some(reason) => {
-                                section.places = Some(Err(reason));
-                                cx.notify();
-                            }
-                            None => Self::read_places(round, PlacesRead::AfterChecks, cx),
+                        if let Some(reason) = refused.borrow_mut().take() {
+                            section.places = Some(Err(reason));
+                            cx.notify();
                         }
                     });
                 },
@@ -362,13 +380,15 @@ impl Containers {
         cx.notify();
     }
 
-    /// One container host's row: its name, its state, and "· Refreshing…" while its check runs (`.recipe-row`).
-    fn host_row(place: &EnvironmentPlaceView, index: usize, cx: &App) -> Div {
+    /// One container host's row: its name, its state as `shown` says, and "· Refreshing…" while its check runs
+    /// (`.recipe-row`).
+    fn host_row(place: &EnvironmentPlaceView, shown: Shown<'_>, index: usize, cx: &App) -> Div {
         let palette = theme::palette(cx);
         let id = format!("containers-host-{index}-state");
-        let state = match &place.reason {
+        let refreshing = shown.refreshing;
+        let state = match shown.reason {
             Some(reason) => HostSentence::new(ElementId::Name(format!("{id}-reason").into()))
-                .host(&HostText::from_host(reason.clone())),
+                .host(&HostText::from_host(reason.to_owned())),
             None => HostSentence::new(ElementId::Name(format!("{id}-ready").into())).text("Ready"),
         };
         div()
@@ -394,7 +414,7 @@ impl Containers {
             )
             // No leading space: the old span's " · " lost its space at the start of its flex item, and the row's gap
             // already separates it, as it did there.
-            .children(place.refreshing.then(|| div().child("· Refreshing…")))
+            .children(refreshing.then(|| div().child("· Refreshing…")))
     }
 
     /// One leftover's row: its name and its Delete.
@@ -481,11 +501,13 @@ impl Render for Containers {
             Some(Err(reason)) => {
                 hosts.child(Self::failure_line("containers-hosts-error", reason, cx))
             }
-            Some(Ok(places)) => hosts.children(
-                container_hosts(places)
-                    .enumerate()
-                    .map(|(index, place)| Self::host_row(place, index, cx)),
-            ),
+            Some(Ok(places)) => {
+                let store = session::current_store(cx);
+                let collections = store.as_ref().map(|store| store.read(cx).collections());
+                hosts.children(container_hosts(places).enumerate().map(|(index, place)| {
+                    Self::host_row(place, shown(place, collections), index, cx)
+                }))
+            }
         };
 
         let heading = div()
@@ -569,6 +591,66 @@ fn container_hosts(places: &[EnvironmentPlaceView]) -> impl Iterator<Item = &Env
     places
         .iter()
         .filter(|place| place.place.container_host().is_some())
+}
+
+/// Host `host`'s check state as the hosts collection last pushed it; `None` before its entry arrives, or for an entry
+/// that carries none.
+fn pushed_check(collections: &Collections, host: i64) -> Option<&ContainerCheckView> {
+    collections
+        .get::<HostView>(&HostView::key(host))?
+        .container_check
+        .as_ref()
+}
+
+/// The fleet the places read reflects ([`Fleet`]), or `None` while the hosts collection is missing or not available,
+/// when what it lists proves nothing about the registry.
+fn fleet(collections: &Collections) -> Option<Fleet> {
+    let meta = collections.meta(Collection::Hosts)?;
+    if meta.availability != Availability::Available {
+        return None;
+    }
+    Some(
+        collections
+            .ordered::<HostView>()
+            .into_iter()
+            .filter(|host| HostKind::of(host).holds_containers())
+            .map(|host| (host.id, host.name.clone(), host.destination.clone()))
+            .collect(),
+    )
+}
+
+/// What one container host's row shows of its check.
+#[derive(Debug)]
+struct Shown<'a> {
+    /// Why the host cannot run containers, in the helm's words; `None` reads Ready.
+    reason: Option<&'a str>,
+    /// Whether a check of the host is running.
+    refreshing: bool,
+}
+
+/// What `place`'s row shows (the module docs). Once the pushed check has a result (`checked_at` set), its state is
+/// Ready when the check passed and the pushed reason otherwise, which is what the places read would say of the same
+/// result; before that, it is the places read's. A failed result with no reason cannot come from the helm, and falls
+/// back to the read too. Whether a check runs is the pushed state whenever the host's entry carries a check, so a
+/// check shows however it started and stops showing when it ends; the places read's own flag, true only when it was
+/// read, stands in before the hosts collection has the host.
+fn shown<'a>(place: &'a EnvironmentPlaceView, collections: Option<&'a Collections>) -> Shown<'a> {
+    let pushed = place
+        .place
+        .container_host()
+        .zip(collections)
+        .and_then(|(host, collections)| pushed_check(collections, host));
+    let result = pushed
+        .filter(|check| check.checked_at.is_some())
+        .and_then(|check| match (check.usable, &check.reason) {
+            (true, _) => Some(None),
+            (false, Some(reason)) => Some(Some(reason.as_str())),
+            (false, None) => None,
+        });
+    Shown {
+        reason: result.unwrap_or(place.reason.as_deref()),
+        refreshing: pushed.map_or(place.refreshing, |check| check.refreshing),
+    }
 }
 
 /// `POST /api/hosts/{host}/podman-probe`: check `host` again in the background.
