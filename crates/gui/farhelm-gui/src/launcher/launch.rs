@@ -32,7 +32,6 @@
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
 use farhelm_proto::session_requests::CreateSessionBody;
-use farhelm_proto::ui_channel::HostView;
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
 use super::view::{Launcher, show};
@@ -124,34 +123,23 @@ pub(super) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to fini
 /// each side refusing its own action while the other's work is in flight, rather than by the old app's shared token.
 /// (Add host's half, refusing itself while a launch is in flight, is the hosts work's.)
 ///
-/// Two kinds count. A new host's probe and setup, and a host's removal, by their kind of work ([`changes_host_registry`]);
-/// the orchestrator's decision counts the probe too, which the old app left outside its token. And any work on a
-/// registered host's own key: an edit of its destination or alias, a re-run of its setup, any of its settings, as the
-/// old app's token covered every host settings write. Suspend and Resume are not registry changes (SPEC.md), and
-/// nothing done to a session is.
+/// What counts is decided by kind of work ([`changes_host_registry`]): a host's probe and setup (a new host's, or a
+/// registered one's re-run), and a host's removal. The orchestrator decided on 2026-11-14 that the probe counts, which the old app left outside its token, and
+/// that a save of a registered host's settings does not, its destination and alias included: that window is one short
+/// save, so a launch does not wait for it (the hosts side is to refuse a destination change during a launch instead,
+/// in its own change).
+/// Suspend and Resume are not registry changes (SPEC.md), and nothing done to a session is.
+///
+/// TODO: call the operation store's shared classification, `Work::changes_host_registry()`, instead of the local
+/// [`changes_host_registry`] once the store has it; the two answer the same.
 pub(super) fn host_change_in_flight(cx: &App) -> bool {
-    let (Some(operations), Some(store)) =
-        (session::current_operations(cx), session::current_store(cx))
-    else {
-        return false;
-    };
-    let operations = operations.read(cx);
-    operations.any_in_flight(changes_host_registry)
-        || store
-            .read(cx)
-            .collections()
-            .ordered::<HostView>()
-            .iter()
-            .any(|host| {
-                operations
-                    .in_flight(&OpKey::host(&HostView::key(host.id)))
-                    .is_some()
-            })
+    session::current_operations(cx)
+        .is_some_and(|operations| operations.read(cx).any_in_flight(changes_host_registry))
 }
 
 /// Whether `work` is a registry change counted by its kind: a host probe registers a host that answers, a setup
-/// registers the host it sets up, and a removal takes a host out of the registry. Exhaustive, so a new kind of work decides. Work on a registered host's own key is counted by
-/// its key instead ([`host_change_in_flight`]).
+/// registers the host it sets up, and a removal takes a host out of the registry. Exhaustive, so a new kind of work
+/// decides (a host's Update, when it comes, counts).
 fn changes_host_registry(work: Work) -> bool {
     match work {
         Work::Probe | Work::Setup | Work::RemoveHost => true,

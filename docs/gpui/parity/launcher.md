@@ -77,8 +77,9 @@ These specs' rows sit in another area's parity file; their launcher cases are th
   still happen.
 - While one of the window's host-registry changes is in flight, Launch is refused with a reason ("Wait for the host
   change to finish") as its hover text and after "Not launched." on a press; the old app only disabled it. A new host's
-  probe counts as such a change (decided by the migration's orchestrator on 2026-11-14), which the old app's token left
-  out.
+  probe counts as such a change, which the old app's token left out, and a save of a registered host's settings (its
+  destination and alias included) does not, which the old token covered; both decided by the migration's orchestrator on
+  2026-11-14 (`launcher::launch_tests::launch_does_not_wait_for_a_host_settings_save`).
 - The footer's prompt count says "1 line" for a one-line prompt; the old footer said "1 lines".
 - The footer's lines are cut at the footer's edge without an ellipsis; their full text is each line's accessible name,
   and the target line's hover help.
