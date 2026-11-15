@@ -1,8 +1,9 @@
 //! Behavior tests for the prompt, on GPUI's simulated platform: that a confirmation acts only on what it showed, where
 //! a question starts and how it is answered, cancelled and closed, how its summary and its title draw a host value,
 //! the anchored question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
-//! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, and a
-//! body the feature draws (the host setup confirmation's plan) with the dialog frame's tile, note and width.
+//! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, the
+//! debug build's refusal of an option the question's presentation ignores, and a body the feature draws (the host setup
+//! confirmation's plan) with the dialog frame's tile, note and width.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -1801,6 +1802,96 @@ fn a_question_with_an_answer_that_can_fail_opens_only_inline(cx: &mut TestAppCon
         settle(cx);
         assert!(asked.is_none(), "{kind}: it did not open");
     }
+}
+
+// ---- Options a presentation ignores ----------------------------------------------------------------------------------
+
+/// `question` with every option that only some presentations take: the empty-click rule, the loud look, a body, a tile,
+/// a note, a width and Escape sending focus home. Each test below asks it one way, and the assertion's message names
+/// exactly the options that way ignores, in the builders' order, so a test pins both what is refused and what is not.
+#[cfg(debug_assertions)]
+fn with_every_presentation_option(question: Question<String>) -> Question<String> {
+    question
+        .keeps_focus_on_empty_click()
+        .loud()
+        .body(|_: &String, _, cx| {
+            cx.new(|cx| PlanBody {
+                copy: cx.focus_handle().tab_stop(true),
+                copied: Rc::default(),
+            })
+        })
+        .tile(|_, _| div())
+        .note("Undo it with the gear")
+        .width(px(560.))
+        .returns_home_on_escape()
+}
+
+/// Why this matters: a release build drops an option its presentation ignores, so a question that is moved from one
+/// presentation to another, or built by a helper shared between two, loses its look or its rule with nothing on screen
+/// to say so. The debug build the tests run in has to fail instead, naming the option and the call.
+///
+/// Specified: a centered question carrying every presentation-specific option fails a debug build as it is asked,
+/// naming `prompt::ask` and the loud look only, since the centered question takes all the others.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(
+    expected = "a question was asked through prompt::ask with Question::loud, which it ignores"
+)]
+fn a_centered_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let question = with_every_presentation_option(question("alpha"));
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
+    });
+}
+
+/// Why this matters: the anchored question is where a row's or the header's question goes when its control is drawn,
+/// and the same question falls back to centered when it is not, so a helper builds one question for both. A body or a
+/// tile added there for the centered case would vanish whenever the anchored one shows.
+///
+/// Specified: an anchored question carrying every presentation-specific option fails a debug build as it is asked,
+/// naming `prompt::ask_anchored` with the loud look, the body, the tile, the note and the width, and not the
+/// empty-click and Escape-home rules, which an anchored question keeps.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(
+    expected = "a question was asked through prompt::ask_anchored with Question::loud, Question::body, \
+                Question::tile, Question::note, Question::width, which it ignores"
+)]
+fn an_anchored_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
+    let (cx, row) = open_row(cx);
+    let Some(anchor) = row.anchor.borrow().clone() else {
+        panic!("the premise: the row's menu button was drawn")
+    };
+    let question = with_every_presentation_option(question("alpha"));
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_anchored(question, anchor, None, &mark, |_, _, _| {}, window, cx);
+    });
+}
+
+/// Why this matters: an inline question leaves its empty space and its Escape to the owner's dialog, so a question
+/// built for a layer and asked inline would quietly lose the rule that keeps a stray click from arming Enter, or the
+/// return to the terminal SPEC.md asks of the header's questions.
+///
+/// Specified: an inline question carrying every presentation-specific option fails a debug build as it is asked,
+/// naming `prompt::ask_inline` with the empty-click rule, the body, the tile, the note, the width and the Escape-home
+/// rule, and not the loud look, which is the inline question's own.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(
+    expected = "a question was asked through prompt::ask_inline with Question::keeps_focus_on_empty_click, \
+                Question::body, Question::tile, Question::note, Question::width, \
+                Question::returns_home_on_escape, which it ignores"
+)]
+fn an_inline_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let question = with_every_presentation_option(question("alpha"));
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        let _ = prompt::ask_inline(question, &mark, |_, _, _| {}, window, cx);
+    });
 }
 
 // ---- A body the feature draws ----------------------------------------------------------------------------------------

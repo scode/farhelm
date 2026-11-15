@@ -35,7 +35,8 @@
 //! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
 //! the host dialogs' header tile, footer note and width ([`Question::tile`], [`Question::note`], [`Question::width`]).
 //! The body is a view built once, as the question is asked, from the frozen value; its own controls are not answers.
-//! The anchored and inline questions ignore all four. Approved by the GPUI migration's orchestrator on 2026-11-14.
+//! The anchored and inline questions do not take them (below). Approved by the GPUI migration's orchestrator on
+//! 2026-11-14.
 //!
 //! A title is usually the app's own words, but may name a host value, as the host setup confirmation's "Set up host ·
 //! <name>" does: then it is a [`HostSentence`](crate::host_text::HostSentence) ([`Question::new`]). The centered and
@@ -78,6 +79,12 @@
 //! question's text and answers (`.templates-departure`), on whatever band its owner puts it in, or loud
 //! ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its title as a red heading
 //! (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
+//!
+//! Some options belong to some presentations only: the body, tile, note and width to the centered question, the loud
+//! look to the inline one, and the empty-click and Escape-home rules to the two layers. A debug build asserts, as the
+//! question opens, that none is set on a question asked a way that ignores it; a release build ignores it. Otherwise a
+//! question moved from centered to anchored, or a helper that builds one question for both, would lose its body or its
+//! tile with no test failing. The answer that can fail is stricter: a layer refuses it in every build.
 //!
 //! NOTE: Two recorded deviations from the old YOLO question's look. The old one drew its last line (the host "asks
 //! before every YOLO launch") in the dimmer `--fg-dim`; here every line is drawn alike, since a question's lines carry
@@ -249,7 +256,7 @@ impl<T: Clone + 'static> Question<T> {
     /// and header Stop, Restart, Replace and Delete questions, which must call this when they are ported: without it a
     /// click on their empty space focuses the question, and a following Enter presses Confirm. Rename, tab close, the
     /// interrupted card's Replace question and the host update confirmation do not have the rule yet; those leave it
-    /// off.
+    /// off. Not for an inline question, whose empty space is its owner's ([`ask_inline`]; a debug build asserts it).
     pub fn keeps_focus_on_empty_click(mut self) -> Self {
         self.keeps_focus_on_empty_click = true;
         self
@@ -304,7 +311,8 @@ impl<T: Clone + 'static> Question<T> {
 
     /// Drawn inline in the loud look: a red edge and wash, with the title as a red heading and the summary in bold.
     /// SPEC.md asks for a "prominent confirmation" before a YOLO launch, and the old app made it loud on purpose: a
-    /// question that looks like the lines around it gets clicked through. The other presentations ignore it.
+    /// question that looks like the lines around it gets clicked through. Only the inline question takes it: a debug
+    /// build asserts it is not set on a question asked another way, and a release build ignores it there.
     pub fn loud(mut self) -> Self {
         self.loud = true;
         self
@@ -336,10 +344,11 @@ impl<T: Clone + 'static> Question<T> {
     /// ([`HostSentence`](crate::host_text::HostSentence), [`element`](crate::host_text::element)), as everywhere else;
     /// the prompt draws the body as given and cannot check that it did.
     ///
-    /// Only the centered question draws a body; the anchored and inline questions ignore it, as they ignore the tile
-    /// and the note. No question asked those ways needs one, and each would need more than drawing it: the anchored
-    /// question's amber 12-pixel prose would restyle it, and an inline question returns focus itself only from its
-    /// answers, so Escape with focus on a body control would let focus fall elsewhere in the owner's dialog.
+    /// Only the centered question draws a body: a debug build asserts that an anchored or inline question has none, as
+    /// it does for the tile, the note and the width. No question asked those ways needs one, and each would need more
+    /// than drawing it: the anchored question's amber 12-pixel prose would restyle it, and an inline question returns
+    /// focus itself only from its answers, so Escape with focus on a body control would let focus fall elsewhere in the
+    /// owner's dialog.
     pub fn body<V: Into<AnyView>>(
         mut self,
         build: impl FnOnce(&T, &mut Window, &mut App) -> V + 'static,
@@ -352,7 +361,8 @@ impl<T: Clone + 'static> Question<T> {
 
     /// An icon tile left of the title ([`DialogFrame::tile`]): the old host dialogs' host mark. `draw` runs on every
     /// draw, since a drawn element lasts one frame; it should draw what it captured when the question was built, not
-    /// read live state. The tile is decoration, and only the centered question has one; the others ignore it.
+    /// read live state. The tile is decoration, and only the centered question has one; a debug build asserts the
+    /// others are not given one.
     pub fn tile<E: IntoElement>(
         mut self,
         draw: impl Fn(&mut Window, &mut App) -> E + 'static,
@@ -365,7 +375,7 @@ impl<T: Clone + 'static> Question<T> {
 
     /// A note at the footer's left, beside the answers ([`DialogFrame::note`]): the host confirmations' "Undo "don't
     /// ask again" with the gear at the foot of the navigation rail". App wording only. Only the centered question has
-    /// a footer; the others ignore it.
+    /// a footer; a debug build asserts the others are not given a note.
     pub fn note(mut self, note: impl Into<SharedString>) -> Self {
         self.note = Some(note.into());
         self
@@ -373,7 +383,7 @@ impl<T: Clone + 'static> Question<T> {
 
     /// The dialog's width in place of the ordinary one ([`DialogFrame::width`]): the old host setup confirmation was
     /// 560 pixels wide, against the ordinary dialog's 480, so its plan's paths wrap where they did. Only the centered
-    /// question takes it; the others ignore it.
+    /// question takes it; a debug build asserts the others are not given one.
     pub fn width(mut self, width: Pixels) -> Self {
         self.width = Some(width);
         self
@@ -383,7 +393,8 @@ impl<T: Clone + 'static> Question<T> {
     /// opened it; every other way it closes (an answer, a press outside it) still returns focus to the opener. SPEC.md,
     /// "Keyboard focus", for the session header's Stop, Restart, Replace and Delete questions: "Escape cancels the
     /// header's … question and returns focus to the terminal". A row's questions return to their opener on Escape too.
-    /// While there is no home, or another layer is still open, Escape returns focus to the opener all the same.
+    /// While there is no home, or another layer is still open, Escape returns focus to the opener all the same. Not for
+    /// an inline question, whose Escape keeps focus in its owner's dialog ([`ask_inline`]; a debug build asserts it).
     pub fn returns_home_on_escape(mut self) -> Self {
         self.returns_to = ReturnTo::HomeOnEscape;
         self
@@ -397,6 +408,33 @@ impl<T: Clone + 'static> Question<T> {
     /// Whether focus starts on Cancel: asked for, or the confirming answer is disabled.
     fn starts_focus_on_cancel(&self) -> bool {
         self.starts_on_cancel || !self.confirm_enabled
+    }
+
+    /// The options set on this question that a question shown as `shown` ignores, by builder name, in the order the
+    /// builders are declared: the body, tile, note and width outside the centered question, the loud look outside the
+    /// inline one, and inside it the empty-click and Escape rules its owner's dialog keeps. This is the one list of
+    /// what each presentation ignores, which [`build`] asserts empty in a debug build (see the module docs). An answer
+    /// that can fail is not here: a layer refuses it outright, in every build ([`ask_inner`]).
+    fn ignored_by(&self, shown: Shown) -> Vec<&'static str> {
+        let (centered, inline) = (shown == Shown::Centered, shown == Shown::Inline);
+        [
+            (
+                "Question::keeps_focus_on_empty_click",
+                inline && self.keeps_focus_on_empty_click,
+            ),
+            ("Question::loud", !inline && self.loud),
+            ("Question::body", !centered && self.body.is_some()),
+            ("Question::tile", !centered && self.tile.is_some()),
+            ("Question::note", !centered && self.note.is_some()),
+            ("Question::width", !centered && self.width.is_some()),
+            (
+                "Question::returns_home_on_escape",
+                inline && self.returns_to == ReturnTo::HomeOnEscape,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(option, ignored)| ignored.then_some(option))
+        .collect()
     }
 }
 
@@ -492,6 +530,17 @@ enum Shown {
     Anchored,
     /// Inside its owner's surface, which draws it ([`ask_inline`]). Not a layer, so the prompt itself returns focus.
     Inline,
+}
+
+impl Shown {
+    /// The call that asks a question this way, which is how a feature author knows the presentation: for messages.
+    fn asked_through(self) -> &'static str {
+        match self {
+            Shown::Centered => "prompt::ask",
+            Shown::Anchored => "prompt::ask_anchored",
+            Shown::Inline => "prompt::ask_inline",
+        }
+    }
 }
 
 /// Which answer.
@@ -917,11 +966,12 @@ pub fn ask_anchored<T: Clone + 'static>(
 /// and waits to be reached. `on_confirm` runs at most once, with the frozen value, if the user confirms. See the module
 /// docs for focus, Escape and the looks.
 ///
-/// [`Question::keeps_focus_on_empty_click`] and [`Question::returns_home_on_escape`] do not apply here: an inline
-/// question's empty space belongs to its owner's dialog, which has its own rule, and Escape on it keeps focus in that
-/// dialog, returning it as any answer does. On the page, with no dialog open (a plain Replace's YOLO question), the
-/// same holds against the page: Escape cancels and returns focus to what held it when the question opened, and a press
-/// on the question's empty space is a press on the page's empty space, which sends focus home.
+/// [`Question::keeps_focus_on_empty_click`] and [`Question::returns_home_on_escape`] do not apply here, and a debug build
+/// asserts neither is set (nor a centered question's body, tile, note or width): an inline question's empty space
+/// belongs to its owner's dialog, which has its own rule, and Escape on it keeps focus in that dialog, returning it as
+/// any answer does. On the page, with no dialog open (a plain Replace's YOLO question), the same holds against the
+/// page: Escape cancels and returns focus to what held it when the question opened, and a press on the question's empty
+/// space is a press on the page's empty space, which sends focus home.
 pub fn ask_inline<T: Clone + 'static>(
     question: Question<T>,
     mark: &Mark,
@@ -1033,6 +1083,14 @@ fn build<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> (Entity<Prompt<T>>, FocusHandle) {
+    // Every presentation passes here, so this is the one check: a question moved from one presentation to another, or
+    // built by a helper shared between two, fails a debug build instead of silently losing its body or its tile.
+    debug_assert!(
+        question.ignored_by(shown).is_empty(),
+        "a question was asked through {} with {}, which it ignores",
+        shown.asked_through(),
+        question.ignored_by(shown).join(", "),
+    );
     let confirm_focus = cx.focus_handle().tab_stop(true);
     let cancel_focus = cx.focus_handle().tab_stop(true);
     let alternative_focus = question
