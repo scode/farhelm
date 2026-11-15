@@ -662,7 +662,8 @@ def start_mutter(
 
 def helm_request(run: Path, method: str, path: str, body: dict | None = None):
     """One request to the app's embedded helm with the credential the agent build wrote to `helm.json`; the decoded
-    JSON reply. Waits for `helm.json` first, since the app writes it only once its helm is up."""
+    JSON reply, or `None` for a reply without a body (the 204 a preference write answers with). Waits for `helm.json`
+    first, since the app writes it only once its helm is up."""
     wait_for(run / "helm.json", 30, "the app's helm file")
     helm = json.loads((run / "helm.json").read_text())
     request = urllib.request.Request(
@@ -672,7 +673,8 @@ def helm_request(run: Path, method: str, path: str, body: dict | None = None):
         method=method,
     )
     with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read())
+        reply = response.read()
+    return json.loads(reply) if reply else None
 
 
 def listed_states(run: Path) -> dict[str, str | None]:

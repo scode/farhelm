@@ -20,9 +20,9 @@
 //! - Uninstall, Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
-//! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), Settings and the helm's own machine's
-//! greyed Update so far. The rerun of a failed Update, the live Update and Remove are decided here already and drawn by
-//! the pieces of the port that send them.
+//! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), Settings, Remove on a host whose
+//! removal only forgets it ([`Offers::remove`]) and the helm's own machine's greyed Update so far. The rerun of a failed
+//! Update and the live Update are decided here already and drawn by the pieces of the port that send them.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
@@ -80,11 +80,17 @@ impl HostKind {
         }
     }
 
-    /// Whether the host can be removed from the list. The helm's own machine never can.
-    pub(crate) fn is_removable(self) -> bool {
+    /// Whether removing the host only forgets its entry, which the menu's Remove does: an SSH host, whose supervisor and
+    /// sessions keep running (SPEC.md, "Topology"). Removing a Tensorlake host deletes its sandbox and removing a
+    /// container host deletes its container, so theirs is a different command with its own question (the Hosts panel's
+    /// Delete sandbox, which a later piece of the port brings); until then their menus offer no removal at all. The
+    /// helm's own machine is never removed.
+    pub(crate) fn removal_only_forgets(self) -> bool {
         match self {
-            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
-            HostKind::Local | HostKind::Unrecognized => false,
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
         }
     }
 
@@ -211,7 +217,9 @@ pub(crate) struct Offers {
     pub(crate) rerun: Option<(Rerun, bool)>,
     /// Update, if offered: live, or greyed with the reason on the helm's own machine.
     pub(crate) update: Option<Update>,
-    /// Remove, if the host can be removed: `Some(true)` when it can be chosen now, `Some(false)` while the host is
+    /// Remove, which forgets the host, offered only where removing it does nothing more
+    /// ([`HostKind::removal_only_forgets`]: a sandbox's or a container's removal deletes the machine and will be an
+    /// offer of its own): `Some(true)` when it can be chosen now, `Some(false)` while the host is
     /// busy with work in flight or a run.
     pub(crate) remove: Option<bool>,
 }
@@ -269,7 +277,7 @@ impl Update {
 ///   waiting for `farhelm helm setup`, it does not run a newer Farhelm, and it is not suspended. On the helm's own
 ///   machine it is [`Update::Greyed`] wherever it would otherwise be offered.
 /// - **Settings** always, chosen only while the host is idle.
-/// - **Remove** for a removable kind, chosen only while the host is idle.
+/// - **Remove** for a kind whose removal only forgets the host, chosen only while the host is idle.
 pub(crate) fn offers(
     host: &HostView,
     progress: Option<&ProvisioningView>,
@@ -306,6 +314,6 @@ pub(crate) fn offers(
         settings_enabled: !busy,
         rerun,
         update,
-        remove: kind.is_removable().then_some(!busy),
+        remove: kind.removal_only_forgets().then_some(!busy),
     }
 }

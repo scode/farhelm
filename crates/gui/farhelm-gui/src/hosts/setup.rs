@@ -77,6 +77,12 @@ pub(crate) const MOVED_ON: &str =
 pub(crate) const RERUN_MOVED_ON: &str =
     "Farhelm is not running on this host. Choose Re-run again to see what setting it up changes.";
 
+/// The footer note of the host confirmations with a permanent answer (this one and the removal confirmation), the old
+/// dialogs' words. SPEC.md ("Session list", on Settings' Hosts section): "each host dialog's permanent answer points to
+/// the gear as the place to undo it".
+pub(super) const UNDO_NOTE: &str =
+    "Undo \"don't ask again\" with the gear at the foot of the navigation rail";
+
 /// `.provisioning-plan`'s line height: 1.45 at its 12 pixels.
 const PLAN_LINE: f32 = 17.4;
 
@@ -193,7 +199,7 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
             cx.new(|_| body)
         })
         .tile(move |_, cx| host_mark(icon, color, px(24.), theme::palette(cx)))
-        .note("Undo \"don't ask again\" with the gear at the foot of the navigation rail")
+        .note(UNDO_NOTE)
         .width(px(WIDTH))
         // SPEC.md, "Opening and closing": the dialogs that share the host and Settings installer keep focus on the
         // control in use when their empty space is clicked.

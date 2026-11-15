@@ -9,9 +9,10 @@
 //! What the menu offers is [`offers::offers`], one pure function of the pushed host, its retained run and its work in
 //! flight, read while the menu draws, so an open menu follows the host. So far it draws Re-run on an SSH host whose
 //! setup failed, which runs it again ([`super::setup::rerun`]); Settings, which opens the host settings dialog
-//! ([`super::settings`]); and on the helm's own machine the greyed Update with the reason it is greyed ("Run the
-//! installer again to update this machine"), which sends nothing (SPEC.md, "Session list"). Settings is unavailable
-//! while the host has work in flight or a run going on.
+//! ([`super::settings`]); on the helm's own machine the greyed Update with the reason it is greyed ("Run the
+//! installer again to update this machine"), which sends nothing (SPEC.md, "Session list"); and on an SSH host, behind
+//! a separator in the danger red, Remove, which forgets the host ([`super::remove`]). Settings and Remove are
+//! unavailable while the host has work in flight or a run going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -22,8 +23,8 @@
 //! Linux), home.
 //!
 //! NOTE: Each of the other commands arrives with the piece of the port that sends it, at its place in the old order
-//! (a rerun, Update, Settings, then Remove behind a separator; the rerun of a failed Update with Update), and the
-//! toggle keeps the old hover help, which names them already. Not ported: the old menu's Retry and Adopt (the
+//! (a rerun, Update, Settings, then Uninstall and Remove behind a separator; the rerun of a failed Update with Update),
+//! and the toggle keeps the old hover help, which names them already. Not ported: the old menu's Retry and Adopt (the
 //! migration's settings-and-hosts area left both out of the port's second milestone on 2026-11-14), opening the menu
 //! with the arrow keys from the closed toggle, and the flyout's pointer notch.
 
@@ -37,7 +38,7 @@ use gpui::{
 use super::identity::{display_name, phase};
 use super::offers::{self, HostKind, Offers, Rerun, Update};
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier};
+use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -279,6 +280,37 @@ impl Render for HostMenu {
             }
             let _ = super::settings::open_settings(host, &opener, &mark, window, cx);
         });
+        // Remove where the offers say, unavailable while the host is busy; the old menu's last command, in its
+        // destructive group behind a separator.
+        let remove = offered.remove.map(|enabled| {
+            let (menu, host) = (cx.weak_entity(), self.host);
+            MenuItem::new(
+                "host-menu-remove",
+                Icon::Trash,
+                "Remove",
+                HoverHelp::tooltip(super::remove::REMOVE_HELP),
+                Role::MenuItem,
+            )
+            .description("Forget this host")
+            .danger()
+            .disabled(!enabled)
+            .on_click(move |_, window, cx| {
+                // The mark of this click, taken before the menu closes. Closing the menu returns focus to its
+                // toggle, which the confirmation then returns focus to when it closes.
+                let mark = Mark::take(cx);
+                let layer = menu.upgrade().and_then(|menu| menu.read(cx).layer);
+                if let Some(layer) = layer {
+                    layers::close(layer, window, cx);
+                }
+                super::remove::start(host, &mark, window, cx);
+            })
+        });
+        let removal = remove.map(|remove| {
+            [
+                menu_separator(cx).into_any_element(),
+                remove.into_any_element(),
+            ]
+        });
         panel.child(header(&view, &name)).child(
             div()
                 .id("host-menu-items")
@@ -288,7 +320,8 @@ impl Render for HostMenu {
                 .flex_col()
                 .children(rerun)
                 .children(update)
-                .child(settings),
+                .child(settings)
+                .children(removal.into_iter().flatten()),
         )
     }
 }

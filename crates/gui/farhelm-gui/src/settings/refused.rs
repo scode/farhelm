@@ -27,8 +27,9 @@ use crate::operations::NotStarted;
 pub(crate) struct Refused(Option<SharedString>);
 
 impl Refused {
-    /// What the line says. Also the words of the host setup question's permanent answer when its preference save meets
-    /// another (`hosts::setup`), so one refusal reads the same wherever it is shown.
+    /// What the line says. Also the words of the host setup and host removal questions' permanent answers when their
+    /// preference save meets another (`hosts::setup` and `hosts::remove`), so one refusal reads the same wherever it is
+    /// shown.
     pub(crate) const WORDS: &str = "Not saved: another save was in progress. Try again.";
 
     /// Record how a press on `control` (its element id) went: a started save clears the line, a busy key moves it to

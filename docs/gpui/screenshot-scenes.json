@@ -813,7 +813,7 @@
     },
     {
       "golden": "host-menu",
-      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, and Settings (its only command so far) highlighted",
+      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, Settings highlighted, and Remove behind a separator (its only commands so far)",
       "reference": "host-menu"
     },
     {
@@ -850,6 +850,11 @@
       "golden": "host-setup-failed-hosts-panel",
       "title": "The Hosts panel with Details on and a new host's setup failed at its last step: eight steps checked green, the last crossed red with the helm's reason, and the run's message",
       "reference": "host-setup-failed-hosts-panel"
+    },
+    {
+      "golden": "host-remove-confirmation",
+      "title": "The removal confirmation a host menu's Remove opens: the host's mark, name, phase and build, its destination, what removal keeps, the footer note and the three answers",
+      "reference": "host-remove-confirmation"
     }
   ],
   "reference_scenes": [
