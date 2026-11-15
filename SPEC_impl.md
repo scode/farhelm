@@ -911,9 +911,14 @@ for text that says how long ago something happened (a session row's age, the det
 ticker reads the time of day from GPUI's scheduler, which tests advance like every other clock, and one shared 30-second
 clock, as in the old app, notifies each view that shows such text, whether or not its window is active and whatever the
 reduced-motion setting, because an age is information rather than motion and an inactive window is often still on
-screen. A view holds one clock handle for all its rows, and a view that draws an age is drawn uncached, since the cache
-wrapper cannot see the time. No row or view runs its own timer. This carries over the old rule that nothing redraws on
-its own more than 10 times a second; without it, one animating row redraws its whole list at display rate.
+screen. Counts of whole seconds (how long a Restart has waited, a host setup's elapsed time) are read the same way, and
+a shared one-second clock notifies each view that shows one on the same terms, for the same reason; it has its own loop,
+so a view that shows only ages is never woken every second. A view holds one clock handle for all its rows, and a view
+that draws an age or a count is drawn uncached, since the cache wrapper cannot see the time. No row or view runs its own
+timer. New code that shows a count of seconds holds the one-second clock rather than building one from a chain of
+deadlines; views written before that clock existed may still use such a chain until they are moved over. This carries
+over the old rule that nothing redraws on its own more than 10 times a second; without it, one animating row redraws its
+whole list at display rate.
 
 One-shot transitions are the exception to the ten-a-second rule, and they do not go through the ticker. One owner in the
 component layer draws them (`components::entrance`, in `crates/gui/farhelm-gui/src/components/transition.rs`), the only
@@ -950,9 +955,10 @@ channel's watchdog and heartbeat, and on `with_animation` everywhere but the tra
 window is inactive; by a test that a view holding the clock redraws every 30 seconds in an inactive window under reduced
 motion and leaves no timer once it is gone; and by tests that an entrance follows CSS's `ease-out` to the element's own
 opacity, asks for no frame once it ends, starts opaque with no frame under reduced motion, and in an inactive window
-ends on time and does not play again when the window is activated. The wall clock itself is held by review, not by the
-clock bans: no lint stops GUI code from reading GPUI's scheduler clock outside the ticker, or a view from reading the
-time without holding a clock handle.
+ends on time and does not play again when the window is activated; and by tests that the one-second clock redraws its
+holders every second, runs until its last holder goes, and wakes no view that holds only the 30-second clock. The wall
+clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's scheduler clock
+outside the ticker, or a view from reading the time without holding a clock handle.
 
 ### Notices: the notice center
 
