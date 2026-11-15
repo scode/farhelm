@@ -9,10 +9,10 @@
 //!   then Cancel, Reset choices (Agent tab), Save as template (not in Replace with) and the main action, with what a
 //!   press of it has to say pinned above them. Save as template opens its inline panel at the end of the body
 //!   (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
-//! - **The body**, in reading and Tab order: the destination rows (Where, Host, a managed checkout's repository and
-//!   preview, Folder, Name), the Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not
-//!   drawn, but its draft is kept (SPEC.md: "switching tabs keeps each tab's draft"). The Agent tab's harness, effort
-//!   and permission choices are drawn by [`choices`].
+//! - **The body**, in reading and Tab order: the composer search box ([`search`]), the destination rows (Where,
+//!   Host, a managed checkout's repository and preview, Folder, Name), the Agent and Command tabs, and the chosen
+//!   tab's fields. The other tab's fields are not drawn, but its draft is kept (SPEC.md: "switching tabs keeps each
+//!   tab's draft"). The Agent tab's harness, effort and permission choices are drawn by [`choices`].
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
@@ -30,9 +30,9 @@
 //!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: marking the folder field when the helm refuses the folder;
-//! the composer search; recent setups, Browse and the folder check, with its warning on the folder field; the rest of
-//! managed checkouts (`checkout` says which); the escaped display of a prompt, wrapper prefix, Custom flags,
+//! NOTE: Not built yet, each with the piece that brings it: the search's rows from launch history, repositories and
+//! templates (`crate::launcher::search` names them); recent setups and Browse; the rest of managed checkouts
+//! (`checkout` says which); the escaped display of a prompt, wrapper prefix, Custom flags,
 //! seeded model, command line or resume command holding invisible characters, with Clear wrapper prefix, Clear agent
 //! command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it
 //! overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
@@ -89,6 +89,7 @@ mod choices;
 mod folder_check;
 mod host_picker;
 mod model_field;
+mod search;
 pub(in crate::launcher) mod yolo_question;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
@@ -122,9 +123,8 @@ const TEMPLATE_PANEL_OPEN: &str = "Finish or cancel saving the template before l
 /// user's action that asked for it; nothing opens if the user moved on since (the layer manager's rule) or no UI
 /// session is connected. Returns the launcher's layer.
 ///
-/// Focus starts on the first field, Restart with's on Cancel (SPEC.md: "Ordinary launches still start focus on search;
-/// Restart starts on Cancel"; the search box comes later, and until then its place is the first field's). Closing
-/// returns focus to whatever held it when the launcher opened.
+/// Focus starts on the search box, Restart with's on Cancel (SPEC.md: "Ordinary launches still start focus on search;
+/// Restart starts on Cancel"). Closing returns focus to whatever held it when the launcher opened.
 pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
     open_noted(draft, None, None, mark, window, cx)
 }
@@ -244,9 +244,9 @@ pub enum Note {
     /// [`BANNER_SHOWS_FOR`] after the templates applied, as the old banner did whatever its origin.
     Banner(HostSentence),
     /// Why a quick launch opened New instead of launching (its sentence starting "Not launched."), or why a template
-    /// shortcut changed nothing in this open launcher, in the place of the composer search's refusals until that search
-    /// exists. Drawn as its own alert at the top of the notices region, above a press's reason, the helm's words or the
-    /// YOLO question, which it never hides, and cleared by the next press of Launch as by an edit.
+    /// shortcut changed nothing in this open launcher. Drawn as its own alert at the top of the notices region, above a
+    /// press's reason, the helm's words or the YOLO question, which it never hides, and cleared by the next press of
+    /// Launch as by an edit.
     Refusal(HostSentence),
 }
 
@@ -433,6 +433,10 @@ pub(crate) struct Launcher {
     pub(super) model_input: TextInputState,
     /// The model field's list and what the user is doing in it.
     model_field: model_field::ModelField,
+    /// The composer search box's text: what the user is searching for, emptied when they take a row.
+    pub(super) search: TextInputState,
+    /// The search box's open results, highlight and last refusal (`search`).
+    search_box: search::SearchBox,
     /// The host picker's list, highlight and typeahead.
     host_picker: host_picker::HostPicker,
     /// The folder check: what was last asked about the folder and what the answer found (`folder_check`).
@@ -536,6 +540,25 @@ impl Launcher {
             window,
             cx,
         );
+        // The search box is not a plain text edit either: what is typed is a query, and Enter takes a row (`search`).
+        let search = TextInputState::new(window, cx);
+        search.set_placeholder(search::SEARCH_PLACEHOLDER, window, cx);
+        let search_events = search.subscribe(
+            window,
+            cx,
+            |launcher: &mut Self, event, window, cx| match event {
+                TextInputEvent::Changed => launcher.search_typed(window, cx),
+                TextInputEvent::Submitted { held } => launcher.search_enter(held, window, cx),
+            },
+        );
+        // Leaving the box (Tab, say) closes its results, as leaving the model field closes its list; deferred for the
+        // focus-phase reason given below.
+        let search_blur = cx.on_blur(&search.focus_handle(cx), window, |_, window, cx| {
+            cx.defer_in(window, |launcher, window, cx| {
+                launcher.close_search(window, cx);
+                cx.notify();
+            });
+        });
         let model_handle = model_input.focus_handle(cx);
         let model_events = model_input.subscribe(
             window,
@@ -598,7 +621,14 @@ impl Launcher {
             })
         })
         .collect();
-        fields.extend([model_events, model_focus, model_blur, host_blur]);
+        fields.extend([
+            model_events,
+            model_focus,
+            model_blur,
+            host_blur,
+            search_events,
+            search_blur,
+        ]);
         let repository = draft
             .checkout
             .as_ref()
@@ -621,6 +651,8 @@ impl Launcher {
             flags,
             model_input,
             model_field: model_field::ModelField::default(),
+            search,
+            search_box: search::SearchBox::default(),
             host_picker: host_picker::HostPicker::default(),
             folder_check: folder_check::FolderCheck::default(),
             checkout,
@@ -641,16 +673,12 @@ impl Launcher {
         }
     }
 
-    /// Where focus starts: Cancel in Restart with, the first field otherwise: the folder field, or, while a managed
-    /// checkout is chosen, the read-only folder field drawn in its place (a launcher brought back after a refusal can
-    /// hold a checkout draft, and the editable folder field is not drawn then).
+    /// Where focus starts: Cancel in Restart with, the search box otherwise, a managed checkout's included (SPEC.md:
+    /// "Ordinary launches still start focus on search; Restart starts on Cancel").
     fn start_focus(&self, cx: &App) -> gpui::FocusHandle {
         match self.draft.mode {
             Mode::RestartWith(_) => self.cancel_focus.clone(),
-            Mode::New | Mode::Clone | Mode::ReplaceWith { .. } if self.draft.checkout.is_some() => {
-                self.checkout_folder_focus(cx)
-            }
-            Mode::New | Mode::Clone | Mode::ReplaceWith { .. } => self.folder.focus_handle(cx),
+            Mode::New | Mode::Clone | Mode::ReplaceWith { .. } => self.search.focus_handle(cx),
         }
     }
 
@@ -1127,7 +1155,7 @@ impl Launcher {
     }
 
     /// Close the panel without saving (its Cancel, or Escape), and put focus back where the launcher starts it, as the
-    /// old panel returned to the composer's search (its first field until the search exists). Not while it saves.
+    /// old panel returned to the composer's search. Not while it saves.
     pub(super) fn close_save_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.template_saving(cx) {
             return;
@@ -1986,10 +2014,12 @@ impl Render for Launcher {
             .gap(px(ROW_GAP))
             .children(tabs)
             .children(fields);
+        let search = self.search_row(palette, window, cx);
         let body = div()
             .flex()
             .flex_col()
             .gap(px(SECTION_GAP))
+            .child(search)
             .child(destination)
             .child(choices)
             .children(self.save_panel.clone());

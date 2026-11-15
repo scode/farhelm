@@ -69,6 +69,8 @@ mod restart_with_tests;
 #[cfg(test)]
 mod search_tests;
 #[cfg(test)]
+mod search_view_tests;
+#[cfg(test)]
 pub(crate) mod view_tests;
 #[cfg(test)]
 mod yolo_tests;
