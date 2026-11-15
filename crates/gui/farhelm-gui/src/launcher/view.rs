@@ -16,18 +16,22 @@
 //! - **The main action.** Launch (Replace, Restart for those modes) is drawn retired while [`LaunchDraft::refusal`]
 //!   names a reason, and the reason is its hover text; a press, or Enter on the dialog, a single-line field or a
 //!   choice, shows the reason beside it in the bordered alert, "Not launched." first ("Restart error." in Restart
-//!   with). Its accessible name keeps the operation and its target, as the old one did.
+//!   with). A press of a complete New or Clone launches it ([`super::launch`]): the dialog closes, and the same
+//!   launcher comes back with the helm's words in that alert if the helm refuses. Its accessible name keeps the
+//!   operation and its target, as the old one did.
 //! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), and again on Retry
 //!   after a failed read. Hosts, sessions and the remembered permission are read from the store while drawing, and the
 //!   remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: sending the launch (until then a press of a complete draft
-//! does nothing); Restart with's markers for changed settings; the composer search; recent setups, Browse and the folder
+//! NOTE: Not built yet, each with the piece that brings it: sending a Restart with or Replace with (until then a press
+//! of a complete draft there does nothing); marking the folder field when the helm refuses the folder; Restart with's
+//! markers for changed settings; the composer search; recent setups, Browse and the folder
 //! check, with its warning on the folder field; managed checkouts, with their folder and name placeholders; the escaped
 //! display of a prompt, wrapper prefix, Custom flags, seeded model, command line or resume command holding invisible
 //! characters, with Clear wrapper prefix, Clear agent command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it overflowed;
 //! today's refusals are one or two lines). The model field is `model_field`, the host picker `host_picker`.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use farhelm_helm_client::ApiPath;
@@ -43,6 +47,7 @@ use gpui::{
 };
 
 use super::draft::{Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
+use super::launch;
 use super::request::{Target, capitalized};
 use super::words::{agent_note, effort_label, permission_display};
 use crate::assets::Icon;
@@ -54,6 +59,7 @@ use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
+use crate::operations::OpKey;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};
@@ -89,6 +95,24 @@ const PROMPT_ROWS: usize = 3;
 pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
     let store = session::current_store(cx)?;
     let launcher = cx.new(|cx| Launcher::new(draft, &store, window, cx));
+    let layer = show(&launcher, mark, window, cx)?;
+    read_catalog(launcher.downgrade(), cx);
+    #[cfg(test)]
+    cx.set_global(super::view_tests::Opened(launcher.downgrade()));
+    Some(layer)
+}
+
+/// Draw `launcher` as the launcher's dialog, on top of everything in `window`: a new launcher from [`open`], or one a
+/// submit hid, brought back with its draft (`launch`). Refused, returning `None`, as [`open`] is: if the user moved on
+/// since `mark`, or with no UI session. The layer holds the launcher from then on, and closing it drops the launcher
+/// unless something else holds it too.
+pub(super) fn show(
+    launcher: &Entity<Launcher>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    session::current_store(cx)?;
     let start = launcher.read(cx).start_focus(cx);
     let weak = launcher.downgrade();
     // Enter on the dialog itself (after a click on its empty space) presses the main action.
@@ -116,9 +140,6 @@ pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) 
         cx,
     )?;
     launcher.update(cx, |launcher, _| launcher.layer = Some(layer));
-    read_catalog(launcher.downgrade(), cx);
-    #[cfg(test)]
-    cx.set_global(super::view_tests::Opened(launcher.downgrade()));
     Some(layer)
 }
 
@@ -158,8 +179,14 @@ pub(crate) struct Launcher {
     notice: Option<String>,
     /// Whether the main action was pressed since the draft last changed, which shows its reason beside it.
     pressed: bool,
+    /// The key of this launcher's last launch, once the helm refused it: the operation store keeps the refusal's words
+    /// under it, and they are shown beside the main action until the draft changes or Launch is pressed again
+    /// (`launch`). Read from the store when drawing, never copied here.
+    refused: Option<OpKey>,
+    /// Whether the keystroke being handled is a held Enter, which never launches. See where it is made, in `new`.
+    pub(super) held_enter: Rc<Cell<bool>>,
     pub(super) folder: TextInputState,
-    name: TextInputState,
+    pub(super) name: TextInputState,
     conversation: TextInputState,
     pub(super) wrapper: TextInputState,
     pub(super) prompt: TextInputState,
@@ -290,12 +317,30 @@ impl Launcher {
                         TextInputEvent::Changed => {
                             launcher.edited(which, input.text(cx).to_string(), cx)
                         }
-                        TextInputEvent::Submitted => launcher.press(window, cx),
+                        TextInputEvent::Submitted => {
+                            if !launcher.held_enter.get() {
+                                launcher.press(window, cx);
+                            }
+                        }
                     }
                 })
             })
             .collect();
-        fields.extend([model_events, model_focus, model_blur, host_blur]);
+        // SPEC.md: "A held Enter never launches". A single-line field reports Submitted on every auto-repeat of Enter
+        // without saying it was one, so this notes, before each keystroke is dispatched, whether it is a held Enter;
+        // the fields' Submitted and the model field's Enter read it while that keystroke is handled. Buttons, the
+        // choices and the dialog's own Enter already ignore a held key.
+        let held_enter = Rc::new(Cell::new(false));
+        let noting = held_enter.clone();
+        let held_watch = cx.intercept_keystrokes(move |event, _, _| {
+            noting.set(
+                event
+                    .key_down
+                    .as_ref()
+                    .is_some_and(|down| down.is_held && down.keystroke.key == "enter"),
+            );
+        });
+        fields.extend([model_events, model_focus, model_blur, host_blur, held_watch]);
         Launcher {
             draft,
             store: store.clone(),
@@ -303,6 +348,8 @@ impl Launcher {
             catalog_error: None,
             notice: None,
             pressed: false,
+            refused: None,
+            held_enter,
             folder,
             name,
             conversation,
@@ -349,7 +396,26 @@ impl Launcher {
     /// they already changed, and redraw. Every edit, whatever control made it, ends here.
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.pressed = false;
+        self.refused = None;
         cx.notify();
+    }
+
+    /// The helm refused this launcher's launch, sent under `key`: show the refusal the operation store keeps under it
+    /// beside the main action when the launcher is next drawn.
+    pub(super) fn refused(&mut self, key: OpKey, cx: &mut Context<Self>) {
+        self.pressed = false;
+        self.refused = Some(key);
+        cx.notify();
+    }
+
+    /// The helm's words refusing this launcher's last launch, as the operation store keeps them, while they are shown.
+    fn refusal_words(&self, cx: &App) -> Option<HostText> {
+        let key = self.refused.as_ref()?;
+        let operations = session::current_operations(cx)?;
+        operations
+            .read(cx)
+            .failure(key)
+            .map(|failure| failure.message.clone())
     }
 
     /// Put the text fields the draft can change on its own back in step with it (after Reset choices, say). A field
@@ -419,16 +485,37 @@ impl Launcher {
         self.draft.refusal(target, self.live_launch(cx).as_ref())
     }
 
-    /// The main action was pressed (the button, or Enter on the dialog, a single-line field or a choice): show why it
-    /// cannot launch, if it cannot.
+    /// The main action was pressed (the button, or Enter on the dialog, a single-line field or a choice): launch, or
+    /// show why it cannot.
     ///
-    /// NOTE: Sending the launch comes with the piece that ports launching; until then a press of a complete draft does
-    /// nothing. That piece must also keep a held Enter from launching (SPEC.md: "A held Enter never launches"): a
-    /// single-line field reports Submitted on every auto-repeat, which is harmless only while a press just shows the
-    /// reason. The tab strip and the radios already ignore a held Enter.
-    fn press(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.pressed = true;
-        cx.notify();
+    /// A complete New or Clone sends its create ([`launch::start`]) and hides: the layer closes, and the launcher waits
+    /// for the reply out of sight. The press is the user's answer the reply's moved-on check counts from, so this runs
+    /// in the handler of that press, never deferred.
+    ///
+    /// NOTE: Restart with and Replace with send nothing yet; they come with the pieces that port them, and until then a
+    /// press of a complete draft there does nothing.
+    pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.refused = None;
+        let creates = matches!(self.draft.mode, Mode::New | Mode::Clone);
+        let body = (creates && self.refusal(cx).is_none())
+            .then(|| {
+                let hosts = self.hosts(cx);
+                self.draft.create_body(Target {
+                    hosts: &hosts,
+                    catalog: self.catalog.as_deref(),
+                })
+            })
+            .flatten();
+        let Some(body) = body else {
+            self.pressed = true;
+            cx.notify();
+            return;
+        };
+        if launch::start(cx.entity(), &body, window, cx)
+            && let Some(layer) = self.layer.take()
+        {
+            layers::close(layer, window, cx);
+        }
     }
 
     /// Reset choices: the agent choices back to New's, with the remembered permission; in Restart with, the source's
@@ -1254,20 +1341,33 @@ impl Render for Launcher {
             .child(destination)
             .child(choices);
 
-        let notices = (self.pressed && refusal.is_some()).then(|| {
-            let lead = if restart {
-                "Restart error."
-            } else {
-                "Not launched."
-            };
-            let text = format!("{lead} {}", refusal.clone().unwrap_or_default());
+        // What a press has to say: the draft's own reason after a press it refused, or the helm's words refusing the
+        // last launch. The helm's words are host text and are drawn escaped, as their own element.
+        let lead = if restart {
+            "Restart error."
+        } else {
+            "Not launched."
+        };
+        let alert = match (&refusal, &self.refusal_words(cx)) {
+            (Some(reason), _) if self.pressed => {
+                Some(HostSentence::new("launcher-refusal-words").text(format!("{lead} {reason}")))
+            }
+            (_, Some(words)) => Some(
+                HostSentence::new("launcher-refusal-words")
+                    .text(format!("{lead} "))
+                    .host(words),
+            ),
+            _ => None,
+        };
+        let notices = alert.map(|sentence| {
+            let text = sentence.accessible_name();
             // `.launch-composer-refusal-alert`: a bordered alert with a warning sign, the lead before the reason, in
             // the warning colors (red is kept for danger in the launcher).
             div()
                 .id("launcher-refusal")
                 .debug_selector(|| "launcher-refusal".into())
                 .role(Role::Alert)
-                .aria_label(text.clone())
+                .aria_label(text)
                 .flex()
                 .items_start()
                 .gap(px(8.))
@@ -1280,7 +1380,7 @@ impl Render for Launcher {
                 .text_size(metrics::TEXT_MD)
                 .text_color(theme::color(palette.warn_bright))
                 .child(div().flex_none().child("⚠"))
-                .child(div().min_w_0().child(text))
+                .child(div().min_w_0().child(sentence))
         });
 
         let mut answers = vec![

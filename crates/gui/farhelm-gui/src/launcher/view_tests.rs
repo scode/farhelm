@@ -58,7 +58,10 @@ fn fixture_hosts(positions: &[usize]) -> CollectionState {
 
 /// The real main view over the fake helm with one host, session `a` and the preferences, and the launcher opened on
 /// `draft`, checked once settled.
-fn launcher_on(cx: &mut TestAppContext, draft: LaunchDraft) -> (FakeHelm, &mut VisualTestContext) {
+pub(super) fn launcher_on(
+    cx: &mut TestAppContext,
+    draft: LaunchDraft,
+) -> (FakeHelm, &mut VisualTestContext) {
     launcher_with_hosts(cx, draft, hosts())
 }
 
@@ -88,7 +91,7 @@ fn launcher_with_hosts(
 }
 
 /// Run `read` on the open launcher.
-fn read<T>(
+pub(super) fn read<T>(
     cx: &mut VisualTestContext,
     read: impl FnOnce(&Launcher, &gpui::Window, &gpui::App) -> T,
 ) -> T {
@@ -106,7 +109,8 @@ fn draft(cx: &mut VisualTestContext) -> LaunchDraft {
     read(cx, |launcher, _, _| launcher.draft.clone())
 }
 
-/// Whether the launcher is still open: its view lives as long as its layer does.
+/// Whether the launcher is still open: its view lives as long as its layer does, until a press launches it; a launcher
+/// whose create is out lives on hidden (`launch_tests` checks the layer instead).
 fn is_open(cx: &mut VisualTestContext) -> bool {
     cx.update(|_, cx| {
         cx.try_global::<Opened>()
@@ -155,7 +159,7 @@ fn toggled(cx: &mut VisualTestContext, id: &str) -> Option<gpui::Toggled> {
 }
 
 /// The accessible name of the element drawn under `id` in a fresh frame.
-fn name_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+pub(super) fn name_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
     test_support::frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -168,7 +172,7 @@ fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
 }
 
 /// The text of the refusal shown beside the main action, if one is.
-fn shown_refusal(cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn shown_refusal(cx: &mut VisualTestContext) -> Option<String> {
     name_of(cx, "launcher-refusal")
 }
 
