@@ -17,11 +17,14 @@
 //! - [`armed`]: the sequence in the window: the prefix, the key capture, its cancels, the pill and Enter.
 //! - [`dispatch`]: the quick-launch dispatcher every shortcut ends in: it resolves the templates a shortcut names,
 //!   applies them to New's prefill, and starts the launch unseen or opens New.
+//! - [`save`]: Save as template's model, what the launcher offers to keep and what starts checked. No GPUI types.
+//! - [`save_panel`]: the launcher's inline Save as template panel, which the launcher draws and which saves.
 //!
 //! The entry points other areas call are plain functions here: [`open`] for the list header's Templates button, with
 //! [`button_help`] for its hover text, [`open_with_hint`] for a shortcut that found nothing to launch, and, for the main
 //! view, [`quick_launch`] for the ⚡ chord, and [`begin_sequence`] for the sequence prefix with
-//! [`watch_sequence_presses`] for the press that cancels it.
+//! [`watch_sequence_presses`] for the press that cancels it; and [`open_at`] for the launcher's Save as template, which
+//! opens Templates on the template it saved.
 //!
 //! Templates, the ⚡ mark and the number keys are read from the store the helm pushes, never with a request per use.
 //! SPEC.md says the shortcuts read "the mark and templates fresh on each use, so an agent's or the command line's
@@ -35,6 +38,8 @@ pub mod dialog;
 pub mod dispatch;
 pub mod editor;
 pub mod fields;
+pub mod save;
+pub mod save_panel;
 pub mod sequence;
 pub mod shortcuts;
 pub mod summary;
@@ -53,6 +58,8 @@ mod editor_tests;
 mod fields_tests;
 #[cfg(test)]
 mod leave_tests;
+#[cfg(test)]
+mod save_tests;
 #[cfg(test)]
 mod sequence_tests;
 #[cfg(test)]
@@ -123,6 +130,12 @@ pub fn open_with_hint(
     cx: &mut App,
 ) -> Option<LayerId> {
     dialog::open(ReturnTo::Opener, Some(hint), mark, window, cx)
+}
+
+/// Open the Templates dialog with the stored template `name` in its editor: the launcher's Save as template, once its
+/// save succeeded and the launcher closed. Nothing opens when the user has moved on since `mark`.
+pub fn open_at(name: &str, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+    dialog::open_at(name, mark, window, cx)
 }
 
 /// Quick launch the template marked ⚡ (SPEC.md, "Quick launch"): the main view's handler of `QuickLaunch`, the ⚡

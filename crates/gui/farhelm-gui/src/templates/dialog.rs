@@ -250,6 +250,28 @@ pub fn open(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    open_dialog(returns_to, hint, mark, window, cx).map(|(layer, _)| layer)
+}
+
+/// Open the dialog with the stored template `name` in its editor, focus in its name field: where a successful Save as
+/// template lands (SPEC.md: "Successful saving ... opens the new template in the Templates editor"). The helm pushes
+/// a command's changes before its reply, so the store holds the template by the time its save succeeded; a name it
+/// does not hold leaves the editor empty. Closing returns focus to what held it when the dialog opened. Otherwise as
+/// [`open`].
+pub fn open_at(name: &str, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+    let (layer, dialog) = open_dialog(ReturnTo::Opener, None, mark, window, cx)?;
+    dialog.update(cx, |dialog, cx| dialog.open_template(name, window, cx));
+    Some(layer)
+}
+
+/// [`open`], also handing back the dialog, for [`open_at`] to open a template in it.
+fn open_dialog(
+    returns_to: ReturnTo,
+    hint: Option<Hint>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<(LayerId, gpui::Entity<TemplatesDialog>)> {
     session::current_store(cx)?;
     if focus::has_moved_on(mark, cx) {
         return None;
@@ -300,7 +322,7 @@ pub fn open(
     dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
     #[cfg(test)]
     cx.set_global(Opened(dialog.downgrade()));
-    Some(layer)
+    Some((layer, dialog))
 }
 
 /// What the header's Close does: dismiss the dialog through the layer manager, so its dismissal hook decides, as for
