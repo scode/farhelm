@@ -183,6 +183,14 @@ pub enum Icon {
     Restart,
     /// An arrow up from a line: update a host's Farhelm (the old app's Update glyph, on the host menu's Update).
     Update,
+    /// An open circle with an arrowhead, turning clockwise: check for updates, the version readout's `↻`. Drawn here,
+    /// in the 14-unit action box, rather than as the character: the bundled monospace face has no U+21BB (the old app
+    /// got it from the system's fallback font), and the readout turns it a quarter under the pointer, which GPUI does
+    /// only to an SVG.
+    Refresh,
+    /// A page with a folded corner and two lines: a document to read, the update menu's What's new (the old app's
+    /// Document glyph).
+    Document,
     /// A shield with a tick: the Settings dialog's Agent trust section (the old app's Agent trust glyph).
     AgentTrust,
     /// A plus: add something new (the old app's Add glyph, on the host rail's Add host).
@@ -276,6 +284,8 @@ impl Icon {
         Icon::Terminal,
         Icon::Restart,
         Icon::Update,
+        Icon::Refresh,
+        Icon::Document,
         Icon::AgentTrust,
         Icon::Add,
         Icon::Templates,
@@ -343,6 +353,8 @@ impl Icon {
             Icon::Terminal => "icons/terminal.svg",
             Icon::Restart => "icons/restart.svg",
             Icon::Update => "icons/update.svg",
+            Icon::Refresh => "icons/refresh.svg",
+            Icon::Document => "icons/document.svg",
             Icon::AgentTrust => "icons/agent-trust.svg",
             Icon::Add => "icons/add.svg",
             Icon::Templates => "icons/templates.svg",
@@ -456,6 +468,8 @@ impl Assets {
                 Some(include_bytes!("../assets/icons/permission-unknown.svg"))
             }
             "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
+            "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
+            "icons/document.svg" => Some(include_bytes!("../assets/icons/document.svg")),
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

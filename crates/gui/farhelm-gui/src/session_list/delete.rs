@@ -301,7 +301,8 @@ const SPINNER_STEPS: u8 = 8;
 /// The spinner's turn, which the list holds while any row shows a pending Delete and its window is active, as it holds
 /// the running pulse, and drops otherwise: a live animation handle keeps the ticker's timer firing ten times a second,
 /// which an inactive window has no use for. Every pending row draws the same step, so one handle serves them all. The
-/// main pane holds one of its own, on the same terms, for its scrim.
+/// main pane holds one of its own, on the same terms, for its scrim, and so does the version readout, for its check glyph
+/// and its ring (`update_readout::view`).
 ///
 /// The step is counted from the ticker's notifications of the turn's own entity: the ticker notifies it once per tick
 /// and nothing else does, so the count is the number of ticks it has seen. The view that holds the spinner observes

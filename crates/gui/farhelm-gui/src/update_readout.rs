@@ -316,6 +316,8 @@ fn shown_build(raw: &str) -> String {
     }
 }
 
+pub mod view;
+
 #[cfg(test)]
 mod tests {
     use super::*;

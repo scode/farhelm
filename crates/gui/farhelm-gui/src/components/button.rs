@@ -1,7 +1,8 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, the outlined
 //! danger of a permanent answer, plus the compact control that sits on the red banner, the ⋯ that opens a list row's
-//! menu, the host rail's square entries, the removable filter chip, the button that reads as a link, an entry of a
-//! navigation list such as Settings' sections, and the two swatches of the host settings' appearance picker.
+//! menu, the host rail's square entries, the removable filter chip, the button that reads as a link, the version
+//! readout's controls that keep the look of their text, an entry of a navigation list such as Settings' sections, and
+//! the two swatches of the host settings' appearance picker.
 //!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
@@ -86,6 +87,13 @@ pub enum Tier {
     /// `.inline-link`: a button that reads as a link in running text: the link color, underlined, with no fill, edge
     /// or padding. The focus ring is every control's.
     Link,
+    /// `.app-version-check`, `.app-version-toggle` and `.app-update-failure`: the sidebar header's version readout and
+    /// its status, controls that keep the look of the text they sit in. No padding, edge or fill, at rest or under the
+    /// pointer, and the inks are the content's own; keyboard focus draws every control's ring. `focus_fill` adds the
+    /// control-hover fill under that ring, which only the update-menu toggle had (the old sheet's `.btn:focus-visible`
+    /// fill outranked the toggle's `background: none`, and its own hover rule took the fill away again under the
+    /// pointer).
+    Readout { focus_fill: bool },
     /// `.app-settings-navigation button`: an entry of a navigation list (Settings' sections), as wide as its list, its
     /// icon and label at the left 8 pixels apart, 13-pixel text on a 16-pixel line (the old `line-height: normal`, which
     /// made it 34 pixels high), the primary ink at rest, and the label cut short with an ellipsis rather than wrapped.
@@ -287,7 +295,8 @@ impl Button {
     }
 
     /// The button opens something, and `expanded` says whether it is open now: `aria-expanded`, and the pressed look
-    /// while it is (see the module docs). On a button that is also [`Button::pressed`], the pressed look wins.
+    /// while it is (see the module docs), except in [`Tier::Readout`], which keeps the look of its text. On a button
+    /// that is also [`Button::pressed`], the pressed look wins.
     pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
         self
@@ -410,8 +419,9 @@ impl Button {
             );
         }
         // After the pressed looks: a button that is both a choice in force and open (the host rail's Hosts while host
-        // management shows) keeps its pressed look, as the old sheet drew it.
-        if self.expanded == Some(true) {
+        // management shows) keeps its pressed look, as the old sheet drew it. The readout's update toggle had no open
+        // look at all: it keeps the look of its text while its menu is open.
+        if self.expanded == Some(true) && !matches!(self.tier, Tier::Readout { .. }) {
             return (
                 Some(palette.accent_fill_hover),
                 palette.accent_fill_hover,
@@ -465,6 +475,7 @@ impl Button {
                 palette.tunnel_fg,
             ),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
+            Tier::Readout { .. } => (None, theme::TRANSPARENT, None, palette.fg_1),
             Tier::Primary if self.disabled || self.busy || self.refused => retired,
             Tier::Danger if self.disabled || self.busy || self.refused => retired,
             Tier::Primary => (
@@ -516,7 +527,7 @@ impl RenderOnce for Button {
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
-            Tier::Rail | Tier::Link | Tier::IconChoice => (px(0.), px(0.)),
+            Tier::Rail | Tier::Link | Tier::Readout { .. } | Tier::IconChoice => (px(0.), px(0.)),
             Tier::ColorChoice => (px(COLOR_CHOICE_PAD), px(COLOR_CHOICE_PAD)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
@@ -545,6 +556,7 @@ impl RenderOnce for Button {
             | Tier::Rail
             | Tier::Chip
             | Tier::Link
+            | Tier::Readout { .. }
             | Tier::Nav
             | Tier::QuickMark { .. }
             | Tier::NumberKey { .. }
@@ -621,9 +633,12 @@ impl RenderOnce for Button {
             } else {
                 metrics::RADIUS_SM
             })
-            // `.inline-link` has no edge at all (`border: 0`), so it sits on the text line like the words around it;
-            // every other tier keeps the 1-pixel edge.
-            .when(self.tier != Tier::Link, |button| button.border_1())
+            // `.inline-link` and the readout have no edge at all (`border: 0`), so they sit on the text line like the
+            // words around them; every other tier keeps the 1-pixel edge.
+            .when(
+                !matches!(self.tier, Tier::Link | Tier::Readout { .. }),
+                |button| button.border_1(),
+            )
             .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
             .line_height(px(17.))
@@ -647,9 +662,18 @@ impl RenderOnce for Button {
                     .line_height(px(NAV_LINE_HEIGHT))
             });
         button = button.when_some(fill, |button, fill| button.bg(theme::color(fill)));
-        // The old navigation entries showed keyboard focus by their ring alone, without `.btn`'s focus fill.
-        if ring && enabled && self.tier != Tier::Nav {
-            button = button.bg(theme::color(hover_fill));
+        // The old navigation entries showed keyboard focus by their ring alone, without `.btn`'s focus fill; of the
+        // readout's controls only the update-menu toggle has it.
+        let focus_fill = match self.tier {
+            Tier::Nav | Tier::Readout { focus_fill: false } => None,
+            Tier::Readout { focus_fill: true } => Some(palette.control_hover),
+            _ => Some(hover_fill),
+        };
+        if ring
+            && enabled
+            && let Some(focus_fill) = focus_fill
+        {
+            button = button.bg(theme::color(focus_fill));
         }
         if ring && pressed {
             // A pressed button's ring is the inverse ink inside its edge (`outline-color: var(--on-fill);
@@ -704,6 +728,7 @@ impl RenderOnce for Button {
                     | Tier::Rail
                     | Tier::Chip
                     | Tier::Link
+                    | Tier::Readout { .. }
                     | Tier::Nav
                     | Tier::QuickMark { .. }
                     | Tier::NumberKey { .. }
