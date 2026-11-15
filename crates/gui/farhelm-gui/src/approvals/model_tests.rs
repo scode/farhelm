@@ -297,8 +297,7 @@ fn session_references_stay_raw_copyable_identities() {
 }
 
 /// The From line keeps host, title and ID apart, and keeps the complete raw reference for its hover, accessible name
-/// and Copy ID while showing only the bare ID shortened; an unparseable reference is shown whole rather than guessed
-/// at.
+/// and Copy ID; a session the helm does not know by title says so in the app's words.
 #[test]
 fn the_from_line_keeps_its_parts_apart_and_the_full_reference_raw() {
     let mut approval = request(
@@ -317,11 +316,10 @@ fn the_from_line_keeps_its_parts_apart_and_the_full_reference_raw() {
     assert_eq!(from.host, HostText::from_host("build\u{202e}host"));
     assert_eq!(from.title, Some(HostText::from_host("“quoted” title")));
     assert_eq!(from.id, reference("1234567\u{200b}middle\u{202e}"));
-    assert_eq!(from.bare, "1234567\u{200b}middle\u{202e}");
 
     approval.session = unknown("not a reference");
     let from = Card::of(&approval, TunnelOffer::NotOffered).from;
-    assert_eq!((from.title, from.bare.as_str()), (None, "not a reference"));
+    assert_eq!((from.title, from.id.as_str()), (None, "not a reference"));
 }
 
 // ---- Permission chips -----------------------------------------------------------------------------------------------

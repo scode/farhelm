@@ -8230,15 +8230,17 @@ still there and bumps the feed, so no card outlives the request it describes. Ca
 
 The GUI keeps one expanded request id locally, preserves it across listing refreshes, and falls back to the oldest
 remaining request when it leaves. The other requests are header buttons below it, including requests from other hosts.
-The listing's id sequence and the expanded id together trigger the 700ms arm delay; a generation check prevents an older
-delay from arming buttons after a more recent switch. The common shell separates its pinned header and answer bar from
-an aligned fact list and individually scrollable long-text boxes. Requester host, quoted title and shortened ID remain
-separate peer isolates with accessible labels. ID shortening uses complete `peer::display_identity` escape spellings
-from the bare ID, while hover and accessible text retain the complete reference. Target and copied-source IDs stay in
-full. Copy buttons call the existing clipboard writer on the unmodified raw reference. Escaped or shortened display text
-is never copied or used as an action target; the card's answer handlers retain its random approval ID. Launch and
-restart permission chips reuse `list::session_permission` and its description rather than classifying command strings
-again; stored workspace trust and permission flags keep their separate meaning.
+The listing's id sequence and the expanded id together trigger the 700ms arm delay; each change's pause replaces the one
+before it, so an older pause never arms buttons after a more recent switch. The common shell separates its pinned header
+and answer bar from an aligned fact list and individually scrollable long-text boxes. Requester host, quoted title and
+shortened ID remain separate host-text elements with accessible labels. ID shortening is host text's abbreviated
+identity spelling (`HostText::identity_abbreviated`), cut only between whole escape spellings of the bare ID, while
+hover and accessible text retain the complete reference in the strict identity spelling. Target and copied-source IDs
+stay in full. Copy buttons put the unmodified raw reference on the clipboard. Escaped or shortened display text is never
+copied or used as an action target; the card's answers name its random approval ID. Launch and restart permission chips
+take their drawing and warning from the session list's shield (`crate::permission`) and only name which of its meanings
+applies, rather than classifying command strings again; stored workspace trust and permission flags keep their separate
+meaning.
 
 The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
 follows the actual main-pane rectangle and the terminal area's top, falling back to the top row's bottom when no

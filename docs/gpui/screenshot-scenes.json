@@ -748,6 +748,16 @@
       "reference": "terminal-detached-banner"
     },
     {
+      "golden": "approval-card",
+      "title": "An agent approval card at its full width",
+      "reference": "approval-card"
+    },
+    {
+      "golden": "approval-card-narrow",
+      "title": "An agent approval card in a narrow pane, labels stacked",
+      "reference": "approval-card"
+    },
+    {
       "golden": "terminal-styles",
       "title": "Terminal text styles, colors and box drawing",
       "reference": null

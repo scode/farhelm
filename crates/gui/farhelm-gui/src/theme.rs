@@ -123,6 +123,12 @@ pub struct Palette {
     pub warn_bg_dim: Token,
     /// `--warn-border`: the edge of an amber band, around the launcher's refused-launch alert.
     pub warn_border: Token,
+    /// `color-mix(in srgb, var(--warn) 14%, transparent)`: the agent approval card's "Agent request" badge fill
+    /// (`.approval-card-badge`), `--warn` at 14% over whatever it sits on.
+    pub warn_badge_bg: Token,
+    /// `color-mix(in srgb, var(--warn) 12%, transparent)`: a warning chip's fill on an approval card
+    /// (`.approval-permission-warning`), `--warn` at 12%.
+    pub warn_chip_bg: Token,
     /// `--danger`: the red text tone of destructive actions and waiting.
     pub danger: Token,
     /// `--danger-strong`: failure prose on ordinary surfaces.
@@ -203,6 +209,8 @@ pub const DARK: Palette = Palette {
     warn_bg: rgb_token(0x3d3424),
     warn_bg_dim: rgb_token(0x302b23),
     warn_border: rgb_token(0x6a5533),
+    warn_badge_bg: rgba_token(0xe5bb6e24),
+    warn_chip_bg: rgba_token(0xe5bb6e1f),
     danger: rgb_token(0xee8a8a),
     danger_strong: rgb_token(0xf09595),
     danger_soft: rgb_token(0xf2c0c4),
@@ -277,6 +285,8 @@ pub const LIGHT: Palette = Palette {
     warn_bg: rgb_token(0xfff0d2),
     warn_bg_dim: rgb_token(0xfaf2e3),
     warn_border: rgb_token(0xd6bc87),
+    warn_badge_bg: rgba_token(0x79531b24),
+    warn_chip_bg: rgba_token(0x79531b1f),
     danger: rgb_token(0xa63e4d),
     danger_strong: rgb_token(0xa13443),
     danger_soft: rgb_token(0xf2c0c4),
