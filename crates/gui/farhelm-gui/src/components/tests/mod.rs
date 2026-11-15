@@ -10,17 +10,18 @@
 //!
 //! Each component's tests live in a file named after the component's own file under `components/` (`button.rs` for
 //! `components/button.rs`, and so on), so a change to one control touches one test file rather than a file every
-//! control's PR edits. Two files test the layer's shared rules from `components/mod.rs` instead of a control:
-//! `hover_help.rs` (hover help and its tooltip) and `enter_choice.rs` (the choice controls' Enter rule). `transition.rs`
-//! tests the one-shot entrance (`components/transition.rs`), and `spinner.rs` the stepped spinner's turn
+//! control's PR edits. Three files test the layer's shared rules from `components/mod.rs` instead of a control:
+//! `hover_help.rs` (hover help and its tooltip), `enter_choice.rs` (the choice controls' Enter rule) and
+//! `focus_stop.rs` (the focus stop under every scroll stop, with a handle its caller owns). `transition.rs` tests the
+//! one-shot entrance (`components/transition.rs`), and `spinner.rs` the stepped spinner's turn
 //! (`components/spinner.rs`); neither draws a control. A new control's tests go in a new file here, declared below.
 //!
 //! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
 //! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
 //! sending keys and then drawing a frame, holding a key down for its repeats, reading what an element's subtree
 //! painted, and pressing every key a scroll stop takes; and the two fixtures the scroll box's and the dialog body's
-//! scroll stop tests share (numbered lines of content, and an element's role and name). A fixture that one
-//! component's tests use stays in that component's file.
+//! scroll stop tests share (numbered lines of content, and an element's role and name, which the focus stop's tests
+//! read too). A fixture that one component's tests use stays in that component's file.
 
 mod button;
 mod checkbox;
@@ -30,6 +31,7 @@ mod custom_flags;
 mod dialog;
 mod divider;
 mod enter_choice;
+mod focus_stop;
 mod hover_help;
 mod mark_toggle;
 mod menu_item;

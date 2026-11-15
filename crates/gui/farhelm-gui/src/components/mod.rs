@@ -18,6 +18,12 @@
 //! input, focus or name, so the label, hover help and role rule does not reach them. `transition`'s [`entrance`] fades
 //! an element in as it appears: it is the one place in the GUI crates' own code where GPUI's animation may be used, for
 //! one-shot transitions only (its module docs say why the ticker cannot draw them and what it keeps).
+//!
+//! Two of the layer's rules make a box its caller draws into a keyboard stop rather than drawing a control.
+//! [`focus_stop`] is a tab stop on a focus handle its caller owns, with a role, a name and the keyboard's ring, for a
+//! place where focus rests (the session pane's interrupted card, home while it shows), which must be able to hold focus
+//! before its first frame. [`scroll_stop`] is the same stop with a handle of its own plus the scroll keys, for a region
+//! that scrolls and holds nothing focusable (`scroll_box.rs` has the full account). Neither draws hover help.
 
 mod banner;
 mod button;
@@ -79,9 +85,9 @@ pub use transition::{ENTRANCE, entrance};
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Div, ElementId, InteractiveElement, KeyDownEvent, ParentElement as _, Pixels,
-    ScrollHandle, SharedString, Stateful, StatefulInteractiveElement, Styled as _, Window, div,
-    point, prelude::FluentBuilder as _, px,
+    App, ClickEvent, Div, ElementId, FocusHandle, InteractiveElement, KeyDownEvent,
+    ParentElement as _, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
+    Styled as _, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
 use crate::focus;
@@ -361,21 +367,76 @@ const LINE_STEP: Pixels = px(40.);
 /// stop's Page Up, Page Down and Space.
 const PAGE_SHARE: f32 = 0.875;
 
-/// Where a scroll stop draws its ring: `inset_x` from the stop's padding box at its sides and `inset_y` at its top and
-/// bottom (negative to cover a border, or to reach past the stop), with corners of `radius`. The two differ only for a
-/// dialog's notices, whose ring reaches out to the card's sides as the old full-width region's did
-/// ([`DialogFrame::notices_stop`]).
+/// Where a focus stop draws its ring ([`focus_stop`], and so every scroll stop): `inset_x` from the stop's padding box at
+/// its sides and `inset_y` at its top and bottom (negative to cover a border, or to reach past the stop), with corners
+/// of `radius`. The two differ only for a dialog's notices, whose ring reaches out to the card's sides as the old
+/// full-width region's did ([`DialogFrame::notices_stop`]).
 pub(crate) struct Ring {
     pub(crate) inset_x: Pixels,
     pub(crate) inset_y: Pixels,
     pub(crate) radius: Pixels,
 }
 
+/// Make `stop`, the box drawn under `id`, a focus stop on `focus`, a handle its caller owns: a tab stop with `role` and
+/// `label` as its accessible role and name, and `ring` while the keyboard has put focus on it. It takes no keys. The
+/// ring, role and Tab reach every stop shares, scroll stops included ([`scroll_stop`] is this plus the scroll keys), so
+/// they cannot drift apart.
+///
+/// Use it for a stop that is a place for focus to rest rather than a region to scroll: a session pane's interrupted
+/// card, which is home while it shows (SPEC.md, "Where focus rests"). The handle is the caller's, made with
+/// `.tab_stop(true)`, because such a stop must be able to hold focus before it is first drawn: the pane makes the card
+/// home ([`focus::set_home`]) as it learns the card is to show, and a handle kept in the stop's element state would not
+/// exist until the card's first frame. Use [`scroll_stop`] instead for a region whose content scrolls and holds nothing
+/// focusable (SPEC.md, "Reaching everything by keyboard"), whose handle is its own.
+///
+/// It makes nothing focusable but `focus` and draws nothing focusable inside the stop. Controls the caller draws inside
+/// it (the card's buttons) keep their own stops, which come after it in Tab order, since GPUI orders Tab by paint order,
+/// and their own keys, since it takes none; its ring shows only while the stop itself holds focus. Like a scroll stop it
+/// counts as a text field for Tab reach (`focus::OnPress::Focus`, which also has a press of any mouse button on the
+/// stop's own space focus it), and it draws no hover help: the caller adds its own if it wants one.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one stop's parts, each drawn once; a struct would only repeat them"
+)]
+pub(crate) fn focus_stop(
+    stop: Stateful<Div>,
+    id: &str,
+    focus: &FocusHandle,
+    role: Role,
+    label: SharedString,
+    ring: Ring,
+    window: &Window,
+    cx: &App,
+) -> Stateful<Div> {
+    debug_assert!(focus.tab_stop, "a focus stop's handle must be a tab stop");
+    let palette = theme::palette(cx);
+    let ringed = focus::shows_ring(focus, window);
+    let stop = stop
+        .relative()
+        .role(role)
+        .aria_label(label)
+        .when(ringed, |stop| {
+            stop.child(
+                div()
+                    .debug_selector(|| format!("{id}-ring"))
+                    .absolute()
+                    .top(ring.inset_y)
+                    .left(ring.inset_x)
+                    .right(ring.inset_x)
+                    .bottom(ring.inset_y)
+                    .border_2()
+                    .border_color(theme::color(palette.accent))
+                    .rounded(ring.radius),
+            )
+        });
+    focus::track(stop, focus, focus::OnPress::Focus)
+}
+
 /// Make `stop`, the box drawn under `id` around the scrolling element whose scroll state is `scroll`, a scroll stop: a
-/// tab stop with `role` and `label` as its accessible role and name, the ring while the keyboard has put focus on it,
-/// and the scroll keys. The rule every scroll stop shares (the scroll box's, the dialog body's and the dialog
-/// notices'), so their keys, ring and Tab reach cannot drift apart; `scroll_box.rs`'s module docs say what it does and
-/// why the stop wraps the scrolling element rather than being it. Its focus handle is its own, kept under `id`.
+/// [`focus_stop`] with `role`, `label` and `ring`, plus the scroll keys. The rule every scroll stop shares (the scroll
+/// box's, the dialog body's and the dialog notices'), so their keys cannot drift apart; `scroll_box.rs`'s module docs
+/// say what it does and why the stop wraps the scrolling element rather than being it. Its focus handle is its own,
+/// kept under `id`.
 ///
 /// It handles no hover help: the box takes its own, as its constructor does, while a dialog body takes none, since a
 /// tooltip over a whole body would cover what the user is reading.
@@ -394,40 +455,21 @@ pub(crate) fn scroll_stop(
     cx: &mut App,
 ) -> Stateful<Div> {
     let focus = focus::control_handle(ElementId::Name(format!("{id}-focus").into()), window, cx);
-    let palette = theme::palette(cx);
     let keys = scroll.clone();
     let focused = focus.clone();
-    let stop = stop
-        .relative()
-        .role(role)
-        .aria_label(label)
-        .when(focus::shows_ring(&focus, window), |stop| {
-            stop.child(
-                div()
-                    .debug_selector(|| format!("{id}-ring"))
-                    .absolute()
-                    .top(ring.inset_y)
-                    .left(ring.inset_x)
-                    .right(ring.inset_x)
-                    .bottom(ring.inset_y)
-                    .border_2()
-                    .border_color(theme::color(palette.accent))
-                    .rounded(ring.radius),
-            )
-        })
-        // GPUI hands a key to every element on the focused element's path, so a control inside the stop (a link in a
-        // box) would scroll it too: the keys are the stop's only while the stop itself holds focus.
-        .on_key_down(move |event, window, cx| {
-            if !focused.is_focused(window) {
-                return;
-            }
-            if let Some(top) = scrolled_to(event, &keys) {
-                cx.stop_propagation();
-                keys.set_offset(point(keys.offset().x, top));
-                window.refresh();
-            }
-        });
-    focus::track(stop, &focus, focus::OnPress::Focus)
+    // GPUI hands a key to every element on the focused element's path, so a control inside the stop (a link in a box)
+    // would scroll it too: the keys are the stop's only while the stop itself holds focus.
+    let stop = stop.on_key_down(move |event, window, cx| {
+        if !focused.is_focused(window) {
+            return;
+        }
+        if let Some(top) = scrolled_to(event, &keys) {
+            cx.stop_propagation();
+            keys.set_offset(point(keys.offset().x, top));
+            window.refresh();
+        }
+    });
+    focus_stop(stop, id, &focus, role, label, ring, window, cx)
 }
 
 /// Let Page Up, Page Down, Home and End scroll `region`, the scrolling element whose scroll state is `scroll`, while a
