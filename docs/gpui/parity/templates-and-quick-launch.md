@@ -6,7 +6,7 @@ sections: Creation (the Templates dialog, quick launch, number keys, launcher se
 
 | Old spec                                    | Tests | Covers                                                              | Status                                                                                                                                                                                                                                                                                                            |
 | ------------------------------------------- | ----- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark | partly: the list, summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields and Save (`templates::editor_tests`, `templates::fields_tests`); rename, duplicate, leaving, deleting, `tl:` and Save as template are still to come |
+| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark | partly: the list, summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields, Save, rename and Duplicate (`templates::editor_tests`, `templates::fields_tests`); leaving, deleting, `tl:` and Save as template are still to come |
 | `tests/quick-launch.spec.ts`                | 30    | quick launch submits the wrapper prefix saved in its agent template | not yet ported                                                                                                                                                                                                                                                                                                    |
 | `tests/launcher-template-shortcuts.spec.ts` | 8     | back-to-back bolt and number chords stack on New without submitting | not yet ported                                                                                                                                                                                                                                                                                                    |
 | `tests/template-list-shortcut.spec.ts`      | 4     | Cmd-J exact name launches through the fresh quick-launch path       | not yet ported                                                                                                                                                                                                                                                                                                    |
@@ -110,8 +110,21 @@ orchestrator.
   shows "Choose a host" with the line "This template places sessions in an environment, which this editor cannot show
   yet. It stays as stored unless you choose a host or remove this field.", and the placement is saved unchanged until a
   host is chosen or the field removed.
-- **The editor's screenshot.** The `template-editor` golden has no Duplicate or Delete in its footer yet: those come
-  with their pieces.
+- **The editor's screenshot.** The `template-editor` golden has no Delete in its footer yet: it comes with its piece.
+- **A rename's bindings are read from the pushed preferences.** The old rename read the preferences again after saving
+  the new name and said "shortcut bindings could not be read" when that read failed. Here the store is that read, so the
+  message is said while the helm reports its preferences unavailable, or before they have arrived. Tested by
+  `templates::editor_tests::unreadable_bindings_stop_the_rename_before_any_move`; the moves and their refusals by
+  `a_rename_saves_moves_the_mark_and_key_then_deletes_the_old_name`,
+  `a_rename_with_nothing_bound_goes_straight_to_the_deletion`,
+  `a_refused_mark_move_stops_the_rename_and_keeps_the_old_template` and
+  `a_refused_key_move_stops_the_rename_and_keeps_the_old_template`. The old "a shortcut write was interrupted" words are
+  kept for a step that cannot start, which here only a retired store refuses (a reset closes the dialog with it), so no
+  test reaches them.
+- **A refused deletion of a renamed template's old name.** As in the old app, the status line then shows only the helm's
+  words, not which step of the rename failed; by then the template is saved under the new name with the mark and key
+  moved, and the old one is still there. Tested by
+  `templates::editor_tests::a_refused_delete_of_the_old_name_shows_the_helms_words`.
 
 ## Superseded
 
