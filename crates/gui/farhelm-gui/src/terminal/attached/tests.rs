@@ -3640,43 +3640,48 @@ fn an_inert_terminal_is_dimmed_and_sends_nothing(cx: &mut TestAppContext) {
     assert!(!h.sent().is_empty(), "and typing reaches the program again");
 }
 
-/// A program that took a press is owed its release, or it stays mid-drag; a terminal going inert sees no more
-/// releases, so it must send them as it goes. Specified: with mouse reporting on, after a press the program heard, going
-/// inert sends that button's release; the real release afterwards sends nothing more.
+/// The mouse report deduper must hear only reports that are sent: a drag move dropped while the terminal was inert,
+/// counted as sent, would suppress the same move once the terminal is usable again, and the program's pointer would
+/// lag a cell behind until it left that cell. Specified: with drag reporting on and a button held, a move to another
+/// cell while inert sends nothing, and the same move once the terminal is usable again sends that cell's report.
 #[gpui::test]
-fn going_inert_mid_press_releases_the_programs_button(cx: &mut TestAppContext) {
+fn a_move_dropped_while_inert_is_sent_once_usable_again(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.attach_showing("hello");
+    h.attach_showing("hello world");
+    h.fake().output(mouse_mode("drag"));
+    settle(h.cx);
     let owner = h.owner.clone();
     h.choose(&owner);
-    h.fake().output(mouse_mode("click"));
+    let (press, step, far) = (h.at_cell(2, 0), h.at_cell(3, 0), h.at_cell(6, 0));
+    h.cx.simulate_mouse_down(press, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(step, Some(MouseButton::Left), Modifiers::none());
     settle(h.cx);
-    let at = h.at_cell(2, 0);
-    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
-    settle(h.cx);
-    let pressed = h.sent();
-    assert_eq!(pressed.len(), 1, "the premise: the program heard the press");
-    h.inert(true);
-    let released = h.sent();
     assert!(
-        matches!(
-            released.as_slice(),
-            [(
-                GridInput::Mouse {
-                    kind: MouseEventKind::Up,
-                    button: 0,
-                    x: 2,
-                    y: 0,
-                    ..
-                },
-                _
-            )]
-        ),
-        "going inert sends the release: {released:?}"
+        !h.sent().is_empty(),
+        "the premise: the program hears the drag"
     );
-    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+
+    h.inert(true);
+    h.cx.simulate_mouse_move(far, Some(MouseButton::Left), Modifiers::none());
     settle(h.cx);
-    assert_eq!(h.sent(), [], "and the real release sends nothing more");
+    assert_eq!(h.sent(), [], "nothing is sent while inert");
+
+    h.inert(false);
+    h.cx.simulate_mouse_move(far, Some(MouseButton::Left), Modifiers::none());
+    settle(h.cx);
+    let sent = h.sent();
+    assert!(
+        sent.iter().any(|(input, _)| matches!(
+            input,
+            GridInput::Mouse {
+                kind: MouseEventKind::Move,
+                x: 6,
+                y: 0,
+                ..
+            }
+        )),
+        "the move reaches the program: {sent:?}"
+    );
 }
 
 /// What was under way when the terminal went inert must not finish behind the veil: a selection drag would copy at its
