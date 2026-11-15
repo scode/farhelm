@@ -21,7 +21,8 @@
 //! around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
-//! request opens it one more, in both appearances.
+//! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
+//! with the keyboard's ring.
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -403,6 +404,70 @@ fn dialog(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         false,
         |_, _, _| {},
     )
+    .into_any_element()
+}
+
+/// The dialog frame with a question in its notices whose answers are both disabled, as the old Trash dialog's global
+/// Delete all question's were while a deletion was in flight, so the notices are a stop of their own
+/// ([`DialogFrame::notices_stop`]). The setup's Tab focuses that stop, which comes first (the body holds no control and
+/// the header no Close), so the golden pins its ring: its sides at the card's inner edge, as the body's ring lies, and
+/// its top and bottom two pixels outside the notices. The question is drawn in the prompt's loud look, as the Trash
+/// dialog asks it (`prompt.rs`: 16-pixel text on 20-pixel lines, 6 pixels between them, 10 by 12 pixels of padding
+/// inside a 2-pixel red edge on the red wash), so the ring is pinned around what a real dialog's notices hold.
+fn dialog_notices_stop(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = crate::theme::palette(cx);
+    let answer = |id: &'static str, label: &'static str, tier: Tier| {
+        Button::new(
+            id,
+            label,
+            HoverHelp::tooltip("Golden scene button"),
+            Role::Button,
+        )
+        .tier(tier)
+        .disabled(true)
+    };
+    let question = div()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .py(px(10.))
+        .px(px(12.))
+        .text_size(px(16.))
+        .line_height(px(20.))
+        .bg(crate::theme::color(palette.danger_wash))
+        .border_2()
+        .border_color(crate::theme::color(palette.danger))
+        .rounded(crate::theme::metrics::RADIUS_MD)
+        .child("Delete 3 archived checkouts (1.2 GB) on this machine, build-box?")
+        .child("Work in them that was never committed or pushed is lost permanently.")
+        .child(
+            div()
+                .flex()
+                .justify_end()
+                .gap(px(8.))
+                .child(answer("question-cancel", "Cancel", Tier::Neutral))
+                .child(answer(
+                    "question-submit",
+                    "Delete permanently",
+                    Tier::Danger,
+                )),
+        );
+    DialogFrame::new(
+        "trash",
+        "Trash",
+        div().child("3 archived checkouts on reachable hosts."),
+        vec![
+            Button::new(
+                "close",
+                "Close",
+                HoverHelp::tooltip("Golden scene button"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral),
+        ],
+    )
+    .notices(question)
+    .notices_stop("Global checkout deletion confirmation")
     .into_any_element()
 }
 
@@ -3854,6 +3919,12 @@ static SCENES: &[Scene] = &[
         size: (540., 300.),
         draw: dialog,
         setup: no_setup,
+    },
+    Scene {
+        name: "dialog-notices-stop",
+        size: (540., 340.),
+        draw: dialog_notices_stop,
+        setup: focus_ring_setup,
     },
     Scene {
         name: "tooltip",

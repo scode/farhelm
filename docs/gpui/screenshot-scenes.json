@@ -751,6 +751,11 @@
       "reference": "rename-dialog"
     },
     {
+      "golden": "dialog-notices-stop",
+      "title": "A dialog whose notices hold a loud question with both answers disabled, so the notices are a stop of their own, focused with the keyboard ring reaching to the card's sides",
+      "reference": null
+    },
+    {
       "golden": "prompt",
       "title": "A confirmation from the prompt foundation",
       "reference": "host-remove-confirmation"
