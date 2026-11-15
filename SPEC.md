@@ -2943,17 +2943,21 @@ whatever the agent renders is what you see. There is no composer, no message abs
   Immediately before an automatic pick the client rereads shared preferences, falling back to its current in-memory copy
   on failure, and remembers the result. Removing an unselected session leaves the pane alone; removing the last session
   leaves it empty. Existing removal detection still needs a complete, unfiltered fleet reply to infer an external
-  deletion or host removal; filtering or a capped reply does not unselect an already-open session. Replace selects its
-  replacement if its source is still selected when it finishes, and closing a terminal tab is not a session removal.
-  Launching the app is itself the deliberate act the attach semantics below key off. Opening a second client therefore
-  takes over its chosen session exactly as clicking that session there would. The attached client owns input and
-  terminal dimensions: the PTY resizes to that client, and the last size sticks when nothing is attached. Reconnecting
-  replays the terminal so the session looks as it would have had the client stayed attached, modulo redraws caused by
-  dimension changes. The floor: the host-side terminal retains, and replay covers, at least the current screen plus
-  10,000 lines of scrollback. The sidebar visibly marks the selected session's row whenever that session is listed, so
-  which session the main pane is interacting with is readable at a glance rather than only from the bottom bar's session
-  name. A filter that excludes the selected session leaves no row to mark — the bottom bar's session name remains the
-  identifier in that state, and the main pane deliberately stays put (filtering the list is not deselecting).
+  deletion or host removal, with one exception for the open session: the client's list query names it, and once the helm
+  has answered that query it keeps the open session in every reply while the session exists, so a successful, filtered
+  reply without it means it was deleted elsewhere, and the client moves on as for any removal (the maintainer decided
+  this on 2026-11-15). Otherwise filtering does not unselect an already-open session, and a capped reply never does.
+  Replace selects its replacement if its source is still selected when it finishes, and closing a terminal tab is not a
+  session removal. Launching the app is itself the deliberate act the attach semantics below key off. Opening a second
+  client therefore takes over its chosen session exactly as clicking that session there would. The attached client owns
+  input and terminal dimensions: the PTY resizes to that client, and the last size sticks when nothing is attached.
+  Reconnecting replays the terminal so the session looks as it would have had the client stayed attached, modulo redraws
+  caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at least the current screen
+  plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row whenever that session is listed,
+  so which session the main pane is interacting with is readable at a glance rather than only from the bottom bar's
+  session name. A filter that excludes the selected session leaves no row to mark — the bottom bar's session name
+  remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
+  deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
   (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
   terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary

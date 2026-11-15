@@ -13,7 +13,8 @@
 //! settles the selection, the open session's seen mark and the open session its query names ([`SessionList::settle`],
 //! [`filters`]' "The query names the open session") whenever the connection changes (a new UI session after a reset,
 //! or none while the window is inert), the selection changes, the current UI session's store applies a pushed change,
-//! or its operation store starts or settles a request. GPUI draws nothing for a window
+//! its operation store starts or settles a request, or the helm answers the list's query (whose naming of the open
+//! session is evidence the selection rules read, [`filters::Choice::serves_named`]). GPUI draws nothing for a window
 //! that is hidden, minimized or behind other windows, and SPEC.md, "Status", wants a session open in a window behind
 //! other apps recorded as seen the same way as one in a focused window; work driven by frames would wait until the
 //! window showed again. Each settle recomputes from the state as it is then. A settle that changes the selection
@@ -364,14 +365,18 @@ impl SessionList {
         {
             current.operations = Some(cx.observe(&operations, |list, _, cx| list.settle(cx)));
         }
+        let serves_named = selected
+            .as_deref()
+            .is_some_and(|key| current.filters.serves_named(key));
         let collections = store.read(cx).collections();
         let listed = selection::listed(collections);
-        // Gone on a complete listing without it, or once this window's own Delete of it succeeded and the store no
-        // longer holds it, which a filtered listing would never prove (`delete`'s "This window's own Delete is
-        // evidence"); and never while its own Replace is in flight (`selection`'s "A Replace keeps its own source open
-        // until it answers").
+        // Gone on a complete listing without it, on any available listing without it once the query the helm serves
+        // names it, or once this window's own Delete of it succeeded and the store no longer holds it (`selection`'s
+        // "A selection stays until it is proven gone"); and never while its own Replace is in flight (`selection`'s "A
+        // Replace keeps its own source open until it answers").
         let gone = selected.as_deref().is_some_and(|key| {
             let proven = session::listing_proves_gone(collections, key)
+                || selection::absent_while_named(collections, key, serves_named)
                 || (deleted_here && collections.get::<SessionRow>(key).is_none());
             proven && !replace::in_flight(key, cx)
         });

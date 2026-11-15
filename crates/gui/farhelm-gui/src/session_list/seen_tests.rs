@@ -405,10 +405,12 @@ fn a_manual_unread_of_the_open_session_sticks_until_the_user_returns_or_output_a
 
 /// The M1 follow-up: a listing that hides the open session (the helm's cap cut it) must not make the seen memory
 /// forget it, or its return to the list reads as a new opening and marks it seen, undoing a manual Mark unread of a
-/// session the user never left. The memory must still notice output that arrived while it was hidden. Specified, with
-/// a open and marked unread by hand: a cut listing without a keeps a open and sends nothing; a complete listing with
-/// a back, unseen at the same activity, sends nothing; after another cut, a's return with new activity sends its seen
-/// mark at that activity.
+/// session the user never left. The memory must still notice output that arrived while it was hidden. The cut listing
+/// also carries nothing for a, as the helm sends it for a session past its host's own cap, so it pins too that a cut
+/// listing proves nothing even under an answered query naming the open session (`selection::absent_while_named`'s
+/// NOTE). Specified, with a open and marked unread by hand: a cut listing without a keeps a open and sends nothing; a
+/// complete listing with a back, unseen at the same activity, sends nothing; after another cut, a's return with new
+/// activity sends its seen mark at that activity.
 #[gpui::test]
 fn the_seen_memory_survives_a_cut_listing_that_hides_the_open_session(cx: &mut TestAppContext) {
     let rows = [(idle("a"), 0), (idle("b"), 0)];
@@ -460,7 +462,8 @@ fn the_seen_memory_survives_a_cut_listing_that_hides_the_open_session(cx: &mut T
 /// The same follow-up through a filter: SPEC.md, "Hiding the selected session changes neither that selection nor its
 /// open terminal", so choosing a host the open session is not on hides it without the user leaving it, and choosing
 /// All brings it back. Specified, with a open and marked unread by hand, over the local host and one remote: choosing
-/// the remote sends its session query; the helm's narrowed listing without a keeps a open and sends nothing; choosing
+/// the remote sends its session query; the helm's narrowed listing, which leaves a out of the list and carries it,
+/// keeps a open and sends nothing; choosing
 /// All and the helm's listing with a back, unseen at the same activity, send nothing but All's query.
 #[gpui::test]
 fn the_seen_memory_survives_a_host_filter_that_hides_the_open_session(cx: &mut TestAppContext) {
@@ -486,7 +489,7 @@ fn the_seen_memory_survives_a_host_filter_that_hides_the_open_session(cx: &mut T
             json!({ "host": 2, "selected": "a" })
         )]
     );
-    fake.push(change(narrowed(&["b"], 2, 1), &[], &["a"]));
+    fake.push(change(carrying(narrowed(&["b"], 2, 1), "a"), &[], &[]));
     test_support::settle(cx);
     assert_eq!(
         selected(cx).as_deref(),
@@ -563,11 +566,16 @@ fn a_carried_open_session_is_marked_seen_as_its_output_arrives(cx: &mut TestAppC
 /// the open session must not hide the user leaving and coming back either. The quick switcher searches every host
 /// whatever the sidebar shows, so with a host chosen the user can open sessions the list does not show. Found by the
 /// review gate, as a memory kept for whichever hidden session was open. Specified, with a open and marked unread by
-/// hand, over the local host and one remote: choosing the remote hides a and c; the quick switcher opens c, then a again,
-/// each picked by typing its title and Enter, and nothing is marked while they are hidden (picking the hidden c widens
-/// the query to All, `{"selected": "c"}`, as SPEC.md's quick switcher asks, but a stays hidden until the helm's widened
-/// listing arrives); once that listing shows a again unseen at the same activity, a is marked seen at that activity.
-/// The fake helm here carries no hidden session, so these are the moments with no row for the open one.
+/// hand, over the local host and one remote: choosing the remote hides a and c, the helm carrying a; the quick switcher
+/// opens c, picked by typing its title and Enter, which widens the query to All (`{"selected": "c"}`, as SPEC.md's
+/// quick switcher asks), and nothing is marked while c has no row; the helm's widened listing, with a unseen at the
+/// same activity, and its reply mark nothing either; the switcher then opens a again, and a is marked seen at that
+/// activity.
+///
+/// NOTE: The review gate's case left and returned with no row for either session, the helm's widened listing held back.
+/// That can no longer arrive: the helm pushes a query's listing before replying, and the switcher's read is answered
+/// after the query, so by the time a pick can be made the helm carries or lists the open session (SPEC.md's exception
+/// to "Existing removal detection" now reads a listing without it as its deletion).
 #[gpui::test]
 fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut TestAppContext) {
     let rows = [(idle("a"), 0), (idle("b"), 0), (idle("c"), 0)];
@@ -586,7 +594,7 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
 
     test_support::click(cx, "host-rail-host-2");
     answered(&mut fake);
-    fake.push(change(narrowed(&["b"], 3, 1), &[], &["a", "c"]));
+    fake.push(change(carrying(narrowed(&["b"], 3, 1), "a"), &[], &["c"]));
     test_support::settle(cx);
     assert!(
         !drawn(cx, "session-row-a") && !drawn(cx, "session-row-c"),
@@ -594,43 +602,40 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
     );
 
     let fleet = [idle("a").seen(None), idle("b"), idle("c")];
+    let seen_marks = |sent: &[(Method, String, Value)]| -> Vec<(Method, String, Value)> {
+        sent.iter()
+            .filter(|(_, path, _)| path.ends_with("/seen"))
+            .cloned()
+            .collect()
+    };
     quick_switch(&mut fake, cx, "c", &fleet);
     assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
-    let sent = answered(&mut fake);
-    assert!(
-        sent.contains(&named("c")),
-        "the pick of the hidden c widened the query: {sent:?}"
-    );
-    assert!(
-        !sent.iter().any(|(_, path, _)| path.ends_with("/seen")),
-        "nothing is marked while hidden"
-    );
-    quick_switch(&mut fake, cx, "a", &fleet);
-    assert_eq!(
-        selected(cx).as_deref(),
-        Some("a"),
-        "the premise: a is open again"
-    );
-    assert!(
-        !answered(&mut fake)
-            .iter()
-            .any(|(_, path, _)| path.ends_with("/seen")),
-        "nothing is marked while hidden"
-    );
-
+    // The helm pushes its widened listing before it replies, as it does for every query it accepts.
     fake.push(change(
         listing_meta(&order, 3, false),
         &[idle("a").seen(None), idle("c")],
         &[],
     ));
     test_support::settle(cx);
-    // a lives on a remote host, so its terminal also reads a's tunnels as it opens; that read is the terminal's.
-    let sent: Vec<_> = answered(&mut fake)
-        .into_iter()
-        .filter(|(_, path, _)| !path.ends_with("/tunnels"))
-        .collect();
+    let sent = answered(&mut fake);
+    assert!(
+        sent.contains(&named("c")),
+        "the pick of the hidden c widened the query: {sent:?}"
+    );
     assert_eq!(
-        sent,
+        seen_marks(&sent),
+        [],
+        "nothing is marked, before c has a row or after"
+    );
+
+    quick_switch(&mut fake, cx, "a", &fleet);
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a is open again"
+    );
+    assert_eq!(
+        seen_marks(&answered(&mut fake)),
         [seen_put("a", json!(100))],
         "a's return after the user left it is marked seen"
     );

@@ -31,9 +31,11 @@
 //! puts the previous choice back, both dimensions of it, and shows the helm's words under the heading until the next
 //! choice.
 //!
-//! **What filtering leaves alone.** Hiding the open session changes neither the selection nor its terminal: the
-//! selection rules never treat a filtered listing as proof that a session is gone (`session::listing_proves_gone`), and
-//! the helm keeps pushing the hidden open session's current state, so the pane goes on naming it.
+//! **What filtering leaves alone.** Hiding the open session changes neither the selection nor its terminal: a filtered
+//! listing proves nothing about the sessions it leaves out (`session::listing_proves_gone`), and the helm keeps pushing
+//! the hidden open session's current state, so the pane goes on naming it. The one thing a filtered listing does prove
+//! is that the open session itself is gone, once the query it answers named that session and the listing is not cut
+//! ([`Choice::serves_named`]).
 //! Ended sessions show only under All, which is the helm's doing: its status filter matches the status word exactly, so
 //! Idle never lists an exited session.
 //!
@@ -229,6 +231,9 @@ pub(crate) struct Choice {
     answered_named: Option<String>,
     /// How many queries this UI session sent; the last one's number.
     sent: u64,
+    /// The number of the last query the helm answered, accepted or refused: `sent` once no query is in flight, since
+    /// replies arrive in the order the queries were sent.
+    replied: u64,
     /// The helm's words for the latest query, when it refused it.
     refusal: Option<HostText>,
 }
@@ -266,6 +271,23 @@ impl Choice {
         Some(self.sent)
     }
 
+    /// Whether the helm now serves a query that names `key` as the open session, with no later query on its way. Then
+    /// every listing it pushes holds `key`, listed or carried, for as long as that session exists (SPEC_impl.md, "What
+    /// is pushed, and how changes are found"), so an available listing without it shows the session gone, filtered or
+    /// not (SPEC.md's exception to "Existing removal detection", decided by the maintainer on 2026-11-15). A cut
+    /// listing still proves nothing (`selection::absent_while_named`'s NOTE).
+    ///
+    /// NOTE: Both halves are needed. The query last sent is not enough: until the helm accepts a query naming a session
+    /// the user just opened (a quick-switcher pick the filters hide, say), its listings need not hold that session, and
+    /// treating its absence as proof would undo the pick. The query last accepted is not enough either while a later one
+    /// is in flight: the helm pushes a query's listing before replying to it, so a later query naming another session
+    /// can leave `key` out although it exists. That takes a quick return: with `key` listed, the user opens another
+    /// session and then `key` again before the helm answers the first of those, while `key` stops matching the
+    /// filters (`session_pane/carried_tests.rs`, `a_quick_return_to_a_session_is_not_undone_by_the_query_it_overtook`).
+    pub(crate) fn serves_named(&self, key: &str) -> bool {
+        self.replied == self.sent && self.answered_named.as_deref() == Some(key)
+    }
+
     /// The helm answered query number `number`, which asked for `query` naming `selected` as the open session: accepted
     /// (`Ok`), or refused in its words.
     pub(crate) fn settle(
@@ -275,6 +297,7 @@ impl Choice {
         selected: Option<&str>,
         answer: Result<(), HostText>,
     ) {
+        self.replied = number;
         match answer {
             Ok(()) => {
                 self.answered = query;
@@ -402,10 +425,12 @@ impl SessionList {
                         selected.as_deref(),
                         answer.map(|_| ()),
                     );
-                    // A refused change of the filters put the accepted naming back (`Choice::named`'s NOTE); correct
-                    // it now rather than at the next pushed change, which may be a long way off. Otherwise this sends
-                    // nothing.
-                    list.name_open_session(cx);
+                    // Settle the whole list, not only its naming: the query in force is evidence the selection
+                    // rules read (`Choice::serves_named`), and a push that left the open session out may have
+                    // arrived while this reply was on its way. The settle also corrects the naming at once when a
+                    // refused change of the filters put the accepted one back (`Choice::named`'s NOTE), rather than
+                    // at the next pushed change, which may be a long way off. Otherwise it sends nothing.
+                    list.settle(cx);
                     cx.notify();
                 });
             },

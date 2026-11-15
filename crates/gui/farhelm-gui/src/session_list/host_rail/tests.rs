@@ -31,7 +31,9 @@ use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::hosts::add::tests::Opened;
 use crate::hosts::identity::LOCAL_NAME;
 use crate::main_view::MainView;
-use crate::session_list::tests::{change, listing, open_main, painted, preferences, session};
+use crate::session_list::tests::{
+    carrying, change, listing, open_main, painted, preferences, session,
+};
 use crate::test_support::{self, any_open, focused_id, frame, meta};
 use crate::{assets, bootstrap, layers};
 
@@ -609,7 +611,8 @@ fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut
 
     test_support::click(cx, "host-rail-host-3");
     let (query, _) = one_query(&mut fake);
-    fake.push(change(filtered(&[], 2, 0), &[], &["a", "b"]));
+    // The helm carries the open a outside the empty list, as for any query naming it.
+    fake.push(change(carrying(filtered(&[], 2, 0), "a"), &[], &["b"]));
     fake.reply(query.id, 204, None);
     cx.run_until_parked();
     let nodes = frame(cx);
