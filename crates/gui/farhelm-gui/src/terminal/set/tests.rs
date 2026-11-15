@@ -686,3 +686,250 @@ fn a_remote_sessions_terminals_read_their_tunnels_once(cx: &mut TestAppContext) 
         .count();
     assert_eq!(reads, 1);
 }
+
+// ---- New terminal and Close ----------------------------------------------------------------------------------------
+
+/// The tab requests the window sent since the last call, as (id, method, path), left unanswered; anything else it sent
+/// (a seen mark, a tunnel read) is answered with success at once, since the fake answers in order.
+fn tab_requests(helm: &mut FakeHelm) -> Vec<(u64, farhelm_helm_client::Method, String)> {
+    let mut found = Vec::new();
+    for command in helm.commands() {
+        if command.path.starts_with("/api/sessions/a/tabs") {
+            found.push((command.id, command.method, command.path));
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    found
+}
+
+/// [`snapshot`] with the helm-wide Skip session confirmations switch on.
+fn skipping(tabs: &[&str]) -> Vec<CollectionState> {
+    let mut snapshot = snapshot(tabs);
+    snapshot[1].entries[0].value["skip_session_confirmations"] = json!(true);
+    snapshot
+}
+
+/// SPEC.md, "Session view": the view "supports additional terminal tabs", and the old strip's New terminal opened one
+/// and showed it; the helm's reply and its push of the new tab list can come in either order, and the tab must be
+/// chosen either way, or a press would leave the user looking at the old terminal. Specified: New terminal sends one
+/// `POST /api/sessions/a/tabs`; answered with tab t1 before the row lists it, nothing is chosen yet; once the push lists
+/// t1, t1 is chosen and a typed key reaches its stream. A second press, answered after the push of t2, chooses t2 at
+/// once.
+#[gpui::test]
+fn new_terminal_opens_a_tab_and_shows_it(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&[]));
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    tab_requests(&mut window.helm);
+
+    click(window.cx, super::ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        sent.iter()
+            .map(|(_, method, path)| (*method, path.as_str()))
+            .collect::<Vec<_>>(),
+        [(farhelm_helm_client::Method::Post, "/api/sessions/a/tabs")]
+    );
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t1" } })));
+    settle(window.cx);
+    assert_eq!(window.chosen(), None, "not listed yet");
+    window.push_tabs(&["t1"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    let t1 = window.stream_of(Some("t1"));
+    window.go_live(t1, "shell");
+    keys(window.cx, "x");
+    assert!(window.typed_into(t1), "the new tab has focus");
+
+    click(window.cx, super::ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1);
+    window.push_tabs(&["t1", "t2"]);
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t2" } })));
+    settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t2"));
+}
+
+/// SPEC.md, "Lifecycle operations": a pending request refuses "another lifecycle action, New terminal or Clone on that
+/// session", and the old spec counted the POSTs: repeated presses while an open is in flight make one tab. A refusal
+/// must say why in the helm's words (a vanished folder, a shell that died at once) and leave the button usable.
+/// Specified: two presses send one POST; a 409 with the helm's words draws "Open tab: " and the words, and a third press
+/// sends another POST.
+#[gpui::test]
+fn new_terminal_sends_once_and_a_refusal_says_why(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&[]));
+    tab_requests(&mut window.helm);
+    click(window.cx, super::ADD_ID);
+    click(window.cx, super::ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "one open while one is in flight");
+    window.helm.reply(
+        sent[0].0,
+        409,
+        Some(json!({ "error": "the session's folder is gone" })),
+    );
+    settle(window.cx);
+    let painted = painted(&test_support::frame(window.cx)).join(" ");
+    assert!(
+        painted.contains("Open tab: ") && painted.contains("the session's folder is gone"),
+        "{painted}"
+    );
+    click(window.cx, super::ADD_ID);
+    assert_eq!(tab_requests(&mut window.helm).len(), 1, "usable again");
+}
+
+/// Closing a tab kills its shell and whatever it started, which the window cannot see, so the × asks first, naming the
+/// tab and that consequence (the old `CLOSE_TAB_CONSEQUENCE`), with Confirm close focused; Cancel sends nothing. A
+/// chosen tab that closed shows the agent terminal. Specified: with t1 chosen, the × draws the question with the
+/// consequence and "Terminal 1", focus on its confirming answer; Cancel sends nothing; asked again and confirmed, one
+/// `DELETE /api/sessions/a/tabs/t1` goes out, and its success shows the agent terminal.
+#[gpui::test]
+fn closing_a_tab_asks_first_then_sends_one_delete(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: t1 is shown"
+    );
+    click(window.cx, "session-terminal-close-t1");
+    let painted = painted(&test_support::frame(window.cx));
+    assert!(
+        painted
+            .iter()
+            .any(|text| text == super::CLOSE_TAB_CONSEQUENCE),
+        "{painted:?}"
+    );
+    // Once in the strip and once in the question's own line.
+    assert_eq!(
+        painted.iter().filter(|text| *text == "Terminal 1").count(),
+        2,
+        "the question names the tab"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm")
+    );
+    click(window.cx, "prompt-cancel");
+    assert_eq!(tab_requests(&mut window.helm), []);
+
+    click(window.cx, "session-terminal-close-t1");
+    click(window.cx, "prompt-confirm");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        sent.iter()
+            .map(|(_, method, path)| (*method, path.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            farhelm_helm_client::Method::Delete,
+            "/api/sessions/a/tabs/t1"
+        )]
+    );
+    window.helm.reply(sent[0].0, 200, Some(json!({})));
+    settle(window.cx);
+    assert_eq!(window.chosen(), None, "the agent terminal shows");
+}
+
+/// SPEC.md: Skip session confirmations skips "terminal-tab Close", which then runs on the first press; each tab closes
+/// under its own key, so a sibling closes alongside one still in flight (the old spec's "a sibling can close alongside
+/// it"), a second press on a closing tab sends nothing, and a refused close says why under the strip, on that tab
+/// alone. Specified: with the switch on and tabs t1 and t2, the ×s of t1, t1 again and t2 send one DELETE for each tab;
+/// t1's refused with the helm's words draws "Close tab: " and the words in t1's refusal line and none for t2.
+#[gpui::test]
+fn skipped_questions_close_at_once_side_by_side_and_a_refusal_shows_on_its_tab(
+    cx: &mut TestAppContext,
+) {
+    let mut window = open(cx, skipping(&["t1", "t2"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-terminal-close-t1");
+    click(window.cx, "session-terminal-close-t1");
+    click(window.cx, "session-terminal-close-t2");
+    assert!(window.cx.debug_bounds("prompt").is_none(), "no question");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        sent.iter()
+            .map(|(_, _, path)| path.as_str())
+            .collect::<Vec<_>>(),
+        ["/api/sessions/a/tabs/t1", "/api/sessions/a/tabs/t2"]
+    );
+    window.helm.reply(
+        sent[0].0,
+        404,
+        Some(json!({ "error": "no such terminal tab" })),
+    );
+    window.helm.reply(sent[1].0, 200, Some(json!({})));
+    settle(window.cx);
+    let refusal = window
+        .cx
+        .debug_bounds("session-terminal-close-refusal-t1")
+        .is_some();
+    assert!(refusal, "t1's refusal line");
+    assert!(
+        window
+            .cx
+            .debug_bounds("session-terminal-close-refusal-t2")
+            .is_none()
+    );
+    let painted = painted(&test_support::frame(window.cx)).join(" ");
+    assert!(
+        painted.contains("Close tab: ") && painted.contains("no such terminal tab"),
+        "{painted}"
+    );
+}
+
+/// Opening and closing a tab touch neither a session's creation nor the host registry, which launches and registry
+/// changes refuse each other on (SPEC.md, "Launches and changes to the host registry still exclude each other"); a
+/// wrong answer would block a launch during a tab's close or let one race a registry change. Specified: both kinds of
+/// tab work answer no to both questions.
+#[test]
+fn tab_work_neither_creates_a_session_nor_changes_the_host_registry() {
+    use crate::operations::Work;
+    for work in [Work::TabOpen, Work::TabClose] {
+        assert!(!work.creates_a_session(), "{work:?}");
+        assert!(!work.changes_host_registry(), "{work:?}");
+    }
+}
+
+/// SPEC.md, "Lifecycle operations": "an open lifecycle confirmation or a pending request refuses another lifecycle
+/// action, New terminal or Clone on that session". The session's questions hang from its row and header and are not
+/// modal, so New terminal must refuse by itself, or a press would open a shell beside a Stop the user is about to
+/// confirm, or while a Stop is closing every tab. Specified: with the header's Stop question open, a press on New
+/// terminal sends nothing.
+#[gpui::test]
+fn new_terminal_is_refused_while_a_lifecycle_question_is_open(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-header-stop");
+    assert!(
+        window.cx.debug_bounds("prompt").is_some(),
+        "the premise: Stop asks"
+    );
+    click(window.cx, super::ADD_ID);
+    assert_eq!(tab_requests(&mut window.helm), []);
+}
+
+/// [`new_terminal_is_refused_while_a_lifecycle_question_is_open`]'s other half: a pending request on the session.
+/// Specified: with Skip session confirmations on, the header's Stop goes out at once and, while it is unanswered, a
+/// press on New terminal sends nothing. The operation store refuses a second request on the session's key by itself;
+/// New terminal's dimmed look while one is out is not checked here (the test frame does not report a button's
+/// disabled state).
+#[gpui::test]
+fn new_terminal_is_refused_while_a_lifecycle_request_is_pending(cx: &mut TestAppContext) {
+    let mut window = open(cx, skipping(&["t1"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-header-stop");
+    let stops = window
+        .helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.path == "/api/sessions/a/stop")
+        .count();
+    assert_eq!(stops, 1, "the premise: the Stop is out, unanswered");
+    click(window.cx, super::ADD_ID);
+    assert_eq!(tab_requests(&mut window.helm), []);
+}

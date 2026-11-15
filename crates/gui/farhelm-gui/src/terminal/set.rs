@@ -30,21 +30,33 @@
 //!   agent terminal is chosen and becomes home, so a reaped tab that held focus leaves it on the agent terminal (SPEC.md,
 //!   "A shell tab exits on its own while the user types in it. The session's agent tab takes focus").
 //!
-//! NOTE: New tab and Close are not here yet: the strip lists and chooses tabs, but opening and closing them is the
-//! terminal area's next change. Selection is not kept across a change of session: reopening a session shows its agent
-//! terminal, as the old app's view did after a reload.
+//! - **New terminal and Close.** New terminal (`POST /api/sessions/{id}/tabs`) runs on the session's own operation key,
+//!   so a pending lifecycle request refuses it (SPEC.md, "Lifecycle operations"), and it is unavailable while a question,
+//!   dialog or menu holds the keyboard, which covers an open lifecycle question (the session's questions hang from its
+//!   row and header, and are not modal); its refusal shows on the session's row and header as "Open tab: " and the helm's
+//!   words. The tab it opened is chosen and focused once the helm has both answered and listed it, in whichever order
+//!   those come. Each tab's × (`DELETE /api/sessions/{id}/tabs/{tab}`) runs on that tab's own key, so siblings close
+//!   side by side and a close holds none of the session's lifecycle actions; it asks first, hung under the ×, naming the
+//!   tab and that its shell and everything it started die, unless **Skip session confirmations** is on (SPEC.md: the
+//!   switch skips "terminal-tab Close"). A refused close shows under the strip on that tab alone ("Close tab: " and the
+//!   helm's words) until its next close.
+//!
+//! NOTE: Selection is not kept across a change of session: reopening a session shows its agent terminal, as the old
+//! app's view did after a reload. The close question names the tab as it was named when it opened (the old one renamed
+//! itself as tabs before it closed); it acts on the tab's id either way.
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use farhelm_helm_client::terminal::AttachmentLease;
+use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, EntityId, FocusHandle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Role, ScrollHandle,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EntityId,
+    FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Role,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 
 #[cfg(test)]
@@ -53,8 +65,13 @@ mod tests;
 use super::CellMetrics;
 use super::attached::{AttachedTerminal, NoticeHold, TerminalTarget};
 use super::tunnels::Tunnels;
-use crate::components::{Button, HoverHelp, Tier};
+use crate::assets::Icon;
+use crate::components::{Button, HoverHelp, IconButton, Tier};
 use crate::focus::{self, Mark};
+use crate::host_text;
+use crate::layers::{Anchor, Subject};
+use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::prompt::{self, Answer, Question};
 use crate::session::{self, UiSession};
 use crate::theme;
 
@@ -97,6 +114,109 @@ pub(crate) fn tab_element_id(id: &str) -> String {
 /// A tab's place-based name: "Terminal 1" for the first.
 pub(crate) fn tab_label(index: usize) -> String {
     format!("Terminal {}", index + 1)
+}
+
+/// The element id of shell tab `id`'s × button.
+pub(crate) fn close_element_id(id: &str) -> String {
+    format!("session-terminal-close-{id}")
+}
+
+/// The element id of the line under the strip saying why closing shell tab `id` was refused.
+pub(crate) fn close_refusal_id(id: &str) -> String {
+    format!("session-terminal-close-refusal-{id}")
+}
+
+/// New terminal's element id.
+pub(crate) const ADD_ID: &str = "session-terminal-add";
+
+/// `.tab-add`: a 24-pixel square.
+const ADD_SIDE: f32 = 24.;
+
+/// `.tab-add-divider`: 16 pixels high.
+const ADD_DIVIDER_HEIGHT: f32 = 16.;
+
+/// The close question's first line (the old app's `CLOSE_TAB_CONSEQUENCE`): closing asks whatever the shell runs,
+/// since the window cannot see what that is, and the close kills it either way.
+pub(crate) const CLOSE_TAB_CONSEQUENCE: &str =
+    "Closing kills this terminal's shell and every process it started:";
+
+/// `.tab-error`: the refusal line's padding, vertical then horizontal.
+const REFUSAL_PAD: (f32, f32) = (4., 10.);
+
+/// Whether shell tab `id`'s close is in flight.
+fn closing(key: &str, id: &str, cx: &App) -> bool {
+    session::current_operations(cx).is_some_and(|operations| {
+        operations
+            .read(cx)
+            .in_flight(&OpKey::tab(key, id))
+            .is_some()
+    })
+}
+
+/// The × of shell tab `id` (named `label` now) was pressed: close it at once when **Skip session confirmations** is on
+/// (SPEC.md: the switch skips "terminal-tab Close"), else ask first, hung under the ×. The question names the tab as it
+/// was named when it opened and acts on its id, so a tab before it closing in the meantime closes the right one.
+fn ask_to_close(
+    set: &Entity<TerminalSet>,
+    id: &str,
+    label: &str,
+    anchor: &Anchor,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mark = Mark::take(cx);
+    let skips = session::current_store(cx).is_some_and(|store| {
+        crate::session_list::menu::skips_questions(store.read(cx).collections())
+    });
+    if skips {
+        set.update(cx, |set, cx| set.close_tab(id, cx));
+        return;
+    }
+    let question = Question::new(
+        format!("Close {label}?"),
+        Answer {
+            label: "Confirm close".into(),
+            help: HoverHelp::tooltip(format!(
+                "Close {label}, ending its shell and everything it started"
+            )),
+            tier: Tier::Danger,
+        },
+        id.to_owned(),
+    )
+    .line(CLOSE_TAB_CONSEQUENCE)
+    .line(label.to_owned())
+    .cancel_answer(Answer {
+        label: "Cancel".into(),
+        help: HoverHelp::tooltip("Cancel: keep the tab open"),
+        tier: Tier::Neutral,
+    });
+    let confirmed = set.downgrade();
+    prompt::ask_anchored(
+        question,
+        anchor.clone(),
+        Some(Subject::of(set)),
+        &mark,
+        move |id, _, cx| {
+            let _ = confirmed.update(cx, |set, cx| set.close_tab(&id, cx));
+        },
+        window,
+        cx,
+    );
+}
+
+/// Choose shell tab `id` in `set` and focus its terminal, in `window`, for the press marked `mark` (see
+/// [`TerminalSet::choose`]).
+fn choose_in(
+    set: &Entity<TerminalSet>,
+    id: String,
+    mark: Mark,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let set = set.clone();
+    let _ = window.update(cx, move |_, window, cx| {
+        set.update(cx, |set, cx| set.choose(Some(id), &mark, window, cx));
+    });
 }
 
 /// Says whether the terminals' notices are held back now; shared by every terminal of the set (see
@@ -146,6 +266,9 @@ pub struct TerminalSet {
     revealed: Cell<Option<usize>>,
     /// Whether the terminals are inert ([`TerminalSet::set_inert`]), which new tabs take on too.
     inert: bool,
+    /// A tab New terminal opened that the pushed row does not list yet, with the press that asked and its window: it is
+    /// chosen once it is listed.
+    opened: Option<(String, Mark, AnyWindowHandle)>,
     /// Follows the pushed row's tab list.
     _tabs_follow: session::ObservingCurrent,
 }
@@ -178,6 +301,7 @@ impl TerminalSet {
             scroll: ScrollHandle::new(),
             revealed: Cell::new(None),
             inert: false,
+            opened: None,
             _tabs_follow: tabs_follow,
         };
         set.follow_tabs(cx);
@@ -382,6 +506,14 @@ impl TerminalSet {
         {
             self.chosen = None;
         }
+        // The tab New terminal opened, now listed: chosen after this update, which is the set's own.
+        if let Some((id, _, _)) = &self.opened
+            && self.tabs.iter().any(|tab| &tab.id == id)
+            && let Some((id, mark, window)) = self.opened.take()
+        {
+            let set = cx.entity();
+            cx.defer(move |cx| choose_in(&set, id, mark, window, cx));
+        }
         self.member_changed(cx);
         cx.notify();
     }
@@ -436,24 +568,26 @@ impl TerminalSet {
     }
 
     /// The strip for the top row's left region: the agent terminal's tab, then one per shell tab, each choosing its
-    /// terminal, in a row that scrolls sideways when it runs out of room (SPEC.md: "only the tab strip takes the
-    /// remaining width and scrolls horizontally when needed").
+    /// terminal and with its × beside it, then a divider and New terminal, in a row that scrolls sideways when it runs
+    /// out of room (SPEC.md: "only the tab strip takes the remaining width and scrolls horizontally when needed").
     ///
     /// Each tab is a button reporting whether its terminal is the one shown (pressed), as the old strip's were, not a
-    /// tab list: the next change puts a close button beside each, which a tab list cannot hold. A tab that keyboard
-    /// focus reaches while scrolled out of view is scrolled into it.
-    pub fn strip(&self, set: &Entity<TerminalSet>, window: &Window) -> AnyElement {
-        let chosen = self.chosen.clone();
-        let inert = self.inert;
-        let focused = std::iter::once(&self.agent_focus)
-            .chain(self.tabs.iter().map(|tab| &tab.focus))
-            .position(|handle| handle.is_focused(window));
-        if focused != self.revealed.get() {
-            if let Some(index) = focused {
-                self.scroll.scroll_to_item(index);
-            }
-            self.revealed.set(focused);
-        }
+    /// tab list, which could not hold the close buttons beside them. A tab that keyboard focus reaches while scrolled
+    /// out of view is scrolled into it.
+    pub fn strip(set: &Entity<TerminalSet>, window: &mut Window, cx: &mut App) -> AnyElement {
+        let this = set.read(cx);
+        let key = this.key.clone();
+        let chosen = this.chosen.clone();
+        let inert = this.inert;
+        this.reveal_focused(window);
+        let listed: Vec<(String, FocusHandle)> = this
+            .tabs
+            .iter()
+            .map(|tab| (tab.id.clone(), tab.focus.clone()))
+            .collect();
+        let agent_focus = this.agent_focus.clone();
+        let scroll = this.scroll.clone();
+        let palette = theme::palette(cx);
         let tab = |id: String,
                    label: String,
                    help: String,
@@ -471,24 +605,99 @@ impl TerminalSet {
                     let value = value.clone();
                     set.update(cx, |set, cx| set.choose(value, &mark, window, cx));
                 })
+                .into_any_element()
         };
-        let mut tabs = vec![tab(
+        let mut items = vec![tab(
             AGENT_TAB_ID.to_owned(),
             "Agent".to_owned(),
             "Agent: show the session's agent terminal".to_owned(),
             None,
-            &self.agent_focus,
+            &agent_focus,
         )];
-        for (index, listed) in self.tabs.iter().enumerate() {
+        for (index, (id, focus)) in listed.into_iter().enumerate() {
             let label = tab_label(index);
-            tabs.push(tab(
-                tab_element_id(&listed.id),
-                label.clone(),
-                format!("{label}: show this shell tab"),
-                Some(listed.id.clone()),
-                &listed.focus,
-            ));
+            let closing = closing(&key, &id, cx);
+            let anchor = Anchor::for_element(
+                SharedString::from(format!("{}-close-anchor", tab_element_id(&id))),
+                window,
+                cx,
+            );
+            let close = {
+                let set = set.clone();
+                let (id, label, anchor) = (id.clone(), label.clone(), anchor.clone());
+                Button::new(
+                    close_element_id(&id),
+                    "×",
+                    HoverHelp::tooltip(format!(
+                        "Close {label}, ending its shell and everything it started"
+                    )),
+                    Role::Button,
+                )
+                .tier(Tier::TerminalTabClose)
+                .accessible_name(format!("Close {label}"))
+                .disabled(inert)
+                .busy(closing)
+                .on_click(move |_, window, cx| ask_to_close(&set, &id, &label, &anchor, window, cx))
+            };
+            // The tab and its ×: siblings, as the old `.tab-slot` held them, the × its own anchor for the question.
+            items.push(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_none()
+                    .items_center()
+                    .child(tab(
+                        tab_element_id(&id),
+                        label.clone(),
+                        format!("{label}: show this shell tab"),
+                        Some(id.clone()),
+                        &focus,
+                    ))
+                    .child(
+                        div()
+                            .relative()
+                            .flex_none()
+                            .child(close)
+                            .child(anchor.track()),
+                    )
+                    .into_any_element(),
+            );
         }
+        // `.tab-add-divider`: a 1-pixel rule that keeps creating a tab apart from choosing one.
+        items.push(
+            div()
+                .flex_none()
+                .w(px(1.))
+                .h(px(ADD_DIVIDER_HEIGHT))
+                .mx(px(2.))
+                .bg(theme::color(palette.border_dim))
+                .into_any_element(),
+        );
+        // SPEC.md, "Lifecycle operations": "an open lifecycle confirmation or a pending request refuses another
+        // lifecycle action, New terminal or Clone on that session". A request on the session's key is the second; any
+        // question, dialog or menu holding the keyboard covers the first (the session's questions hang from its row and
+        // header, and are not modal), so a press there only closes it, unanswered.
+        let refused = crate::session_list::delete::busy(&key, cx)
+            || crate::layers::focus_layer_open(window, cx);
+        let add = {
+            let set = set.clone();
+            IconButton::new(
+                ADD_ID,
+                Icon::Add,
+                "New terminal",
+                HoverHelp::tooltip("New terminal: open a shell tab in the session's folder"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral)
+            .square(px(ADD_SIDE))
+            .disabled(inert || refused)
+            .on_click(move |_, window, cx| {
+                let mark = Mark::take(cx);
+                let handle = window.window_handle();
+                TerminalSet::open_tab(&set, mark, handle, cx);
+            })
+        };
+        items.push(add.into_any_element());
         div()
             .id(STRIP_ID)
             .debug_selector(|| STRIP_ID.into())
@@ -500,26 +709,163 @@ impl TerminalSet {
             .gap(px(STRIP_GAP))
             .min_w_0()
             .overflow_x_scroll()
-            .track_scroll(&self.scroll)
+            .track_scroll(&scroll)
             .when(inert, |strip| strip.opacity(INERT_OPACITY))
-            .children(tabs)
+            .children(items)
             .into_any_element()
+    }
+
+    /// Scroll the strip to the tab keyboard focus is on, once per tab it reaches (see `revealed`).
+    fn reveal_focused(&self, window: &Window) {
+        let focused = std::iter::once(&self.agent_focus)
+            .chain(self.tabs.iter().map(|tab| &tab.focus))
+            .position(|handle| handle.is_focused(window));
+        if focused != self.revealed.get() {
+            // The strip's children are the agent's tab, then one item per shell tab, so the index carries over.
+            if let Some(index) = focused {
+                self.scroll.scroll_to_item(index);
+            }
+            self.revealed.set(focused);
+        }
+    }
+
+    /// Open a shell tab in the session (New terminal), under the session's own key, so a pending lifecycle request
+    /// refuses it and it holds the session's lifecycle actions while it runs. Once the helm answers with the new tab,
+    /// the tab is chosen and its terminal takes focus (unless the user moved on since `mark`), as the old app selected
+    /// a tab it opened; a refusal shows on the session's row and header ("Open tab: " and the helm's words). Not keyed
+    /// for retries: a duplicate tab is visible and closes on its own, and the button sends once per press.
+    fn open_tab(set: &Entity<TerminalSet>, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
+        let key = set.read(cx).key.clone();
+        let (Some(operations), Ok(path)) = (
+            session::current_operations(cx),
+            ApiPath::api(&["sessions", &key, "tabs"]),
+        ) else {
+            return;
+        };
+        let command = Command::new(
+            Work::TabOpen,
+            Method::Post,
+            path,
+            None,
+            "POST /api/sessions/[session]/tabs",
+        );
+        let weak = set.downgrade();
+        let started = operations.update(cx, |operations, cx| {
+            operations.start(&OpKey::session(&key), command, cx, move |settled, cx| {
+                let Outcome::Done(Some(body)) = &settled.outcome else {
+                    return;
+                };
+                let Some(id) = body["tab"]["id"].as_str().map(str::to_owned) else {
+                    return;
+                };
+                let Some(set) = weak.upgrade() else {
+                    return;
+                };
+                if set.read(cx).tabs.iter().any(|tab| tab.id == id) {
+                    choose_in(&set, id, mark, window, cx);
+                } else {
+                    // The reply can come before the pushed row lists the tab: choose it when it does.
+                    set.update(cx, |set, _| set.opened = Some((id, mark, window)));
+                }
+            })
+        });
+        if let Err(not_started) = started {
+            tracing::debug!(?not_started, "New terminal sent nothing");
+        }
+    }
+
+    /// Close shell tab `id` (its × and, unless skipped, its question), under the tab's own key, so siblings close side by
+    /// side. Its terminal goes when the pushed row stops listing it; a chosen tab that closed shows the agent terminal
+    /// at once. A refusal shows under the strip until the tab's next close.
+    fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
+        let (Some(operations), Ok(path)) = (
+            session::current_operations(cx),
+            ApiPath::api(&["sessions", &self.key, "tabs", id]),
+        ) else {
+            return;
+        };
+        let command = Command::new(
+            Work::TabClose,
+            Method::Delete,
+            path,
+            None,
+            "DELETE /api/sessions/[session]/tabs/[tab]",
+        );
+        let set = cx.weak_entity();
+        let closed = id.to_owned();
+        let started = operations.update(cx, |operations, cx| {
+            operations.start(
+                &OpKey::tab(&self.key, id),
+                command,
+                cx,
+                move |settled, cx| {
+                    if matches!(settled.outcome, Outcome::Done(_)) {
+                        let _ = set.update(cx, |set, cx| {
+                            if set.chosen.as_deref() == Some(closed.as_str()) {
+                                set.chosen = None;
+                                cx.notify();
+                            }
+                        });
+                    }
+                },
+            )
+        });
+        if let Err(not_started) = started {
+            tracing::debug!(?not_started, "a tab's close sent nothing");
+        }
     }
 }
 
 impl Render for TerminalSet {
+    /// The refused closes' lines (one per listed tab whose close the helm refused, in the strip's order, as the old
+    /// `.tab-error` lines under the strip), then the shown terminal, or the not-attached notice, in the rest.
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        match self.shown() {
-            Some(terminal) => div().size_full().child(terminal.clone()),
-            None => div().size_full().child(
+        let palette = theme::palette(cx);
+        let operations = session::current_operations(cx);
+        let refusals: Vec<AnyElement> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                let failure = operations
+                    .as_ref()?
+                    .read(cx)
+                    .failure(&OpKey::tab(&self.key, &tab.id))?
+                    .clone();
+                let id = close_refusal_id(&tab.id);
+                Some(
+                    div()
+                        .id(SharedString::from(id.clone()))
+                        .debug_selector(move || id.clone())
+                        .flex()
+                        .flex_row()
+                        .flex_none()
+                        .py(px(REFUSAL_PAD.0))
+                        .px(px(REFUSAL_PAD.1))
+                        .text_size(theme::metrics::TEXT_SM)
+                        .text_color(theme::color(palette.danger))
+                        .child("Close tab: ")
+                        .child(host_text::element(&failure.message))
+                        .into_any_element(),
+                )
+            })
+            .collect();
+        let shown = match self.shown() {
+            Some(terminal) => div().flex_1().min_h_0().child(terminal.clone()),
+            None => div().flex_1().min_h_0().child(
                 div()
                     .id(NOT_ATTACHED_ID)
                     .debug_selector(|| NOT_ATTACHED_ID.into())
                     .p(px(NOT_ATTACHED_PAD))
                     .text_size(px(NOT_ATTACHED_TEXT_SIZE))
-                    .text_color(theme::color(theme::palette(cx).fg_dim))
+                    .text_color(theme::color(palette.fg_dim))
                     .child(not_attached_text()),
             ),
-        }
+        };
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .children(refusals)
+            .child(shown)
     }
 }
