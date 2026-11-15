@@ -366,7 +366,7 @@
     },
     {
       "id": "app-sort-menu",
-      "title": "The list title's order menu, opened with a click: the shared header, the three orders with Recently active checked and highlighted, and the title in its open look (the sidebar still widened by the scene before; no Compact item yet)",
+      "title": "The list title's order menu, opened with a click: the shared header, the three orders with Recently active checked and highlighted, Compact unchecked after a separator, and the title in its open look (the sidebar still widened by the scene before)",
       "reference": "sort-menu",
       "mockup": false,
       "steps": [
@@ -377,6 +377,36 @@
         [
           "wait",
           "--text",
+          "Order and density, shared by every client"
+        ]
+      ]
+    },
+    {
+      "id": "app-session-list-compact",
+      "title": "The list in compact density, chosen from the order menu's Compact in an app run of its own over five sessions (running, waiting, idle and two exited): one line per row, the exited Fixtures 4 and 5 with their marks in the status column in place of their ended lines, and no last lines",
+      "reference": "session-list-compact",
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "running,waiting,idle,exited,exited"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:session-order"
+        ],
+        [
+          "wait",
+          "--text",
+          "Order and density, shared by every client"
+        ],
+        [
+          "click",
+          "id:session-order-compact"
+        ],
+        [
+          "wait",
+          "--gone",
           "Order and density, shared by every client"
         ]
       ]
@@ -979,6 +1009,11 @@
       "reference": "session-unavailable"
     },
     {
+      "golden": "session-list-compact",
+      "title": "The session list in compact density: one line per row, a stale row's clock after its title, and each of the four ended marks (stopped, exited, interrupted, error) in the status column, the open row in its inverse inks",
+      "reference": "session-list-compact"
+    },
+    {
       "golden": "session-list-empty",
       "title": "The session list over an empty fleet",
       "reference": "empty-fleet"
@@ -1255,7 +1290,7 @@
     },
     {
       "golden": "session-order-menu",
-      "title": "The list title's order menu open below it: the shared header and the three orders, Recently active checked and highlighted (no Compact item yet)",
+      "title": "The list title's order menu open below it: the shared header, the three orders with Recently active checked and highlighted, and Compact unchecked after a separator",
       "reference": "sort-menu"
     },
     {
@@ -1355,7 +1390,7 @@
     },
     {
       "id": "session-list-compact",
-      "ported": false
+      "ported": true
     },
     {
       "id": "empty-fleet",
@@ -1595,7 +1630,7 @@
     },
     {
       "id": "sort-menu",
-      "ported": false
+      "ported": true
     },
     {
       "id": "help-menu",

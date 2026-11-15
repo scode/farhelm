@@ -805,7 +805,9 @@ systemd or SSH substrate ran.
   asserted YOLO, the menu's Replace and Confirm replace bring up the YOLO question in its row, and its one-off answer
   makes the helm list the title under a new id and not the old one, with the local host still asking before YOLO
   launches; and on a session of its own, the Keyboard shortcuts chord from its focused terminal opens the overview with
-  focus on its Close, and Escape closes it with focus back on the terminal, which then echoes a typed line. A failed run
+  focus on its Close, and Escape closes it with focus back on the terminal, which then echoes a typed line; and on a
+  session of its own in a folder of its own, the order menu's Compact makes the helm store compact on and the row's last
+  line, naming the folder, leave the window, and choosing it again stores it off and brings the line back. A failed run
   keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still
   stops its app run, and the second run if one is up, for which the recorder's `--termination-grace` leaves it time: 30
   s covers the two `stop`s in a row, each a few seconds normally. Its 34 steps took 91 s on a build worker on
@@ -817,8 +819,8 @@ systemd or SSH substrate ran.
   foot (Hosts and the Settings gear), status segments, host menu, Remove host, host Update and host Uninstall, Help menu
   or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and announcements at a window start),
   Trash button and dialog, Keyboard shortcuts overview, approval cards or their region, the helm's approval path,
-  sidebar width or divider, terminal attach, paste, text input or scrollback, the order menu, the heading's New, the
-  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  sidebar width or divider, terminal attach, paste, text input or scrollback, the order menu (Compact included), compact
+  rows, the heading's New, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

@@ -1970,10 +1970,22 @@ fn session_list_scene_holding(
     extra: Vec<CollectionState>,
     cx: &mut App,
 ) {
+    let history: Vec<&str> = open.into_iter().collect();
+    session_list_scene_preferring(state, rows, preferences(&history, None), extra, cx);
+}
+
+/// [`session_list_scene`], with the helm's preference row `preferences` (which names the open session through its
+/// visit history) in place of the plain one, and `extra` collections in the helm's snapshot too.
+fn session_list_scene_preferring(
+    state: &SceneState,
+    rows: &[Fixture],
+    preferences: CollectionState,
+    extra: Vec<CollectionState>,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
-    let history: Vec<&str> = open.into_iter().collect();
     let mut registry = hosts(&[
         local(),
         remote(2, "deploy@buildbox.example.invalid"),
@@ -1984,7 +1996,7 @@ fn session_list_scene_holding(
         "cause": "transport-failure",
         "last_error": "timed out",
     });
-    let mut snapshot = vec![listing(&order, rows), preferences(&history, None), registry];
+    let mut snapshot = vec![listing(&order, rows), preferences, registry];
     snapshot.extend(extra);
     helm.connect(snapshot);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
@@ -2025,6 +2037,47 @@ fn session_list_selected_stale_setup(state: &SceneState, _: &mut Window, cx: &mu
             .cwd("/home/user/bench"),
     ];
     session_list_scene_opening(state, &rows, Some("f"), cx);
+}
+
+/// The list in compact density (reference `session-list-compact`): every row one line, with no last line and no ended
+/// line. The open row runs (its inverse inks pinned); then a row on a host the helm cannot reach, its clock after the
+/// title; then each of the four ended marks in the status column, in its ink: a user's stop (the filled square), an
+/// exit with a code, an interruption and a launch error; and last a stale exited row, whose ended mark and clock show
+/// together.
+fn session_list_compact_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let row = |key, title, ago: i64| {
+        session(key)
+            .title(title)
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
+    };
+    let exited =
+        |code: serde_json::Value| serde_json::json!({ "state": "exited", "exit_code": code });
+    let rows = [
+        row("a", "Refactor the API client", 5).host(1),
+        row("f", "Benchmark on the build box", 3_600)
+            .host(3)
+            .stale(),
+        row("e", "Release notes for 0.40", 2 * 3_600)
+            .status(exited(serde_json::Value::Null))
+            .annotation("stopped by user"),
+        row("g", "Run the migration", 3 * 3_600).status(exited(serde_json::json!(17))),
+        row("h", "Profile the release build", 86_400)
+            .status(serde_json::json!({ "state": "interrupted" })),
+        row("i", "Bisect the flaky test", 2 * 86_400)
+            .status(serde_json::json!({ "state": "error", "detail": "cannot launch" })),
+        row("j", "Check the bench numbers", 3 * 86_400)
+            .host(3)
+            .stale()
+            .status(exited(serde_json::json!(1))),
+    ];
+    let preferences = preferences_state(Preferences {
+        compact: Some(true),
+        visit_history: vec!["a".to_owned()],
+        welcome_seen: Some(true),
+        ..Preferences::default()
+    });
+    session_list_scene_preferring(state, &rows, preferences, Vec::new(), cx);
 }
 
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
@@ -2199,8 +2252,8 @@ fn alerting_notice() -> serde_json::Value {
 }
 
 /// The list's order menu, open below its title as a click opens it (reference `sort-menu`): the title in its open look,
-/// the shared header ("Session list"), and the three orders with Recently active, the stored default, checked and
-/// highlighted. The old menu's Compact is not ported, so the picture is one item short of the reference.
+/// the shared header ("Session list"), the three orders with Recently active, the stored default, checked and
+/// highlighted, and Compact, unchecked, after a separator.
 fn session_order_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_then(
         state,
@@ -4293,6 +4346,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_empty_setup,
+    },
+    Scene {
+        name: "session-list-compact",
+        size: (420., 418.),
+        draw: session_lists,
+        setup: session_list_compact_setup,
     },
     Scene {
         name: "session-row-menu",

@@ -647,3 +647,149 @@ fn the_directory_is_drawn_in_the_monospace_face() {
         );
     }
 }
+
+// ---- The menu button's reveal ---------------------------------------------------------------------------------------
+
+/// Whether b's menu button shows, as its wrapper's debug selector names the reveal (`super::menu`, "The button's
+/// reveal"); the frame's record carries no opacity. Fails unless exactly one of the two names was drawn, so a button
+/// drawn twice or not at all cannot pass for either.
+fn b_button_shown(cx: &mut VisualTestContext) -> bool {
+    test_support::redraw(cx);
+    let shown = cx.debug_bounds("session-menu-b:shown").is_some();
+    let hidden = cx.debug_bounds("session-menu-b:hidden").is_some();
+    assert_ne!(shown, hidden, "b's button is drawn once");
+    shown
+}
+
+/// Move the pointer onto the middle of what is drawn under element id `id` and let the window settle.
+fn pointer_to(cx: &mut VisualTestContext, id: &str) {
+    let at = match node(&frame(cx), id) {
+        Some(drawn) => drawn.bounds.center(),
+        None => panic!("{id} was not drawn"),
+    };
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    test_support::settle(cx);
+}
+
+/// The old `buttons.spec.ts` case "the row kebab is hidden at rest and revealed by hover, focus, selection, or its own
+/// open menu": every row has a menu button, which would crowd the list if all showed, so it shows only while there is a
+/// reason to, and each reason must go away again, or a button would stay stuck on a row the user left. An open menu
+/// must keep its button with the pointer gone, since the pointer leaves the row to reach the menu's commands. Run under
+/// macOS's click rule, so a click focuses no control. Specified, over rows a (open) and b: at rest b's button is
+/// hidden; with the pointer over b's row it shows, and still shows after a key that moves no focus (F12) is pressed
+/// with the pointer resting there; with the pointer on the list's title again it is hidden; a click on it opens its
+/// menu, and with the pointer on the title it still shows; Escape closes the menu and focus returns to the button,
+/// which shows; Shift+Tab moves focus to b's open control, and the button still shows (focus anywhere in the row);
+/// Shift+Tab again moves focus to a's menu button, out of b's row, and b's button is hidden; a click on b's row opens
+/// b, and with the pointer on the title and focus outside b's row its button shows.
+#[gpui::test]
+fn the_menu_button_shows_for_hover_focus_its_open_menu_and_selection_and_none_latches(
+    cx: &mut TestAppContext,
+) {
+    use super::menu_tests::snapshot;
+    let (_fake, cx) = super::tests::open_main(
+        cx,
+        snapshot(
+            &[
+                (super::tests::session("a"), 0),
+                (super::tests::session("b"), 0),
+            ],
+            false,
+        ),
+    );
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    pointer_to(cx, "session-order");
+    assert_eq!(
+        super::tests::selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a is open"
+    );
+    assert!(!b_button_shown(cx), "hidden at rest");
+
+    pointer_to(cx, "session-item-b");
+    assert!(b_button_shown(cx), "the pointer over the row shows it");
+    // A key that moves no focus: GPUI's own hover tracking stands down after keyboard input, the old `:hover` did not.
+    let focused = test_support::focused_id(cx);
+    test_support::keys(cx, "f12");
+    test_support::redraw(cx);
+    assert_eq!(
+        test_support::focused_id(cx),
+        focused,
+        "the premise: the key moved no focus"
+    );
+    assert!(
+        b_button_shown(cx),
+        "a key pressed with the pointer resting on the row keeps it"
+    );
+    pointer_to(cx, "session-order");
+    assert!(!b_button_shown(cx), "hover does not latch");
+
+    test_support::click(cx, "session-menu-b");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-menu-rename"),
+        "the premise: b's menu is open"
+    );
+    pointer_to(cx, "session-order");
+    assert!(
+        b_button_shown(cx),
+        "its open menu keeps it, the pointer away"
+    );
+
+    test_support::keys(cx, "escape");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-menu-b")
+    );
+    assert!(b_button_shown(cx), "its own focus shows it");
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-row-b")
+    );
+    assert!(
+        b_button_shown(cx),
+        "focus on another control of the row shows it"
+    );
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-menu-a"),
+        "the premise: focus left b's row"
+    );
+    assert!(
+        !b_button_shown(cx),
+        "neither focus nor the closed menu latches"
+    );
+
+    test_support::click(cx, "session-row-b");
+    pointer_to(cx, "session-order");
+    assert_eq!(super::tests::selected(cx).as_deref(), Some("b"));
+    let focused = test_support::focused_id(cx).unwrap_or_default();
+    assert!(
+        !focused.starts_with("session-row-b") && focused != "session-menu-b",
+        "the premise: focus is outside b's row: {focused}"
+    );
+    assert!(b_button_shown(cx), "the open session's button shows");
+}
+
+/// The menu button's hover help is the old toggle's, which says what the menu holds rather than only that it opens.
+/// Specified: hovering b's button shows `Session actions: rename, clone, replace, stop, delete and more`.
+#[gpui::test]
+fn the_menu_buttons_help_names_what_its_menu_holds(cx: &mut TestAppContext) {
+    use super::menu_tests::snapshot;
+    let (_fake, cx) = super::tests::open_main(
+        cx,
+        snapshot(
+            &[
+                (super::tests::session("a"), 0),
+                (super::tests::session("b"), 0),
+            ],
+            false,
+        ),
+    );
+    assert_eq!(
+        help_after_crossing(cx, "session-row-b", "session-menu-b").as_deref(),
+        Some("Session actions: rename, clone, replace, stop, delete and more")
+    );
+}

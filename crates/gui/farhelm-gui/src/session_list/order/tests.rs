@@ -18,7 +18,7 @@ use farhelm_proto::ui_channel::{
 use gpui::{Role, TestAppContext, Toggled, VisualTestContext};
 use serde_json::{Value, json};
 
-use super::{Order, TITLE_ID};
+use super::{COMPACT_DESCRIPTION, COMPACT_ID, Order, TITLE_ID};
 use crate::actions::NewSession;
 use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::main_view::MainView;
@@ -214,11 +214,12 @@ fn a_click_opens_the_menu_on_its_first_order_and_escape_returns_to_the_title(
 }
 
 /// The old title opened its menu from the keyboard as a menu button does, and the old menu took Home and End; a
-/// keyboard user who could not reach the last order without walking the list would lose what the old app gave. The
+/// keyboard user who could not reach the last item without walking the list would lose what the old app gave. The
 /// arrows inside are the layer manager's. Specified: with focus on the closed title, Down opens the menu on Recently
-/// active; Down moves to Newest created; End goes to Title A–Z and Home back to Recently active; Escape closes it, and
-/// Up on the closed title opens it on Title A–Z; Tab from there keeps the menu open with focus on one of its orders
-/// (SPEC.md, "Keyboard focus": "Inside a dialog or menu, focus stays inside", where the old menu closed on Tab).
+/// active; Down moves to Newest created; End goes to Compact, the last item, and Home back to Recently active; Escape
+/// closes it, and Up on the closed title opens it on Compact; Tab from there keeps the menu open with focus on one of
+/// its items (SPEC.md, "Keyboard focus": "Inside a dialog or menu, focus stays inside", where the old menu closed on
+/// Tab).
 #[gpui::test]
 fn down_and_up_open_the_menu_at_either_end_and_home_and_end_walk_it(cx: &mut TestAppContext) {
     let (_fake, main, cx) = open(cx);
@@ -237,7 +238,7 @@ fn down_and_up_open_the_menu_at_either_end_and_home_and_end_walk_it(cx: &mut Tes
     keys(cx, "down");
     assert_eq!(focused_id(cx).as_deref(), Some("session-order-created"));
     keys(cx, "end");
-    assert_eq!(focused_id(cx).as_deref(), Some("session-order-title"));
+    assert_eq!(focused_id(cx).as_deref(), Some(COMPACT_ID));
     keys(cx, "home");
     assert_eq!(focused_id(cx).as_deref(), Some("session-order-activity"));
 
@@ -245,15 +246,17 @@ fn down_and_up_open_the_menu_at_either_end_and_home_and_end_walk_it(cx: &mut Tes
     assert!(!menu_open(&main, cx));
     keys(cx, "up");
     assert!(menu_open(&main, cx));
-    assert_eq!(focused_id(cx).as_deref(), Some("session-order-title"));
+    assert_eq!(focused_id(cx).as_deref(), Some(COMPACT_ID));
     keys(cx, "tab");
     assert!(menu_open(&main, cx), "Tab leaves the menu open");
     let focused = focused_id(cx);
     assert!(
         Order::ALL
             .iter()
-            .any(|order| focused.as_deref() == Some(order.item_id())),
-        "Tab keeps focus on an order: {focused:?}"
+            .map(|order| order.item_id())
+            .chain([COMPACT_ID])
+            .any(|item| focused.as_deref() == Some(item)),
+        "Tab keeps focus on an item: {focused:?}"
     );
 }
 
@@ -351,6 +354,152 @@ fn the_open_menu_follows_a_pushed_order(cx: &mut TestAppContext) {
     assert_eq!(checked(cx), Order::Title);
     stored_order(&mut fake, None, cx);
     assert_eq!(checked(cx), Order::Activity);
+}
+
+// ---- Compact -------------------------------------------------------------------------------------------------------
+
+/// A push of the preference row with `compact` (`None` for unset), as the helm sends it when the stored density
+/// changes.
+fn stored_compact(fake: &mut FakeHelm, compact: Option<bool>, cx: &mut VisualTestContext) {
+    let preferences = Preferences {
+        visit_history: vec!["a".into()],
+        compact,
+        welcome_seen: Some(true),
+        ..Preferences::default()
+    };
+    fake.push(CollectionChanges {
+        collection: Collection::Preferences,
+        meta: meta(&[PREFERENCES_KEY]),
+        upsert: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: serde_json::to_value(preferences).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+}
+
+/// Whether the open menu reports Compact checked.
+fn compact_checked(cx: &mut VisualTestContext) -> bool {
+    let nodes = frame(cx);
+    let item = node(&nodes, COMPACT_ID).expect("the menu draws Compact");
+    item.toggled == Some(Toggled::True)
+}
+
+/// Whether the rows are compact: b's row does not paint its last line's directory (`~/src/b`). Row b, not the open a,
+/// whose directory the session pane's details bar paints too.
+fn rows_compact(cx: &mut VisualTestContext) -> bool {
+    !texts_within(&frame(cx), "session-item-b")
+        .iter()
+        .any(|text| text.text.as_ref() == "~/src/b")
+}
+
+/// SPEC.md, "Session list": the title's menu offers the orders "and **Compact**", and the old menu drew it last, after
+/// a separator, as a checkbox, so a screen reader hears it as a choice that is on or off rather than a fourth order.
+/// Specified: the open menu's Compact is a checkbox item named Compact, below Title A–Z, unchecked while the preference
+/// is unset, its hover help `One line per session, with the folder shown on hover`; and with the preference pushed on,
+/// the open menu checks it, the orders' check unchanged.
+#[gpui::test]
+fn compact_is_a_checkbox_after_the_orders_checked_as_the_preference_is(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    click(cx, "session-order");
+    let nodes = frame(cx);
+    let compact = node(&nodes, COMPACT_ID).expect("the menu draws Compact");
+    assert_eq!(
+        (compact.role, compact.label.as_deref()),
+        (Some(Role::MenuItemCheckBox), Some("Compact"))
+    );
+    assert!(
+        compact.bounds.top() > node(&nodes, "session-order-title").unwrap().bounds.bottom(),
+        "Compact comes after the orders"
+    );
+    assert!(!compact_checked(cx), "unset is off");
+    assert_eq!(
+        hover_help(cx, COMPACT_ID).as_deref(),
+        Some(COMPACT_DESCRIPTION)
+    );
+    assert_eq!(
+        COMPACT_DESCRIPTION,
+        "One line per session, with the folder shown on hover"
+    );
+
+    stored_compact(&mut fake, Some(true), cx);
+    assert!(compact_checked(cx));
+    assert_eq!(checked(cx), Order::Activity);
+}
+
+/// Compact is a write of the shared preference row, like the order: sparse, so it never puts back a stale copy of a
+/// field another client changed, and shown at once while it is in flight. Turning it off must store `false` rather
+/// than leave the field as it was (the old `compact hides the second line and persists across client seeds`).
+/// Specified: choosing Compact sends exactly one command, `PUT /api/preferences` with `{"compact": true}`, closes the
+/// menu with focus on the title, and the rows are compact while the write is in flight, the reopened menu checking it;
+/// once the helm pushes the stored preference and answers, the rows stay compact; choosing Compact again sends
+/// `{"compact": false}`, and the rows show their last lines.
+#[gpui::test]
+fn choosing_compact_sends_its_sparse_write_and_the_rows_follow_it(cx: &mut TestAppContext) {
+    let (mut fake, main, cx) = open(cx);
+    assert!(
+        !rows_compact(cx),
+        "the premise: the rows show their last lines"
+    );
+    click(cx, "session-order");
+    click(cx, COMPACT_ID);
+    let (write, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "compact": true }));
+    assert!(!menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(TITLE_ID));
+    assert!(rows_compact(cx), "while the write is in flight");
+    click(cx, "session-order");
+    assert!(compact_checked(cx), "the open menu checks it in flight");
+    keys(cx, "escape");
+
+    stored_compact(&mut fake, Some(true), cx);
+    fake.reply(write, 200, None);
+    test_support::settle(cx);
+    assert!(rows_compact(cx));
+
+    click(cx, "session-order");
+    click(cx, COMPACT_ID);
+    let (write, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "compact": false }));
+    stored_compact(&mut fake, Some(false), cx);
+    fake.reply(write, 200, None);
+    test_support::settle(cx);
+    assert!(!rows_compact(cx));
+}
+
+/// SPEC.md, "Errors and diagnostics", names the "compact layout" among the best-effort preferences: a failed save is
+/// logged but stays silent, the choice lasts only until the next read from the helm, which under the channel is at
+/// once, and it "is never resent" (the order's rule, decided by the migration's orchestrator on 2026-11-14 for the
+/// order). Specified: choosing Compact sends `{"compact": true}`; once the helm refuses it with words of its own, the
+/// frame paints exactly what it painted before the choice (the rows' last lines, none of the helm's words), nothing is
+/// sent again, and the menu shows Compact unchecked; choosing it again still sends its write.
+#[gpui::test]
+fn a_refused_compact_write_keeps_the_stored_density_and_shows_nothing(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    let before = painted(&frame(cx));
+    click(cx, "session-order");
+    click(cx, COMPACT_ID);
+    let (write, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "compact": true }));
+    fake.reply(write, 400, Some(json!("no compact rows on this helm")));
+    test_support::settle(cx);
+    assert_eq!(sent(&mut fake), [], "a refused write is not resent");
+    assert_eq!(
+        painted(&frame(cx)),
+        before,
+        "the refusal adds nothing and the rows are as stored"
+    );
+
+    click(cx, "session-order");
+    assert!(!compact_checked(cx));
+    click(cx, COMPACT_ID);
+    let (_, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "compact": true }),
+        "a later choice still sends"
+    );
 }
 
 // ---- The count -----------------------------------------------------------------------------------------------------
