@@ -125,26 +125,18 @@ pub struct VersionReadout {
     /// glyph's turn).
     #[cfg(test)]
     drawn_look: std::cell::Cell<Option<Look>>,
-    /// What a screenshot golden holds still on this readout (see [`Pinned`]); nothing outside test builds.
+    /// The step of eight whatever spins (the check button's glyph, the ring beside the toggle) is drawn at in place of
+    /// the turn's. Always `None` in the app. The screenshot goldens' progress scenes hold one ([`Self::holding_step`]):
+    /// they reduce motion so that a capture settles, which leaves every turn at its first step, and step 0 looks like
+    /// no turn at all. Read in every build, on each frame that draws something spinning, so a golden draws through the
+    /// path the app draws through; a frame with nothing spinning never reads it, so it turns nothing at rest.
+    step_hold: Option<u8>,
+    /// The pointer's hover state as the last frame read it (the element-keyed state `render` reads and the hover
+    /// listener writes), so that a golden can rest a pointer on the control through it ([`Self::rest_pointer`]).
+    /// Recorded by `render`, never read there; held weakly, so the state still ends with the element, as it would
+    /// without this record.
     #[cfg(test)]
-    pinned: Pinned,
-}
-
-/// What a screenshot golden pins on a readout (`goldens.rs`'s version readout scenes): looks that no input can hold
-/// still in a headless capture. A golden has no pointer resting on the check button, so it pins the lit look the
-/// pointer would give. The spinners turn with the ticker, which those scenes stop (reduced motion) so that a capture
-/// can settle, leaving them at the first step; so it pins a later step, to show that the glyph and the ring do turn
-/// (step 0 looks like no turn at all).
-///
-/// Keyboard focus needs no pin: the scenes give it through the focus coordinator, as a keyboard user would.
-#[cfg(test)]
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Pinned {
-    /// Draw the check button lit (as under the pointer) whether or not anything lights it.
-    pub(crate) lit: bool,
-    /// Draw whatever spins (the check button's glyph, the ring beside the toggle) at this step of its eight instead of
-    /// the spinner's. Applies only while something spins, so it never turns a glyph at rest.
-    pub(crate) step: Option<u8>,
+    hover: Option<gpui::WeakEntity<bool>>,
 }
 
 impl VersionReadout {
@@ -167,8 +159,9 @@ impl VersionReadout {
             _observing: observing,
             #[cfg(test)]
             drawn_look: std::cell::Cell::new(None),
+            step_hold: None,
             #[cfg(test)]
-            pinned: Pinned::default(),
+            hover: None,
         };
         readout.observe_feedback(&first, cx);
         readout
@@ -207,10 +200,27 @@ impl VersionReadout {
         cx.notify();
     }
 
-    /// This readout with `pinned` held still on every frame it draws, for a screenshot golden.
+    /// This readout with whatever spins held at `step` of its eight on every frame it draws (none when `None`), for a
+    /// screenshot golden; see `step_hold`.
     #[cfg(test)]
-    pub(crate) fn pinned(self, pinned: Pinned) -> Self {
-        VersionReadout { pinned, ..self }
+    pub(crate) fn holding_step(self, step: Option<u8>) -> Self {
+        VersionReadout {
+            step_hold: step,
+            ..self
+        }
+    }
+
+    /// Rest the pointer on the control as the hover listener records a real one, for a golden that shows the check
+    /// button lit by the pointer: a headless capture has no pointer to rest, and one pointer could not rest on two rows
+    /// of a scene at once. It lasts as a real rest does, until the hover listener sees the pointer leave or a frame
+    /// leaves the control undrawn. Does nothing before a frame has drawn the readout, since the state is the element's,
+    /// nor once the element's state has ended.
+    #[cfg(test)]
+    pub(crate) fn rest_pointer(&mut self, cx: &mut Context<Self>) {
+        if let Some(hover) = self.hover.as_ref().and_then(gpui::WeakEntity::upgrade) {
+            hover.update(cx, |hovered, _| *hovered = true);
+            cx.notify();
+        }
     }
 
     /// The focus handle the check button and the toggle share, for a golden that gives the readout keyboard focus
@@ -232,6 +242,13 @@ impl VersionReadout {
         self.updater.read(cx).readout().clone()
     }
 
+    /// The step of eight whatever spins is drawn at: a golden's held step, else the turn's, else the first (no turn
+    /// runs in an inactive window).
+    fn step(&self, cx: &App) -> u8 {
+        self.step_hold
+            .unwrap_or_else(|| self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)))
+    }
+
     /// The check button: a press checks for updates now.
     fn check_button(
         &self,
@@ -243,12 +260,8 @@ impl VersionReadout {
     ) -> Button {
         let palette = theme::palette(cx);
         let lit = hovered || focus::shows_ring(&self.focus, window);
-        #[cfg(test)]
-        let lit = lit || self.pinned.lit;
         let warning = readout.needs_reinstall || readout.withdrawn;
-        let step = spinning.then(|| self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)));
-        #[cfg(test)]
-        let step = step.map(|step| self.pinned.step.unwrap_or(step));
+        let step = spinning.then(|| self.step(cx));
         let look = check_look(palette, lit, step, warning);
         #[cfg(test)]
         self.drawn_look.set(Some(look));
@@ -339,9 +352,7 @@ impl VersionReadout {
             // Shrinks with the row (flex items shrink by default), down to nothing before the version does.
             .min_w_0();
         let row = row.when(presentation.separate_progress_spinner, |row| {
-            let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
-            #[cfg(test)]
-            let step = self.pinned.step.unwrap_or(step);
+            let step = self.step(cx);
             row.child(
                 div()
                     .flex_none()
@@ -425,6 +436,10 @@ impl Render for VersionReadout {
         // starts over unhovered, as GPUI's own hover does, instead of staying lit with no pointer over it.
         let hovered = window.use_keyed_state("app-version-hovered", cx, |_, _| false);
         let is_hovered = *hovered.read(cx);
+        #[cfg(test)]
+        {
+            self.hover = Some(hovered.downgrade());
+        }
         let view = cx.weak_entity();
         let control_element = match control {
             ReadoutControl::UpdateMenu => {

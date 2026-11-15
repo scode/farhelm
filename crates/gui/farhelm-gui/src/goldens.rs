@@ -80,7 +80,7 @@ use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
 use crate::theme::{self, Preference};
 use crate::ticker;
-use crate::update_readout::view::{Pinned, VersionReadout};
+use crate::update_readout::view::VersionReadout;
 use crate::update_readout::{self, Activity, Readout};
 use farhelm_grid_model::GridOutput;
 use farhelm_helm_client::fake::FakeHelm;
@@ -3788,8 +3788,9 @@ fn notices_window(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
 // docs. The version text is this build's own (`0.0.0-unreleased` on main), so a version bump redraws every one of
 // these scenes.
 
-/// One row of a version readout scene: the readout its fixture updater shows, and what the row pins on the view.
-type ReadoutRow = (Readout, Pinned);
+/// One row of a version readout scene: the readout its fixture updater shows, and the step the row holds whatever spins
+/// at (`VersionReadout::holding_step`), if it holds one.
+type ReadoutRow = (Readout, Option<u8>);
 
 /// The readouts a version readout scene made, one per row in the scene's order, kept among the scene's kept values.
 struct Readouts(Vec<Entity<VersionReadout>>);
@@ -3828,16 +3829,16 @@ fn kept_readouts(state: &SceneState) -> Vec<Entity<VersionReadout>> {
 /// drawn before the setup already shows them: a setup that gives a readout keyboard focus, opens its menu or shows its
 /// hover help needs it drawn, and a step deferred to a later frame could be missed by [`settle`], which stops at the
 /// first two identical frames. Motion is reduced before any readout exists, so no spinner ever ticks and the capture
-/// settles; a row that shows a turn pins its step instead.
+/// settles; a row that shows a turn holds its step instead.
 fn readout_rows(state: &SceneState, rows: fn() -> Vec<ReadoutRow>, cx: &mut App) -> AnyElement {
     let mut readouts = kept_readouts(state);
     if readouts.is_empty() {
         ticker::set_reduced_motion(true, cx);
         readouts = rows()
             .into_iter()
-            .map(|(readout, pinned)| {
+            .map(|(readout, step)| {
                 let updater = updates::fixture(readout, cx);
-                cx.new(|cx| VersionReadout::new(updater, cx).pinned(pinned))
+                cx.new(|cx| VersionReadout::new(updater, cx).holding_step(step))
             })
             .collect();
         state
@@ -3891,46 +3892,51 @@ fn focus_readout(state: &SceneState, row: usize, tabs: usize, window: &mut Windo
 /// Rows of the check button with no update waiting: at rest (the version in `--fg-1`, the `↻` in `--fg-2`); lit, as
 /// under the pointer (both in `--fg-0`, the glyph a quarter turned); with a reinstall warning (`⚠` and the version in
 /// `--warn`); the warning lit (the version in `--fg-0`, as the old sheet's later hover rule won, the `⚠` still
-/// `--warn`); and the button with keyboard focus (lit, with the accent ring and no fill), which the setup gives it.
+/// `--warn`); and the button with keyboard focus (lit, with the accent ring and no fill), which the setup gives it. The
+/// setup also rests the pointer on the two lit rows ([`LIT_CHECK_ROWS`]).
 fn version_readout_check_rows() -> Vec<ReadoutRow> {
     let warned = Readout {
         needs_reinstall: true,
         ..golden_readout(Activity::Idle, false)
     };
-    let lit = Pinned {
-        lit: true,
-        step: None,
-    };
     vec![
-        (golden_readout(Activity::Idle, false), Pinned::default()),
-        (golden_readout(Activity::Idle, false), lit),
-        (warned.clone(), Pinned::default()),
-        (warned, lit),
-        (golden_readout(Activity::Idle, false), Pinned::default()),
+        (golden_readout(Activity::Idle, false), None),
+        (golden_readout(Activity::Idle, false), None),
+        (warned.clone(), None),
+        (warned, None),
+        (golden_readout(Activity::Idle, false), None),
     ]
 }
+
+/// The rows of [`version_readout_check_rows`] drawn lit, as under the pointer: the plain button and the warned one.
+const LIT_CHECK_ROWS: [usize; 2] = [1, 3];
 
 /// [`version_readout_check_rows`], drawn.
 fn version_readout_check(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     readout_rows(state, version_readout_check_rows, cx)
 }
 
-/// Keyboard focus on the last row's check button.
+/// The pointer resting on each of [`LIT_CHECK_ROWS`], given through the hover state each readout reads, since a capture
+/// has no pointer and one pointer could not rest on two rows; then keyboard focus on the last row's check button.
 fn version_readout_check_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let readouts = kept_readouts(state);
+    for row in LIT_CHECK_ROWS {
+        let readout = readouts
+            .get(row)
+            .expect("the scene's first frame made its readouts");
+        readout.update(cx, |readout, cx| readout.rest_pointer(cx));
+    }
     focus_readout(state, 4, 0, window, cx);
 }
 
-/// The step the progress rows pin: three eighths of a turn, clearly turned and unlike the lit quarter turn.
-const PINNED_STEP: u8 = 3;
+/// The step the progress rows hold: three eighths of a turn, clearly turned and unlike the lit quarter turn.
+const HELD_STEP: u8 = 3;
 
-/// Rows of work in progress: a check with the glyph spinning (pinned at [`PINNED_STEP`], in `--fg-0`) and "Checking…"
+/// Rows of work in progress: a check with the glyph spinning (held at [`HELD_STEP`], in `--fg-0`) and "Checking…"
 /// beside it; an install, the same with "Installing…"; and both again while an update waits, where the red toggle with
 /// `↑` has no glyph to spin, so the accent ring (at the same step) comes before the words.
 fn version_readout_progress_rows() -> Vec<ReadoutRow> {
-    let turned = Pinned {
-        lit: false,
-        step: Some(PINNED_STEP),
-    };
+    let turned = Some(HELD_STEP);
     let installing = || Activity::Installing("0.40.0".to_string());
     vec![
         (golden_readout(Activity::Checking, false), turned),
@@ -3953,11 +3959,11 @@ fn version_readout_outcomes_rows() -> Vec<ReadoutRow> {
     vec![
         (
             golden_readout(Activity::UpToDate("0.39.0".to_string()), false),
-            Pinned::default(),
+            None,
         ),
-        (golden_readout(failed(), false), Pinned::default()),
-        (golden_readout(failed(), true), Pinned::default()),
-        (golden_readout(failed(), false), Pinned::default()),
+        (golden_readout(failed(), false), None),
+        (golden_readout(failed(), true), None),
+        (golden_readout(failed(), false), None),
     ]
 }
 
@@ -3981,9 +3987,9 @@ fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
         ..golden_readout(Activity::Idle, true)
     };
     vec![
-        (golden_readout(Activity::Idle, true), Pinned::default()),
-        (withdrawn, Pinned::default()),
-        (golden_readout(Activity::Idle, true), Pinned::default()),
+        (golden_readout(Activity::Idle, true), None),
+        (withdrawn, None),
+        (golden_readout(Activity::Idle, true), None),
     ]
 }
 
@@ -4001,7 +4007,7 @@ fn version_readout_update_ready_setup(state: &SceneState, window: &mut Window, c
 fn version_readout_menu(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     top_left(readout_rows(
         state,
-        || vec![(golden_readout(Activity::Idle, true), Pinned::default())],
+        || vec![(golden_readout(Activity::Idle, true), None)],
         cx,
     ))
 }
@@ -4057,7 +4063,7 @@ fn version_readout_tooltip(state: &SceneState, _: &mut Window, cx: &mut App) -> 
                 tooltip: reinstall_tooltip(),
                 ..golden_readout(Activity::Idle, false)
             };
-            vec![(readout, Pinned::default())]
+            vec![(readout, None)]
         },
         cx,
     ))

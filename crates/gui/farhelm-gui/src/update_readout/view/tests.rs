@@ -1,5 +1,6 @@
 //! Tests of the version readout while an updater runs: each state's control, words and marks, the update menu, the
-//! inline status's timing and dismissal, the spinner's life, and focus across the check-to-toggle swap. They draw the
+//! inline status's timing and dismissal, the spinner's life, what a screenshot golden holds still (a rested pointer and
+//! a held step), and focus across the check-to-toggle swap. They draw the
 //! readout entity over the fake updater host (`desktop::updates::fake`), kept as the app's updater so its commands
 //! reach the fake, beside one other control for the focus cases; one test draws it in the real header. Without an
 //! updater the header draws its plain build text, which the sidebar's own header test covers.
@@ -315,6 +316,66 @@ fn the_spinner_runs_only_while_something_spins_and_stands_still_under_reduced_mo
     test_support::advance(cx, crate::ticker::TICK * 3);
     assert_eq!(look(cx, &readout).map(|look| look.eighths), Some(0));
     assert!(shows(cx, "Checking…"), "the words stay");
+}
+
+// ---- What a screenshot golden holds still --------------------------------------------------------------------------
+
+/// The version readout goldens light the check button with a rested pointer and show a turn with a held step, and
+/// they are evidence for the app only while both go through what the app draws from (SPEC_impl.md, "GPUI cookbook:
+/// traps", on `cfg(test)` branches). Specified: a rested pointer lights the button exactly as a real hover does, and a
+/// real pointer passing over and leaving puts it back at rest, since the rest is the hover listener's own state; a
+/// held step turns nothing at rest, and once a check spins the glyph is drawn at that step.
+#[gpui::test]
+fn a_golden_rests_the_pointer_and_holds_the_step_through_the_drawn_inputs(cx: &mut TestAppContext) {
+    let (cx, readout, feed, _seen, _other) = open(cx, readout_in(Activity::Idle, false, 0));
+    let palette = *cx.update(|_, cx| theme::palette(cx));
+    let lit = Some((palette.fg_0, 2));
+    let ink_and_turn =
+        |cx: &mut VisualTestContext| look(cx, &readout).map(|look| (look.version, look.eighths));
+    assert_eq!(
+        ink_and_turn(cx),
+        Some((palette.fg_1, 0)),
+        "the premise: at rest"
+    );
+    readout.update(cx, |readout, cx| readout.rest_pointer(cx));
+    test_support::settle(cx);
+    assert_eq!(ink_and_turn(cx), lit, "a rested pointer lights it");
+    // A real pointer enters before it leaves: the hover listener reports a leave only after it saw the pointer over
+    // the control.
+    let center = test_support::center(cx, "app-version-check");
+    cx.simulate_mouse_move(center, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(ink_and_turn(cx), lit, "the pointer entering keeps it lit");
+    cx.simulate_mouse_move(point(px(500.), px(500.)), None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        ink_and_turn(cx),
+        Some((palette.fg_1, 0)),
+        "the pointer left"
+    );
+
+    readout.update(cx, |readout, cx| {
+        readout.step_hold = Some(5);
+        cx.notify();
+    });
+    test_support::settle(cx);
+    assert_eq!(
+        look(cx, &readout).map(|look| look.eighths),
+        Some(0),
+        "a held step turns nothing at rest"
+    );
+    publish(cx, &feed, readout_in(Activity::Checking, false, 1));
+    assert_eq!(look(cx, &readout).map(|look| look.eighths), Some(5));
+    assert!(
+        holds_spinner(cx, &readout),
+        "the premise: the turn runs, so the ticks below would move an unheld glyph"
+    );
+    test_support::advance(cx, crate::ticker::TICK * 3);
+    assert_eq!(
+        look(cx, &readout).map(|look| look.eighths),
+        Some(5),
+        "held while the turn runs on"
+    );
 }
 
 // ---- The update toggle and its menu --------------------------------------------------------------------------------
