@@ -16,6 +16,8 @@
 //!   ([`crate::feedback::open`], [`crate::hosts::ssh_help::open`]) with the `?` button as their opener, so closing
 //!   either returns focus to the button, as the old app returned focus to its Help toggle; Check for updates asks the
 //!   updater ([`crate::desktop::updates::check_now`]).
+//! - **Keyboard shortcuts** opens the overview ([`crate::shortcuts::open_from_menu`]) with the `?` button as its
+//!   opener, so closing it returns focus there, as SPEC.md's Keyboard shortcuts paragraph asks.
 //! - **Conditional items.** Check for updates is drawn only while an updater runs ([`crate::desktop::updates::runs`]),
 //!   last, as SPEC.md says. On Linux, which has no menu bar, the menu also offers Open-Source Notices, which dispatches
 //!   the same action as the Mac app menu's item (the maintainer decided on 2026-11-13 that the notices live in that
@@ -27,9 +29,6 @@
 //!
 //! - **Welcome** reopens the Welcome card ([`crate::welcome::open`]) with the `?` button as its opener; a reopened card
 //!   writes nothing.
-//!
-//! NOTE: Not drawn yet: Keyboard shortcuts, waiting for its dialog. It joins [`items`] in the old order (after
-//! Documentation) when its dialog lands; a menu item whose dialog does not exist would open nothing.
 //!
 //! NOTE: Deviations from the old flyout, both from the layer manager's one beside placement (its `Placement::Beside`
 //! docs record the shared clamp): the old Help menu hung from its toggle's bottom edge and kept at least 8 pixels from
@@ -81,6 +80,8 @@ enum Item {
     SendFeedback,
     ChatOnDiscord,
     Documentation,
+    /// The Keyboard shortcuts overview, the same dialog its chord opens.
+    KeyboardShortcuts,
     /// Always offered, even when no installed update waits for a restart.
     ReleaseNotes,
     /// The history of announcements this helm has shown; offered only once it has shown one.
@@ -102,6 +103,7 @@ impl Item {
             Item::SendFeedback => "Send feedback",
             Item::ChatOnDiscord => "Chat on Discord",
             Item::Documentation => "Documentation",
+            Item::KeyboardShortcuts => "Keyboard shortcuts",
             Item::ReleaseNotes => "Release notes",
             Item::Announcements => "Announcements",
             Item::SshHelp => "SSH needs 2FA?",
@@ -117,6 +119,7 @@ impl Item {
             Item::SendFeedback => "Privately, to Farhelm's maintainer",
             Item::ChatOnDiscord => "Opens Farhelm's Discord in your browser",
             Item::Documentation => "Opens farhelm.io/docs in your browser",
+            Item::KeyboardShortcuts => "Shows keys and your template bindings",
             Item::ReleaseNotes => "Opens the release notes in your browser",
             Item::Announcements => "Shows previously shown announcements again",
             Item::SshHelp => "Start a host's SSH connections yourself",
@@ -138,6 +141,9 @@ impl Item {
             }
             Item::Documentation => {
                 "Documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
+            }
+            Item::KeyboardShortcuts => {
+                "Keyboard shortcuts: show this client's keys and current template bindings"
             }
             Item::ReleaseNotes => {
                 "Release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
@@ -167,7 +173,7 @@ impl Item {
             Item::ChatOnDiscord => Icon::External,
             Item::Documentation | Item::ReleaseNotes | Item::OpenSourceNotices => Icon::Document,
             Item::Announcements | Item::Welcome => Icon::Info,
-            Item::SshHelp => Icon::Terminal,
+            Item::SshHelp | Item::KeyboardShortcuts => Icon::Terminal,
             Item::CheckForUpdates => Icon::Update,
         }
     }
@@ -178,6 +184,7 @@ impl Item {
             Item::SendFeedback => "help-menu-send-feedback",
             Item::ChatOnDiscord => "help-menu-discord",
             Item::Documentation => "help-menu-documentation",
+            Item::KeyboardShortcuts => "help-menu-keyboard-shortcuts",
             Item::ReleaseNotes => "help-menu-release-notes",
             Item::Announcements => "help-menu-announcements",
             Item::SshHelp => "help-menu-ssh-help",
@@ -197,6 +204,7 @@ fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
         Item::SendFeedback,
         Item::ChatOnDiscord,
         Item::Documentation,
+        Item::KeyboardShortcuts,
         Item::ReleaseNotes,
     ];
     if announced {
@@ -354,6 +362,9 @@ impl HelpMenu {
             }
             Item::ChatOnDiscord => cx.open_url(DISCORD_URL),
             Item::Documentation => cx.open_url(DOCS_URL),
+            Item::KeyboardShortcuts => {
+                let _ = crate::shortcuts::open_from_menu(opener, mark, window, cx);
+            }
             Item::ReleaseNotes => cx.open_url(RELEASE_NOTES_URL),
             Item::Announcements => {
                 let _ = crate::announcements::open_history(opener, mark, window, cx);

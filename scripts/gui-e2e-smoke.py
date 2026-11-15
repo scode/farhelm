@@ -17,12 +17,13 @@ view's open session that a status filter hides, named and renamed; 51, the sessi
 switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened from the Help menu and opened by a window
 start that asks for it; 54, the session list's Replace meeting the YOLO question; 60 and 62 to 64, the approvals area's
 cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
-the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice). The
-behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
-`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`,
-`approvals/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their
-ids (`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
-Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
+other-dialogs area's Keyboard shortcuts overview). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
+`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`); nothing here checks layout or
+wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their
+labels: the open session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks
+the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -161,6 +162,9 @@ YOLO_ONE_OFF = "Start YOLO session anyway"
 # The launcher's header summary in New: text only the open launcher draws (New's hover help says it with a lowercase
 # "start", which this does not match), so waiting for it (or for it to go) tells whether the launcher is open (step 51).
 LAUNCHER_SUMMARY = "Start an agent or a command on any host"
+
+# A row only the open Keyboard shortcuts overview draws: the oracle for it open and closed (step 65).
+SHORTCUTS_ROW = "Begin launch sequence"
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -1828,6 +1832,44 @@ class Smoke(unittest.TestCase):
             clicked = last_click[0] if last_click else None
             detail = f"{clicked.stdout}{clicked.stderr}" if clicked else "no click was made"
             raise AssertionError(f"{answer} did not end the request; the last click said:\n{detail}") from None
+
+    # ---- The other-dialogs area's Keyboard shortcuts (65), on a session of its own ------------------------------
+
+    def test_65_the_shortcuts_chord_from_a_terminal_opens_the_overview_and_escape_returns(self) -> None:
+        """The Keyboard shortcuts chord is SPEC.md's one shortcut matched by the Slash key's position, taken by the
+        app's keystroke interceptor before a focused terminal sees it, and closing the overview hands focus back to the
+        terminal. Specified, in a basic fake-agent session this step creates under a title of its own: with its terminal
+        focused and showing the echo of a stamped line, the platform's chord opens the overview with focus on its
+        Close; Escape closes it, and the terminal has focus again (`terminal-text` reads only a focused terminal) and
+        takes a second stamped line, which comes back as the agent's echo of exactly that line."""
+        stamp = uuid.uuid4().hex[:8]
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"Shortcuts origin {stamp}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        before = f"before-{stamp}"
+        self.ok("type", "--keys", before)
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", f"echo:{before}")
+        self.assertNotIn(SHORTCUTS_ROW, self.ok("snapshot"), "premise: the overview is not open")
+        self.ok("press", "cmd-/" if sys.platform == "darwin" else "ctrl-shift-/")
+        self.ok("wait", "--text", SHORTCUTS_ROW)
+        self.assertRegex(
+            self.ok("snapshot", "-i"), r'button "Close keyboard shortcuts" \[focused\]', "focus starts on Close"
+        )
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", SHORTCUTS_ROW)
+        after = f"after-{stamp}"
+        self.ok("type", "--keys", after)
+        self.ok("press", "enter")
+        screen = self.ok("terminal-text", "--wait", f"echo:{after}")
+        # `terminal-text` prints the screen as one JSON string, its lines joined by escaped newlines.
+        lines = [line.strip() for line in json.loads(screen).splitlines()]
+        self.assertIn(f"echo:{after}", lines, "the echo is of exactly the typed line, nothing before it")
 
 
 def waiting_approvals() -> list[dict]:
