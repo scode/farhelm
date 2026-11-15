@@ -565,10 +565,13 @@ deletes its builder and the builder's snapshots. Every builder and snapshot is r
 whatever a failed deletion or a helm stopping mid-build leaves is deleted by the next build or by deleting the recipe,
 and the row says when something still awaits deletion; nothing cleans up at helm start. Deleting a recipe cancels its
 running build and deletes its builder and snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm
-asked for in the last 15 minutes may still appear, the recipe stays, with the reason, so a retry finishes the job.
-Changing a base keeps the built snapshot until a successful rebuild replaces it. A recipe cannot select a snapshot
-Farhelm built for a recipe as its base, its own included, because Farhelm deletes those when their recipe moves on; that
-save is refused.
+asked for in the last 15 minutes may still appear, the recipe stays, with the reason, so a retry finishes the job. A
+deletion still going after 20 seconds, such as one waiting for a build sandbox Tensorlake has not finished creating,
+says it carries on (decided by the GPUI migration's orchestrator on 2026-11-15): the recipe leaves the list once it is
+deleted, and if the deletion then fails, the recipe stays, its reason reaches only the helm's log, and deleting it again
+shows why. Until the deletion ends, saving or building the recipe is refused. Changing a base keeps the built snapshot
+until a successful rebuild replaces it. A recipe cannot select a snapshot Farhelm built for a recipe as its base, its
+own included, because Farhelm deletes those when their recipe moves on; that save is refused.
 
 Preparation takes a second filesystem snapshot on top of that built snapshot, with Farhelm's supervisor installed and
 its user unit enabled to start at boot. A short-lived `farhelm-prepare-<helm tag>-<recipe>` sandbox uses the confirmed
