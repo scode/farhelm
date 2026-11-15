@@ -131,6 +131,10 @@ pub enum Work {
     /// and leaves the host's supervisor and sessions running (`hosts::remove`). Not supersedable: a second Remove of the
     /// same host waits for the first to settle.
     RemoveHost,
+    /// The user's answer to an agent's approval request (`POST /api/approvals/{id}`), under the request's own key
+    /// ([`OpKey::approval`]). Not supersedable: the first answer pressed wins, and a second waits for it to settle
+    /// (SPEC.md, "Agent-spawned sessions").
+    Answer,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built
@@ -153,6 +157,8 @@ enum Key {
     /// A session's tunnels, by the session's id: apart from the session's own key, so opening or closing a tunnel never
     /// makes the session's lifecycle actions busy.
     Tunnels(String),
+    /// An agent's approval request, by the id the helm gave it.
+    Approval(String),
 }
 
 impl OpKey {
@@ -196,6 +202,12 @@ impl OpKey {
     /// [`OpKey::session`], whose busy state is the session's lifecycle actions'.
     pub fn tunnels(session: &str) -> OpKey {
         OpKey(Key::Tunnels(session.to_owned()))
+    }
+
+    /// An agent's approval request, by the id the helm gave it: one answer at a time per request, and its refusal kept
+    /// for the request's card to show.
+    pub fn approval(id: &str) -> OpKey {
+        OpKey(Key::Approval(id.to_owned()))
     }
 }
 
