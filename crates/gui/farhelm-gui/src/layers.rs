@@ -12,7 +12,13 @@
 //!   helm, which closes everything ([`close_all`]) without asking.
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
-//!   shows its result where it belongs instead.
+//!   shows its result where it belongs instead. The one exception is SPEC.md's window-start dialogs (the Welcome card,
+//!   and the first batch of announcements when nothing is open ahead of it), which open with a mark taken when their
+//!   owner first sees a new UI session, before its first snapshot is drawn ([`Mark::at_ui_session_start`]). The user
+//!   has done nothing yet; if they type or click before the open, the open is refused, and the dialog stays unseen
+//!   until a later window start or reset (the maintainer's decision, 2026-11-14). A batch that SPEC.md has wait behind
+//!   the Welcome card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a
+//!   mark taken when the last of them closes, which always follows a press of the user's.
 //! - **An overlay closes when its subject is gone, not when it moves.** A popover is anchored to an element through an
 //!   [`Anchor`], state the anchor element keeps in its element state: it follows the element wherever it is drawn,
 //!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`]: an
