@@ -507,6 +507,34 @@ impl LaunchDraft {
         };
     }
 
+    /// Take a recent setup's choices (SPEC.md, "Recent setups": "A recent row fills every saved choice"): the Agent tab,
+    /// its agent type, model, effort, permission (as the helm would read it), Custom flags and wrapper prefix, all as
+    /// deliberate choices, as a Clone's restored launch is. Its destination is the caller's to set through
+    /// [`Self::edit_folder`] or [`Self::choose_repository`], which keep what the mode holds.
+    ///
+    /// A model the catalog offers for that agent is the catalog's; any other is a custom model owned by the agent, as a
+    /// typed custom model is, so a later agent switch clears it (with no catalog yet, every model counts as custom, as
+    /// in the old launcher). Refused, changing nothing, where the mode holds the agent type (Restart with), whose
+    /// launcher offers no recent setups anyway.
+    pub fn restore_recent(&mut self, selection: &LaunchSelection, catalog: Catalog<'_>) {
+        if self.holds(Field::AgentType) {
+            return;
+        }
+        self.restore_selection(selection);
+        let in_catalog = selection.model.as_deref().is_some_and(|model| {
+            let id = selection.harness.catalog_model_id(model);
+            catalog
+                .unwrap_or_default()
+                .iter()
+                .any(|entry| entry.harness == selection.harness && entry.id == id)
+        });
+        self.agent.model_owner = selection
+            .model
+            .as_ref()
+            .filter(|_| !in_catalog)
+            .map(|_| selection.harness);
+    }
+
     /// A command launch's stored fields; its agent tab stays empty.
     fn seed_command(&mut self, command: &CommandLaunch) {
         self.tab = Tab::Command;

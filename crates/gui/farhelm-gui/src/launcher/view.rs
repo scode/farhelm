@@ -9,10 +9,11 @@
 //!   then Cancel, Reset choices (Agent tab), Save as template (not in Replace with) and the main action, with what a
 //!   press of it has to say pinned above them. Save as template opens its inline panel at the end of the body
 //!   (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
-//! - **The body**, in reading and Tab order: the composer search box ([`search`]), the destination rows (Where,
-//!   Host, a managed checkout's repository and preview, Folder, Name), the Agent and Command tabs, and the chosen
-//!   tab's fields. The other tab's fields are not drawn, but its draft is kept (SPEC.md: "switching tabs keeps each
-//!   tab's draft"). The Agent tab's harness, effort and permission choices are drawn by [`choices`].
+//! - **The body**, in reading and Tab order: the composer search box ([`search`]), the recent setups while any match
+//!   ([`recents`]), the destination rows (Where, Host, a managed checkout's repository and preview, Folder, Name), the
+//!   Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not drawn, but its draft is kept
+//!   (SPEC.md: "switching tabs keeps each tab's draft"). The Agent tab's harness, effort and permission choices are
+//!   drawn by [`choices`].
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
@@ -95,6 +96,7 @@ pub(super) use folder_list::{
 mod history;
 mod host_picker;
 mod model_field;
+mod recents;
 mod search;
 pub(in crate::launcher) mod yolo_question;
 
@@ -463,8 +465,10 @@ pub(crate) struct Launcher {
     folder_check: folder_check::FolderCheck,
     /// The folder field's dropdown of recent folders and resets (`folder_list`).
     folder_list: folder_list::FolderList,
-    /// The chosen host's launch history, which the folder list offers again (`history`).
+    /// The chosen host's launch history, which the folder list and the recent setups offer again (`history`).
     history: history::LaunchHistory,
+    /// The recent setups strip's rows' focus handles (`recents`).
+    recents: recents::RecentsStrip,
     /// The managed-checkout destination's fields, suggestions and preview (`checkout`).
     checkout: checkout::CheckoutState,
     /// The host button's focus handle; leaving it closes the host list.
@@ -704,6 +708,7 @@ impl Launcher {
             folder_check: folder_check::FolderCheck::default(),
             folder_list: folder_list::FolderList::default(),
             history: history::LaunchHistory::default(),
+            recents: recents::RecentsStrip::default(),
             checkout,
             host_focus,
             command,
@@ -2138,11 +2143,14 @@ impl Render for Launcher {
             .children(tabs)
             .children(fields);
         let search = self.search_row(palette, window, cx);
+        // Recent setups sit between the search box and the destination, and take no room without rows (`recents`).
+        let recents = self.recents_strip(palette, window, cx);
         let body = div()
             .flex()
             .flex_col()
             .gap(px(SECTION_GAP))
             .child(search)
+            .children(recents)
             .child(destination)
             .child(choices)
             .children(self.save_panel.clone());

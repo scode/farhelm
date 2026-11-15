@@ -125,6 +125,12 @@ pub enum Tier {
     /// pressed row's summary takes `--on-accent-dim` there, not here. The Templates editor's "+ Add field" menu draws its
     /// entries in this tier too, left-aligned with the same hover fill.
     TemplateRow,
+    /// `.launch-composer-recent-slots > button`: one row of the launcher's recent setups, a ghost as wide as its well and
+    /// 36 pixels high, with square corners (the well rounds the strip), 14 pixels in at the sides, its content (the
+    /// setup's cells, given as [`Button::content`]) laid out from the left in the quiet `--fg-1` ink at 13 pixels, and the
+    /// control hover fill under the pointer. The cells draw their own inks (the agent's name in the primary ink). Its
+    /// keyboard ring is drawn inside its edge, since the well clips anything outside it.
+    RecentSetup,
     /// `.templates-remove`: the ✕ that removes a field from a template, a ghost 30 pixels wide and 34 high (the height
     /// of the field's control beside it, so the ✕ is centered on the control), in the quiet `--fg-1` ink that turns
     /// `--danger` with the control hover fill under the pointer.
@@ -179,6 +185,10 @@ const NUMBER_KEY_PAD: f32 = 4.;
 const FIELD_REMOVE_SIZE: (f32, f32) = (30., 34.);
 /// The [`Tier::TemplateRow`] box's padding, vertical then horizontal (`.templates-row`: `10px 12px`).
 const TEMPLATE_ROW_PAD: (f32, f32) = (10., 12.);
+/// The [`Tier::RecentSetup`] box: `height: 36px; padding: 0 14px`. The old row had no border; every button here has a
+/// 1-pixel (transparent) edge, so the padding is a pixel less to keep the content 14 pixels in.
+const RECENT_SETUP_HEIGHT: f32 = 36.;
+const RECENT_SETUP_PAD_X: f32 = 13.;
 
 /// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
 const ROW_MENU_HEIGHT: f32 = 19.6;
@@ -575,7 +585,8 @@ impl Button {
             Tier::Ghost
             | Tier::RowMenu { on_fill: false }
             | Tier::FieldRemove
-            | Tier::TerminalTab => (None, palette.control_hover, None, palette.fg_1),
+            | Tier::TerminalTab
+            | Tier::RecentSetup => (None, palette.control_hover, None, palette.fg_1),
             Tier::TerminalTabClose => (None, palette.danger_bg_dim, None, palette.fg_1),
             // Returned above, before the pressed looks.
             Tier::QuickMark { .. } | Tier::NumberKey { .. } => {
@@ -697,6 +708,7 @@ impl RenderOnce for Button {
             Tier::TerminalTab => (px(TERMINAL_TAB_PAD.0), px(TERMINAL_TAB_PAD.1)),
             Tier::TerminalTabClose => (px(TERMINAL_TAB_CLOSE_PAD.0), px(TERMINAL_TAB_CLOSE_PAD.1)),
             Tier::TemplateRow => (px(TEMPLATE_ROW_PAD.0), px(TEMPLATE_ROW_PAD.1)),
+            Tier::RecentSetup => (px(0.), px(RECENT_SETUP_PAD_X)),
             Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
             Tier::Waiting => (px(WAITING_PAD.0), px(WAITING_PAD.1)),
             Tier::Ghost
@@ -732,6 +744,7 @@ impl RenderOnce for Button {
             | Tier::QuickMark { .. }
             | Tier::NumberKey { .. }
             | Tier::TemplateRow
+            | Tier::RecentSetup
             | Tier::FieldRemove
             | Tier::IconChoice
             | Tier::ColorChoice
@@ -876,6 +889,17 @@ impl RenderOnce for Button {
             .when(self.tier == Tier::TemplateRow, |button| {
                 button.w_full().min_w_0().justify_start()
             })
+            // A recent setup's row fills the strip's well at a fixed height, square-cornered inside the well's own
+            // rounding, its cells laid out from the left at the strip's 13 pixels.
+            .when(self.tier == Tier::RecentSetup, |button| {
+                button
+                    .w_full()
+                    .min_w_0()
+                    .h(px(RECENT_SETUP_HEIGHT))
+                    .justify_start()
+                    .rounded_none()
+                    .text_size(metrics::TEXT_MD)
+            })
             .when(self.tier == Tier::FieldRemove, |button| {
                 button
                     .w(px(FIELD_REMOVE_SIZE.0))
@@ -918,6 +942,19 @@ impl RenderOnce for Button {
                     .border_2()
                     .border_color(theme::color(ring_color))
                     .rounded(radius),
+            );
+        } else if ring && self.tier == Tier::RecentSetup {
+            // A recent setup's row fills a well that clips what lies outside it, so its ring sits inside its edge, as
+            // the old one did (`box-shadow: inset 0 0 0 1.5px var(--accent)`), square like the row.
+            button = button.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .border_2()
+                    .border_color(theme::color(ring_color)),
             );
         } else if ring {
             // The old `outline: 2px solid var(--accent); outline-offset: 1px`, drawn as a ring element because GPUI has
@@ -965,6 +1002,7 @@ impl RenderOnce for Button {
                     | Tier::QuickMark { .. }
                     | Tier::NumberKey { .. }
                     | Tier::TemplateRow
+                    | Tier::RecentSetup
                     | Tier::FieldRemove
                     | Tier::IconChoice
                     | Tier::ColorChoice

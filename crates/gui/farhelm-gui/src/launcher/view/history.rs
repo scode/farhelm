@@ -1,5 +1,6 @@
-//! The launch history the launcher offers again: the folders, and later the whole setups, that launched successfully
-//! before on the chosen host's current installation (`GET /api/launch-history?host=<id>`).
+//! The launch history the launcher offers again: the folders (the folder list, `folder_list`) and the whole setups (the
+//! recent setups strip, `recents`) that launched successfully before on the chosen host's current installation
+//! (`GET /api/launch-history?host=<id>`).
 //!
 //! SPEC.md, "Recent setups" and "Working directory"; SPEC_impl.md, "Composer history". Ported from the old launcher's
 //! `request_launch_history` (`list/create_form.rs` at reference commit `24bc0580`). Here's the TLDR:
