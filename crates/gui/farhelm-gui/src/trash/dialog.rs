@@ -25,8 +25,10 @@
 //!   counts, size and host names they name. The question is drawn in the prompt's plain look inside the old band, a
 //!   red-tinted strip under a red rule, for as long as it is open ([`Inline::is_open`], read while drawing). A host's
 //!   band is inside its card, under its header; the global one in the frame's bounded region above the footer's actions
-//!   ([`DialogFrame::notices`]), which scrolls on its own and is drawn only while that question is open. Focus starts
-//!   on Delete permanently (SPEC.md, "Opening and closing": permanent trash deletion starts on its confirming answer),
+//!   ([`DialogFrame::notices`]), which scrolls on its own and is drawn only while that question is open. Page Up,
+//!   Page Down, Home and End scroll that region from an answer inside it ([`DialogFrame::notices_stop`]), so a warning
+//!   taller than the region stays readable by keyboard (SPEC.md: "its own bounded, keyboard-scrollable region directly above the footer"). Focus starts on
+//!   Delete permanently (SPEC.md, "Opening and closing": permanent trash deletion starts on its confirming answer),
 //!   scrolled into view by the focus coordinator; Cancel or Escape on the question returns focus to the button that
 //!   asked it, Delete all for the global one. That button is drawn busy rather than disabled while it is unavailable (a
 //!   re-read under the question, say), so it can still take focus back. Delete all waits until every reachable host's
@@ -44,9 +46,6 @@
 //!   of them is available, the list's own stop, "Archived checkouts"), then the footer's Close and Delete all (SPEC.md,
 //!   "Initial focus stays on footer Close"). Close, the header's close and Escape are never unavailable, and closing
 //!   never cancels a delete the helm took.
-//!
-//! NOTE: Not yet as SPEC.md has it, waiting for a foundation change and recorded in the parity file ("### Trash"): the
-//! global question's region is not keyboard-scrollable while an answer holds focus.
 //!
 //! NOTE: Deviations from the old dialog, recorded in the parity file: the old dialog stacked its footer's actions as
 //! full-width rows at phone widths, which the app's 720 by 560 minimum window never reaches, so that is not ported; the
@@ -501,12 +500,17 @@ impl Render for TrashDialog {
         );
         if let Some(global) = global {
             // The old `.checkout-trash-global-confirmation`: directly above the footer's actions, bounded, and
-            // scrolling on its own, which is what the frame's notices region is.
-            frame = frame.notices(
-                band(palette)
-                    .debug_selector(|| "trash-global-confirmation".into())
-                    .child(global),
-            );
+            // scrolling on its own, which is what the frame's notices region is. The old region was a `ScrollRegion`
+            // under this name, so the keyboard could scroll it too, from its focused answer as the browser scrolled the
+            // focused element's container. The old region also became a stop of its own while both answers were
+            // disabled; here the prompt's Cancel is always available, so the frame's stop for that case never shows.
+            frame = frame
+                .notices(
+                    band(palette)
+                        .debug_selector(|| "trash-global-confirmation".into())
+                        .child(global),
+                )
+                .notices_stop("Global checkout deletion confirmation");
         }
         frame
             .heading(heading)

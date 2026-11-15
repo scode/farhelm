@@ -1863,19 +1863,52 @@ class Smoke(unittest.TestCase):
     def test_65_the_shortcuts_chord_from_a_terminal_opens_the_overview_and_escape_returns(self) -> None:
         """The Keyboard shortcuts chord is SPEC.md's one shortcut matched by the Slash key's position, taken by the
         app's keystroke interceptor before a focused terminal sees it, and closing the overview hands focus back to the
-        terminal. Specified, in a basic fake-agent session this step creates under a title of its own: with its terminal
-        focused and showing the echo of a stamped line, the platform's chord opens the overview with focus on its
-        Close; Escape closes it, and the terminal has focus again (`terminal-text` reads only a focused terminal) and
-        takes a second stamped line, which comes back as the agent's echo of exactly that line."""
+        terminal. Specified, in a basic fake-agent session this step creates under a title of its own: once the focused
+        terminal shows that session's stamped origin line and the agent's freshly started screen and nothing else, and
+        then the echo of a stamped line, the
+        platform's chord opens the overview with focus on its Close; Escape closes it, and the terminal has focus again
+        (`terminal-text` reads only a focused terminal) and takes a second stamped line, which comes back as the
+        agent's echo of exactly that line.
+
+        The session's command echoes a line stamped for this run before it starts the agent, and the step waits for
+        that line, then the agent's start and ready lines, then its `> ` prompt, and nothing else. Every fake agent
+        prints `FAKE-AGENT READY`, and the pane remakes its terminals only once it sees the new selection, after the
+        click has returned, so a wait for that line alone could pass on the terminal of whatever session was open
+        before; the stamp is what only this session's terminal shows, whatever earlier steps left open. The prompt is
+        the fixture's own safe-to-type point: input sent on the ready line alone can land on top of it."""
         stamp = uuid.uuid4().hex[:8]
         fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
         title = f"Shortcuts origin {stamp}"
         body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
         body["title"] = title
+        # Command launches run through `bash -c`, so this line reaches the session's terminal before the agent starts.
+        origin = f"shortcuts-origin-{stamp}"
+        body["command"]["command"] = f"echo {origin}; {body['command']['command']}"
         gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
         self.ok("wait", "--text", title)
         self.ok("click", f"text:{title}")
-        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        # This session's whole screen right after its agent starts: the stamped origin line, the agent's start line,
+        # its ready line and its `> ` prompt, each row's trailing blanks trimmed as `terminal-text` prints them.
+        fresh = [origin, "fake-agent starting (script=basic)", "FAKE-AGENT READY", ">"]
+        last = ""
+
+        def fresh_terminal() -> bool:
+            """Whether the focused terminal shows this session's freshly started screen and nothing more, keeping what
+            it last showed for the failure message."""
+            nonlocal last
+            screen = agent("terminal-text")
+            last = screen.stdout.strip() or screen.stderr.strip()
+            if screen.returncode != 0:
+                return False
+            text = gui_agent.probe_text(screen.stdout)
+            return [line.rstrip() for line in text.strip().splitlines()] == fresh
+
+        try:
+            eventually(fresh_terminal, f"the terminal of {title}, freshly started")
+        except AssertionError:
+            raise AssertionError(
+                f"the focused terminal never showed {title}'s fresh screen alone; it last showed {last}"
+            ) from None
         before = f"before-{stamp}"
         self.ok("type", "--keys", before)
         self.ok("press", "enter")
