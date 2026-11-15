@@ -9,16 +9,12 @@
 //! helm's reason under the switch ([`failure`]). Nothing is retried or read back.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
-use gpui::{
-    App, Div, InteractiveElement as _, ParentElement as _, Role, Stateful,
-    StatefulInteractiveElement as _, Styled as _, div, px,
-};
+use gpui::{App, Div, Stateful};
 
-use super::choices::{self, HELP_LINE_HEIGHT};
+use super::choices;
 use crate::drafts::Draft;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
-use crate::theme::{self, metrics};
 
 /// `PUT` of `path` with `{enabled}`, the save of a [`Configured`] switch. A path that does not build is the caller's
 /// failed save, as for any command.
@@ -133,17 +129,9 @@ pub(super) fn failure(
         Known::Unreadable(reason) => Some(reason),
         Known::Reading | Known::Read(_) => None,
     })?;
-    let palette = theme::palette(cx);
-    let sentence = HostSentence::new(id).text(prefix).host(reason);
-    Some(
-        div()
-            .id(id)
-            .debug_selector(|| id.to_owned())
-            .role(Role::Alert)
-            .aria_label(sentence.accessible_name())
-            .text_size(metrics::TEXT_SM)
-            .line_height(px(HELP_LINE_HEIGHT))
-            .text_color(theme::color(palette.danger))
-            .child(sentence),
-    )
+    Some(choices::host_failure_line(
+        id,
+        HostSentence::new(id).text(prefix).host(reason),
+        cx,
+    ))
 }

@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use super::Refused;
 use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::Draft;
-use crate::host_text::HostText;
+use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
 use crate::theme::{self, metrics};
 
@@ -362,6 +362,27 @@ pub(super) fn failure_line(id: String, text: &'static str, cx: &App) -> Stateful
         .line_height(px(HELP_LINE_HEIGHT))
         .text_color(theme::color(palette.danger))
         .child(text)
+}
+
+/// A failure line that carries the helm's words, drawn as [`failure_line`] is under the element id `id`: `sentence`
+/// holds the app's words, if any, and the helm's as host text, which reach the screen and assistive technology only
+/// escaped (SPEC_impl.md, "Host-supplied text"). The configuration switches' lines and the tunnel switch's are drawn
+/// this way.
+pub(super) fn host_failure_line(
+    id: &'static str,
+    sentence: HostSentence,
+    cx: &App,
+) -> Stateful<Div> {
+    let palette = theme::palette(cx);
+    div()
+        .id(id)
+        .debug_selector(|| id.to_owned())
+        .role(Role::Alert)
+        .aria_label(sentence.accessible_name())
+        .text_size(metrics::TEXT_SM)
+        .line_height(px(HELP_LINE_HEIGHT))
+        .text_color(theme::color(palette.danger))
+        .child(sentence)
 }
 
 /// The line beside the Settings control `control` (its element id) when `refused` holds its press as the one refused last

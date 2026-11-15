@@ -54,6 +54,15 @@ impl Refused {
         self.0 = Some(control.into());
     }
 
+    /// Take the line away from `control`, if it is there: for a press on it that went through without starting a save
+    /// (the tunnel switch's press that opens its warning), so the line no longer says that control's press was refused.
+    /// A line beside another control stays, since nothing has shown that key free yet.
+    pub(crate) fn clear(&mut self, control: &str) {
+        if self.0.as_deref() == Some(control) {
+            self.0 = None;
+        }
+    }
+
     /// The line beside `control`, if its press was the one refused last: `draw` builds it in the look of that control's
     /// own failure line from its element id (`<control>-busy`, where tests and the test bridge find it) and
     /// [`Refused::WORDS`].
@@ -91,5 +100,22 @@ mod tests {
         assert!(line(&refused, "second").is_some(), "not a busy key");
         refused.record("first", &Ok(()));
         assert_eq!(line(&refused, "second"), None, "a save started");
+    }
+
+    /// A press that went through without a save (the tunnel switch's, which opens its warning) must take away its own
+    /// line, or "Not saved" would stand beside a switch the warning may turn on, and must leave another control's line,
+    /// since no save has shown the key free. Specified: clearing another control leaves the line; clearing its own
+    /// control removes it.
+    #[test]
+    fn clear_takes_away_only_its_own_controls_line() {
+        let mut refused = Refused::default();
+        refused.refuse("switch");
+        refused.clear("other");
+        assert!(
+            refused.line("switch", |id, _| id).is_some(),
+            "another control's clear"
+        );
+        refused.clear("switch");
+        assert_eq!(refused.line("switch", |id, _| id), None);
     }
 }

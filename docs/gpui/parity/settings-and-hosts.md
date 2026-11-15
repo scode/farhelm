@@ -42,17 +42,12 @@ golden `settings-notifications`, and its Sounds half waits for the Sounds sub-he
 cases are in `tests/appearance.spec.ts`, below. Agent trust's are split between `tests/workspace-trust.spec.ts` (below)
 and this spec, whose hint-switch cases are mapped in the Agent trust bullet.
 
-NOTE: Terminal shows only the link choice for now. Its **File types to open with Cmd-click** field governs opening
-downloaded files and comes with file downloads, later in the migration. Its tunnel consent switch waits for the tunnel
-feature's consent question ("Allow tunnels from remote sessions?"), which the terminal area builds with tunnels: turning
-the switch on without that warning would grant consent unasked, which SPEC.md rules out ("consent is off until they
-accept the warning"). The migration's settings-and-hosts area decided on 2026-11-14 to leave the switch out until the
-question exists. The old desktop switch, for when it is ported: turning it on opened the warning and saved consent only
-on Allow; turning it off saved at once, and the helm then closed every open tunnel.
-
-NOTE: Nothing in the new app follows the link choice yet: the GPUI terminal reads neither it nor tunnel consent today.
-The new app's terminals follow them only once the terminal area's link and tunnel pieces land; until then the helm alone
-acts on them (it closes the open tunnels when consent is turned off).
+NOTE: Terminal shows the link choice and the tunnel consent switch. Its **File types to open with Cmd-click** field
+governs opening downloaded files and comes with file downloads, later in the migration. The switch is the old Mac app's,
+and like it is drawn only on the Mac, where the terminal offers tunnels: turning it on asks the terminal's tunnel
+warning ("Allow tunnels from remote sessions?") and consent is saved only on Allow; turning it off saves at once, and
+the helm then closes every open tunnel. The golden `settings-terminal` is decided for the Mac on every machine, so it
+shows the switch.
 
 The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener and
 opens it at Sessions; the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity
@@ -86,6 +81,18 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `a_refused_link_choice_shows_the_stored_choice_and_a_failure_line`,
   `an_unset_or_unknown_link_choice_reads_as_intercept`. The arrows, Space and the description lines as accessible
   descriptions are the radio group's own, which its tests in `components/tests/radio_group.rs` cover.
+- Terminal's tunnel switch, which no browser spec covered (it was the Mac app's only):
+  `the_tunnel_switch_is_drawn_only_on_the_mac` (none on Linux),
+  `the_terminal_section_offers_the_link_choices_with_their_risks` (the switch, its name, role, place and help),
+  `the_tunnel_switch_turns_on_only_through_the_warning` (Cancel saves nothing and returns focus to what held it, the
+  switch under the Linux click rule; Allow saves only `tunnel_consent: true`, with no optimistic copy),
+  `a_refused_allow_leaves_the_switch_off_with_the_helms_words`,
+  `turning_tunnels_off_saves_at_once_and_a_refusal_restores_on`,
+  `a_tunnel_press_during_another_save_asks_nothing_and_says_why`,
+  `turning_tunnels_off_during_another_save_sends_nothing_and_says_why`, and
+  `an_allow_whose_save_meets_another_says_so_under_the_switch`. The warning itself, its words and its save are the
+  terminal area's (`docs/gpui/parity/terminal.md`). Pending: focus after a mouse press and Cancel on a Mac, where the
+  click leaves the switch unfocused and focus goes back to what held it before; the tests decide focus by Linux's rule.
 - Agent trust's hint switches ("settings reports and reverts a refused ${choice.field} save" for
   `claude_trust_hint_dismissed` and `codex_trust_hint_dismissed`): they save and refuse as every preference switch does,
   in `a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switch`, and
@@ -515,8 +522,28 @@ Where the port does not match the old app, and why. Each stays until the work na
   2026-11-14, under its goal's instruction not to request a key for helm configuration before it is needed: the embedded
   helm answers these saves in milliseconds, so they rarely meet. The old trust switches each had their own request and
   were unavailable only while their own save ran.
-- **Terminal has no tunnel consent switch yet.** It waits for the terminal area's consent question (see the NOTE under
-  `tests/settings.spec.ts` above).
+- **The tunnel switch looks and behaves like the other switches where the old one did not.** Its help sits 4 pixels
+  under it, as every switch's does, where the old desktop switch and its help were separate children of the section, 14
+  pixels apart. It has hover help (the help's first sentence), which every control here has; the old one had none. It
+  shows the pushed preference from the start, where the old one was unavailable until its own read of the preferences
+  answered. And a press while another Settings save is in flight asks nothing and says why (below), where the old switch
+  was unavailable while any tunnel action ran. Like the old one, it is drawn only on the Mac: the old desktop app was
+  the Mac app, and on Linux the terminal offers no tunnel while the switch, its help and its warning speak of this Mac.
+  SPEC.md's "In the desktop app, the Terminal section also has tunnel consent" names no platform, while its tunnel
+  paragraph offers tunnels "In the Mac app".
+- **Turning the tunnel switch off shows off while the save is in flight.** The old switch held its last acknowledged
+  value in both directions while a request ran. Here turning it off is a draft's save like any switch's, which shows the
+  value being saved (the area's no-optimistic-copy rule allows a pending value only as the draft); turning it on still
+  shows the stored value until the helm pushes consent.
+- **When Allow's save meets another preference save, the terminal's busy words show under the tunnel switch.** The press
+  checks the preference row's key before asking, so this happens only when a save starts while the warning is up. The
+  words are the terminal area's tunnel entry point's ("Another change to the preferences is still being saved; try
+  again"), not Settings' own busy line ("Not saved: another save was in progress. Try again."), since the entry point
+  reports its refusal as text.
+- **A tunnel switch refusal that arrives after Settings has closed is shown nowhere.** The old app's tunnel controller
+  put such a failure in its global tunnel notice when no control was left to show it. Here, as for every Settings save,
+  the reply settles nothing on screen once the dialog is gone; with no optimistic copy the switch's stored value is
+  still right when Settings opens again.
 - **No one-pane layout at 620 pixels and below.** The old dialog showed either the section list or the section below
   that width, with "‹ Settings" to go back. The window's minimum width (720 pixels) is above it, so the layout is
   unreachable and is not built.
