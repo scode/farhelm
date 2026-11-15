@@ -12759,6 +12759,134 @@ mod client_bodies {
         }
     }
 
+    /// `GET /api/launch-history`: the helm's reply decodes into the client's `LaunchHistoryReply` with every value
+    /// intact, a launch into a disposable environment and a managed checkout included, and an ordinary launch whose
+    /// helm entry leaves out its environment target. Why: the launcher's recent folders, recent setups and stale-preview
+    /// check all read this reply, and a field renamed on one side would quietly empty them. Destructured without `..`,
+    /// so a field added on either side fails to compile here until it is checked.
+    #[test]
+    fn a_launch_history_reply_decodes_on_the_client() {
+        use super::super::LaunchHistoryBody;
+        use farhelm_proto::session_requests::{
+            FolderHistoryEntry, LaunchHistoryEntry, LaunchHistoryReply,
+        };
+        let selection = LaunchSelection {
+            permission_flags: None,
+            harness: LaunchHarness::Codex,
+            model: Some("gpt-5".into()),
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            wrapper_prefix: Some(vec!["with-env".into()]),
+            container: None,
+            workspace_trust: None,
+        };
+        let environment = farhelm_proto::LaunchTarget::Environment {
+            recipe: "rust".into(),
+            place: farhelm_proto::Place::PodmanHost(4),
+        };
+        let repo = farhelm_proto::GithubRepo {
+            owner: "acme".into(),
+            name: "bar".into(),
+        };
+        let reply = LaunchHistoryBody {
+            launches: vec![
+                super::store::LaunchHistoryEntry {
+                    host: 7,
+                    target: Some(environment.clone()),
+                    github_repo: Some(repo.clone()),
+                    canonical_cwd: Some("/home/user".into()),
+                    cwd: "~".into(),
+                    selection: selection.clone(),
+                    created_at: 1_700_000_000,
+                    creation_seq: Some(12),
+                },
+                super::store::LaunchHistoryEntry {
+                    host: 7,
+                    target: None,
+                    github_repo: None,
+                    canonical_cwd: None,
+                    cwd: "~/src".into(),
+                    selection: selection.clone(),
+                    created_at: 1_600_000_000,
+                    creation_seq: None,
+                },
+            ],
+            folders: vec![super::store::FolderHistoryEntry {
+                host: 7,
+                canonical_cwd: "/home/user/src".into(),
+                canonical_proven: true,
+                display_cwd: "~/src".into(),
+                created_at: 1_600_000_000,
+                creation_seq: Some(3),
+            }],
+            checkout_config_revision: 5,
+        };
+        let LaunchHistoryReply {
+            launches,
+            folders,
+            checkout_config_revision,
+        } = decode(&reply);
+        assert_eq!(checkout_config_revision, 5);
+        let [first, second] = &launches[..] else {
+            panic!("two launches, not {}", launches.len());
+        };
+        let LaunchHistoryEntry {
+            host,
+            target,
+            github_repo,
+            canonical_cwd,
+            cwd,
+            selection: chosen,
+            created_at,
+            creation_seq,
+        } = first;
+        assert_eq!(
+            (
+                *host,
+                target,
+                github_repo,
+                canonical_cwd.as_deref(),
+                cwd.as_str()
+            ),
+            (7, &Some(environment), &Some(repo), Some("/home/user"), "~")
+        );
+        assert_eq!(
+            (chosen, *created_at, *creation_seq),
+            (&selection, 1_700_000_000, Some(12))
+        );
+        assert_eq!(
+            (
+                &second.target,
+                &second.github_repo,
+                &second.canonical_cwd,
+                second.creation_seq
+            ),
+            (&None, &None, &None, None),
+            "an ordinary launch's left-out fields decode as absent"
+        );
+        let [folder] = &folders[..] else {
+            panic!("one folder, not {}", folders.len());
+        };
+        let FolderHistoryEntry {
+            host,
+            canonical_cwd,
+            canonical_proven,
+            display_cwd,
+            created_at,
+            creation_seq,
+        } = folder;
+        assert_eq!(
+            (
+                *host,
+                canonical_cwd.as_str(),
+                *canonical_proven,
+                display_cwd.as_str()
+            ),
+            (7, "/home/user/src", true, "~/src")
+        );
+        assert_eq!((*created_at, *creation_seq), (1_600_000_000, Some(3)));
+    }
+
     /// `POST /api/browse-directory`: the launcher's folder check and its Browse send the shared client body, which
     /// decodes into `BrowseDirectoryReq` with every value intact, and the helm's reply decodes into the client's reply
     /// type. Destructured without `..`, so a field added on either side fails to compile here until it is checked.

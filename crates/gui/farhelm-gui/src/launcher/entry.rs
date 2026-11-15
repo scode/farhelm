@@ -469,7 +469,7 @@ fn open_host(collections: &Collections, selected: Option<&str>) -> Option<i64> {
 
 /// The helm's own host, New's and Clone's fallback target: "the helm's own host" in SPEC.md, "Host". `None` only
 /// before the helm has reported it.
-fn local_host(collections: &Collections) -> Option<i64> {
+pub(super) fn local_host(collections: &Collections) -> Option<i64> {
     collections
         .ordered::<HostView>()
         .into_iter()

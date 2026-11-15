@@ -2,7 +2,8 @@
 //! (`POST /api/sessions`), Restart with (`POST /api/sessions/{id}/restart`) and
 //! Replace and Replace with (`POST /api/sessions/{id}/replace`), plus the
 //! launcher's reads and their replies: the folder read
-//! (`POST /api/browse-directory`), and the managed-checkout destination's
+//! (`POST /api/browse-directory`), the launch history
+//! (`GET /api/launch-history`), and the managed-checkout destination's
 //! repository suggestions (`POST /api/github-repositories`) and checkout
 //! preview (`POST /api/github-checkout-preview`).
 //!
@@ -30,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
 use crate::AcceptedGithubPreview;
-use crate::{CommandLaunch, GithubCheckoutRequest, GithubRepo, LaunchSelection};
+use crate::{CommandLaunch, GithubCheckoutRequest, GithubRepo, LaunchSelection, LaunchTarget};
 
 /// `POST /api/sessions`: one create.
 ///
@@ -183,4 +184,50 @@ pub struct GithubCheckoutPreviewBody {
     pub expected_incarnation: Option<u64>,
     pub repo: String,
     pub title: Option<String>,
+}
+
+/// The helm's answer to `GET /api/launch-history?host=<id>`: what launched successfully before on that host's current
+/// installation, which the launcher offers again as recent folders and recent setups, and the checkout configuration's
+/// revision when it was read.
+///
+/// The helm answers only for a connected host, from the history its live connection claims (never a registry row
+/// alone), so a retargeted row never offers the replaced installation's folders; a host that reports no identity has no
+/// history. Both lists come newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct LaunchHistoryReply {
+    pub launches: Vec<LaunchHistoryEntry>,
+    pub folders: Vec<FolderHistoryEntry>,
+    /// The checkout configuration's revision as of this read. A higher revision than any seen means the checkout
+    /// folders may have moved, so a checkout preview taken before it is stale.
+    pub checkout_config_revision: i64,
+}
+
+/// One earlier successful agent launch: its destination and the choices it was made with, without its title or
+/// conversation, which belong to that session only.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct LaunchHistoryEntry {
+    pub host: i64,
+    /// A disposable environment's recipe and place, for a launch that created one.
+    pub target: Option<LaunchTarget>,
+    /// The repository of a launch into a fresh managed checkout; reusing it asks for a new checkout preview.
+    pub github_repo: Option<GithubRepo>,
+    /// The folder's identity as the launch accepted it; `None` for an older entry, whose `cwd` spelling is all there is.
+    pub canonical_cwd: Option<String>,
+    pub cwd: String,
+    pub selection: LaunchSelection,
+    pub created_at: i64,
+    pub creation_seq: Option<u64>,
+}
+
+/// One folder a launch on this host started in, as the user typed it (`display_cwd`), with the identity the host
+/// resolved it to for telling two spellings of one folder apart.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FolderHistoryEntry {
+    pub host: i64,
+    pub canonical_cwd: String,
+    /// Whether a successful launch proved `canonical_cwd`; `false` for an older spelling the helm may refine later.
+    pub canonical_proven: bool,
+    pub display_cwd: String,
+    pub created_at: i64,
+    pub creation_seq: Option<u64>,
 }

@@ -243,6 +243,8 @@ impl Launcher {
                 self.choose_permissions(permission.permission(), window, cx)
             }
             Row::UsePath(path) => {
+                // A folder taken from search is a pick, not typing: the folder list shows every recent folder again.
+                self.folder_picked();
                 self.draft.edit_folder(path);
                 self.sync_fields(window, cx);
                 self.changed(cx);

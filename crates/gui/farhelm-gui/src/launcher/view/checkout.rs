@@ -503,9 +503,7 @@ impl Launcher {
     /// never accepted. A lower or equal one is only noted. The revision never goes back down: an older read answering
     /// late cannot undo a newer one.
     ///
-    /// Called by the launcher's launch-history read, which brings the revision; until that read exists only the tests
-    /// call it.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Called by the launcher's launch-history read (`history`), which brings the revision with every answer.
     pub(crate) fn observe_checkout_config_revision(
         &mut self,
         revision: i64,

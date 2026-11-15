@@ -759,7 +759,7 @@ fn what_a_preview_answers_for_asks_again_and_late_answers_never_apply(cx: &mut T
         "an answer about the old connection is not one"
     );
     let after = sent(&mut helm, cx);
-    answer_trash_read(&mut helm, cx, &after);
+    answer_reconnect_reads(&mut helm, cx, &after);
     let sixth = to(&after, PREVIEW);
     let [sixth] = &sixth[..] else {
         panic!("one preview for the new connection");
@@ -786,8 +786,8 @@ fn what_a_preview_answers_for_asks_again_and_late_answers_never_apply(cx: &mut T
 }
 
 /// Push host1 as connected on connection `incarnation`, as the helm does after the host reconnects. The app's Trash
-/// then reads that host's checkout trash, which the caller answers in its place in the fake's order (see
-/// [`answer_trash_read`]).
+/// then reads that host's checkout trash and the launcher rereads its launch history, which the caller answers in their
+/// places in the fake's order (see [`answer_reconnect_reads`]).
 fn reconnect(helm: &mut FakeHelm, cx: &mut VisualTestContext, incarnation: u64) {
     let mut host = hosts().remove(0);
     host.incarnation = incarnation;
@@ -803,14 +803,37 @@ fn reconnect(helm: &mut FakeHelm, cx: &mut VisualTestContext, incarnation: u64) 
     settle(cx);
 }
 
-/// Answer the one checkout-trash read among `commands` with a timeout, which the Trash shows as its own failure. The
-/// fake answers commands in the order they were sent, so this comes before answering anything sent after it.
-fn answer_trash_read(helm: &mut FakeHelm, cx: &mut VisualTestContext, commands: &[FakeCommand]) {
+/// Answer the reads a reconnect sends among `commands`: the one checkout-trash read with a timeout, which the Trash
+/// shows as its own failure, and the launcher's reread of the host's launch history with no body, so the launcher
+/// offers no history and observes no new configuration revision. The fake answers commands in the order they were
+/// sent, so both are answered in that order, before anything sent after them.
+fn answer_reconnect_reads(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    commands: &[FakeCommand],
+) {
     let reads = to(commands, "/api/checkout-trash/list");
-    let [read] = &reads[..] else {
-        panic!("one trash read after the reconnect, not {}", reads.len());
-    };
-    helm.reply(read.id, 504, Some(json!("the host timed out")));
+    assert_eq!(
+        reads.len(),
+        1,
+        "one trash read after the reconnect, not {}",
+        reads.len()
+    );
+    let mut answered: Vec<&FakeCommand> = commands
+        .iter()
+        .filter(|command| {
+            command.path == "/api/checkout-trash/list"
+                || command.path.starts_with("/api/launch-history")
+        })
+        .collect();
+    answered.sort_by_key(|command| command.id);
+    for command in answered {
+        if command.path.starts_with("/api/launch-history") {
+            helm.reply(command.id, 200, None);
+        } else {
+            helm.reply(command.id, 504, Some(json!("the host timed out")));
+        }
+    }
     settle(cx);
 }
 
