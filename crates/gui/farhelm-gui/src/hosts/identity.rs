@@ -1,9 +1,8 @@
 //! How a host is named and marked: the one home of a registered host's display name ([`display_name`]), its identity
 //! mark, its chosen shape in its chosen color ([`host_mark`]), and what its phase is called ([`phase`]).
 //!
-//! The rail, the Hosts panel, Add host and the launcher read these from here, and host settings will too when it
-//! arrives, so that no area reaches into another's private module for them and every surface names and marks a host
-//! the same way.
+//! The rail, the Hosts panel, Add host, the launcher, and the host menu and settings read these from here, so that no
+//! area reaches into another's private module for them and every surface names and marks a host the same way.
 //!
 //! [`phase`] holds a phase's words, its tone (the color group of its dot and words), its hover, and the detail lines
 //! under a host's row. It is `pub(crate)` so that the launcher's host picker can show the phase words; the detail
@@ -76,8 +75,9 @@ fn glyph(icon: HostIcon) -> Icon {
 }
 
 /// The token a host color tints with: the palette's `host` entry at the color's place in `HostColor::ALL` less one
-/// (`--host-icon-<color>`), and the ordinary foreground for the default color, as the old mark's inline style did.
-fn tint(color: HostColor, palette: &Palette) -> Token {
+/// (`--host-icon-<color>`), and the ordinary foreground for the default color, as the old mark's inline style did. The
+/// host settings' color swatches fill with it too, so a swatch and the mark it picks never disagree.
+pub(crate) fn tint(color: HostColor, palette: &Palette) -> Token {
     match color {
         HostColor::Default => palette.fg_0,
         HostColor::Lavender => palette.host[0],

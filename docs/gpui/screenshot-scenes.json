@@ -692,6 +692,21 @@
       "reference": "hosts-panel-host-unreachable"
     },
     {
+      "golden": "host-menu",
+      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, and Settings (its only command so far) highlighted",
+      "reference": "host-menu"
+    },
+    {
+      "golden": "host-settings-dialog",
+      "title": "The host settings dialog as its menu opens it: the header with the host's mark, name, phase and build, then Connection and Appearance (no Checkouts section yet)",
+      "reference": "host-settings-dialog"
+    },
+    {
+      "golden": "host-settings-dialog-end",
+      "title": "The host settings dialog scrolled to its end: the Permissions switches with their help",
+      "reference": "host-settings-dialog-end"
+    },
+    {
       "golden": "host-add-dialog",
       "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, Cancel and Add",
       "reference": "host-add-dialog"

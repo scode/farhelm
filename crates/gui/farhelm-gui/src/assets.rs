@@ -52,6 +52,8 @@
 //! So is the Add glyph (`ActionGlyph::Add`, a plus), on the host rail's Add host, in the same box and stroke.
 //!
 //! The Checkouts section glyph is the old app's `FolderIcon`, in its own 12-unit box with the same 1.2 stroke.
+//!
+//! The host menu's Update glyph is the old app's too (`ActionGlyph::Update`), in the same box and stroke.
 
 use std::borrow::Cow;
 
@@ -165,6 +167,8 @@ pub enum Icon {
     /// Two curved arrows chasing each other round: restart the agent and resume its conversation (the old app's Restart
     /// glyph, on the session header's Restart).
     Restart,
+    /// An arrow up from a line: update a host's Farhelm (the old app's Update glyph, on the host menu's Update).
+    Update,
     /// A shield with a tick: the Settings dialog's Agent trust section (the old app's Agent trust glyph).
     AgentTrust,
     /// A plus: add something new (the old app's Add glyph, on the host rail's Add host).
@@ -225,6 +229,7 @@ impl Icon {
         Icon::Appearance,
         Icon::Terminal,
         Icon::Restart,
+        Icon::Update,
         Icon::AgentTrust,
         Icon::Add,
         Icon::Templates,
@@ -275,6 +280,7 @@ impl Icon {
             Icon::Appearance => "icons/appearance.svg",
             Icon::Terminal => "icons/terminal.svg",
             Icon::Restart => "icons/restart.svg",
+            Icon::Update => "icons/update.svg",
             Icon::AgentTrust => "icons/agent-trust.svg",
             Icon::Add => "icons/add.svg",
             Icon::Templates => "icons/templates.svg",
@@ -341,6 +347,7 @@ impl Assets {
             "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
             "icons/agent-trust.svg" => Some(include_bytes!("../assets/icons/agent-trust.svg")),
             "icons/folder.svg" => Some(include_bytes!("../assets/icons/folder.svg")),
+            "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

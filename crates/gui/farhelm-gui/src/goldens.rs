@@ -8,8 +8,8 @@
 //! editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, and with a
-//! host failing to connect), and the Add host dialog and the setup confirmation it leads to, in both appearances,
-//! compared pixel for pixel.
+//! host failing to connect), the Add host dialog and the setup confirmation it leads to, a host's actions menu, and the
+//! host settings dialog at its top and scrolled to its end, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -2075,6 +2075,110 @@ fn hosts_panels(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement 
         .into_any_element()
 }
 
+/// A host scene's one remaining step (opening the menu, scrolling the dialog), kept among the scene's kept values until
+/// a frame makes it possible. It runs once: run on every frame, its own redraw would ask for the next frame forever.
+struct Pending(Cell<bool>);
+
+/// Whether the scene's [`Pending`] step is still to run, marking it run.
+fn take_pending(state: &SceneState) -> bool {
+    state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<Pending>())
+        .is_some_and(|pending| pending.0.replace(false))
+}
+
+/// The reference screens' hosts in the Hosts panel, then `build-box`'s menu opened from its toggle (reference
+/// `host-menu`): the header naming it, its destination and build, and Settings, its one command so far, highlighted.
+/// The menu opens through [`host_menu_scene`] once the toggle has been drawn.
+fn host_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), false, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(Cell::new(true))));
+}
+
+/// The Hosts panel at the scene's left, so its menu has room beside it, and once its toggles have been drawn, one press
+/// of `build-box`'s toggle after that frame.
+fn host_menu_scene(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let panel = state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<Entity<HostsPanel>>().cloned());
+    if let Some(panel) = panel
+        && panel.read(cx).toggle_drawn(2)
+        && take_pending(state)
+    {
+        window.defer(cx, move |window, cx| {
+            panel.update(cx, |panel, cx| panel.toggle_menu(2, window, cx))
+        });
+    }
+    div()
+        .size_full()
+        .child(hosts_panels(state, window, cx))
+        .into_any_element()
+}
+
+/// The reference screens' hosts, with `build-box`'s settings open as its menu opens them (reference
+/// `host-settings-dialog`): the header with its mark, name, phase and build, then Connection and Appearance, focus on
+/// the destination's Edit. The dialog opens once the connection has a UI session, whose store the snapshot made, as
+/// [`settings_scene`] opens Settings. The fake, the connection and the watch are kept for the scene's life.
+fn host_settings_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(
+        &crate::hosts::tests::reference_hosts(),
+    )]);
+    let handle = window.window_handle();
+    // The scene's ring handle stands in for the menu's toggle, as it stands in for the gear in the Settings scenes.
+    let opener = state.ring.clone();
+    let opened = Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::hosts::open_settings(2, &opener, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// The host settings dialog, then (reference `host-settings-dialog-end`) its body scrolled to its end.
+fn host_settings_dialog_end_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    host_settings_dialog_setup(state, window, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(Cell::new(true))));
+}
+
+/// Once the dialog is open, one turn of the wheel over its body, after that frame, far enough to reach its end.
+fn host_settings_dialog_end(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    if layers::any_open(window, cx) && take_pending(state) {
+        window.defer(cx, |window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                    // The middle of the scene, which the dialog's body covers whatever its header's height.
+                    position: point(px(280.), px(500.)),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-4000.))),
+                    ..Default::default()
+                }),
+                cx,
+            );
+        });
+    }
+    div().into_any_element()
+}
+
 /// The session list a scene's setup made, in a column of the sidebar's width and surface.
 fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
@@ -2355,6 +2459,24 @@ static SCENES: &[Scene] = &[
         size: (364., 418.),
         draw: hosts_panels,
         setup: hosts_panel_host_unreachable_setup,
+    },
+    Scene {
+        name: "host-menu",
+        size: (640., 418.),
+        draw: host_menu_scene,
+        setup: host_menu_setup,
+    },
+    Scene {
+        name: "host-settings-dialog",
+        size: (560., 1000.),
+        draw: empty,
+        setup: host_settings_dialog_setup,
+    },
+    Scene {
+        name: "host-settings-dialog-end",
+        size: (560., 1000.),
+        draw: host_settings_dialog_end,
+        setup: host_settings_dialog_end_setup,
     },
     Scene {
         name: "tab-strip",

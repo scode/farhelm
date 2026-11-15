@@ -6,7 +6,7 @@
 //! (`ProvisioningMenuState::offered`) and the stylesheet's `.hosts-heading` and `.host-row` rules at reference commit
 //! `24bc0580`.
 //!
-//! ## Entry point
+//! ## Entry points
 //!
 //! [`HostsPanel`] is the view. The sidebar makes one with `cx.new(HostsPanel::new)` and keeps it for the window's life,
 //! drawing it as a child in place of the session list's column while Hosts is pressed and not drawing it otherwise.
@@ -14,6 +14,10 @@
 //! the current ... details choice"); nothing in the panel needs to run while it is hidden, since everything it shows is
 //! read from the store when it draws. It fills the box it is given and scrolls its rows inside it, so the box needs a
 //! definite height.
+//!
+//! [`open_menu`] opens a host's actions menu at an anchor ([`menu`]): the panel's row toggle calls it, and the host
+//! rail's avatar menu will. [`open_settings`] opens a host's settings dialog ([`settings`]), which the menu's Settings
+//! calls.
 //!
 //! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button call. A new host
 //! without Farhelm goes on to the setup confirmation and the setup's submission ([`setup`]); a setup the helm refused
@@ -26,10 +30,11 @@
 //! A heading band with the host count ("Hosts 3", read out as "3 hosts") and the Details switch, then one row per host
 //! in the registry's order, session-owned hosts included (SPEC.md: they "participate in ordinary host management"). A
 //! row is the host's identity mark, its name (the alias, else the helm's display name, "Local (this machine)" for the
-//! local host under the registry's own name; the destination behind an alias shows in the details), and its phase dot
-//! and words ([`identity::phase`]). Under it, while the row is open, the details: the destination behind an alias,
-//! what the helm knows about the phase (for a connected host its version, identity and session count) and the remedy
-//! where waiting will not help. The last refusal of work on the host shows under the row whether it is open or not.
+//! local host under the registry's own name; the destination behind an alias shows in the details), its phase dot
+//! and words ([`identity::phase`]), and the ⋯ toggle that opens its actions menu. Under it, while the row is open, the
+//! details: the destination behind an alias, what the helm knows about the phase (for a connected host its version,
+//! identity and session count) and the remedy where waiting will not help. The last refusal of work on the host shows
+//! under the row whether it is open or not.
 //!
 //! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): its last provisioning
 //! run failed, the last work on it was refused, or it is the helm's own machine with no supervisor running. The switch
@@ -48,28 +53,36 @@
 //! ## Not drawn yet
 //!
 //! NOTE: Each arrives with the piece of the port that gives it something to do: Update all and the add button in the
-//! heading, the row's actions toggle and the menu it opens, the inline `↑ Update` button, setup and Update progress
-//! (the inline status, the step list, the one-off opening of a row for a run and its fold). The toggle's place at the
-//! row's end is kept empty, at its width, so the phase words sit where they will sit beside it, and the heading keeps
-//! its old height. [`offers::offers`] already says what the menu will offer.
+//! heading, the inline `↑ Update` button, setup and Update progress (the inline status, the step list, the one-off
+//! opening of a row for a run and its fold). The heading keeps its old height meanwhile.
 
 pub mod add;
 pub(crate) mod identity;
+mod menu;
 pub(crate) mod offers;
+mod settings;
 pub(crate) mod setup;
+
+pub use menu::open_menu;
+pub use settings::open_settings;
 
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::collections::HashMap;
+
 use farhelm_proto::provisioning::ProvisioningView;
-use farhelm_proto::ui_channel::{Availability, Collection, HostView};
+use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use gpui::{
-    AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, Role,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    AnyElement, Context, Div, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, div, px,
 };
 
 use crate::components::{Checkbox, HoverHelp, StatusMark};
+use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
+use crate::layers::{self, Anchor, LayerId};
 use crate::operations::{Failure, OpKey};
 use crate::render_count;
 use crate::session;
@@ -104,11 +117,6 @@ const NAME_FLOOR: f32 = 52.;
 /// `.host-status`'s gap between the dot and the words.
 const STATUS_GAP: f32 = 5.;
 
-/// The actions toggle's width at the row's end (`.host-row-menu`: the ⋯ at 14 pixels inside 5 pixels of padding a
-/// side) and its right margin. Kept empty until the toggle is drawn.
-const TOGGLE_WIDTH: f32 = 24.;
-const TOGGLE_MARGIN: f32 = 2.;
-
 /// `.host-detail` and its siblings: their side padding, the pixel above each line, and their line height (the old
 /// `normal` line height of 12-pixel Inter, as the reference screens measure it).
 const DETAIL_PAD_X: f32 = 12.;
@@ -126,6 +134,13 @@ const ERROR_PAD_TOP: f32 = 2.;
 pub struct HostsPanel {
     /// The Details switch: whether every row is open. Starts off and is never saved.
     details: bool,
+    /// The host whose menu a row toggle last opened, and the menu's layer: what draws that toggle pressed and makes a
+    /// second press close the menu. Checked with the layer manager whenever it is read, so a menu closed some other
+    /// way (Escape, a press outside, a chosen command) needs no bookkeeping here.
+    menu: Option<(i64, LayerId)>,
+    /// Each drawn row's toggle, by host id, as last drawn: its anchor and its focus handle, which a press of the toggle
+    /// opens the menu at ([`HostsPanel::toggle_menu`]). A row not drawn last frame has none.
+    toggles: HashMap<i64, (Anchor, FocusHandle)>,
     /// Redraws the panel when its top line changes (a setup refused after the user moved on, a refused "don't ask
     /// again"): that line lives in a global of the setup module, which notifies no view by itself.
     _lines: Subscription,
@@ -137,6 +152,8 @@ impl HostsPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         HostsPanel {
             details: false,
+            menu: None,
+            toggles: HashMap::new(),
             _lines: setup::observe_panel_lines(cx),
         }
     }
@@ -145,6 +162,34 @@ impl HostsPanel {
     fn set_details(&mut self, on: bool, cx: &mut Context<Self>) {
         self.details = on;
         cx.notify();
+    }
+
+    /// `host`'s row toggle was pressed: close its menu if it is open, and open it otherwise, beside the toggle with
+    /// focus going back to it when it closes ([`open_menu`]). Does nothing for a row not drawn last frame. Another
+    /// host's open menu has already closed by then, since the press was outside it. Visible to the crate for the
+    /// screenshot goldens, which open a menu without a click.
+    pub(crate) fn toggle_menu(&mut self, host: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((anchor, opener)) = self.toggles.get(&host).cloned() else {
+            return;
+        };
+        if let Some((open, layer)) = self.menu.take()
+            && open == host
+            && layers::is_open(layer, window, cx)
+        {
+            layers::close(layer, window, cx);
+            cx.notify();
+            return;
+        }
+        let mark = Mark::take(cx);
+        self.menu = open_menu(host, anchor, &opener, &mark, window, cx).map(|layer| (host, layer));
+        cx.notify();
+    }
+
+    /// Whether `host`'s row toggle was drawn last frame, so a golden scene presses it only once that press can open
+    /// the menu.
+    #[cfg(test)]
+    pub(crate) fn toggle_drawn(&self, host: i64) -> bool {
+        self.toggles.contains_key(&host)
     }
 
     /// Turn Details on or off from a test or a golden scene, as a toggle of the switch would.
@@ -180,10 +225,11 @@ struct RowInput<'a> {
 }
 
 impl Render for HostsPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("hosts-panel", cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
+        let mut toggles = self.toggles(window, cx);
         let operations = session::current_operations(cx);
         let mut status = None;
         let mut drawn: Vec<AnyElement> = Vec::new();
@@ -224,7 +270,7 @@ impl Render for HostsPanel {
                             refusal: operations
                                 .and_then(|operations| operations.failure(&OpKey::host(&key))),
                         };
-                        self.row(&input, &twin, palette)
+                        self.row(&input, &twin, toggles.remove(&host.id), palette)
                     })
                     .collect();
             }
@@ -324,12 +370,48 @@ impl Render for HostsPanel {
 }
 
 impl HostsPanel {
-    /// One host's row (`.host-row`): its header line, then its details while it is open, then the last refusal of work
-    /// on it, which shows open or not. `twin` names a host by id for a duplicate's details.
+    /// Every listed host's menu toggle ([`menu::toggle`]), by host id, the one whose menu is open drawn pressed, with
+    /// each one's anchor and focus handle recorded for [`HostsPanel::toggle_menu`]. Made before the rows, which borrow
+    /// the store, since a toggle's anchor and focus handle are element state.
+    fn toggles(&mut self, window: &mut Window, cx: &mut Context<Self>) -> HashMap<i64, AnyElement> {
+        let listed: Vec<(i64, HostText)> = session::current_store(cx)
+            .map(|store| {
+                let collections = store.read(cx).collections();
+                collections
+                    .ordered::<HostView>()
+                    .into_iter()
+                    .map(|host| (host.id, display_name(host)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let open = self
+            .menu
+            .filter(|(_, layer)| layers::is_open(*layer, window, cx))
+            .map(|(host, _)| host);
+        self.toggles.clear();
+        listed
+            .into_iter()
+            .map(|(id, name)| {
+                let parts = menu::toggle_parts(id, window, cx);
+                let panel = cx.weak_entity();
+                let toggle =
+                    menu::toggle(id, &name, open == Some(id), &parts, move |window, cx| {
+                        let _ = panel.update(cx, |panel, cx| panel.toggle_menu(id, window, cx));
+                    });
+                self.toggles.insert(id, parts);
+                (id, toggle)
+            })
+            .collect()
+    }
+
+    /// One host's row (`.host-row`): its header line ending in its menu `toggle`, then its details while it is open,
+    /// then the last refusal of work on it, which shows open or not. `twin` names a host by id for a duplicate's
+    /// details.
     fn row(
         &self,
         input: &RowInput,
         twin: &impl Fn(i64) -> Option<HostText>,
+        toggle: Option<AnyElement>,
         palette: &Palette,
     ) -> AnyElement {
         let host = input.host;
@@ -359,7 +441,7 @@ impl HostsPanel {
                     .text_color(theme::color(palette.fg_0)),
             )
             .child(phase_status(host, palette))
-            .child(div().flex_none().w(px(TOGGLE_WIDTH)).mr(px(TOGGLE_MARGIN)));
+            .children(toggle);
         let lines: Vec<AnyElement> = if open {
             phase::detail_lines(host, twin)
                 .into_iter()
@@ -479,24 +561,30 @@ fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
             )
             .ink(ink)
             .described(offers::runs_newer_version(&host.state))
-            .content(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(STATUS_GAP))
-                    .whitespace_nowrap()
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(metrics::STATUS_DOT)
-                            .rounded_full()
-                            .bg(theme::color(ink)),
-                    )
-                    .child(div().min_w_0().truncate().child(words)),
-            ),
+            .content(phase_dot_and_words(&host.state, palette)),
         )
         .into_any_element()
+}
+
+/// A phase's dot and words in its tone's ink, on one line, the words cut short when they do not fit: what a row's
+/// status and the host settings' header both show (the old `.host-status` span, which both drew).
+fn phase_dot_and_words(state: &HostStateView, palette: &Palette) -> Div {
+    let ink = tone_ink(phase::tone(state), palette);
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(STATUS_GAP))
+        .whitespace_nowrap()
+        .text_color(theme::color(ink))
+        .child(
+            div()
+                .flex_none()
+                .size(metrics::STATUS_DOT)
+                .rounded_full()
+                .bg(theme::color(ink)),
+        )
+        .child(div().min_w_0().truncate().child(phase::words(state)))
 }
 
 /// The ink of a phase's tone (the old `.host-status.<class>` colors).
