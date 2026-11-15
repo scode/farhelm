@@ -297,11 +297,12 @@ pub enum Fact {
 pub enum Shape {
     /// On one line in the monospace face, scrolling sideways within itself: paths, repositories, SSH destinations.
     OneLine,
-    /// Wrapped in full in the monospace face: a URL and permission flags, whose tails must stay visible.
+    /// Wrapped in full in the monospace face: a URL and permission flags, whose tails must stay visible, and a box of
+    /// what a shell reads (a command, a resume command, wrapper words).
     WrappedMono,
     /// Drawn as a chip: a template's stored permission label and its YOLO assertion.
     Chip,
-    /// Wrapped in the interface face: names, titles and the app's own words.
+    /// Wrapped in the interface face: names, titles, the app's own words, and a prompt's box.
     Wrapped,
 }
 
@@ -345,7 +346,11 @@ impl Fact {
             },
             Fact::Words("asserted YOLO", _) => Shape::Chip,
             Fact::Identity(..) | Fact::CopyIdentity(..) => Shape::OneLine,
-            Fact::Box(..) | Fact::Words(..) | Fact::Permission(_) => Shape::Wrapped,
+            // A prompt is prose and keeps the interface face (the old `.approval-card-prompt`); every other box holds
+            // what a shell reads (a command, a resume command, wrapper words) in the monospace face (the old `pre`).
+            Fact::Box("initial prompt" | "prompt", _) => Shape::Wrapped,
+            Fact::Box(..) => Shape::WrappedMono,
+            Fact::Words(..) | Fact::Permission(_) => Shape::Wrapped,
         }
     }
 }

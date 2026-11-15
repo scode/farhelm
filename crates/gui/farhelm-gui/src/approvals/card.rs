@@ -30,7 +30,7 @@ use super::model::{
     TRUSTED_WORKSPACE, count, sentence_case,
 };
 use crate::assets;
-use crate::components::{Button, HoverHelp, StatusMark, Tier, copy_button};
+use crate::components::{Button, HoverHelp, ScrollBox, StatusMark, Tier, copy_button};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, Palette, metrics};
 
@@ -493,17 +493,38 @@ fn permission(chips: &Chips, palette: &Palette) -> AnyElement {
 }
 
 /// A long text under its label, in a bounded box that keeps every line (`.approval-card-command` and
-/// `.approval-card-block`): it shrinks toward two lines before the fact list needs to scroll, and grows to six.
+/// `.approval-card-block`): it shrinks toward two lines before the fact list needs to scroll, and grows to six. The box
+/// is the shared keyboard-scrollable one ([`ScrollBox`]), a tab stop named for its label as the old labelled box was, so
+/// the whole text is reachable without a pointer. Commands, resume commands and wrapper words are in the monospace face
+/// (the old `pre`); a prompt keeps the interface face (`.approval-card-prompt`), being prose.
 fn long_text(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyElement {
     let Fact::Box(_, text) = fact else {
         return div().into_any_element();
     };
+    let label = fact.label();
     // Each line its own host-text element, so a line break the agent wrote stays a line break and every character on
     // the line is escaped as host text anywhere is.
     let lines = text.raw().replace("\r\n", "\n");
-    let lines = lines
-        .split('\n')
-        .map(|line| host_text::element(&HostText::from_host(line)).min_h(BOX_LINE));
+    let lines = div().flex().flex_col().children(
+        lines
+            .split('\n')
+            .map(|line| host_text::element(&HostText::from_host(line)).min_h(BOX_LINE)),
+    );
+    let scroll = ScrollBox::new(
+        SharedString::from(format!("approval-{}-box-{index}", card.id)),
+        label.clone(),
+        HoverHelp::tooltip(format!(
+            "{label}: the whole text, scrolled from the keyboard once focused"
+        )),
+        Role::Region,
+        lines,
+    )
+    .min_height(px(3.2 * 16. + 14.))
+    .max_height(px(9.6 * 16. + 14.));
+    let scroll = match fact.shape() {
+        Shape::WrappedMono => scroll.monospace(),
+        Shape::OneLine | Shape::Wrapped | Shape::Chip => scroll,
+    };
     div()
         .flex()
         .flex_col()
@@ -516,30 +537,9 @@ fn long_text(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyEl
                 .flex_none()
                 .line_height(BOX_LABEL_LINE)
                 .text_color(theme::color(palette.fg_dim))
-                .child(fact.label()),
+                .child(label),
         )
-        .child(
-            div()
-                .id(ElementId::Name(SharedString::from(format!(
-                    "approval-{}-box-{index}",
-                    card.id
-                ))))
-                .flex()
-                .flex_col()
-                .flex_shrink_1()
-                .min_h(px(3.2 * 16. + 14.))
-                .max_h(px(9.6 * 16. + 14.))
-                .py(px(6.))
-                .px(px(8.))
-                .overflow_y_scroll()
-                .bg(theme::color(palette.well))
-                .border_1()
-                .border_color(theme::color(palette.border_row))
-                .rounded(metrics::RADIUS_SM)
-                .line_height(BOX_LINE)
-                .font_family(assets::TERMINAL_FONT)
-                .children(lines),
-        )
+        .child(scroll)
         .into_any_element()
 }
 

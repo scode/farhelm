@@ -206,6 +206,19 @@ fn facts_keep_their_layout_contracts() {
     assert!(card.boxes.iter().all(|fact| matches!(fact, Fact::Box(..))));
     assert!(card.facts.iter().all(|fact| !matches!(fact, Fact::Box(..))));
     assert_eq!(card.boxes, vec![boxed("command", "agent --go")]);
+    // A prompt is prose in the interface face; a command, a resume command and wrapper words are read character by
+    // character in the monospace face (the card draws a box's face from its shape).
+    for key in ["initial prompt", "prompt"] {
+        assert_eq!(boxed(key, "v").shape(), Shape::Wrapped, "{key}");
+    }
+    for key in [
+        "command",
+        "resume command",
+        "wrapper prefix",
+        "agent supplied wrapper",
+    ] {
+        assert_eq!(boxed(key, "v").shape(), Shape::WrappedMono, "{key}");
+    }
 }
 
 /// Labels are the app's words in sentence case; the requester's and the new session's redundant context is dropped,
