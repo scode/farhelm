@@ -28,12 +28,19 @@
 //! option, and its label kept to one line and cut with an ellipsis, since the list is exactly as wide as its control
 //! ([`crate::layers::Anchor::matching_width`]) and a native menu never wrapped an option. An unavailable choice says
 //! why after its label ([`MenuItem::suffix`]), as the old app's disabled `<option>`s did (" · " and the reason).
+//!
+//! A command that is one of a set of choices in force (the session list's orders, a `menuitemradio` in the old app)
+//! says whether it is the one in force with [`MenuItem::checked`]: it keeps its icon and its description, reports
+//! itself checked or not, and the checked one draws " ✓" after its label, as the old sheet's
+//! `.sort-menu-item[aria-checked="true"] .menu-label::after` did. That differs from a choice on purpose: a select's
+//! list marks the chosen option in the icon's place and reports it selected, while a menu's radio items keep their
+//! icons and are reported checked.
 
 use std::rc::Rc;
 
 use gpui::{
     App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
     prelude::FluentBuilder as _, px, svg,
 };
 
@@ -64,6 +71,9 @@ pub struct MenuItem {
     suffix: Option<SharedString>,
     /// Whether this is a choice ([`MenuItem::choice`]), and then whether it is the chosen one.
     chosen: Option<bool>,
+    /// Whether this command is one of a set of choices in force ([`MenuItem::checked`]), and then whether it is the
+    /// one in force.
+    checked: Option<bool>,
     help: HoverHelp,
     role: Role,
     danger: bool,
@@ -90,6 +100,7 @@ impl MenuItem {
             description: None,
             suffix: None,
             chosen: None,
+            checked: None,
             help,
             role,
             danger: false,
@@ -113,6 +124,16 @@ impl MenuItem {
         item.icon = chosen.then_some(Icon::Check);
         item.chosen = Some(chosen);
         item
+    }
+
+    /// The command is one of a set of choices in force (a menu's radio items, [`Role::MenuItemRadio`]), and `checked`
+    /// says whether it is the one in force now: reported checked or not to assistive technology, and, when checked,
+    /// " ✓" drawn after the label (see the module docs). The icon and the description stay; the accessible name stays
+    /// the label alone, without the tick, as the old item's name did. Give an item a check or a [`MenuItem::suffix`],
+    /// not both: a suffix takes the tick's place after the label.
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
+        self
     }
 
     /// Words drawn after the label on the same line, after a middle dot: why an unavailable choice cannot be chosen
@@ -196,9 +217,10 @@ impl RenderOnce for MenuItem {
 
         // A choice keeps its label (and any suffix) to one line, cut with an ellipsis: the list is as wide as its
         // control, and a pop-up menu never wrapped an option.
-        let words: SharedString = match &self.suffix {
-            Some(suffix) => format!("{} · {suffix}", self.label).into(),
-            None => self.label.clone(),
+        let words: SharedString = match (&self.suffix, self.checked) {
+            (Some(suffix), _) => format!("{} · {suffix}", self.label).into(),
+            (None, Some(true)) => format!("{} ✓", self.label).into(),
+            (None, _) => self.label.clone(),
         };
         let line = div()
             .min_w_0()
@@ -250,6 +272,13 @@ impl RenderOnce for MenuItem {
             })
             .child(copy)
             .when_some(self.chosen, |item, chosen| item.aria_selected(chosen))
+            .when_some(self.checked, |item, checked| {
+                item.aria_toggled(if checked {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
+            })
             .when_some(
                 self.description
                     .as_ref()

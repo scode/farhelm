@@ -14,7 +14,7 @@ use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, RadioGroup, RadioOption, Role};
 use crate::test_support::{bounds, center, check, click, focused_id, frame, open, redraw};
 
-use super::{held_key, press_and_draw, stroke, tooltip, wait_hover_delay};
+use super::{held_key, painted_under, press_and_draw, stroke, tooltip, wait_hover_delay};
 
 /// What the owner of a test's radio group sees: the value chosen now (its state, which the group's choices set), how
 /// many choices it heard, how often its main action ran and with which value chosen at the time, and how many Enter
@@ -504,38 +504,6 @@ fn plain_radios_refuse_the_button_group_role() {
         Role::Group,
     )
     .radios();
-}
-
-/// What the element drawn under `id` painted in `nodes`, the driver record of one frame: the strings its subtree
-/// painted, and how many SVG glyphs that subtree holds. The record has no ink colors, so a glyph's or a word's color
-/// is the goldens' to pin.
-fn painted_under(nodes: &[gpui::DriverNode], id: &str) -> (Vec<String>, usize) {
-    let root = nodes
-        .iter()
-        .position(|node| node.element_id.as_deref() == Some(id))
-        .unwrap_or_else(|| panic!("{id} was drawn"));
-    let within = |mut index: usize| loop {
-        if index == root {
-            return true;
-        }
-        match nodes[index].parent {
-            Some(parent) => index = parent,
-            None => return false,
-        }
-    };
-    let under: Vec<&gpui::DriverNode> = (0..nodes.len())
-        .filter(|&index| within(index))
-        .map(|index| &nodes[index])
-        .collect();
-    let texts = under
-        .iter()
-        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
-        .collect();
-    let glyphs = under
-        .iter()
-        .filter(|node| node.type_name.ends_with("Svg"))
-        .count();
-    (texts, glyphs)
 }
 
 /// The role, accessible name and pressed or checked state the element drawn under `id` reports in `nodes`.

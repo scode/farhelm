@@ -1,6 +1,6 @@
 //! Tests of the button: a click and Enter or Space run it once, a disabled one is inert, a busy one keeps focus, its
-//! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, and a
-//! square one keeps its side.
+//! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, a
+//! square one keeps its side, and the session list heading's padding lines its title's words up with the band's edge.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -380,5 +380,34 @@ fn a_square_button_keeps_its_side_whatever_its_tier_pads(cx: &mut TestAppContext
     assert!(
         padded.size.height > px(24.),
         "the premise: the tier's padding alone makes it larger, {padded:?}"
+    );
+}
+
+/// The session list's order title lines its words up with the heading band's edge only if its button has no padding at
+/// its sides, as the old `.session-heading .sort-title` rule had it. Specified: a ghost button with words and the heading
+/// padding has no padding at its sides and 2 pixels above and below its content, inside its 1-pixel edge.
+#[gpui::test]
+fn a_heading_button_takes_the_heading_bands_padding(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        div()
+            .flex()
+            .items_start()
+            .child(
+                Button::new(
+                    "words",
+                    "Words",
+                    HoverHelp::tooltip("A test control"),
+                    Role::Button,
+                )
+                .heading()
+                .content(div().id("words-content").w(px(50.)).h(px(16.))),
+            )
+            .into_any_element()
+    });
+    let words = bounds(cx, "words");
+    assert_eq!(
+        (f32::from(words.size.width), f32::from(words.size.height)),
+        (52., 22.),
+        "the 50-by-16 content, 2 pixels above and below it, none beside it, and the 1-pixel edge all round"
     );
 }

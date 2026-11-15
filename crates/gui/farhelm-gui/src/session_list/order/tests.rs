@@ -1,0 +1,413 @@
+//! Tests of the list's heading: the order's title and its menu, the order's write and its silent refusal, the count's
+//! words, and the Templates button.
+//!
+//! Like the rest of the list's tests, these run the real main view over the helm client's fake, which hands the test
+//! every command the window sent, and read controls from GPUI's driver record of the frame by their ids: the title is
+//! `session-order`, the menu `session-order-menu`, its items `session-order-<word>`, the count `session-count`, and the
+//! Templates button `templates-button`. They share the rail's fixtures (`host_rail/tests.rs`): sessions a and b on host
+//! 2, a open, over three hosts, with no order stored.
+//!
+//! GPUI's driver record does not carry a button's expanded state, so whether the title reports its menu open is read
+//! where the title takes it from ([`SessionList::order_menu_open`]).
+
+use farhelm_helm_client::Method;
+use farhelm_helm_client::fake::FakeHelm;
+use farhelm_proto::ui_channel::{
+    Collection, CollectionChanges, KeyedEntry, PREFERENCES_KEY, Preferences,
+};
+use gpui::{Role, TestAppContext, Toggled, VisualTestContext};
+use serde_json::{Value, json};
+
+use super::{Order, TITLE_ID};
+use crate::main_view::MainView;
+use crate::session_list::COUNT_ID;
+use crate::session_list::host_rail::tests::{hover_help, label, node, snapshot, texts_within};
+use crate::session_list::tests::{change, listing_meta, painted, selected, sent};
+use crate::test_support::{self, click, focused_id, frame, keys, meta, started};
+use crate::{focus, layers, templates};
+
+// ---- Fixtures ------------------------------------------------------------------------------------------------------
+
+/// The rail's snapshot, connected, in the real main view, with the commands the window sent on its own (remembering the
+/// open session, its seen mark) answered, so a test's next look at the fake sees only what its own steps sent. None of
+/// those may store an order: the preference row is shared, and a window that wrote the order it opened in would stamp
+/// that order into every other client's (the old `sort.spec.ts` case "the default order is never written"). The main
+/// view is returned too, to ask its list whether the order menu is open.
+fn open(cx: &mut TestAppContext) -> (FakeHelm, gpui::Entity<MainView>, &mut VisualTestContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(snapshot());
+    cx.run_until_parked();
+    let (main, window) = test_support::open_view(cx, MainView::new);
+    for command in fake.commands() {
+        let body = command.body.clone().unwrap_or_default();
+        assert!(
+            body.get("list_sort").is_none(),
+            "opening stored an order: {command:?}"
+        );
+        fake.reply(command.id, 200, None);
+    }
+    window.run_until_parked();
+    (fake, main, window)
+}
+
+/// Whether the order title reports its menu open.
+fn menu_open(main: &gpui::Entity<MainView>, cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| {
+        let list = main.read(cx).session_list().clone();
+        list.update(cx, |list, cx| list.order_menu_open(window, cx))
+    })
+}
+
+/// A push of the preference row holding `list_sort`, as the helm sends it when the stored order changes.
+fn stored_order(fake: &mut FakeHelm, list_sort: Option<&str>, cx: &mut VisualTestContext) {
+    let preferences = Preferences {
+        visit_history: vec!["a".into()],
+        list_sort: list_sort.map(str::to_owned),
+        ..Preferences::default()
+    };
+    fake.push(CollectionChanges {
+        collection: Collection::Preferences,
+        meta: meta(&[PREFERENCES_KEY]),
+        upsert: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: serde_json::to_value(preferences).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+}
+
+/// The one order write the window sent since the last look: its envelope id and body. Fails on anything else, so a
+/// test that expects the write also proves nothing else went out (no session query that names a sort).
+fn one_write(fake: &mut FakeHelm) -> (u64, Value) {
+    test_support::one_command(fake, Method::Put, "/api/preferences")
+}
+
+/// What the open menu's items report, in their order: (accessible name, role, checked).
+fn items(cx: &mut VisualTestContext) -> Vec<(String, Option<Role>, Option<Toggled>)> {
+    let nodes = frame(cx);
+    Order::ALL
+        .iter()
+        .map(|order| {
+            let item = node(&nodes, order.item_id())
+                .unwrap_or_else(|| panic!("{} was not drawn", order.item_id()));
+            (
+                item.label.as_deref().unwrap_or_default().to_owned(),
+                item.role,
+                item.toggled,
+            )
+        })
+        .collect()
+}
+
+/// The order whose item the open menu reports checked; fails unless exactly one is.
+fn checked(cx: &mut VisualTestContext) -> Order {
+    let checked: Vec<Order> = Order::ALL
+        .into_iter()
+        .zip(items(cx))
+        .filter(|(_, (_, _, toggled))| *toggled == Some(Toggled::True))
+        .map(|(order, _)| order)
+        .collect();
+    assert_eq!(checked.len(), 1, "one checked order: {checked:?}");
+    checked[0]
+}
+
+// ---- The title -----------------------------------------------------------------------------------------------------
+
+/// The title is the only place the window says which order the list is in, and its name and help are what a screen
+/// reader user hears for it (the old `aria-label` and `data-tooltip`); an unknown stored word must read as the helm's
+/// default, as the channel serves it. Specified: with no order stored the title paints "Recently active", is a button
+/// named "Sort: Recently active" with the hover help "Sort: the order of the session list, shared by every client";
+/// each stored word the helm pushes ("created", "title", "activity", and the unknown "most-recent") renames it ("Sort:
+/// Newest created", "Sort: Title A–Z", "Sort: Recently active" twice), and none of those pushes sends anything.
+#[gpui::test]
+fn the_title_names_the_stored_order_and_follows_a_pushed_change(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, TITLE_ID), "Sort: Recently active");
+    assert_eq!(node(&nodes, TITLE_ID).unwrap().role, Some(Role::Button));
+    assert!(
+        texts_within(&nodes, TITLE_ID)
+            .iter()
+            .any(|text| text.text.as_ref() == "Recently active"),
+        "the title paints the order's name"
+    );
+    assert_eq!(
+        hover_help(cx, "session-order").as_deref(),
+        Some("Sort: the order of the session list, shared by every client")
+    );
+
+    for (word, name) in [
+        ("created", "Sort: Newest created"),
+        ("title", "Sort: Title A–Z"),
+        ("activity", "Sort: Recently active"),
+        ("most-recent", "Sort: Recently active"),
+    ] {
+        stored_order(&mut fake, Some(word), cx);
+        assert_eq!(label(&frame(cx), TITLE_ID), name, "stored {word}");
+    }
+    assert_eq!(sent(&mut fake), [], "a pushed order sends nothing");
+}
+
+// ---- The menu ------------------------------------------------------------------------------------------------------
+
+/// A click is how most users reach the orders, and on macOS that click leaves the title unfocused, so the title must be
+/// named as where closing returns focus or Escape would leave focus wherever it was. The menu's words are the old
+/// menu's. Specified, under the macOS click rule: a click on the title opens the menu with focus on its first order,
+/// Recently active, the title reporting it open; the menu paints the header "Session list" over "Order and density,
+/// shared by every client", and its items sit in a menu named "Sort" as radio items named Recently active, Newest
+/// created and Title A–Z, only Recently active (the stored default) checked, each with its old description as its
+/// hover help; Escape closes it with focus on the title, which reports it closed.
+#[gpui::test]
+fn a_click_opens_the_menu_on_its_first_order_and_escape_returns_to_the_title(
+    cx: &mut TestAppContext,
+) {
+    let (_fake, main, cx) = open(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    assert!(!menu_open(&main, cx), "the premise: the menu is closed");
+
+    click(cx, "session-order");
+    assert!(menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-order-activity"));
+    let nodes = frame(cx);
+    let words = painted(&nodes);
+    for line in ["Session list", "Order and density, shared by every client"] {
+        assert!(words.iter().any(|text| text == line), "{line} in {words:?}");
+    }
+    let menu = node(&nodes, "session-order-items").unwrap();
+    assert_eq!(
+        (menu.role, menu.label.as_deref()),
+        (Some(Role::Menu), Some("Sort"))
+    );
+    let radio = |name: &str, checked| (name.to_owned(), Some(Role::MenuItemRadio), Some(checked));
+    assert_eq!(
+        items(cx),
+        [
+            radio("Recently active", Toggled::True),
+            radio("Newest created", Toggled::False),
+            radio("Title A–Z", Toggled::False),
+        ]
+    );
+    for (order, description) in [
+        (
+            "session-order-activity",
+            "Active sessions first, ordered by when work started",
+        ),
+        (
+            "session-order-created",
+            "Most recently created sessions first",
+        ),
+        (
+            "session-order-title",
+            "Session titles in alphabetical order",
+        ),
+    ] {
+        assert_eq!(hover_help(cx, order).as_deref(), Some(description));
+    }
+
+    keys(cx, "escape");
+    assert!(!menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(TITLE_ID));
+}
+
+/// The old title opened its menu from the keyboard as a menu button does, and the old menu took Home and End; a
+/// keyboard user who could not reach the last order without walking the list would lose what the old app gave. The
+/// arrows inside are the layer manager's. Specified: with focus on the closed title, Down opens the menu on Recently
+/// active; Down moves to Newest created; End goes to Title A–Z and Home back to Recently active; Escape closes it, and
+/// Up on the closed title opens it on Title A–Z; Tab from there keeps the menu open with focus on one of its orders
+/// (SPEC.md, "Keyboard focus": "Inside a dialog or menu, focus stays inside", where the old menu closed on Tab).
+#[gpui::test]
+fn down_and_up_open_the_menu_at_either_end_and_home_and_end_walk_it(cx: &mut TestAppContext) {
+    let (_fake, main, cx) = open(cx);
+    click(cx, "session-order");
+    keys(cx, "escape");
+    assert!(!menu_open(&main, cx));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(TITLE_ID),
+        "the premise: the closed title has focus"
+    );
+
+    keys(cx, "down");
+    assert!(menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-order-activity"));
+    keys(cx, "down");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-order-created"));
+    keys(cx, "end");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-order-title"));
+    keys(cx, "home");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-order-activity"));
+
+    keys(cx, "escape");
+    assert!(!menu_open(&main, cx));
+    keys(cx, "up");
+    assert!(menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-order-title"));
+    keys(cx, "tab");
+    assert!(menu_open(&main, cx), "Tab leaves the menu open");
+    let focused = focused_id(cx);
+    assert!(
+        Order::ALL
+            .iter()
+            .any(|order| focused.as_deref() == Some(order.item_id())),
+        "Tab keeps focus on an order: {focused:?}"
+    );
+}
+
+// ---- Choosing ------------------------------------------------------------------------------------------------------
+
+/// The helm sorts the pushed list by the stored order, so choosing is one sparse preference write and nothing else: a
+/// session query naming a sort would stop the channel following the shared order, and a body naming other fields could
+/// put back a stale copy of them. Re-choosing writes nothing (the old `apply_sort`). Specified: Down, Down and Enter on
+/// the title send exactly one command, `PUT /api/preferences` with `{"list_sort": "created"}`, close the menu and leave
+/// focus on the title, which names Newest created while the write is in flight; once the helm pushes the stored order
+/// and answers, the title still names Newest created, focus is still on it and the open session is still open;
+/// reopening the menu shows Newest created checked, and choosing it again sends nothing and closes the menu with focus
+/// on the title.
+#[gpui::test]
+fn choosing_an_order_sends_only_its_sparse_write_and_rechoosing_sends_nothing(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, main, cx) = open(cx);
+    let open_session = selected(cx);
+    click(cx, "session-order");
+    keys(cx, "escape");
+    keys(cx, "down down enter");
+    let (write, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "list_sort": "created" }));
+    assert!(!menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(TITLE_ID));
+    assert_eq!(
+        label(&frame(cx), TITLE_ID),
+        "Sort: Newest created",
+        "while the write is in flight"
+    );
+
+    stored_order(&mut fake, Some("created"), cx);
+    fake.reply(write, 200, None);
+    test_support::settle(cx);
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Newest created");
+    assert_eq!(focused_id(cx).as_deref(), Some(TITLE_ID));
+    assert_eq!(selected(cx), open_session);
+
+    keys(cx, "down");
+    assert_eq!(checked(cx), Order::Created);
+    click(cx, "session-order-created");
+    assert_eq!(sent(&mut fake), [], "the order in force sends nothing");
+    assert!(!menu_open(&main, cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(TITLE_ID));
+}
+
+/// SPEC.md, "Errors and diagnostics", makes the list's order a best-effort preference: a failed save is logged and
+/// stays silent, and the choice lasts only until the next read from the helm, which under the channel is at once (the
+/// helm pushes the list in the stored order). So a refused write must leave the title on the stored order and add
+/// nothing to the window (decided by the migration's orchestrator on 2026-11-14). Specified: choosing Title A–Z by
+/// click sends `{"list_sort": "title"}`; once the helm refuses it with words of its own, the title names Recently
+/// active again, the frame paints exactly what it painted before the choice (none of the helm's words), nothing is
+/// sent again (SPEC.md: a failed save "is never resent"), and the menu checks Recently active; choosing Newest created
+/// then still sends its own write.
+#[gpui::test]
+fn a_refused_write_keeps_the_stored_order_and_shows_nothing(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    let before = painted(&frame(cx));
+    click(cx, "session-order");
+    click(cx, "session-order-title");
+    let (write, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "list_sort": "title" }));
+    fake.reply(write, 400, Some(json!("no title order on this helm")));
+    test_support::settle(cx);
+    assert_eq!(sent(&mut fake), [], "a refused write is not resent");
+
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, TITLE_ID), "Sort: Recently active");
+    assert_eq!(
+        painted(&nodes),
+        before,
+        "the refusal adds nothing to the window"
+    );
+    click(cx, "session-order");
+    assert_eq!(checked(cx), Order::Activity);
+    click(cx, "session-order-created");
+    let (_, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "list_sort": "created" }),
+        "a later choice still sends"
+    );
+}
+
+/// An open menu must not go on checking an order another client replaced, since the next choice is judged against
+/// what it shows. Specified: with the menu open over the stored Recently active, a push storing "title" moves the check
+/// to Title A–Z, and a push storing nothing moves it back to Recently active.
+#[gpui::test]
+fn the_open_menu_follows_a_pushed_order(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    click(cx, "session-order");
+    assert_eq!(checked(cx), Order::Activity);
+    stored_order(&mut fake, Some("title"), cx);
+    assert_eq!(checked(cx), Order::Title);
+    stored_order(&mut fake, None, cx);
+    assert_eq!(checked(cx), Order::Activity);
+}
+
+// ---- The count -----------------------------------------------------------------------------------------------------
+
+/// A bare number beside the title says nothing to a screen reader, so the old count was named, and helped on hover,
+/// "Sessions: <count>"; a cut listing's warning took the same name in place of the count. Specified: over two sessions
+/// the count is named "Sessions: 2" and shows that as its hover help; over a listing the helm's cap cut at one of five
+/// sessions, the warning is named "Sessions: Showing 1 of 5 sessions — could not read the list to the end".
+#[gpui::test]
+fn the_count_is_named_and_helped_as_sessions_and_its_text(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    assert_eq!(label(&frame(cx), COUNT_ID), "Sessions: 2");
+    assert_eq!(
+        hover_help(cx, "session-count").as_deref(),
+        Some("Sessions: 2")
+    );
+
+    fake.push(change(listing_meta(&["a"], 5, true), &[], &["b"]));
+    test_support::settle(cx);
+    assert_eq!(
+        label(&frame(cx), COUNT_ID),
+        "Sessions: Showing 1 of 5 sessions — could not read the list to the end"
+    );
+}
+
+// ---- Templates -----------------------------------------------------------------------------------------------------
+
+/// The heading's Templates button is how the window reaches the Templates dialog without a shortcut, and SPEC.md's
+/// "Opening and closing" wants focus back where it was when the dialog closes. Its help is the Templates module's
+/// (`templates::button_help`), whose words that module's tests pin; here it is enough that the help is that one.
+/// Specified: the button is named "Templates", sits right of the title, and its hover help starts "Templates: " and
+/// names the ⚡ chord as the module spells it; under the Linux click rule a click on it opens the Templates dialog (its
+/// list drawn), and Escape closes it with focus back on the button.
+#[gpui::test]
+fn templates_opens_its_dialog_and_closing_returns_focus_to_the_button(cx: &mut TestAppContext) {
+    let (_fake, _main, cx) = open(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, "templates-button"), "Templates");
+    assert!(
+        node(&nodes, "templates-button").unwrap().bounds.left()
+            > node(&nodes, TITLE_ID).unwrap().bounds.right()
+    );
+    let help = hover_help(cx, "templates-button").expect("the button has hover help");
+    assert!(
+        help.starts_with("Templates: ") && help.contains(templates::QUICK_LAUNCH_SHORTCUT_NAME),
+        "the Templates module's help: {help}"
+    );
+
+    click(cx, "templates-button");
+    assert!(
+        cx.update(|window, cx| layers::any_open(window, cx)),
+        "the dialog opened"
+    );
+    assert!(
+        node(&frame(cx), "templates-list").is_some(),
+        "its list is drawn"
+    );
+    keys(cx, "escape");
+    assert!(!cx.update(|window, cx| layers::any_open(window, cx)));
+    assert_eq!(focused_id(cx).as_deref(), Some("templates-button"));
+}

@@ -344,6 +344,23 @@
       ]
     },
     {
+      "id": "app-sort-menu",
+      "title": "The list title's order menu, opened with a click: the shared header, the three orders with Recently active checked and highlighted, and the title in its open look (the sidebar still widened by the scene before; no Compact item yet)",
+      "reference": "sort-menu",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "id:session-order"
+        ],
+        [
+          "wait",
+          "--text",
+          "Order and density, shared by every client"
+        ]
+      ]
+    },
+    {
       "id": "app-header-replace-question",
       "title": "Replace asked from the open session's header (the exited Fixture 4): the question hung under the Replace button",
       "reference": "header-replace-question",
@@ -882,6 +899,11 @@
       "golden": "host-remove-confirmation",
       "title": "The removal confirmation a host menu's Remove opens: the host's mark, name, phase and build, its destination, what removal keeps, the footer note and the three answers",
       "reference": "host-remove-confirmation"
+    },
+    {
+      "golden": "session-order-menu",
+      "title": "The list title's order menu open below it: the shared header and the three orders, Recently active checked and highlighted (no Compact item yet)",
+      "reference": "sort-menu"
     }
   ],
   "reference_scenes": [

@@ -17,7 +17,8 @@
 //!
 //! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
 //! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
-//! sending keys and then drawing a frame, and holding a key down for its repeats. A fixture that one component's tests use stays in that component's file.
+//! sending keys and then drawing a frame, holding a key down for its repeats, and reading what an element's subtree
+//! painted. A fixture that one component's tests use stays in that component's file.
 
 mod button;
 mod checkbox;
@@ -27,6 +28,7 @@ mod divider;
 mod enter_choice;
 mod hover_help;
 mod mark_toggle;
+mod menu_item;
 mod option_row;
 mod radio_group;
 mod scrollbar;
@@ -100,4 +102,36 @@ fn held_key(cx: &mut VisualTestContext, chord: &'static str) {
     });
     cx.run_until_parked();
     check(cx);
+}
+
+/// What the element drawn under `id` painted in `nodes`, the driver record of one frame: the strings its subtree
+/// painted, and how many SVG glyphs that subtree holds. The record has no ink colors, so a glyph's or a word's color
+/// is the goldens' to pin.
+pub(super) fn painted_under(nodes: &[gpui::DriverNode], id: &str) -> (Vec<String>, usize) {
+    let root = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("{id} was drawn"));
+    let within = |mut index: usize| loop {
+        if index == root {
+            return true;
+        }
+        match nodes[index].parent {
+            Some(parent) => index = parent,
+            None => return false,
+        }
+    };
+    let under: Vec<&gpui::DriverNode> = (0..nodes.len())
+        .filter(|&index| within(index))
+        .map(|index| &nodes[index])
+        .collect();
+    let texts = under
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .collect();
+    let glyphs = under
+        .iter()
+        .filter(|node| node.type_name.ends_with("Svg"))
+        .count();
+    (texts, glyphs)
 }
