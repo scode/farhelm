@@ -99,7 +99,8 @@ pub fn open_new_named(name: &str, window: &mut Window, cx: &mut App) -> bool {
     })
 }
 
-/// Open New on `draft`, saying `note` in its notices region until the draft is next edited: the one path every way of
+/// Open New on `draft`, saying `note` until the draft is next edited (a banner in its notices region, a refusal above its
+/// search box): the one path every way of
 /// opening New takes ([`open_new`], [`open_new_named`], and a quick launch that did not start directly, which opens it
 /// with its templates applied and a banner or a refusal). Call it from the handler of the user's action. Refused,
 /// returning `false`, as [`open_new`] is: while New is unavailable ([`new_available`]), while a dialog or menu is
