@@ -185,14 +185,21 @@ fn harness_connected(
     let connection = cx.update(|cx| session::start(handle, events, None, cx));
     // An empty preferences row, as a fresh helm pushes it: a test changes a preference by pushing to it (the client
     // ignores changes to a collection it has no snapshot of).
-    let mut snapshot = vec![farhelm_proto::ui_channel::CollectionState {
-        collection: farhelm_proto::ui_channel::Collection::Preferences,
-        meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
-        entries: vec![farhelm_proto::ui_channel::KeyedEntry {
-            key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
-            value: serde_json::json!({}),
-        }],
-    }];
+    // `more` may bring its own preferences row; otherwise the row is empty.
+    let mut snapshot = Vec::new();
+    if !more
+        .iter()
+        .any(|state| state.collection == farhelm_proto::ui_channel::Collection::Preferences)
+    {
+        snapshot.push(farhelm_proto::ui_channel::CollectionState {
+            collection: farhelm_proto::ui_channel::Collection::Preferences,
+            meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+            entries: vec![farhelm_proto::ui_channel::KeyedEntry {
+                key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+                value: serde_json::json!({}),
+            }],
+        });
+    }
     snapshot.extend(more);
     helm.connect(snapshot);
     cx.run_until_parked();
@@ -3526,6 +3533,375 @@ fn settings_way_into_the_warning_saves_consent_only_on_allow(cx: &mut TestAppCon
     h.helm.reply(save[0].id, 204, None);
     settle(h.cx);
     assert_eq!(*saved.borrow(), [Ok(())], "Allow's save is reported stored");
+}
+
+// ---- The dimmed, inert terminal ----------------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// Make the first owner inert, or not, as the session view does under a status card.
+    fn inert(&mut self, inert: bool) {
+        let owner = self.owner.clone();
+        self.cx
+            .update(|_, cx| owner.update(cx, |owner, cx| owner.set_inert(inert, cx)));
+        settle(self.cx);
+    }
+}
+
+/// SPEC.md: an unreachable host's session keeps "a retained terminal dimmed and inert beneath" its card. The card is
+/// the session view's; the terminal must show its screen dimmed and let nothing reach the program, or a keystroke or a
+/// click aimed at the card would land in a program the user cannot see answering. Specified: an inert terminal keeps
+/// its screen under the scrim; typing, a press under mouse reporting and a wheel turn over it send nothing; turned
+/// back, typing reaches the program again.
+#[gpui::test]
+fn an_inert_terminal_is_dimmed_and_sends_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let _ = h.sent();
+    h.inert(true);
+    assert!(
+        h.cx.debug_bounds(INERT_SCRIM_ID).is_some(),
+        "the scrim is drawn"
+    );
+    assert_eq!(
+        h.read(|owner, cx| owner.terminal_text(cx))
+            .map(|text| first_line(&text).to_owned())
+            .as_deref(),
+        Some("hello"),
+        "over the screen it keeps"
+    );
+    keys(h.cx, "a");
+    let at = h.at_cell(2, 0);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_event(gpui::ScrollEvent {
+        position: at,
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-200.))),
+        ..Default::default()
+    });
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "no key, press or wheel reaches the program");
+    // With no mouse reporting a drag would select and copy; the veil takes it before the grid sees it.
+    h.fake().output(mouse_mode("off"));
+    settle(h.cx);
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(4, 0));
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    h.cx.dispatch_action(actions::SelectAllInTerminal);
+    settle(h.cx);
+    assert_eq!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selected_text()),
+        None,
+        "nothing is selected, by the pointer or by Select All"
+    );
+    h.inert(false);
+    assert!(
+        h.cx.debug_bounds(INERT_SCRIM_ID).is_none(),
+        "the scrim goes"
+    );
+    h.choose(&owner);
+    keys(h.cx, "a");
+    assert!(!h.sent().is_empty(), "and typing reaches the program again");
+}
+
+/// A program that took a press is owed its release, or it stays mid-drag; a terminal going inert sees no more
+/// releases, so it must send them as it goes. Specified: with mouse reporting on, after a press the program heard, going
+/// inert sends that button's release; the real release afterwards sends nothing more.
+#[gpui::test]
+fn going_inert_mid_press_releases_the_programs_button(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let at = h.at_cell(2, 0);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    let pressed = h.sent();
+    assert_eq!(pressed.len(), 1, "the premise: the program heard the press");
+    h.inert(true);
+    let released = h.sent();
+    assert!(
+        matches!(
+            released.as_slice(),
+            [(
+                GridInput::Mouse {
+                    kind: MouseEventKind::Up,
+                    button: 0,
+                    x: 2,
+                    y: 0,
+                    ..
+                },
+                _
+            )]
+        ),
+        "going inert sends the release: {released:?}"
+    );
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "and the real release sends nothing more");
+}
+
+/// What was under way when the terminal went inert must not finish behind the veil: a selection drag would copy at its
+/// release and a press on a link would open it. Specified: a drag begun, then inert, then moved and released, copies
+/// nothing; a press on a web link, then inert, then released, opens nothing.
+#[gpui::test]
+fn going_inert_drops_a_drag_and_a_link_press_under_way(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("go https://example.com/x and more words");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.cx.write_to_clipboard(ClipboardItem::new_string("before".into()));
+    let (from, mid, to) = (h.at_cell(20, 0), h.at_cell(23, 0), h.at_cell(26, 0));
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(mid, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selected_text())
+            .is_some(),
+        "the premise: the drag has selected"
+    );
+    h.inert(true);
+    h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("before".to_string()),
+        "the drag copied nothing"
+    );
+    h.inert(false);
+    let link = h.at_cell(5, 0);
+    h.rest_on(link);
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some("https://example.com/x"),
+        "the premise: the press lands on a hovered web link"
+    );
+    h.cx.simulate_mouse_down(link, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    h.inert(true);
+    h.cx.simulate_mouse_up(link, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.cx.opened_url(), None, "the link press opened nothing");
+}
+
+/// A paste is the user's input like a key: one still reading the clipboard when the terminal goes inert must not reach
+/// the program, even if the terminal is no longer inert when the read answers (the inert check at sending would let it
+/// through then). Specified: with the paste asked for, made inert and back in the same update, so the paste is still in
+/// flight, nothing is sent; the same paste with no inert step in between is sent, which is the premise.
+#[gpui::test]
+fn a_paste_in_flight_when_the_terminal_goes_inert_is_dropped(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.cx.write_to_clipboard(ClipboardItem::new_string("pasted".into()));
+    h.cx.update(|window, cx| {
+        owner.update(cx, |owner, cx| owner.paste(&actions::Paste, window, cx));
+    });
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [(paste("pasted", true), true)],
+        "the premise: the same paste, with nothing in between, is sent"
+    );
+    h.cx.update(|window, cx| {
+        owner.update(cx, |owner, cx| {
+            owner.paste(&actions::Paste, window, cx);
+            owner.set_inert(true, cx);
+            owner.set_inert(false, cx);
+        });
+    });
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "the paste in flight was dropped");
+}
+
+/// The card standing over an inert terminal is where the keyboard belongs (SPEC.md, "Keyboard focus": a card's
+/// controls are reached by Tab), so the terminal under it must leave the Tab order and take it back when it returns.
+/// Tab inside a focused terminal is the program's, so this walks in from the window's root. Specified: from the root,
+/// with the first of two terminals inert, Tab lands on the second, passing the first; with neither inert, Tab lands on
+/// the first.
+#[gpui::test]
+fn an_inert_terminal_is_no_tab_stop(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, true);
+    let (first, second) = (h.owner.clone(), h.second.clone().unwrap().0);
+    assert!(
+        !h.focused(&first) && !h.focused(&second),
+        "the premise: focus rests on the root"
+    );
+    h.inert(true);
+    keys(h.cx, "tab");
+    assert!(
+        h.focused(&second) && !h.focused(&first),
+        "Tab passes the inert terminal"
+    );
+}
+
+/// [`an_inert_terminal_is_no_tab_stop`]'s other half, from a fresh window: with neither of two terminals inert, Tab
+/// from the root lands on the first, so the first is a Tab stop again once it is not inert.
+#[gpui::test]
+fn a_terminal_that_is_not_inert_is_a_tab_stop(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, true);
+    let first = h.owner.clone();
+    h.inert(true);
+    h.inert(false);
+    keys(h.cx, "tab");
+    assert!(h.focused(&first), "Tab lands on the first terminal");
+}
+
+impl Harness<'_> {
+    /// Push the shared **Color terminal frames by host** preference.
+    fn color_frames(&mut self, on: bool) {
+        self.helm
+            .push(farhelm_proto::ui_channel::CollectionChanges {
+                collection: farhelm_proto::ui_channel::Collection::Preferences,
+                meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+                upsert: vec![farhelm_proto::ui_channel::KeyedEntry {
+                    key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+                    value: serde_json::json!({ "color_terminal_frames": on }),
+                }],
+                remove: Vec::new(),
+            });
+        settle(self.cx);
+    }
+
+    /// Push host 2 (the remote harness's session's host) with identity color `color`, a wire word.
+    fn host_color(&mut self, color: &str) {
+        let hosts: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../farhelm-helm/http-contract/host-list.json"
+        ))
+        .unwrap();
+        let mut host = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|host| host["id"] == 2)
+            .unwrap()
+            .clone();
+        host["color"] = serde_json::json!(color);
+        let keys: Vec<String> = hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|host| farhelm_proto::ui_channel::HostView::key(host["id"].as_i64().unwrap()))
+            .collect();
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        self.helm
+            .push(farhelm_proto::ui_channel::CollectionChanges {
+                collection: farhelm_proto::ui_channel::Collection::Hosts,
+                meta: test_support::meta(&keys),
+                upsert: vec![farhelm_proto::ui_channel::KeyedEntry {
+                    key: farhelm_proto::ui_channel::HostView::key(2),
+                    value: host,
+                }],
+                remove: Vec::new(),
+            });
+        settle(self.cx);
+    }
+
+    /// The frame's color as the terminal last took it from the pushed state.
+    fn frame(&mut self) -> Option<farhelm_proto::host_appearance::HostColor> {
+        self.read(|owner, _| owner.frame())
+    }
+}
+
+/// SPEC.md: "Settings can color the thin frame around every session's terminal with that session's host identity
+/// color. This is off by default ... a host with the default color uses the ordinary foreground color ... A host color
+/// change updates open session frames through the existing hosts feed, and a switch change applies immediately."
+/// Specified: with the preference unset no frame is drawn; turned on, the frame is drawn in the host's color (the
+/// default color, for this host); the host's color changing changes the frame's at once; turned off, the frame goes.
+#[gpui::test]
+fn the_frame_takes_the_hosts_color_while_the_preference_is_on(cx: &mut TestAppContext) {
+    use farhelm_proto::host_appearance::HostColor;
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    let _ = h.helm.commands();
+    assert_eq!(h.frame(), None, "off by default");
+    assert!(h.cx.debug_bounds(HOST_FRAME_ID).is_none());
+    let _ = h.fake().received();
+    h.color_frames(true);
+    redraw(h.cx);
+    assert_eq!(
+        h.frame(),
+        Some(HostColor::Default),
+        "the host's color, here the default"
+    );
+    assert!(h.cx.debug_bounds(HOST_FRAME_ID).is_some(), "drawn");
+    assert!(
+        !h.fake()
+            .received()
+            .iter()
+            .any(|request| matches!(request, FakeTerminalRequest::Resize { .. })),
+        "the terminal's size does not change"
+    );
+    h.host_color("teal");
+    assert_eq!(
+        h.frame(),
+        Some(HostColor::Teal),
+        "a host color change applies at once"
+    );
+    h.color_frames(false);
+    assert_eq!(h.frame(), None, "and turning it off takes the frame away");
+    assert!(h.cx.debug_bounds(HOST_FRAME_ID).is_none());
+}
+
+/// The frame follows the preference as the store holds it when the terminal opens, not only its changes after: a
+/// session opened while the preference is already on is framed from its first frame. Specified: a remote session's
+/// terminal made with the preference on and its host colored teal draws the teal frame at once.
+#[gpui::test]
+fn a_terminal_opened_with_the_preference_on_is_framed(cx: &mut TestAppContext) {
+    use farhelm_proto::host_appearance::HostColor;
+    let hosts: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../farhelm-helm/http-contract/host-list.json"
+    ))
+    .unwrap();
+    let entries: Vec<_> = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|host| {
+            let mut host = host.clone();
+            if host["id"] == 2 {
+                host["color"] = serde_json::json!("teal");
+            }
+            farhelm_proto::ui_channel::KeyedEntry {
+                key: farhelm_proto::ui_channel::HostView::key(host["id"].as_i64().unwrap()),
+                value: host,
+            }
+        })
+        .collect();
+    let keys: Vec<String> = entries.iter().map(|entry| entry.key.clone()).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let more = vec![
+        test_support::sessions(&["s1"]),
+        farhelm_proto::ui_channel::CollectionState {
+            collection: farhelm_proto::ui_channel::Collection::Hosts,
+            meta: test_support::meta(&keys),
+            entries,
+        },
+        farhelm_proto::ui_channel::CollectionState {
+            collection: farhelm_proto::ui_channel::Collection::Preferences,
+            meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+            entries: vec![farhelm_proto::ui_channel::KeyedEntry {
+                key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+                value: serde_json::json!({ "color_terminal_frames": true }),
+            }],
+        },
+    ];
+    let mut h = harness_connected(cx, false, more);
+    h.attach_showing("hello");
+    assert_eq!(h.frame(), Some(HostColor::Teal));
+    assert!(
+        h.cx.debug_bounds(HOST_FRAME_ID).is_some(),
+        "drawn from the start"
+    );
 }
 
 // ---- Mouse reporting -----------------------------------------------------------------------------------------------
