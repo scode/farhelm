@@ -388,10 +388,11 @@ pub(crate) struct Ring {
 ///
 /// Use it for a stop that is a place for focus to rest rather than a region to scroll: a session pane's interrupted
 /// card, which is home while it shows (SPEC.md, "Where focus rests"). The handle is the caller's, made with
-/// `.tab_stop(true)`, because such a stop must be able to hold focus before it is first drawn: the pane makes the card
+/// `.tab_stop(true)`, because such a stop must be able to be home before it is first drawn: the pane makes the card
 /// home ([`focus::set_home`]) as it learns the card is to show, and a handle kept in the stop's element state would not
-/// exist until the card's first frame. Use [`scroll_stop`] instead for a region whose content scrolls and holds nothing
-/// focusable (SPEC.md, "Reaching everything by keyboard"), whose handle is its own.
+/// exist until the card's first frame. Focus reaches it once a frame draws it, since the coordinator gives no focus to
+/// a home the frame on screen does not draw. Use [`scroll_stop`] instead for a region whose content scrolls and holds
+/// nothing focusable (SPEC.md, "Reaching everything by keyboard"), whose handle is its own.
 ///
 /// It makes nothing focusable but `focus` and draws nothing focusable inside the stop. Controls the caller draws inside
 /// it (the card's buttons) keep their own stops, which come after it in Tab order, since GPUI orders Tab by paint order,

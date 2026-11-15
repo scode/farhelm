@@ -507,6 +507,109 @@ fn focus_goes_home_when_nothing_holds_it_and_never_takes_it_from_a_control(
     );
 }
 
+/// A home the frame on screen does not draw counts as no home, and focus reaches it once a frame draws it. Focus given
+/// to an undrawn handle takes no keys: GPUI reports it focused, so nothing recovers it, and key dispatch starts above
+/// the root's key context. Desktop-integration found that with New as home while New was disabled during a launch, or
+/// hidden behind the Hosts panel: Tab, Escape and every binding did nothing.
+///
+/// Specified: with home set while it is not drawn, focus is not on it but stays on the root; the first frame that
+/// draws home, with nothing else holding focus, sends focus there; and when home stops being drawn while it holds
+/// focus, focus moves to the root, where Tab reaches a control. The harness's invariant (focus is on something the
+/// frame draws) holds after every step.
+#[gpui::test]
+fn a_home_the_frame_does_not_draw_is_no_home_until_a_frame_draws_it(cx: &mut TestAppContext) {
+    let state = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let home_shown = Rc::new(Cell::new(false));
+    let (drawn, home_drawn) = (state.clone(), home_shown.clone());
+    let cx = open(cx, move |_, _| {
+        let Some((home, control)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        div()
+            .flex()
+            .gap(px(8.))
+            .children(home_drawn.get().then(|| {
+                focus::track(
+                    div()
+                        .relative()
+                        .debug_selector(|| "home".into())
+                        .size(px(40.)),
+                    &home,
+                    OnPress::Focus,
+                )
+            }))
+            .child(button("control", &control))
+            .into_any_element()
+    });
+    let (home, control) = (handle(cx), handle(cx));
+    state.replace(Some((home.clone(), control.clone())));
+    redraw(cx);
+
+    cx.update(|window, cx| focus::set_home(Some(&home), window, cx));
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("home").is_none(),
+        "the premise: home is not drawn"
+    );
+    assert!(!focused(cx, &home), "an undrawn home does not take focus");
+    assert!(
+        !focused(cx, &control),
+        "the premise: focus rests on the root, not on the control"
+    );
+
+    // Nothing loses focus here, so GPUI reports nothing: only the frame that draws home sends focus there.
+    home_shown.set(true);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("home").is_some(),
+        "the premise: home is drawn"
+    );
+    assert!(focused(cx, &home), "focus went home once a frame drew it");
+
+    home_shown.set(false);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("home").is_none(),
+        "the premise: home is no longer drawn"
+    );
+    assert!(
+        !focused(cx, &home),
+        "focus left the home that is no longer drawn"
+    );
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &control),
+        "focus left the undrawn home for the root, where Tab reached the control"
+    );
+}
+
+/// The per-step invariant that focus is on something the frame on screen draws is what turns every other dead-keys
+/// path into a failing step, not only the home this module guards: a move through the coordinator to a control that
+/// is not drawn (here [`focus::focus_control`], which moves at once) is one such path. Specified: after such a move,
+/// the invariant reports focus on an undrawn element.
+#[gpui::test]
+fn the_invariant_catches_focus_on_an_element_the_frame_does_not_draw(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let undrawn = handle(cx);
+    redraw(cx);
+    // Judged before the next frame: once one is drawn, GPUI sees the focused element missing from a frame whose
+    // predecessor drew focus and reports focus lost, which recovers it. The dead state is the one that report misses,
+    // when the frame before drew nothing focused either; the invariant must catch it whichever way it arose.
+    let (premise, problem) = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        focus::focus_control(&undrawn, &mark, window, cx);
+        (
+            undrawn.is_focused(window),
+            focus::invariant_violation(window, cx),
+        )
+    });
+    assert!(premise, "the premise: the undrawn handle holds focus");
+    assert_eq!(
+        problem.as_deref(),
+        Some("focus is on an element the frame on screen does not draw")
+    );
+}
+
 /// A button whose own click removes it (the connection-lost banner's Dismiss) hands focus home in a frame of its own,
 /// with nothing else redrawing. GPUI reports the lost focus while it finishes a frame and draws no new one for a focus
 /// move made then, so without the coordinator asking for one the window kept drawing "nothing focused" until some
@@ -1069,6 +1172,37 @@ fn a_dialog_returning_home_falls_back_to_its_opener_without_a_home(cx: &mut Test
     assert!(
         focused(cx, &row),
         "with no home, closing it returned focus to its opener"
+    );
+}
+
+/// Why this matters: a dialog that returns focus home (the Rename editor opened with its shortcut) may close while
+/// home is not drawn, and focus given to an undrawn home takes no keys. Returning to the opener instead would leave
+/// focus on, say, a row reached with Tab, which nothing later corrects.
+///
+/// Specification: with home set but not drawn and a row focused, a dialog opened returning home leaves focus on
+/// neither the row nor home when it closes, and Tab from there still reaches the row.
+#[gpui::test]
+fn a_dialog_returning_to_an_undrawn_home_leaves_focus_on_the_root(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["row"], &[]);
+    let (row, _) = drawn(&items, "row");
+    let home = handle(cx);
+    cx.update(|window, cx| focus::set_home(Some(&home), window, cx));
+    keys(cx, "tab");
+    assert!(focused(cx, &row), "the premise: the row holds focus");
+    let inside = handle(cx);
+    open_dialog_returning(
+        cx,
+        vec![("inside", inside.clone())],
+        &inside,
+        focus::ReturnTo::Home,
+    );
+    keys(cx, "escape");
+    assert!(!focused(cx, &home), "the undrawn home took no focus");
+    assert!(!focused(cx, &row), "nor did the opener");
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &row),
+        "keys still work there: Tab reached the row"
     );
 }
 
