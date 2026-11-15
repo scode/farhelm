@@ -217,7 +217,9 @@ impl SessionPane {
             .current(cx)
             .as_ref()
             .map(|mounted| mounted.set.clone());
-        let strip = set.as_ref().map(|set| set.read(cx).strip(set, window));
+        let strip = set
+            .as_ref()
+            .map(|set| crate::terminal::set::TerminalSet::strip(set, window, cx));
         let pill = set
             .map(|set| set.read(cx).agent().clone())
             .and_then(|terminal| {
