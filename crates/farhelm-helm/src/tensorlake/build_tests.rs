@@ -1,6 +1,6 @@
 //! Snapshot build proofs: the engine against an in-memory Tensorlake and a
-//! scripted sandbox shell, the store's billing invariants, and the build
-//! route.
+//! scripted sandbox shell, the store's billing invariants, the build route,
+//! and the recipe Delete's reply bound.
 //!
 //! The in-memory API drives the same [`FakeModel`] the browser suite's fake
 //! persists, so both levels share Tensorlake's rules (name uniqueness, 404s,
@@ -1924,4 +1924,412 @@ async fn a_switch_to_an_image_does_not_attempt_snapshot_deletion() {
             .iter()
             .any(|op| op.starts_with("delete_snapshot"))
     );
+}
+
+// ---------------------------------------------------------------------------
+// The recipe Delete within the host reply bound
+// ---------------------------------------------------------------------------
+//
+// The GUI's channel runs one command at a time and resets the window when one
+// stays unanswered for 30 seconds, so `DELETE /api/tensorlake/recipes/{name}`
+// answers within `HOST_REPLY_BOUND` (SPEC_impl.md, "The UI channel"). Its
+// longest wait is a build sandbox create that reached Tensorlake and has not
+// answered: the delete cancels the build but has to wait for that create,
+// which is never cancelled and which the real client allows ten minutes.
+// `MemoryApi::hold_create` stands in for it. The tests pause the clock once the
+// harness is up and measure each reply on the clock the bound runs on.
+
+/// How long past the bound a test waits for a delete's reply before failing,
+/// so a route that lost its bound fails with a message rather than parking the
+/// test until nextest's own timeout.
+const PAST_THE_BOUND: Duration = Duration::from_secs(10);
+
+/// How long, on the paused clock, a deletion released after its reply gets to
+/// finish. Its sweep polls on the engine's own timers, so this is virtual time:
+/// generous costs nothing, and a deletion parked for good with no timer left
+/// fails at once, when the clock jumps straight here.
+const FINISH_WINDOW: Duration = Duration::from_secs(300);
+
+/// A harness whose Tensorlake is a [`MemoryApi`] that holds every create, with
+/// the API key and Farhelm's ssh key saved, the managed recipe [`RECIPE`]
+/// created, and its build started and parked inside its sandbox create, all
+/// through the routes.
+struct DeleteFixture {
+    harness: crate::rest_harness::Harness,
+    api: Arc<MemoryApi>,
+}
+
+impl DeleteFixture {
+    async fn new() -> Self {
+        let api = Arc::new(MemoryApi::default());
+        let harness = crate::rest_harness::FleetBuilder::new()
+            .await
+            .tensorlake_api(api.clone())
+            .tensorlake_shell(ScriptedShell::new(Arc::clone(&api)))
+            .start()
+            .await;
+        let fixture = Self { harness, api };
+        let create = serde_json::json!({ "name": RECIPE, "recipe": tests_support::save() });
+        for (method, path, body) in [
+            (
+                "PUT",
+                "/api/tensorlake",
+                Some(r#"{"api_key":"test-key"}"#.to_string()),
+            ),
+            ("POST", "/api/tensorlake/ssh-key", None),
+            ("POST", "/api/tensorlake/recipes", Some(create.to_string())),
+        ] {
+            let (status, body, _) = fixture.send(method, path, body).await.unwrap();
+            assert_eq!(
+                status,
+                axum::http::StatusCode::OK,
+                "{method} {path}: {body}"
+            );
+        }
+        fixture.api.hold_create.send_replace(true);
+        let build = format!("/api/tensorlake/recipes/{RECIPE}/build");
+        let (status, body, _) = fixture.send("POST", &build, None).await.unwrap();
+        assert_eq!(status, axum::http::StatusCode::ACCEPTED, "{body}");
+        fixture
+            .api
+            .create_committed
+            .subscribe()
+            .wait_for(|committed| *committed)
+            .await
+            .unwrap();
+        assert!(
+            fixture
+                .harness
+                .state
+                .tensorlake
+                .builds()
+                .is_building(RECIPE)
+                && !fixture.build_cancelled(),
+            "premise: the build is running, parked in its create, and not cancelled"
+        );
+        fixture
+    }
+
+    /// Send one request through the real router on a task of its own, so the
+    /// test can steer the fake while the route waits. The reply comes with how
+    /// long it took on the tokio clock, from just before the send.
+    fn send(
+        &self,
+        method: &'static str,
+        path: &str,
+        body: Option<String>,
+    ) -> tokio::task::JoinHandle<(axum::http::StatusCode, String, Duration)> {
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(body.map_or_else(axum::body::Body::empty, axum::body::Body::from))
+            .unwrap();
+        let router = self.harness.router();
+        let started = tokio::time::Instant::now();
+        tokio::spawn(async move {
+            let response = router.oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                String::from_utf8(bytes.to_vec()).unwrap(),
+                started.elapsed(),
+            )
+        })
+    }
+
+    /// Send a DELETE of `recipe` and wait for its reply, failing once
+    /// [`PAST_THE_BOUND`] has gone by after the bound without one.
+    async fn delete(&self, recipe: &str) -> (axum::http::StatusCode, String, Duration) {
+        let call = self.send("DELETE", &format!("/api/tensorlake/recipes/{recipe}"), None);
+        tokio::time::timeout(crate::sessions::HOST_REPLY_BOUND + PAST_THE_BOUND, call)
+            .await
+            .expect("the recipe Delete should answer within the host reply bound")
+            .unwrap()
+    }
+
+    /// [`Self::delete`] for a Delete that must be answered at once, from local
+    /// state: under the paused clock, before any timer could have fired.
+    async fn delete_at_once(&self, recipe: &str) -> (axum::http::StatusCode, String) {
+        let (status, body, waited) = self.delete(recipe).await;
+        assert!(
+            waited < Duration::from_secs(1),
+            "the Delete of {recipe} answered {status} after {waited:?}: {body}"
+        );
+        (status, body)
+    }
+
+    /// The names `GET /api/tensorlake/recipes` lists.
+    async fn listed(&self) -> Vec<String> {
+        let (status, body, _) = self
+            .send("GET", "/api/tensorlake/recipes", None)
+            .await
+            .unwrap();
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        serde_json::from_str::<farhelm_proto::tensorlake::recipes::RecipesView>(&body)
+            .unwrap()
+            .recipes
+            .into_iter()
+            .map(|recipe| recipe.name)
+            .collect()
+    }
+
+    /// Whether the recipe's running build has been asked to stop.
+    fn build_cancelled(&self) -> bool {
+        self.harness
+            .state
+            .tensorlake
+            .builds()
+            .registry()
+            .active
+            .get(RECIPE)
+            .is_some_and(|active| *active.cancel.borrow())
+    }
+}
+
+/// Why: a recipe's Delete waits for its cancelled build to stop, and a build
+/// whose sandbox create Tensorlake has not answered stops only once the create
+/// does, which can take minutes. The GUI cannot wait that long, but the
+/// deletion must still finish once the reply has gone, or the builder bills
+/// with nothing to delete it.
+///
+/// Spec: with the build parked inside its create, `DELETE
+/// /api/tensorlake/recipes/{name}` answers 504 once `HOST_REPLY_BOUND` has
+/// passed and not much later, saying the deletion carries on; meanwhile the
+/// recipe is still listed, a second Delete is refused at once as already
+/// being deleted, and a save of the recipe is refused at once as being deleted
+/// (it would otherwise be accepted and then lost with the row); once the
+/// create answers, the deletion finishes on its own:
+/// the feed's bump shows the recipe gone from the list, the builder the create
+/// made is terminated and no snapshot is left.
+#[farhelm_testtrace::test]
+async fn a_delete_waiting_for_a_create_answers_at_the_reply_bound_and_finishes_after() {
+    let f = DeleteFixture::new().await;
+    let mut bumps = f.harness.manager.events().subscribe();
+    tokio::time::pause();
+    let (status, body, waited) = f.delete(RECIPE).await;
+    assert!(
+        f.build_cancelled(),
+        "the delete cancelled the build, which is still parked in its create"
+    );
+    assert_eq!(status, axum::http::StatusCode::GATEWAY_TIMEOUT, "{body}");
+    assert!(
+        body.contains(
+            "the deletion carries on, and the recipe leaves the recipe list once it is deleted; \
+             if it is still listed later, delete it again to see why"
+        ),
+        "{body}"
+    );
+    let bound = crate::sessions::HOST_REPLY_BOUND;
+    assert!(
+        waited >= bound && waited < bound + Duration::from_secs(1),
+        "the delete answered after {waited:?}"
+    );
+
+    // What the 504 promises: the deletion is under way, not abandoned.
+    assert_eq!(
+        f.delete_at_once(RECIPE).await,
+        (
+            axum::http::StatusCode::CONFLICT,
+            "recipe rust-dev is already being deleted".into()
+        )
+    );
+    let save = serde_json::to_string(&tests_support::save()).unwrap();
+    let (status, body, waited) = f
+        .send(
+            "PUT",
+            &format!("/api/tensorlake/recipes/{RECIPE}"),
+            Some(save),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (status, body.as_str()),
+        (
+            axum::http::StatusCode::CONFLICT,
+            "recipe rust-dev is being deleted"
+        )
+    );
+    assert!(
+        waited < Duration::from_secs(1),
+        "the save answered after {waited:?}"
+    );
+    assert_eq!(f.listed().await, [RECIPE]);
+
+    // The deletion bumps the feed once it ends, which is what makes the GUI
+    // read the list again. Other bumps may come first, so each one is checked
+    // against the list itself.
+    bumps.borrow_and_update();
+    f.api.hold_create.send_replace(false);
+    let mut last = vec![];
+    let finished = tokio::time::timeout(FINISH_WINDOW, async {
+        loop {
+            bumps.changed().await.unwrap();
+            last = f.listed().await;
+            if last.is_empty() {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(
+        finished.is_ok(),
+        "the deletion should finish after its reply; the list still holds {last:?}"
+    );
+    let model = f.api.model();
+    let [builder] = &model.sandboxes[..] else {
+        panic!("the create made one builder: {:?}", model.sandboxes);
+    };
+    assert_eq!(builder.status, "terminated", "{:?}", model.sandboxes);
+    assert!(model.snapshots.is_empty(), "{:?}", model.snapshots);
+}
+
+/// Why: the 504 says the deletion carries on, so a Delete that local state
+/// already refuses must say so instead, at once, without cancelling anything:
+/// a refused Delete of a recipe in use must leave its running build alone.
+///
+/// Spec: with the recipe's build parked inside its create, a Delete of a
+/// recipe a host uses answers 409 "a host uses recipe …; delete that host
+/// first" at once and leaves the build running and not cancelled, and a Delete
+/// of a recipe that does not exist answers 404 "no recipe has that name" at
+/// once.
+#[farhelm_testtrace::test]
+async fn a_delete_local_state_refuses_answers_at_once_and_cancels_nothing() {
+    let f = DeleteFixture::new().await;
+    crate::tensorlake::hosts::test_support::plant(
+        &f.harness.store,
+        "one",
+        "farhelm-host-k7q2-one-aaaa",
+        RECIPE,
+        None,
+    )
+    .await;
+    tokio::time::pause();
+    assert_eq!(
+        f.delete_at_once(RECIPE).await,
+        (
+            axum::http::StatusCode::CONFLICT,
+            "a host uses recipe rust-dev; delete that host first".into()
+        )
+    );
+    assert!(
+        f.harness.state.tensorlake.builds().is_building(RECIPE) && !f.build_cancelled(),
+        "the refused delete left the build running"
+    );
+    assert_eq!(
+        f.delete_at_once("no-such-recipe").await,
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            "no recipe has that name".into()
+        )
+    );
+    f.api.hold_create.send_replace(false);
+}
+
+/// Wait for the helm to log that a request it had already answered as still
+/// running ended without success, and return that event's reply text.
+///
+/// The log comes from a task of its own that wakes once the request's work
+/// ends, so it may still be queued when the test sees the work's feed bump.
+/// The wait yields to the runtime a bounded number of times rather than
+/// sleeping: the paused clock would make any sleep instant anyway, and the
+/// log task needs only to be scheduled, not any time to pass.
+async fn late_failure_logged() -> Option<String> {
+    const LATE_FAILURE: &str =
+        "a request the helm had already answered as still running ended without success";
+    let events = crate::test_capture::current();
+    for _ in 0..1000 {
+        if let Some(event) = crate::test_capture::matching(&events, LATE_FAILURE).pop() {
+            return event.field("reply").map(str::to_owned);
+        }
+        tokio::task::yield_now().await;
+    }
+    None
+}
+
+/// Why: once the Delete has answered that the deletion carries on, a cleanup
+/// that then fails has nobody to tell. The recipe must stay listed (its row is
+/// the only record of what still bills), the reason must reach the helm's log,
+/// and the 504's advice, deleting it again to see why, must hold.
+///
+/// Spec: with the build parked inside its create and Tensorlake refusing to
+/// terminate the builder that create makes, `DELETE
+/// /api/tensorlake/recipes/{name}` answers 504 at the bound; once the create
+/// answers, the cleanup fails on its own: the recipe is still listed, its
+/// deletion admission is released, the helm logs the late failure with
+/// Tensorlake's reason, and a second Delete runs the cleanup again and
+/// answers that reason at once.
+#[farhelm_testtrace::test]
+async fn a_delete_that_fails_after_its_reply_keeps_the_recipe_and_logs_why() {
+    let f = DeleteFixture::new().await;
+    let builder = {
+        let model = f.api.model();
+        let [builder] = &model.sandboxes[..] else {
+            panic!(
+                "premise: the held create made one builder: {:?}",
+                model.sandboxes
+            );
+        };
+        builder.id.clone()
+    };
+    f.api.fail.lock().unwrap().insert(
+        format!("terminate_sandbox {builder}"),
+        TensorlakeError::Status {
+            status: 500,
+            message: "try later".into(),
+        },
+    );
+    let mut bumps = f.harness.manager.events().subscribe();
+    tokio::time::pause();
+    let (status, body, _) = f.delete(RECIPE).await;
+    assert_eq!(status, axum::http::StatusCode::GATEWAY_TIMEOUT, "{body}");
+
+    // The deletion bumps the feed once it ends, with its admission released
+    // first, so the first bump after which the recipe is no longer being
+    // deleted is the end of the failed cleanup.
+    bumps.borrow_and_update();
+    f.api.hold_create.send_replace(false);
+    let builds = Arc::clone(f.harness.state.tensorlake.builds());
+    let ended = tokio::time::timeout(FINISH_WINDOW, async {
+        while builds.is_deleting(RECIPE) {
+            bumps.changed().await.unwrap();
+        }
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the failed cleanup should end after its reply"
+    );
+    assert!(
+        f.api
+            .ops()
+            .contains(&format!("terminate_sandbox {builder}")),
+        "premise: the cleanup reached the refused termination: {:?}",
+        f.api.ops()
+    );
+    assert_eq!(
+        f.listed().await,
+        [RECIPE],
+        "the failed deletion keeps the recipe"
+    );
+    let logged = late_failure_logged().await;
+    assert!(
+        logged
+            .as_deref()
+            .is_some_and(|reply| reply.contains("try later")),
+        "the late failure's reason reaches the log: {logged:?}"
+    );
+
+    let (status, body) = f.delete_at_once(RECIPE).await;
+    assert!(
+        status.is_server_error() && status != axum::http::StatusCode::GATEWAY_TIMEOUT,
+        "{status}: {body}"
+    );
+    assert!(body.contains("try later"), "the retry answers why: {body}");
+    assert_eq!(f.listed().await, [RECIPE]);
 }

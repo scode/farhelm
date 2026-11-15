@@ -1314,6 +1314,9 @@ impl Fixture {
         self.delete_sessions_until_sealed(host, &container, &session.id, &kept.to_string())
             .await;
         let recipe_path = format!("/api/tensorlake/recipes/{}", self.recipe);
+        // The recipe Delete answers within the helm's 20-second host reply
+        // bound. This refusal is assumed to come well inside it; one that
+        // did not would be a 504 here, its reason only in the helm's log.
         let response = self
             .http
             .delete(self.url(&recipe_path))
@@ -1341,10 +1344,26 @@ impl Fixture {
             .unwrap();
         let status = response.status();
         let body = response.text().await.unwrap();
-        assert!(
-            status.is_success(),
-            "retry recipe cleanup after releasing its image: {body}"
-        );
+        // A cleanup slower than the reply bound answers 504 and carries on;
+        // its success then shows as the recipe leaving the list.
+        if status == reqwest::StatusCode::GATEWAY_TIMEOUT {
+            wait_for_listing_with(
+                || self.observe("/api/tensorlake/recipes"),
+                300,
+                "recipe",
+                |listed| {
+                    listed["recipes"].as_array().is_some_and(|recipes| {
+                        recipes.iter().all(|recipe| recipe["name"] != self.recipe)
+                    })
+                },
+            )
+            .await;
+        } else {
+            assert!(
+                status.is_success(),
+                "retry recipe cleanup after releasing its image: {status}: {body}"
+            );
+        }
         assert!(self.owned_ids("image").await.unwrap().is_empty());
         assert!(self.owned_ids("container").await.unwrap().is_empty());
         assert!(

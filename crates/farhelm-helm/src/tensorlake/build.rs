@@ -903,6 +903,13 @@ impl RecipeBuilds {
         self.registry().active.contains_key(name)
     }
 
+    /// Whether a Delete of recipe `name` holds the shared deletion admission,
+    /// which it keeps until its cleanup ends, also after its route has
+    /// answered that the deletion carries on.
+    pub(crate) fn is_deleting(&self, name: &str) -> bool {
+        self.registry().deleting.contains(name)
+    }
+
     /// The saved API key, if any.
     async fn api_key(&self) -> anyhow::Result<Option<ApiKey>> {
         Ok(self.store.tensorlake_config().await?.api_key())

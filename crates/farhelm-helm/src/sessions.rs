@@ -3687,6 +3687,11 @@ pub(crate) async fn rename_session(
 /// `hosts::remove_host`). The Tensorlake settings routes that wait on
 /// Tensorlake's API use the same bound (SPEC_impl.md, "The UI channel").
 ///
+/// So is a recipe's Delete, whose cleanup waits on Tensorlake and on container
+/// hosts: once its cleanup has started, it replies that the deletion carries
+/// on, and the recipe leaves the recipe list once it is deleted
+/// (`crate::tensorlake::recipes::delete_recipe`).
+///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
 /// `do_replace_session`, the restart's, `create_session_request` and
@@ -3721,9 +3726,10 @@ pub(crate) async fn within_host_reply_bound(
 /// an uninstall's plan, a destination or alias change waiting for a setup or
 /// Update to finish) can wait on a host for longer than the UI channel
 /// tolerates, and each one's eventual outcome shows in a different place: the
-/// hosts list, or nowhere, when the user simply has to try again. `timed_out`
-/// is the whole message the 504 carries, and it is the caller's because only
-/// the caller knows which.
+/// hosts list, or nowhere, when the user simply has to try again; the other
+/// routes that use it, such as a recipe's Delete, are listed under
+/// [`HOST_REPLY_BOUND`]. `timed_out` is the whole message the 504 carries, and
+/// it is the caller's because only the caller knows which.
 ///
 /// A failure the work produces after the 504 went out reaches nobody, so it is
 /// logged with its status and the start of its text; the caller's pushed state

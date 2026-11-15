@@ -263,7 +263,13 @@ on Tensorlake's API rather than on a host, answer within the same bound, counted
 the migration's orchestrator on 2026-11-15): the API key's Test and the list of Sandboxes not on this helm stop listing
 and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover
 sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then
-shows (see "Tensorlake account").
+shows (see "Tensorlake account"). A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same
+bound, counted from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15): an unknown recipe,
+one a host uses and one already being deleted are refused at once from local state, before anything is cancelled; once
+its cleanup has started, a deletion still running at the bound replies that it carries on, and the recipe leaves the
+recipe list once it is deleted, or, if the cleanup fails, stays listed with the reason only in the helm's log until a
+second Delete runs the cleanup again and answers it. While the deletion runs, the recipe's save (`PUT`) and Build are
+refused with 409, so a save cannot be accepted and then lost with the row.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -5537,7 +5543,9 @@ selection for every provider. Each provider cleans all its recorded and live pla
 active work and requests cancellation only between commands, preserving recorded ownership of partial resources. Every
 installed provider is attempted and failures retain their records. The final store transaction rechecks recipe use and
 aggregate cleanup state before deleting the catalog row. Both engines share the same registry instance. Tensorlake
-cleanup checks only Tensorlake state before requiring its key.
+cleanup checks only Tensorlake state before requiring its key. The route refuses an unknown or used recipe from local
+state before taking admission, and runs the cleanup on a task of its own, answering within the UI channel's host reply
+bound while a slow cleanup carries on (see "The UI channel").
 
 Containers leftovers use a provider-owned operation. It rechecks canonical identity, this helm's ownership labels and
 the absence of row, recipe or active-job references before removal. Row-backed leftovers use the ordinary confirmed
