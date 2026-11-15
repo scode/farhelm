@@ -107,6 +107,13 @@ pub enum Work {
     /// host-add key. Accepted (202) once the helm has registered the host and started the run, whose progress the helm
     /// pushes. Not supersedable: the plan is one-use.
     Setup,
+    /// Opening a remote session's loopback link through a tunnel (`POST /api/sessions/{id}/tunnels/open`), on the
+    /// session's tunnel key ([`OpKey::tunnels`]); the helm opens the browser itself. Not supersedable: the old app
+    /// allowed one tunnel action at a time, and a second waits for the first.
+    TunnelOpen,
+    /// Closing one of a session's tunnels (`DELETE /api/sessions/{id}/tunnels/{tunnel}`), on the same key, so Close
+    /// all closes them one after another. Not supersedable.
+    TunnelClose,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built
@@ -126,6 +133,9 @@ enum Key {
     Launch(u64),
     /// Numbered the same way.
     HostAdd(u64),
+    /// A session's tunnels, by the session's id: apart from the session's own key, so opening or closing a tunnel never
+    /// makes the session's lifecycle actions busy.
+    Tunnels(String),
 }
 
 impl OpKey {
@@ -162,6 +172,13 @@ impl OpKey {
     /// Fresh in the same way as [`OpKey::new_launch`]'s.
     pub fn new_host_add() -> OpKey {
         OpKey(Key::HostAdd(next_number()))
+    }
+
+    /// The tunnels of a session, by the id the helm serves the session under: one key for all of them, so one tunnel
+    /// action runs at a time per session ([`Work::TunnelOpen`], [`Work::TunnelClose`]). Distinct from
+    /// [`OpKey::session`], whose busy state is the session's lifecycle actions'.
+    pub fn tunnels(session: &str) -> OpKey {
+        OpKey(Key::Tunnels(session.to_owned()))
     }
 }
 

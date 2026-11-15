@@ -3,8 +3,9 @@
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
-//! mouse reporting, and web links with a program's hyperlink's destination display since. File links and the reconnect
-//! display with its phase and Retry come later in that work. The session pane ([`crate::session_pane`]) mounts one for
+//! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
+//! host's loopback links ([`super::tunnels`]) since. File links and the reconnect display with its phase and Retry come
+//! later in that work. The session pane ([`crate::session_pane`]) mounts one for
 //! the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
@@ -98,7 +99,7 @@ use std::time::Duration;
 
 use farhelm_grid_model::{
     ExitState, GridError, GridOutput, LinkKind, Position, Selection, SelectionMode, TerminalLink,
-    web_target,
+    tunnel_port, web_target,
 };
 use farhelm_helm_client::terminal::{
     Attachment, AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents,
@@ -124,6 +125,7 @@ use gpui::{
     UTF16Selection, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
+use super::tunnels::{self, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
 use crate::actions::{self, KeyOwner};
 use crate::assets::TERMINAL_FONT;
@@ -257,6 +259,12 @@ pub struct AttachedTerminal {
     /// shows, so the refusal's advice (enlarge the window and hover again) means hovering again, as in the old app,
     /// and the display that was not fully visible does not keep sitting over the explanation.
     refusal_raised: bool,
+    /// The session's tunnels: what the destination display offers for a remote host's loopback link, and what a
+    /// Cmd-click opens through ([`super::tunnels`]). One per terminal until terminal tabs share one per session.
+    tunnels: Entity<Tunnels>,
+    /// The platform the tunnel offer is decided for: this one, except in tests, which decide it for the Mac on any
+    /// machine ([`AttachedTerminal::set_platform`]).
+    platform: Platform,
     /// The buttons held in a press the program's mouse reporting took, as a bit per button (1 left, 2 middle, 4
     /// right); 0 while none is. Moves and releases go to the program until the last of them comes up.
     reporting: u8,
@@ -298,6 +306,8 @@ pub struct AttachedTerminal {
     /// [`AttachedTerminal::report_focus`]). Set up on the first render, which is where the owner first has its window.
     activation: Option<Subscription>,
     _session: [Subscription; 2],
+    /// Redraws the terminal when its tunnels change, since it draws their failure notice.
+    _tunnels: Subscription,
     /// How many delivery turns ran, and how many times output was applied to a view, so tests can check the per-turn
     /// bound and that consecutive output is applied as one batch.
     #[cfg(test)]
@@ -328,6 +338,8 @@ impl AttachedTerminal {
         ];
         #[cfg(any(feature = "agent", test))]
         probe::enroll(cx.weak_entity(), cx);
+        let tunnels = cx.new(|_| Tunnels::new(target.session.clone()));
+        let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
         AttachedTerminal {
             target,
             hold: None,
@@ -356,6 +368,8 @@ impl AttachedTerminal {
             press_admitted: false,
             refusal: None,
             refusal_raised: false,
+            tunnels,
+            platform: actions::THIS_PLATFORM,
             reporting: 0,
             mouse_dedupe: MouseDeduper::default(),
             retired,
@@ -373,6 +387,7 @@ impl AttachedTerminal {
             blink: None,
             paste: None,
             _session: subscriptions,
+            _tunnels: tunnel_watch,
             #[cfg(test)]
             turns: 0,
             #[cfg(test)]
@@ -1367,7 +1382,7 @@ impl Render for AttachedTerminal {
                         }
                     });
                     let released = owner.clone();
-                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                         if phase != DispatchPhase::Bubble {
                             return;
                         }
@@ -1375,7 +1390,7 @@ impl Render for AttachedTerminal {
                             owner.report_released(event, cx);
                             if event.button == MouseButton::Left {
                                 owner.end_selection(Some(event), cx);
-                                owner.link_released(event, cx);
+                                owner.link_released(event, window, cx);
                                 // Hover lookups pause during a press; the pointer may rest on other text now. Only
                                 // while it is over the grid: a release over a dialog covering the terminal must not
                                 // underline a link through its scrim.
@@ -1418,6 +1433,23 @@ impl Render for AttachedTerminal {
         });
         let disclosure_anchor = self.place_disclosure(window, cx);
         let refusal = self.refusal_line(cx);
+        let tunnel_notice = tunnels::notice_line(&self.tunnels, cx);
+        // The refused click's explanation and the tunnel notice, stacked at the top of the grid's area so neither
+        // hides the other. Drawn outside the grid's element: a press on the notice's Dismiss must not also be a press
+        // on the terminal (a selection, a mouse report, a link under it), and its button must not sit inside the
+        // terminal's key context, where Tab and Escape are the program's.
+        let overlay = (refusal.is_some() || tunnel_notice.is_some()).then(|| {
+            div()
+                .absolute()
+                .top(px(PANE_PADDING + 4.))
+                .left(px(PANE_PADDING + 4.))
+                .right(px(PANE_PADDING + 4.))
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .children(refusal)
+                .children(tunnel_notice)
+        });
         let hovering_link = self
             .committed
             .as_ref()
@@ -1486,8 +1518,7 @@ impl Render for AttachedTerminal {
                     .overflow_hidden()
                     .child(room)
                     .children(screen)
-                    .children(disclosure_anchor)
-                    .children(refusal),
+                    .children(disclosure_anchor),
             )
             .children(scrollbar);
         let body = focus::track(body, &self.focus, OnPress::Focus);
@@ -1515,7 +1546,16 @@ impl Render for AttachedTerminal {
             .overflow_hidden()
             .bg(ground.hsla(1.))
             .children(banner.map(|line| self.banner(line, cx)))
-            .child(body)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(body)
+                    .children(overlay),
+            )
             .children(placeholder)
             .child(measure)
     }
@@ -1566,6 +1606,9 @@ struct LinkPress {
     /// Whether a click may open the link, decided before anything the press did could change it (closing popovers,
     /// the destination display among them); see [`AttachedTerminal::click_admitted`].
     admitted: bool,
+    /// Whether the link was offered a tunnel at the press, so a Cmd-click tunnels only an address whose display the
+    /// admission checked (a tunnel read answering between press and release changes nothing).
+    hinted: bool,
 }
 
 /// The web address a click on `link` opens: a printed address by the strict rule for text, a program's hyperlink by
@@ -1611,7 +1654,8 @@ impl AttachedTerminal {
     }
 
     /// The pointer rests on `position` with no press under way: tell the view, which finds the link there. Reaching
-    /// another cell counts as hovering again after a refused click, so destination displays show again.
+    /// another cell counts as hovering again, after a refused click or a display put away with no press (Escape), and
+    /// redraws so the display shows again.
     fn hover_link_at(&mut self, position: Option<Point<Pixels>>, cx: &mut Context<Self>) {
         let was = self
             .hover_point
@@ -1619,7 +1663,15 @@ impl AttachedTerminal {
         self.hover_point = position;
         let cell = position.and_then(|position| self.link_cell(position, cx));
         if cell != was {
-            self.refusal_raised = false;
+            // Reaching another cell counts as hovering again, after a refused click or a display put away with no
+            // press (Escape). Nothing else redraws for a move within one link, so ask for the frame that shows it.
+            let dismissed = self
+                .disclosure
+                .as_ref()
+                .is_some_and(|shown| shown.dismissed_at.is_some());
+            if std::mem::take(&mut self.refusal_raised) || dismissed {
+                cx.notify();
+            }
         }
         if let Some(view) = self.committed.clone() {
             let before = view.read(cx).hovered_link().is_some();
@@ -1662,9 +1714,11 @@ impl AttachedTerminal {
 
     /// The primary button came up: a press on a link that is released on the same link, still in the text, within
     /// the jitter, with nothing selected, is a click, and opens the link's web address in the browser with no prompt
-    /// (SPEC.md) unless the link choice leaves clicks to the program. A program's hyperlink (OSC 8) opens only while its
-    /// destination display is fully visible; otherwise the click is refused, and says why at the top of the terminal.
-    fn link_released(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+    /// (SPEC.md) unless the link choice leaves clicks to the program. A link that has a destination display (a
+    /// program's hyperlink, or a printed address with a tunnel hint) opens only while that display is fully visible;
+    /// otherwise the click is refused, and says why at the top of the terminal. On a Mac, Cmd alone on a link that was
+    /// offered a tunnel at the press opens it through one ([`super::tunnels`]) instead of as printed.
+    fn link_released(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(press) = self.link_press.take() else {
             return;
         };
@@ -1694,11 +1748,28 @@ impl AttachedTerminal {
             cx.notify();
             return;
         }
+        // Cmd and nothing else, on a link the display offered a tunnel for: through the tunnel, with the link as
+        // printed (the helm rewrites it to the tunnel's local address). Anything else opens the link as it is, on this
+        // Mac, which the hint says too.
+        let modifiers = event.modifiers;
+        let tunnel_gesture = self.platform == Platform::Mac
+            && modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+            && !modifiers.shift
+            && !modifiers.function;
+        if tunnel_gesture && press.hinted {
+            let mark = Mark::take(cx);
+            let uri = press.link.uri.clone();
+            self.tunnels
+                .update(cx, |tunnels, cx| tunnels.open(uri, &mark, window, cx));
+            return;
+        }
         cx.open_url(&target);
     }
 }
 
-/// What a click on a program's hyperlink says when its destination display was not fully visible (the old app's
+/// What a click on a link with a destination display says when that display was not fully visible (the old app's
 /// refusal, `admitDisclosure` in terminal-files.js; the form for a display another surface covers is not built yet).
 const DISCLOSURE_REFUSAL: &str =
     "cannot open: full link details are not visible; enlarge the window and hover again";
@@ -1711,10 +1782,13 @@ const DISCLOSURE_OFFSET_X: f32 = 12.;
 const DISCLOSURE_ABOVE: f32 = 4.;
 const DISCLOSURE_BELOW: f32 = 12.;
 
-/// The destination display of the program hyperlink the pointer rests on.
+/// The destination display of the link the pointer rests on: a program's hyperlink, or a printed address offered a
+/// tunnel.
 struct Disclosure {
-    /// The hyperlink it is for.
+    /// The link it is for: a program's hyperlink, or a printed address offered a tunnel.
     link: TerminalLink,
+    /// The tunnel hint it ends with, for a remote host's loopback link on a Mac.
+    hint: Option<HostSentence>,
     /// Where the pointer was when it opened, which it stays anchored by while the pointer rests on the link.
     at: Point<Pixels>,
     /// Which display this is, counting every one this terminal opened: its anchor's key, so each display has an anchor
@@ -1724,52 +1798,121 @@ struct Disclosure {
     layer: Option<LayerId>,
     /// Where the display was last drawn; a click checks it was fully visible.
     drawn: super::disclosure::Drawn,
+    /// Whether a press in the terminal came since it opened. A press closes it (the layer manager closes a popover on
+    /// any press outside it) and it comes back once the press ends, so a second click works; closed with no press (by
+    /// Escape, chiefly), it stays closed while the pointer rests, rather than reopening at once and losing the Escape.
+    pressed: bool,
+    /// The cell the pointer rested on when it was found closed with no press since it opened ([`Disclosure::pressed`]):
+    /// it stays closed until the pointer reaches another cell, which counts as hovering again.
+    dismissed_at: Option<(u16, u16)>,
 }
 
 impl AttachedTerminal {
-    /// The hovered link, when it is a program's hyperlink to a web address: the one kind of link that shows its
-    /// destination before a click opens it.
-    fn disclosed_link(&self, cx: &App) -> Option<TerminalLink> {
+    /// The hovered link when it gets a destination display, with the tunnel hint the display ends with: a program's
+    /// hyperlink to a web address always, since its text need not resemble where it goes; a printed web address only
+    /// when the session's tunnels offer it a hint (a remote host's loopback address on a Mac), since otherwise what it
+    /// shows is what opens.
+    fn disclosed_link(&self, cx: &App) -> Option<(TerminalLink, Option<HostSentence>)> {
         let view = self.committed.as_ref()?.read(cx);
-        view.hovered_link()
-            .filter(|link| {
-                matches!(link.kind, LinkKind::Osc { .. }) && link_web_target(link).is_some()
-            })
-            .cloned()
+        let link = view.hovered_link()?;
+        link_web_target(link)?;
+        let hint = self.tunnel_hint(link, cx);
+        (matches!(link.kind, LinkKind::Osc { .. }) || hint.is_some()).then(|| (link.clone(), hint))
+    }
+
+    /// Ask for the session's tunnels the first time the pointer rests on a loopback link on a Mac, which is when the
+    /// offer first depends on them. The read goes out after this frame: the owner is drawing.
+    fn request_tunnels(&mut self, cx: &mut Context<Self>) {
+        let loopback = self
+            .committed
+            .as_ref()
+            .and_then(|view| view.read(cx).hovered_link())
+            .is_some_and(|link| tunnel_port(&link.uri).is_some());
+        if self.platform != Platform::Mac {
+            return;
+        }
+        let tunnels = self.tunnels.clone();
+        if loopback && tunnels.read(cx).unrequested() {
+            cx.defer(move |cx| tunnels.update(cx, |tunnels, cx| tunnels.request(cx)));
+        } else if !loopback && tunnels.read(cx).retry_wanted() {
+            // A failed read is tried again the next time a loopback link is hovered, not while this one still is,
+            // which would send it again every frame.
+            cx.defer(move |cx| tunnels.update(cx, |tunnels, _| tunnels.rearm()));
+        }
+    }
+
+    /// The tunnel hint `link` gets in its destination display, if the session's tunnels offer one for it.
+    fn tunnel_hint(&self, link: &TerminalLink, cx: &App) -> Option<HostSentence> {
+        let program_owns_clicks = LinkClick::current(cx) == LinkClick::Program;
+        self.tunnels
+            .read(cx)
+            .hint(&link.uri, self.platform, program_owns_clicks)
+    }
+
+    /// Decide the tunnel offer for `platform` instead of this machine's, so tests on any machine cover the Mac's.
+    #[cfg(test)]
+    pub(crate) fn set_platform(&mut self, platform: Platform) {
+        self.platform = platform;
+    }
+
+    /// The session's tunnels, for tests that answer their reads and check their notice.
+    #[cfg(test)]
+    pub(crate) fn tunnels(&self) -> &Entity<Tunnels> {
+        &self.tunnels
     }
 
     /// Keep the destination display in step with the hovered link, as the owner draws, and return the anchor to draw.
     ///
     /// A hyperlink under the pointer gets a display, opened after this frame once its anchor has been drawn. Another
     /// link (the next row of a wrapped one counts as another, since each row is its own link to the grid model), no
-    /// link, or a display whose layer has closed while the pointer rests and no press is under way gets a fresh one or
-    /// none. No display shows after a refused click until the pointer moves to another cell, and none opens while a
-    /// dialog or menu holds the keyboard.
+    /// link, or a display that a press closed, once the press has ended, gets a fresh one or none. One closed with no
+    /// press (Escape) stays closed until the hover changes. No display shows after a refused click until the pointer
+    /// moves to another cell, and none opens while a dialog or menu holds the keyboard.
     fn place_disclosure(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let pressing = self.link_press.is_some() || self.select.is_some() || self.reporting != 0;
+        self.request_tunnels(cx);
         let wanted = self.disclosed_link(cx).filter(|_| !self.refusal_raised);
+        // The hint counts too: a display opened before the session's tunnels were read opens again with it.
+        let cell = self
+            .committed
+            .as_ref()
+            .and_then(|view| view.read(cx).hover_cell());
+        // A display closed with no press since it opened stays dismissed for the cell the pointer rested on then.
+        if let Some(shown) = &mut self.disclosure
+            && !shown.pressed
+            && shown.dismissed_at.is_none()
+            && shown
+                .layer
+                .is_some_and(|layer| !layers::is_open(layer, window, cx))
+        {
+            shown.dismissed_at = cell;
+        }
         let current = self.disclosure.as_ref().is_some_and(|shown| {
-            wanted.as_ref() == Some(&shown.link)
+            wanted.as_ref() == Some(&(shown.link.clone(), shown.hint.clone()))
                 && (pressing
+                    || shown.dismissed_at.is_some_and(|at| Some(at) == cell)
                     || shown
                         .layer
                         .is_none_or(|layer| layers::is_open(layer, window, cx)))
         });
         if !current {
             let old = self.disclosure.take().and_then(|shown| shown.layer);
-            if let (Some(link), Some(at)) = (wanted, self.hover_point) {
+            if let (Some((link, hint)), Some(at)) = (wanted, self.hover_point) {
                 self.disclosure_count += 1;
                 let generation = self.disclosure_count;
                 self.disclosure = Some(Disclosure {
                     link,
+                    hint,
                     at,
                     generation,
                     layer: None,
                     drawn: super::disclosure::Drawn::default(),
+                    pressed: false,
+                    dismissed_at: None,
                 });
             }
             let opening = self.disclosure.as_ref().map(|shown| shown.generation);
@@ -1862,7 +2005,8 @@ impl AttachedTerminal {
         let anchor = self.disclosure_anchor.clone()?;
         let text = view.read(cx).link_disclosure(&shown.link)?;
         let drawn = shown.drawn.clone();
-        let content = cx.new(|_| super::disclosure::DisclosureView::new(&text, drawn));
+        let hint = shown.hint.clone();
+        let content = cx.new(|_| super::disclosure::DisclosureView::new(&text, hint, drawn));
         let popover = Popover {
             view: content.into(),
             container: cx.focus_handle(),
@@ -1875,20 +2019,24 @@ impl AttachedTerminal {
     }
 
     /// Whether a click on `link` that starts now may open it, decided at the press, before anything the press does
-    /// (closing popovers, among them this display) can change it: a printed web address always may; a program's
-    /// hyperlink only while its destination display, for this very link, is open and was fully visible (inside the
-    /// window) when last drawn (SPEC.md: the hover display counts as disclosing the target only while fully visible).
+    /// (closing popovers, among them this display) can change it: a printed web address with no tunnel hint always
+    /// may; a program's hyperlink, or a printed address whose display carries a tunnel hint, only while its destination
+    /// display, for this very link, is open and was fully visible (inside the window) when last drawn (SPEC.md: the
+    /// hover display counts as disclosing the target only while fully visible, and this applies to Cmd-click tunnel
+    /// opens too).
     fn click_admitted(&self, link: &TerminalLink, window: &Window, cx: &App) -> bool {
-        match link.kind {
-            LinkKind::Text => true,
-            LinkKind::Osc { .. } => self.disclosure.as_ref().is_some_and(|shown| {
+        let disclosed = match link.kind {
+            LinkKind::Text => self.tunnel_hint(link, cx).is_some(),
+            LinkKind::Osc { .. } => true,
+        };
+        !disclosed
+            || self.disclosure.as_ref().is_some_and(|shown| {
                 shown.link == *link
                     && shown
                         .layer
                         .is_some_and(|layer| layers::is_open(layer, window, cx))
                     && super::disclosure::fully_visible(&shown.drawn)
-            }),
-        }
+            })
     }
 
     /// The refused click's explanation, drawn at the top of the grid's area until the next press there (the old app's
@@ -1903,10 +2051,6 @@ impl AttachedTerminal {
                 .debug_selector(|| "terminal-link-refusal".into())
                 .role(Role::Status)
                 .aria_label(text.clone())
-                .absolute()
-                .top(px(4.))
-                .left(px(4.))
-                .right(px(4.))
                 .px(px(6.))
                 .py(px(4.))
                 .max_h(px(54.))
@@ -2189,6 +2333,9 @@ impl AttachedTerminal {
         if self.refusal.take().is_some() {
             cx.notify();
         }
+        if let Some(shown) = &mut self.disclosure {
+            shown.pressed = true;
+        }
         let Some(view) = self.committed.clone() else {
             return;
         };
@@ -2204,6 +2351,7 @@ impl AttachedTerminal {
         };
         let admitted = std::mem::take(&mut self.press_admitted);
         self.link_press = link.clone().map(|link| LinkPress {
+            hinted: self.tunnel_hint(&link, cx).is_some(),
             link,
             at: event.position,
             admitted,
