@@ -89,6 +89,7 @@ conflicted across all of it.
 | Permission words                | `crates/gui/farhelm-gui/src/permission/words.rs`                                                                                                                                                                                                                                                                               | [reported](#permission-words)            | none                                  |
 | Provider wording                | `crates/gui/farhelm-gui/src/environment_ui.rs`                                                                                                                                                                                                                                                                                 | [reported](#provider-wording)            | none                                  |
 | Template summary                | `crates/gui/farhelm-gui/src/templates/summary.rs`                                                                                                                                                                                                                                                                              | [reported](#template-summary)            | none                                  |
+| Save as template                | `crates/gui/farhelm-gui/src/templates/save.rs`, `crates/gui/farhelm-gui/src/templates/save_panel.rs`                                                                                                                                                                                                                           | [reported](#save-as-template)            | none                                  |
 | Terminal tunnels                | `crates/gui/farhelm-gui/src/terminal/tunnels.rs`                                                                                                                                                                                                                                                                               | [reported](#terminal-tunnels)            | none                                  |
 | Terminal text size              | `crates/gui/farhelm-gui/src/terminal/text_size.rs`                                                                                                                                                                                                                                                                             | [reported](#terminal-text-size)          | none                                  |
 | Terminal set                    | `crates/gui/farhelm-gui/src/terminal/set.rs`                                                                                                                                                                                                                                                                                   | [reported](#terminal-set)                | none                                  |
@@ -497,6 +498,14 @@ with the areas that show a template's summary or the permission label in it (the
 
 Lint exceptions: none.
 
+### Save as template
+
+Extension points: reported, the whole files: owned by the templates-and-quick-launch area, which built them, and shared
+with the launcher, which hosts the Save as template panel (`save_panel::SavePanel`) and builds what it saves from
+(`save::Candidate`). Another area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
 ### Terminal tunnels
 
 Extension points: reported, the whole file: owned by the terminal area, which built it, and shared with the areas that
@@ -868,6 +877,8 @@ conflict marker.
 | Permission words       | `crates/gui/farhelm-gui/src/permission/words.rs`       | `reported`    |
 | Provider wording       | `crates/gui/farhelm-gui/src/environment_ui.rs`         | `reported`    |
 | Template summary       | `crates/gui/farhelm-gui/src/templates/summary.rs`      | `reported`    |
+| Save as template       | `crates/gui/farhelm-gui/src/templates/save.rs`         | `reported`    |
+| Save as template       | `crates/gui/farhelm-gui/src/templates/save_panel.rs`   | `reported`    |
 | Terminal tunnels       | `crates/gui/farhelm-gui/src/terminal/tunnels.rs`       | `reported`    |
 | Terminal text size     | `crates/gui/farhelm-gui/src/terminal/text_size.rs`     | `reported`    |
 | Terminal set           | `crates/gui/farhelm-gui/src/terminal/set.rs`           | `reported`    |

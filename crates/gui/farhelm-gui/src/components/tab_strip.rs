@@ -20,8 +20,9 @@
 //! It holds no state: its owner says which tab is chosen and hears each choice. Focus follows the platform's control
 //! rule ([`crate::focus::OnPress::Control`]), as the other choice controls do.
 //!
-//! Built for one consumer, the launcher, and documented for the next: a second tab strip (the session view's terminal
-//! tabs, say) extends this one rather than adding another.
+//! Built for one consumer, the launcher, and documented for the next: a second strip of choices extends this one rather
+//! than adding another. The session view's terminal tabs are not one: each tab carries its own close button, so they
+//! are the terminal set's own pressed-state buttons.
 
 use std::rc::Rc;
 

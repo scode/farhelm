@@ -26,7 +26,8 @@
 //!   [`choose_terminal`] when the user chooses a session (its terminal becomes home and takes focus). Only when none of
 //!   them is on screen does focus rest on the window's root view, which is not a tab stop, so a key press still starts
 //!   inside Farhelm's key context. SPEC.md's rule for a shell tab that exits (the agent tab takes focus at once) needs
-//!   a move of its own, which the terminal tabs add here when they arrive.
+//!   no move of its own: the terminal set falls back to the agent terminal and the session pane makes it home, so the
+//!   home move covers it.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
 //!   where it was before it opened, or home or a control its opener named instead ([`ReturnTo`]); when the focused
