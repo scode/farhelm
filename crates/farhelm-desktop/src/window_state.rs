@@ -274,19 +274,6 @@ impl MaximizeState {
     }
 }
 
-/// A maximized observation cannot replace the frame needed by Restore.
-pub fn remember_normal(
-    previous: Option<WindowRect>,
-    observed: Option<WindowRect>,
-    maximized: bool,
-) -> Option<WindowRect> {
-    if maximized {
-        previous
-    } else {
-        observed.or(previous)
-    }
-}
-
 // ---- Following the live window -------------------------------------------------------------------------------------
 
 /// What the window reports about itself, whenever its bounds, maximized or fullscreen state change.
@@ -626,31 +613,6 @@ mod tests {
             })
         );
         assert_eq!(restore_rectangle(saved, &[PRIMARY], false), None);
-    }
-
-    /// Close while maximized must save the last ordinary frame, not the screen frame.
-    #[test]
-    fn maximized_transitions_preserve_last_normal_bounds() {
-        let first = WindowRect {
-            x: 100,
-            y: 80,
-            width: 900,
-            height: 650,
-        };
-        let maximized = PRIMARY;
-        let restored = WindowRect {
-            x: 120,
-            y: 90,
-            width: 850,
-            height: 620,
-        };
-        let normal = remember_normal(Some(first), Some(maximized), true);
-        assert_eq!(normal, Some(first));
-        assert_eq!(remember_normal(normal, None, true), Some(first));
-        assert_eq!(
-            remember_normal(normal, Some(restored), false),
-            Some(restored)
-        );
     }
 
     /// Fullscreen exit events cannot erase the maximize state before close.
