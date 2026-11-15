@@ -6,7 +6,8 @@
 //! `app.css` at the reference commit). Here's the TLDR of the rules:
 //!
 //! - **The row.** A plain flex row, at least 30 pixels high, on `--bg-1`: a flexible left region that may shrink to
-//!   nothing ([`TABS_SLOT`], where the terminal area's tab strip and tunnel pill go; empty until they come), then the
+//!   nothing ([`TABS_SLOT`], where the terminal area's tab strip and open-tunnels pill go; the pill is the terminal's
+//!   to draw, [`AttachedTerminal::tunnel_pill`](crate::terminal::attached::AttachedTerminal::tunnel_pill)), then the
 //!   actions, which never shrink. The row never wraps; a pane too narrow for it clips it. SPEC.md's floor is a
 //!   650-pixel pane, where every action stays fully visible and keyboard reachable.
 //! - **The actions, in the old order.** Stop, Restart, Replace, Delete, each a compact button with the old icon, label
@@ -59,9 +60,9 @@ use crate::session;
 use crate::session_list::{delete, menu, outcome, replace, restart, stop};
 use crate::theme::{self, metrics};
 
-/// The id of the top row's left region, where the terminal area's tab strip and tunnel pill go. Drawn empty until they
-/// come, so the row's layout (a region that takes the width the actions leave, and shrinks to nothing first) is already
-/// the one they need.
+/// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
+/// while the session has tunnels open; the tabs are still to come. The row's layout (a region that takes the width the
+/// actions leave, and shrinks to nothing first) is already the one they need.
 pub(crate) const TABS_SLOT: &str = "session-header-tabs";
 
 /// `.session-topbar`'s `min-height`.
@@ -210,6 +211,16 @@ impl SessionPane {
         } else {
             px(ROW_MIN_HEIGHT)
         };
+        // The terminal area's part of the left region: the open-tunnels pill, while the session has tunnels open. A
+        // button, so it keeps its presses inside the title band.
+        let pill = self
+            .mounted
+            .current(cx)
+            .as_ref()
+            .map(|mounted| mounted.terminal.clone())
+            .and_then(|terminal| {
+                terminal.update(cx, |terminal, cx| terminal.tunnel_pill(window, cx))
+            });
         let row = div()
             .id("session-header")
             .debug_selector(|| "session-header".into())
@@ -229,8 +240,12 @@ impl SessionPane {
                 div()
                     .id(TABS_SLOT)
                     .debug_selector(|| TABS_SLOT.into())
+                    .flex()
+                    .flex_row()
+                    .items_center()
                     .flex_1()
-                    .min_w_0(),
+                    .min_w_0()
+                    .children(pill),
             );
         let row = title_band::row(row, Row::SessionTop);
         let Some(store) = session::current_store(cx) else {

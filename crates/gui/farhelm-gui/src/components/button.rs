@@ -108,6 +108,10 @@ pub enum Tier {
     /// the fill's hover. The content is the caller's, so a chosen choice draws its mark in the inverse ink itself (the
     /// old sheet's one `!important` over the mark's own tint).
     IconChoice,
+    /// `.session-tunnel-toggle`: the open-tunnels pill in the session's top row, the row's one distinctively colored
+    /// control: the tunnel ink on the tunnel fill inside the tunnel edge, rounded to 8 pixels, padded 2 by 4 pixels at
+    /// 11 pixels. Open ([`Button::expanded`]), it takes the accent fill with the inverse ink, as any open toggle does.
+    Tunnel,
     /// `.host-color-choice`: one of the host settings' color choices, a 26-pixel circle with 3 pixels around its
     /// content (the color's swatch), no fill or edge at rest and no hover fill. Chosen, it takes the accent fill inside
     /// an edge in the inverse ink.
@@ -116,6 +120,8 @@ pub enum Tier {
 
 /// The [`Tier::QuickMark`] box's padding, vertical then horizontal (`.templates-quick-mark`: `10px 5px`).
 const QUICK_MARK_PAD: (f32, f32) = (10., 5.);
+/// The [`Tier::Tunnel`] pill's padding, vertical then horizontal (`.session-tunnel-toggle`: `2px 4px`).
+const TUNNEL_PAD: (f32, f32) = (2., 4.);
 /// The [`Tier::NumberKey`] box's padding on every side.
 const NUMBER_KEY_PAD: f32 = 4.;
 
@@ -452,6 +458,12 @@ impl Button {
                 palette.fg_0,
             ),
             Tier::ColorChoice => (None, theme::TRANSPARENT, None, palette.fg_0),
+            Tier::Tunnel => (
+                Some(palette.tunnel_bg),
+                palette.tunnel_bg,
+                Some(palette.tunnel_border),
+                palette.tunnel_fg,
+            ),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
             Tier::Primary if self.disabled || self.busy || self.refused => retired,
             Tier::Danger if self.disabled || self.busy || self.refused => retired,
@@ -510,6 +522,7 @@ impl RenderOnce for Button {
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
             Tier::QuickMark { .. } => (px(QUICK_MARK_PAD.0), px(QUICK_MARK_PAD.1)),
             Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
+            Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
             Tier::Ghost
             | Tier::Neutral
             | Tier::Primary
@@ -537,6 +550,7 @@ impl RenderOnce for Button {
             | Tier::NumberKey { .. }
             | Tier::IconChoice
             | Tier::ColorChoice
+            | Tier::Tunnel
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
@@ -616,6 +630,14 @@ impl RenderOnce for Button {
             .text_color(theme::color(text))
             // A transparent edge where a tier has none keeps every tier the same size.
             .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)))
+            // `.session-tunnel-toggle`: `gap: 3px`, `font-size: 11px`, `line-height: 1.4`, `border-radius: 8px`.
+            .when(self.tier == Tier::Tunnel, |button| {
+                button
+                    .gap(px(3.))
+                    .text_size(px(11.))
+                    .line_height(px(15.))
+                    .rounded(px(8.))
+            })
             .when(self.tier == Tier::Nav, |button| {
                 button
                     .justify_start()
