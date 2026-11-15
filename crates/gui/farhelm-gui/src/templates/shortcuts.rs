@@ -89,6 +89,21 @@ impl Bindings {
     }
 }
 
+/// The number keys after a rename of `old` to `new`: every key `old` held is held by `new` instead, and nothing else
+/// changes (SPEC.md: "Rename keeps a key"; the old app's `rename_number_binding`).
+pub fn keys_renamed(
+    keys: &BTreeMap<String, String>,
+    old: &str,
+    new: &str,
+) -> BTreeMap<String, String> {
+    keys.iter()
+        .map(|(key, holder)| {
+            let holder = if holder == old { new } else { holder.as_str() };
+            (key.clone(), holder.to_owned())
+        })
+        .collect()
+}
+
 /// What a click on `name`'s bolt writes, given whether the bolt was drawn lit when the user clicked it and what the
 /// store holds now: `Some(new mark)` to write, or `None` when the store already says what the click asks for. The intent
 /// comes from the drawn bolt, never from the store at the moment the click is handled, so a click meant to mark a

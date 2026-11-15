@@ -16,8 +16,8 @@ use serde_json::json;
 use crate::operations::{Command, Work};
 
 use super::shortcuts::{
-    Bindings, KEYS, bolt_help, key_button_text, key_help, keys_command, mark_command, mark_write,
-    may_mark,
+    Bindings, KEYS, bolt_help, key_button_text, key_help, keys_command, keys_renamed, mark_command,
+    mark_write, may_mark,
 };
 
 fn bindings(marked: Option<&str>, keys: &[(&str, &str)]) -> Bindings {
@@ -194,4 +194,19 @@ fn a_bolt_click_writes_what_the_drawn_bolt_meant() {
         None,
         "clearing codex's mark never clears the mark an agent moved to claude"
     );
+}
+
+/// SPEC.md: "Rename keeps a key". A rename moves the old name's key to the new name and must leave every other key
+/// where it is, since the map is written whole and a key dropped here would be unbound for good. Specified: the key the
+/// old name held now names the new one, the others are unchanged, and a map in which the old name holds nothing comes
+/// back unchanged (so the rename writes nothing).
+#[test]
+fn a_rename_moves_only_the_old_names_key() {
+    let keys = map(&[("1", "old"), ("2", "other")]);
+    assert_eq!(
+        keys_renamed(&keys, "old", "new"),
+        map(&[("1", "new"), ("2", "other")])
+    );
+    let untouched = map(&[("2", "other")]);
+    assert_eq!(keys_renamed(&untouched, "old", "new"), untouched);
 }

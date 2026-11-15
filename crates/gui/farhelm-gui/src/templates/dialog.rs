@@ -382,6 +382,26 @@ impl TemplatesDialog {
         self.show_editor(editor, &mark, window, cx);
     }
 
+    /// The open editor's Duplicate: its copy in the editor, with focus on its name field. Nothing while a write is in
+    /// flight. The copy is named over the stored names, or over none while the helm cannot read them (the save checks
+    /// the name again).
+    pub(super) fn duplicate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing(cx) {
+            return;
+        }
+        let names = super::editor::stored_names(cx).unwrap_or_default();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let Some(copy) = self
+            .editor
+            .as_ref()
+            .and_then(|editor| editor.duplicate(&names, window, cx))
+        else {
+            return;
+        };
+        let mark = Mark::take(cx);
+        self.show_editor(copy, &mark, window, cx);
+    }
+
     /// The editor's Save, with the dialog's model catalog to judge the draft's effort by.
     /// Nothing while any write of the dialog's is in flight (a ⚡ or number-key write included): the dialog's writes go
     /// one at a time, and Save's busy look only reaches the screen with the next frame.
@@ -392,6 +412,13 @@ impl TemplatesDialog {
         if let Some(editor) = self.editor.as_mut() {
             editor.save(self.catalog.as_deref(), window, cx);
         }
+    }
+
+    /// Forget which preference write this dialog last sent, once the editor has written the preferences itself (a
+    /// rename moving the ⚡ mark or a number key), so the line under the panes that reports a refused ⚡ or key write
+    /// does not word the editor's refusal as the list's.
+    pub(super) fn forget_preference_write(&mut self) {
+        self.last_write = None;
     }
 
     /// "+ New template": an empty new draft in the editor, with focus on its name field.

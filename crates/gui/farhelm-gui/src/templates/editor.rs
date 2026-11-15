@@ -36,10 +36,19 @@
 //!   crate sends a command's changes, then its reply), so the list already holds a template just saved, which closes
 //!   the old dialog's gap where a reload could still lack it. While the helm reports the collection unavailable, or
 //!   before its first snapshot, a new name cannot be proven free and is refused.
+//! - **Renaming.** Saving a stored template under a changed name saves it under the new name, gives the new name the
+//!   ⚡ mark if the old one held it, moves the old name's number key to the new name, then deletes the old name (SPEC.md:
+//!   "a rename saves that draft under the new name and then deletes the old one"; "Renaming repoints the mark before
+//!   deleting the old name"; "Rename keeps a key"). Each step is its own write, on its own key, started when the step
+//!   before it has settled; a step that fails stops the rename with the old dialog's words for it, and the old template
+//!   stays, so nothing is lost; the copy under the new name stays too, and saving the draft again is refused as a taken
+//!   name, as in the old dialog (the user opens the new name, or renames the draft back). The whole rename counts as one
+//!   save for Save's busy state and the dialog's.
+//! - **Duplicate** (stored templates only) opens an unsaved copy of the template as it was opened or last saved, not of
+//!   unsaved edits, named by [`duplicate_name`] over the stored names, as a new template that needs Save.
 //!
-//! NOTE: Not here yet, each with its own piece: renaming a stored template (until then a save under a changed name
-//! writes the new name and leaves the stored one), Duplicate, Delete, and the leave question (until it lands, leaving
-//! an unsaved draft discards it).
+//! NOTE: Not here yet, each with its own piece: Delete, and the leave question (until it lands, leaving an unsaved draft,
+//! Duplicate included, discards it).
 
 use std::collections::HashMap;
 
@@ -57,8 +66,8 @@ use gpui::{
 };
 
 use super::dialog::TemplatesDialog;
-use super::fields::{Draft, Field, capitalized, name_refusal};
-use super::shortcuts::Bindings;
+use super::fields::{Draft, Field, capitalized, duplicate_name, name_refusal};
+use super::shortcuts::{self, Bindings};
 use crate::components::{Button, HoverHelp, TextInputEvent, TextInputState, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -132,6 +141,48 @@ fn helm_said(message: &HostText) -> HostSentence {
 enum Writing {
     /// The save of the draft under `name`: a new template's, or a stored one's under its own name.
     Save { name: String },
+    /// A stored template saved under a new name: `step` is the step in flight ([`Editor::rename_from`]).
+    Rename {
+        old: String,
+        new: String,
+        step: Step,
+    },
+}
+
+/// A rename's steps, in order: the template saved under its new name, the ⚡ mark moved, the number key moved, the old
+/// name deleted. The two moves happen only when the old name held the mark or a key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    Put,
+    Mark,
+    Keys,
+    Delete,
+}
+
+impl Step {
+    /// The step after this one, or `None` after the last.
+    fn next(self) -> Option<Step> {
+        match self {
+            Step::Put => Some(Step::Mark),
+            Step::Mark => Some(Step::Keys),
+            Step::Keys => Some(Step::Delete),
+            Step::Delete => None,
+        }
+    }
+
+    /// What the status line says when this step is refused: the helm's words for the save under the new name and for
+    /// the deletion of the old one, the old dialog's own words for the moves, which say the old template was kept.
+    fn refused(self, message: &HostText) -> HostSentence {
+        match self {
+            Step::Put | Step::Delete => helm_said(message),
+            Step::Mark => said(
+                "The new name was saved, but the quick launch mark could not be moved; the old template was kept",
+            ),
+            Step::Keys => said(
+                "The new name was saved, but its number key could not be moved; the old template was kept",
+            ),
+        }
+    }
 }
 
 /// One open template. See the module docs.
@@ -243,6 +294,22 @@ impl Editor {
     /// dialog, since only Escape closes the menu on its own.
     pub(super) fn forget_add_menu(&mut self) {
         self.add_open = false;
+    }
+
+    /// Duplicate: an editor on an unsaved copy of the stored template this one holds, as it was opened or last saved
+    /// (never its unsaved edits), with the switch inferred and workspace trust dropped as opening does, named by
+    /// [`duplicate_name`] over `names`, the stored names. The copy is a new template, so it differs from its empty
+    /// baseline and needs Save. `None` for a new template, which has nothing stored to copy.
+    pub(super) fn duplicate(
+        &self,
+        names: &[&str],
+        window: &mut Window,
+        cx: &mut Context<TemplatesDialog>,
+    ) -> Option<Editor> {
+        self.previous.as_ref()?;
+        let mut copy = Draft::from_template(&self.baseline.template());
+        copy.name = duplicate_name(&copy.name, names);
+        Some(Editor::with(None, Draft::default(), copy, window, cx))
     }
 
     /// Escape while the "+ Add field" menu is open closes the menu first and puts focus back on "+ Add field", as the
@@ -507,7 +574,8 @@ impl Editor {
         name_refusal(self.previous.as_deref(), name, names.as_deref())
     }
 
-    /// Save: with unsaved changes and no write in flight, check the draft and write it whole. See the module docs.
+    /// Save: with unsaved changes and no write in flight, check the draft and write it whole. A stored template saved
+    /// under another name is renamed ([`Editor::rename_from`] takes it from there). See the module docs.
     pub(super) fn save(
         &mut self,
         catalog: Option<&[LaunchCatalogModel]>,
@@ -528,8 +596,15 @@ impl Editor {
             cx.notify();
             return;
         };
-        let writing = Writing::Save {
-            name: template.name.clone(),
+        let writing = match self.previous.clone() {
+            Some(old) if old != template.name => Writing::Rename {
+                old,
+                new: template.name.clone(),
+                step: Step::Put,
+            },
+            _ => Writing::Save {
+                name: template.name.clone(),
+            },
         };
         self.status = None;
         if self.start(&OpKey::template(&template.name), command, writing, cx) {
@@ -552,10 +627,17 @@ impl Editor {
             return false;
         };
         let weak = cx.weak_entity();
+        let preference = *key == OpKey::preferences();
         let started = operations.update(cx, |operations, cx| {
             operations.start(key, command, cx, move |settled, cx| {
                 let outcome = settled.outcome.clone();
                 let _ = weak.update(cx, |dialog, cx| {
+                    // A rename's preference writes are the editor's: the line under the panes that reports a refused
+                    // ⚡ or number-key write from the list must not take them for its own. Writes on a template's key
+                    // leave that line alone.
+                    if preference {
+                        dialog.forget_preference_write();
+                    }
                     if let Some(editor) = dialog.editor.as_mut() {
                         editor.settled(outcome, cx);
                     }
@@ -577,19 +659,28 @@ impl Editor {
 
     /// The editor's write in flight settled. A save that succeeded makes the draft as sent the new baseline and the
     /// stored template this editor holds; a refused one puts the helm's words in the status line and keeps the draft
-    /// for correction. Either way the inputs take edits again, and focus stays where it is (on Save, which kept it).
+    /// for correction. A rename goes on to its next step, or stops with its step's words, the old template kept. Once
+    /// nothing is in flight the inputs take edits again, and focus stays where it is (on Save, which kept it).
     fn settled(&mut self, outcome: Outcome, cx: &mut Context<TemplatesDialog>) {
         let Some(writing) = self.writing.take() else {
             return;
         };
-        // The template route answers a write at once and never accepts one as long work (202), so both mean done.
+        // The template route answers a write at once and never accepts one as long work (202); the preference route
+        // neither. Both mean done.
         let refused = match outcome {
             Outcome::Done(_) | Outcome::Accepted(_) => None,
             Outcome::Refused(refusal) => Some(refusal.words),
         };
         match (writing, refused) {
             (Writing::Save { name }, None) => self.finish_save(name),
+            (Writing::Rename { old, new, step }, None) => match step.next() {
+                Some(next) => self.rename_from(old, new, next, cx),
+                None => self.finish_save(new),
+            },
             (Writing::Save { .. }, Some(message)) => self.status = Some(helm_said(&message)),
+            (Writing::Rename { step, .. }, Some(message)) => {
+                self.status = Some(step.refused(&message));
+            }
         }
         if self.writing.is_none() {
             for (which, input) in &self.inputs {
@@ -598,11 +689,71 @@ impl Editor {
         }
     }
 
-    /// A save succeeded: the draft as sent is the baseline, and `name` the stored
+    /// A save, or the last step of a rename, succeeded: the draft as sent is the baseline, and `name` the stored
     /// template the editor holds.
     fn finish_save(&mut self, name: String) {
         self.baseline = self.draft.clone();
         self.previous = Some(name);
+    }
+
+    /// Go on with the rename of `old` to `new` (already saved under `new`) from the first step at or after `step` that
+    /// has something to do, in the old dialog's order: give `new` the ⚡ mark if `old` holds it, move `old`'s number key
+    /// to `new` (the whole map, written as the list writes it), then delete `old` (SPEC.md: "Renaming repoints the mark
+    /// before deleting the old name"; "Rename keeps a key"). Each step is read from the store as it stands when the step
+    /// before it settles, which already holds that step's result, and each is work on its own key. A step that cannot
+    /// go on stops the rename with its own words, and the old template stays.
+    fn rename_from(
+        &mut self,
+        old: String,
+        new: String,
+        step: Step,
+        cx: &mut Context<TemplatesDialog>,
+    ) {
+        if step != Step::Delete
+            && let Some(error) = preferences_unavailable(cx)
+        {
+            self.status = Some(
+                said("The new name was saved, but shortcut bindings could not be read; the old template was kept: ")
+                    .host(&HostText::from_host(error)),
+            );
+            return;
+        }
+        let bindings = Bindings::current(cx);
+        let renamed_keys = shortcuts::keys_renamed(&bindings.keys, &old, &new);
+        let (key, command, step) = match step {
+            Step::Mark if bindings.is_marked(&old) => (
+                OpKey::preferences(),
+                shortcuts::mark_command(Some(&new)).ok(),
+                Step::Mark,
+            ),
+            Step::Mark | Step::Keys if renamed_keys != bindings.keys => (
+                OpKey::preferences(),
+                shortcuts::keys_command(&renamed_keys).ok(),
+                Step::Keys,
+            ),
+            Step::Put | Step::Mark | Step::Keys | Step::Delete => {
+                (OpKey::template(&old), delete_command(&old), Step::Delete)
+            }
+        };
+        let started = command.is_some_and(|command| {
+            self.start(
+                &key,
+                command,
+                Writing::Rename {
+                    old: old.clone(),
+                    new: new.clone(),
+                    step,
+                },
+                cx,
+            )
+        });
+        // Only a retired store refuses to start a step here (the editor's busy state keeps every other write off these
+        // keys), so this is the old relay's wording for a write cut short, kept for the delete as for the moves.
+        if !started {
+            self.status = Some(said(
+                "The new name was saved, but a shortcut write was interrupted; the old template was kept",
+            ));
+        }
     }
 
     // ---- Drawing ----------------------------------------------------------------------------------------------------
@@ -837,8 +988,8 @@ impl Editor {
     }
 
     /// The editor's own footer (`.templates-editor-footer`, the shared dialog footer's look inside the editor):
-    /// Save at its right. Save is busy, and so greyed and inert while keeping focus, when there is nothing unsaved and
-    /// while any write of the dialog's is in flight (`busy`).
+    /// Duplicate for a stored template, then Save, at its right. Save is busy, and so greyed and inert while keeping
+    /// focus, when there is nothing unsaved and while any write of the dialog's is in flight (`busy`).
     fn footer(
         &self,
         busy: bool,
@@ -868,6 +1019,21 @@ impl Editor {
                 let _ = weak.update(cx, |dialog, cx| dialog.save_editor(window, cx));
             }
         });
+        // Duplicate, for a stored template only, before Save, as the old footer ordered them.
+        let duplicate = self.previous.is_some().then(|| {
+            let weak = weak.clone();
+            Button::new(
+                "templates-duplicate",
+                "Duplicate",
+                HoverHelp::tooltip("Open a new unsaved copy with a free name"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral)
+            .busy(busy)
+            .on_click(move |_, window, cx| {
+                let _ = weak.update(cx, |dialog, cx| dialog.duplicate(window, cx));
+            })
+        });
         div()
             .mt_auto()
             .py(pad_y)
@@ -879,6 +1045,7 @@ impl Editor {
             .bg(theme::color(palette.bg_1))
             .border_t_1()
             .border_color(theme::color(palette.border_dim))
+            .children(duplicate)
             .child(save)
     }
 }
@@ -1076,9 +1243,45 @@ fn make_input(
     }
 }
 
+/// Why the shortcut bindings cannot be known, while the helm reports its preferences unavailable or before they have
+/// arrived: a rename then cannot tell whether the old name holds the ⚡ mark or a key, and stops before moving either
+/// (the old dialog's "shortcut bindings could not be read").
+fn preferences_unavailable(cx: &App) -> Option<String> {
+    // Preferences that have not arrived prove nothing about the bindings, as a missing template list proves nothing
+    // about the names (`stored_names`): moving on would delete the old name and with it its ⚡ mark and key.
+    const NOT_ARRIVED: &str = "the shortcut bindings have not arrived yet";
+    let Some(store) = session::current_store(cx) else {
+        return Some(NOT_ARRIVED.to_owned());
+    };
+    match store
+        .read(cx)
+        .collections()
+        .meta(Collection::Preferences)
+        .map(|meta| &meta.availability)
+    {
+        Some(Availability::Unavailable { error }) => Some(error.clone()),
+        Some(Availability::Available) => None,
+        None => Some(NOT_ARRIVED.to_owned()),
+    }
+}
+
+/// `DELETE /api/templates/{name}`: a rename's last step, removing the old name. Work on the old name's key, of the
+/// save kind, since the store treats every editor write alike (busy on its own key, never superseded). `None` for a
+/// name that cannot be a path segment, which a stored name never is.
+fn delete_command(name: &str) -> Option<Command> {
+    let path = ApiPath::api(&["templates", name]).ok()?;
+    Some(Command::new(
+        Work::Save,
+        Method::Delete,
+        path,
+        None,
+        "DELETE /api/templates/[template]",
+    ))
+}
+
 /// The names of the templates the helm pushed, or `None` while it reports the collection unavailable or before its
 /// first snapshot: a list that proves nothing about which names are free (see the module docs).
-fn stored_names(cx: &App) -> Option<Vec<String>> {
+pub(super) fn stored_names(cx: &App) -> Option<Vec<String>> {
     let store = session::current_store(cx)?;
     let collections = store.read(cx).collections();
     match &collections.meta(Collection::Templates)?.availability {
