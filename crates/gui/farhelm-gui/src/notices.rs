@@ -19,6 +19,11 @@ pub enum Notice {
     /// The connection to the helm was lost and the window was rebuilt (SPEC.md, "Losing the connection to the helm").
     /// Stays until the user dismisses it.
     ConnectionLost,
+    /// A launch the user had moved on from was refused, and its launcher waits with the draft and the refusal
+    /// (SPEC.md, "Creation": "Otherwise a notice offers it, and the launcher returns when the user opens that notice").
+    /// The banner's Open launcher brings it back (`launcher::launch`). The launcher withdraws it when it returns or a
+    /// reset drops it.
+    LaunchNotStarted,
 }
 
 impl Notice {
@@ -29,6 +34,9 @@ impl Notice {
                 "The connection to the helm was lost; something you did just before may or may \
                                        not have happened."
                     .into()
+            }
+            Notice::LaunchNotStarted => {
+                "Not launched. Open the launcher to see why; it still holds your settings.".into()
             }
         }
     }

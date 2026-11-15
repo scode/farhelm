@@ -47,7 +47,7 @@ use crate::session_list::{self, SessionList};
 use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
 use crate::theme::metrics;
-use crate::{layers, render_count, root, session, settings, theme};
+use crate::{launcher, layers, render_count, root, session, settings, theme};
 
 /// The window's root view.
 pub struct MainView {
@@ -286,7 +286,24 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
 /// Like that banner, the text runs first and the button follows it rather than being pushed to the far edge. Visible to
 /// the crate so the goldens can pin it.
 pub(crate) fn banner(notice: Notice) -> AnyElement {
-    Banner::new(notice.text())
+    // What a notice offers besides dismissing it, before Dismiss. Exhaustive, so a new notice decides.
+    let banner = match notice {
+        Notice::ConnectionLost => Banner::new(notice.text()),
+        // SPEC.md, "Creation": a refused launch the user had moved on from is offered by a notice, "and the launcher
+        // returns when the user opens that notice".
+        Notice::LaunchNotStarted => Banner::new(notice.text()).lead_action(
+            Button::new(
+                "notice-open-launcher",
+                "Open launcher",
+                HoverHelp::tooltip("Open launcher: show the refused launch with its settings and why it did not start"),
+                Role::Button,
+            )
+            .on_click(|_, window, cx| {
+                launcher::launch::open_waiting(window, cx);
+            }),
+        ),
+    };
+    banner
         .action(
             Button::new(
                 SharedString::from(format!("notice-dismiss-{notice:?}")),

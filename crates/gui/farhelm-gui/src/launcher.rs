@@ -5,6 +5,7 @@
 //! Built in pieces. So far:
 //!
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
+//! - [`launch`]: a submitted New or Clone, from the press of Launch to what its reply opens or brings back.
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
 //! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
@@ -23,10 +24,12 @@
 //! - **What a mode holds.** [`draft::LaunchDraft::holds`] is the one presence check for the fields Restart with and
 //!   Replace with hold fixed. The equality rules a template needs beside it (a held value repeated as a no-op) are the
 //!   templates work's to add next to it.
-//! - **One submit path.** [`request`] turns a complete draft into its one request body; a launch started without
-//!   showing the launcher goes through the same check and body.
+//! - **One submit path.** [`request`] turns a complete draft into its one request body, and [`launch`] sends it and
+//!   deals with the reply; a launch started without showing the launcher goes through the same check, body and reply
+//!   handling.
 
 pub mod draft;
+pub mod launch;
 mod model;
 pub mod request;
 pub mod view;
@@ -34,6 +37,8 @@ pub(crate) mod words;
 
 #[cfg(test)]
 mod draft_tests;
+#[cfg(test)]
+mod launch_tests;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]

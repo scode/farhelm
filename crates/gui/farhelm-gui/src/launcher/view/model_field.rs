@@ -185,7 +185,7 @@ impl Launcher {
                 }
             }
         }
-        if matches!(self.draft.mode, Mode::RestartWith(_)) {
+        if matches!(self.draft.mode, Mode::RestartWith(_)) && !self.held_enter.get() {
             self.press(window, cx);
         }
         cx.notify();
