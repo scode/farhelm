@@ -48,8 +48,10 @@ const GAP: f32 = 6.;
 const SPINNER: f32 = 12.;
 
 /// The progress pill of one pending launch: its captured words, when it was sent, and the spinner and clock that redraw
-/// it. Restart with and Replace with ("Restarting", "Replacing") add their verbs when they launch through this path.
+/// it.
 pub(super) struct ProgressPill {
+    /// "Launching" or "Replacing" (Restart with adds "Restarting"): the old `LaunchAction::present`.
+    verb: &'static str,
     host: HostText,
     /// The session name the request carries; `None` for a request that leaves the name to the helm.
     title: Option<HostText>,
@@ -62,15 +64,17 @@ pub(super) struct ProgressPill {
 }
 
 impl ProgressPill {
-    /// The pill for a launch on `host` named `title`, sent at `sent` (the ticker's wall clock when the create went
-    /// out, so the seconds count from then rather than from when the pill first shows).
+    /// The pill for a launch doing `verb` on `host` named `title`, sent at `sent` (the ticker's wall clock when the
+    /// request went out, so the seconds count from then rather than from when the pill first shows).
     pub(super) fn new(
+        verb: &'static str,
         host: HostText,
         title: Option<String>,
         sent: SystemTime,
         cx: &mut Context<Self>,
     ) -> ProgressPill {
         ProgressPill {
+            verb,
             host,
             title: title
                 .filter(|title| !title.is_empty())
@@ -81,10 +85,11 @@ impl ProgressPill {
         }
     }
 
-    /// The pill's words without the seconds: "Launching “name” on host…", or without the name when the request names
-    /// none. The name is the user's typed text and the host the helm's, so both are drawn escaped as host values.
+    /// The pill's words without the seconds: "Launching “name” on host…" (or "Replacing ..."), or without the name when
+    /// the request names none. The name is the user's typed text and the host the helm's, so both are drawn escaped as
+    /// host values.
     fn words(&self) -> HostSentence {
-        let mut words = HostSentence::new("launch-progress-label").text("Launching");
+        let mut words = HostSentence::new("launch-progress-label").text(self.verb);
         if let Some(title) = &self.title {
             words = words.text(" “").host(title).text("”");
         }

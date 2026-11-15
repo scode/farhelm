@@ -51,6 +51,8 @@ pub(crate) mod launch_tests;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]
+mod replace_with_tests;
+#[cfg(test)]
 mod request_tests;
 #[cfg(test)]
 mod view_tests;

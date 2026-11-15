@@ -63,7 +63,7 @@ fn fleet() -> CollectionState {
 /// The main view over the fake helm with hosts 1, 9 and 11 and `yolo` as the remembered permission: with [`fleet`] and
 /// `selected` selected, or, for `None`, with no sessions at all, since the selection rules open a listed session by
 /// themselves and "no open session" needs nothing to open.
-fn window_with<'a>(
+pub(super) fn window_with<'a>(
     cx: &'a mut TestAppContext,
     selected: Option<&str>,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
@@ -116,7 +116,7 @@ fn selected(cx: &mut VisualTestContext) -> Option<String> {
 }
 
 /// The host and folder the open launcher's draft holds.
-fn destination(cx: &mut VisualTestContext) -> (Option<i64>, String) {
+pub(super) fn destination(cx: &mut VisualTestContext) -> (Option<i64>, String) {
     let draft: LaunchDraft = draft(cx);
     (draft.host, draft.folder.value().clone())
 }
