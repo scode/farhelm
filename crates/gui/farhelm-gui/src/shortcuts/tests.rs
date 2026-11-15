@@ -10,13 +10,8 @@
 //! platform's form; no test depends on glyph widths, so the simulated platform's fake text system is enough.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
-use farhelm_helm_client::fake::FakeHelm;
-use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
-use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_input_mapping::Platform;
-use farhelm_proto::grid::GridOutput;
 use farhelm_proto::ui_channel::{
     CollectionChanges, CollectionState, PREFERENCES_KEY, Preferences, SessionRow,
 };
@@ -24,7 +19,6 @@ use gpui::{
     Action, Global, KeyContext, KeybindingKeystroke, Keystroke, Modifiers, TestAppContext,
     VisualTestContext, WeakEntity, point, px,
 };
-use serde_json::json;
 
 use super::{Chord, KeyboardShortcuts, Keys, Name, Row, sections, wording};
 use crate::actions::{
@@ -32,11 +26,10 @@ use crate::actions::{
     IncreaseTerminalTextSize, KeyOwner, NewSession, PHYSICAL_KEYS, QuickLaunch, QuickSwitcher,
     RenameSession, ShowKeyboardShortcuts, TERMINAL_KEYS, THIS_PLATFORM, TemplateNumberKey,
 };
-use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences_state, session};
 use crate::templates::shortcuts::Bindings;
 use crate::test_support::{
-    self, any_open, click, focused_id, frame, keys, settle, started, terminal_focused,
+    self, MainWindow, any_open, click, focused_id, frame, keys, open_main, settle, terminal_focused,
 };
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -62,15 +55,9 @@ const CLOSE: &str = "keyboard-shortcuts-close";
 /// The `?` button's id.
 const HELP_BUTTON: &str = "app-help-toggle";
 
-/// The fake terminals the connection handed out, in the order the pane attached them.
-type Terminals = Rc<std::cell::RefCell<Vec<FakeTerminal>>>;
-
-/// The main view over the fake helm, with the terminals its pane attaches.
-struct Main<'a> {
-    cx: &'a mut VisualTestContext,
-    helm: FakeHelm,
-    terminals: Terminals,
-}
+/// The real main view over the fake helm, shared with the other modules whose chords must open something from a
+/// focused terminal; [`MainWindow::terminal_live`] makes its terminal live.
+type Main<'a> = MainWindow<'a>;
 
 /// Sessions a and b, with a the last visited, so a is open at startup, and preferences holding `preferences`'s
 /// bindings. The Welcome card is marked seen, as `session_list::tests::preferences` marks it, so it does not open at
@@ -90,64 +77,6 @@ fn seen(preferences: Preferences) -> Preferences {
     Preferences {
         welcome_seen: Some(true),
         ..preferences
-    }
-}
-
-/// The main view connected to the fake helm with `snapshot`, its connection handing out fake terminals, open in an
-/// active window and checked once settled.
-fn open_main(cx: &mut TestAppContext, snapshot: Vec<CollectionState>) -> Main<'_> {
-    let (mut helm, connection) = started(cx);
-    let terminals: Terminals = Rc::default();
-    let record = terminals.clone();
-    cx.update(|cx| {
-        connection.update(cx, |connection, _| {
-            connection.serve_terminals(move |attach: TerminalAttach| {
-                let (terminal, handle, events) = FakeTerminal::open(&attach);
-                record.borrow_mut().push(terminal);
-                (handle, events)
-            })
-        })
-    });
-    helm.connect(snapshot);
-    cx.run_until_parked();
-    let (_, cx) = test_support::open_view(cx, MainView::new);
-    Main {
-        cx,
-        helm,
-        terminals,
-    }
-}
-
-impl Main<'_> {
-    /// The open session's terminal attaches and replays a complete screen, so it goes live, takes focus and takes
-    /// input.
-    fn terminal_live(&mut self) {
-        {
-            let mut terminals = self.terminals.borrow_mut();
-            let terminal = &mut terminals[0];
-            let asked = terminal.attach();
-            let screen = [
-                json!({"t":"hello","cols":asked.cols,"rows":asked.rows,"history_cap":0}),
-                json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
-                    "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
-                json!({"t":"frame","rev":1,"cols":asked.cols,"rows":asked.rows,
-                    "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
-            ];
-            for message in screen {
-                terminal.output(serde_json::from_value::<GridOutput>(message).unwrap());
-            }
-            terminal.replay_complete();
-        }
-        settle(self.cx);
-    }
-
-    /// How many input requests the open session's terminal sent its program since the last call.
-    fn program_input(&mut self) -> usize {
-        self.terminals.borrow_mut()[0]
-            .received()
-            .into_iter()
-            .filter(|request| matches!(request, FakeTerminalRequest::Input { .. }))
-            .count()
     }
 }
 
@@ -527,12 +456,8 @@ fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppCon
 #[gpui::test]
 fn the_chord_from_a_terminal_opens_the_overview_and_escape_returns_home(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet(Preferences::default()));
+    // Asserts the premise itself: a's terminal is live and focused, and its input count starts here.
     main.terminal_live();
-    assert!(
-        terminal_focused(main.cx),
-        "the premise: a's terminal has focus"
-    );
-    main.program_input();
     keys(main.cx, CHORD);
     assert!(open(main.cx), "the chord opened the overview");
     assert_eq!(focused_id(main.cx).as_deref(), Some(CLOSE));
