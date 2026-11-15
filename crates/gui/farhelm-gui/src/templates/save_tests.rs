@@ -76,7 +76,7 @@ fn clone_draft() -> LaunchDraft {
 /// The real main view over the fake helm holding `templates`, with the launcher opened on `draft` in a window tall
 /// enough for the whole panel, and the launcher's catalog read answered with an empty catalog. Every command sent so far
 /// is taken, so a test's later commands are its own.
-fn launcher_on<'a>(
+pub(super) fn launcher_on<'a>(
     cx: &'a mut TestAppContext,
     draft: LaunchDraft,
     templates: &[LaunchTemplate],

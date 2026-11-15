@@ -1360,3 +1360,233 @@ fn a_sequence_on_unreadable_bindings_refuses_its_keys_but_not_its_words(cx: &mut
     keys(cx, &format!("{SEQUENCE_PREFIX_CHORD} g o enter"));
     assert_eq!(creates(&mut helm, cx).len(), 1, "`go` launched by its word");
 }
+
+// ---- Quick launch into a managed checkout ----------------------------------------------------------------------------
+
+/// The helm's route for a managed checkout's preview.
+const PREVIEW: &str = "/api/github-checkout-preview";
+/// The supervisor's words refusing a checkout name that is taken, as the helm passes them on.
+const TAKEN: &str = "a directory with that checkout name already exists; choose another title";
+/// The helm's words refusing a create whose preview another create took meanwhile.
+const LOST: &str =
+    "the checkout preview is no longer current; obtain a new preview before resubmitting";
+
+/// The helm's ready preview of a checkout of `acme/bar` in `/work/<basename>`, from host1's installation.
+fn ready(basename: &str) -> serde_json::Value {
+    json!({
+        "canonical_root": "/work", "basename": basename, "cwd": format!("/work/{basename}"),
+        "config_revision": 3, "host": "1", "incarnation": 4, "installation_identity": "identity1",
+    })
+}
+
+/// Add `repo-go` to the helm's templates: the `go` command into a managed checkout of `acme/bar`, with the session name
+/// `base` as a template base name.
+fn push_repo_template(helm: &mut FakeHelm, cx: &mut VisualTestContext, base: &str) {
+    let mut all = templates(Availability::Available);
+    let repo_go = template(
+        "repo-go",
+        TemplateFields {
+            destination: Some(TemplateDestination::Github("acme/bar".into())),
+            name: Some(base.to_owned()),
+            ..runs_true()
+        },
+    );
+    all.meta.order.push(repo_go.name.clone());
+    all.entries.push(KeyedEntry {
+        key: repo_go.name.clone(),
+        value: serde_json::to_value(&repo_go).unwrap(),
+    });
+    push(helm, cx, all);
+}
+
+/// What one round of a checkout quick launch's traffic does with each preview, by the name it asks for: answer it
+/// ready, answer it taken, or hold it.
+type PreviewAnswer = fn(&str, usize) -> Option<(u16, serde_json::Value)>;
+
+/// Run the window's traffic for `rounds` rounds: each preview answered as `answer` says for its title and how many
+/// previews of that title came before, each create collected unanswered, everything else answered plainly (the catalog
+/// with [`catalog`]) while no preview is held. `between` runs after each round with the titles and creates so far, and
+/// ends the run by returning `true`. Returns the preview titles in order and the creates.
+fn run_checkout_traffic(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    rounds: usize,
+    answer: PreviewAnswer,
+    mut between: impl FnMut(&mut FakeHelm, &mut VisualTestContext, &[String], &[FakeCommand]) -> bool,
+) -> (Vec<String>, Vec<FakeCommand>) {
+    let mut titles: Vec<String> = Vec::new();
+    let mut created = Vec::new();
+    let mut holding = false;
+    for _ in 0..rounds {
+        cx.run_until_parked();
+        for command in helm.commands() {
+            if command.path == PREVIEW {
+                let title = command.body.as_ref().unwrap()["title"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                let before = titles.iter().filter(|seen| **seen == title).count();
+                titles.push(title.clone());
+                match answer(&title, before) {
+                    Some((status, body)) if !holding => helm.reply(command.id, status, Some(body)),
+                    _ => holding = true,
+                }
+            } else if command.path == "/api/sessions" {
+                created.push(command);
+            } else if !holding {
+                let body = command.path.ends_with("launch-catalog").then(catalog);
+                helm.reply(command.id, 200, body);
+            }
+        }
+        settle(cx);
+        if between(helm, cx, &titles, &created) {
+            break;
+        }
+    }
+    (titles, created)
+}
+
+/// ⚡ on `repo-go` named by the base `review`, with the preview of `review` answered taken and `review-2` ready: the
+/// previews it asked for and its one create, nothing shown at any point. `press` runs once, after the round that asked
+/// for the preview of `review-2`.
+fn numbered_quick_launch(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    mut press: impl FnMut(&mut VisualTestContext),
+) -> FakeCommand {
+    push_repo_template(helm, cx, "review");
+    chord(cx);
+    let mut pressed = false;
+    let (titles, created) = run_checkout_traffic(
+        helm,
+        cx,
+        8,
+        |title, _| match title {
+            "review" => Some((409, json!(TAKEN))),
+            "review-2" => Some((200, ready("bar-review-2"))),
+            _ => None,
+        },
+        |_, cx, titles, created| {
+            assert!(!any_open(cx), "nothing is shown while it numbers and waits");
+            if !pressed && titles.iter().any(|title| title == "review-2") {
+                pressed = true;
+                press(cx);
+            }
+            !created.is_empty()
+        },
+    );
+    assert_eq!(titles, ["review", "review-2"]);
+    let [create] = &created[..] else {
+        panic!("one create, not {}", created.len());
+    };
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["title"], json!("review-2"), "{body}");
+    assert_eq!(body["cwd"], json!("/work/bar-review-2"), "{body}");
+    create.clone()
+}
+
+/// SPEC.md, "Managed checkouts": a template base name "uses its first free candidate", and a shortcut "launches without
+/// showing the path first"; the old app's case "quick launch numbers a template base name when its checkout is taken",
+/// which went on to name the session. A hidden quick launch must follow its own base name's numbering rather than open
+/// New. Specified: the preview of `review` answered taken, the launch goes on to preview `review-2` and sends one create
+/// titled `review-2` into its folder, nothing shown; its success opens the session with the naming editor over it, as
+/// any quick launch New never showed.
+#[gpui::test]
+fn a_taken_base_name_is_numbered_and_launched_out_of_sight(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("repo-go"));
+    let create = numbered_quick_launch(&mut helm, cx, |_| {});
+    push(
+        &mut helm,
+        cx,
+        listing(&["n"], &[session("n").title("review-2")]),
+    );
+    helm.reply(
+        create.id,
+        200,
+        Some(session("n").title("review-2").entry().value),
+    );
+    settle(cx);
+    assert_eq!(
+        cx.update(|_, cx| local_state::selected(cx)).as_deref(),
+        Some("n")
+    );
+    assert!(
+        any_open(cx),
+        "the naming editor opened over the new session"
+    );
+}
+
+/// SPEC.md, "Keyboard focus": a result the user moved on from "moves no focus, opens no dialog". Numbering keeps the ⚡
+/// press as the launch's moment, so a key pressed after the next candidate's preview went out still counts. Specified:
+/// a key pressed once the preview of `review-2` was asked for; the launch still starts `review-2`, and its success says
+/// "Started" in the launcher's report instead of opening the session or the naming editor.
+#[gpui::test]
+fn a_numbered_quick_launch_the_user_moved_on_from_starts_quietly(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("repo-go"));
+    let create = numbered_quick_launch(&mut helm, cx, |cx| keys(cx, "x"));
+    push(
+        &mut helm,
+        cx,
+        listing(&["n"], &[session("n").title("review-2")]),
+    );
+    helm.reply(
+        create.id,
+        200,
+        Some(session("n").title("review-2").entry().value),
+    );
+    settle(cx);
+    assert!(
+        label(cx, "launch-started-report").is_some(),
+        "the success took the moved-on path"
+    );
+    assert!(!any_open(cx), "and opened nothing");
+}
+
+/// The old app's case "quick launch waits for a managed preview and reveals its path race", for a template base name: a
+/// create that loses its previewed folder to another one must not quietly try another folder (SPEC.md: "A lost-race
+/// base-name launch obtains a new preview and may advance, but requires another Launch click"). Specified: ⚡ on
+/// `repo-go` named `review`, its preview of `review` ready and its create refused as never accepted; the refreshed
+/// preview of `review` is now taken, and `review-2` ready; the launcher is shown with the helm's words and "nothing was
+/// accepted" beside `review-2`'s folder, and no second create goes out.
+#[gpui::test]
+fn a_base_name_quick_launch_that_loses_its_folder_is_shown(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("repo-go"));
+    push_repo_template(&mut helm, cx, "review");
+    chord(cx);
+    let mut refused = false;
+    let (titles, created) = run_checkout_traffic(
+        &mut helm,
+        cx,
+        10,
+        |title, before| match (title, before) {
+            ("review", 0) => Some((200, ready("bar-review"))),
+            ("review", _) => Some((409, json!(TAKEN))),
+            ("review-2", _) => Some((200, ready("bar-review-2"))),
+            _ => None,
+        },
+        |helm, _, _, created| {
+            if let Some(create) = created.first()
+                && !refused
+            {
+                refused = true;
+                helm.reply_marked(
+                    create.id,
+                    409,
+                    vec![farhelm_proto::ui_channel::HelmMarker::CreateUnaccepted],
+                    Some(json!(LOST)),
+                );
+            }
+            false
+        },
+    );
+    assert!(refused, "the premise: the create went out and was refused");
+    assert_eq!(titles, ["review", "review", "review-2"]);
+    assert_eq!(created.len(), 1, "no second create");
+    assert!(any_open(cx), "the quick launch is shown");
+    let shown = text(cx);
+    assert!(
+        shown.contains(LOST) && shown.contains("nothing was accepted"),
+        "{shown}"
+    );
+    assert!(shown.contains("/work/bar-review-2"), "{shown}");
+}
