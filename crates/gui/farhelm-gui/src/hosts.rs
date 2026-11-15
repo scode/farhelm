@@ -22,9 +22,9 @@
 //! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button (`+`) call, each
 //! naming itself as where closing the dialog returns focus. A new host without Farhelm goes on to the setup
 //! confirmation and the setup's submission ([`setup`]); a setup the helm refused after the user moved on from it shows
-//! at the top of the panel, since it has no row. Add host, a setup's submission, a row's Re-run, Remove, Update and
-//! Update all refuse to start while a session launch is in flight ([`launch_in_flight`]), as the old app refused a host
-//! change during a launch.
+//! at the top of the panel, since it has no row. Add host, a setup's submission, a row's Re-run, Remove, Update, Update
+//! all and Uninstall refuse to start while a session launch is in flight ([`launch_in_flight`]), as the old app refused
+//! a host change during a launch.
 //!
 //! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
 //! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
@@ -35,6 +35,10 @@
 //! request, and so does one that was not started at all (the host busy, a session launch in flight). Only a Remove that
 //! asked nothing reports outside a question: a refusal under its row, like any refused work on a host, and a Remove
 //! not started at the top of the panel.
+//!
+//! The menu's Uninstall removes Farhelm from an SSH host ([`uninstall`]): it asks the helm for a plan, shows it for
+//! confirmation, and shows the run in the host's row like a setup's. Once the run has forgotten the host, a one-line
+//! removal notice at the top of the panel says where the host's data stays.
 //!
 //! A remote host's Update ([`update`]) is sent the same way from the menu's Update and its rerun of a failed one, from
 //! a row's inline `↑ Update` and, for every host whose Update is available, from the heading's Update all. A refused
@@ -68,17 +72,17 @@
 //! not saved anywhere (SPEC.md: "its unpersisted details switch"). The old app turned the switch on for a failed local
 //! setup; the port opens that row instead.
 //!
-//! A host with a setup or an Update running, or its setup's rerun or its Update's requests out, shows the run's inline
-//! status on a line of its own under its name in place of the phase words and the inline Update, and an open row shows
-//! the run's steps under its details ([`progress`], which also keeps the one fact the panel holds about a host: when it
-//! first saw the run, and whether the user folded it). A running setup opens its row; a running Update leaves it
+//! A host with a setup, an Update or an uninstall running, or its requests out, shows the run's inline status on a line
+//! of its own under its name in place of the phase words and the inline Update, and an open row shows the run's steps
+//! under its details ([`progress`], which also keeps the one fact the panel holds about a host: when it first saw the
+//! run, and whether the user folded it). A running setup or uninstall opens its row; a running Update leaves it
 //! folded, and its failure opens it like any failure.
 //!
-//! While any row shows a setup's or an Update's elapsed time, the panel holds the ticker's shared one-second clock
-//! ([`ticker::every_second`]), which redraws it once a second in an inactive window and under reduced motion too, so
-//! the count moves on with nothing pushed; while its window is active and a row shows a run in progress, it also holds
-//! the shared pulse. It lets go of both the moment the sidebar hides it ([`HostsPanel::hidden`]) and when a reset
-//! replaces the UI session, so a panel nobody sees keeps no ticker loop awake.
+//! While any row shows a run's elapsed time (a setup, an Update or an uninstall), the panel holds the ticker's shared
+//! one-second clock ([`ticker::every_second`]), which redraws it once a second in an inactive window and under reduced
+//! motion too, so the count moves on with nothing pushed; while its window is active and a row shows a run in progress,
+//! it also holds the shared pulse. It lets go of both the moment the sidebar hides it ([`HostsPanel::hidden`]) and when
+//! a reset replaces the UI session, so a panel nobody sees keeps no ticker loop awake.
 //!
 //! A host list never read says "Loading hosts…"; a failed first read says so in red; a failed refresh keeps the rows it
 //! had and says above them that they are the last state read. The panel never invents a host.
@@ -100,6 +104,7 @@ mod settings;
 pub(crate) mod setup;
 pub mod ssh_help;
 pub mod status;
+pub(crate) mod uninstall;
 pub(crate) mod update;
 
 pub use menu::open_menu;
@@ -207,6 +212,8 @@ pub struct HostsPanel {
     _lines: Subscription,
     /// The same for the removal module's lines (a Remove that was not started, a refused "don't ask again").
     _removal_lines: Subscription,
+    /// The same for the uninstall module's removal notice, which shows at the top of the panel.
+    _uninstall_notice: Subscription,
     /// What the panel keeps about the hosts' runs ([`Runs`]), for the current UI session only: a reset starts it over.
     runs: PerSession<Runs>,
     /// Keeps `runs` up to date with every change of the current store, whether or not the panel is drawn, so a run's
@@ -244,14 +251,18 @@ impl HostsPanel {
             runs: PerSession::default(),
             _following: session::observe_current(cx, |panel: &mut Self, cx| panel.follow_runs(cx)),
             _removal_lines: remove::observe_panel_lines(cx),
+            _uninstall_notice: uninstall::observe_notices(cx),
         }
     }
 
     /// Record what the current store's host progress says about each host's run ([`progress::follow`]), now. Reaching
     /// the runs through [`PerSession::current`] here, on every change of the connection, is also what drops them, the
-    /// pulse and the clock included, as soon as a reset replaces the UI session, whether or not the panel is drawn.
+    /// pulse and the clock included, as soon as a reset replaces the UI session, whether or not the panel is drawn. The
+    /// rail's state ([`status::follow`]) and the uninstall's removal notice ([`uninstall::follow`]) follow the same
+    /// changes from here.
     fn follow_runs(&mut self, cx: &mut Context<Self>) {
         status::follow(cx);
+        uninstall::follow(cx);
         let now = ticker::wall_now(cx);
         let runs = &mut self.runs.current(cx).seen;
         let Some(store) = session::current_store(cx) else {
@@ -341,14 +352,14 @@ impl HostsPanel {
     }
 }
 
-/// Whether `host`'s row is open: the Details switch is on, a setup is running on the host that the user has not folded
-/// (`progress`, and what the panel keeps about it, `seen`), the host's last provisioning run failed, the last work on
-/// the host was refused (`refused`), or the host is the helm's own machine with no supervisor running. All but the
-/// switch open the row by themselves: a running setup once, so its steps show as they go (SPEC.md: "the running row
-/// expands once"), a failure always, so it shows its evidence and remedies whatever was folded, and the local host
-/// without a supervisor so it shows what to do rather than reading as a phantom unreachable host (SPEC.md, "Topology").
-/// Each closes it again once it no longer holds: success ends the first, a new run or new work on the host replaces
-/// the next two, and a supervisor starting ends the last.
+/// Whether `host`'s row is open: the Details switch is on, a setup or an uninstall is running on the host that the user
+/// has not folded (`progress`, and what the panel keeps about it, `seen`), the host's last provisioning run failed, the
+/// last work on the host was refused (`refused`), or the host is the helm's own machine with no supervisor running. All
+/// but the switch open the row by themselves: a running setup or uninstall once, so its steps show as they go (SPEC.md:
+/// "the running row expands once"), a failure always, so it shows its evidence and remedies whatever was folded, and
+/// the local host without a supervisor so it shows what to do rather than reading as a phantom unreachable host
+/// (SPEC.md, "Topology"). Each closes it again once it no longer holds: success ends the first, a new run or new work
+/// on the host replaces the next two, and a supervisor starting ends the last.
 pub(crate) fn disclosed(
     details: bool,
     host: &HostView,
@@ -574,6 +585,9 @@ impl Render for HostsPanel {
                 .text_color(theme::color(palette.danger))
                 .child(line)
         });
+        // The removal notice of an uninstall this window confirmed, once its host has left the list: no row is left to
+        // show it under.
+        let uninstalled = uninstall::notice(cx);
         div()
             .id("hosts-panel")
             // Tests and the bridge find the panel by this; it records nothing outside test builds.
@@ -587,6 +601,7 @@ impl Render for HostsPanel {
             .child(heading)
             .children(status)
             .children(refused)
+            .children(uninstalled)
             .child(
                 div()
                     .id("host-list")
@@ -846,10 +861,10 @@ fn add_button(focus: &FocusHandle) -> AnyElement {
 }
 
 /// The entity id of the current UI session's operation store; `None` while the window is inert. What this module's
-/// app globals (the Hosts panel's lines in [`setup`] and [`remove`], the rail's state in [`status`]) tag what they keep
-/// with, and compare on every read: a reset makes a new operation store, so whatever was kept under the old one stops
-/// showing, as everything from the helm does after a reset. Private to this module and its submodules, which own those
-/// globals.
+/// app globals (the Hosts panel's lines in [`setup`] and [`remove`], the rail's state in [`status`], the removal notices
+/// in [`uninstall`]) tag what they keep with, and compare on every read: a reset makes a new operation store, so
+/// whatever was kept under the old one stops showing, as everything from the helm does after a reset. Private to this
+/// module and its submodules, which own those globals.
 fn current_operations_id(cx: &App) -> Option<EntityId> {
     session::current_operations(cx).map(|operations| operations.entity_id())
 }

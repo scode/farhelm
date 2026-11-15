@@ -17,6 +17,7 @@ fn idle_ssh() -> Offers {
         rerun: None,
         update: Some(Update::Available),
         remove: Some(true),
+        uninstall: Some(true),
     }
 }
 
@@ -113,9 +114,9 @@ fn a_suspended_host_is_not_offered_update_or_rerun() {
 /// of the old `only_confirmation_preparation_and_pending_plans_exclude_other_settings` that survives the port: work in
 /// flight withdraws the new provisioning commands, the old app's "Update planning keeps only its own Settings
 /// unavailable" (`provisioning.spec.ts`). Specified: with work in flight, Update and the rerun are withdrawn, and
-/// Settings and Remove stay listed but unavailable.
+/// Settings, Uninstall and Remove stay listed but unavailable.
 #[test]
-fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_and_remove() {
+fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_uninstall_and_remove() {
     let failed = run(2, ProvisioningOperation::Update, RunStatus::Failed);
     let ssh = host(2, "ssh", connected());
     assert_eq!(
@@ -130,6 +131,7 @@ fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_and_remove() {
             rerun: None,
             update: None,
             remove: Some(false),
+            uninstall: Some(false),
         }
     );
 }
@@ -137,8 +139,8 @@ fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_and_remove() {
 /// Why this matters: while setup or an Update runs on a host, its settings must not change under the run and it must
 /// not be started again (`provisioning.spec.ts`, "accepted ADD registers before execution and releases the page lock
 /// while running": during the run Settings is unavailable and neither Update nor Re-run is offered; afterwards Update
-/// is). Specified: with a running run, Update is withdrawn and Settings and Remove are unavailable; once the run
-/// completes, the host is offered as an idle one.
+/// is). Specified: with a running run, Update is withdrawn and Settings, Uninstall and Remove are unavailable; once the
+/// run completes, the host is offered as an idle one.
 #[test]
 fn a_running_run_holds_the_host_until_it_ends() {
     let ssh = host(2, "ssh", connected());
@@ -150,6 +152,7 @@ fn a_running_run_holds_the_host_until_it_ends() {
             rerun: None,
             update: None,
             remove: Some(false),
+            uninstall: Some(false),
         }
     );
     let completed = run(2, ProvisioningOperation::Add, RunStatus::Completed);
@@ -159,7 +162,8 @@ fn a_running_run_holds_the_host_until_it_ends() {
 /// Why this matters: a failed run is continued from the menu, and its item has to say which run it repeats; an
 /// uninstall that failed part way is continued by choosing Uninstall again, never by a rerun. Specified: a failed setup
 /// is offered as [`Rerun::Setup`] ("Try the failed setup again"), a failed Update as [`Rerun::Update`] ("Try the failed
-/// update again"), a failed uninstall as no rerun; the failed run leaves Update available.
+/// update again"), a failed uninstall as no rerun but with Uninstall available to continue it; the failed run leaves
+/// Update available.
 #[test]
 fn a_failed_run_is_offered_again_as_what_it_was() {
     let ssh = host(2, "ssh", connected());
@@ -174,6 +178,10 @@ fn a_failed_run_is_offered_again_as_what_it_was() {
     );
     assert_eq!(Rerun::Update.description(), "Try the failed update again");
     assert_eq!(rerun(ProvisioningOperation::Uninstall).rerun, None);
+    assert_eq!(
+        rerun(ProvisioningOperation::Uninstall).uninstall,
+        Some(true)
+    );
 }
 
 /// Why this matters: the panel cannot update the helm's own machine, so rerunning a failed Update there could only be
@@ -221,6 +229,7 @@ fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
             rerun: None,
             update: Some(Update::Greyed),
             remove: None,
+            uninstall: None,
         }
     );
     assert_eq!(
@@ -295,6 +304,7 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
             rerun: None,
             update: None,
             remove: None,
+            uninstall: None,
         }
     );
     let transport = HostStateView::Unreachable {
@@ -310,7 +320,9 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
 /// even with a failed run, draws no locality and has no appearance to choose; SSH, Tensorlake and Podman hosts are
 /// remote and the local host is local; only an SSH host is offered Remove, since only its removal merely forgets it (a
 /// sandbox's or a container's deletes the machine, a different command, and the helm's own machine is never removed);
-/// only an SSH host's settings edit its destination; and every known kind's settings choose its appearance.
+/// only an SSH host is offered Uninstall (SPEC.md: the local host is uninstalled with `farhelm uninstall`, and the
+/// panel "offers no Uninstall" for a sandbox); only an SSH host's settings edit its destination; and every known kind's
+/// settings choose its appearance.
 #[test]
 fn each_kind_decides_its_own_offers() {
     let failed = run(9, ProvisioningOperation::Add, RunStatus::Failed);
@@ -323,6 +335,7 @@ fn each_kind_decides_its_own_offers() {
             rerun: None,
             update: None,
             remove: None,
+            uninstall: None,
         }
     );
     assert_eq!(HostKind::Unrecognized.locality(), None);
@@ -344,6 +357,11 @@ fn each_kind_decides_its_own_offers() {
         assert_eq!(
             offers(&view, None, false).remove.is_some(),
             forgets,
+            "{kind}"
+        );
+        assert_eq!(
+            offers(&view, None, false).uninstall.is_some(),
+            kind == "ssh",
             "{kind}"
         );
         assert_eq!(HostKind::of(&view).locality(), Some(locality), "{kind}");

@@ -260,6 +260,14 @@ pub(crate) async fn update_host(
 /// without a body (the response carries the confirmation the user must
 /// accept), then consume the returned opaque plan when the same route
 /// receives its confirmation body.
+///
+/// As for [`update_host`], only planning answers within the host reply
+/// bound (`crate::sessions::HOST_REPLY_BOUND`): it reads the host's session
+/// list, probes the destination and inspects the installation, each of which
+/// can wait on the host longer than the GUI's channel lets one command wait.
+/// A plan found after the timeout reply is retained but never confirmed, and
+/// the user chooses uninstall again. The confirmation consumes the plan and
+/// starts the run, which checks the host again on its own task.
 pub(crate) async fn uninstall_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
@@ -272,10 +280,22 @@ pub(crate) async fn uninstall_host(
                 Err(error) => provisioning_error(error),
             }
         }
-        None => match state.provisioning.plan_uninstall(host).await {
-            Ok(plan) => axum::Json(plan).into_response(),
-            Err(error) => provisioning_error(error),
-        },
+        None => {
+            crate::sessions::within_host_reply_bound_saying(
+                async move {
+                    match state.provisioning.plan_uninstall(host).await {
+                        Ok(plan) => axum::Json(plan).into_response(),
+                        Err(error) => provisioning_error(error),
+                    }
+                },
+                format!(
+                    "the host did not answer within {} seconds while Farhelm checked what \
+                     uninstalling would remove; nothing was changed, so choose uninstall again",
+                    crate::sessions::HOST_REPLY_BOUND.as_secs()
+                ),
+            )
+            .await
+        }
     }
 }
 

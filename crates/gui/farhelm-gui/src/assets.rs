@@ -57,7 +57,8 @@
 //! The Branch glyph, a template destination's Managed checkout choice, is the old app's `BranchIcon`, in the same
 //! 12-unit box and stroke.
 //!
-//! The host menu's Update glyph is the old app's too (`ActionGlyph::Update`), in the same box and stroke.
+//! The host menu's Update glyph is the old app's too (`ActionGlyph::Update`), in the same box and stroke, and so is its
+//! Uninstall glyph (`ActionGlyph::Uninstall`).
 //!
 //! The harness marks (`Harness*`, the agent mark on a session row) are not drawn here: each file is generated from the
 //! geometry in [`crate::marks`], the one source for those shapes and their provenance, and a test in the GUI's harness
@@ -289,6 +290,10 @@ pub enum Icon {
     TrashEmpty,
     /// A filled bin with its lid tipped open: the Trash button holding checkouts (the old `TrashIcon` with `full: true`).
     TrashFull,
+    /// An arrow leaving an open tray: remove Farhelm from a host, the host menu's Uninstall (the old app's
+    /// `ActionGlyph::Uninstall`, in the 14-unit action box with the 1.2 stroke). The arrow points out of the tray
+    /// because the old one's downward arrow read as downloading the installation.
+    Uninstall,
 }
 
 impl Icon {
@@ -374,6 +379,7 @@ impl Icon {
         Icon::Feedback,
         Icon::TrashEmpty,
         Icon::TrashFull,
+        Icon::Uninstall,
     ];
 }
 
@@ -458,6 +464,7 @@ impl Icon {
             Icon::Feedback => "icons/feedback.svg",
             Icon::TrashEmpty => "icons/trash-empty.svg",
             Icon::TrashFull => "icons/trash-full.svg",
+            Icon::Uninstall => "icons/uninstall.svg",
         }
     }
 }
@@ -562,6 +569,7 @@ impl Assets {
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             "icons/trash-empty.svg" => Some(include_bytes!("../assets/icons/trash-empty.svg")),
             "icons/trash-full.svg" => Some(include_bytes!("../assets/icons/trash-full.svg")),
+            "icons/uninstall.svg" => Some(include_bytes!("../assets/icons/uninstall.svg")),
             "icons/bell-filled.svg" => Some(include_bytes!("../assets/icons/bell-filled.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

@@ -5389,6 +5389,61 @@ mod tests {
         backend.release.notify_one();
     }
 
+    /// Spec: uninstall's plan request (`POST /api/hosts/{id}/uninstall`
+    /// without a body) answers within the host reply bound when the host
+    /// stalls, saying nothing changed and to choose uninstall again.
+    ///
+    /// Why: the GPUI app sends this request through its channel, whose
+    /// watchdog resets the window when a command stays unanswered for 30
+    /// seconds, and planning probes and inspects the host as Update's planning
+    /// does (see `update_planning_answers_a_stalled_host_within_the_bound`).
+    /// The host here is not connected, so planning reaches the probe that
+    /// looks for an answering supervisor, which the backend holds.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn uninstall_planning_answers_a_stalled_host_within_the_bound() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        harness.state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        ));
+        let router = harness.router();
+        let host = harness
+            .store
+            .add_ssh_host("stalled-uninstall.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        backend
+            .block_probe
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let (status, text) = send(
+            &router,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/api/hosts/{host}/uninstall"))
+                .header("host", "127.0.0.1:7433")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{text}");
+        assert!(
+            text.contains("nothing was changed") && text.contains("choose uninstall again"),
+            "{text}"
+        );
+        assert_eq!(
+            backend.probes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "premise: the timeout came from the stalled planning probe"
+        );
+        backend.release.notify_one();
+    }
+
     /// A valid host with no retained operation has a stable, explicit idle
     /// JSON shape rather than masquerading as missing progress.
     #[farhelm_testtrace::test]

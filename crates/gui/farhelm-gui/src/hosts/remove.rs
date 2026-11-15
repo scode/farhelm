@@ -188,12 +188,7 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
     let title = HostSentence::new("host-remove-title")
         .text("Remove host · ")
         .host(&name);
-    let mut summary = HostSentence::new("host-remove-summary").text(phase::words(&view.state));
-    if let Some(build) = phase::reported_build(&view.state) {
-        summary = summary
-            .text(" · Farhelm ")
-            .mono(&HostText::from_host(build));
-    }
+    let summary = phase_summary("host-remove-summary", &view);
     let (icon, color) = (view.icon, view.color);
     let remove = Answer {
         label: "Remove".into(),
@@ -253,6 +248,19 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
         window,
         cx,
     )
+}
+
+/// The summary line under a host confirmation's title, the old `HostDialogHeader`'s for a host: `view`'s phase words,
+/// then the build it reports ("Connected · Farhelm 0.16.0"), the build in the monospace face as host text, under the
+/// sentence id `id`. The removal and uninstall confirmations both show it, frozen as they opened.
+pub(super) fn phase_summary(id: &'static str, view: &HostView) -> HostSentence {
+    let summary = HostSentence::new(id).text(phase::words(&view.state));
+    match phase::reported_build(&view.state) {
+        Some(build) => summary
+            .text(" · Farhelm ")
+            .mono(&HostText::from_host(build)),
+        None => summary,
+    }
 }
 
 /// `DELETE /api/hosts/{id}` for host `host`: the helm forgets the entry and answers with an empty object, or refuses

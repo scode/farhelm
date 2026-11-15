@@ -3110,6 +3110,118 @@ fn host_update_refusal_setup(_: &SceneState, window: &mut Window, cx: &mut App) 
     );
 }
 
+/// The host refusal dialog for an uninstall of `build-box` refused while a session still runs there (reference
+/// `host-uninstall-refusal`, which the helm's real refusal drew): "Uninstall Farhelm · build-box", the red summary, the
+/// destination and the helm's words, and Close with focus. No Remove: the helm marks no remedy on this refusal.
+fn host_uninstall_refusal_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::hosts::refusal::{self, Refusal};
+    let view = crate::hosts::tests::reference_hosts().remove(1);
+    let reason = crate::operations::Refusal {
+        words: HostText::from_host(
+            "uninstall is refused while sessions on this host have not ended or still have terminal tabs open: \
+             \"migrate auth tokens\". Stop those sessions and close their tabs, then choose uninstall again",
+        ),
+        status: 409,
+        markers: Vec::new(),
+    };
+    let mark = Mark::take(cx);
+    let _ = refusal::open(
+        Refusal::of(crate::hosts::uninstall::ACTION, &view, &reason),
+        &mark,
+        window,
+        cx,
+    );
+}
+
+/// The uninstall confirmation for the reference screens' `build-box` (no reference: the old dialog was not captured),
+/// as its menu's Uninstall opens it once the helm's plan arrives: the host's mark, name, phase and build, the numbered
+/// plan with its paths and Copy plan, the kept data in its amber note, and Cancel and Uninstall, focus on Uninstall. The
+/// question opens once the connection has a UI session, as the removal confirmation's scene does; the fake, the
+/// connection and the watch are kept for the scene's life.
+fn host_uninstall_confirmation_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(
+        &crate::hosts::tests::reference_hosts(),
+    )]);
+    let handle = window.window_handle();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            let view = crate::hosts::tests::reference_hosts().remove(1);
+            crate::hosts::uninstall::confirm_for_golden(view, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// `build-box`'s uninstall running at its second of six steps, Details off (no reference): the running row opens by
+/// itself, its inline status reading "Uninstalling", the count, the running step and the clock, and the run's steps
+/// under it with Collapse. Motion is reduced, so the dot holds still, and the test clock does not move, so the elapsed
+/// time reads "0:00".
+fn host_uninstall_running_hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{hosts, progress, reference_hosts, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus, StepStatus};
+    ticker::set_reduced_motion(true, cx);
+    let mut uninstall = run(2, ProvisioningOperation::Uninstall, RunStatus::Running);
+    uninstall.steps = crate::hosts::uninstall::tests::reference_steps()
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(n, planned)| {
+            let status = match n {
+                0 => StepStatus::Completed,
+                1 => StepStatus::Running,
+                _ => StepStatus::Pending,
+            };
+            crate::hosts::progress::tests::step(&planned.name, status)
+        })
+        .collect();
+    hosts_panel_scene_with(
+        state,
+        vec![hosts(&reference_hosts()), progress(&[uninstall])],
+        false,
+        cx,
+    );
+}
+
+/// The Hosts panel after this window uninstalled `build-box` (no reference): the two hosts left and, above them, the
+/// one-line removal notice, "Removed from build-box · data kept", with Copy and ×. The notice is shown once the
+/// connection has a UI session, since it belongs to that session's operation store.
+fn hosts_panel_uninstall_notice_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let mut listed = crate::hosts::tests::reference_hosts();
+    listed.remove(1);
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(&listed)]);
+    let panel = cx.new(HostsPanel::new);
+    let shown = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if shown.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        shown.set(true);
+        crate::hosts::uninstall::show_notice_for_golden(
+            "build-box",
+            "/home/dev/.local/state/farhelm",
+            cx,
+        );
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(panel));
+    keep.push(Box::new(watch));
+}
+
 /// The Hosts panel a scene's setup made, as [`hosts_panels`] draws it, in a column tall enough for a setup's nine
 /// steps under its row and a failure's messages after them, as the reference screens' sidebar was.
 fn tall_hosts_panels(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
@@ -4210,6 +4322,30 @@ static SCENES: &[Scene] = &[
         size: (520., 136.),
         draw: scroll_boxes,
         setup: focus_ring_setup,
+    },
+    Scene {
+        name: "host-uninstall-refusal",
+        size: (640., 600.),
+        draw: empty,
+        setup: host_uninstall_refusal_setup,
+    },
+    Scene {
+        name: "host-uninstall-confirmation",
+        size: (600., 900.),
+        draw: empty,
+        setup: host_uninstall_confirmation_setup,
+    },
+    Scene {
+        name: "host-uninstall-running-hosts-panel",
+        size: (364., 924.),
+        draw: tall_hosts_panels,
+        setup: host_uninstall_running_hosts_panel_setup,
+    },
+    Scene {
+        name: "hosts-panel-uninstall-notice",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: hosts_panel_uninstall_notice_setup,
     },
 ];
 

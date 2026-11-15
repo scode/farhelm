@@ -15,12 +15,13 @@ session list's order menu; 47, the settings-and-hosts area's host Update, its pr
 other-dialogs area's Send feedback, up to but never including Send; 49, the session list header's Trash; 50, the session
 view's open session that a status filter hides, named and renamed; 51, the session list heading's New and the quick
 switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened from the Help menu and opened by a window
-start that asks for it; 60, the approvals area's card for an agent's request and its Allow). The behavior itself is
-specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
-`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`); nothing
-here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
-(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
-Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+start that asks for it; 60, the approvals area's card for an agent's request and its Allow; 61, the settings-and-hosts
+area's host uninstall, its refusal, run and removal notice). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
+`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`); nothing here checks layout or wording beyond the
+names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
+session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in
+drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -1433,11 +1434,99 @@ class Smoke(unittest.TestCase):
         self.assertIsNotNone(child, "the agent reports the child's id")
         eventually(lambda: set(listed_titles()) - before, "the helm listing the spawned session")
 
+    # ---- The settings-and-hosts area's host uninstall (61) ----------------------------------------------------------
+
+    def test_61_a_fake_hosts_uninstall_is_refused_then_runs_and_leaves_a_notice(self) -> None:
+        """Uninstall is the only supported way to remove Farhelm from a remote host (SPEC.md, "Supported host setup"),
+        and only the real helm shows that the menu's click goes through its plan, the confirmation and its one-use
+        plan to a run that forgets the host, and that its refusals reach the window. A fake host is never connected,
+        so the helm refuses its uninstall as not connected until the scripted backend reports the unit file already
+        gone (`unit_removed`, as after a run that failed past removing it), when the helm plans the rest offline.
+        This step registers a fake host of its own through the helm's API (a scripted setup that completes) and,
+        with Hosts shown: chooses Uninstall from its menu, which opens the host refusal dialog naming the host as not
+        connected, and Close closes it; then, with the unit reported gone and the backend holding its steps, chooses
+        Uninstall again, which opens the confirmation with the helm's plan, and Uninstall there starts the run, which
+        the row shows as "Uninstalling: 0 of ..." with its steps; released, the run makes the helm forget the host, the
+        panel shows the removal notice naming it, and the notice's dismiss control hides it. The backend's script is
+        emptied, a host left behind is removed and Hosts is hidden, whatever happened; the snapshot's names of the
+        dialogs, the status and the notice are the oracles."""
+        destination = f"uninstall-{uuid.uuid4().hex[:8]}.example"
+        target = f"ssh:{destination}"
+        gui_agent.script_hosts(RUN, {})
+        probe = gui_agent.helm_request(
+            RUN, "POST", "/api/hosts/probe", {"target": {"kind": "ssh", "destination": destination}, "new_entry": {}}
+        )
+        self.assertEqual(probe["result"], "provisionable", probe)
+        host = gui_agent.helm_request(RUN, "POST", "/api/hosts/provision", {"probe_id": probe["probe_id"]})["host_id"]
+        refused = "Farhelm refused this action"
+        plan = f"Farhelm will uninstall from {destination}"
+        notice = f"Farhelm was removed from {destination}; its data remains in"
+
+        def listed() -> bool:
+            """Whether the helm still lists the fake host."""
+            return any(row["id"] == host for row in gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"])
+
+        def run_view() -> dict:
+            """The host's retained run as the helm serves it."""
+            return gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning")
+
+        def showing(*texts: str):
+            """A check for `eventually`: the snapshot, once it names every one of `texts`."""
+
+            def check() -> str | None:
+                shot = self.ok("snapshot")
+                return shot if all(text in shot for text in texts) else None
+
+            return check
+
+        try:
+            eventually(lambda: run_view().get("status") == "completed", f"{destination}'s setup completing")
+            if HOSTS_PANEL not in self.ok("snapshot"):
+                self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "the Hosts panel showing")
+
+            self.ok("click", f"id:host-menu-toggle-{host}")
+            self.ok("click", "id:host-menu-uninstall")
+            shot = eventually(showing(refused, "Uninstall Farhelm"), "the refusal dialog opening")
+            self.assertIn("isn't connected", shot, "the helm's reason shows")
+            self.ok("click", "id:host-refusal-done")
+            self.ok("wait", "--gone", refused)
+            self.assertTrue(listed(), "the refusal changed nothing")
+
+            gui_agent.script_hosts(RUN, {"targets": {target: {"unit_removed": True, "hold_actions": True}}})
+            self.ok("click", f"id:host-menu-toggle-{host}")
+            self.ok("click", "id:host-menu-uninstall")
+            eventually(showing(plan), "the confirmation showing the helm's plan")
+            self.ok("click", "id:prompt-confirm")
+            self.ok("wait", "--gone", plan)
+            eventually(showing("Uninstalling: 0 of", "Uninstall provisioning Running"), "the row showing the run")
+
+            gui_agent.script_hosts(RUN, {"targets": {target: {"unit_removed": True}}})
+            eventually(lambda: not listed(), "the helm forgetting the uninstalled host")
+            eventually(showing(notice), "the removal notice naming the host")
+            self.ok("click", "id:uninstall-notice-dismiss")
+            eventually(lambda: notice not in self.ok("snapshot"), "the notice going")
+        finally:
+            failing = sys.exc_info()[0] is not None
+            try:
+                gui_agent.script_hosts(RUN, {})
+                if listed():
+                    eventually(lambda: run_view().get("status") != "running", f"{destination}'s run ending")
+                    gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+                snapshot = self.ok("snapshot")
+                if refused in snapshot or plan in snapshot:
+                    agent("press", "escape")
+                if HOSTS_PANEL in self.ok("snapshot"):
+                    self.ok("click", "id:hosts-panel-toggle")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 61 left host {host} ({destination}) behind: {error}", file=sys.stderr)
+
 
 def waiting_approvals() -> list[dict]:
     """The requests the helm holds for the user's answer, oldest first (`GET /api/approvals`)."""
     return gui_agent.helm_request(RUN, "GET", "/api/approvals")["approvals"]
-
 
     # ---- The other-dialogs area's Welcome card (52, 53) --------------------------------------------------------------
 

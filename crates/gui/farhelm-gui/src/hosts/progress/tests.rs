@@ -95,9 +95,9 @@ fn the_panel_keeps_a_runs_first_sight_and_fold_until_the_run_changes() {
 /// Why this matters: SPEC.md, "Topology": "the running row expands once to show the helm's steps ... The user may fold
 /// that run ... Success folds the row", while "While an update is running, its host row stays folded". Specified: a
 /// running setup opens its row unless that very run was folded; a fold of the host's earlier run does not hold the new
-/// one closed; a completed or failed setup, a running Update and the helm's idle view (no run id) open nothing here (a
-/// failure opens its row through the panel's own rule); `shown` passes setup and Update runs with an id, and not an
-/// uninstall's.
+/// one closed; a running uninstall opens its row like a setup and folds the same way; a completed or failed setup, a
+/// running Update and the helm's idle view (no run id) open nothing here (a failure opens its row through the panel's
+/// own rule); `shown` passes every run with an id.
 #[test]
 fn a_running_setup_opens_its_row_until_folded() {
     let running = setup("run-a", RunStatus::Running);
@@ -124,8 +124,20 @@ fn a_running_setup_opens_its_row_until_folded() {
         shown(Some(&update)).is_some(),
         "an Update's steps are drawn"
     );
-    let uninstall = run(2, ProvisioningOperation::Uninstall, RunStatus::Running);
-    assert!(shown(Some(&uninstall)).is_none(), "not an uninstall's yet");
+    let mut uninstall = run(2, ProvisioningOperation::Uninstall, RunStatus::Running);
+    uninstall.run_id = Some("run-u".into());
+    assert!(
+        shown(Some(&uninstall)).is_some(),
+        "an uninstall's steps are drawn"
+    );
+    assert!(
+        opens_row(Some(&uninstall), None),
+        "a running uninstall opens its row"
+    );
+    let mut seen = HashMap::new();
+    follow(&mut seen, [&uninstall], at(0));
+    fold(&mut seen, 2, "run-u");
+    assert!(!opens_row(Some(&uninstall), seen.get(&2)), "and folds");
     let mut idle = setup("run-a", RunStatus::Running);
     idle.run_id = None;
     assert!(shown(Some(&idle)).is_none(), "the idle view is no run");
@@ -140,7 +152,8 @@ fn a_running_setup_opens_its_row_until_folded() {
 /// counts; a running or pending one does not), the running step's name, and the time since first sight; unchanged,
 /// warning and failed steps count as done too; a running Update is counted and timed the same way as an Update's; with
 /// a probe or a setup in flight and no running run it is pending setup, with an Update's request in flight pending
-/// Update, also over the host's earlier failed run; a save in flight, a completed run and no run give none.
+/// Update, also over the host's earlier failed run, and with an uninstall's pending uninstall ("Setup and uninstall
+/// planning show their action in the folded row"); a save in flight, a completed run and no run give none.
 #[test]
 fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
     let running = setup("run-a", RunStatus::Running);
@@ -192,6 +205,12 @@ fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
         status(Some(&failed), None, Some(Work::UpdateHost), at(0)),
         Some(Status::Pending(Run::Update)),
         "a new Update's requests over the failed one"
+    );
+    let failed = run(2, ProvisioningOperation::Uninstall, RunStatus::Failed);
+    assert_eq!(
+        status(Some(&failed), None, Some(Work::UninstallHost), at(0)),
+        Some(Status::Pending(Run::Uninstall)),
+        "an uninstall's requests, the continuation's over its failed run"
     );
     assert_eq!(status(None, None, Some(Work::Save), at(0)), None);
     assert_eq!(
