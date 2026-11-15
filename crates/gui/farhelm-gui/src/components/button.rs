@@ -136,6 +136,11 @@ pub enum Tier {
     /// control: the tunnel ink on the tunnel fill inside the tunnel edge, rounded to 8 pixels, padded 2 by 4 pixels at
     /// 11 pixels. Open ([`Button::expanded`]), it takes the accent fill with the inverse ink, as any open toggle does.
     Tunnel,
+    /// `.tab`: one terminal of the session view's tab strip (the agent's or a shell tab's), a ghost in the old tab's box
+    /// (`padding: 3px 10px` at 12 pixels) that never shrinks, so a long strip scrolls rather than squeezing its tabs.
+    /// The shown terminal's tab is drawn through [`Button::pressed`], the accent fill with the inverse ink
+    /// (`.tab.selected`).
+    TerminalTab,
     /// `.host-color-choice`: one of the host settings' color choices, a 26-pixel circle with 3 pixels around its
     /// content (the color's swatch), no fill or edge at rest and no hover fill. Chosen, it takes the accent fill inside
     /// an edge in the inverse ink.
@@ -156,6 +161,8 @@ pub enum Tier {
 const QUICK_MARK_PAD: (f32, f32) = (10., 5.);
 /// The [`Tier::Tunnel`] pill's padding, vertical then horizontal (`.session-tunnel-toggle`: `2px 4px`).
 const TUNNEL_PAD: (f32, f32) = (2., 4.);
+/// The [`Tier::TerminalTab`] box's padding, vertical then horizontal (`.tab`: `3px 10px`).
+const TERMINAL_TAB_PAD: (f32, f32) = (3., 10.);
 /// The [`Tier::NumberKey`] box's padding on every side.
 const NUMBER_KEY_PAD: f32 = 4.;
 /// The [`Tier::FieldRemove`] box: `.templates-remove`'s `width: 30px; height: 34px`.
@@ -515,9 +522,10 @@ impl Button {
             palette.fg_2,
         );
         match self.tier {
-            Tier::Ghost | Tier::RowMenu { on_fill: false } | Tier::FieldRemove => {
-                (None, palette.control_hover, None, palette.fg_1)
-            }
+            Tier::Ghost
+            | Tier::RowMenu { on_fill: false }
+            | Tier::FieldRemove
+            | Tier::TerminalTab => (None, palette.control_hover, None, palette.fg_1),
             // Returned above, before the pressed looks.
             Tier::QuickMark { .. } | Tier::NumberKey { .. } => {
                 (None, palette.control_hover, None, palette.fg_2)
@@ -632,6 +640,7 @@ impl RenderOnce for Button {
             Tier::QuickMark { .. } => (px(QUICK_MARK_PAD.0), px(QUICK_MARK_PAD.1)),
             Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
             Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
+            Tier::TerminalTab => (px(TERMINAL_TAB_PAD.0), px(TERMINAL_TAB_PAD.1)),
             Tier::TemplateRow => (px(TEMPLATE_ROW_PAD.0), px(TEMPLATE_ROW_PAD.1)),
             Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
             Tier::Waiting => (px(WAITING_PAD.0), px(WAITING_PAD.1)),
@@ -672,6 +681,7 @@ impl RenderOnce for Button {
             | Tier::IconChoice
             | Tier::ColorChoice
             | Tier::Tunnel
+            | Tier::TerminalTab
             | Tier::HostUpdate { .. }
             | Tier::Waiting
             | Tier::RowMenu { on_fill: false } => palette.accent,
@@ -693,7 +703,7 @@ impl RenderOnce for Button {
         let square = self.side.is_some()
             || matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
         // `.btn.host-update-button`'s `flex: 0 0 auto`: the row's name gives way first.
-        let rigid = matches!(self.tier, Tier::HostUpdate { .. });
+        let rigid = matches!(self.tier, Tier::HostUpdate { .. } | Tier::TerminalTab);
         let enabled = !self.disabled;
         // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
         let active = enabled && !self.busy;

@@ -64,8 +64,8 @@ use crate::session_list::{delete, menu, outcome, replace, restart, stop};
 use crate::theme::{self, metrics};
 
 /// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
-/// while the session has tunnels open; the tabs are still to come. The row's layout (a region that takes the width the
-/// actions leave, and shrinks to nothing first) is already the one they need.
+/// while the session has tunnels open; the strip always, its Agent tab at least. The row's layout (a region that takes
+/// the width the actions leave, and shrinks to nothing first) is already the one they need.
 pub(crate) const TABS_SLOT: &str = "session-header-tabs";
 
 /// `.session-topbar`'s `min-height`.
@@ -205,13 +205,17 @@ impl SessionPane {
         } else {
             px(ROW_MIN_HEIGHT)
         };
-        // The terminal area's part of the left region: the open-tunnels pill, while the session has tunnels open. A
-        // button, so it keeps its presses inside the title band.
-        let pill = self
+        // The terminal area's part of the left region: the strip of the session's terminals, then the open-tunnels pill
+        // while the session has tunnels open (the agent terminal's: SPEC.md's tunnels belong to the session). Buttons,
+        // so they keep their presses inside the title band.
+        let set = self
             .mounted
             .current(cx)
             .as_ref()
-            .map(|mounted| mounted.terminal.clone())
+            .map(|mounted| mounted.set.clone());
+        let strip = set.as_ref().map(|set| set.read(cx).strip(set, window));
+        let pill = set
+            .map(|set| set.read(cx).agent().clone())
             .and_then(|terminal| {
                 terminal.update(cx, |terminal, cx| terminal.tunnel_pill(window, cx))
             });
@@ -239,6 +243,8 @@ impl SessionPane {
                     .items_center()
                     .flex_1()
                     .min_w_0()
+                    .gap(px(ROW_GAP))
+                    .children(strip)
                     .children(pill),
             );
         let row = title_band::row(row, Row::SessionTop);
