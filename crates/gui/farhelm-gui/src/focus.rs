@@ -25,9 +25,11 @@
 //!   when the selected session has stopped. The views that own those set it: [`set_home`] in general, and
 //!   [`choose_terminal`] when the user chooses a session (its terminal becomes home and takes focus). Only when none of
 //!   them is on screen does focus rest on the window's root view, which is not a tab stop, so a key press still starts
-//!   inside Farhelm's key context. SPEC.md's rule for a shell tab that exits (the agent tab takes focus at once) needs
-//!   no move of its own: the terminal set falls back to the agent terminal and the session pane makes it home, so the
-//!   home move covers it.
+//!   inside Farhelm's key context. "On screen" is literal: a home the frame on screen does not draw counts as none
+//!   ([`drawn_home`]), since focus on an undrawn handle takes no keys at all, and after every frame a window resting on
+//!   its root goes home once that frame draws it ([`settle_home`]). SPEC.md's rule for a shell tab that exits (the
+//!   agent tab takes focus at once) needs no move of its own: the terminal set falls back to the agent terminal and the
+//!   session pane makes it home, so the home move covers it.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
 //!   where it was before it opened, or home or a control its opener named instead ([`ReturnTo`]); when the focused
@@ -509,9 +511,10 @@ fn state(window: &Window, cx: &App) -> Option<Entity<WindowFocus>> {
     installed::<Windows>(cx)?.0.get(&id)?.upgrade()
 }
 
-/// Set the window's home: where focus goes whenever nothing holds it and no layer that holds focus is open. The selected session's
-/// terminal is home (SPEC.md, "Where focus rests"); `None` leaves the window without one. If nothing holds focus now, it
-/// goes home at once, but home never takes focus from a control that holds it.
+/// Set the window's home: where focus goes whenever nothing holds it and no layer that holds focus is open. The
+/// selected session's terminal is home (SPEC.md, "Where focus rests"); `None` leaves the window without one. If nothing
+/// holds focus now, it goes home at once if the frame on screen draws home, and otherwise once a frame does
+/// ([`settle_home`]); home never takes focus from a control that holds it.
 pub fn set_home(home: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
     let Some(state) = state(window, cx) else {
         return;
@@ -718,9 +721,53 @@ fn home(window: &Window, cx: &App) -> Option<FocusHandle> {
     state(window, cx)?.read(cx).home.as_ref()?.upgrade()
 }
 
-/// Where focus rests when nothing else holds it and no layer that holds focus is open: home if the window has one, its root otherwise.
+/// The window's home, but only while the frame on screen draws it: a home that frame did not draw counts as no home.
+///
+/// Focus given to a handle the frame on screen does not draw is dead: GPUI reports it focused, so nothing recovers it,
+/// but key dispatch for a focus id missing from the frame starts above the root's key context, so Tab, Escape and every
+/// Farhelm binding do nothing until that handle is drawn again. GPUI's focus-lost report misses it whenever the frame
+/// before drew nothing focused either. A home goes undrawn in ordinary use: one set before its first frame (the
+/// session pane's interrupted card), and New as home (the sidebar's follow-up) while it is disabled, since a launch or
+/// a host change in flight draws it untracked, or while the Hosts panel hides the session list's column.
+/// Desktop-integration found the dead keys with New as home (2026-11-15). [`settle_home`] moves a window resting on
+/// its root to home once a frame draws it.
+///
+/// [`choose_terminal`] does not go through here: it focuses the chosen terminal at once, usually before its first
+/// frame, which is safe, since the frame on screen then drew focus (on the row the user chose) and GPUI reports the
+/// focus lost if the next frame does not draw the terminal.
+fn drawn_home(window: &Window, cx: &App) -> Option<FocusHandle> {
+    home(window, cx).filter(|home| is_drawn(home, window, cx))
+}
+
+/// Whether the frame on screen draws `handle`'s element, overlays included: the root contains every element drawn there
+/// and nothing else, and the root itself counts as drawn.
+fn is_drawn(handle: &FocusHandle, window: &Window, cx: &App) -> bool {
+    root_handle(window, cx).is_some_and(|root| root.contains(handle, window))
+}
+
+/// Where focus rests when nothing else holds it and no layer that holds focus is open: home if the window has one and
+/// the frame on screen draws it ([`drawn_home`]), its root otherwise.
 fn resting_place(window: &Window, cx: &App) -> Option<FocusHandle> {
-    home(window, cx).or_else(|| state(window, cx)?.read(cx).root.upgrade())
+    drawn_home(window, cx).or_else(|| root_handle(window, cx))
+}
+
+/// After every frame: a window whose focus rests on its root (or on nothing) while no layer that holds focus is open,
+/// and whose home that frame drew, sends focus home. This is how focus reaches a home that was not drawn when focus
+/// last needed a resting place ([`drawn_home`]): the interrupted card once its first frame draws it, or New drawn
+/// enabled again once the launch is answered. It never takes focus from a control that holds it, as [`set_home`] does
+/// not.
+///
+/// The root view's own element queues it while every frame is prepared ([`root`]), so it runs once that frame is drawn
+/// and reads it. The focus move asks for the frame that shows it, as every focus move does.
+fn settle_home(window: &mut Window, cx: &mut App) {
+    if !holds_nothing(window, cx) || layers::focus_layer_open(window, cx) {
+        return;
+    }
+    let Some(home) = drawn_home(window, cx) else {
+        return;
+    };
+    apply(Move::Recover(&home), window, cx);
+    reveal_focused(window, cx);
 }
 
 // ---- The root's wiring -----------------------------------------------------------------------------------------------
@@ -760,7 +807,8 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
         })
         .child(
             canvas(
-                |_, _, _| (),
+                // Prepared on every frame, since the root view is never replayed from a cache.
+                |_, window, cx| window.defer(cx, settle_home),
                 |_, _, window, _| {
                     window.on_mouse_event(|event: &MouseDownEvent, phase, _, cx| {
                         if phase == gpui::DispatchPhase::Capture {
@@ -1536,7 +1584,8 @@ pub enum ReturnTo {
     /// may have been pressed while a row reached with Tab held focus ("Desktop window chrome").
     ///
     /// Home only once no other layer that holds focus is left open, since focus never leaves a dialog for the page
-    /// behind it; with such a layer still open, or with no home, it falls back to [`ReturnTo::Opener`].
+    /// behind it; with such a layer still open, or with no home, it falls back to [`ReturnTo::Opener`]. A home the
+    /// frame on screen does not draw gets focus once a frame draws it, with focus on the window's root until then.
     Home,
     /// [`ReturnTo::Home`] when the user dismisses the layer (Escape, through the layer manager's dismissal), and
     /// [`ReturnTo::Opener`] when it closes any other way (an answer, a press outside a question, its subject going).
@@ -1563,7 +1612,14 @@ pub(crate) fn return_to(
         state.update(cx, |state, _| state.pending = None);
     }
     let (named, undrawn) = match target {
-        ReturnTo::Home if !layers::focus_layer_open(window, cx) => (home(window, cx), None),
+        // A home the frame on screen does not draw takes no focus (see [`drawn_home`]): focus waits on the root and
+        // goes home with the frame that draws it ([`settle_home`]). Returning to the opener instead would leave focus
+        // on, say, a row reached with Tab, which nothing later corrects. Only a window with no home at all falls back
+        // to the opener.
+        ReturnTo::Home if !layers::focus_layer_open(window, cx) => match home(window, cx) {
+            Some(_) => (resting_place(window, cx), None),
+            None => (None, None),
+        },
         // `contains` reads the frame on screen, which still has the closed layer over the one below it. With no layer
         // left, the control must still be drawn on the page.
         ReturnTo::Control(control)
@@ -1646,11 +1702,24 @@ pub fn shows_ring(handle: &FocusHandle, window: &Window) -> bool {
 }
 
 /// What breaks SPEC.md's focus rules in `window` right now, if anything: exactly one element holds focus (GPUI holds at
-/// most one, so this checks that something does), and with a dialog open it is inside the topmost one, a layer opened
-/// above it, or an approval card. The test harness runs this after every step.
+/// most one, so this checks that something does), the frame on screen draws it, and with a dialog open it is inside the
+/// topmost one, a layer opened above it, or an approval card. The test harness runs this after every step.
+///
+/// Focus on an element the frame does not draw is the dead-keys state [`drawn_home`] describes: it holds focus in
+/// GPUI's eyes, yet no key reaches Farhelm's bindings. That check holds only once the frame after a focus move is
+/// drawn, as it is between test steps: inside an update, a move to a control the next frame will draw (a layer's
+/// start) is not drawn yet.
 pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
-    if state(window, cx).is_some() && window.focused(cx).is_none() {
-        return Some("nothing holds focus".to_string());
+    if state(window, cx).is_some() {
+        match window.focused(cx) {
+            None => return Some("nothing holds focus".to_string()),
+            Some(focused) if !is_drawn(&focused, window, cx) => {
+                return Some(
+                    "focus is on an element the frame on screen does not draw".to_string(),
+                );
+            }
+            Some(_) => {}
+        }
     }
     (!layers::focus_is_where_dialogs_allow(window, cx)).then(|| {
         "a dialog is open but focus is outside it, every layer above it and the approval region"
