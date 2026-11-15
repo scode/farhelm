@@ -27,8 +27,9 @@
 //! - **Saves are the operation store's work** under [`OpKey::preferences`], the preference row's key, although this is
 //!   helm configuration, not a preference: helm configuration has no key of its own, so a Save here is refused while
 //!   any other Settings save is in flight, and the other way round ([`super::agent_trust`] has the reasoning, accepted
-//!   by this area on 2026-11-14). A done save shows "ntfy alert settings saved" until the next edit and fills the form
-//!   from the helm's answer, emptying the token field; a refusal keeps the form as typed with the helm's words under it,
+//!   by this area on 2026-11-14). A Save the key refuses sends nothing and says so under the form ([`Refused`]) until
+//!   the next save starts. A done save shows "ntfy alert settings saved" until the next edit and fills the form from
+//!   the helm's answer, emptying the token field; a refusal keeps the form as typed with the helm's words under it,
 //!   until the next save starts.
 //! - **Send test is not a save.** It asks the helm to send one alert with the settings it stores, even while alerts are
 //!   off, and sends nothing of the form (SPEC.md: "Send test uses the saved configuration"). It changes nothing, so it
@@ -43,15 +44,16 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
 use gpui::{
-    AnyWindowHandle, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _, Subscription,
-    Window, div, px,
+    AnyWindowHandle, App, Context, Div, ElementId, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div, px,
 };
 
+use super::Refused;
 use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use crate::components::{
-    Button, Checkbox, HoverHelp, Select, SelectOption, TextInput, TextInputEvent, TextInputState,
-    Tier,
+    Button, Checkbox, HoverHelp, RadioGroup, RadioOption, TextInput, TextInputEvent,
+    TextInputState, Tier,
 };
 use crate::drafts::{self, Draft};
 use crate::host_text::{HostSentence, HostText};
@@ -66,8 +68,13 @@ const LABEL_GAP: f32 = 6.;
 const FIELD_HEIGHT: f32 = 36.;
 /// `.checkout-root-error` and `.checkout-root-success`: `line-height: 1.5` at 12 pixels.
 const OUTCOME_LINE_HEIGHT: f32 = 18.;
+/// The form's name for [`Refused`]: its Save is the one control here whose press the key can refuse, and the line saying
+/// so is drawn under the id [`Refused::line`] makes of it, `ntfy-busy`.
+const REFUSED: &str = "ntfy";
 /// The route the form reads and saves, as a refusal without words names it.
 const ROUTE: &str = "/api/ntfy-alerts";
+/// The priority segments' hover help, the old buttons' `data-tooltip`, which the group repeats as its own.
+const PRIORITY_HELP: &str = "Priority used for session alerts; Save applies the selected priority";
 /// Every priority, in the order the old segments showed them.
 const PRIORITIES: [Priority; 5] = [
     Priority::Min,
@@ -205,6 +212,9 @@ pub(super) struct NtfyAlerts {
     testing: bool,
     /// How the last Send test went, until the next edit, save or test.
     tested: Option<Result<(), HostText>>,
+    /// Whether the last Save sent nothing because another Settings save held the key, which the form says until its
+    /// next save starts.
+    refused: Refused,
     /// The window the form is drawn in, where answers that arrive later set the fields' text.
     window: AnyWindowHandle,
     _edits: Vec<Subscription>,
@@ -226,6 +236,7 @@ impl NtfyAlerts {
             saved: false,
             testing: false,
             tested: None,
+            refused: Refused::default(),
             window: window.window_handle(),
             _edits: Vec::new(),
         };
@@ -375,7 +386,8 @@ impl NtfyAlerts {
         self.token_saved() && (form.clear || (self.server_changed() && form.token.is_empty()))
     }
 
-    /// Save the form. Does nothing while it is locked.
+    /// Save the form. Does nothing while it is locked, when Save is drawn busy or unavailable; a Save the operation store
+    /// refuses because another Settings save holds the key says so under the form ([`Refused`]).
     fn save(&mut self, cx: &mut Context<Self>) {
         if self.locked() {
             return;
@@ -410,15 +422,17 @@ impl NtfyAlerts {
                 });
             },
         );
+        // Another Settings save may hold the key, which the form then says.
+        self.refused.record(REFUSED, &started);
         match started {
             Ok(()) => {
                 self.saved = false;
                 self.tested = None;
                 self.hold(cx);
             }
-            // Another Settings save holds the key, or the window went inert.
             Err(not_started) => tracing::debug!(?not_started, "ntfy alert settings not saved"),
         }
+        cx.notify();
     }
 
     /// Send test: ask the helm to send one alert with the settings it stores (the module docs). Does nothing while the
@@ -522,10 +536,11 @@ impl NtfyAlerts {
     }
 
     /// A line under the form: the danger ink for a failure, the quiet one for the rest.
-    fn outcome(id: &'static str, role: Role, color: gpui::Hsla) -> gpui::Stateful<Div> {
+    fn outcome(id: impl Into<SharedString>, role: Role, color: gpui::Hsla) -> gpui::Stateful<Div> {
+        let id: SharedString = id.into();
         div()
-            .id(id)
-            .debug_selector(move || id.to_owned())
+            .id(ElementId::Name(id.clone()))
+            .debug_selector(move || id.to_string())
             .role(role)
             .text_size(metrics::TEXT_SM)
             .line_height(px(OUTCOME_LINE_HEIGHT))
@@ -538,8 +553,8 @@ impl Render for NtfyAlerts {
         let palette = theme::palette(cx);
         let form = self.form.value().clone();
         let weak = cx.weak_entity();
-        let failure = |id: &'static str, reason: &HostText| {
-            let sentence = HostSentence::new(id).host(reason);
+        let failure = |id: SharedString, reason: &HostText| {
+            let sentence = HostSentence::new(ElementId::Name(id.clone())).host(reason);
             Self::outcome(id, Role::Alert, theme::color(palette.danger))
                 .aria_label(sentence.accessible_name())
                 .child(sentence)
@@ -563,6 +578,8 @@ impl Render for NtfyAlerts {
                     .debug_selector(|| "ntfy-token-origin-hint".to_owned())
                 });
 
+        // `.segmented-control` of `aria-pressed` buttons, as the old form drew the five priorities: each its own tab
+        // stop, a press choosing it into the form and saving nothing.
         let choose = weak.clone();
         let priority = div()
             .flex()
@@ -572,35 +589,30 @@ impl Render for NtfyAlerts {
             .min_w_0()
             .child(Self::label("Priority"))
             .child(
-                Select::new(
-                    "ntfy-priority",
-                    "Priority",
-                    HoverHelp::tooltip(
-                        "Priority used for session alerts; Save applies the selected priority",
-                    ),
-                    Role::ComboBox,
-                )
-                .options(PRIORITIES.map(|priority| {
-                    SelectOption::new(
-                        priority.header(),
-                        priority.display_label(),
-                        HoverHelp::tooltip(
-                            "Priority used for session alerts; Save applies the selected priority",
+                PRIORITIES
+                    .into_iter()
+                    .fold(
+                        RadioGroup::new(
+                            "ntfy-priority",
+                            "Priority",
+                            HoverHelp::tooltip(PRIORITY_HELP),
+                            Role::Group,
                         ),
+                        |group, priority| {
+                            group.option(RadioOption::new(
+                                priority.display_label(),
+                                HoverHelp::tooltip(PRIORITY_HELP),
+                                priority,
+                            ))
+                        },
                     )
-                }))
-                .chosen(form.priority.header())
-                .disabled(self.locked())
-                .on_choose(move |value, _, cx| {
-                    let chosen = PRIORITIES
-                        .into_iter()
-                        .find(|p| p.header() == value.as_ref());
-                    let _ = choose.update(cx, |alerts, cx| {
-                        if let Some(chosen) = chosen {
+                    .chosen(Some(form.priority))
+                    .disabled(self.locked())
+                    .on_change(move |&chosen, _, cx| {
+                        let _ = choose.update(cx, |alerts, cx| {
                             let _ = alerts.edit(|form| form.priority = chosen, cx);
-                        }
-                    });
-                }),
+                        });
+                    }),
             );
 
         // "Retry loading" while the read has failed, as in the old form.
@@ -657,7 +669,7 @@ impl Render for NtfyAlerts {
             Ok(()) => Self::outcome("ntfy-tested", Role::Status, theme::color(palette.fg_1))
                 .aria_label("Test alert sent")
                 .child("Test alert sent"),
-            Err(reason) => failure("ntfy-tested", reason),
+            Err(reason) => failure("ntfy-tested".into(), reason),
         });
         let saved = (self.saved && !saving && !self.form.is_touched()).then(|| {
             Self::outcome("ntfy-saved", Role::Status, theme::color(palette.fg_1))
@@ -725,7 +737,7 @@ impl Render for NtfyAlerts {
                 cx,
             ))
             .child(priority)
-            .children(self.unreadable.as_ref().map(|reason| failure("ntfy-load-error", reason)))
+            .children(self.unreadable.as_ref().map(|reason| failure("ntfy-load-error".into(), reason)))
             .children(retry)
             // `.dialog-actions`: the form's buttons at its end, Send test before Save. They share a row, not a
             // submission: Send test never sends the form.
@@ -747,7 +759,11 @@ impl Render for NtfyAlerts {
                     .aria_label("Working…")
                     .child("Working…")
             }))
-            .children(self.form.refusal().map(|reason| failure("ntfy-error", reason)))
+            .children(self.form.refusal().map(|reason| failure("ntfy-error".into(), reason)))
+            .children(
+                self.refused
+                    .line(REFUSED, |id, text| failure(id.into(), &HostText::from_host(text))),
+            )
             .children(saved)
             .children(tested)
     }

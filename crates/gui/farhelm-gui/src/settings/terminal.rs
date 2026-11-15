@@ -21,7 +21,7 @@ use farhelm_helm_client::PathError;
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{App, Div, ParentElement as _, Role, Styled as _, Window, div, px};
 
-use super::choices;
+use super::{Refused, choices};
 use crate::components::{HoverHelp, RadioGroup, RadioOption};
 use crate::drafts::Draft;
 use crate::operations::Command;
@@ -107,12 +107,13 @@ pub(super) fn command(choice: LinkClick) -> Result<Command, PathError> {
 
 /// The link choices as two of the section's children, which the section spaces like any other (`.host-settings-section`
 /// put its help and its group 14 pixels apart): the help, then the stacked radio group with each choice's description
-/// and, after a refused save, the failure line under it. `on_change` is what a choice does with the chosen value. The
-/// group shows the value being saved while its save is in flight and the stored one otherwise, as a switch does
-/// ([`choices::Switch::shown`]).
+/// and, after a refused save, the failure line under it, then the line saying why a press sent nothing (`refused`,
+/// [`choices::busy_line`]). `on_change` is what a choice does with the chosen value. The group shows the value being
+/// saved while its save is in flight and the stored one otherwise, as a switch does ([`choices::Switch::shown`]).
 pub(super) fn links(
     draft: &Draft<LinkClick>,
     preferences: Option<&Preferences>,
+    refused: &Refused,
     on_change: impl Fn(&LinkClick, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> [Div; 2] {
@@ -149,6 +150,7 @@ pub(super) fn links(
             draft
                 .refusal()
                 .map(|_| choices::failure_line(ERROR_ID.to_owned(), FAILURE, cx)),
-        );
+        )
+        .children(choices::busy_line(refused, ID, cx));
     [choices::help(HELP, cx), choice]
 }

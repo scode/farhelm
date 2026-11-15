@@ -2237,8 +2237,8 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
 
 /// SPEC.md: the settings "are explicitly saved helm configuration", and "The stored token is never returned": the form
 /// must send what was typed, show the helm's answer, and then hold no token, or the next Save would send it again,
-/// possibly to another server. Specified: a server, topic and token typed, the switch turned on and High chosen in the
-/// priority select, Save sends all five in one `PUT` and shows "Working…" while it is out; the helm's answer shows
+/// possibly to another server. Specified: a server, topic and token typed, the switch turned on and High pressed in the
+/// priority segments, Save sends all five in one `PUT` and shows "Working…" while it is out; the helm's answer shows
 /// "ntfy alert settings saved"; a second Save sends the same form with no token.
 #[gpui::test]
 fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext) {
@@ -2248,8 +2248,13 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
     fill(cx, "ntfy-server", "http://127.0.0.1:9");
     fill(cx, "ntfy-topic", "browser-alerts");
     fill(cx, "ntfy-token", "browser-token");
-    reach(cx, "ntfy-priority");
-    keys(cx, "space down enter");
+    reach(cx, "ntfy-priority-High");
+    keys(cx, "space");
+    assert_eq!(
+        switch_on(cx, "ntfy-priority-High"),
+        Some(true),
+        "High shows pressed"
+    );
     assert_eq!(sent(&mut helm), [], "nothing saves before Save");
 
     let (id, body) = save_ntfy(&mut helm, cx);
@@ -2436,7 +2441,7 @@ fn topic_input(cx: &mut VisualTestContext) -> crate::components::TextInputState 
 /// include "a keystroke while saving". This form binds its fields to its draft itself (the drafts module's
 /// `DraftInput` saves one field per request), so the same legs are tested here: an edit taken while saving would be
 /// marked saved by the reply although it was never sent. Specified: while the `PUT` is unanswered, typing into the
-/// topic leaves the field as sent, the switch and the priority select take no click, and Save sends nothing more; a
+/// topic leaves the field as sent, the switch and the priority segments take no click, and Save sends nothing more; a
 /// keystroke that still reaches the form while saving (here by lifting the field's read-only hold, as an event queued
 /// before it took effect would) is refused, and the field shows the topic sent again; after the helm refuses, Save
 /// sends the first body again. Which of the read-only hold and the put-back stopped the first keystroke is not told
@@ -2453,9 +2458,14 @@ fn nothing_edits_the_form_while_its_save_is_in_flight(cx: &mut TestAppContext) {
     cx.simulate_input("typed");
     test_support::check(cx);
     click(cx, "ntfy-enabled");
-    click(cx, "ntfy-priority");
+    click(cx, "ntfy-priority-Urgent");
     assert_eq!(switch_on(cx, "ntfy-enabled"), Some(false));
-    assert!(!drawn(cx, "ntfy-priority-list"), "the select did not open");
+    assert_eq!(
+        switch_on(cx, "ntfy-priority-Urgent"),
+        Some(false),
+        "the segment took no click"
+    );
+    assert_eq!(switch_on(cx, "ntfy-priority-Default"), Some(true));
     reach(cx, "ntfy-save");
     keys(cx, "space");
     assert_eq!(sent(&mut helm), [], "nothing more was sent");
@@ -2481,6 +2491,143 @@ fn nothing_edits_the_form_while_its_save_is_in_flight(cx: &mut TestAppContext) {
     settle(cx);
     let (_, again) = save_ntfy(&mut helm, cx);
     assert_eq!(again, first, "the form is still the one sent");
+}
+
+// ---- A press refused while another save holds the key -----------------------------------------------------------------
+
+/// The role and accessible name of the line saying why a press on `control` sent nothing (`<control>-busy`), if drawn.
+fn busy_line(cx: &mut VisualTestContext, control: &str) -> Option<(Option<Role>, Option<String>)> {
+    let id = format!("{control}-busy");
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id.as_str()))
+        .map(|node| (node.role, node.label.map(|label| label.to_string())))
+}
+
+/// The line as an alert with the shared words, as `busy_line` reads it.
+fn busy_alert() -> Option<(Option<Role>, Option<String>)> {
+    Some((Some(Role::Alert), Some(super::Refused::WORDS.to_owned())))
+}
+
+/// Why this matters: every Settings save holds the preference row's key and the operation store queues nothing, so a
+/// press that meets another save sends nothing; the old app queued such a press, and one that silently does nothing
+/// reads as a broken control. Specified: with one switch's save in flight, a click on another switch sends nothing,
+/// leaves it showing the stored value and draws "Not saved: another save was in progress. Try again." as an alert under
+/// it; a click on Appearance's Dark moves the line under the group, and a click on Terminal's second link choice under
+/// that group; back in Sessions, with the other switch drawn, its line is gone; a second click on the saving switch
+/// moves the line there; once the save is answered, a click on the other switch sends its save and no line is left.
+#[gpui::test]
+fn a_press_during_another_settings_save_says_why_it_sent_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let saving = Choice::SkipSessionConfirmations.id();
+    let other = Choice::ColorTerminalFrames.id();
+    click(cx, saving);
+    let (id, _) = one_save(&mut helm);
+    assert_eq!(
+        preference_work(cx),
+        Some(Work::Save),
+        "the premise: in flight"
+    );
+
+    click(cx, other);
+    assert_eq!(sent(&mut helm), [], "the key held the press back");
+    assert_eq!(switch_on(cx, other), Some(false), "the stored value shows");
+    assert_eq!(busy_line(cx, other), busy_alert());
+    let line = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(format!("{other}-busy").as_str()))
+        .map(|node| node.bounds);
+    assert!(
+        line.is_some_and(|line| line.top() >= bounds(cx, other).bottom()),
+        "the line {line:?} is below its switch"
+    );
+
+    click(cx, section_button(Section::Appearance));
+    click(cx, "settings-appearance-Dark");
+    assert_eq!(sent(&mut helm), []);
+    assert_eq!(appearance_chosen(cx), Some("System"));
+    assert_eq!(busy_line(cx, super::appearance::ID), busy_alert());
+    click(cx, section_button(Section::Terminal));
+    click(cx, BOTH);
+    assert_eq!(sent(&mut helm), []);
+    assert_eq!(link_chosen(cx), Some(INTERCEPT), "the stored choice shows");
+    assert_eq!(busy_line(cx, super::terminal::ID), busy_alert());
+    click(cx, section_button(Section::Sessions));
+    assert_eq!(
+        switch_on(cx, other),
+        Some(false),
+        "the premise: the switch is drawn"
+    );
+    assert_eq!(busy_line(cx, other), None, "only the latest press says it");
+
+    click(cx, saving);
+    assert_eq!(sent(&mut helm), [], "its own save is still in flight");
+    assert_eq!(busy_line(cx, saving), busy_alert());
+
+    helm.reply(id, 204, None);
+    settle(cx);
+    click(cx, other);
+    let _ = one_save(&mut helm);
+    assert_eq!(
+        busy_line(cx, saving),
+        None,
+        "a started save took the line away"
+    );
+    assert_eq!(busy_line(cx, other), None);
+}
+
+/// Why this matters: Checkouts' fields, its spare switch and the ntfy form save under the same preference row's key as
+/// every Settings choice, from views of their own, so each must say why its press sent nothing too. Specified: with
+/// Notifications and Checkouts read, the spare switch's save in flight, a typed post-clone command's Save and the ntfy
+/// form's Save send nothing and each draws the alert under its own control; a second click on the spare switch draws
+/// it under the switch; once the spare's save is answered, the ntfy Save sends its `PUT` and its line goes, while the
+/// post-clone field's line stays until that field's own save starts.
+#[gpui::test]
+fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    click(cx, section_button(Section::Checkouts));
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 3, "the premise: Checkouts read its routes");
+    helm.reply(reads[0].0, 200, Some(json!({ "root": null })));
+    helm.reply(reads[1].0, 200, Some(json!({ "command": null })));
+    helm.reply(reads[2].0, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+
+    click(cx, super::checkouts::SPARE_ID);
+    let (id, _) = one_put(&mut helm, "/api/checkout-spare");
+    assert_eq!(
+        preference_work(cx),
+        Some(Work::Save),
+        "the premise: in flight"
+    );
+    type_into(cx, Field::PostClone, "make setup");
+    click(cx, Field::PostClone.save());
+    assert_eq!(sent(&mut helm), [], "the key held the field back");
+    assert_eq!(busy_line(cx, "checkout-post-clone"), busy_alert());
+    click(cx, super::checkouts::SPARE_ID);
+    assert_eq!(sent(&mut helm), []);
+    assert_eq!(busy_line(cx, super::checkouts::SPARE_ID), busy_alert());
+
+    click(cx, section_button(Section::Notifications));
+    reach(cx, "ntfy-save");
+    keys(cx, "space");
+    assert_eq!(sent(&mut helm), [], "the key held the form back");
+    assert_eq!(busy_line(cx, "ntfy"), busy_alert());
+
+    helm.reply(id, 204, None);
+    settle(cx);
+    let (id, _) = save_ntfy(&mut helm, cx);
+    assert_eq!(busy_line(cx, "ntfy"), None, "its save started");
+    helm.reply(id, 200, Some(ntfy("https://ntfy.sh", "", "default", false)));
+    settle(cx);
+    click(cx, section_button(Section::Checkouts));
+    assert_eq!(
+        busy_line(cx, "checkout-post-clone"),
+        busy_alert(),
+        "another view's save leaves the field's line"
+    );
 }
 
 // ---- The body's foot ------------------------------------------------------------------------------------------------

@@ -148,7 +148,7 @@ Settings → Notifications' ntfy alerts form is ported, Send test included. Repl
   `a_blank_token_keeps_the_saved_one_and_a_typed_or_cleared_one_does_not` and
   `the_server_changes_only_with_its_scheme_host_or_port` (`settings/ntfy.rs`); the masked token field,
   `a_masked_input_holds_what_was_typed_and_paints_none_of_it` (`components/tests.rs`). The look (the monospace server
-  field, Save's accent fill, "No token saved"): the golden `settings-notifications`.
+  field, the priority segments, Save's accent fill, "No token saved"): the golden `settings-notifications`.
 - "ntfy send test reports outcome while leaving unsaved fields alone":
   `send_test_sends_nothing_of_the_form_and_reports_how_it_went` (the test sends no body, its refusal and success show in
   place and survive a section switch with the unsaved fields, closing discards both, and nothing else is sent while it
@@ -469,12 +469,12 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **The hint switches can be used before the trust read answers, and when it fails.** The old ones were unavailable
   until the read came back. Here whether a hint was dismissed comes from the pushed preference row, not from the trust
   read, so a hint switch shows the stored dismissal from the start and saves like any preference switch.
-- **A trust switch's save is refused while another Settings save is in flight**, like a preference switch's (below). The
-  operation store admits one request per key, and helm configuration (where trust lives) has no key of its own, so trust
-  saves go under the preference row's key. This area accepted that on 2026-11-14, under its goal's instruction not to
-  request a key for helm configuration before it is needed: the embedded helm answers these saves in milliseconds, so
-  they rarely meet. The old trust switches each had their own request and were unavailable only while their own save
-  ran.
+- **A trust switch's save is refused while another Settings save is in flight**, with a line beside the switch saying
+  so, like a preference switch's (below). The operation store admits one request per key, and helm configuration (where
+  trust lives) has no key of its own, so trust saves go under the preference row's key. This area accepted that on
+  2026-11-14, under its goal's instruction not to request a key for helm configuration before it is needed: the embedded
+  helm answers these saves in milliseconds, so they rarely meet. The old trust switches each had their own request and
+  were unavailable only while their own save ran.
 - **Terminal has no tunnel consent switch yet.** It waits for the terminal area's consent question (see the NOTE under
   `tests/settings.spec.ts` above).
 - **No one-pane layout at 620 pixels and below.** The old dialog showed either the section list or the section below
@@ -484,15 +484,24 @@ Where the port does not match the old app, and why. Each stays until the work na
   user went on from the top of the section. The focus coordinator moves focus to a control only while no layer is open,
   and the heading is not a control, so focus stays on the section button (Linux), or where it was (macOS, where the
   click does not focus the button; a control in the section that was hidden hands focus to the closest one left).
-- **A click or arrow press while another preference save is in flight does nothing.** The old app queued every switch's
-  newest click per field and sent it after the earlier one ("the latest click wins"). Here the operation store admits
-  one request on the preference row at a time, so the second click is refused; a second click on the same switch leaves
-  it showing the value in flight, and one on another switch leaves that switch as it was; the user clicks again after
-  the reply, which the embedded helm sends within milliseconds. In a radio group (Appearance, Terminal's link choice)
-  the arrows move focus and the choice together, so a second arrow press while the first choice's save is in flight
-  moves focus to the next option while the choice stays where the first press put it. Accepted by the migration's
-  orchestrator on 2026-11-14, since preference saves are helm-local and take milliseconds; revisit only if a user meets
-  it.
+- **A click or arrow press while another preference save is in flight is refused, and says so.** The old app queued
+  every switch's newest click per field and sent it after the earlier one ("the latest click wins"). Here the operation
+  store admits one request on the preference row at a time, so the second click sends nothing: a second click on the
+  same switch leaves it showing the value in flight, and one on another switch leaves that switch as it was, and either
+  way "Not saved: another save was in progress. Try again." shows under the control pressed, until a save from the same
+  view starts or another press is refused; the user clicks again after the reply, which the embedded helm sends within
+  milliseconds. The words are in the past tense because the line outlives the save that blocked the press. In a radio
+  group (Appearance, Terminal's link choice) the arrows move focus and the choice together, so a second arrow press
+  while the first choice's save is in flight moves focus to the next option while the choice stays where the first press
+  put it, with the line under the group. The refusal was accepted by the migration's orchestrator on 2026-11-14, since
+  preference saves are helm-local and take milliseconds, to be revisited only if a user meets it; the orchestrator asked
+  the same day that it not be silent. Covered by `a_press_during_another_settings_save_says_why_it_sent_nothing` and
+  `the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing`.
+- **Checkouts' fields are refused while another Settings save is in flight.** The default checkout folder and the
+  post-clone command each had a request of their own in the old app, so no other Settings save ever held their Save
+  back. Here they are helm configuration saved under the preference row's key, like the switches (above), so their Save
+  sends nothing while any other Settings save is in flight, and the same line shows under the field until its next save
+  starts.
 - **Every switch reports its refused save.** The old app showed no failure for the two host switches, nor for turning
   Skip session confirmations on, which SPEC.md's best-effort list in "Errors and diagnostics" kept silent because the
   old choice had already taken effect in an optimistic copy. With no optimistic copy a failed save never took effect, so
@@ -534,17 +543,15 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **No Sounds sub-heading.** The old section opened with Sounds and its three switches (session waiting, approval
   request, turn finished) above ntfy alerts. Status sounds belong to the other dialogs area, which adds them to this
   section when it builds them; until then the section holds ntfy alerts alone.
-- **Priority is a select.** The old form chose the priority with five segments (Min, Low, Default, High, Urgent); this
-  one has a select over the same five, as the migration's orchestrator decided for this port on 2026-11-14. It edits the
-  form like the segments did and saves nothing on its own.
 - **A refusal stays until the next save starts.** The old form cleared its outcome line on any edit; here the helm's
   words stay under the form, as every Settings failure line does, until the next Save.
 - **A Send test after a refused Save shows its outcome below the save's refusal.** The old form had one outcome line,
   which a Send test emptied before showing its own. Here the refused save's words are the draft's and stay until the
   next save, as above, so the test's "Test alert sent" or its refusal shows beneath them; the two lines are about
   different requests, and the test used the settings the helm stores, not the refused ones.
-- **Save is refused while another Settings save is in flight**, as Agent trust's switches are (above): ntfy alerts are
-  helm configuration with no operation key of their own, so they save under the preference row's key.
+- **Save is refused while another Settings save is in flight**, with the same line under the form, as Agent trust's
+  switches are (above): ntfy alerts are helm configuration with no operation key of their own, so they save under the
+  preference row's key.
 - Not visible, recorded for review: the form is one draft over all its fields, saved in one request, rather than one
   `DraftInput` per text field, because `DraftInput` saves only its own field. The migration's settings-and-hosts area
   decided on 2026-11-14 to keep this exception until a second whole-form save makes it worth building into the drafts
@@ -596,9 +603,11 @@ Where the port does not match the old app, and why. Each stays until the work na
   lifetime, and goes once the preference is on (however it got there) or after a reset; the setup itself goes on either
   way. The old app showed nothing (its preference writer was fire-and-forget); the area's rule that a failed save is
   reported asks for the line. The old writer also queued a write behind a busy preference save, where this one is
-  dropped while another preference save is in flight (the operation store's one request per key). Only Settings saves
-  preferences, and it cannot be open while the confirmation is, so it would take a save still in flight from just
-  before.
+  refused while another preference save is in flight (the operation store's one request per key) and the panel line says
+  so instead, in the words Settings uses for such a press ("Not saved: another save was in progress. Try again.").
+  Settings, the templates dialog's shortcut writes and a tunnel consent save under the same key; Settings cannot be open
+  while the confirmation is, so it takes a save still in flight from just before, or one of the others
+  (`a_permanent_answer_refused_for_another_preference_save_says_so_in_the_hosts_panel`).
 - **Add is not held back while a setup request is out.** The old app held its page lock until the provision request
   replied, so Add was unavailable meanwhile; here a new Add can start at once. The helm answers that request quickly
   (202 once the run has started), and two adds of different destinations do not conflict.
@@ -623,15 +632,17 @@ Where the port does not match the old app, and why. Each stays until the work na
   milestone (decided by the migration's settings-and-hosts area on 2026-11-14), and the toggle keeps the old hover help,
   which names them.
 - **One save per host at a time, and nothing goes unavailable while one runs.** Every setting saves under the host's one
-  operation key, so a click on another setting of the same host while a save is in flight changes nothing (the switch or
-  choice goes on showing what it showed); the user clicks again after the reply, which the embedded helm sends within
-  milliseconds. The old dialog instead disabled every control while any host write ran and while a field was open, and
-  put focus back afterwards; here only the other field's Edit waits while a field is open. The checkout folder follows
-  the same rule (decided by the migration's settings-and-hosts area on 2026-11-14): the old field was disabled with the
-  rest of the dialog, but its save is work on the same key, so the key already keeps it and the other saves from
-  crossing, and the field keeps its own refusal line, so no other control's outcome can replace it. The field stays
-  editable meanwhile, and a Save the key refuses sends nothing and keeps reading "Save"; a Use default the key refuses
-  likewise sends nothing and shows nothing.
+  operation key, so a click on another setting of the same host while a save is in flight sends nothing (the switch or
+  choice goes on showing what it showed) and "Not saved: another save was in progress. Try again." shows where that
+  control's refusal would; the user clicks again after the reply, which the embedded helm sends within milliseconds. The
+  old dialog instead disabled every control while any host write ran and while a field was open, and put focus back
+  afterwards; here only the other field's Edit waits while a field is open. The checkout folder follows the same rule
+  (decided by the migration's settings-and-hosts area on 2026-11-14): the old field was disabled with the rest of the
+  dialog, but its save is work on the same key, so the key already keeps it and the other saves from crossing, and the
+  field keeps its own refusal line, so no other control's outcome can replace it. The field stays editable meanwhile,
+  and a Save or Use default the key refuses sends nothing, keeps reading "Save" or "Use default", and shows the same
+  line under the field. Covered by `a_press_during_another_save_on_the_host_says_why_it_sent_nothing` and
+  `saves_on_the_host_wait_for_each_other_without_locking_the_folder` (`hosts/settings/tests.rs`).
 - **The alias is not checked before it is sent.** The old dialog refused control characters and more than 64 characters
   itself; the helm refuses both, in its own words, which show under the row as any refusal does.
 - **A refused save also shows under the host's row** in the Hosts panel, which opens, as every refused work on a host

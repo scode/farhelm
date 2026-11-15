@@ -32,6 +32,7 @@ use gpui::{
     Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
+use super::Refused;
 use super::choices::{self, Choice, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use super::configured::{self, Configured};
 use crate::components::{Checkbox, HoverHelp};
@@ -231,11 +232,13 @@ pub(super) struct Trust {
     pub(super) focus: FocusHandle,
 }
 
-/// One agent's block: its trust switch, its help (and Claude's caution box), its hint switch, and the failure lines.
-/// `on_toggle` is what a toggle of the trust switch does; `hint` draws the hint switch through the dialog.
+/// One agent's block: its trust switch, its help (and Claude's caution box), its hint switch, and the failure lines,
+/// with the trust switch's line saying why a press sent nothing (`refused`, [`choices::busy_line`]) last. `on_toggle`
+/// is what a toggle of the trust switch does; `hint` draws the hint switch through the dialog.
 pub(super) fn block(
     trust: &Trust,
     first: bool,
+    refused: &Refused,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     hint: impl FnOnce(Choice) -> AnyElement,
     cx: &App,
@@ -289,6 +292,7 @@ pub(super) fn block(
                 .map(|choice| div().mt(px(BLOCK_GAP)).child(hint(choice))),
         )
         .children(failure)
+        .children(choices::busy_line(refused, agent.id(), cx))
 }
 
 /// Claude's caution box (`.claude-trust-caution`): why the switch is off by default, in the amber of a warning, with
