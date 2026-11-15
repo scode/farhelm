@@ -19,7 +19,7 @@ use crate::session_list::tests::{listing, session};
 use crate::test_support::{self, any_open, keys, settle};
 
 /// The smallest complete draft: a Command tab launch of `true`, asserted not YOLO, on host1 in `~`.
-fn command_draft() -> LaunchDraft {
+pub(super) fn command_draft() -> LaunchDraft {
     let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
     draft.choose_tab(Tab::Command);
     draft.edit_command("true".into());

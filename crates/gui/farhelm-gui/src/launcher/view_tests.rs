@@ -66,7 +66,7 @@ pub(super) fn launcher_on(
 }
 
 /// [`launcher_on`] with the hosts collection `hosts`.
-fn launcher_with_hosts(
+pub(super) fn launcher_with_hosts(
     cx: &mut TestAppContext,
     draft: LaunchDraft,
     hosts: CollectionState,
@@ -177,7 +177,7 @@ pub(super) fn shown_refusal(cx: &mut VisualTestContext) -> Option<String> {
 }
 
 /// A Codex launch carrying `model`, `effort` and `permissions`, with a stored resume command.
-fn codex(
+pub(super) fn codex(
     model: Option<&str>,
     effort: Option<LaunchEffort>,
     permissions: Option<LaunchPermission>,
@@ -202,10 +202,11 @@ fn codex(
     }
 }
 
-/// SPEC.md, "Creation": New opens a dialog on the Agent tab with no agent type, the destination rows first, and focus
-/// on the first field (the search box's place until it exists). The header names the mode.
+/// SPEC.md, "Creation": New opens a dialog on the Agent tab with no agent type, the search box first, then the
+/// destination rows, and focus in the search box ("Ordinary launches still start focus on search"). The header names
+/// the mode.
 #[gpui::test]
-fn new_opens_on_the_agent_tab_with_focus_in_the_first_field(cx: &mut TestAppContext) {
+fn new_opens_on_the_agent_tab_with_focus_in_the_search_box(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
     assert!(drawn(cx, "launcher"), "the launcher's dialog is drawn");
     assert!(drawn(cx, "launcher-folder-row") && drawn(cx, "launcher-name-row"));
@@ -223,7 +224,19 @@ fn new_opens_on_the_agent_tab_with_focus_in_the_first_field(cx: &mut TestAppCont
         "the Command tab's do not"
     );
     assert_eq!(draft(cx).tab, Tab::Agent);
-    assert!(folder_focused(cx), "focus starts in the folder field");
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .search
+            .focus_handle(cx)
+            .is_focused(window)),
+        "focus starts in the search box"
+    );
+    let search = test_support::bounds(cx, "launcher-search-row");
+    let folder = test_support::bounds(cx, "launcher-folder-row");
+    assert!(
+        search.top() < folder.top(),
+        "the search box is above the destination"
+    );
 }
 
 /// The footer says what Launch would start in the old footer's words, and Launch's accessible name keeps them after its
@@ -329,9 +342,10 @@ fn a_refused_press_says_why_beside_the_main_action(cx: &mut TestAppContext) {
 #[gpui::test]
 fn typing_in_the_folder_edits_the_draft(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "".into(), None));
+    test_support::click(cx, "launcher-folder-row");
     assert!(
         folder_focused(cx),
-        "the premise: focus starts in the folder field"
+        "the premise: the click focused the folder field"
     );
     keys(cx, "/ s r c");
     let draft = draft(cx);
@@ -1462,9 +1476,10 @@ fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
 #[gpui::test]
 fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    test_support::click(cx, "launcher-folder-row");
     assert!(
         folder_focused(cx),
-        "the premise: focus starts in the folder"
+        "the premise: the click focused the folder"
     );
     keys(cx, "shift-tab");
     assert!(

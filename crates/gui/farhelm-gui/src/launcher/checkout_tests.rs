@@ -597,13 +597,13 @@ fn a_chosen_repository_is_previewed_before_it_launches(cx: &mut TestAppContext) 
     );
 }
 
-/// A refused checkout launch brings the launcher back on its draft, and focus starts on the folder row as for any
-/// launcher: here the read-only checkout folder field, since the editable folder field is not drawn while a checkout is
-/// chosen. Why: starting on a field that is not drawn leaves focus wherever the focus coordinator's recovery puts it.
-/// Specified: with the preview ready, a press sends one create; the helm's refusal brings the launcher back still on
-/// the checkout of `acme/bar`, its words shown, and the checkout folder field focused.
+/// A refused checkout launch brings the launcher back on its draft, with focus in the search box as for any launcher
+/// (SPEC.md: "Ordinary launches still start focus on search"), which is drawn whatever the destination. Why: starting
+/// on a field that is not drawn (the editable folder field, while a checkout is chosen) would leave focus wherever the
+/// focus coordinator's recovery puts it. Specified: with the preview ready, a press sends one create; the helm's
+/// refusal brings the launcher back still on the checkout of `acme/bar`, its words shown, and the search box focused.
 #[gpui::test]
-fn a_refused_checkout_launch_comes_back_with_focus_on_its_folder(cx: &mut TestAppContext) {
+fn a_refused_checkout_launch_comes_back_with_focus_in_the_search_box(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
     edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
     let previews = to(&sent(&mut helm, cx), PREVIEW);
@@ -628,7 +628,9 @@ fn a_refused_checkout_launch_comes_back_with_focus_on_its_folder(cx: &mut TestAp
     );
     assert!(shown_refusal(cx).is_some_and(|words| words.contains("host1 is busy")));
     assert!(read(cx, |launcher, window, cx| launcher
-        .checkout_folder_focused(window, cx)));
+        .search
+        .focus_handle(cx)
+        .is_focused(window)));
 }
 
 /// A refused preview leaves no path and says why: the old "Checkout preview unavailable" in the folder field and the

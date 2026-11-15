@@ -458,7 +458,8 @@ fn a_revealed_quick_launch_is_no_longer_unseen(cx: &mut TestAppContext) {
 /// applied and a prominent banner saying it needs more choices", and the banner is the launcher's to clear once the user
 /// starts editing. Launching it would only be refused. Specified: with `partial` marked, the chord sends no create and
 /// opens New with the template's folder and the banner "partial needs more choices before it can launch; complete it
-/// below."; typing into the focused field takes the banner away.
+/// below."; typing into a field (the folder; focus starts in the search box, whose query is not an edit) takes the
+/// banner away.
 #[gpui::test]
 fn an_incomplete_mark_opens_new_with_its_choices_and_banner(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, Some("partial"));
@@ -472,6 +473,7 @@ fn an_incomplete_mark_opens_new_with_its_choices_and_banner(cx: &mut TestAppCont
         banner(cx).as_deref(),
         Some("partial needs more choices before it can launch; complete it below.")
     );
+    test_support::click(cx, "launcher-folder-row");
     keys(cx, "x");
     assert_eq!(banner(cx), None, "an edit took the banner away");
 }
@@ -868,7 +870,13 @@ fn a_shortcut_refusal_shows_over_a_press_reason(cx: &mut TestAppContext) {
 fn a_sequence_in_the_launcher_applies_or_refuses_there(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, None);
     open_new(&mut helm, cx);
-    keys(cx, "shift-tab");
+    // Focus starts in the search box; Tab walks on to the host button, after any destination choice drawn before it.
+    for _ in 0..4 {
+        if focused_id(cx).as_deref() == Some("launcher-host") {
+            break;
+        }
+        keys(cx, "tab");
+    }
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("launcher-host"),

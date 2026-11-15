@@ -248,7 +248,7 @@ impl Launcher {
     /// choice ([`LaunchDraft::host_chosen`](crate::launcher::draft::LaunchDraft::host_chosen), which Save as template
     /// reads), as the old picker did, while [`LaunchDraft::choose_host`](crate::launcher::draft::LaunchDraft::choose_host)
     /// leaves the folder alone for the same host.
-    fn pick_host(&mut self, host: i64, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn pick_host(&mut self, host: i64, window: &mut Window, cx: &mut Context<Self>) {
         let selected = local_state::selected(cx);
         let folder = default_folder(self.store.read(cx).collections(), selected.as_deref(), host);
         self.draft.choose_host(host, folder);
