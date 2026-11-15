@@ -48,6 +48,13 @@
 //! A pinned row draws the muted pin glyph just before its title, and its accessible name starts with "Pinned"
 //! ([`super::pins`]).
 //!
+//! A marked row ([`super::marking`]) draws a 3-pixel marker down its leading edge, in the accent fill, or in the fill's
+//! ink on the selected row, whose accent fill it keeps; an unselected marked row is tinted as well (`marked_bg`). The
+//! marker is the item's last child, so it paints over the open control's hover fill, as the old `::before` did with
+//! `z-index: 1`, and it takes no width from the row. Nothing about the mark reaches assistive technology, as in the
+//! old app, whose `data-session-marked` was for its stylesheet and its tests; tests find the marker by its debug
+//! selector, `session-marked-<key>`.
+//!
 //! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
 //! start where they did in the old app. The managed checkout's form of the last line (and its compact mark after the
 //! title) is not ported yet.
@@ -60,6 +67,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 
+use super::marking::Gesture;
 use super::row_marks::{self, RowMarks};
 use super::selection::Listed;
 use super::status::{self, Badge};
@@ -89,6 +97,9 @@ pub(super) const CAUSE_ID_SUFFIX: &str = "-cause";
 
 /// The id suffix of a row's age track, the column the age is right-aligned in (`session-row-<key>-age-track`).
 pub(super) const AGE_TRACK_ID_SUFFIX: &str = "-age-track";
+
+/// The marked row's marker width (`.session-row[data-session-marked="true"]::before`).
+const MARKER_WIDTH: gpui::Pixels = px(3.);
 
 /// The advance of every character of the monospace face (the terminal's JetBrains Mono), in ems.
 const MONO_ADVANCE_EM: f32 = 0.6;
@@ -198,8 +209,9 @@ impl Inks {
 /// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `focus`
 /// is the row's own focus handle, which the list owns and registers with its list state: the row's item tracks it so it
 /// contains whichever of the row's controls holds focus, and never takes focus itself. `hover` is where the item
-/// records whether the pointer is over it, for the menu button's reveal. `on_open` runs when the user activates the
-/// row.
+/// records whether the pointer is over it, for the menu button's reveal. `marked` draws the marked look (see the module
+/// docs). `on_open` runs when the user activates the row, with the gesture the click's modifiers ask for; the
+/// keyboard's Enter and Space carry none, so they always open.
 #[allow(
     clippy::too_many_arguments,
     reason = "one row's inputs, all drawn from by one function"
@@ -208,12 +220,13 @@ pub(crate) fn row(
     session: Listed,
     collections: &Collections,
     selected: bool,
+    marked: bool,
     steps: Steps,
     menu: AnyElement,
     bell: Option<AnyElement>,
     focus: &FocusHandle,
     hover: RowHover,
-    on_open: impl Fn(&mut Window, &mut App) + 'static,
+    on_open: impl Fn(Gesture, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     let palette = theme::palette(cx);
@@ -335,7 +348,9 @@ pub(crate) fn row(
     if !compact && let Some(meta) = meta_line(session, collections, inks) {
         control = control.line(meta);
     }
-    control = control.on_click(move |_, window, cx| on_open(window, cx));
+    control = control.on_click(move |event, window, cx| {
+        on_open(Gesture::from_modifiers(&event.modifiers()), window, cx)
+    });
 
     // The row itself is the list's item, and it is what carries "selected" for assistive technology: AccessKit
     // reports selection only on item-like roles (a list item, an option), not on a button. The old app marked its open
@@ -355,10 +370,14 @@ pub(crate) fn row(
         // row must not hide its menu button.
         .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
         .on_hover(move |hovered, _, cx| hover.set(*hovered, cx))
+        .relative()
         .w_full()
         .border_b_1()
         .border_color(theme::color(palette.border_row))
         .when(selected, |row| row.bg(theme::color(palette.accent_fill)))
+        .when(marked && !selected, |row| {
+            row.bg(theme::color(palette.marked_bg))
+        })
         .child(
             div()
                 .flex()
@@ -376,7 +395,26 @@ pub(crate) fn row(
         ))
         .children(outcome::row_line(session.key, selected, cx))
         .children(replace_yolo::row_question(session.key, cx))
+        .children(marked.then(|| marker(session.key, selected, palette)))
         .into_any_element()
+}
+
+/// A marked row's marker: [`MARKER_WIDTH`] down the row's whole leading edge, over everything else in it, in the
+/// accent fill, or in the fill's ink on the selected row's accent fill. No listeners, so it takes no presses.
+fn marker(key: &str, selected: bool, palette: &Palette) -> impl IntoElement {
+    let selector = format!("session-marked-{key}");
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left_0()
+        .w(MARKER_WIDTH)
+        .bg(theme::color(if selected {
+            palette.on_fill
+        } else {
+            palette.accent_fill
+        }))
+        .debug_selector(move || selector.clone())
 }
 
 /// The first line's last track: the session's age in the row's secondary ink, right-aligned in a track at least
