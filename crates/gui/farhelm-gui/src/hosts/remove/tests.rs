@@ -1,6 +1,7 @@
 //! Tests of removing a host from its menu over the helm client's fake: the confirmation (what it shows, its answers'
-//! order, where focus starts and returns), what each answer sends and under which key, removal without asking, where a
-//! refused removal shows, and the two refusals before anything is sent (a session launch in flight, the host busy).
+//! order, where focus starts and returns), what each answer sends and under which key, the question staying up through
+//! its request, removal without asking, where a refused removal shows (inside the question, or under the row without
+//! one), and the two refusals before anything is sent (a session launch in flight, the host busy).
 //!
 //! The Hosts panel runs over the reference screens' three hosts (the local host as 1, `build-box` as 2 at
 //! `dev@build-box`, `gpu-1` as 3), in a sidebar-wide column so a menu opens beside its row, and Remove is reached by
@@ -234,18 +235,19 @@ fn the_question_closes_when_its_host_is_gone(cx: &mut TestAppContext) {
 // ---- The answers ---------------------------------------------------------------------------------------------------
 
 /// Remove sends the helm's own route for forgetting a host, naming it by registry id, under the host's key, so the
-/// request goes on after the question closes and the host's other actions wait for it; once the helm forgets the host,
-/// its row goes, and nothing opens. Specified: Remove closes the question with focus on `build-box`'s toggle and sends
-/// `DELETE /api/hosts/2` without a body as the host key's `RemoveHost` work; the helm's empty reply frees the key, and
-/// after the pushed list drops the host its row is gone and nothing is open. (Where focus goes once the toggle is gone
-/// is the focus coordinator's recovery; the harness checks after every step that something holds it.)
+/// host's other actions wait for it. The question stays up while it runs, as the old dialog did, so a refusal has
+/// somewhere to show; it goes once the helm forgets the host, which is the success. Specified: Remove sends
+/// `DELETE /api/hosts/2` without a body as the host key's `RemoveHost` work and leaves the question open with focus on
+/// Remove; after the pushed list drops the host the question has closed and the row is gone, and the helm's empty
+/// reply frees the key with nothing open. (Where focus goes once the toggle is gone is the focus coordinator's
+/// recovery; the harness checks after every step that something holds it.)
 #[gpui::test]
 fn remove_sends_the_delete_under_the_hosts_key(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
     press_remove(cx);
     click(cx, "prompt-confirm");
-    assert!(!any_open(cx), "the question closed at once");
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-2"));
+    assert!(any_open(cx), "the question stays up while the removal runs");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     let commands = helm.commands();
     assert_eq!(commands.len(), 1, "one command: {commands:?}");
     assert_eq!(
@@ -256,6 +258,7 @@ fn remove_sends_the_delete_under_the_hosts_key(cx: &mut TestAppContext) {
     assert_eq!(host_work(cx), Some(Work::RemoveHost));
 
     push_removed(&mut helm, cx);
+    assert!(!any_open(cx), "the question went with its host");
     helm.reply(commands[0].id, 200, Some(json!({})));
     settle(cx);
     assert_eq!(host_work(cx), None, "the reply frees the key");
@@ -263,14 +266,111 @@ fn remove_sends_the_delete_under_the_hosts_key(cx: &mut TestAppContext) {
     assert!(!any_open(cx), "and nothing opened");
 }
 
-/// A refused removal leaves the host listed, so its row is where the refusal belongs, and the row opens to show it
-/// (the old dialog showed it inside itself; the question has closed by now). Specified: the helm's 409 with its words
-/// shows under `build-box`'s row, and nothing opens.
+/// The old dialog stayed up through its request and showed the helm's refusal inside it, then sent focus to Cancel so
+/// that Enter or Escape dismisses the refusal rather than sending the refused removal again. A question that closed
+/// instead would leave the user reading the refusal somewhere else, and one that showed it under the row as well would
+/// report it twice. Specified: the helm's 409 to Remove leaves the question open with "Farhelm refused this action: "
+/// and the helm's words inside it, focus on Cancel, and nothing under `build-box`'s row; Remove pressed again sends a
+/// second `DELETE /api/hosts/2`, which clears the reason, and once the helm forgets the host the question closes.
 #[gpui::test]
-fn a_refused_removal_shows_under_the_hosts_row(cx: &mut TestAppContext) {
+fn a_refused_removal_keeps_the_question_up_with_the_reason(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
     press_remove(cx);
     click(cx, "prompt-confirm");
+    let commands = helm.commands();
+    assert_eq!(commands.len(), 1, "the premise: the removal went out");
+    helm.reply(commands[0].id, 409, Some(json!(BUSY)));
+    settle(cx);
+    assert!(any_open(cx), "the question stayed up");
+    assert_eq!(
+        label(cx, "host-remove-refused"),
+        Some(format!("Farhelm refused this action: {BUSY}"))
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(
+        label(cx, "host-error-2"),
+        None,
+        "the row does not report it a second time"
+    );
+
+    click(cx, "prompt-confirm");
+    let retry = helm.commands();
+    assert_eq!(
+        retry
+            .iter()
+            .map(|command| (command.method, command.path.as_str()))
+            .collect::<Vec<_>>(),
+        [(Method::Delete, "/api/hosts/2")],
+        "Remove sent the removal again"
+    );
+    assert_eq!(
+        label(cx, "host-remove-refused"),
+        None,
+        "the retry cleared the reason"
+    );
+    push_removed(&mut helm, cx);
+    helm.reply(retry[0].id, 200, Some(json!({})));
+    settle(cx);
+    assert!(!any_open(cx), "the retry's success closed the question");
+}
+
+/// After a refusal, focus sits on Cancel so that the refusal is dismissed rather than resent; dismissing it must then
+/// close the question the way Cancel always does, back on the control that opened it, without bringing the refusal
+/// back under the row it was dropped from. Specified: after the helm's 409 to Remove, Cancel closes the question with
+/// focus on `build-box`'s menu toggle, nothing under its row, and nothing more sent.
+#[gpui::test]
+fn cancel_after_a_refusal_returns_focus_to_the_rows_toggle(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    press_remove(cx);
+    click(cx, "prompt-confirm");
+    let commands = helm.commands();
+    assert_eq!(commands.len(), 1, "the premise: the removal went out");
+    helm.reply(commands[0].id, 409, Some(json!(BUSY)));
+    settle(cx);
+    assert!(
+        label(cx, "host-remove-refused").is_some(),
+        "the premise: the question shows the refusal"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+
+    click(cx, "prompt-cancel");
+    assert!(!any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-2"));
+    assert_eq!(label(cx, "host-error-2"), None, "the refusal stays dropped");
+    assert_eq!(sent(&mut helm), []);
+}
+
+/// The question's subject closes it once the helm stops listing the host, but that proof needs a host list the window
+/// can trust: while the hosts collection is not available (a failed refresh, say), the helm's success is the only
+/// thing that can close it, and a question left frozen there would hold Escape until a reset. Specified: the helm's
+/// 200 to Remove, with no host list pushed after it, closes the question with focus back on `build-box`'s menu
+/// toggle, whose row is still drawn.
+#[gpui::test]
+fn the_helms_success_closes_the_question_without_a_host_list(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    press_remove(cx);
+    click(cx, "prompt-confirm");
+    let commands = helm.commands();
+    assert_eq!(commands.len(), 1, "the premise: the removal went out");
+    assert!(any_open(cx), "the premise: the question is still up");
+    helm.reply(commands[0].id, 200, Some(json!({})));
+    settle(cx);
+    assert!(
+        node(&frame(cx), "host-row-2").is_some(),
+        "the premise: no host list dropped the row"
+    );
+    assert!(!any_open(cx), "the success closed the question");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-2"));
+}
+
+/// With "Remove hosts without asking" on there is no question to hold a refusal, so the store's record under the
+/// host's row stays the report (the old app's short refusal dialog is not ported yet, a recorded deviation). Specified:
+/// with the preference on, the helm's 409 to the menu's Remove shows its words under `build-box`'s row, and nothing
+/// opens.
+#[gpui::test]
+fn without_asking_a_refused_removal_shows_under_the_hosts_row(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(true)]);
+    press_remove(cx);
     let commands = helm.commands();
     assert_eq!(commands.len(), 1, "the premise: the removal went out");
     helm.reply(commands[0].id, 409, Some(json!(BUSY)));
@@ -281,14 +381,15 @@ fn a_refused_removal_shows_under_the_hosts_row(cx: &mut TestAppContext) {
 
 /// "Remove, don't ask again" is the old app's permanent answer: it removes this host and turns on the shared preference
 /// that skips the question next time, which Settings shows and can turn off (`settings.spec.ts`, "settings reverses a
-/// permanent removal answer without reloading"). Specified: it closes the question and sends `DELETE /api/hosts/2` and
-/// `PUT /api/preferences` with only `{"skip_host_remove_confirmation": true}`, in either order.
+/// permanent removal answer without reloading"). Specified: it sends `DELETE /api/hosts/2` and `PUT /api/preferences`
+/// with only `{"skip_host_remove_confirmation": true}`, in either order, and the question stays up while the removal
+/// runs.
 #[gpui::test]
 fn the_permanent_answer_also_stops_asking(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
     press_remove(cx);
     click(cx, "prompt-alternative-0");
-    assert!(!any_open(cx));
+    assert!(any_open(cx), "the question stays up while the removal runs");
     assert_eq!(
         sent(&mut helm),
         [
@@ -301,10 +402,10 @@ fn the_permanent_answer_also_stops_asking(cx: &mut TestAppContext) {
     );
 }
 
-/// The permanent answer's preference save is separate from the removal, and the question has closed by the time it is
-/// refused, so the refusal must show somewhere or the user believes the next removal will not ask. Specified: a 500 to
-/// the preference save shows "Remove hosts without asking:" and the helm's words on the Hosts panel's line; it goes
-/// once the pushed preference is on.
+/// The permanent answer's preference save is separate from the removal, and the question may have closed by the time
+/// it is refused, so the refusal must show somewhere or the user believes the next removal will not ask. Specified: a
+/// 500 to the preference save shows "Remove hosts without asking:" and the helm's words on the Hosts panel's line; it
+/// goes once the pushed preference is on.
 #[gpui::test]
 fn a_refused_permanent_answer_shows_on_the_panels_line(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
@@ -337,6 +438,63 @@ fn a_refused_permanent_answer_shows_on_the_panels_line(cx: &mut TestAppContext) 
     });
     settle(cx);
     assert_eq!(label(cx, "hosts-remove-stop-asking-error"), None);
+}
+
+/// The preference is saved once the removal is sent, so a removal the helm then refuses has already turned it on. The
+/// question staying up must not hide that: it shows the refusal like Remove's, and the user's "don't ask again" stands,
+/// as the old app, which stored it first, left it. A second press of the permanent answer then has nothing more to
+/// save, and a second save racing the first would be refused as busy and report a failure that did not happen.
+/// Specified: the permanent answer sends the removal and the preference save; the helm's 409 to the removal leaves the
+/// question open with "Farhelm refused this action: " and its words, focus on Cancel, and the preference save is not
+/// withdrawn (no further command goes out). Once the save succeeded and the pushed preference is on, the permanent
+/// answer pressed again sends only `DELETE /api/hosts/2`.
+#[gpui::test]
+fn a_permanent_answer_whose_removal_the_helm_refuses_keeps_the_question_up(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    press_remove(cx);
+    click(cx, "prompt-alternative-0");
+    let commands = helm.commands();
+    let removal = commands
+        .iter()
+        .find(|command| command.path == "/api/hosts/2")
+        .expect("the removal went out");
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.path == "/api/preferences"),
+        "the premise: the preference save went out with it"
+    );
+    helm.reply(removal.id, 409, Some(json!(BUSY)));
+    settle(cx);
+    assert!(any_open(cx), "the question stayed up");
+    assert_eq!(
+        label(cx, "host-remove-refused"),
+        Some(format!("Farhelm refused this action: {BUSY}"))
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(sent(&mut helm), [], "nothing withdrew the preference");
+
+    let save = commands
+        .iter()
+        .find(|command| command.path == "/api/preferences")
+        .expect("the preference save went out");
+    helm.reply(save.id, 204, None);
+    let on = preferences(true);
+    helm.push(CollectionChanges {
+        collection: on.collection,
+        meta: on.meta,
+        upsert: on.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    click(cx, "prompt-alternative-0");
+    assert_eq!(
+        sent(&mut helm),
+        [(format!("{:?} /api/hosts/2", Method::Delete), None)],
+        "the retry sent the removal and no second save"
+    );
 }
 
 /// With "Remove hosts without asking" on, the menu's Remove goes ahead at once, as the old remembered answer did, and
@@ -398,9 +556,10 @@ fn a_session_launch_in_flight_refuses_remove_with_a_reason(cx: &mut TestAppConte
 }
 
 /// The launch check holds when the removal is answered, not only when Remove is pressed in the menu: a launch can start
-/// while the question is open (from another surface, or an earlier press already on its way). Specified: with the
-/// question open, a session's Restart starting makes Remove on the question send nothing, and the Hosts panel's line
-/// reads [`LAUNCH_REFUSAL`].
+/// while the question is open (from another surface, or an earlier press already on its way). The question stays up
+/// with the reason, as for the helm's refusal, so the user can press Remove again once the launch is done. Specified:
+/// with the question open, a session's Restart starting makes Remove on the question send nothing and leaves the
+/// question open with [`LAUNCH_REFUSAL`] inside it and focus on Cancel, and the Hosts panel's line stays empty.
 #[gpui::test]
 fn a_launch_that_started_while_the_question_was_open_refuses_its_answer(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
@@ -409,10 +568,13 @@ fn a_launch_that_started_while_the_question_was_open_refuses_its_answer(cx: &mut
     start_work(&mut helm, cx, OpKey::session("s1"), Work::Restart);
     click(cx, "prompt-confirm");
     assert_eq!(sent(&mut helm), [], "no removal went out");
+    assert!(any_open(cx), "the question stayed up");
     assert_eq!(
-        label(cx, "hosts-remove-not-started").as_deref(),
+        label(cx, "host-remove-not-started").as_deref(),
         Some(LAUNCH_REFUSAL)
     );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(label(cx, "hosts-remove-not-started"), None);
 }
 
 /// When the host turned busy between the menu and the question, the old dialog disabled Remove and its permanent
@@ -453,7 +615,7 @@ fn asked_while_the_host_is_busy_only_cancel_acts(cx: &mut TestAppContext) {
 /// "don't ask again" must not be stored either, or the next Remove would go ahead silently on a choice made for a
 /// removal that never happened (the old app stored it first, a recorded deviation). Specified: with the question open,
 /// a session's Restart starting makes the permanent answer send neither the removal nor the preference save, and the
-/// Hosts panel's line gives the launch reason, [`LAUNCH_REFUSAL`].
+/// question, still open, gives the launch reason, [`LAUNCH_REFUSAL`].
 #[gpui::test]
 fn a_permanent_answer_whose_removal_is_refused_stores_no_preference(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
@@ -466,8 +628,9 @@ fn a_permanent_answer_whose_removal_is_refused_stores_no_preference(cx: &mut Tes
         [],
         "neither the removal nor the preference save"
     );
+    assert!(any_open(cx), "the question stayed up");
     assert_eq!(
-        label(cx, "hosts-remove-not-started").as_deref(),
+        label(cx, "host-remove-not-started").as_deref(),
         Some(LAUNCH_REFUSAL)
     );
 }
@@ -496,8 +659,8 @@ fn a_permanent_answer_refused_by_another_preference_save_says_so(cx: &mut TestAp
 
 /// The menu holds Remove unavailable while the host has work in flight, but work can start on the host after the
 /// question opened; the operation store then refuses the removal, and that refusal must say so rather than do nothing.
-/// Specified: with the question open, a save starting on `build-box`'s key makes Remove send nothing, and the Hosts
-/// panel's line reads "Remove build-box: Not started: " and the operation store's shared reason
+/// Specified: with the question open, a save starting on `build-box`'s key makes Remove send nothing, and the question,
+/// still open, reads "Remove build-box: Not started: " and the operation store's shared reason
 /// ([`NotStarted::BUSY_REASON`], "another operation was in progress. Try again.").
 #[gpui::test]
 fn a_busy_host_refuses_remove_with_a_reason(cx: &mut TestAppContext) {
@@ -507,8 +670,10 @@ fn a_busy_host_refuses_remove_with_a_reason(cx: &mut TestAppContext) {
     start_work(&mut helm, cx, OpKey::host("2"), Work::Save);
     click(cx, "prompt-confirm");
     assert_eq!(sent(&mut helm), [], "no removal went out");
+    assert!(any_open(cx), "the question stayed up");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
     assert_eq!(
-        label(cx, "hosts-remove-not-started"),
+        label(cx, "host-remove-not-started"),
         Some(format!(
             "Remove build-box: Not started: {}",
             NotStarted::BUSY_REASON

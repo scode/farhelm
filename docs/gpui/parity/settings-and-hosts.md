@@ -339,22 +339,29 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
 
 - "rail removal returns to its avatar on cancel and Hosts on success", its row half:
   `cancel_sends_nothing_and_returns_focus_to_the_rows_toggle` (under macOS's click rule) and
-  `remove_sends_the_delete_under_the_hosts_key` (focus after the removal recovers, see Deviations). The avatar half
-  waits for the rail's avatar menu.
+  `remove_sends_the_delete_under_the_hosts_key` (the question stays up until the helm forgets the host; focus after the
+  removal recovers, see Deviations). The avatar half waits for the rail's avatar menu.
 - "host retirement releases before removal and preserves approval focus: Remove success", the removal's half:
   `remove_asks_naming_the_host_its_destination_and_what_removal_keeps` (focus on Remove) and
   `remove_sends_the_delete_under_the_hosts_key` (Remove sends the removal); the question closing when its host goes,
-  `the_question_closes_when_its_host_is_gone`. Its approval-card half is not this area's, and nothing here could move
-  focus off a card: the question closes when Remove is pressed, and the result moves no focus.
+  `the_question_closes_when_its_host_is_gone`. Its approval-card half is not this area's: the question keeps focus on
+  its busy answer while the removal runs, and the result moves no focus outside it.
 - `settings.spec.ts`, "settings reverses a permanent removal answer without reloading", its removal half:
   `the_permanent_answer_also_stops_asking` and `with_the_preference_on_remove_goes_without_asking`.
-- A refused removal: `a_refused_removal_shows_under_the_hosts_row`; a refused permanent answer,
+- A refused removal, which the old dialog showed inside itself:
+  `a_refused_removal_keeps_the_question_up_with_the_reason` ("Farhelm refused this action:" and the helm's words in
+  amber under the body, focus moved to Cancel as the old `focus_remove_refusal` did, nothing under the row, and a second
+  Remove that succeeds); Cancel after it, `cancel_after_a_refusal_returns_focus_to_the_rows_toggle`;
+  `a_permanent_answer_whose_removal_the_helm_refuses_keeps_the_question_up` (the preference stays on, and pressing the
+  answer again saves nothing more); with the preference on,
+  `without_asking_a_refused_removal_shows_under_the_hosts_row`. The helm's success closing the question without a host
+  list, `the_helms_success_closes_the_question_without_a_host_list`. A refused permanent answer,
   `a_refused_permanent_answer_shows_on_the_panels_line` and, refused by the operation store while another preference
   save was in flight, `a_permanent_answer_refused_by_another_preference_save_says_so`.
 - A Remove refused before anything is sent: `a_session_launch_in_flight_refuses_remove_with_a_reason` (a launch, a
-  Restart and a Replace in flight), `a_launch_that_started_while_the_question_was_open_refuses_its_answer` and
-  `a_busy_host_refuses_remove_with_a_reason`; a question asked while the host is busy,
-  `asked_while_the_host_is_busy_only_cancel_acts`.
+  Restart and a Replace in flight, from the menu), and inside the question that stays up,
+  `a_launch_that_started_while_the_question_was_open_refuses_its_answer` and `a_busy_host_refuses_remove_with_a_reason`;
+  a question asked while the host is busy, `asked_while_the_host_is_busy_only_cancel_acts`.
 - The menu, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs`:
   `a_remote_hosts_toggle_opens_a_menu_offering_update_settings_and_remove`,
   `settings_waits_for_the_hosts_own_work_in_flight` (Remove does nothing while the host is busy),
@@ -816,14 +823,18 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Remove host
 
-- Interim: **a refused removal shows under the host's row after the question closed.** The old dialog stayed open, every
-  answer disabled, through its request and showed the helm's refusal inside it ("Farhelm refused this action"). The
-  prompt keeps a question open through an answer's action only for an extra answer of an inline question, not for a
-  centered question's confirming answer, so the question closes on Remove and the refusal shows under the row, which
-  opens, as every refused work on a host does there. This stays until the prompt offers that for a centered question.
-- Interim: **with "Remove hosts without asking" on, a refusal also shows under the row.** The old app opened its short
-  host refusal dialog ("Remove host · <name>", Close); Update's refusals brought that dialog (`hosts::refusal`), and
-  Remove does not open it yet.
+- **A refusal inside the question reads "Farhelm refused this action:" and the helm's words, in amber, under the body.**
+  The old dialog stayed open, every answer disabled, through its request, as the question does now, and on a refusal
+  turned its summary into a red "Farhelm refused this action" and drew the helm's words below the explanation in the
+  body's ink at 16 pixels. A question's summary is frozen as it opened, so those words lead the reason line, which the
+  prompt draws in its amber (`--warn-bright`) at the dialog frame's 12 pixels. Focus moves to Cancel after the refusal,
+  as the old dialog's did, and the row shows nothing of it.
+- **A Remove refused before anything is sent, answered on the question, says why inside it.** The question stays up with
+  the line the Hosts panel would show ("Remove <name>: ..."), focus on Cancel, as for the helm's refusal. The old app
+  ignored such a press (its page lock); see the panel-line item below for the menu's Remove.
+- Interim: **with "Remove hosts without asking" on, a refusal shows under the row.** The old app opened its short host
+  refusal dialog ("Remove host · <name>", Close); Update's refusals brought that dialog (`hosts::refusal`), and Remove
+  does not open it yet.
 - **The header's phase has no colored dot.** The old header drew the host's phase with its dot in the phase's color,
   then the build. A question of the prompt has a one-line text summary, so the phase words and build are drawn in the
   summary's quiet ink ("Connected · Farhelm 0.0.0-unreleased"), frozen as the question opened. Drawing the dot needs a
@@ -831,15 +842,17 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **No header close control.** The old dialog had "×" ("Cancel host removal"); a question of the prompt has none. Cancel
   and Escape do what it did.
 - **After a removal, focus recovers as from any control that goes** (SPEC.md, "Where focus rests": home, the selected
-  session's terminal), where the old app moved it to the rail's Hosts control. Focus was back on the row's menu toggle
-  since the question closed, and that toggle goes with the row.
-- **A Remove refused before anything is sent says why at the top of the Hosts panel**, naming the host: while the host's
-  key has other work in flight ("Not started: another operation was in progress. Try again.", the operation store's
-  shared reason after Remove's own lead-in), and while a session launch is in flight. The old app ignored such a press
-  without a word (its page lock). A launch is the launcher's New or Clone, or a session's Restart or Replace, in flight.
+  session's terminal), where the old app moved it to the rail's Hosts control. The question closes with its host, and
+  the row's menu toggle it would return focus to goes with the row.
+- **A Remove from the menu refused before anything is sent says why at the top of the Hosts panel**, naming the host:
+  while the host's key has other work in flight ("Not started: another operation was in progress. Try again.", the
+  operation store's shared reason after Remove's own lead-in), and while a session launch is in flight. The old app
+  ignored such a press without a word (its page lock). A launch is the launcher's New or Clone, or a session's Restart
+  or Replace, in flight.
 - **"Remove, don't ask again" stores the preference only once its removal is sent.** The old app stored it first, so a
   removal its page lock then held back still turned the preference on; here a removal refused before anything is sent (a
-  session launch in flight, the host's key busy) leaves the preference as it was.
+  session launch in flight, the host's key busy) leaves the preference as it was. A removal the helm refuses after it
+  was sent leaves the preference on, as the old app did; the question stays up offering both answers again.
 - **A refused "Remove, don't ask again" is reported** on the same panel line ("Remove hosts without asking: " and the
   helm's words, or "Not saved: another operation was in progress. Try again." when another preference save was in
   flight); the old app showed nothing.
