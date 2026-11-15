@@ -14,6 +14,8 @@
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //!   The Templates editor's model suggestions are its rows for one agent type.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
+//! - [`search`]: the composer search's rules (what a query means, the rows it offers, the row preselected, what an
+//!   empty result says), with no view.
 //! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
 //! - `words`: the launcher's own words for agent choices (its chip order, docs link and agent notes); the permission
 //!   and effort names other surfaces show too are `crate::permission::words`.
@@ -41,6 +43,7 @@ pub mod launch;
 pub(crate) mod model;
 mod pill;
 pub mod request;
+pub mod search;
 pub mod view;
 mod words;
 mod yolo;
@@ -61,6 +64,8 @@ mod replace_with_tests;
 mod request_tests;
 #[cfg(test)]
 mod restart_with_tests;
+#[cfg(test)]
+mod search_tests;
 #[cfg(test)]
 pub(crate) mod view_tests;
 #[cfg(test)]
