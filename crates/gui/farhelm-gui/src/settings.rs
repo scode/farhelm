@@ -77,6 +77,8 @@ mod credential_tests;
 mod credentials;
 mod ntfy;
 #[cfg(test)]
+mod recipe_credential_tests;
+#[cfg(test)]
 mod recipe_editor_tests;
 #[cfg(test)]
 mod recipe_place_tests;
