@@ -550,13 +550,15 @@ Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focu
 the coordinator, by the review gate, which refuses area code that defers a focus move to a later frame itself (a
 `window.defer` around a call to the coordinator), and by the focus invariant that in-process tests check after every
 step: exactly one focused element, inside the topmost modal (or a layer opened above it) or in an agent approval card if
-a modal is open (SPEC.md, "Keyboard focus"). When nothing else holds focus it rests where SPEC.md's "Where focus rests"
-says (the selected session's terminal, New, a stopped session's card), and on the window's root view only when none of
-those is on screen, so a key press always reaches Farhelm's own key bindings rather than GPUI Kit's.
+a modal is open (SPEC.md, "Keyboard focus"); a card is any control inside the layer manager's approval region, the one
+place outside the modal the invariant accepts, and nothing else in the coordinator treats it specially. When nothing
+else holds focus it rests where SPEC.md's "Where focus rests" says (the selected session's terminal, New, a stopped
+session's card), and on the window's root view only when none of those is on screen, so a key press always reaches
+Farhelm's own key bindings rather than GPUI Kit's.
 
 ### Overlays: the layer manager
 
-Owner: the layer manager. It owns the dialog slot, the popover stack, the pill and tooltips.
+Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the pill and tooltips.
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
@@ -565,8 +567,9 @@ when Escape closes nothing, not even a tooltip: an editor whose save is in fligh
 unsaved draft stays and asks first, then closes itself if the answer says to leave. A question drawn inline in a dialog
 takes Escape first while focus is in it, as its Cancel, so the dialog stays open. A dialog's own Close control goes
 through the same hook; a close its opener makes, a subject going and a reset do not ask. A dialog that asks for it (the
-quick switcher, as in the old app) also closes on a press on its veil outside it, through Escape's path, so the same
-hook decides; any other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener
+quick switcher, as in the old app) also closes on a press its veil takes, through Escape's path, so the same hook
+decides; a press on something drawn above the veil (an approval card, or a menu opened from inside the dialog) is not
+such a press. Any other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener
 that asks (the quick switcher again, so it does not move as its results grow). An overlay closes when its subject is
 gone, not when it moves; anchoring to the element makes a moved row's menu follow the row. A popover is as wide as its
 content, or exactly as wide as its anchor when its opener asks (a select's list, a list floating under its field, as the
@@ -612,6 +615,29 @@ terminal area, or the main area with no session open), best one element drawn un
 otherwise shows the pill again on the new anchor when a session opens or closes. A window has one pill slot: showing
 replaces, and hiding takes down only the pill that show returned; `layers::show_pill` says when a second pill would need
 a slot of its own.
+
+A second feature-supplied element is drawn above every dialog and popover and under the pill and the tooltip without
+being a layer: the approval region (`layers::install_approval_region`), where SPEC.md's independent agent approval cards
+"remain usable" while a dialog is open, in the old app's order (veils at z-index 40, cards at 45, pill and tooltip at
+50). Unlike the pill it takes presses and focus. The approvals feature installs it once per window and never shows or
+hides it; its view draws nothing while no card waits, and a reset leaves it installed. It opens no layer and is not
+counted by `layers::any_open`, Tab's trap, focus recovery or Escape. Its view is laid out while the frame is prepared,
+inside a zero-size box at the window's origin that tracks the region's focus, so it places its card itself from the
+bounds of an element the session view draws (`layers::Anchor::drawn_bounds`, this frame's at that point) and the
+window's size. The box is zero-size because a tracked element takes every press its hitbox sees, and a full-window one
+would keep a press on the page's empty space from sending focus home. That the view occludes whatever it draws, and
+draws nothing with a size or a listener when empty, is held by review. Most of what the cards need follows from the
+rules above without a rule of its own, and tests show it: a press on a card is the card's, since it is drawn above the
+veil and occludes; a dialog closing, or its subject going, leaves focus on a card; the dialog's late focus moves refuse
+while focus is on a card; Tab from a card goes back into the dialog, while the dialog's own Tab never reaches it; and a
+focused card control going away sends focus into the topmost dialog, or home. Escape on a card does nothing, so it
+cannot close the dialog behind it, as the old app's keyboard safety net passed over the cards (decided by the GPUI
+migration's foundations owner, 2026-11-14). A view that reads `drawn_bounds` picks its anchor from its own state, not
+from `None`: the bounds turn `None` only after the frame that stopped drawing the element, and nothing redraws then. Not
+built yet, for want of anything to build them against: counting a card as covering a terminal link's disclosure (an
+occluding card counts with no change if that hit test uses occlusion), raising a refused link's explanation above the
+cards, and drawing a layer a card opens above the region. Until that last one, any layer a card opens (the tunnel
+consent dialog, or a question or menu anchored to the card) draws under the cards.
 
 One tooltip shows at a time. When a control with hover help sits inside another that has its own (a session row's marks
 inside the row), the innermost one under the pointer shows its help, as the old app's tooltip took the help nearest the

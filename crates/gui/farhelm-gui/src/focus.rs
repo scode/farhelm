@@ -90,8 +90,10 @@
 //!   starting answer is reached the same way. Nothing yet scrolls to a layer's start below the fold; SPEC.md's archive
 //!   global confirmation, whose actions are brought into view when it opens, will need it.
 //!
-//! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
-//! knows only the topmost dialog.
+//! NOTE: Agent approval cards (the layer manager's approval region, [`layers::install_approval_region`]) are the one
+//! place outside the topmost dialog where [`invariant_violation`] lets focus be while a dialog is open. Nothing else
+//! here knows them: they are not a layer, so Tab's trap, recovery and the focus return on close pass over them, which
+//! is what keeps focus on a card when the dialog behind it closes and sends it into the dialog when the card goes.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -1597,12 +1599,14 @@ pub fn shows_ring(handle: &FocusHandle, window: &Window) -> bool {
 }
 
 /// What breaks SPEC.md's focus rules in `window` right now, if anything: exactly one element holds focus (GPUI holds at
-/// most one, so this checks that something does), and with a dialog open it is inside the topmost one or a layer opened
-/// above it. The test harness runs this after every step.
+/// most one, so this checks that something does), and with a dialog open it is inside the topmost one, a layer opened
+/// above it, or an approval card. The test harness runs this after every step.
 pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
     if state(window, cx).is_some() && window.focused(cx).is_none() {
         return Some("nothing holds focus".to_string());
     }
-    (!layers::focus_is_where_dialogs_allow(window, cx))
-        .then(|| "a dialog is open but focus is outside it and every layer above it".to_string())
+    (!layers::focus_is_where_dialogs_allow(window, cx)).then(|| {
+        "a dialog is open but focus is outside it, every layer above it and the approval region"
+            .to_string()
+    })
 }
