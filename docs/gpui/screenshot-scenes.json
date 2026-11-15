@@ -528,8 +528,8 @@
       "reference": null,
       "mockup": false,
       "start": [
-        "--sessions",
-        "1"
+        "--fleet",
+        "basic"
       ],
       "steps": [
         [
@@ -565,7 +565,7 @@
         [
           "terminal-text",
           "--wait",
-          "spam-line-100"
+          "spam-line-135"
         ]
       ]
     },
