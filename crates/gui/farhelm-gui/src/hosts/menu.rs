@@ -153,6 +153,7 @@ pub fn open_menu(
             anchor,
             // The toggle, not what held focus before: on macOS the click that opened the menu left it unfocused.
             returns_to: focus::ReturnTo::Control(opener.clone()),
+            traps_tab: true,
         },
         mark,
         window,

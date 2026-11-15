@@ -3456,6 +3456,7 @@ fn toggle_scene(cx: &mut TestAppContext, names_toggle: bool) -> ToggleScene<'_> 
                         start: Some(first.clone()),
                         anchor: opens.clone(),
                         returns_to,
+                        traps_tab: true,
                     },
                     &mark,
                     window,

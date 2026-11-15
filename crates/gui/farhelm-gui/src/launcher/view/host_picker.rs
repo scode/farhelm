@@ -270,6 +270,7 @@ impl Launcher {
                 anchor,
                 // A list that never takes focus returns none, so this is never used.
                 returns_to: focus::ReturnTo::Opener,
+                traps_tab: true,
             },
             &mark,
             window,
