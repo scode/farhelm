@@ -558,6 +558,23 @@
           "id:terminal-grid"
         ]
       ]
+    },
+    {
+      "id": "app-help-menu",
+      "title": "The Help menu, opened from the host rail foot's ? button",
+      "reference": "help-menu",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "id:app-help-toggle"
+        ],
+        [
+          "wait",
+          "--text",
+          "Farhelm guides and feedback"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
@@ -720,6 +737,11 @@
       "golden": "session-row-menu",
       "title": "A session row's actions menu, open below its button",
       "reference": "session-row-menu"
+    },
+    {
+      "golden": "help-menu",
+      "title": "The Help menu, open beside the host rail foot's ? button",
+      "reference": "help-menu"
     },
     {
       "golden": "row-delete-confirmation",

@@ -50,6 +50,7 @@
 //!   rules are tested without a window.
 //! - [`sounds`]: the status sounds as plain Rust: the rules for which one an observation plays, and the three sounds
 //!   synthesized into WAV bytes; observing the store and playing them come later.
+//! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -74,6 +75,7 @@ pub mod drafts;
 pub mod environment_ui;
 pub mod focus;
 pub mod harness;
+pub mod help_menu;
 pub mod host_text;
 pub mod hosts;
 pub mod launcher;

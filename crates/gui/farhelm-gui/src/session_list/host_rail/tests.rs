@@ -755,6 +755,10 @@ fn tab_from_all_reaches_the_first_avatar_and_space_chooses_it(cx: &mut TestAppCo
 const HOSTS: &str = "hosts-panel-toggle";
 const GEAR: &str = "app-settings-toggle";
 
+/// The Help button's element id (the old `.app-help-toggle`), the foot's last control, below the gear; the help menu's
+/// own tests cover the button and its menu.
+const HELP: &str = "app-help-toggle";
+
 /// The id of the switch Settings focuses when it opens (its Sessions section's first switch, Skip session
 /// confirmations), as the Settings dialog's own tests name it.
 const FIRST_SWITCH: &str = "settings-skip-session-confirmations";
@@ -779,8 +783,9 @@ fn panel_shown(cx: &mut VisualTestContext) -> bool {
 /// 8 pixels above the bottom. Specified: in a 1200 by 700 window, Hosts is a button named "Hosts", not pressed, whose
 /// hover help is "Hosts: show host management", directly above the gear, a button named "Settings" whose hover help is
 /// the old app's words without the updater clause; both are 40-pixel squares 7.5 pixels from the window's left edge,
-/// the gear's bottom 8 pixels above the window's; the rail's scrolling part ends at the foot's top, 88 pixels above the
-/// bottom, so both sit wholly below every entry.
+/// the gear's bottom 48 pixels above the window's, leaving the 40-pixel Help button and the foot's 8-pixel padding
+/// below it (the help menu's tests pin that button); the rail's scrolling part ends at the foot's top, 128 pixels
+/// above the bottom, so both sit wholly below every entry.
 #[gpui::test]
 fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot());
@@ -806,13 +811,13 @@ fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &m
         gear.top(),
         "Hosts sits directly above the gear"
     );
-    assert_eq!(gear.bottom(), px(700. - 8.));
+    assert_eq!(gear.bottom(), px(700. - 48.));
     assert_eq!(
         test_support::bounds(cx, "host-rail").bottom(),
         hosts.top(),
         "the entries scroll above the foot"
     );
-    assert_eq!(hosts.top(), px(700. - 88.));
+    assert_eq!(hosts.top(), px(700. - 128.));
     assert_eq!(
         hover_help(cx, HOSTS).as_deref(),
         Some("Hosts: show host management")
@@ -946,9 +951,9 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
 /// between them, before the foot; in GPUI, Tab follows the order controls are drawn in, which is why the list draws the
 /// foot after its own column. A foot drawn inside the rail would put Hosts and the gear between the last avatar and the
 /// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
-/// which leaves focus on its avatar and draws the status segments and the chip as the list's controls, Tab goes to
-/// host 2's avatar, Add host, the segments' chosen All (their one stop), the chip, Hosts, then the gear; Shift+Tab from
-/// the gear goes back to Hosts.
+/// which leaves focus on its avatar and draws the status segments and the chip as the list's controls, Tab goes to host
+/// 2's avatar, Add host, the segments' chosen All (their one stop), the chip, Hosts, the gear, then Help; Shift+Tab
+/// from Help goes back to the gear.
 #[gpui::test]
 fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
@@ -970,19 +975,20 @@ fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppCo
         "host-filter-chip",
         HOSTS,
         GEAR,
+        HELP,
     ] {
         test_support::keys(cx, "tab");
         assert_eq!(focused_id(cx).as_deref(), Some(expected));
     }
     test_support::keys(cx, "shift-tab");
-    assert_eq!(focused_id(cx).as_deref(), Some(HOSTS));
+    assert_eq!(focused_id(cx).as_deref(), Some(GEAR));
 }
 
 /// The old spec "rail scrolling leaves settings and help reachable": a long registry makes the rail scroll, and the
 /// foot must stay where it is whatever the rail's scroll position, with no entry scrolling under it. Specified: in a
 /// 1200 by 500 window over 30 hosts, the last avatar starts below the rail's visible part; after a wheel over the rail
 /// scrolls it to its end, the last avatar lies wholly inside the rail's visible part, above Hosts, and neither foot
-/// control has moved, the gear's bottom still 8 pixels above the window's.
+/// control has moved, the gear's bottom still 48 pixels above the window's and Help's 8 pixels above it.
 #[gpui::test]
 fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppContext) {
     let many: Vec<Host> = (10..40)
@@ -1027,7 +1033,12 @@ fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppConte
         foot,
         "the foot did not move"
     );
-    assert_eq!(foot.1.bottom(), px(500. - 8.));
+    assert_eq!(foot.1.bottom(), px(500. - 48.));
+    assert_eq!(
+        test_support::bounds(cx, HELP).bottom(),
+        px(500. - 8.),
+        "Help stays at the foot's bottom"
+    );
 }
 
 // ---- Add host, and the keyboard below the rail's fold ---------------------------------------------------------------
