@@ -6,31 +6,40 @@
 //! `quick-switcher-row-<key>`, and its field by the `quick-switcher-field` selector. Every step ends in one of the
 //! shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
-//! The last tests pick sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the
-//! session list makes once the pick has opened the session (`filters.rs`).
+//! Later tests pick sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the
+//! session list makes once the pick has opened the session (`filters.rs`). The last ones drive the `tl:` templates
+//! section and the Quick launch row over a fleet that adds the helm's own host and three templates
+//! ([`template_fleet`]); what a pick then does inside New (the catalog wait, refusals) is the templates area's, tested
+//! in `templates::rows_tests`, so these stop at New opening with the template applied.
 //!
 //! No test here depends on glyph widths, so the simulated platform's fake text system is enough: the scroll test needs
 //! only the rows' heights, which come from the line height.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeCommand;
-use farhelm_proto::ui_channel::{CollectionState, SESSION_QUERY_PATH, SessionRow};
+use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
+    Preferences, SESSION_QUERY_PATH, SessionRow,
+};
 use gpui::{DriverNode, Entity, Global, TestAppContext, VisualTestContext, WeakEntity};
 use serde_json::{Value, json};
 
 use super::{
-    CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QuickSwitcher, Read, Selected, mark_positions,
-    matching_positions, ranked,
+    CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QUICK_ROW_HELP, QUICK_ROW_ID, QuickSwitcher, Read,
+    Selected, TEMPLATE_ROW_HELP, TEMPLATE_ROW_ID, mark_positions, matching_positions, ranked,
 };
 use crate::actions::QUICK_SWITCHER_CHORD;
-use crate::launcher::launch_tests::{HostChange, start_host_change};
+use crate::launcher::launch_tests::{HostChange, creates_answering, start_host_change};
+use crate::launcher::view_tests::fixture_hosts;
 use crate::layers;
 use crate::local_state;
 use crate::session_list::host_rail::tests::{
     filtered, hosts, hover_help, local, node, pressed, remote, texts_within,
 };
 use crate::session_list::tests::{
-    Fixture, carrying, change, launcher_drawn, listing, painted, preferences, selected, session,
+    Fixture, carrying, change, launcher_drawn, listing, painted, preferences, preferences_state,
+    selected, session,
 };
 use crate::session_pane::details::BAR_ID;
 use crate::test_support::{
@@ -239,7 +248,7 @@ fn field_focused(cx: &mut VisualTestContext) -> bool {
 }
 
 /// The keys of the switcher's session rows in the order they are listed, and the key of the selected row: a session's
-/// key, or [`NEW_ROW_ID`] for the New row.
+/// key, [`NEW_ROW_ID`] for the New row, [`QUICK_ROW_ID`] for the Quick launch row, or a template's name.
 fn listed(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
     let switcher = switcher(cx);
     cx.update(|_, cx| {
@@ -253,6 +262,11 @@ fn listed(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
         let selected = rows.selected(switcher.selected).map(|row| match row {
             Selected::Session(index) => key(index),
             Selected::New => NEW_ROW_ID.to_owned(),
+            Selected::QuickLaunch => QUICK_ROW_ID.to_owned(),
+            Selected::Template(position) => match &rows.templates {
+                Some(Ok(templates)) => templates[position].name.clone(),
+                Some(Err(_)) | None => unreachable!("only listed templates are selected"),
+            },
         });
         (keys, selected)
     })
@@ -613,21 +627,24 @@ fn a_reply_to_an_earlier_opening_never_reaches_a_later_switcher(cx: &mut TestApp
 
 /// SPEC.md: "Arrow keys choose and Enter opens the selected session ...; the first match is initially selected." The
 /// arrows must not move the field's caret, and the selection must stop at both ends rather than wrap. Specified: over
-/// a, b, c the first row is selected; Down three times stops at c; Up three times stops at a; typing resets the
-/// selection to the first match; focus stays in the field throughout.
+/// a, b, c with nothing typed the first row is selected; Down twice reaches c, a third time the Quick launch row that
+/// follows the matches, and a fourth stays there; Up four times stops at a; typing resets the selection to the first
+/// match; focus stays in the field throughout.
 #[gpui::test]
 fn the_arrows_move_the_selection_and_stop_at_both_ends(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
     let read = main.open_switcher();
     main.answer(read, &[session("a"), session("b"), session("c")], false);
     assert_eq!(listed(main.cx).1.as_deref(), Some("a"));
-    keys(main.cx, "down down down");
+    keys(main.cx, "down down");
+    assert_eq!(listed(main.cx).1.as_deref(), Some("c"));
+    keys(main.cx, "down down");
     assert_eq!(
         listed(main.cx).1.as_deref(),
-        Some("c"),
+        Some(QUICK_ROW_ID),
         "Down stops at the last"
     );
-    keys(main.cx, "up up up");
+    keys(main.cx, "up up up up");
     assert_eq!(
         listed(main.cx).1.as_deref(),
         Some("a"),
@@ -1160,9 +1177,9 @@ fn the_new_row_follows_the_matches_and_is_selected_when_nothing_matches(cx: &mut
 }
 
 /// SPEC.md: "With a leading `tl:` (case-insensitive), sessions and the New row are replaced by matching templates".
-/// The templates section is the templates area's, but the New row is this one's, and offered there it would name a
-/// session after a template search. Specified: with `tl:claude`, `TL:claude` and `  Tl:` (spaces around) as the query
-/// there is no New row, and Enter opens nothing; `tlx` and `t:l` still offer it.
+/// Offered there, the New row would name a session after a template search. Specified, with no template collection:
+/// with `tl:claude`, `TL:claude` and `  Tl:` (spaces around) as the query there is no New row, and Enter opens
+/// nothing; `tlx` and `t:l` still offer it.
 #[gpui::test]
 fn a_template_query_offers_no_new_row(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
@@ -1317,4 +1334,445 @@ fn a_refused_new_closes_the_switcher_and_returns_focus(cx: &mut TestAppContext) 
     assert!(!launcher_drawn(main.cx), "New was refused");
     assert!(!any_open(main.cx));
     assert!(terminal_focused(main.cx), "focus is back in a's terminal");
+}
+
+// ---- Templates and Quick launch ------------------------------------------------------------------------------------
+
+/// The templates collection of these tests, in the helm's order: `go` launches on its own (a command of `true`,
+/// answered not YOLO), `partial` only sets a folder and so needs more choices, and `Nightly Build` sets nothing.
+fn templates_state(availability: Availability) -> CollectionState {
+    let all = [
+        LaunchTemplate {
+            name: "go".into(),
+            fields: TemplateFields {
+                kind: Some(LauncherKind::Command),
+                command: Some("true".into()),
+                yolo: Some(false),
+                ..TemplateFields::default()
+            },
+        },
+        LaunchTemplate {
+            name: "partial".into(),
+            fields: TemplateFields {
+                destination: Some(TemplateDestination::Folder("/srv/partial".into())),
+                ..TemplateFields::default()
+            },
+        },
+        LaunchTemplate {
+            name: "Nightly Build".into(),
+            fields: TemplateFields::default(),
+        },
+    ];
+    let names: Vec<&str> = all.iter().map(|template| template.name.as_str()).collect();
+    CollectionState {
+        collection: Collection::Templates,
+        meta: CollectionMeta {
+            availability,
+            ..test_support::meta(&names)
+        },
+        entries: all
+            .iter()
+            .map(|template| KeyedEntry {
+                key: template.name.clone(),
+                value: serde_json::to_value(template).unwrap(),
+            })
+            .collect(),
+    }
+}
+
+/// [`fleet`]'s preferences with ⚡ on `marked`, if anything.
+fn marked(marked: Option<&str>) -> CollectionState {
+    preferences_state(Preferences {
+        visit_history: vec!["a".into()],
+        quick_launch_template: marked.map(str::to_owned),
+        welcome_seen: Some(true),
+        ..Preferences::default()
+    })
+}
+
+/// Push ⚡ onto the template `name`, as the helm pushes a preferences change, and settle.
+fn push_mark(main: &mut Main<'_>, name: &str) {
+    let state = marked(Some(name));
+    main.helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
+    settle(main.cx);
+}
+
+/// [`fleet`] with ⚡ on `mark`, the helm's own host (host1, connected, which New's prefill takes since the sessions
+/// name none) and [`templates_state`].
+fn template_fleet(mark: Option<&str>) -> Vec<CollectionState> {
+    vec![
+        listing(
+            &["a", "b", "c"],
+            &[session("a"), session("b"), session("c")],
+        ),
+        marked(mark),
+        fixture_hosts(&[0]),
+        templates_state(Availability::Available),
+    ]
+}
+
+/// The template rows the frame drew, top to bottom, by name, and the one drawn selected.
+fn drawn_templates(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
+    let mut rows: Vec<_> = frame(cx)
+        .into_iter()
+        .filter_map(|node| {
+            let name = node.element_id.as_deref()?.strip_prefix(TEMPLATE_ROW_ID)?;
+            Some((node.bounds.origin.y, name.to_owned(), node.selected))
+        })
+        .collect();
+    rows.sort_by(|a, b| f32::from(a.0).total_cmp(&f32::from(b.0)));
+    let selected = rows
+        .iter()
+        .find(|row| row.2 == Some(true))
+        .map(|row| row.1.clone());
+    (rows.into_iter().map(|row| row.1).collect(), selected)
+}
+
+/// The creates the window sent since the last call, every other command answered at once and the catalog read with an
+/// empty catalog (the launcher's own helper).
+fn creates(main: &mut Main<'_>) -> Vec<FakeCommand> {
+    creates_answering(&mut main.helm, main.cx, &json!([]))
+}
+
+/// SPEC.md: "With a leading `tl:` (case-insensitive), sessions and the New row are replaced by matching templates,
+/// using the session launcher's own template search; `tl:` alone lists every template", and "After a failed session
+/// read, New and template search remain usable". The section is how a user reaches a template without leaving the
+/// keyboard, so it must not wait on the session read it replaces. Specified, with the read still unanswered: `tl:`
+/// draws "Templates" over go, partial and Nightly Build in the helm's order with go selected, each row named by its
+/// template and helped "Open New with this template applied; nothing launches yet", partial's and Nightly Build's
+/// summaries "Destination" and "Sets nothing yet" drawn, no session, New or Quick launch row, and the hint "Picking a
+/// template opens New with it applied; nothing launches yet."; `TL: build` lists Nightly Build alone; `tl:zzz` says "No
+/// templates match", selects nothing, and Enter opens nothing.
+#[gpui::test]
+fn a_tl_query_lists_templates_in_the_helms_order_without_waiting_for_the_read(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, template_fleet(None));
+    main.open_switcher();
+    set_query(main.cx, "tl:");
+    assert_eq!(
+        drawn_templates(main.cx),
+        (
+            vec!["go".into(), "partial".into(), "Nightly Build".into()],
+            Some("go".into())
+        )
+    );
+    let nodes = frame(main.cx);
+    let shown = painted(&nodes);
+    for words in [
+        "Templates",
+        "Destination",
+        "Sets nothing yet",
+        "Picking a template opens New with it applied; nothing launches yet.",
+    ] {
+        assert!(
+            shown.iter().any(|line| line == words),
+            "{words:?} in {shown:?}"
+        );
+    }
+    assert!(
+        !shown.iter().any(|line| line == "Loading sessions…"),
+        "the read's state gives way to the section"
+    );
+    assert_eq!(
+        node(&nodes, "quick-switcher-template-partial").and_then(|row| row.label.as_deref()),
+        Some("partial")
+    );
+    assert!(drawn_rows(&nodes).is_empty(), "no session rows");
+    assert!(node(&nodes, NEW_ROW_ID).is_none() && node(&nodes, QUICK_ROW_ID).is_none());
+    assert_eq!(
+        hover_help(main.cx, "quick-switcher-template-go").as_deref(),
+        Some(TEMPLATE_ROW_HELP)
+    );
+
+    set_query(main.cx, "TL: build");
+    assert_eq!(
+        drawn_templates(main.cx),
+        (vec!["Nightly Build".into()], Some("Nightly Build".into()))
+    );
+    set_query(main.cx, "tl:zzz");
+    assert_eq!(drawn_templates(main.cx), (Vec::new(), None));
+    assert_eq!(
+        test_support::label(main.cx, "quick-switcher-templates-empty").as_deref(),
+        Some("No templates match")
+    );
+    keys(main.cx, "enter");
+    assert!(
+        switcher_drawn(main.cx) && !launcher_drawn(main.cx),
+        "Enter opened nothing"
+    );
+}
+
+/// SPEC.md has a failed template read shown where `tl:` shows its rows; listing what the store last held would look
+/// current when it is not. Specified: with the templates unavailable ("busy"), `tl:` draws the alert "Couldn't load
+/// templates: busy" and no template row, and Enter opens nothing.
+#[gpui::test]
+fn a_failed_template_read_shows_its_reason_in_place_of_the_rows(cx: &mut TestAppContext) {
+    let mut fleet = template_fleet(None);
+    fleet[3] = templates_state(Availability::Unavailable {
+        error: "busy".into(),
+    });
+    let mut main = open_main(cx, fleet);
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    set_query(main.cx, "tl:");
+    assert_eq!(
+        test_support::label(main.cx, "quick-switcher-templates-failure").as_deref(),
+        Some("Couldn't load templates: busy")
+    );
+    assert_eq!(drawn_templates(main.cx), (Vec::new(), None));
+    keys(main.cx, "enter");
+    assert!(
+        switcher_drawn(main.cx) && !launcher_drawn(main.cx),
+        "Enter opened nothing"
+    );
+}
+
+/// SPEC.md: "Picking one opens New with its edits applied ... Neither name nor template pick launches a session", and
+/// closing what the user opened returns focus to where it was. New refuses while any dialog is open, so the switcher
+/// must close first. Specified: from a's focused terminal, `tl:` and Down select partial; Enter closes the switcher and
+/// opens New with focus inside it, its folder `/srv/partial` and the banner "partial needs more choices before it can
+/// launch; complete it below.", sending no create; Escape closes New with focus back in a's terminal.
+#[gpui::test]
+fn enter_on_a_template_opens_new_with_it_applied_and_closing_returns_focus(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, template_fleet(None));
+    main.terminal_live();
+    let read = main.open_switcher();
+    main.answer(read, &[session("a"), session("b"), session("c")], false);
+    set_query(main.cx, "tl:");
+    keys(main.cx, "down");
+    assert_eq!(listed(main.cx).1.as_deref(), Some("partial"));
+
+    keys(main.cx, "enter");
+    assert!(!switcher_drawn(main.cx), "the switcher closed");
+    assert!(creates(&mut main).is_empty(), "nothing launched");
+    assert!(launcher_drawn(main.cx), "New opened");
+    assert!(
+        main.cx
+            .update(|window, cx| layers::focus_layer_open(window, cx))
+            && !terminal_focused(main.cx),
+        "focus is inside New"
+    );
+    assert!(
+        painted(&frame(main.cx))
+            .iter()
+            .any(|line| line.contains("/srv/partial"))
+    );
+    assert_eq!(
+        test_support::label(main.cx, "launcher-banner").as_deref(),
+        Some("partial needs more choices before it can launch; complete it below.")
+    );
+
+    keys(main.cx, "escape");
+    assert!(!any_open(main.cx));
+    assert!(
+        terminal_focused(main.cx),
+        "focus went back to where the switcher found it"
+    );
+}
+
+/// The pointer's way to a template, and a New handoff like the New row's, so it returns the sidebar from the Hosts
+/// panel (SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff";
+/// the old pick hid the panel the same way). Specified: with the Hosts panel shown, a click on go's row closes the
+/// switcher, opens New with go's command `true`, sends no create, and shows the list's column in place of the panel.
+#[gpui::test]
+fn a_click_on_a_template_opens_new_and_returns_from_the_hosts_panel(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, template_fleet(None));
+    click(main.cx, "hosts-panel-toggle");
+    assert!(
+        node(&frame(main.cx), "hosts-panel").is_some(),
+        "the premise: the Hosts panel shows"
+    );
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    set_query(main.cx, "tl:");
+    click(main.cx, "quick-switcher-template-go");
+    assert!(!switcher_drawn(main.cx));
+    assert!(creates(&mut main).is_empty(), "nothing launched");
+    assert!(launcher_drawn(main.cx));
+    let nodes = frame(main.cx);
+    assert!(
+        painted(&nodes).iter().any(|line| line == "true"),
+        "go's command"
+    );
+    assert!(node(&nodes, "hosts-panel").is_none(), "the panel went");
+    assert!(
+        node(&nodes, "session-list").is_some(),
+        "Sessions shows again"
+    );
+}
+
+/// SPEC.md: "With no query, a separate final "Quick launch: <template>" row uses the direct quick-launch path ...; the
+/// first recent session stays initially selected." Its label is what tells the user which template the row starts.
+/// Specified: while the read is loading the row is drawn, labelled "Quick launch: Mark a template" with the ⚡ chord
+/// and helped "Quick launch: start the marked template directly, or open Templates to mark one", but not selected;
+/// once a, b and c arrive, a is selected and the row is drawn below the matches, with the empty field named "Search
+/// sessions or templates" and showing "Jump to a session · tl: for templates", and the hint "Templates" over "Type tl:
+/// to search templates. Picking one opens New with it applied." above the footer; typing `a` takes the row away for
+/// the New row; with ⚡ pushed onto go and the query cleared, it reads "Quick launch: go".
+#[gpui::test]
+fn the_quick_launch_row_follows_the_matches_and_names_the_mark(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, template_fleet(None));
+    let read = main.open_switcher();
+    let nodes = frame(main.cx);
+    let row = node(&nodes, QUICK_ROW_ID).expect("the Quick launch row is drawn");
+    assert_eq!(row.label.as_deref(), Some("Quick launch: Mark a template"));
+    assert_eq!(
+        row.selected,
+        Some(false),
+        "nothing is selected while loading"
+    );
+    let texts: Vec<String> = texts_within(&nodes, QUICK_ROW_ID)
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == crate::templates::QUICK_LAUNCH_SHORTCUT_NAME),
+        "the ⚡ chord is drawn whole in the row: {texts:?}"
+    );
+    assert_eq!(
+        hover_help(main.cx, QUICK_ROW_ID).as_deref(),
+        Some(QUICK_ROW_HELP)
+    );
+
+    main.answer(read, &[session("a"), session("b"), session("c")], false);
+    assert_eq!(
+        listed(main.cx),
+        (vec!["a".into(), "b".into(), "c".into()], Some("a".into()))
+    );
+    let nodes = frame(main.cx);
+    let row = node(&nodes, QUICK_ROW_ID).expect("the Quick launch row is drawn");
+    let results = node(&nodes, "quick-switcher-results").expect("the matches are drawn");
+    assert!(
+        row.bounds.top() >= results.bounds.bottom(),
+        "the Quick launch row {:?} is pinned below the matches {:?}",
+        row.bounds,
+        results.bounds
+    );
+    // The name sits on the Kit input inside the field's wrapper, which carries the id.
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.label.as_deref() == Some("Search sessions or templates")),
+        "the field is named for sessions and templates"
+    );
+    let shown = painted(&nodes);
+    for words in [
+        "Jump to a session · tl: for templates",
+        "Templates",
+        "Type tl: to search templates. Picking one opens New with it applied.",
+    ] {
+        assert!(
+            shown.iter().any(|line| line == words),
+            "{words:?} in {shown:?}"
+        );
+    }
+
+    type_query(main.cx, "a");
+    let nodes = frame(main.cx);
+    assert!(node(&nodes, QUICK_ROW_ID).is_none() && node(&nodes, NEW_ROW_ID).is_some());
+
+    push_mark(&mut main, "go");
+    set_query(main.cx, "");
+    assert_eq!(
+        node(&frame(main.cx), QUICK_ROW_ID).and_then(|row| row.label.as_deref().map(str::to_owned)),
+        Some("Quick launch: go".into())
+    );
+}
+
+/// SPEC.md: the row "uses the direct quick-launch path, or opens Templates to mark one", the ⚡ chord's own, which does
+/// nothing while a dialog holds the keyboard, so the switcher closes first. Specified: from a's focused terminal with
+/// nothing marked, Enter on the Quick launch row closes the switcher and opens Templates with its "Mark a template with
+/// ⚡" hint, sending no create, and Escape closes Templates with focus back in a's terminal; with ⚡ on go, a click on
+/// the row closes the switcher and sends one create with no dialog open and focus still in a's terminal.
+#[gpui::test]
+fn the_quick_launch_row_opens_templates_or_launches_the_mark(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, template_fleet(None));
+    main.terminal_live();
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    keys(main.cx, "down");
+    assert_eq!(listed(main.cx).1.as_deref(), Some(QUICK_ROW_ID));
+    keys(main.cx, "enter");
+    assert!(!switcher_drawn(main.cx), "the switcher closed");
+    assert!(
+        creates(&mut main).is_empty(),
+        "nothing marked: nothing launched"
+    );
+    assert!(
+        painted(&frame(main.cx))
+            .iter()
+            .any(|line| line.contains("Mark a template with ⚡")),
+        "Templates with its hint"
+    );
+    keys(main.cx, "escape");
+    assert!(!any_open(main.cx));
+    assert!(
+        terminal_focused(main.cx),
+        "Templates gave focus back to the terminal"
+    );
+
+    push_mark(&mut main, "go");
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    click(main.cx, QUICK_ROW_ID);
+    assert!(!switcher_drawn(main.cx), "the switcher closed");
+    assert_eq!(creates(&mut main).len(), 1, "go launched");
+    assert!(!any_open(main.cx), "unseen");
+    assert!(terminal_focused(main.cx), "focus stayed in a's terminal");
+}
+
+/// SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff", and the
+/// old switcher's Quick launch went through the list's New, which left the Hosts panel; opening Templates to mark one
+/// did not. A launch started from the panel would otherwise leave its new session out of sight. Specified: with the
+/// Hosts panel shown and nothing marked, a click on the Quick launch row opens Templates and the panel still shows;
+/// after Escape and with ⚡ pushed onto go, a click on the row sends one create and the list's column shows in place of
+/// the panel.
+#[gpui::test]
+fn the_quick_launch_row_leaves_the_hosts_panel_only_for_a_launch(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, template_fleet(None));
+    click(main.cx, "hosts-panel-toggle");
+    assert!(
+        node(&frame(main.cx), "hosts-panel").is_some(),
+        "the premise: the Hosts panel shows"
+    );
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    click(main.cx, QUICK_ROW_ID);
+    assert!(
+        creates(&mut main).is_empty(),
+        "nothing marked: nothing launched"
+    );
+    assert!(
+        painted(&frame(main.cx))
+            .iter()
+            .any(|line| line.contains("Mark a template with ⚡")),
+        "the premise: Templates opened"
+    );
+    assert!(
+        node(&frame(main.cx), "hosts-panel").is_some(),
+        "Templates kept the panel"
+    );
+    keys(main.cx, "escape");
+
+    push_mark(&mut main, "go");
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    click(main.cx, QUICK_ROW_ID);
+    assert_eq!(creates(&mut main).len(), 1, "go launched");
+    let nodes = frame(main.cx);
+    assert!(node(&nodes, "hosts-panel").is_none(), "the panel went");
+    assert!(
+        node(&nodes, "session-list").is_some(),
+        "Sessions shows again"
+    );
 }

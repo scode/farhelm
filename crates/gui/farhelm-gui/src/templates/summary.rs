@@ -12,11 +12,17 @@
 //!
 //! SPEC.md says the list summary "mentions" an initial prompt. The old app's word for it was "Initial prompt", which is
 //! what this keeps.
+//!
+//! The drawing is shared too ([`line`], and the ⚡ chord's text size, [`CHORD_TEXT`]), so that the lists show one
+//! summary the same way rather than each keeping a copy.
 
 use farhelm_proto::LaunchHarness;
 use farhelm_proto::LaunchPermission;
 use farhelm_proto::launcher::{LauncherKind, TemplateFields};
 
+use gpui::{AnyElement, Div, IntoElement as _, ParentElement as _, Styled as _, div};
+
+use crate::host_text::{self, HostText};
 use crate::launcher::draft::harness_label;
 use crate::permission::words::{effort_label, guarded_mode_name, permission_display};
 
@@ -34,6 +40,37 @@ pub enum Part {
 
 /// What separates two fields' parts.
 const SEPARATOR: &str = " · ";
+
+/// `.templates-quick-chord`: the text size of the ⚡ chord where a list names it beside a template (the Templates
+/// list's marked row, the quick switcher's Quick launch row), smaller than the 12-pixel summary.
+pub(crate) const CHORD_TEXT: f32 = 11.;
+
+/// A summary's `parts` on one line (`.templates-row-summary`: `white-space: nowrap`), as every list that shows a
+/// template draws it: the app's words as text, the template's values through the host-text element, a wrapper prefix's
+/// and custom permission words in the monospace face. The parts never wrap; a summary longer than the row is cut at the
+/// row's edge, without the old ellipsis, since an ellipsis can only end one text element and a summary is several
+/// (recorded in the parity file). The caller sets the text size and ink, and whether the line may shrink below its
+/// content.
+pub(crate) fn line(parts: &[Part]) -> Div {
+    div()
+        .flex()
+        .flex_row()
+        .flex_nowrap()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .children(parts.iter().map(|part| -> AnyElement {
+            match part {
+                Part::Words(words) => div().flex_none().child(words.clone()).into_any_element(),
+                Part::Host(value) => host_text::element(&HostText::from_host(value.as_str()))
+                    .flex_none()
+                    .into_any_element(),
+                Part::Mono(value) => host_text::element(&HostText::from_host(value.as_str()))
+                    .flex_none()
+                    .font_family(crate::assets::TERMINAL_FONT)
+                    .into_any_element(),
+            }
+        }))
+}
 
 /// The summary of `fields`, in the old app's order: initial prompt, launch kind, agent type, model, effort,
 /// permissions, custom words, wrapper prefix, command, retired container, YOLO, resume command, placement, destination,
