@@ -6,6 +6,9 @@
 //! takes a mark and calls [`super::open`] with its own focus handle. Every step ends in one of the shared harness's step
 //! helpers, so the focus and layer invariants are checked after each.
 
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{
@@ -79,7 +82,34 @@ fn section_button(section: Section) -> &'static str {
         Section::Checkouts => "settings-section-checkouts",
         Section::AgentTrust => "settings-section-agent-trust",
         Section::Notifications => "settings-section-notifications",
+        Section::App => "settings-section-app",
     }
+}
+
+/// Keep a fake desktop updater as the app's, as the desktop app does at startup when its updater runs, with automatic
+/// updates starting at `automatic`. Its automatic-updates write succeeds unless `refuse` is set when it is called, and
+/// every value it is asked to write, saved or not, lands in `writes`, so a test sees each press reach the updater.
+fn keep_updater(
+    cx: &mut VisualTestContext,
+    automatic: bool,
+    refuse: &Rc<Cell<bool>>,
+    writes: &Rc<RefCell<Vec<bool>>>,
+) {
+    use crate::desktop::updates::fake::{Feed, Seen, fake_host};
+    let (feed, seen) = (Rc::new(Feed::default()), Rc::new(Seen::default()));
+    seen.automatic.set(automatic);
+    let mut host = fake_host(&feed, &seen, false);
+    let (refuse, writes) = (refuse.clone(), writes.clone());
+    host.set_automatic_updates = Box::new(move |on| {
+        writes.borrow_mut().push(on);
+        if refuse.get() {
+            Err("The choice could not be saved".to_string())
+        } else {
+            Ok(())
+        }
+    });
+    cx.update(|_, cx| crate::desktop::updates::keep(Some(host), cx));
+    settle(cx);
 }
 
 /// The preferences collection holding `preferences`.
@@ -222,7 +252,8 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
 }
 
 /// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust
-/// and Notifications; listing a section with nothing behind it would offer a button that shows an empty pane. The list
+/// and Notifications, and App only where the desktop app's updater runs, which it does not here; listing a section
+/// with nothing behind it would offer a button that shows an empty pane. The list
 /// follows SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal,
 /// Checkouts, Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
 /// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust and
@@ -259,6 +290,166 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Notifications".to_string(), Some(Toggled::False)),
         ]
     );
+}
+
+/// SPEC.md, "Session list": the sections are "followed by **App** only in a desktop app whose updater is active". App's
+/// one switch writes through the updater, so listing it where none runs would offer a switch that saves nothing; the
+/// test above pins that it is absent then. Specified: with a desktop updater kept as the app's, App is listed last,
+/// after Notifications, unpressed, and its button shows the App section under the App heading with focus left on the
+/// button.
+#[gpui::test]
+fn app_is_listed_last_while_the_desktop_updater_runs(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    keep_updater(cx, true, &Rc::default(), &Rc::default());
+    open_settings(cx);
+    let listed: Vec<String> = frame(cx)
+        .into_iter()
+        .filter(|node| {
+            node.element_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("settings-section-"))
+        })
+        .filter_map(|node| node.label.map(|label| label.to_string()))
+        .collect();
+    assert_eq!(
+        listed
+            .iter()
+            .rev()
+            .take(2)
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["App", "Notifications"]
+    );
+    click(cx, section_button(Section::App));
+    assert_eq!(heading(cx).as_deref(), Some("App"));
+    assert_eq!(focused_id(cx).as_deref(), Some("settings-section-app"));
+}
+
+/// SPEC.md: the App switch installs updates automatically, "on by default", and "unlike the host choices it is a
+/// setting of that app installation, kept with the app rather than by the helm"; a refused write must not show as
+/// saved, since the user would then believe updates install on their own (the old switch: "Only a saved choice is shown
+/// as the choice"). Specified: over an updater whose setting is on, the section shows the old note and the switch on
+/// with the on help. A press writes off through the updater, sends the helm nothing and holds no preference save; the
+/// switch shows off with the off help naming the ? menu and this machine's update item. A press the updater refuses
+/// shows the switch still off, with the updater's reason under it, which a section switch keeps. The next press, saved,
+/// turns it on and takes the reason away.
+#[gpui::test]
+fn the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let (refuse, writes) = (Rc::new(Cell::new(false)), Rc::new(RefCell::new(Vec::new())));
+    keep_updater(cx, true, &refuse, &writes);
+    open_settings(cx);
+    click(cx, section_button(Section::App));
+    let _ = sent(&mut helm);
+    assert!(painted(cx).contains("This one belongs to this Farhelm app on this Mac."));
+    assert_eq!(switch_on(cx, super::app::ID), Some(true));
+    assert!(
+        painted(cx)
+            .contains("installs it in the background. Restarting Farhelm finishes the update.")
+    );
+
+    click(cx, super::app::ID);
+    assert_eq!(*writes.borrow(), [false]);
+    assert!(sent(&mut helm).is_empty(), "the helm was sent nothing");
+    assert_eq!(
+        preference_work(cx),
+        None,
+        "and no preference save holds its key"
+    );
+    assert_eq!(switch_on(cx, super::app::ID), Some(false));
+    assert!(painted(cx).contains(
+        "Farhelm installs a new release only when you check for updates from the ? menu or this machine's update \
+         item, or run the installer yourself."
+    ));
+    assert!(!drawn(cx, super::app::ERROR_ID));
+
+    refuse.set(true);
+    click(cx, super::app::ID);
+    assert_eq!(
+        *writes.borrow(),
+        [false, true],
+        "the premise: the press reached the updater"
+    );
+    assert_eq!(
+        switch_on(cx, super::app::ID),
+        Some(false),
+        "a refused write shows the setting in force"
+    );
+    assert!(painted(cx).contains("The choice could not be saved"));
+    click(cx, section_button(Section::Sessions));
+    click(cx, section_button(Section::App));
+    assert!(
+        drawn(cx, super::app::ERROR_ID),
+        "the reason survives a section switch"
+    );
+
+    refuse.set(false);
+    click(cx, super::app::ID);
+    assert_eq!(switch_on(cx, super::app::ID), Some(true));
+    assert!(
+        !drawn(cx, super::app::ERROR_ID),
+        "a saved press takes the reason away"
+    );
+    assert!(sent(&mut helm).is_empty());
+}
+
+/// App's switch writes the app's own setting through the updater, never through the operation store, so a helm save
+/// on the preference row's key must not hold it back: every other Settings control is refused while such a save is in
+/// flight, and a regression that routed App through the store would refuse it too, with the busy line. Specified: with
+/// Skip session confirmations' save sent and unanswered (the premise: preference work in flight), a press on App's
+/// switch reaches the updater as a write of off, the switch shows off, no busy line is drawn under it, and the
+/// Sessions save is still the one in flight.
+#[gpui::test]
+fn the_app_switch_writes_while_a_preference_save_is_unanswered(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let writes = Rc::new(RefCell::new(Vec::new()));
+    keep_updater(cx, true, &Rc::default(), &writes);
+    open_settings(cx);
+    click(cx, Choice::SkipSessionConfirmations.id());
+    let _ = one_save(&mut helm);
+    assert_eq!(
+        preference_work(cx),
+        Some(Work::Save),
+        "the premise: the Sessions save is in flight"
+    );
+
+    click(cx, section_button(Section::App));
+    click(cx, super::app::ID);
+    assert_eq!(*writes.borrow(), [false], "the write reached the updater");
+    assert_eq!(switch_on(cx, super::app::ID), Some(false));
+    assert_eq!(
+        busy_line(cx, super::app::ID),
+        None,
+        "nothing says it was refused"
+    );
+    assert_eq!(
+        preference_work(cx),
+        Some(Work::Save),
+        "the Sessions save is still out"
+    );
+    assert!(sent(&mut helm).is_empty());
+}
+
+/// The header's "and for this device" is true only where App is listed, since App's switch is the one setting in the
+/// dialog that belongs to this device; elsewhere it would claim device settings the dialog does not have (the
+/// migration's orchestrator decided on 2026-11-15 that the words follow whether App is listed). Specified: with no
+/// updater the header reads "For every host on this helm" without "and for this device"; once an updater is kept and
+/// Settings opens again, it reads "For every host on this helm, and for this device".
+#[gpui::test]
+fn the_header_says_this_device_only_where_app_is_listed(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let without = painted(cx);
+    assert!(without.contains("For every host on this helm"));
+    assert!(!without.contains("and for this device"));
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the premise: Settings closed");
+
+    keep_updater(cx, true, &Rc::default(), &Rc::default());
+    open_settings(cx);
+    assert!(painted(cx).contains("For every host on this helm, and for this device"));
 }
 
 /// SPEC.md: "Escape and either close control return focus to the gear", and the old app returned it there on every

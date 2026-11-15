@@ -7,7 +7,7 @@ use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 
-use super::{HostKind, Locality, Offers, Rerun, Update, needs_local_setup, offers};
+use super::{HostKind, Locality, Offers, Rerun, Update, menu_offers, needs_local_setup, offers};
 use crate::hosts::tests::{connected, host, local_down, run, skew};
 
 /// An idle SSH host's offers: everything an SSH host can be offered, all of it available.
@@ -231,6 +231,52 @@ fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
         Update::Available.description(),
         "Install the newer Farhelm version"
     );
+}
+
+/// Why this matters: in the installed desktop app the helm's own machine is the machine the app runs on, and the app
+/// updates itself, so SPEC.md ("Session list") has that row always offer Update, which checks for a newer release and
+/// installs it; the old `update_menu_item_is_disabled_on_the_local_row_and_points_at_the_installer`, its app-updater
+/// half. That check is not the panel's Update: the inline button and Update all must never send the helm's refused
+/// local Update, and the rerun of a failed panel Update there stays greyed. Specified: with the app's updater running,
+/// the local host's menu offers [`Update::CheckForRelease`] ("Check for a newer Farhelm and install it") when idle,
+/// with no supervisor, during a run and with work in flight, every other offer as [`offers`] says; a failed Update's
+/// rerun there stays greyed; the panel's own [`offers`] still greys it; without the updater the menu's offers are
+/// [`offers`]'s; and an SSH host's are [`offers`]'s either way.
+#[test]
+fn in_the_desktop_app_the_local_hosts_update_checks_for_a_release() {
+    let local = host(1, "local", connected());
+    let running = run(1, ProvisioningOperation::Add, RunStatus::Running);
+    for (view, progress, in_flight) in [
+        (local.clone(), None, false),
+        (host(1, "local", local_down("")), None, false),
+        (local.clone(), Some(&running), false),
+        (local.clone(), None, true),
+    ] {
+        assert_eq!(
+            menu_offers(&view, progress, in_flight, true),
+            Offers {
+                update: Some(Update::CheckForRelease),
+                ..offers(&view, progress, in_flight)
+            },
+            "{view:?}, {progress:?}, in flight {in_flight}"
+        );
+        assert_eq!(
+            menu_offers(&view, progress, in_flight, false),
+            offers(&view, progress, in_flight)
+        );
+    }
+    assert_eq!(
+        Update::CheckForRelease.description(),
+        "Check for a newer Farhelm and install it"
+    );
+    let failed = run(1, ProvisioningOperation::Update, RunStatus::Failed);
+    assert_eq!(
+        menu_offers(&local, Some(&failed), false, true).rerun,
+        Some((Rerun::Update, false))
+    );
+    assert_eq!(offers(&local, None, false).update, Some(Update::Greyed));
+    let ssh = host(2, "ssh", connected());
+    assert_eq!(menu_offers(&ssh, None, false, true), idle_ssh());
 }
 
 /// Why this matters: on the helm's own machine the panel never installs a supervisor; `farhelm helm setup` does

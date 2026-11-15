@@ -112,7 +112,9 @@ struct Plan {
 // ---- Starting an Update ----------------------------------------------------------------------------------------------
 
 /// Whether `host`'s Update is available, given its retained run `progress` and whether work on it is in flight: what
-/// the host menu offers as a live Update ([`offers::offers`]). The inline button and Update all ask the same.
+/// the host menu offers as a live Update ([`offers::offers`]). The inline button and Update all ask the same. The
+/// installed desktop app's check on the helm's own machine is not this Update ([`offers::menu_offers`]), so neither
+/// draws it nor sends it.
 pub(crate) fn available(
     host: &HostView,
     progress: Option<&farhelm_proto::provisioning::ProvisioningView>,

@@ -993,6 +993,11 @@
       "reference": "settings-notifications"
     },
     {
+      "golden": "settings-app",
+      "title": "Settings at App, in the installed desktop app: its note and Install updates automatically on",
+      "reference": "settings-app"
+    },
+    {
       "golden": "hosts-panel",
       "title": "The Hosts panel over three connected hosts: the heading with its count, Details switch and Update all, each row's mark, name and phase",
       "reference": "hosts-panel"

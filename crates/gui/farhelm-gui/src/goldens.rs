@@ -2415,14 +2415,14 @@ fn feedback_dialog_reuse_setup(state: &SceneState, window: &mut Window, cx: &mut
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts`,
-/// `settings-agent-trust` and `settings-notifications`): focus on the section's first switch (on the dialog itself at
-/// Appearance, Terminal, Checkouts, Agent trust and Notifications), naming on because the row stores no choice for it,
-/// and automatic remote-host updates turned on so the Hosts picture shows a switch in each state. Agent trust's reads
-/// of each agent's trust, sent as it opens, are answered at once with the trust off and the hint not dismissed,
-/// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
-/// ready, and Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic,
-/// Default priority, no token); nothing else is answered. The opener is the scene's ring handle, which stands in for
-/// the gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
+/// `settings-agent-trust`, `settings-notifications` and `settings-app`): focus on the section's first switch (on the
+/// dialog itself at Appearance, Terminal, Checkouts, Agent trust and Notifications), naming on because the row stores
+/// no choice for it, and automatic remote-host updates turned on so the Hosts picture shows a switch in each state.
+/// Agent trust's reads of each agent's trust, sent as it opens, are answered at once with the trust off and the hint
+/// not dismissed, Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a
+/// checkout kept ready, and Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`,
+/// no topic, Default priority, no token); nothing else is answered. The opener is the scene's ring handle, which stands
+/// in for the gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -2805,6 +2805,18 @@ fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut 
 /// sub-heading above it, which is not built. Focus starts on the dialog itself (`Section::first`), so no ring shows.
 fn settings_notifications_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Notifications, window, cx);
+}
+
+/// Settings at App (reference `settings-app`), over a fake desktop updater kept as the app's
+/// (`desktop::updates::fake`), so the section is listed, after Notifications, and shows its note and the switch on, the
+/// app's default, with the on help. Focus starts on the switch, whose ring shows only under keyboard focus, so the
+/// picture shows none.
+fn settings_app_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::desktop::updates::fake::{Feed, Seen, fake_host};
+    let (feed, seen) = (Rc::new(Feed::default()), Rc::new(Seen::default()));
+    seen.automatic.set(true);
+    crate::desktop::updates::keep(Some(fake_host(&feed, &seen, false)), cx);
+    settings_scene(state, crate::settings::Section::App, window, cx);
 }
 
 /// The setup confirmation for the reference screens' plan (reference `host-add-setup-plan`), as a probe's plan opens it
@@ -3973,6 +3985,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_notifications_setup,
+    },
+    Scene {
+        name: "settings-app",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_app_setup,
     },
     Scene {
         name: "hosts-panel",

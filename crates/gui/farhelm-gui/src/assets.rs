@@ -47,7 +47,8 @@
 //! The Terminal section glyph is the old app's too (`ActionGlyph::Terminal`), in the same 14-unit action box and stroke.
 //!
 //! So is the Appearance section glyph (`ActionGlyph::Appearance`), in the same box and stroke; its filled half has no
-//! stroke, as the old one's did not. So is the Agent trust section glyph (`ActionGlyph::AgentTrust`).
+//! stroke, as the old one's did not. So is the Agent trust section glyph (`ActionGlyph::AgentTrust`), and the App
+//! section glyph (`ActionGlyph::App`).
 //!
 //! So is the Add glyph (`ActionGlyph::Add`, a plus), on the host rail's Add host, in the same box and stroke.
 //!
@@ -216,6 +217,8 @@ pub enum Icon {
     Restore,
     /// A shield with a tick: the Settings dialog's Agent trust section (the old app's Agent trust glyph).
     AgentTrust,
+    /// A window with a title bar: the Settings dialog's App section (the old app's App glyph).
+    App,
     /// A plus: add something new (the old app's Add glyph, on the host rail's Add host).
     Add,
     /// Two stacked cards: launch templates (the old app's Templates glyph, on the Templates dialog's header tile and in
@@ -341,6 +344,7 @@ impl Icon {
         Icon::Maximize,
         Icon::Restore,
         Icon::AgentTrust,
+        Icon::App,
         Icon::Add,
         Icon::Templates,
         Icon::Bolt,
@@ -424,6 +428,7 @@ impl Icon {
             Icon::Maximize => "icons/maximize.svg",
             Icon::Restore => "icons/restore.svg",
             Icon::AgentTrust => "icons/agent-trust.svg",
+            Icon::App => "icons/app.svg",
             Icon::Add => "icons/add.svg",
             Icon::Templates => "icons/templates.svg",
             Icon::Bolt => "icons/bolt.svg",
@@ -515,6 +520,7 @@ impl Assets {
             "icons/appearance.svg" => Some(include_bytes!("../assets/icons/appearance.svg")),
             "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
             "icons/agent-trust.svg" => Some(include_bytes!("../assets/icons/agent-trust.svg")),
+            "icons/app.svg" => Some(include_bytes!("../assets/icons/app.svg")),
             "icons/folder.svg" => Some(include_bytes!("../assets/icons/folder.svg")),
             "icons/harness-cursor.svg" => {
                 Some(include_bytes!("../assets/icons/harness-cursor.svg"))
