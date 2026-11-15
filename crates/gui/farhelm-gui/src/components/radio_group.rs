@@ -11,12 +11,14 @@
 //!
 //! - **[`Role::RadioGroup`] behaves as native radios.** The group is one tab stop: Tab enters at the chosen option and
 //!   the next Tab leaves the group. The arrows move the choice and focus together to the next or previous available
-//!   option, wrapping at the ends as WebKit's radios do, and Space chooses the focused option. With nothing chosen, Tab
-//!   enters at the first available option and Shift+Tab at the last, as in WebKit. Options report the radio button role
-//!   and whether they are checked. The old Credentials editor's `role="radio"` buttons (Claude Code or Codex) were
-//!   plain buttons that only announced themselves as radios, with each one a tab stop and no arrows; under this role
-//!   they would get the native keyboard their role promised when the Credentials editor is ported, and that port
-//!   confirms it.
+//!   option, wrapping at the ends as WebKit's radios do, and Space chooses the focused option. Home and End move
+//!   neither focus nor the choice, as in the old app: its radio groups were native radios, which in WebKit and Chromium
+//!   handle only the arrows, or `role="radio"` buttons with no keys of their own (below), so Home and End did nothing
+//!   in any of them. With nothing chosen, Tab enters at the first available option and Shift+Tab at the last, as in
+//!   WebKit. Options report the radio button role and whether they are checked. The old Credentials editor's
+//!   `role="radio"` buttons (Claude Code or Codex) were plain buttons that only announced themselves as radios, with
+//!   each one a tab stop and no arrows; under this role they would get the native keyboard their role promised when the
+//!   Credentials editor is ported, and that port confirms it.
 //! - **[`Role::Group`] behaves as the old buttons with `aria-pressed`.** Each available option is a tab stop of its
 //!   own, Enter or Space chooses it, the arrows do nothing, and options report the button role with their pressed state
 //!   (toggled, to assistive technology).
