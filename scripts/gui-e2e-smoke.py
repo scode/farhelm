@@ -40,7 +40,9 @@ they share the one app run, and say how the one step that needs a start of its o
 
 - Steps run in name order, and unittest sorts names as strings, so a step is `test_<nn>_...` with a two-digit number
   after the last one taken (`test_10_` would sort before `test_1_`, since `0` sorts before `_`). `main` refuses to run
-  a step named otherwise. Two areas taking the same number is harmless, since their steps share nothing.
+  a step named otherwise, and refuses a `test_` function written anywhere but directly in `Smoke` (`stray_steps`), so
+  a module-level helper goes after the class, never between its steps. Two areas taking the same number is harmless,
+  since their steps share nothing.
 - Each area's steps seed and use sessions of their own (created through the helm's API with `gui_agent.helm_request`,
   under titles no other step uses; `gui_agent.seed_body` always titles its session `Fixture <n>`, so a body built with
   it gets its title overridden), set up the open session and focus their steps depend on rather than assume what an
@@ -62,6 +64,7 @@ session of the same user. Run it through `scripts/record-test-run.py` (`.agents/
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -1854,9 +1857,48 @@ sys.stdin.read()
 """
 
 
+def stray_steps(source: str) -> list[tuple[str, int]]:
+    """Every function named `test_...` in `source` that is not a direct method of the module-level `Smoke` class, as
+    its name and line, in line order: a step unittest will never run.
+
+    A step that ends up anywhere else is skipped without a word, which is why this exists. A jj automatic merge once put
+    a module-level helper function between two areas' steps, so steps 52 and 53, which followed it, became unreachable
+    code inside that function, which every run from then on skipped with nothing saying so. The name check in `main`
+    cannot see that, since `getTestCaseNames` only lists what the class already has. The source is parsed, not
+    imported, so a stray step is found however deep it sits (in a function, at module level, or in another class) and
+    before anything starts.
+
+    A `test_` method under an `if` or `try` in the class body counts as stray too, although unittest would run it: no
+    step needs that shape, and accepting it would make this check about what Python happens to bind rather than about
+    where steps are written."""
+    tree = ast.parse(source)
+    placed = {
+        id(member)
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Smoke"
+        for member in node.body
+        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    stray = [
+        (node.name, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+        and id(node) not in placed
+    ]
+    return sorted(stray, key=lambda found: found[1])
+
+
 def main(argv: list[str]) -> int:
     """Start the app, run the steps, stop the app; exit 0 only when every step passed and the run stopped cleanly."""
     global RUN
+    # First, before even the arguments: a step outside `Smoke` would be skipped without a word (`stray_steps` says how
+    # that happened once), so the run refuses rather than passing with fewer steps than the file holds.
+    stray = stray_steps(Path(__file__).read_text(encoding="utf-8"))
+    for name, line in stray:
+        print(f"gui-e2e-smoke: {name} (line {line}) is not a method of Smoke, so it would never run", file=sys.stderr)
+    if stray:
+        return 1
     # SIGTERM takes the same path as Ctrl-C, so the `finally` below stops the app run. Python's default SIGTERM ends the
     # process without running it, which left the compositor, the app, its helm and supervisor and the terminal hosts
     # running (all in sessions of their own); SIGTERM is what the recorder forwards when it is interrupted and what a

@@ -722,6 +722,12 @@ systemd or SSH substrate ran.
   and run directories removed when clean and kept when not, and scenes with their own `start` options getting an app run
   of their own while the rest share the list's `app_start`. Seconds; needs neither the app nor the reference set. The
   batch itself is a tool, not a gate. Run the tests when the script or the scene list changes.
+- `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
+  anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
+  inside a module-level function that way): a clean class passes, a step inside a module-level function, one at module
+  level and one in another class are each reported with its line, the committed script passes with unittest collecting
+  every `def test_` it spells out, and `main` refuses before it makes a run directory or starts anything. Seconds;
+  starts nothing. Run it when `scripts/gui-e2e-smoke.py` changes, a new step included.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app end-to-end smoke' --concurrency 'one app run, steps in order; one step starts and stops a second run' --termination-grace 30 -- python3 -B scripts/gui-e2e-smoke.py`
   — the GPUI app end to end (`scripts/gui-e2e-smoke.py`): the real app, its embedded helm and a real supervisor with
   three basic fake agents, driven through the bridge by `scripts/gui-agent.py`. In one app run (one step starts and
