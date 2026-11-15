@@ -22,8 +22,15 @@ and the "Extension point rules" table gives each extension point's path and rule
   the table may name the file (the next check would stop on it) and other areas build on it.
 
 A rule admits a shape of change, not its content, so review still checks that an admitted change follows the pattern
-the table describes. Renames are not detected (`--no-renames`): a rename is the deletion of its old path and the
-addition of its new one, which is what the rules care about.
+the table describes.
+
+The check also prints as `reported`, never refusing, each module an area's file newly imports from another area with
+no row, and each one in no area and no row as unassigned, for the rule in the file's "What is not a foundation", whose
+area table it reads (`cross_area_imports` has the details). That part is advisory: any failure in it, a malformed area
+table included, prints that cross-area imports were not checked and leaves the exit status to the rest of the check.
+
+Renames are not detected (`--no-renames`): a rename is the deletion of its old path and the addition of its new one,
+which is what the rules care about.
 
 The rules are read from the base revision, never from the PR, so a PR cannot widen the rules it is judged by. For the
 same reason the landing step runs the base's copy of this script, from stdin, which is why `--repo` has no default:
@@ -39,7 +46,8 @@ renamed without updating the table stops the check instead of silently losing it
 `--owner` is for a foundation PR made by the owner: it reports what would have been refused and exits 0.
 
 Exit status: 0 when nothing is refused (or under `--owner`), whatever was reported, 1 when something is refused, 2
-when the check cannot judge (a git failure, a malformed table, or anything unexpected).
+when the check cannot judge (a git failure, a malformed main or rules table, or anything unexpected outside the
+advisory import check).
 `scripts/test-check-foundation-paths.py` covers it against temporary git repositories.
 """
 from __future__ import annotations
@@ -119,6 +127,17 @@ CODE = re.compile(r"`([^`]+)`")
 PATH_TOKEN = re.compile(r"^[\w.-]+(/[\w.-]+)*/?$")
 
 
+def cell_paths(name: str, cell: str, column: str, problems: list[str]) -> list[str]:
+    """The backticked repository paths in one paths cell (the main table's or the area table's), adding to `problems`
+    every path the parser could not read, since that path would otherwise silently have no owner."""
+    spans = CODE.findall(cell)
+    paths = [span for span in spans if PATH_TOKEN.match(span)]
+    problems += [f"{name}: {span!r} is not a path" for span in spans if "/" in span and span not in paths]
+    if "/" in CODE.sub("", cell):
+        problems.append(f"{name}: a path in the {column} column is not in backticks")
+    return paths
+
+
 def parse_table(markdown: str, tree: set[str]) -> list[Foundation]:
     """The foundations the markdown declares, validated against `tree`, the base revision's files. Raises CannotRun
     naming every problem found.
@@ -131,12 +150,7 @@ def parse_table(markdown: str, tree: set[str]) -> list[Foundation]:
     foundations = {}
     problems = []
     for name, owned_cell, *_ in table_rows(markdown, ("Foundation", "Owned paths"), 4):
-        spans = CODE.findall(owned_cell)
-        owned = [span for span in spans if PATH_TOKEN.match(span)]
-        # A path the parser cannot read would otherwise be silently unowned.
-        problems += [f"{name}: {span!r} is not a path" for span in spans if "/" in span and span not in owned]
-        if "/" in CODE.sub("", owned_cell):
-            problems.append(f"{name}: a path in the Owned paths column is not in backticks")
+        owned = cell_paths(name, owned_cell, "Owned paths", problems)
         if name in foundations:
             problems.append(f"{name}: foundation listed twice")
         elif not owned:
@@ -169,6 +183,26 @@ def parse_table(markdown: str, tree: set[str]) -> list[Foundation]:
     if problems:
         raise CannotRun(f"{TABLE} is malformed:\n" + "\n".join(f"  {problem}" for problem in problems))
     return list(foundations.values())
+
+
+def parse_areas(markdown: str) -> dict[str, str]:
+    """Each area path the area table declares, mapped to its area. Raises CannotRun when there is no area table, a path
+    cannot be read, or two area paths overlap, so that each file has at most one area.
+
+    Unlike owned paths, an area path need not exist: nothing refuses an area deleting its own file, so requiring it
+    would let an ordinary area refactor stop the import check for every later PR. A stale path covers nothing. An area
+    path may lie inside a foundation's owned path (an area-built module with a row stays its area's for imports).
+    """
+    areas, problems = {}, []
+    for name, cell in table_rows(markdown, ("Area", "Area paths"), 2):
+        for path in cell_paths(name, cell, "Area paths", problems):
+            clash = next((other for other in areas if covers(other, path) or covers(path, other)), None)
+            if clash is not None:
+                problems.append(f"{path} ({name}) and {clash} ({areas[clash]}) overlap")
+            areas[path] = name
+    if problems:
+        raise CannotRun(f"{TABLE}'s area table is malformed: " + "; ".join(problems))
+    return areas
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -204,10 +238,14 @@ def resolve(repo: pathlib.Path, base: str, head: str) -> tuple[str, str]:
     return base, head
 
 
+def files(repo: pathlib.Path, rev: str) -> set[str]:
+    """Every file path in `rev`'s tree."""
+    return set(git(repo, "ls-tree", "-r", "--name-only", "-z", rev).split("\0")) - {""}
+
+
 def load(repo: pathlib.Path, base: str) -> list[Foundation]:
     """The foundations as the base revision's table declares them, checked against the base revision's tree."""
-    tree = set(git(repo, "ls-tree", "-r", "--name-only", "-z", base).split("\0")) - {""}
-    return parse_table(git(repo, "show", f"{base}:{TABLE}"), tree)
+    return parse_table(git(repo, "show", f"{base}:{TABLE}"), files(repo, base))
 
 
 def changes(repo: pathlib.Path, base: str, head: str) -> list[Change]:
@@ -296,11 +334,103 @@ def judge(change: Change, foundations: list[Foundation]) -> Verdict | None:
     return Verdict(owner.name, change.path, allowed, extension.rule, reason)
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Cross-area imports
+# ---------------------------------------------------------------------------------------------------------------------
+
+USE = re.compile(r"\buse\s+crate::([^;]*);")
+
+
+def is_test_path(path: str) -> bool:
+    """Whether `path` is a test file, skipped on both ends of an import: `*_tests.rs`, `tests.rs`, or anything under a
+    `tests/` directory. A test module the path cannot show, an inline `mod tests { ... }` block in a production file or
+    a `#[cfg(test)]` module under another name, still counts as production code."""
+    return path.endswith("_tests.rs") or path.rsplit("/", 1)[-1] == "tests.rs" or "/tests/" in "/" + path
+
+
+def crate_src(path: str) -> str | None:
+    """The `src/` directory of the crate holding `path`, which `use crate::` paths resolve under (`crates/x/src/` for
+    `crates/x/src/a/b.rs`), or `None` outside one: only Rust source under a crate's `src/` can import that way."""
+    rooted = "/" + path
+    return path[: rooted.index("/src/") + len("src/")] if "/src/" in rooted else None
+
+
+def use_paths(spec: str) -> list[list[str]]:
+    """The paths one `use crate::<spec>;` names, as segment lists, with groups expanded, aliases dropped, and `self`
+    and `*` standing for the path before them: `{a, b::{self, c as d}}` is `a`, `b` and `b::c`."""
+    spec = re.sub(r"\s+", "", re.sub(r"\s+as\s+\w+", "", spec))
+    items, depth, start = [], 0, 0
+    for index, char in enumerate(spec):
+        depth += (char == "{") - (char == "}")
+        if char == "," and depth == 0:
+            items.append(spec[start:index])
+            start = index + 1
+    paths = []
+    for item in filter(None, [*items, spec[start:]]):
+        head, brace, rest = item.partition("{")
+        segments = [segment for segment in head.split("::") if segment and segment not in ("self", "*")]
+        paths += [segments + inner for inner in use_paths(rest.rsplit("}", 1)[0])] if brace else [segments]
+    return paths
+
+
+def imported_modules(source: str, src: str, tree: set[str]) -> dict[str, str]:
+    """The module files `source`'s `use crate::...` statements import, each mapped to the first path naming it.
+
+    A path resolves to its deepest prefix that is a module file in `tree` (`a/b.rs` or `a/b/mod.rs` under `src`), since
+    its last segments may be items rather than modules. Line comments are dropped first, so a commented-out `use` or a
+    doc example does not count; a path that resolves to no file (a macro, a module declared inline) is skipped.
+    """
+    modules = {}
+    for match in USE.finditer(re.sub(r"//[^\n]*", "", source)):
+        for segments in use_paths(match.group(1)):
+            prefixes = ["/".join(segments[:n]) for n in range(1, len(segments) + 1)]
+            found = [src + p + tail for p in prefixes for tail in (".rs", "/mod.rs") if src + p + tail in tree]
+            if found:
+                modules.setdefault(found[-1], "crate::" + "::".join(segments))
+    return modules
+
+
+def cross_area_imports(
+    repo: pathlib.Path, base: str, head: str, edits: list[Change], foundations: list[Foundation], areas: dict[str, str]
+) -> list[Verdict]:
+    """A `reported` verdict for each module an area file newly imports from another area's paths with no row in the
+    main table, named by the importing file and its area. A module in no area and no row is reported as unassigned, so
+    that the orchestrator hears of a module nobody owns rather than the check skipping it.
+
+    Both revisions' imports resolve against the head's tree, so that one module named at both counts as the same file
+    and only a module the file did not import before is new.
+    """
+    def area_of(path: str) -> str | None:
+        return next((area for area_path, area in areas.items() if covers(area_path, path)), None)
+
+    tree, verdicts = files(repo, head), []
+    for change in edits:
+        importer = area_of(change.path)
+        src = crate_src(change.path)
+        if change.status not in ("A", "M") or not change.path.endswith(".rs") or src is None:
+            continue
+        if importer is None or is_test_path(change.path):
+            continue
+        before = imported_modules(git(repo, "show", f"{base}:{change.path}"), src, tree) if change.status == "M" else {}
+        for module, path in imported_modules(git(repo, "show", f"{head}:{change.path}"), src, tree).items():
+            owner = area_of(module)
+            if module in before or owner == importer or is_test_path(module):
+                continue
+            if any(covers(owned, module) for f in foundations for owned in f.owned):
+                continue
+            reason = f"imports {path}, from {module} of {owner}, which no row covers"
+            if owner is None:
+                reason = f"imports {path}, from {module}, which no area or row covers (unassigned)"
+            verdicts.append(Verdict(importer, change.path, True, "cross-area import", reason, reported=True))
+    return verdicts
+
+
 def run(argv: list[str] | None = None) -> int:
     """Judge the diff between `--base` and `--head` and print one line per owned path it touches, then a summary.
 
     Every owned path touched gets a line, allowed ones included, so a landing log shows which touches an extension
-    point covered, which the review gate must judge, and which need a request. Paths no foundation owns are not listed.
+    point covered, which the review gate must judge, and which need a request. Paths no foundation owns are not listed,
+    except for the `reported` cross-area import lines, which follow the owned paths' and never change the exit status.
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--base", default="origin/main", help="the revision the PR lands on (default: origin/main)")
@@ -311,7 +441,8 @@ def run(argv: list[str] | None = None) -> int:
     try:
         base, head = resolve(args.repo, args.base, args.head)
         foundations = load(args.repo, base)
-        verdicts = [v for change in changes(args.repo, base, head) if (v := judge(change, foundations))]
+        edits = changes(args.repo, base, head)
+        verdicts = [v for change in edits if (v := judge(change, foundations))]
     except CannotRun as error:
         print(f"{PREFIX}: {error}", file=sys.stderr)
         return 2
@@ -319,16 +450,30 @@ def run(argv: list[str] | None = None) -> int:
     except Exception as error:  # noqa: BLE001
         print(f"{PREFIX}: cannot judge: {type(error).__name__}: {error}", file=sys.stderr)
         return 2
-    for verdict in verdicts:
+    # The import check is advisory, so nothing in it, a bad area table or a file it cannot read, may stop a landing
+    # with exit 2: it says what kept it from checking and the verdict stands on the owned paths alone.
+    try:
+        areas = parse_areas(git(args.repo, "show", f"{base}:{TABLE}"))
+        crossings = cross_area_imports(args.repo, base, head, edits, foundations, areas)
+        imports = f"{len(crossings)} cross-area imports reported"
+    except Exception as error:  # noqa: BLE001
+        reason = error if isinstance(error, CannotRun) else f"{type(error).__name__}: {error}"
+        crossings, imports = [], f"cross-area imports not checked: {reason}"
+    for verdict in verdicts + crossings:
         print(verdict.line(args.owner))
     refused = sum(not verdict.allowed for verdict in verdicts)
     reported = sum(verdict.reported for verdict in verdicts)
     allowed = len(verdicts) - refused - reported
     summary = f"{head} against {base}: {len(verdicts)} owned paths touched, {allowed} allowed, {reported} reported"
+    if crossings:
+        print(
+            f"{PREFIX}: each cross-area import needs a reported row for the module it imports, filed in the PR's touch "
+            f'notice for the foundations owner to build (see {TABLE}, "What is not a foundation")'
+        )
     if args.owner:
-        print(f"{PREFIX}: {summary}, {refused} would be refused without --owner")
+        print(f"{PREFIX}: {summary}, {refused} would be refused without --owner; {imports}")
         return 0
-    print(f"{PREFIX}: {summary}, {refused} refused")
+    print(f"{PREFIX}: {summary}, {refused} refused; {imports}")
     if reported:
         print(
             f"{PREFIX}: the review gate checks that each reported change follows the pattern already there; one that "
