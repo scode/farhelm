@@ -6216,15 +6216,15 @@ These are presentation facts, not new backend operation state or a timer.
 ## Feedback forwarding
 
 SPEC.md's Feedback section is implemented as one protected UI route on the helm, `POST /api/feedback`, behind the same
-device authentication as every other UI route and absent from the agent request verbs. The UI composes the whole
-submission: the message, the optional contact, the version the sidebar already shows, `desktop` or `web`, and the
-operating system the browser or webview reports. The helm validates the submission against the shared request type and
+device authentication as every other UI route and absent from the agent request verbs. The app composes the whole
+submission: the message, the optional contact, the version the sidebar already shows, `desktop`, and the operating
+system the app was built for (macOS or Linux). The helm validates the submission against the shared request type and
 forwards that type as JSON: it adds nothing, trims nothing, and stores nothing. Forwarding through the helm rather than
-posting from the page keeps the webview and the browser off the internet and gives one place where the feedback
-connection lives. After a successful send the dialog separately remembers or clears the contact through the shared
-preferences row, using the authenticated client's snapshot to seed later dialogs and the existing preference queue to
-write every successful choice; the feedback route still stores nothing. Preference validation uses the same contact cap
-and never includes the contact in a refusal or log.
+posting from the app gives one place where the feedback connection lives. After a successful send the dialog separately
+remembers or clears the contact through the shared preferences row, with a preference write of its own that nothing
+retries; each new dialog starts from the contact in the preferences the helm pushes, so a contact remembered in one
+window seeds the next dialog in every window. The feedback route still stores nothing. Preference validation uses the
+same contact cap and never includes the contact in a refusal or log.
 
 The request type and its caps live in `farhelm-proto`, shared by the UI and the helm, so both enforce the same numbers:
 a message of at most 4,000 characters that is not empty or whitespace-only, a contact of at most 200 characters,

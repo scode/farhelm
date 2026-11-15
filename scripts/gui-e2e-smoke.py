@@ -12,12 +12,12 @@ host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's
 rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
 and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's
 Help menu and SSH help; 46, the session list's order menu; 47, the settings-and-hosts area's host Update, its
-progress, failure and rerun). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
-`hosts/`, `help_menu/tests.rs`); nothing here checks layout or wording beyond the names it clicks. A menu's
-commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's header has
-buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
-order, which is the header's.
+progress, failure and rerun; 48, the other-dialogs area's Send feedback, up to but never including Send). The behavior
+itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`); nothing here
+checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
+(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
+Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -122,6 +122,12 @@ HELP_MENU_SUMMARY = "Farhelm guides and feedback"
 # The SSH help dialog's summary, which the Help menu's SSH item shares as its description: an oracle for the dialog
 # only once the menu has gone (step 45).
 SSH_HELP_SUMMARY = "Start a host's SSH connections yourself"
+
+# The feedback dialog's footer note before anything was sent: text only the open dialog draws (step 48).
+FEEDBACK_NOTE = "Nothing is sent until you press Send"
+
+# The feedback dialog's contact reuse choice, drawn only while the contact field is not blank (step 48).
+FEEDBACK_REUSE = "Re-use for future feedback"
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -977,14 +983,14 @@ class Smoke(unittest.TestCase):
         """The rail foot's "?" button is the app's way into help, and SPEC.md's "SSH needs 2FA?" item opens SSH help,
         which, like every dialog the menu opens, hands focus back to the "?" button when it closes (the old app returned
         focus to its Help toggle). The step seeds and touches no session and opens no link, so nothing leaves the
-        machine. Specified: a click on the "?" button opens the menu with focus on its first item, Chat on Discord;
+        machine. Specified: a click on the "?" button opens the menu with focus on its first item, Send feedback;
         choosing SSH needs 2FA? closes the menu and opens SSH help; Escape closes SSH help with focus on the "?" button.
         The menu's summary and then the dialog's are the oracles for open and closed."""
         self.assertNotIn(HELP_MENU_SUMMARY, self.ok("snapshot"), "premise: the Help menu is not open")
         self.ok("click", "id:app-help-toggle")
         self.ok("wait", "--text", HELP_MENU_SUMMARY)
         self.assertRegex(
-            self.ok("snapshot", "-i"), r'menuitem "Chat on Discord" \[focused\]', "focus starts on the first item"
+            self.ok("snapshot", "-i"), r'menuitem "Send feedback" \[focused\]', "focus starts on the first item"
         )
         self.ok("click", "id:help-menu-ssh-help")
         self.ok("wait", "--gone", HELP_MENU_SUMMARY)
@@ -1181,6 +1187,33 @@ class Smoke(unittest.TestCase):
                     raise
                 print(f"gui-e2e-smoke: step 47 left host {host} ({destination}) behind: {error}", file=sys.stderr)
 
+    # ---- The other-dialogs area's Send feedback (48) ----------------------------------------------------------------
+
+    # NOTE: This step never presses Send. Nothing carries a stand-in endpoint into the app's embedded helm, so a Send
+    # here would post real feedback to the project's endpoint. The send and its outcomes are covered in process
+    # (`crates/gui/farhelm-gui/src/feedback/tests.rs`), and the helm's forwarding by its own tests against a stand-in.
+
+    def test_48_send_feedback_opens_from_the_help_menu_and_cancel_returns_to_the_button(self) -> None:
+        """SPEC.md's Send feedback is the Help menu's first item, and its dialog is how a user reaches the maintainer
+        privately; closing it, like every dialog the menu opens, hands focus back to the "?" button. The step seeds and
+        touches no session, never presses Send and opens no link, so nothing leaves the machine. Specified: choosing
+        Send feedback from the menu opens the dialog without "Re-use for future feedback"; once a message and a
+        contact are typed, the contact no longer blank, it appears (the snapshot shows no field's text, so Re-use is
+        the oracle that the contact took the typing); Cancel closes the dialog with focus on the "?" button. The
+        footer's note is the oracle for open and closed, since only the open dialog draws it."""
+        self.assertNotIn(FEEDBACK_NOTE, self.ok("snapshot"), "premise: the feedback dialog is not open")
+        self.ok("click", "id:app-help-toggle")
+        self.ok("wait", "--text", HELP_MENU_SUMMARY)
+        self.ok("click", "id:help-menu-send-feedback")
+        self.ok("wait", "--gone", HELP_MENU_SUMMARY)
+        self.ok("wait", "--text", FEEDBACK_NOTE)
+        self.assertNotIn(FEEDBACK_REUSE, self.ok("snapshot"), "premise: no contact is remembered, so no Re-use")
+        self.ok("fill", "id:feedback-message", "Smoke test feedback, never sent")
+        self.ok("fill", "id:feedback-contact", "smoke@example.invalid")
+        self.ok("wait", "--text", FEEDBACK_REUSE)
+        self.ok("click", "id:feedback-cancel")
+        self.ok("wait", "--gone", FEEDBACK_NOTE)
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
 # OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived

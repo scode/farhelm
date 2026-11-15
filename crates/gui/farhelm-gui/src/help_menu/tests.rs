@@ -110,20 +110,24 @@ fn open_menu(cx: &mut VisualTestContext) {
 
 // ---- The order of the items ----------------------------------------------------------------------------------------
 
-/// SPEC.md fixes the menu's order ("in order: ... Chat on Discord, Documentation, ..., Release notes, SSH needs 2FA?",
-/// "Announcements appears directly after Release notes", "Check for updates last"), and the Linux-only notices item has
-/// no place in SPEC.md, so it goes at the very end where it moves nothing else. An item out of place is a menu the
-/// documentation no longer describes. Specified, for all eight combinations: Discord, Documentation, Release notes, SSH
-/// help always, in that order; a shown announcement adds Announcements right after Release notes; an updater adds Check
-/// for updates after the fixed items; Linux adds Open-Source Notices after everything, including after Check for
-/// updates.
+/// SPEC.md fixes the menu's order ("in order: **Send feedback**, **Chat on Discord**, **Documentation**, ...,
+/// **Release notes**, **SSH needs 2FA?**", "Announcements appears directly after Release notes", "Check for updates
+/// last"), and the Linux-only notices item has no place in SPEC.md, so it goes at the very end where it moves nothing
+/// else. An item out of place is a menu the documentation no longer describes. Specified, for all eight combinations:
+/// Send feedback, Discord, Documentation, Release notes, SSH help always, in that order, Send feedback first; a shown
+/// announcement adds Announcements right after Release notes; an updater adds Check for updates after the fixed items;
+/// Linux adds Open-Source Notices after everything, including after Check for updates.
 #[test]
 fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last() {
     for updater in [false, true] {
         for announced in [false, true] {
             for linux in [false, true] {
-                let mut expected =
-                    vec![Item::ChatOnDiscord, Item::Documentation, Item::ReleaseNotes];
+                let mut expected = vec![
+                    Item::SendFeedback,
+                    Item::ChatOnDiscord,
+                    Item::Documentation,
+                    Item::ReleaseNotes,
+                ];
                 if announced {
                     expected.push(Item::Announcements);
                 }
@@ -172,7 +176,9 @@ fn the_help_button_sits_below_the_gear_with_its_name_and_help(cx: &mut TestAppCo
     );
     assert_eq!(
         hover_help(cx, BUTTON_ID).as_deref(),
-        Some("Help: open the documentation or release notes, chat on Discord, or get SSH 2FA help")
+        Some(
+            "Help: send feedback, open the documentation or release notes, chat on Discord, or get SSH 2FA help"
+        )
     );
 }
 
@@ -185,7 +191,7 @@ fn the_help_button_sits_below_the_gear_with_its_name_and_help(cx: &mut TestAppCo
 /// button's `aria-expanded` wiring is the one every expanded button shares. Specified: with focus away from the `?`
 /// button, a click on it opens the menu beside it (its left edge right of the button's right edge), headed "Help" over
 /// "Farhelm guides and feedback", its items the ones [`items`] gives for this platform without an updater, in that
-/// order, and focus starts on the first; Down moves focus to the second; Escape closes the menu with
+/// order, and focus starts on the first, Send feedback; Down moves focus to the second; Escape closes the menu with
 /// focus on the `?` button.
 #[gpui::test]
 fn the_menu_opens_beside_the_button_and_escape_returns_focus_to_it(cx: &mut TestAppContext) {
@@ -213,9 +219,9 @@ fn the_menu_opens_beside_the_button_and_escape_returns_focus_to_it(cx: &mut Test
         "the menu is headed Help over its summary: {header:?}"
     );
     assert_eq!(drawn_items(cx), expected(false));
-    assert_eq!(focused_id(cx).as_deref(), Some("help-menu-discord"));
+    assert_eq!(focused_id(cx).as_deref(), Some("help-menu-send-feedback"));
     test_support::keys(cx, "down");
-    assert_eq!(focused_id(cx).as_deref(), Some("help-menu-documentation"));
+    assert_eq!(focused_id(cx).as_deref(), Some("help-menu-discord"));
     test_support::keys(cx, "escape");
     assert!(!any_open(cx), "Escape closed the menu");
     assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
@@ -277,7 +283,7 @@ fn ssh_help_opens_from_the_menu_and_returns_focus_to_the_button(cx: &mut TestApp
     cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
     test_support::check(cx);
     open_menu(cx);
-    test_support::keys(cx, "down down down");
+    test_support::keys(cx, "down down down down");
     assert_eq!(focused_id(cx).as_deref(), Some("help-menu-ssh-help"));
     test_support::keys(cx, "enter");
     assert!(node(&frame(cx), MENU).is_none(), "the menu closed");
@@ -289,6 +295,35 @@ fn ssh_help_opens_from_the_menu_and_returns_focus_to_the_button(cx: &mut TestApp
     );
     test_support::keys(cx, "escape");
     assert!(!any_open(cx), "Escape closed SSH help");
+    assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
+}
+
+/// SPEC.md's Send feedback opens the feedback dialog, and the old app returned focus to its Help toggle when it closed,
+/// whether it was dismissed or closed itself after a send. (Closing the menu has already put focus on the button when
+/// the dialog opens, so this pins where focus ends up; the dialog's own tests open it with focus elsewhere.) Specified:
+/// choosing Send feedback, the menu's first item, from the keyboard closes the menu and opens the dialog with focus
+/// inside it (in its message field, which the dialog's own tests pin); Escape closes the dialog and leaves focus on the
+/// `?` button.
+#[gpui::test]
+fn send_feedback_opens_the_dialog_and_returns_focus_to_the_button(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot());
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    open_menu(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("help-menu-send-feedback"));
+    test_support::keys(cx, "enter");
+    assert!(node(&frame(cx), MENU).is_none(), "the menu closed");
+    assert!(
+        node(&frame(cx), "feedback").is_some(),
+        "the feedback dialog opened"
+    );
+    assert_ne!(
+        focused_id(cx).as_deref(),
+        Some(BUTTON_ID),
+        "focus is inside the dialog"
+    );
+    test_support::keys(cx, "escape");
+    assert!(!any_open(cx), "Escape closed the dialog");
     assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
 }
 
@@ -307,7 +342,7 @@ fn check_for_updates_is_offered_only_with_an_updater_and_asks_it_to_check(cx: &m
     assert_eq!(
         hover_help(cx, BUTTON_ID).as_deref(),
         Some(
-            "Help: open the documentation or release notes, chat on Discord, get SSH 2FA help, or check for updates"
+            "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or check for updates"
         )
     );
     open_menu(cx);
