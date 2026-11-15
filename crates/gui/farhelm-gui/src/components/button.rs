@@ -141,6 +141,11 @@ pub enum Tier {
     /// The shown terminal's tab is drawn through [`Button::pressed`], the accent fill with the inverse ink
     /// (`.tab.selected`).
     TerminalTab,
+    /// `.tab-close`: the × beside a shell tab in the session view's tab strip, a ghost in a tight box (`padding: 3px 7px`
+    /// at 12 pixels) that never shrinks, in the quiet `--fg-1` ink that turns `--danger` on the subdued red fill
+    /// (`--danger-bg-dim`) under the pointer, warning before a press that ends a shell. Busy
+    /// ([`Button::busy`]) while its tab closes.
+    TerminalTabClose,
     /// `.host-color-choice`: one of the host settings' color choices, a 26-pixel circle with 3 pixels around its
     /// content (the color's swatch), no fill or edge at rest and no hover fill. Chosen, it takes the accent fill inside
     /// an edge in the inverse ink.
@@ -163,6 +168,8 @@ const QUICK_MARK_PAD: (f32, f32) = (10., 5.);
 const TUNNEL_PAD: (f32, f32) = (2., 4.);
 /// The [`Tier::TerminalTab`] box's padding, vertical then horizontal (`.tab`: `3px 10px`).
 const TERMINAL_TAB_PAD: (f32, f32) = (3., 10.);
+/// The [`Tier::TerminalTabClose`] box's padding, vertical then horizontal (`.tab-close`: `3px 7px`).
+const TERMINAL_TAB_CLOSE_PAD: (f32, f32) = (3., 7.);
 /// The [`Tier::NumberKey`] box's padding on every side.
 const NUMBER_KEY_PAD: f32 = 4.;
 /// The [`Tier::FieldRemove`] box: `.templates-remove`'s `width: 30px; height: 34px`.
@@ -526,6 +533,7 @@ impl Button {
             | Tier::RowMenu { on_fill: false }
             | Tier::FieldRemove
             | Tier::TerminalTab => (None, palette.control_hover, None, palette.fg_1),
+            Tier::TerminalTabClose => (None, palette.danger_bg_dim, None, palette.fg_1),
             // Returned above, before the pressed looks.
             Tier::QuickMark { .. } | Tier::NumberKey { .. } => {
                 (None, palette.control_hover, None, palette.fg_2)
@@ -641,6 +649,7 @@ impl RenderOnce for Button {
             Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
             Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
             Tier::TerminalTab => (px(TERMINAL_TAB_PAD.0), px(TERMINAL_TAB_PAD.1)),
+            Tier::TerminalTabClose => (px(TERMINAL_TAB_CLOSE_PAD.0), px(TERMINAL_TAB_CLOSE_PAD.1)),
             Tier::TemplateRow => (px(TEMPLATE_ROW_PAD.0), px(TEMPLATE_ROW_PAD.1)),
             Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
             Tier::Waiting => (px(WAITING_PAD.0), px(WAITING_PAD.1)),
@@ -682,6 +691,7 @@ impl RenderOnce for Button {
             | Tier::ColorChoice
             | Tier::Tunnel
             | Tier::TerminalTab
+            | Tier::TerminalTabClose
             | Tier::HostUpdate { .. }
             | Tier::Waiting
             | Tier::RowMenu { on_fill: false } => palette.accent,
@@ -703,7 +713,10 @@ impl RenderOnce for Button {
         let square = self.side.is_some()
             || matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
         // `.btn.host-update-button`'s `flex: 0 0 auto`: the row's name gives way first.
-        let rigid = matches!(self.tier, Tier::HostUpdate { .. } | Tier::TerminalTab);
+        let rigid = matches!(
+            self.tier,
+            Tier::HostUpdate { .. } | Tier::TerminalTab | Tier::TerminalTabClose
+        );
         let enabled = !self.disabled;
         // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
         let active = enabled && !self.busy;
@@ -771,6 +784,11 @@ impl RenderOnce for Button {
             .text_color(theme::color(text))
             // A transparent edge where a tier has none keeps every tier the same size.
             .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)))
+            // `.tab-close:disabled { opacity: 0.5 }`: a × whose tab is closing, or that cannot be pressed, reads so.
+            .when(
+                self.tier == Tier::TerminalTabClose && (self.busy || self.disabled),
+                |button| button.opacity(0.5),
+            )
             // `.session-tunnel-toggle`: `gap: 3px`, `font-size: 11px`, `line-height: 1.4`, `border-radius: 8px`.
             .when(self.tier == Tier::Tunnel, |button| {
                 button
@@ -862,7 +880,9 @@ impl RenderOnce for Button {
         }
         if active {
             // The field's ✕ also turns red under the pointer (`.templates-remove:hover { color: var(--danger) }`).
-            let hover_ink = (self.tier == Tier::FieldRemove).then_some(palette.danger);
+            // A tab's × does too (`.tab-close:hover`).
+            let hover_ink = matches!(self.tier, Tier::FieldRemove | Tier::TerminalTabClose)
+                .then_some(palette.danger);
             button = button.cursor_pointer().hover(move |style| {
                 let style = style.bg(theme::color(hover_fill));
                 match hover_ink {

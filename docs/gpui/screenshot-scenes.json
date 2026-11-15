@@ -653,6 +653,25 @@
       ]
     },
     {
+      "id": "app-terminal-tabs",
+      "title": "Two shell tabs opened with New terminal, the agent terminal shown, and Terminal 1's hover help",
+      "reference": null,
+      "mockup": false,
+      "start": ["--sessions", "1"],
+      "steps": [
+        ["click", "text:Fixture 1"],
+        ["terminal-text", "--wait", "FAKE-AGENT READY"],
+        ["click", "id:session-terminal-add"],
+        ["wait", "--text", "Terminal 1"],
+        ["click", "id:session-terminal-add"],
+        ["wait", "--text", "Terminal 2"],
+        ["click", "id:session-terminal-tab-agent"],
+        ["terminal-text", "--wait", "FAKE-AGENT READY"],
+        ["hover", "text:Terminal 1"],
+        ["wait", "--idle"]
+      ]
+    },
+    {
       "id": "app-help-menu",
       "title": "The Help menu, opened from the host rail foot's ? button",
       "reference": "help-menu",

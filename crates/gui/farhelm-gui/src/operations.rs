@@ -156,6 +156,14 @@ pub enum Work {
     /// (`hosts::uninstall`). Not supersedable: the plan is one-use. It changes the host registry, since the run's last
     /// step forgets the host.
     UninstallHost,
+    /// Opening a terminal tab in a session (`POST /api/sessions/{id}/tabs`), on the session's own key, so an open
+    /// lifecycle request refuses it and it holds the session's lifecycle actions while it runs (SPEC.md: a pending
+    /// request refuses "another lifecycle action, New terminal or Clone on that session"). Not supersedable: each press
+    /// opens one shell.
+    TabOpen,
+    /// Closing one terminal tab (`DELETE /api/sessions/{id}/tabs/{tab}`), on that tab's own key ([`OpKey::tab`]), so
+    /// sibling tabs close side by side and a close holds none of the session's lifecycle actions. Not supersedable.
+    TabClose,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -202,6 +210,8 @@ impl Work {
             Work::SendFeedback => false,
             Work::TrashDelete => false,
             Work::UninstallHost => false,
+            Work::TabOpen => false,
+            Work::TabClose => false,
         }
     }
 
@@ -231,6 +241,8 @@ impl Work {
             Work::SendFeedback => false,
             Work::TrashDelete => false,
             Work::UninstallHost => true,
+            Work::TabOpen => false,
+            Work::TabClose => false,
         }
     }
 }
@@ -264,6 +276,9 @@ enum Key {
     Trash(String),
     /// A named credential of the helm's catalog, by its name, which the helm never changes after creation.
     Credential(String),
+    /// One terminal tab of a session, by the session's id and the tab's: apart from the session's own key and from its
+    /// sibling tabs', so a tab closes beside the others and never makes the session's lifecycle actions busy.
+    Tab(String, String),
 }
 
 impl OpKey {
@@ -330,6 +345,12 @@ impl OpKey {
     /// not created yet takes the key of the name it is being created under, which the helm keeps unique across kinds.
     pub fn credential(name: &str) -> OpKey {
         OpKey(Key::Credential(name.to_owned()))
+    }
+
+    /// One terminal tab of a session, by the id the helm serves the session under and the tab's id
+    /// ([`Work::TabClose`]).
+    pub fn tab(session: &str, tab: &str) -> OpKey {
+        OpKey(Key::Tab(session.to_owned(), tab.to_owned()))
     }
 }
 

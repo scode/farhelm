@@ -68,9 +68,13 @@ fn prefix(work: Work) -> Option<&'static str> {
         Work::Replace => Some("Replace: "),
         Work::Seen => Some("Seen: "),
         Work::Restart => Some("Restart: "),
+        // The old app's tab error line ("Open tab: " and the supervisor's words: a vanished folder, a shell that died
+        // at once). A new tab is the session's own work, so its refusal shows where the session's others do.
+        Work::TabOpen => Some("Open tab: "),
         // A probe, a setup, a host's removal, Update and uninstall are host work, never on a session's key, so no row
         // line ever names them; tunnel work has a key of its own, a launch is the launcher's, on a launch key, and an
-        // approval answer is on its request's key, whose card shows its refusal.
+        // approval answer is on its request's key, whose card shows its refusal. A tab's close is on the tab's key,
+        // whose refusal the tab strip shows.
         Work::Rename
         | Work::Delete(_)
         | Work::Save
@@ -84,7 +88,8 @@ fn prefix(work: Work) -> Option<&'static str> {
         | Work::Answer
         | Work::UpdateHost
         | Work::UninstallHost
-        | Work::TrashDelete => None,
+        | Work::TrashDelete
+        | Work::TabClose => None,
     }
 }
 
@@ -191,7 +196,9 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::Answer
         | Work::UpdateHost
         | Work::UninstallHost
-        | Work::TrashDelete => None,
+        | Work::TrashDelete
+        | Work::TabOpen
+        | Work::TabClose => None,
     }
 }
 
