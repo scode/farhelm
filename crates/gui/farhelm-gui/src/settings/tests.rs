@@ -303,7 +303,8 @@ fn escape_and_both_close_controls_return_focus_to_the_gear(cx: &mut TestAppConte
 /// The frame must not move when the user switches sections (SPEC.md: "The dialog keeps one height across sections,
 /// capped by the window"); a section change that resized it would jump Close away from under the pointer. Specified: in
 /// a window 1000 pixels tall, Settings is 760 by 780 pixels and stays exactly where it was, its header close control
-/// too, when Hosts is shown; in a window 600 pixels tall it is 48 pixels shorter than the window (the frame's margins).
+/// too, when Hosts is shown; in a window 600 pixels tall it is 60 pixels shorter than the window (the frame's margins,
+/// 5% of the height above and below, at least 24 pixels each).
 #[gpui::test]
 fn the_frame_keeps_one_size_across_sections_capped_by_the_window(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -329,7 +330,9 @@ fn the_frame_keeps_one_size_across_sections_capped_by_the_window(cx: &mut TestAp
 
     cx.simulate_resize(size(px(1000.), px(600.)));
     settle(cx);
-    assert_eq!(bounds(cx, "settings").size.height, px(600. - 48.));
+    // Capped by the window less the dialog margin above and below: 5% of the height, at least 24 pixels
+    // (`max(24px, 5dvh)` in the old stylesheet), so 30 pixels each in a 600-pixel window.
+    assert_eq!(bounds(cx, "settings").size.height, px(600. - 2. * 30.));
 }
 
 /// SPEC.md, "Reaching everything by keyboard": a control Tab reaches must come into view, and in a short window the

@@ -18,11 +18,11 @@ use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::dialog::Opened;
-use super::dialog_tests::{any_open, open_header, painted, push, template};
+use super::dialog_tests::{open_header, painted, push, template};
 use super::fields::Draft;
 use crate::components::EditCommand;
 use crate::focus;
-use crate::test_support::{self, click, frame, keys, settle};
+use crate::test_support::{self, any_open, click, frame, keys, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 

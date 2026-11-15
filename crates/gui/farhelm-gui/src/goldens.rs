@@ -2085,6 +2085,12 @@ fn row_delete_confirmation_setup(state: &SceneState, _: &mut Window, cx: &mut Ap
     );
 }
 
+/// The sequence pill fades in when it appears (`components::entrance`); with motion reduced it is drawn at once, so the
+/// picture is the settled pill rather than the fade's first, transparent frame.
+fn sequence_pill_setup(_: &SceneState, _: &mut Window, cx: &mut App) {
+    ticker::set_reduced_motion(true, cx);
+}
+
 /// A pending Delete on the selected row (its spinner and "Stopping agent…" in place of the title, in the fill's ink)
 /// and a refused one on the idle row with new output (the helm's words under the row, in red). Motion is reduced, so
 /// the spinner holds its first step and the picture can settle. The refusal is answered before the pending Delete is
@@ -3789,7 +3795,7 @@ static SCENES: &[Scene] = &[
         name: "sequence-pill",
         size: (680., 240.),
         draw: sequence_pill,
-        setup: no_setup,
+        setup: sequence_pill_setup,
     },
     Scene {
         name: "terminal-delete-scrim",

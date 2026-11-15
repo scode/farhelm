@@ -180,7 +180,9 @@ impl DialogFrame {
         self
     }
 
-    /// The frame's width in place of the ordinary dialog width, still never wider than the window.
+    /// The frame's width in place of the ordinary dialog width. Like the ordinary width, it is capped to the window less
+    /// the old backdrop's side margins ([`metrics::DIALOG_SIDE_MARGIN`] each side), so a wide dialog narrows in a narrow
+    /// window rather than running off its edges.
     pub fn width(mut self, width: Pixels) -> Self {
         self.width = Some(width);
         self
@@ -244,7 +246,21 @@ impl RenderOnce for DialogFrame {
                 metrics::DIALOG_FOOTER_PAD,
             )
         };
-        let max_height = window.viewport_size().height - metrics::DIALOG_VERTICAL_MARGIN * 2.;
+        let viewport = window.viewport_size();
+        // `max-height: calc(100dvh - 2 * var(--dialog-vertical-margin))`, with the margin `max(24px, 5dvh)`: on a tall
+        // window a dialog that fills the cap (Settings, say) keeps 5% of the height above and below it, not a flat 24
+        // pixels. (The old launcher's backdrop set a flat 24 pixels in windows at least 1000 pixels wide; that
+        // exception is the launcher's to restore, not every dialog's. The old `max-width: 620px` rule, which shrank the
+        // margin to `max(12px, 3dvh)`, never applies: the window is at least 720 pixels wide.)
+        let vertical_margin = metrics::DIALOG_VERTICAL_MARGIN.max(viewport.height * 0.05);
+        let max_height = viewport.height - vertical_margin * 2.;
+        // The old `width: min(Npx, 100%)` inside a backdrop padded 20 pixels each side. The layer manager centers a
+        // dialog without padding or constraining it, so `max_w_full` here would be relative to a parent as wide as the
+        // card itself and cap nothing; the frame caps its own width against the window instead.
+        let width = self
+            .width
+            .unwrap_or(metrics::DIALOG_WIDTH)
+            .min(viewport.width - metrics::DIALOG_SIDE_MARGIN * 2.);
 
         let mut heading = div().flex_1().min_w_0();
         heading = match self.heading {
@@ -415,8 +431,7 @@ impl RenderOnce for DialogFrame {
             .aria_label(name)
             .flex()
             .flex_col()
-            .w(self.width.unwrap_or(metrics::DIALOG_WIDTH))
-            .max_w_full()
+            .w(width)
             .when_some(self.fixed_height, |frame, height| frame.h(height))
             .max_h(max_height)
             .overflow_y_scroll()
