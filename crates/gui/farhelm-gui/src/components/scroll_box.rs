@@ -24,7 +24,9 @@
 //!   also takes Page Up, Page Down, Home and End from a control inside it
 //!   ([`scroll_from_controls`](super::scroll_from_controls)), which the stop never does.
 //!
-//! What both share, through [`scroll_stop`](super::scroll_stop):
+//! What both share, through [`scroll_stop`](super::scroll_stop), which takes its Tab reach, ring and role from
+//! [`focus_stop`](super::focus_stop), the stop without the keys that a place where focus rests (a session pane's
+//! interrupted card) uses alone:
 //!
 //! - **The keys**, as the old app's browser scrolled a focused region: Up and Down by a line, Page Up and Page Down and
 //!   Space by a page, Home and End to either end. A line is 40 pixels and a page seven eighths of the visible height,

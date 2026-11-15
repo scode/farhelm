@@ -165,6 +165,10 @@ Extension points: reported, the whole directory. An area may add, without a requ
   `IconButton::keeps_focus_on_press`, on Linux only, while Tab still reaches them (decided with the migration's
   orchestrator on 2026-11-14);
 - or an additive builder method on an existing control, built the way its siblings are;
+- or a keyboard stop for a place where focus rests, through `focus_stop` in `components/mod.rs` with a focus handle the
+  area owns, a role, a label and a `Ring`, as the session pane's interrupted card is to be: the scroll stop's ring, role
+  and Tab reach without its keys, so the area can make the handle home before the stop is first drawn (a region that
+  scrolls takes a `ScrollBox` or a dialog's `DialogFrame::scroll_stop` instead);
 - or keyboard scrolling for a dialog's notices region that holds a question, through `DialogFrame::notices_stop` and a
   label: the region is a stop of its own whenever it holds no tab stop, as a body given `DialogFrame::scroll_stop` is,
   and Page Up, Page Down, Home and End scroll it from a control inside it (`scroll_from_controls`), as the old Trash
@@ -176,8 +180,8 @@ hover help and role rule, decided by the migration's orchestrator on 2026-11-14:
 `menu_separator.rs` (`menu_separator`) and `spinner.rs` (`Spinner` and `spinner_icon`) are three.
 
 `HoverHelp`, `with_hover_help`, `activate_on_enter_or_space`, `activate_on_click`, `enter_choice`, `on_enter_choice`,
-`scroll_stop` and `scroll_from_controls` in `components/mod.rs` are the layer's rules: a change to them is a request. An
-element that fades in as it appears is drawn through `components::entrance`, from the area's own code, and
+`focus_stop`, `scroll_stop` and `scroll_from_controls` in `components/mod.rs` are the layer's rules: a change to them is
+a request. An element that fades in as it appears is drawn through `components::entrance`, from the area's own code, and
 `components/transition.rs` (tested in `components/tests/transition.rs`), the one owner of one-shot transitions, is a
 rule too: a change to it, a new transition included, is a request.
 
