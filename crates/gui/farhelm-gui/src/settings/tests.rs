@@ -2801,10 +2801,11 @@ fn busy_alert() -> Option<(Option<Role>, Option<String>)> {
 /// Why this matters: every Settings save holds the preference row's key and the operation store queues nothing, so a
 /// press that meets another save sends nothing; the old app queued such a press, and one that silently does nothing
 /// reads as a broken control. Specified: with one switch's save in flight, a click on another switch sends nothing,
-/// leaves it showing the stored value and draws "Not saved: another save was in progress. Try again." as an alert under
-/// it; a click on Appearance's Dark moves the line under the group, and a click on Terminal's second link choice under
-/// that group; back in Sessions, with the other switch drawn, its line is gone; a second click on the saving switch
-/// moves the line there; once the save is answered, a click on the other switch sends its save and no line is left.
+/// leaves it showing the stored value and draws the busy line ([`super::Refused::WORDS`], "Not saved: another
+/// operation was in progress. Try again.") as an alert under it; a click on Appearance's Dark moves the line under the
+/// group, and a click on Terminal's second link choice under that group; back in Sessions, with the other switch
+/// drawn, its line is gone; a second click on the saving switch moves the line there; once the save is answered, a
+/// click on the other switch sends its save and no line is left.
 #[gpui::test]
 fn a_press_during_another_settings_save_says_why_it_sent_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());

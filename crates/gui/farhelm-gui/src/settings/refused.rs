@@ -5,9 +5,10 @@
 //! dialog holds that host's, so a press that meets another save on its key sends nothing. The old app never let such a
 //! press look like it worked: Settings queued the newest choice per field, and the host dialog disabled its controls
 //! while a write ran. Here the control says why in its own failure line's place ([`Refused::line`], worded
-//! [`Refused::WORDS`]), rather than every control on the key being drawn unavailable for the few milliseconds each save
-//! takes. The migration's orchestrator asked for one of the two on 2026-11-14; this area chose the line, which needs no
-//! change to the shared controls and keeps focus where the user put it.
+//! [`Refused::WORDS`]: "Not saved: " and the operation store's shared reason, [`NotStarted::BUSY_REASON`]), rather than
+//! every control on the key being drawn unavailable for the few milliseconds each save takes. The migration's
+//! orchestrator asked for one of the two on 2026-11-14; this area chose the line, which needs no change to the shared
+//! controls and keeps focus where the user put it.
 //!
 //! One [`Refused`] per view (the Settings dialog, a checkout field, the ntfy form, a host's dialog) remembers the one
 //! control whose press was refused last, so the line explains only the latest refused press. It stays until a save from
@@ -15,8 +16,11 @@
 //! ends long before that, so the words are in the past tense: they say what happened to the press, not what is running
 //! now.
 //!
-//! The words are this area's: [`NotStarted::Busy`] carries no wording of its own, so the line says what the user can do,
-//! not which work held the key.
+//! Only the lead-in is this area's. The reason is the store's, which every area gives after a lead-in of its own (the
+//! module docs of [`crate::operations`]), so a press refused this way reads the same in Settings as anywhere else. It
+//! names no work: [`NotStarted::Busy`] carries the work holding the key, not the press refused, and the line says what
+//! the user can do rather than what held the key. The split was decided by the migration's orchestrator on 2026-11-14;
+//! until then this area worded its own reason ("another save was in progress").
 
 use gpui::SharedString;
 
@@ -27,10 +31,11 @@ use crate::operations::NotStarted;
 pub(crate) struct Refused(Option<SharedString>);
 
 impl Refused {
-    /// What the line says. Also the words of the host setup and host removal questions' permanent answers when their
-    /// preference save meets another (`hosts::setup` and `hosts::remove`), so one refusal reads the same wherever it is
-    /// shown.
-    pub(crate) const WORDS: &str = "Not saved: another save was in progress. Try again.";
+    /// What the line says: this area's lead-in for a save, "Not saved: ", and then [`NotStarted::BUSY_REASON`], written
+    /// out as one literal and held to the store's reason by a test. Also the words of the host setup and host removal
+    /// questions' permanent answers when their preference save meets another (`hosts::setup` and `hosts::remove`), so
+    /// one refusal reads the same wherever it is shown.
+    pub(crate) const WORDS: &str = "Not saved: another operation was in progress. Try again.";
 
     /// Record how a press on `control` (its element id) went: a started save clears the line, a busy key moves it to
     /// `control`, and any other refusal (no UI session, a path that does not build) leaves it as it is, for the caller
@@ -79,6 +84,18 @@ impl Refused {
 mod tests {
     use super::*;
     use crate::operations::Work;
+
+    /// The busy reason is the operation store's so that every area says it the same way, and [`Refused::WORDS`] spells
+    /// it out as a literal, which would drift from the store's unseen without this. Specified: the words are the
+    /// lead-in `Not saved: ` followed by [`NotStarted::BUSY_REASON`], nothing more. The lead-in is typed out here
+    /// rather than shared, so that changing it fails the test too.
+    #[test]
+    fn the_words_are_the_lead_in_then_the_stores_reason() {
+        assert_eq!(
+            Refused::WORDS,
+            format!("Not saved: {}", NotStarted::BUSY_REASON)
+        );
+    }
 
     /// The line must explain only the latest refused press and go once the key has proved free, or it would blame a
     /// save long finished. Specified: a press refused by its own draft shows its line there alone; a busy refusal on

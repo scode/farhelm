@@ -38,12 +38,12 @@
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
 //! on the preference row's key at a time, and every Settings save holds that key, so a press on any control while any
 //! Settings save is in flight sends nothing: the control goes on showing what it showed, with a line beside it saying
-//! that it was not saved because another save was in progress ([`refused`]), and the next press after the reply acts. On the radios (Appearance,
-//! Terminal's link choice) an arrow press moves focus before it reports the choice, so a refused arrow press still
-//! moves focus while the choice stays where it was. The helm is embedded and answers a preference write in
-//! milliseconds, so the window in which a press is refused this way is that short. The migration's orchestrator
-//! accepted the refusal on 2026-11-14, to be revisited only if a user meets it, and asked the same day that it say why;
-//! closing it would take a key per field or a queue, both changes to the operation store, not here.
+//! that it was not saved because another operation was in progress ([`refused`]), and the next press after the reply
+//! acts. On the radios (Appearance, Terminal's link choice) an arrow press moves focus before it reports the choice, so
+//! a refused arrow press still moves focus while the choice stays where it was. The helm is embedded and answers a
+//! preference write in milliseconds, so the window in which a press is refused this way is that short. The migration's
+//! orchestrator accepted the refusal on 2026-11-14, to be revisited only if a user meets it, and asked the same day
+//! that it say why; closing it would take a key per field or a queue, both changes to the operation store, not here.
 //!
 //! NOTE: Not ported yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The one-pane layout at 620 pixels
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A

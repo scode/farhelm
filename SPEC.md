@@ -2358,8 +2358,10 @@ sandboxes are always created with a fixed 30-minute idle timeout. The creation s
 sessions and explains that timeout. The **Terminal** section chooses whether web links open in Farhelm without passing
 the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter two
 choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
-choice is the helm's and takes effect in every mounted terminal immediately. In the desktop app, the **Terminal**
-section also has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
+choice is the helm's and takes effect in every mounted terminal immediately. In the Mac app, where tunnels open (see
+[Terminal experience](#terminal-experience)), the **Terminal** section also has tunnel consent; other desktop apps,
+which open no tunnels, leave it out (decided by the migration's orchestrator on 2026-11-14). In every desktop app, the
+**Terminal** section also has a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
 outside macOS). It defaults to `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables
 opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in the
 shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`, `txt`,
