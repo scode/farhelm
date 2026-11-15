@@ -111,7 +111,10 @@
 //! ([`open_new`], which the quick switcher's "New session named X" row and the New shortcut share): the sidebar's one
 //! filled control, drawn disabled while New is unavailable (a launch pending, a host change in flight).
 //!
-//! NOTE: Not ported yet, each with the area that brings it: compact rows and the order menu's Compact, marking, pins,
+//! The order menu also holds Compact, the helm-wide density preference: with it on, every row is one line
+//! ([`row`]'s "Compact rows"), read once per frame like the steps of the animations.
+//!
+//! NOTE: Not ported yet, each with the area that brings it: marking, pins,
 //! the row menu's other commands, and the rail's host status, the foot's controls other than Hosts and Settings, Add
 //! host and expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
 //! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
@@ -139,6 +142,9 @@ pub(crate) mod stop;
 /// The home-folding rule the rows' last line uses, shared with the details bar's directory field so the two fold a path
 /// alike.
 pub(crate) use row::abbreviate_home;
+
+#[cfg(test)]
+mod compact_tests;
 
 #[cfg(test)]
 pub(crate) mod lifecycle_tests;
@@ -196,7 +202,8 @@ const ROW_OVERDRAW: f32 = 100.;
 
 /// The height a row the list has not drawn yet is taken to have: about a noncompact row with its status and folder
 /// lines. The list needs an estimate for every row to know how far it can scroll; a row's real height replaces it once
-/// the row is drawn, so the estimate only has to be close.
+/// the row is drawn, so the estimate only has to be close. Compact rows are about two thirds of it, and keep it all the
+/// same: a toggle of the density changes no row's estimate, and the rows drawn after it measure themselves.
 const ROW_HEIGHT_HINT: f32 = 50.;
 
 /// The session list view. The main view holds one for the window's life.
@@ -652,10 +659,12 @@ impl Render for SessionList {
         if any_stamp != self.clock.is_some() {
             self.clock = any_stamp.then(|| ticker::clock(cx));
         }
+        let stored_compact = order::compact_stored(store.read(cx).collections());
         let steps = row::Steps {
             pulse: self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             spinner: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
             now: age::seconds(ticker::wall_now(cx)),
+            compact: self.order_state(cx).read(cx).compact_shown(stored_compact),
         };
         if self.sync_rows(keys, window, cx) {
             cx.notify();
@@ -829,7 +838,10 @@ fn draw_row(
     else {
         return div().into_any_element();
     };
-    let menu = menu::menu_button(shared, weak, key, &title, selected, window, cx);
+    let hover = row::RowHover::of(key, window, cx);
+    // Two of the menu button's reveal reasons, which only the row knows: the pointer over it, focus inside it.
+    let row_active = hover.hovered(cx) || focus.contains_focused(window, cx);
+    let menu = menu::menu_button(shared, weak, key, &title, selected, row_active, window, cx);
     let bell = crate::notices_bell::bell(key, selected, window, cx);
     let collections = store.read(cx).collections();
     let Some(row) = collections.get::<SessionRow>(key) else {
@@ -844,6 +856,7 @@ fn draw_row(
         menu,
         bell,
         focus,
+        hover,
         move |_, cx| selection::choose(&open, cx),
         cx,
     )

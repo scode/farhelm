@@ -31,23 +31,37 @@
 //! and its list and keeps its press from the open control), so the track widens by the bell on that row only and its
 //! title gives way, as the old activity column did with the bell's slot in it.
 //!
+//! **Compact rows.** With the helm-wide compact preference on ([`Steps::compact`]), every row is its first line alone:
+//! no ended line and no last line. SPEC.md, "Session list": "The second line is hidden when the helm-wide compact
+//! preference is on", and "Compact ended rows replace the live dot with a distinct ended-state icon, preserving complete
+//! status details in accessible text and a tooltip". So an ended status draws its mark in the status column
+//! ([`status::EndedGlyph`], named and helped by the complete wording, with no mark-read action: SPEC.md's "Ended icons
+//! do not have the live dot's mark-read action"), and a stale row draws a clock after its title, named by its cause and
+//! helped as the cause is on a noncompact row. What the hidden lines said reaches the row's own hover help and
+//! description instead ([`compact_help`]): the complete ended wording, the cause and the full working directory, which
+//! the old row kept in hidden text inside its button and, for the directory, in its summary card (not ported). The
+//! compact menu item says "with the folder shown on hover", and the help is where the folder shows.
+//!
+//! The row's list item records whether the pointer is over it ([`RowHover`]), for its menu button's reveal
+//! ([`super::menu`]).
+//!
 //! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
-//! start where they did in the old app. Compact rows, the managed checkout's form of the last line and the pin are not
-//! ported yet.
+//! start where they did in the old app. The managed checkout's form of the last line (and its compact mark after the
+//! title) and the pin are not ported yet.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, App, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px,
-    relative,
+    AnyElement, App, Entity, FocusHandle, FontWeight, HoverListenerMode, InteractiveElement,
+    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 
 use super::row_marks::{self, RowMarks};
 use super::selection::Listed;
 use super::status::{self, Badge};
 use super::{age, delete, outcome, replace, replace_yolo, stop};
-use crate::assets;
+use crate::assets::{self, Icon};
 use crate::components::{HoverHelp, ListRow, Role, StatusMark};
 use crate::focus;
 use crate::host_text::{self, HostSentence, HostText};
@@ -60,13 +74,14 @@ pub(crate) const ROW_ID_PREFIX: &str = "session-row-";
 /// The id prefix of a session's list item, the row around the open control; the rest is the session's key.
 pub(crate) const ITEM_ID_PREFIX: &str = "session-item-";
 
-/// The hover group every row's list item forms, so its menu button shows while the pointer is anywhere on the row.
-pub(super) const ROW_GROUP: &str = "session-row";
+/// The id suffix of a compact row's ended mark, after the row's open control id (`session-row-<key>-ended`).
+pub(super) const ENDED_ID_SUFFIX: &str = "-ended";
 
 /// The id suffix of a row's age, after the row's open control id (`session-row-<key>-age`).
 pub(super) const AGE_ID_SUFFIX: &str = "-age";
 
-/// The id suffix of a stale row's cause, after the row's open control id (`session-row-<key>-cause`).
+/// The id suffix of a stale row's cause, after the row's open control id (`session-row-<key>-cause`): the words on a
+/// noncompact row's ended line, and the clock after a compact row's title, so either is found the same way.
 pub(super) const CAUSE_ID_SUFFIX: &str = "-cause";
 
 /// The id suffix of a row's age track, the column the age is right-aligned in (`session-row-<key>-age-track`).
@@ -91,9 +106,43 @@ fn under_title() -> gpui::Pixels {
     (metrics::ROW_SLOT + metrics::ROW_SLOT_GAP) * 2.
 }
 
+/// Whether the pointer is over a row's list item, as the item last reported it: one of its menu button's reveal reasons
+/// ([`super::menu`], "The button's reveal"). Element state under the row's key, so it lasts exactly while the row is
+/// drawn in consecutive frames and a row drawn again starts unhovered, the way the item's own hover bookkeeping does; a
+/// row that scrolls away under a resting pointer cannot leave its button shown. A change redraws the list, which made
+/// it.
+#[derive(Clone)]
+pub(super) struct RowHover(Entity<bool>);
+
+impl RowHover {
+    /// `key`'s row's hover state, made while the row is drawn.
+    pub(super) fn of(key: &str, window: &mut Window, cx: &mut App) -> RowHover {
+        RowHover(window.use_keyed_state(
+            SharedString::from(format!("session-row-hover-{key}")),
+            cx,
+            |_, _| false,
+        ))
+    }
+
+    /// Record that the pointer is over the row (`hovered`) or not; only a change redraws.
+    fn set(&self, hovered: bool, cx: &mut App) {
+        self.0.update(cx, |state, cx| {
+            if *state != hovered {
+                *state = hovered;
+                cx.notify();
+            }
+        });
+    }
+
+    /// Whether the pointer is over the row.
+    pub(super) fn hovered(&self, cx: &App) -> bool {
+        *self.0.read(cx)
+    }
+}
+
 /// What every row of one frame draws from alike: the steps of the list's two animations (the running pulse's, which
-/// only a pulsing status mark uses, and the spinner's, which every pending Delete, Stop and long Replace draws) and
-/// the wall clock's reading the ages are counted from.
+/// only a pulsing status mark uses, and the spinner's, which every pending Delete, Stop and long Replace draws), the
+/// wall clock's reading the ages are counted from, and the density.
 #[derive(Clone, Copy)]
 pub(super) struct Steps {
     pub(super) pulse: u64,
@@ -101,6 +150,9 @@ pub(super) struct Steps {
     /// The viewer's clock in seconds since the epoch ([`age::seconds`] of [`crate::ticker::wall_now`]), read once per
     /// frame so every row's age is counted from the same instant; `None` when it is unusable, and no row draws an age.
     pub(super) now: Option<i64>,
+    /// Whether the rows are compact (see the module docs): the helm-wide preference, or the choice the order menu is
+    /// saving while its write is in flight ([`super::order`]). Read once per frame, so no two rows differ.
+    pub(super) compact: bool,
 }
 
 /// The colors of the text a row draws, which depend on whether the row is the selected one and whether its status is
@@ -142,8 +194,9 @@ impl Inks {
 /// Draw `session`'s row, its animations at the list's `steps`, `menu`, its actions menu button, at its end, and `bell`,
 /// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `focus`
 /// is the row's own focus handle, which the list owns and registers with its list state: the row's item tracks it so it
-/// contains whichever of the row's controls holds focus, and never takes focus itself. `on_open` runs when the user
-/// activates the row.
+/// contains whichever of the row's controls holds focus, and never takes focus itself. `hover` is where the item
+/// records whether the pointer is over it, for the menu button's reveal. `on_open` runs when the user activates the
+/// row.
 #[allow(
     clippy::too_many_arguments,
     reason = "one row's inputs, all drawn from by one function"
@@ -156,23 +209,30 @@ pub(crate) fn row(
     menu: AnyElement,
     bell: Option<AnyElement>,
     focus: &FocusHandle,
+    hover: RowHover,
     on_open: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     let palette = theme::palette(cx);
     let row = session.row;
+    let compact = steps.compact;
     let id: SharedString = format!("{ROW_ID_PREFIX}{}", session.key).into();
     let title = HostText::from_host(row.info.title.as_str());
     let badge = status::row_badge(row, format!("{id}-status").into());
     let inks = Inks::of(palette, selected, row.stale);
     let marks = RowMarks::of(row, collections, selected, palette);
+    let cause = status::stale_cause(row, collections);
     // The row's accessible name is its title, escaped as the screen shows it; its status word joins the hover help,
-    // which is also its accessible description.
+    // which is also its accessible description. A compact row's help says what its hidden lines would have.
     let label = HostSentence::new(id.clone()).host(&title).accessible_name();
     let item_label = label.clone();
-    let help = match Badge::word(badge.as_ref()) {
-        Some(word) => format!("{word} — open this session"),
-        None => "Open this session".to_owned(),
+    let help = if compact {
+        compact_help(&id, row, cause)
+    } else {
+        HoverHelp::tooltip(match Badge::word(badge.as_ref()) {
+            Some(word) => format!("{word} — open this session"),
+            None => "Open this session".to_owned(),
+        })
     };
 
     let (live, ended) = match badge {
@@ -180,6 +240,10 @@ pub(crate) fn row(
         Some(Badge::Ended { kind, line }) => (None, Some((kind, line))),
         None => (None, None),
     };
+    // A compact row's ended status is a mark in the live dot's place; a noncompact row's is its ended line.
+    let ended_mark = compact
+        .then(|| ended_mark(&id, row, palette, selected))
+        .flatten();
     let identity = div()
         .flex()
         .flex_row()
@@ -193,10 +257,11 @@ pub(crate) fn row(
                 .flex()
                 .items_center()
                 .justify_center()
-                // The live dot is also the seen toggle ([`super::seen`]).
+                // The live dot is also the seen toggle ([`super::seen`]); a compact ended mark is no control.
                 .children(
                     live.map(|live| super::seen::dot(session, live, selected, steps.pulse, cx)),
-                ),
+                )
+                .children(ended_mark),
         )
         // The locality slot, kept at its width whether or not the session's host can be placed.
         .child(
@@ -232,6 +297,12 @@ pub(crate) fn row(
                 .text_color(theme::color(inks.title))
                 .into_any_element(),
         })
+        // A compact stale row's clock, after the title, which gives way to it (`.compact-qualifier`).
+        .children(
+            cause
+                .filter(|_| compact)
+                .map(|cause| stale_mark(&id, cause, palette, selected)),
+        )
         .child(row_marks::agent_track(&id, &marks))
         .child(age_track(
             &id,
@@ -240,14 +311,13 @@ pub(crate) fn row(
             inks,
         ));
 
-    let mut control = ListRow::new(id.clone(), label, HoverHelp::tooltip(help), Role::Button)
+    let mut control = ListRow::new(id.clone(), label, help, Role::Button)
         .selected(selected)
         .line(identity);
-    let cause = status::stale_cause(row, collections);
-    if ended.is_some() || cause.is_some() {
+    if !compact && (ended.is_some() || cause.is_some()) {
         control = control.line(detail_line(&id, ended, cause, palette, selected, inks));
     }
-    if let Some(meta) = meta_line(session, collections, inks) {
+    if !compact && let Some(meta) = meta_line(session, collections, inks) {
         control = control.line(meta);
     }
     control = control.on_click(move |_, window, cx| on_open(window, cx));
@@ -266,7 +336,10 @@ pub(crate) fn row(
         .role(Role::ListItem)
         .aria_label(item_label)
         .aria_selected(selected)
-        .group(ROW_GROUP)
+        // Hit-tested whatever the last input was, as the old `:hover` was: a key typed while the pointer rests on the
+        // row must not hide its menu button.
+        .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+        .on_hover(move |hovered, _, cx| hover.set(*hovered, cx))
         .w_full()
         .border_b_1()
         .border_color(theme::color(palette.border_row))
@@ -328,6 +401,104 @@ fn age_track(
             .monospace()
             .described(false)
         }))
+}
+
+// ---- Compact rows ---------------------------------------------------------------------------------------------------
+
+/// A compact row's ended mark in the status column (`.compact-ended-status`), or `None` for a status that is not ended:
+/// the shape of how the session ended ([`status::EndedGlyph`]) in its ink, named by the complete ended wording the
+/// noncompact row shows on its own line (`Exited (code unknown) — stopped by user`) and helped by the same words. A
+/// status mark, not a control: no mark-read action, no tab stop, and a press on it opens the row as a press anywhere
+/// else on the row does.
+fn ended_mark(
+    row_id: &SharedString,
+    row: &SessionRow,
+    palette: &Palette,
+    selected: bool,
+) -> Option<impl IntoElement + use<>> {
+    let glyph = status::EndedGlyph::of(row)?;
+    let words = status::ended_words(row, true)?;
+    let id = SharedString::from(format!("{row_id}{ENDED_ID_SUFFIX}"));
+    // The words quote the host after the app's own (a stop annotation, a launch failure's detail), so help naming them
+    // is a sentence, which escapes them as the screen does.
+    let help = match &words.host {
+        Some(host) => HoverHelp::sentence(
+            HostSentence::new(SharedString::from(format!("{id}-help")))
+                .text(words.words.clone())
+                .host(host),
+        ),
+        None => HoverHelp::tooltip(words.words.clone()),
+    };
+    let name = words.line(id.clone()).accessible_text();
+    let ink = glyph.color(palette, selected);
+    Some(
+        StatusMark::new(id.clone(), name.clone(), help, Role::Image, name)
+            .described(false)
+            .content(row_marks::cell(id, glyph.icon(), ink)),
+    )
+}
+
+/// A compact stale row's clock after its title (`.compact-qualifier`), named by the row's cause and helped as the cause
+/// is on a noncompact row (`Waiting for supervisor: this is the session's last-known state`). Its id is the cause's on a
+/// noncompact row, so either is found the same way.
+fn stale_mark(
+    row_id: &SharedString,
+    cause: &'static str,
+    palette: &Palette,
+    selected: bool,
+) -> impl IntoElement + use<> {
+    let id = SharedString::from(format!("{row_id}{CAUSE_ID_SUFFIX}"));
+    div().flex_none().child(
+        StatusMark::new(
+            id.clone(),
+            cause,
+            HoverHelp::tooltip(status::cause_help(cause)),
+            Role::Status,
+            cause,
+        )
+        .content(row_marks::cell(
+            id,
+            Icon::Stale,
+            status::stale_mark_color(palette, selected),
+        )),
+    )
+}
+
+/// A compact row's hover help, which is also its accessible description: what its hidden lines would have said, then
+/// what a click does. Its parts, each only when the row has it, joined by ` · `: the status (the complete ended wording,
+/// or the live word), a stale row's cause, and the full working directory (unabbreviated, as the old row's hidden copy
+/// and its summary card gave it); then ` — open this session`. For example `Exited (code 17) · Waiting for supervisor ·
+/// /home/user/src/a — open this session`. A sentence, since the wording and the directory are host text.
+fn compact_help(row_id: &SharedString, row: &SessionRow, cause: Option<&'static str>) -> HoverHelp {
+    let mut help = HostSentence::new(SharedString::from(format!("{row_id}-help")));
+    let mut first = true;
+    let mut separate = |help: HostSentence| {
+        if std::mem::take(&mut first) {
+            help
+        } else {
+            help.text(" · ")
+        }
+    };
+    if let Some(ended) = status::ended_words(row, true) {
+        help = separate(help).text(ended.words);
+        if let Some(host) = &ended.host {
+            help = help.host(host);
+        }
+    } else if let Some(live) = status::live(row) {
+        help = separate(help).text(live.word());
+    }
+    if let Some(cause) = cause {
+        help = separate(help).text(cause);
+    }
+    if !row.info.cwd.is_empty() {
+        help = separate(help).mono(&HostText::from_host(row.info.cwd.as_str()));
+    }
+    help = if first {
+        help.text("Open this session")
+    } else {
+        help.text(" — open this session")
+    };
+    HoverHelp::sentence(help)
 }
 
 /// The line under the title that holds what the first line has no room for: an ended status in full, wrapping rather

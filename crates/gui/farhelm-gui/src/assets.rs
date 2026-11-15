@@ -87,6 +87,11 @@
 //! The Clipboard is a new drawing, in the 14-unit action box with the 1.2 stroke: the old details bar's copy fields
 //! wrote the clipboard emoji (U+1F4CB) in text, which the bundled faces do not have and which would take the system's
 //! color emoji rather than the field's ink.
+//!
+//! The four ended marks (`Ended*`, a compact session row's status in place of the live dot) are the old app's
+//! `EndedStatusIcon` drawings at the reference commit, and the Stale clock is its `QualifierIcon` for a stale row: all in
+//! its 12-unit box with the 1.2 stroke and round caps and joins, unfilled but for the stopped mark's inner square, which
+//! the old one filled too.
 
 use std::borrow::Cow;
 
@@ -306,6 +311,18 @@ pub enum Icon {
     /// A clipboard: the details bar's copy fields show it under the pointer and keyboard focus (the old clipboard
     /// emoji).
     Clipboard,
+    /// A filled square inside a rounded one: a compact row's session that the user stopped (the old `EndedGlyph::Stopped`).
+    EndedStopped,
+    /// An arrow leaving a door: a compact row's session that exited on its own (the old `EndedGlyph::Exited`).
+    EndedExited,
+    /// An X: a compact row's session that was interrupted (the old `EndedGlyph::Interrupted`).
+    EndedInterrupted,
+    /// A triangle with an exclamation mark: a compact row's session whose agent never started (the old
+    /// `EndedGlyph::Error`).
+    EndedError,
+    /// A clock: a compact row's session whose status is only last-known, its host not connected (the old
+    /// `QualifierGlyph::Stale`).
+    Stale,
 }
 
 impl Icon {
@@ -394,6 +411,11 @@ impl Icon {
         Icon::Uninstall,
         Icon::Lock,
         Icon::Clipboard,
+        Icon::EndedStopped,
+        Icon::EndedExited,
+        Icon::EndedInterrupted,
+        Icon::EndedError,
+        Icon::Stale,
     ];
 }
 
@@ -481,6 +503,11 @@ impl Icon {
             Icon::Uninstall => "icons/uninstall.svg",
             Icon::Lock => "icons/lock.svg",
             Icon::Clipboard => "icons/clipboard.svg",
+            Icon::EndedStopped => "icons/ended-stopped.svg",
+            Icon::EndedExited => "icons/ended-exited.svg",
+            Icon::EndedInterrupted => "icons/ended-interrupted.svg",
+            Icon::EndedError => "icons/ended-error.svg",
+            Icon::Stale => "icons/stale.svg",
         }
     }
 }
@@ -605,6 +632,13 @@ impl Assets {
             "icons/info.svg" => Some(include_bytes!("../assets/icons/info.svg")),
             "icons/feedback.svg" => Some(include_bytes!("../assets/icons/feedback.svg")),
             "icons/clipboard.svg" => Some(include_bytes!("../assets/icons/clipboard.svg")),
+            "icons/ended-stopped.svg" => Some(include_bytes!("../assets/icons/ended-stopped.svg")),
+            "icons/ended-exited.svg" => Some(include_bytes!("../assets/icons/ended-exited.svg")),
+            "icons/ended-interrupted.svg" => {
+                Some(include_bytes!("../assets/icons/ended-interrupted.svg"))
+            }
+            "icons/ended-error.svg" => Some(include_bytes!("../assets/icons/ended-error.svg")),
+            "icons/stale.svg" => Some(include_bytes!("../assets/icons/stale.svg")),
             _ => None,
         }
     }

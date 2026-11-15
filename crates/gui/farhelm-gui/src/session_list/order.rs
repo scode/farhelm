@@ -33,18 +33,27 @@
 //!
 //! **The menu.** The title is a ghost button named "Sort: <order>" that reports whether its menu is open. Its menu is a
 //! popover of the layer manager below the title: the shared [`MenuHeader`] ("Session list"), then the three orders as
-//! radio items with their descriptions, the one in force checked. A click opens it on its first item, and Down or Up on
-//! the closed title on its first or last; inside it the layer manager's Up and Down walk the items, and Home and End
-//! (the menu's own keys) go to the first and last. Escape closes it and focus goes back to the title, which the menu
-//! names as its return target ([`focus::ReturnTo::Control`]), so the same happens on macOS, where the click that opened
-//! it left the title unfocused. Choosing closes it the same way, so focus stays on the title under its new name.
+//! radio items with their descriptions, the one in force checked, then after a separator Compact, a checkbox item. A
+//! click opens it on its first item, and Down or Up on the closed title on its first or last (Compact); inside it the
+//! layer manager's Up and Down walk the items, and Home and End (the menu's own keys) go to the first and last. Escape
+//! closes it and focus goes back to the title, which the menu names as its return target ([`focus::ReturnTo::Control`]),
+//! so the same happens on macOS, where the click that opened it left the title unfocused. Choosing closes it the same
+//! way, so focus stays on the title under its new name.
 //!
-//! The order state belongs to the UI session (`super::Current`), an entity so the draft's save can reach it when the
+//! **Compact.** The menu's last item turns the helm-wide compact preference on or off (SPEC.md, "Session list": "a menu
+//! offering those orders and **Compact**"; the rows' side is `super::row`'s "Compact rows"). It is the order's write in
+//! every way that matters: a sparse `PUT /api/preferences` with `{"compact": <bool>}`, saved through a draft of its own
+//! under the same key, shown (by the item's check and by the rows) as the choice being saved while the write is in
+//! flight and as the stored value at every other moment, an unset preference reading as off. SPEC.md, "Errors and
+//! diagnostics", names the "compact layout" among the best-effort preferences, so a refused write is logged and shows
+//! nothing, the rows and the check going back to the stored density as the order's title goes back to the stored order,
+//! for the reason given above; and a choice while another preference write is in flight is dropped the same way.
+//!
+//! The order state belongs to the UI session (`super::Current`), an entity so the drafts' saves can reach it when the
 //! reply arrives and the open menu can read it while it draws: a reset starts it over, with the helm's channel.
 //!
-//! NOTE: Not ported yet: Compact, the old menu's fourth item, which waits for compact rows so that no item changes
-//! nothing visible; placing the menu beside the sidebar with a pointer notch (the layer manager places it below its
-//! anchor, as for a row's menu); and `aria-haspopup`, which GPUI cannot report. Tab stays inside the open menu, as
+//! NOTE: Not ported yet: placing the menu beside the sidebar with a pointer notch (the layer manager places it below
+//! its anchor, as for a row's menu); and `aria-haspopup`, which GPUI cannot report. Tab stays inside the open menu, as
 //! SPEC.md's "Keyboard focus" has every menu keep focus, where the old Tab on an item closed the menu (a parity
 //! deviation).
 
@@ -61,7 +70,7 @@ use gpui::{
 
 use super::{SessionList, selection};
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role};
+use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role, menu_separator};
 use crate::drafts::{self, Draft};
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -75,10 +84,14 @@ pub(crate) const TITLE_ID: &str = "session-order";
 /// The title's hover help, the old toggle's `data-tooltip`.
 pub(crate) const TITLE_HELP: &str = "Sort: the order of the session list, shared by every client";
 
-/// The menu's header, the old `MenuHeader`'s words. The summary still says "density": the old menu's Compact item comes
-/// back with compact rows, and the header is the old one until then.
+/// The menu's header, the old `MenuHeader`'s words: the orders and Compact, the density.
 pub(crate) const MENU_TITLE: &str = "Session list";
 pub(crate) const MENU_SUMMARY: &str = "Order and density, shared by every client";
+
+/// The Compact item's element id, label and description (which is its hover help too), the old `Choice::Compact`'s.
+pub(crate) const COMPACT_ID: &str = "session-order-compact";
+pub(crate) const COMPACT_LABEL: &str = "Compact";
+pub(crate) const COMPACT_DESCRIPTION: &str = "One line per session, with the folder shown on hover";
 
 /// The menu's accessible name, the old `div[role=menu][aria-label="Sort"]`'s.
 pub(crate) const MENU_NAME: &str = "Sort";
@@ -89,6 +102,9 @@ const MENU_WIDTH: f32 = 246.;
 /// `.sort-title`'s gap between the order's name and its chevron, and the chevron's side (`.sort-title .action-glyph`).
 const TITLE_GAP: f32 = 4.;
 const CHEVRON: f32 = 12.;
+
+/// The menu's items: the three orders, then Compact.
+const ITEMS: usize = 4;
 
 /// One order of the list. The declaration order is the menu's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -183,20 +199,39 @@ impl Order {
 /// `PUT /api/preferences` naming only `list_sort`, set to `order`'s word: a sparse write, so it never puts back a stale
 /// copy of a field another client changed.
 fn command(order: Order) -> Result<Command, PathError> {
+    preferences_write(serde_json::json!({ "list_sort": order.word() }))
+}
+
+/// `PUT /api/preferences` naming only `compact`: sparse, as the order's write is.
+fn compact_command(compact: bool) -> Result<Command, PathError> {
+    preferences_write(serde_json::json!({ "compact": compact }))
+}
+
+/// A sparse `PUT /api/preferences` with `body`, the one route both of the menu's writes go through.
+fn preferences_write(body: serde_json::Value) -> Result<Command, PathError> {
     Ok(Command::new(
         Work::Save,
         Method::Put,
         ApiPath::api(&["preferences"])?,
-        Some(serde_json::json!({ "list_sort": order.word() })),
+        Some(body),
         "PUT /api/preferences",
     ))
 }
 
-/// The order's state in one UI session: the draft its write is saved through, and the menu the title last opened.
+/// Whether the helm stores the compact preference on in `collections`: unset (or no preference row yet) is off,
+/// SPEC.md's "defaults off".
+pub(crate) fn compact_stored(collections: &Collections) -> bool {
+    selection::preferences(collections).and_then(|preferences| preferences.compact) == Some(true)
+}
+
+/// The order's state in one UI session: the drafts its two writes are saved through, and the menu the title last
+/// opened.
 pub(crate) struct OrderState {
     /// The order being saved while a write is in flight. Its value means nothing at any other moment: the title then
     /// reads the store.
     draft: Draft<Order>,
+    /// The compact choice being saved while its write is in flight, read the same way as `draft`.
+    compact: Draft<bool>,
     /// The menu the title opened, checked with the layer manager when read, so a menu closed some other way (Escape, a
     /// press outside, the title no longer drawn) needs no bookkeeping.
     menu: Option<LayerId>,
@@ -208,6 +243,16 @@ impl OrderState {
     fn shown(&self, stored: Order) -> Order {
         if self.draft.is_saving() {
             *self.draft.value()
+        } else {
+            stored
+        }
+    }
+
+    /// Whether the rows are compact and the Compact item checked, `stored` being the helm's ([`compact_stored`]): the
+    /// choice being saved while its write is in flight, else the stored one.
+    pub(crate) fn compact_shown(&self, stored: bool) -> bool {
+        if self.compact.is_saving() {
+            *self.compact.value()
         } else {
             stored
         }
@@ -232,6 +277,7 @@ impl SessionList {
         }
         let state = cx.new(|_| OrderState {
             draft: Draft::load(Order::Activity),
+            compact: Draft::load(false),
             menu: None,
         });
         current.order = Some(state.clone());
@@ -271,10 +317,10 @@ impl SessionList {
             return;
         };
         let mark = Mark::take(cx);
-        let items: [FocusHandle; 3] = std::array::from_fn(|_| cx.focus_handle().tab_stop(true));
+        let items: [FocusHandle; ITEMS] = std::array::from_fn(|_| cx.focus_handle().tab_stop(true));
         let start = match start {
             Start::First => items[0].clone(),
-            Start::Last => items[2].clone(),
+            Start::Last => items[ITEMS - 1].clone(),
         };
         let list = cx.weak_entity();
         let view = cx.new(|_| OrderMenu {
@@ -336,6 +382,48 @@ impl SessionList {
             );
             if let Err(not_started) = started {
                 tracing::debug!(?order, ?not_started, "the list's order was not saved");
+            }
+        });
+        cx.notify();
+    }
+
+    /// The user chose Compact in the menu: close the menu, which returns focus to the title, then save the opposite of
+    /// the density shown. As for an order, a choice that cannot be saved now is logged and changes nothing, and a
+    /// refused save is logged and shows nothing (the module docs, "Compact").
+    fn choose_compact(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.order_state(cx);
+        if let Some(menu) = state.read(cx).menu {
+            layers::close(menu, window, cx);
+        }
+        let Some(store) = session::current_store(cx) else {
+            return;
+        };
+        let compact = !state
+            .read(cx)
+            .compact_shown(compact_stored(store.read(cx).collections()));
+        state.update(cx, |state, cx| {
+            if !state.compact.edit(compact) {
+                tracing::debug!(
+                    compact,
+                    "the compact choice was not saved: its last save is in flight"
+                );
+                return;
+            }
+            let started = drafts::save(
+                state,
+                |state: &mut OrderState| &mut state.compact,
+                &OpKey::preferences(),
+                |compact| compact_command(*compact),
+                cx,
+                move |_, settled, _| {
+                    if let Outcome::Refused(refusal) = &settled.outcome {
+                        let words = &refusal.words;
+                        tracing::warn!(compact, ?words, "the helm refused the compact choice");
+                    }
+                },
+            );
+            if let Err(not_started) = started {
+                tracing::debug!(compact, ?not_started, "the compact choice was not saved");
             }
         });
         cx.notify();
@@ -423,17 +511,20 @@ impl SessionList {
 pub(crate) struct OrderMenu {
     list: WeakEntity<SessionList>,
     state: Entity<OrderState>,
-    /// The orders' focus handles, in their order: the menu starts on the first or the last, and Home and End move
-    /// there.
-    items: [FocusHandle; 3],
+    /// The items' focus handles, in their order (the orders, then Compact): the menu starts on the first or the last,
+    /// and Home and End move there.
+    items: [FocusHandle; ITEMS],
 }
 
 impl Render for OrderMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stored = session::current_store(cx).map_or(Order::Activity, |store| {
-            Order::stored_in(store.read(cx).collections())
-        });
+        let (stored, stored_compact) =
+            session::current_store(cx).map_or((Order::Activity, false), |store| {
+                let collections = store.read(cx).collections();
+                (Order::stored_in(collections), compact_stored(collections))
+            });
         let shown = self.state.read(cx).shown(stored);
+        let compact_shown = self.state.read(cx).compact_shown(stored_compact);
         let items = Order::ALL.iter().zip(&self.items).map(|(order, focus)| {
             let (order, list) = (*order, self.list.clone());
             MenuItem::new(
@@ -450,7 +541,23 @@ impl Render for OrderMenu {
                 let _ = list.update(cx, |list, cx| list.choose_order(order, window, cx));
             })
         });
-        let (first, last) = (self.items[0].clone(), self.items[2].clone());
+        // A checkbox item, after a separator as in the old menu (`menuitemcheckbox`): it keeps its icon and description
+        // and reports itself checked or not, as the orders do.
+        let list = self.list.clone();
+        let compact = MenuItem::new(
+            COMPACT_ID,
+            Icon::Sessions,
+            COMPACT_LABEL,
+            HoverHelp::tooltip(COMPACT_DESCRIPTION),
+            Role::MenuItemCheckBox,
+        )
+        .description(COMPACT_DESCRIPTION)
+        .checked(compact_shown)
+        .focus(&self.items[ITEMS - 1])
+        .on_click(move |_, window, cx| {
+            let _ = list.update(cx, |list, cx| list.choose_compact(window, cx));
+        });
+        let (first, last) = (self.items[0].clone(), self.items[ITEMS - 1].clone());
         layers::panel(cx)
             .id("session-order-menu")
             .debug_selector(|| "session-order-menu".into())
@@ -478,7 +585,9 @@ impl Render for OrderMenu {
                     .aria_label(MENU_NAME)
                     .flex()
                     .flex_col()
-                    .children(items),
+                    .children(items)
+                    .child(menu_separator(cx))
+                    .child(compact),
             )
     }
 }

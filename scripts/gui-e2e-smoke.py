@@ -18,13 +18,13 @@ switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened f
 start that asks for it; 54, the session list's Replace meeting the YOLO question; 60 and 62 to 64, the approvals area's
 cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
-other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel).
-The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
-`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`,
-`approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`); nothing here checks layout or wording beyond the names it
-clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's
-header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
-order, which is the header's.
+other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel;
+67, the session list's Compact). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
+`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`);
+nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
+(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
+Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -1896,6 +1896,39 @@ class Smoke(unittest.TestCase):
             r'button "Notifications: 0 unread" \[focused\]',
             "focus is back on the bell",
         )
+
+    # ---- The session list's Compact (67), on a session of its own ---------------------------------------------
+
+    def test_67_compact_from_the_order_menu_hides_the_rows_last_lines(self) -> None:
+        """Compact is a write of the shared preference (`PUT /api/preferences`, `compact`), and the window draws its
+        rows from the preference the helm pushes back, so only the real helm shows that the choice took effect both
+        ways. Specified, on a basic session this step seeds under a title of its own, in a folder of its own whose name
+        appears nowhere else on screen (the session is never opened, so the details bar does not show it): its row's
+        last line shows the folder; choosing Compact from the list title's menu makes the helm store `compact` true and
+        the folder leave the window while the title stays; choosing Compact again makes the helm store false and the
+        folder come back, which leaves the list as every step before this one saw it."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        folder = spawn_folder("c")
+        # A stamp of its own, not the folder's name: a title holding that name would keep it on screen in compact mode.
+        title = f"Compact {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, folder, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        self.ok("wait", "--text", folder.name)
+
+        def stored() -> bool | None:
+            return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("compact")
+
+        self.assertNotEqual(stored(), True, "premise: compact is off")
+        for compact in (True, False):
+            self.ok("click", "id:session-order")
+            self.ok("wait", "--text", "Order and density, shared by every client")
+            self.ok("click", "id:session-order-compact")
+            self.ok("wait", "--gone", "Order and density, shared by every client")
+            eventually(lambda: stored() is compact, f"the helm storing compact {compact}")
+            self.ok("wait", "--gone" if compact else "--text", folder.name)
+            self.ok("wait", "--text", title)
 
 
 def waiting_approvals() -> list[dict]:
