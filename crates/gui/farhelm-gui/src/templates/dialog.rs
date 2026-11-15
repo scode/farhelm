@@ -18,11 +18,21 @@
 //!   written them, so they are drawn through the host-text element.
 //! - **The editor** ([`super::editor`]) beside the list: "Choose a template to edit, or make a new one." until a row or
 //!   "+ New template" opens one. Focus goes to its name field when it opens. What it refuses or the helm refuses of a
-//!   save is said in the status line under the panes. Opening another template while one has unsaved changes discards
-//!   them for now.
-//! - **Writes, one at a time.** A save and a ⚡ or number-key write are never in flight together: while one is, the
-//!   rows, "+ New template", the bolts, the keys and Save wait (busy, keeping focus), and neither Escape nor Close
-//!   closes the dialog, so the write's refusal can still be reported.
+//!   save is said in the status line under the panes.
+//! - **Leaving an unsaved draft** ([`Departure`]): another row, "+ New template", Duplicate, the header Close and
+//!   Escape first ask "Save these changes before leaving?" with Keep editing, Discard and Save, in that reading order,
+//!   focus starting on Save (SPEC.md), as the plain inline question at the editor's foot. Keep editing stays, with focus
+//!   back in the name field, where it was put as the question opened. Discard goes where the user was heading. Save
+//!   saves, and goes there only once the save has succeeded; a refused save stays with its reason in the status line.
+//!   A departure asked while the question is up replaces it.
+//! - **Deleting.** Delete takes effect at once. Its editor goes, focus moves to "+ New template", and a notice under the
+//!   panes offers Undo for about ten seconds ([`UNDO_FOR`]): Undo saves the copy the dialog had loaded back under its old
+//!   name, unless another template has taken that name since. A later deletion replaces the notice, and closing the
+//!   dialog ends it. Undo never restores the ⚡ mark or a number key, which the helm cleared with the deletion, and
+//!   "Delete permanently" offers no Undo ([`super::editor::DeleteKind`]).
+//! - **Writes, one at a time.** A save, a delete, an Undo, and a ⚡ or number-key write are never in flight together:
+//!   while one is, the rows, "+ New template", the bolts, the keys, Save, Delete and Undo wait (busy, keeping focus),
+//!   and neither Escape nor Close closes the dialog, so the write's refusal can still be reported.
 //! - **Reading.** Everything comes from the store as the helm pushes it; the dialog keeps no copy. A template that
 //!   changes or appears while the dialog is open shows up at once. When the helm could not read its templates the list
 //!   says so with the helm's words, and keeps showing the last templates it had.
@@ -31,9 +41,8 @@
 //!   template holds it. Both write the helm's shared preferences, one write at a time, and show what the store holds,
 //!   never what was just clicked. A refused write is said under the panes in the helm's words.
 //!
-//! NOTE: Built in pieces. Not here yet, each with its own piece: the leave question, and delete. The old list's Retry
-//! beside a failed read is not ported: the helm pushes its templates again whenever they change, so there is nothing
-//! for the dialog to ask for (recorded in the parity file).
+//! NOTE: The old list's Retry beside a failed read is not ported: the helm pushes its templates again whenever they
+//! change, so there is nothing for the dialog to ask for (recorded in the parity file).
 //!
 //! NOTE: The old dialog scrolled as one piece, header included. Here the frame keeps its header (title and Close) on
 //! screen and scrolls the body, as every other dialog of the app does; at a window too short even for the header, the
@@ -41,6 +50,7 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::{LaunchCatalogModel, LaunchTemplate};
@@ -51,7 +61,8 @@ use gpui::{
     WeakEntity, Window, div, px, svg,
 };
 
-use super::editor::Editor;
+use super::editor::{self, DeleteKind, Editor, Ended};
+use super::fields::taken_refusal;
 use super::shortcuts::{self, Bindings, KEYS};
 use super::summary::{self, Part};
 use crate::assets::Icon;
@@ -59,9 +70,11 @@ use crate::components::{Button, DialogFrame, HoverHelp, IconButton, MenuHeader, 
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, Dismissal, LayerId, Popover};
-use crate::operations::{self, Command, OpKey};
+use crate::operations::{self, Command, OpKey, Outcome};
+use crate::prompt::{self, Answer, Question};
 use crate::session;
 use crate::theme::{self, metrics};
+use crate::ticker::{self, Deadline};
 
 /// `.templates-dialog`'s width: `min(960px, 100%)`; the dialog frame applies the `100%` (the window less the old
 /// backdrop's side margins).
@@ -88,10 +101,12 @@ const TILE_GLYPH: f32 = 14.;
 /// The header's summary, the old dialog's words.
 const SUMMARY: &str = "Saved edits to combine in the session launcher";
 
-/// The header Close's name and hover help, the old dialog's words. The help's promise about unsaved changes comes true
-/// with the editor's leave question; until then there is nothing unsaved to ask about.
+/// The header Close's name and hover help, the old dialog's words.
 const CLOSE_LABEL: &str = "Close templates";
 const CLOSE_HELP: &str = "Close templates; unsaved changes ask before leaving";
+
+/// How long a deletion's Undo is offered: SPEC.md's "about ten seconds", the old notice's 10,000 ms.
+pub(super) const UNDO_FOR: Duration = Duration::from_secs(10);
 
 /// Why a shortcut opened the dialog instead of launching, said in a line above the list (the old app's
 /// `quick_launch_hint` and `number_shortcut_hint`). The Templates button opens the dialog with neither.
@@ -158,6 +173,40 @@ pub struct TemplatesDialog {
     /// Whether the catalog read was sent, so it is sent once per dialog. A failed read is not retried: without a
     /// catalog the editor refuses no effort and suggests no model, as the old editor did.
     catalog_requested: bool,
+    /// Where the user was heading when they answered the leave question with Save, and their press: the departure runs
+    /// once that save has succeeded, and is forgotten if it fails.
+    leaving: Option<(Departure, Mark)>,
+    /// The last deletion's Undo, while it is offered.
+    undo: Option<Undo>,
+    /// Whether an Undo's save is in flight. Kept here rather than read from the operation store under the deleted name:
+    /// the notice, and with it that name, can expire while the save is still in flight, and the dialog's writes still
+    /// go one at a time until it settles. A connection reset closes the dialog, so a completion that never runs cannot
+    /// leave it set.
+    restoring: bool,
+    /// The status line's sentence once no editor is open to hold it: why an Undo was refused. Cleared when a template
+    /// opens, and when the next Save, Delete or Undo starts, as the old dialog cleared its one line.
+    status: Option<HostSentence>,
+}
+
+/// Where leaving the editor goes ([`TemplatesDialog::leave`]): every way out that asks about an unsaved draft first,
+/// the old dialog's `Departure`.
+#[derive(Clone, Debug)]
+pub(super) enum Departure {
+    /// The stored template of this name, from its row.
+    Open(String),
+    /// "+ New template".
+    New,
+    /// The editor's Duplicate, which copies the template as last saved.
+    Duplicate,
+    /// The header Close or Escape: the dialog closes.
+    Close,
+}
+
+/// A deletion's Undo: the copy the dialog had loaded, which Undo saves back, until `_expires` ends the offer.
+/// Replacing or dropping it (a later deletion, a successful Undo, the dialog closing) cancels the deadline with it.
+struct Undo {
+    template: LaunchTemplate,
+    _expires: Deadline,
 }
 
 /// The dialog last opened, for tests that reach into its editor and the screenshot goldens that open a row or a menu.
@@ -216,6 +265,10 @@ pub fn open(
         editor: None,
         catalog: None,
         catalog_requested: false,
+        leaving: None,
+        undo: None,
+        restoring: false,
+        status: None,
     });
     let container = cx.focus_handle();
     let layer = layers::open_dialog(
@@ -251,10 +304,10 @@ pub fn open(
 }
 
 /// What the header's Close does: dismiss the dialog through the layer manager, so its dismissal hook decides, as for
-/// Escape. An open "+ Add field" menu is forgotten first, so the hook closes the dialog: only Escape closes that menu on
-/// its own, as in the old dialog, whose Close left the editor whatever was open in it. While a write is in flight the
-/// hook keeps the dialog open, so the menu is left alone too: forgetting it then, with no redraw, would make it vanish
-/// later from under the user.
+/// Escape. An open "+ Add field" menu is forgotten first, so the hook closes the dialog (or asks the leave question about
+/// an unsaved draft): only Escape closes that menu on its own, as in the old dialog, whose Close left the editor
+/// whatever was open in it. While a write is in flight the hook keeps the dialog open, so the menu is left alone too:
+/// forgetting it then, with no redraw, would make it vanish later from under the user.
 fn dismiss(
     dialog: WeakEntity<TemplatesDialog>,
 ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
@@ -315,7 +368,7 @@ const KEY_TEXT: f32 = 10.;
 const KEY_MENU_WIDTH: f32 = 260.;
 
 impl TemplatesDialog {
-    /// Whether a write this dialog sent is in flight: a ⚡ or number-key write, or the editor's save.
+    /// Whether a write this dialog sent is in flight: a ⚡ or number-key write, the editor's save or delete, or an Undo.
     fn writing(&self, cx: &App) -> bool {
         let preferences = self.last_write.is_some()
             && session::current_operations(cx).is_some_and(|operations| {
@@ -324,7 +377,7 @@ impl TemplatesDialog {
                     .in_flight(&OpKey::preferences())
                     .is_some()
             });
-        preferences || self.editor.as_ref().is_some_and(Editor::is_writing)
+        preferences || self.restoring || self.editor.as_ref().is_some_and(Editor::is_writing)
     }
 
     /// Whether the number-key button of `name` has been drawn, so its menu has an anchor to open on (the screenshot
@@ -337,8 +390,8 @@ impl TemplatesDialog {
     /// What Escape and the header Close do. The dialog stays while one of its writes is in flight, as the old dialog
     /// held its Close while busy: closing then would lose the line that reports the write if it is refused (SPEC.md,
     /// "One GUI at a time": a failed save is reported). An open "+ Add field" menu closes first, focus going back to
-    /// "+ Add field", as the old dialog's Escape closed it before the dialog. The editor's leave question joins this
-    /// hook with its own piece.
+    /// "+ Add field", as the old dialog's Escape closed it before the dialog. An unsaved draft stays and asks the leave
+    /// question, whose answer closes the dialog or not.
     fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
         if self.writing(cx) {
             return Dismissal::Stay;
@@ -349,70 +402,328 @@ impl TemplatesDialog {
             cx.notify();
             return Dismissal::Stay;
         }
+        if self.editor.as_ref().is_some_and(Editor::dirty) {
+            self.ask_leave(Departure::Close, window, cx);
+            return Dismissal::Stay;
+        }
         Dismissal::Close
     }
 
     /// Open the stored template `name` in the editor, with focus on its name field. Opening the template the editor
-    /// already holds does nothing, so its unsaved edits stay (the old dialog's rule); opening another discards them for
-    /// now, until the leave question asks first. Nothing opens while a write is in flight.
+    /// already holds does nothing, so its unsaved edits stay (the old dialog's rule); opening another asks first about
+    /// unsaved edits ([`TemplatesDialog::leave`]).
     pub(crate) fn open_template(
         &mut self,
         name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.writing(cx)
-            || self
-                .editor
-                .as_ref()
-                .is_some_and(|editor| editor.previous() == Some(name))
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.previous() == Some(name))
         {
             return;
         }
-        let Some(template) = session::current_store(cx).and_then(|store| {
-            store
-                .read(cx)
-                .collections()
-                .get::<LaunchTemplate>(name)
-                .cloned()
-        }) else {
-            return;
-        };
-        let mark = Mark::take(cx);
-        let editor = Editor::open(&template, window, cx);
-        self.show_editor(editor, &mark, window, cx);
+        self.leave(Departure::Open(name.to_owned()), window, cx);
     }
 
-    /// The open editor's Duplicate: its copy in the editor, with focus on its name field. Nothing while a write is in
-    /// flight. The copy is named over the stored names, or over none while the helm cannot read them (the save checks
-    /// the name again).
+    /// The open editor's Duplicate, once any unsaved edits are answered for ([`TemplatesDialog::leave`]).
     pub(super) fn duplicate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(Departure::Duplicate, window, cx);
+    }
+
+    /// The editor's Save, with the dialog's model catalog to judge the draft's effort by. Returns whether the save was
+    /// sent. Nothing while any write of the dialog's is in flight (a ⚡ or number-key write included): the dialog's
+    /// writes go one at a time, and Save's busy look only reaches the screen with the next frame.
+    pub(super) fn save_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.writing(cx) {
+            return false;
+        }
+        self.status = None;
+        self.editor
+            .as_mut()
+            .is_some_and(|editor| editor.save(self.catalog.as_deref(), window, cx))
+    }
+
+    /// The editor's Delete of the `kind` its label said. Nothing while any write of the dialog's is in flight.
+    pub(super) fn delete_editor(
+        &mut self,
+        kind: DeleteKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.writing(cx) {
             return;
         }
-        let names = super::editor::stored_names(cx).unwrap_or_default();
-        let names: Vec<&str> = names.iter().map(String::as_str).collect();
-        let Some(copy) = self
+        self.status = None;
+        if let Some(editor) = self.editor.as_mut() {
+            editor.delete(kind, window, cx);
+        }
+    }
+
+    /// One of the editor's writes settled ([`Editor::settled`]); act on what reaches beyond the editor. A save the
+    /// leave question's Save waited for lets its departure go; any other end forgets it. A deletion drops the editor,
+    /// offers its Undo (or ends an earlier one, for "Delete permanently") and moves focus to "+ New template", as the
+    /// old dialog did, unless the user has moved on since pressing Delete.
+    pub(super) fn write_settled(
+        &mut self,
+        outcome: Outcome,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match editor.settled(outcome, cx) {
+            Ended::Going => {}
+            Ended::Saved => {
+                if let Some((departure, mark)) = self.leaving.take() {
+                    self.depart(departure, &mark, window, cx);
+                }
+            }
+            Ended::Stopped => self.leaving = None,
+            Ended::Deleted { undo, mark } => {
+                self.editor = None;
+                self.leaving = None;
+                self.undo = undo.map(|template| self.offer_undo(*template, cx));
+                focus::focus_in_layer(&self.new_focus, &mark, window, cx);
+            }
+        }
+    }
+
+    // ---- Leaving the editor -----------------------------------------------------------------------------------------
+
+    /// Leave the editor for `departure`: at once when it holds nothing unsaved, or else after the leave question
+    /// ([`TemplatesDialog::ask_leave`]). Nothing while a write is in flight. The header Close and Escape come through
+    /// the dismissal hook instead, which must answer the layer manager itself.
+    fn leave(&mut self, departure: Departure, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing(cx) {
+            return;
+        }
+        if self.editor.as_ref().is_some_and(Editor::dirty) {
+            self.ask_leave(departure, window, cx);
+        } else {
+            let mark = Mark::take(cx);
+            self.depart(departure, &mark, window, cx);
+        }
+    }
+
+    /// Ask "Save these changes before leaving?" for `departure` at the editor's foot, replacing a question already up.
+    /// Focus first goes to the name field, so the question's Keep editing (and Escape inside it) returns focus there,
+    /// where the old Keep editing put it: the prompt returns focus to what held it when the question opened.
+    fn ask_leave(&mut self, departure: Departure, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(name) = self
             .editor
             .as_ref()
-            .and_then(|editor| editor.duplicate(&names, window, cx))
+            .and_then(|editor| editor.name_focus(cx))
         else {
             return;
         };
         let mark = Mark::take(cx);
-        self.show_editor(copy, &mark, window, cx);
+        focus::focus_in_layer(&name, &mark, window, cx);
+        let answer = |label: &'static str, help: &'static str, tier| Answer {
+            label: label.into(),
+            help: HoverHelp::tooltip(help),
+            tier,
+        };
+        let discard = cx.weak_entity();
+        let question = Question::new(
+            "Save these changes before leaving?",
+            answer("Save", "Save these changes, then continue", Tier::Primary),
+            departure,
+        )
+        .cancel_answer(answer(
+            "Keep editing",
+            "Stay here with the unsaved draft",
+            Tier::Neutral,
+        ))
+        .alternative(
+            answer(
+                "Discard",
+                "Discard these changes, then continue",
+                Tier::Neutral,
+            ),
+            move |departure, window, cx| {
+                let _ = discard.update(cx, |dialog, cx| {
+                    let mark = Mark::take(cx);
+                    dialog.depart(departure, &mark, window, cx)
+                });
+            },
+        );
+        let save = cx.weak_entity();
+        let inline = prompt::ask_inline(
+            question,
+            &mark,
+            move |departure, window, cx| {
+                let _ = save.update(cx, |dialog, cx| {
+                    let mark = Mark::take(cx);
+                    // The fields stay editable while the question is up, so the user may have undone their edits:
+                    // with nothing left to save they leave at once, as the old prompt's Save did.
+                    if !dialog.editor.as_ref().is_some_and(Editor::dirty) {
+                        dialog.depart(departure, &mark, window, cx);
+                    } else if dialog.save_editor(window, cx) {
+                        dialog.leaving = Some((departure, mark));
+                    }
+                });
+            },
+            window,
+            cx,
+        );
+        if let Some(editor) = self.editor.as_mut() {
+            editor.leave = Some(inline);
+        }
+        cx.notify();
     }
 
-    /// The editor's Save, with the dialog's model catalog to judge the draft's effort by.
-    /// Nothing while any write of the dialog's is in flight (a ⚡ or number-key write included): the dialog's writes go
-    /// one at a time, and Save's busy look only reaches the screen with the next frame.
-    pub(super) fn save_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Go where `departure` leads, whatever the editor holds, for the user's action at `mark`: a stored template (by
+    /// its name, as the store holds it now; nothing if it has gone), a new or duplicated draft, or the dialog closed.
+    /// Nothing while a write is in flight, as for every other way to open a template, and since closing then would lose
+    /// the write's report: a Discard answered while a ⚡ or number-key write runs keeps the draft.
+    fn depart(
+        &mut self,
+        departure: Departure,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.writing(cx) {
             return;
         }
-        if let Some(editor) = self.editor.as_mut() {
-            editor.save(self.catalog.as_deref(), window, cx);
+        let editor = match departure {
+            Departure::Open(name) => session::current_store(cx)
+                .and_then(|store| {
+                    store
+                        .read(cx)
+                        .collections()
+                        .get::<LaunchTemplate>(&name)
+                        .cloned()
+                })
+                .map(|template| Editor::open(&template, window, cx)),
+            Departure::New => Some(Editor::new_template(window, cx)),
+            // The copy is named over the stored names, or over none while the helm cannot read them (the save checks
+            // the name again).
+            Departure::Duplicate => {
+                let names = editor::stored_names(cx).unwrap_or_default();
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                self.editor
+                    .as_ref()
+                    .and_then(|editor| editor.duplicate(&names, window, cx))
+            }
+            Departure::Close => {
+                if let Some(layer) = self.layer {
+                    layers::close(layer, window, cx);
+                }
+                None
+            }
+        };
+        if let Some(editor) = editor {
+            self.show_editor(editor, mark, window, cx);
         }
+    }
+
+    // ---- Undo -------------------------------------------------------------------------------------------------------
+
+    /// Offer Undo for the deleted `template` for [`UNDO_FOR`], after which the notice goes.
+    fn offer_undo(&self, template: LaunchTemplate, cx: &mut Context<Self>) -> Undo {
+        let dialog = cx.weak_entity();
+        let expires = ticker::after(UNDO_FOR, cx, move |cx| {
+            let _ = dialog.update(cx, |dialog, cx| {
+                dialog.undo = None;
+                cx.notify();
+            });
+        });
+        Undo {
+            template,
+            _expires: expires,
+        }
+    }
+
+    /// Undo: save the deleted template's loaded copy back under its old name (`PUT /api/templates/{name}`), without
+    /// workspace trust, as every save drops it (SPEC.md). Refused, with the status line saying why in Undo's own words,
+    /// while another template has the name or the list cannot show it is free ([`taken_refusal`]'s rule; not the
+    /// new-name whitespace rule, so a stored spaced name keeps its Undo). Once the helm has stored it the notice goes,
+    /// the template shows in the list as pushed, the editor stays as it is, and focus goes where the old dialog's
+    /// recovery put it once the Undo button was gone: the open editor's name field, or else "+ New template" (unless
+    /// the user has moved on since the press). A refusal keeps the notice, for as long as it had left.
+    fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing(cx) {
+            return;
+        }
+        let Some(undo) = self.undo.as_ref() else {
+            return;
+        };
+        let mut template = undo.template.clone();
+        template.fields.workspace_trust = None;
+        let names = editor::stored_names(cx);
+        let names: Option<Vec<&str>> = names
+            .as_ref()
+            .map(|names| names.iter().map(String::as_str).collect());
+        self.status = taken_refusal(&template.name, names.as_deref()).map(|_| match names {
+            None => editor::said(
+                "The template list could not be read, so Undo cannot check that the deleted template's name is \
+                 still free; try again once it is back",
+            ),
+            Some(_) => editor::said("Another template is now named ")
+                .host(&HostText::from_host(template.name.clone()))
+                .text(", so the deleted template cannot be restored under that name"),
+        });
+        cx.notify();
+        if self.status.is_some() {
+            return;
+        }
+        let (Some(command), Some(operations)) = (
+            editor::save_command(&template),
+            session::current_operations(cx),
+        ) else {
+            return;
+        };
+        let dialog = cx.weak_entity();
+        let handle = window.window_handle();
+        let mark = Mark::take(cx);
+        let started = operations.update(cx, |operations, cx| {
+            operations.start(
+                &OpKey::template(&template.name),
+                command,
+                cx,
+                move |settled, cx| {
+                    let outcome = settled.outcome.clone();
+                    // As for the editor's writes, a completion runs outside any window's update, and a closed window
+                    // has closed the dialog with it.
+                    let _ = handle.update(cx, |_, window, cx| {
+                        dialog.update(cx, |dialog, cx| {
+                            dialog.restoring = false;
+                            match outcome {
+                                Outcome::Done(_) | Outcome::Accepted(_) => {
+                                    dialog.undo = None;
+                                    let target = dialog
+                                        .editor
+                                        .as_ref()
+                                        .and_then(|editor| editor.name_focus(cx))
+                                        .unwrap_or_else(|| dialog.new_focus.clone());
+                                    focus::focus_in_layer(&target, &mark, window, cx);
+                                }
+                                Outcome::Refused(refusal) => {
+                                    dialog.status = Some(editor::helm_said(&refusal.words));
+                                }
+                            }
+                            cx.notify();
+                        })
+                    });
+                },
+            )
+        });
+        self.restoring = started.is_ok();
+    }
+
+    /// The `template-leave-question` golden's state: the open editor's name changed to `codex-deep-unsaved`, as the
+    /// reference picture typed it, and the header Close pressed, which asks the leave question.
+    #[cfg(test)]
+    pub(crate) fn ask_leave_for_golden(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editor.as_mut() {
+            editor.rename_draft("codex-deep-unsaved", window, cx);
+        }
+        self.ask_leave(Departure::Close, window, cx);
     }
 
     /// Forget which preference write this dialog last sent, once the editor has written the preferences itself (a
@@ -422,18 +733,16 @@ impl TemplatesDialog {
         self.last_write = None;
     }
 
-    /// "+ New template": an empty new draft in the editor, with focus on its name field.
+    /// "+ New template": an empty new draft in the editor, with focus on its name field, once any unsaved edits are
+    /// answered for ([`TemplatesDialog::leave`]).
     fn new_template(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.writing(cx) {
-            return;
-        }
-        let mark = Mark::take(cx);
-        let editor = Editor::new_template(window, cx);
-        self.show_editor(editor, &mark, window, cx);
+        self.leave(Departure::New, window, cx);
     }
 
     /// Put `editor` in the pane, move focus to its name field for the action marked `mark` (the field is drawn in
-    /// the next frame, which the focus coordinator waits for), and read the catalog if no editor has yet.
+    /// the next frame, which the focus coordinator waits for), and read the catalog if no editor has yet. The editor it
+    /// replaces goes with its leave question, and the dialog's own status line (an Undo's refusal) is cleared, as the
+    /// old dialog cleared its one line whenever the editor moved on.
     fn show_editor(
         &mut self,
         editor: Editor,
@@ -443,6 +752,7 @@ impl TemplatesDialog {
     ) {
         let name = editor.name_focus(cx);
         self.editor = Some(editor);
+        self.status = None;
         if let Some(name) = name {
             focus::focus_in_layer(&name, mark, window, cx);
         }
@@ -667,9 +977,10 @@ impl TemplatesDialog {
     }
 
     /// The bolt of `name` was clicked while it was drawn lit (`was_lit`) or not: clear the mark, or give it to `name`
-    /// ([`shortcuts::mark_write`] says why the drawn state decides). Nothing is written while another preference write
-    /// is in flight (the operation store's one-per-key rule).
-    fn toggle_mark(&mut self, name: &str, was_lit: bool, cx: &mut Context<Self>) {
+    /// ([`shortcuts::mark_write`] says why the drawn state decides). Nothing is written while any write of the dialog's
+    /// is in flight ([`TemplatesDialog::write`]). Visible to the tests, which call it as a click delivered in the same
+    /// frame as a Delete press would.
+    pub(super) fn toggle_mark(&mut self, name: &str, was_lit: bool, cx: &mut Context<Self>) {
         let stored = Bindings::current(cx).marked;
         if let Some(wanted) = shortcuts::mark_write(name, was_lit, stored.as_deref()) {
             self.write(Write::Mark, shortcuts::mark_command(wanted), cx);
@@ -686,13 +997,19 @@ impl TemplatesDialog {
         self.write(Write::Keys, shortcuts::keys_command(&keys), cx);
     }
 
-    /// Send a preference write as work on the preferences' key.
+    /// Send a preference write as work on the preferences' key, unless any write of the dialog's is in flight. The
+    /// bolts and keys are drawn busy then, but a click delivered in the same frame as a Delete or an Undo press still
+    /// reaches them, and the store would send both (they are on different keys): a mark naming the template the
+    /// deletion just removed, say.
     fn write(
         &mut self,
         write: Write,
         command: Result<Command, farhelm_helm_client::PathError>,
         cx: &mut Context<Self>,
     ) {
+        if self.writing(cx) {
+            return;
+        }
         let (Some(operations), Ok(command)) = (session::current_operations(cx), command) else {
             return;
         };
@@ -890,7 +1207,9 @@ impl Render for TemplatesDialog {
             }
             None => (false, None),
         };
-        let busy = preferences_busy || self.editor.as_ref().is_some_and(Editor::is_writing);
+        let busy = preferences_busy
+            || self.restoring
+            || self.editor.as_ref().is_some_and(Editor::is_writing);
         let store = session::current_store(cx);
         let (templates, unavailable) = match &store {
             Some(store) => {
@@ -1017,9 +1336,14 @@ impl Render for TemplatesDialog {
                     .child(refused),
             );
         }
-        if let Some(status) = self.editor.as_ref().and_then(Editor::status) {
-            // The editor's status line (`.templates-error[role=status]`): why a save was refused, in the app's or the
-            // helm's words, until the next save or another template opens.
+        if let Some(status) = self
+            .editor
+            .as_ref()
+            .and_then(Editor::status)
+            .or(self.status.as_ref())
+        {
+            // The status line (`.templates-error[role=status]`): why a save, a delete or an Undo was refused, in the
+            // app's or the helm's words, until the next one or another template opens.
             body = body.child(
                 div()
                     .id("templates-editor-status")
@@ -1041,6 +1365,44 @@ impl Render for TemplatesDialog {
                         HostSentence::new("templates-unavailable")
                             .text("Templates unavailable: ")
                             .host(&HostText::from_host(error)),
+                    ),
+            );
+        }
+        if let Some(undo) = &self.undo {
+            // `.templates-undo-notice`: "Deleted <name>." and Undo, on the raised surface, while Undo is offered.
+            let weak = cx.weak_entity();
+            body = body.child(
+                div()
+                    .id("templates-undo-notice")
+                    .debug_selector(|| "templates-undo-notice".into())
+                    .role(Role::Status)
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(10.))
+                    .p(px(10.))
+                    .rounded(metrics::RADIUS_SM)
+                    .bg(theme::color(palette.bg_1))
+                    .child(
+                        HostSentence::new("templates-undo-text")
+                            .text("Deleted ")
+                            .host(&HostText::from_host(undo.template.name.clone()))
+                            .text("."),
+                    )
+                    .child(
+                        Button::new(
+                            "templates-undo",
+                            "Undo",
+                            HoverHelp::tooltip(
+                                "Restore the deleted template if its old name is still free",
+                            ),
+                            Role::Button,
+                        )
+                        .tier(Tier::Neutral)
+                        .busy(busy)
+                        .on_click(move |_, window, cx| {
+                            let _ = weak.update(cx, |dialog, cx| dialog.restore(window, cx));
+                        }),
                     ),
             );
         }

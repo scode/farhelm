@@ -335,7 +335,7 @@ fn the_dialog_fits_the_narrowest_window(cx: &mut TestAppContext) {
     assert_eq!(card.right(), px(700.), "{card:?}");
 }
 
-/// Escape closes the dialog, as its header Close does; nothing is unsaved yet to ask about.
+/// Escape closes the dialog, as its header Close does, when there is nothing unsaved to ask about.
 #[gpui::test]
 fn escape_closes_the_dialog(cx: &mut TestAppContext) {
     let (_helm, cx) = open_header(cx, &templates(), None);
@@ -406,7 +406,7 @@ fn closing_a_hint_opened_dialog_returns_focus_where_it_was(cx: &mut TestAppConte
 }
 
 /// The header Close closes the dialog through the layer manager's dismissal, the same path Escape takes, so the editor's
-/// leave question can later hold both.
+/// leave question holds both.
 #[gpui::test]
 fn the_header_close_closes_the_dialog(cx: &mut TestAppContext) {
     let (_helm, cx) = open_header(cx, &templates(), None);

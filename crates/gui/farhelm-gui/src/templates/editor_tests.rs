@@ -28,7 +28,7 @@ use crate::test_support::{self, any_open, click, frame, keys, settle};
 
 /// The templates most tests start with, in the helm's order (by name): one with a launch kind, which opens clean, one
 /// without, which opens with its switch inferred, and a command launch.
-fn templates() -> Vec<LaunchTemplate> {
+pub(super) fn templates() -> Vec<LaunchTemplate> {
     vec![
         template(
             "codex-deep",
@@ -69,7 +69,7 @@ fn catalog() -> Value {
 /// Open the dialog from the header and click `opener` (a row's open button or "+ New template"), then answer the model
 /// catalog read the first editor sends. Asserts that read was all that was sent, so a test's later commands are its
 /// own.
-fn open_editor(helm: &mut FakeHelm, opener: &'static str, cx: &mut VisualTestContext) {
+pub(super) fn open_editor(helm: &mut FakeHelm, opener: &'static str, cx: &mut VisualTestContext) {
     click(cx, "templates-button");
     click(cx, opener);
     settle(cx);
@@ -84,7 +84,7 @@ fn open_editor(helm: &mut FakeHelm, opener: &'static str, cx: &mut VisualTestCon
 }
 
 /// The open editor's draft.
-fn draft(cx: &mut VisualTestContext) -> Draft {
+pub(super) fn draft(cx: &mut VisualTestContext) -> Draft {
     cx.update(|_, cx| {
         let dialog = cx
             .try_global::<Opened>()
@@ -101,7 +101,7 @@ fn draft(cx: &mut VisualTestContext) -> Draft {
 }
 
 /// Whether the open editor's name field holds focus.
-fn name_focused(cx: &mut VisualTestContext) -> bool {
+pub(super) fn name_focused(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| {
         let dialog = cx
             .try_global::<Opened>()
@@ -143,7 +143,7 @@ fn pressed(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
 }
 
 /// Whether anything is drawn under `id`.
-fn drawn(cx: &mut VisualTestContext, id: &str) -> bool {
+pub(super) fn drawn(cx: &mut VisualTestContext, id: &str) -> bool {
     frame(cx)
         .into_iter()
         .any(|node| node.element_id.as_deref() == Some(id))
@@ -756,7 +756,9 @@ fn an_escaped_field_keeps_its_raw_value_until_replaced(cx: &mut TestAppContext) 
         painted(cx)
     );
 
+    // The added YOLO answer is unsaved: leaving asks, and Discard goes on.
     click(cx, "template-open-hidden-model");
+    click(cx, "prompt-alternative-0");
     settle(cx);
     assert!(
         drawn(cx, "templates-model-escaped"),
@@ -936,7 +938,7 @@ fn a_wrapper_prefix_that_does_not_parse_refuses_save(cx: &mut TestAppContext) {
 // ---- Rename and Duplicate ------------------------------------------------------------------------------------------
 
 /// The helm stores and pushes the preferences holding `marked` as the ⚡ template and `keys` as the number keys.
-fn push_preferences(
+pub(super) fn push_preferences(
     helm: &mut FakeHelm,
     marked: Option<&str>,
     keys: &[(&str, &str)],
@@ -963,7 +965,7 @@ fn push_preferences(
 }
 
 /// The one command sent since the last call, which must be `method` on `path`: its id and body.
-fn one(helm: &mut FakeHelm, method: Method, path: &str) -> (u64, Value) {
+pub(super) fn one(helm: &mut FakeHelm, method: Method, path: &str) -> (u64, Value) {
     let sent = helm.commands();
     assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
     assert_eq!((sent[0].method, sent[0].path.as_str()), (method, path));
@@ -971,7 +973,7 @@ fn one(helm: &mut FakeHelm, method: Method, path: &str) -> (u64, Value) {
 }
 
 /// `templates()` with `codex-deep` renamed to `codex-deeper` (the new name added, the old one still there or gone).
-fn renamed(old_kept: bool) -> Vec<LaunchTemplate> {
+pub(super) fn renamed(old_kept: bool) -> Vec<LaunchTemplate> {
     let mut list = templates();
     let mut new = list[0].clone();
     new.name = "codex-deeper".into();
@@ -1215,9 +1217,9 @@ fn a_refused_delete_of_the_old_name_shows_the_helms_words(cx: &mut TestAppContex
 
 /// SPEC.md: "Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free". The copy
 /// is of the saved template, not of edits the user has not saved (the old dialog copied its baseline), and it is a new
-/// template that needs Save. Specified: with `codex-deep-copy` taken and an unsaved model edit, Duplicate opens a new
-/// template named `codex-deep-copy-2` holding the stored model, unsaved, with focus on its name and no Duplicate of its
-/// own; its Save writes it under that name.
+/// template that needs Save. Specified: with `codex-deep-copy` taken and an unsaved model edit, Duplicate, once the
+/// edit is discarded, opens a new template named `codex-deep-copy-2` holding the stored model, unsaved, with focus on
+/// its name and no Duplicate of its own; its Save writes it under that name.
 #[gpui::test]
 fn duplicate_opens_an_unsaved_copy_of_the_saved_template(cx: &mut TestAppContext) {
     let mut list = templates();
@@ -1232,6 +1234,7 @@ fn duplicate_opens_an_unsaved_copy_of_the_saved_template(cx: &mut TestAppContext
         "the premise: an unsaved edit"
     );
     click(cx, "templates-duplicate");
+    click(cx, "prompt-alternative-0");
     settle(cx);
     let copy = draft(cx);
     assert_eq!(copy.name, "codex-deep-copy-2");
