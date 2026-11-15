@@ -26,7 +26,13 @@ impl NativeStaging {
     /// Remove this process's partial saves even though hard exit skips their destructors.
     /// No transfer is awaited, and a completed publication outside staging survives.
     fn cleanup(&self) {
-        for directory in self.0.lock().unwrap().take().unwrap_or_default() {
+        // A poisoned lock still holds a valid list (a panic elsewhere cannot leave it half-written), and this runs
+        // inside the desktop app's quit callback, where a panic aborts the app on macOS.
+        let mut staging = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for directory in staging.take().unwrap_or_default() {
             if let Some(directory) = directory.upgrade()
                 && let Err(error) = std::fs::remove_dir_all(directory.path())
                 && error.kind() != std::io::ErrorKind::NotFound
@@ -37,12 +43,12 @@ impl NativeStaging {
     }
 }
 
-/// Call from the desktop app's quit path, before its event loop exits.
+/// Call from the desktop app's quit path, before its event loop exits; the
+/// desktop app's quit handler does (`farhelm-desktop`'s `run`). It runs
+/// synchronously on the main thread inside that handler, so it must stay fast
+/// (it only removes directories) and must not panic; a second call does
+/// nothing, since the first closes admission for good.
 /// Crashes and force-quits cannot run this process-local cleanup.
-///
-/// NOTE: Nothing calls it at the moment. The old Dioxus app called it from its
-/// event loop's teardown; the GPUI app's quit path must call it once that app
-/// is wired in, or download staging is left behind until the next launch.
 pub fn cleanup_native_downloads() {
     NATIVE_STAGING.cleanup();
 }
