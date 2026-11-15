@@ -785,19 +785,22 @@ systemd or SSH substrate ran.
   there adds no host while the agent is told its request was accepted; and on a fake SSH host of its own, a host menu's
   Uninstall opens the helm's refusal of a host it cannot check, and once the scripted backend reports the unit file
   gone, the confirmation's Uninstall starts a run the row shows, after which the helm forgets the host and the Hosts
-  panel shows the removal notice until its dismiss control hides it. A failed run keeps its run directory under `/tmp`
-  for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, and the second run if
-  one is up, for which the recorder's `--termination-grace` leaves it time: 30 s covers the two `stop`s in a row, each a
-  few seconds normally. Its 34 steps took 91 s on a build worker on 2026-11-15, the second run's start and stop included
-  (62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first
-  unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux,
-  or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row
-  menu, session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick switcher, host rail
-  (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host menu, Remove host, host
-  Update and host Uninstall, Help menu or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and
-  announcements at a window start), Trash button and dialog, approval cards or their region, the helm's approval path,
-  sidebar width or divider, terminal attach, paste, text input or scrollback, the order menu, the heading's New, the
-  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  panel shows the removal notice until its dismiss control hides it; and on a session of its own, a command launch
+  asserted YOLO, the menu's Replace and Confirm replace bring up the YOLO question in its row, and its one-off answer
+  makes the helm list the title under a new id and not the old one, with the local host still asking before YOLO
+  launches. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from
+  the recorder) still stops its app run, and the second run if one is up, for which the recorder's `--termination-grace`
+  leaves it time: 30 s covers the two `stop`s in a row, each a few seconds normally. Its 34 steps took 91 s on a build
+  worker on 2026-11-15, the second run's start and stop included (62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with
+  fewer steps), plus the app's start; it builds the app first unless given `--no-build`. Needs what `gui-agent.py start`
+  needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI
+  does not run it. Run it when the app's session list, row menu, session header, Delete, Rename, Stop, Restart, Replace
+  (its YOLO question included), Mark read and Mark unread, quick switcher, host rail (Add host among its entries) and
+  its foot (Hosts and the Settings gear), status segments, host menu, Remove host, host Update and host Uninstall, Help
+  menu or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and announcements at a window
+  start), Trash button and dialog, approval cards or their region, the helm's approval path, sidebar width or divider,
+  terminal attach, paste, text input or scrollback, the order menu, the heading's New, the bridge's wiring, the app's
+  startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

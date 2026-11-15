@@ -283,8 +283,14 @@ fn a_refused_replace_with_comes_back_and_stays_on_the_source(cx: &mut TestAppCon
 fn replace_with_waits_while_its_source_is_busy(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(replace_with(cx, "a"));
-    cx.update(|_, cx| {
-        crate::session_list::replace::send("a", farhelm_proto::DeleteGuard::Unconditional, cx)
+    cx.update(|window, cx| {
+        crate::session_list::replace::send(
+            "a",
+            farhelm_proto::DeleteGuard::Unconditional,
+            crate::session_list::replace_yolo::Surface::Row,
+            window.window_handle(),
+            cx,
+        )
     });
     let busy = replaces(&mut helm, cx);
     assert_eq!(busy.len(), 1, "the premise: a plain Replace of a is out");

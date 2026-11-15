@@ -13,8 +13,9 @@
 //!   refused if something runs by then, and one that warned only about tabs is refused if the agent runs again. A
 //!   refused removal still leaves the replacement, which the helm's words name.
 //! - **No retry key.** The GUI writes no retry keys (SPEC_impl.md, "One failure path: the reset"), so the request
-//!   carries no `intent_key`; nor `confirm_yolo`, since the YOLO question belongs to the launcher area. A host that asks
-//!   before YOLO launches refuses a YOLO launch's Replace, and that refusal shows like any other.
+//!   carries no `intent_key`. It sets `confirm_yolo` only when it is sent again after the user confirmed the YOLO
+//!   question ([`super::replace_yolo`]): a host that asks before YOLO launches refuses a YOLO launch's Replace without
+//!   it, and that refusal asks the question. Every other refusal shows on the row as described below.
 //! - **A long wait says so.** After two seconds the row shows "Replacing on <host>… <n> s", the host as the helm names
 //!   it and the whole seconds since the request went out, moved on once a second ([`super::outcome`]'s clock); a
 //!   quick reply adds nothing.
@@ -31,21 +32,21 @@
 //!
 //! The question, the precondition, the command and the progress line are functions of a session's row, so the open
 //! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and the interrupted
-//! card (a later piece) can too.
+//! card (a later piece) can too. Each names its [`Surface`], which is where a YOLO question for its Replace shows.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::ReplaceSessionBody;
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionReplaceReply, SessionStatus};
-use gpui::{App, Context, IntoElement, SharedString, Styled, Window, px};
+use gpui::{AnyWindowHandle, App, Context, IntoElement, SharedString, Styled, Window, px};
 use serde_json::json;
 
-use super::outcome;
-use super::{SessionList, delete, menu, selection};
+use super::replace_yolo::{self, Surface};
+use super::{SessionList, delete, menu, outcome, selection};
 use crate::components::{HoverHelp, Tier};
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, OpKey, Outcome, Settled, Work};
+use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::theme;
 use crate::{local_state, session};
@@ -117,18 +118,24 @@ pub(crate) fn launcher_warning(row: &SessionRow) -> (Option<String>, DeleteGuard
     (Some(warning), delete::guard(row))
 }
 
-/// What a confirmed Replace acts on: the source, by the key the helm files it under, and the guard of the row the
-/// question was drawn from.
+/// What a confirmed Replace acts on: the source, by the key the helm files it under, the guard of the row the question
+/// was drawn from, and the surface it was asked on, where a YOLO question for it would show.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Frozen {
     pub(crate) key: String,
     pub(crate) guard: DeleteGuard,
+    pub(crate) surface: Surface,
 }
 
-/// The row's Replace question for `row`, filed under `key`, asked with `guard`: the consequence, then the title quoted
-/// on a line of its own, as the old row's question had them. Its answer is "Confirm replace" in the danger tier, and its
-/// Cancel says in its help what Cancel keeps, as the old row's did.
-pub(crate) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Question<Frozen> {
+/// The row's Replace question for `row`, filed under `key`, asked on `surface` with `guard`: the consequence, then the
+/// title quoted on a line of its own, as the old row's question had them. Its answer is "Confirm replace" in the danger
+/// tier, and its Cancel says in its help what Cancel keeps, as the old row's did.
+pub(crate) fn question(
+    key: &str,
+    row: &SessionRow,
+    guard: DeleteGuard,
+    surface: Surface,
+) -> Question<Frozen> {
     let title = HostText::from_host(row.info.title.as_str());
     Question::new(
         "Replace confirmation",
@@ -140,6 +147,7 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
         Frozen {
             key: key.to_owned(),
             guard,
+            surface,
         },
     )
     .line(consequence(row))
@@ -159,11 +167,15 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
 
 /// The session's plain Replace, `POST /api/sessions/{id}/replace`, as the route's shared client body
 /// ([`ReplaceSessionBody`], which the helm's tests decode into its own request type) with the source's Delete guard as
-/// its two flags and nothing else: no `with` (that is Replace with) and no `confirm_yolo` (see the module docs). The
-/// body has no retry key at all.
-pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, PathError> {
+/// its two flags, and `confirm_yolo` as `consent` says: set only for the Replace sent again after the user confirmed
+/// the YOLO question (see the module docs). No `with` (that is Replace with), and no retry key at all.
+pub(crate) fn command(
+    session: &str,
+    guard: DeleteGuard,
+    consent: bool,
+) -> Result<Command, PathError> {
     let body = ReplaceSessionBody {
-        confirm_yolo: false,
+        confirm_yolo: consent,
         with: None,
         only_if_nothing_alive: guard.only_if_nothing_alive(),
         only_if_agent_ended: guard.only_if_agent_ended(),
@@ -194,61 +206,162 @@ impl SessionList {
         let Some(target) = menu::actionable(key, cx) else {
             return;
         };
-        if let Some(ask) = begin(key, &target.row, target.skips_questions, cx) {
+        if let Some(ask) = begin(
+            key,
+            &target.row,
+            target.skips_questions,
+            Surface::Row,
+            window.window_handle(),
+            cx,
+        ) {
             self.ask_about_row(key, ask, mark, confirm, window, cx);
         }
     }
 }
 
-/// Start a Replace of `row`, filed under `key`, with Skip session confirmations as `skipped`: the one statement of
-/// Replace's ask-or-send rule, for the row's menu and the open session's header alike. Replace always asks unless the
-/// question is skipped; then it is sent at once with the Delete guard of `row` as drawn, and there is nothing to ask.
-/// Otherwise nothing is sent, and what comes back builds the question to ask, whose answer goes to [`confirm`].
+/// Start a Replace of `row`, filed under `key`, on `surface` in `window`, with Skip session confirmations as
+/// `skipped`: the one statement of Replace's ask-or-send rule, for the row's menu and the open session's header alike.
+/// Replace always asks unless the question is skipped; then it is sent at once with the Delete guard of `row` as drawn,
+/// and there is nothing to ask. Otherwise nothing is sent, and what comes back builds the question to ask, whose answer
+/// goes to [`confirm`]. Its callers reach it only through [`menu::actionable`], which refuses while the session has a
+/// request in flight or its YOLO question is open, so a Replace never races the one that question's answer sends.
 pub(crate) fn begin<'a>(
     key: &'a str,
     row: &'a SessionRow,
     skipped: bool,
+    surface: Surface,
+    window: AnyWindowHandle,
     cx: &mut App,
 ) -> Option<impl Fn() -> Question<Frozen> + 'a> {
     let guard = delete::guard(row);
     if skipped {
-        send(key, guard, cx);
+        send(key, guard, surface, window, cx);
         return None;
     }
-    Some(move || question(key, row, guard))
+    Some(move || question(key, row, guard, surface))
 }
 
 /// A Replace question was confirmed: send the Replace it froze.
-pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
-    send(&frozen.key, frozen.guard, cx);
+pub(crate) fn confirm(frozen: Frozen, window: &mut Window, cx: &mut App) {
+    send(
+        &frozen.key,
+        frozen.guard,
+        frozen.surface,
+        window.window_handle(),
+        cx,
+    );
 }
 
-/// Send `key`'s Replace with `guard` through the operation store and start its row's clock. A session that already has
-/// a request in flight sends nothing.
-pub(crate) fn send(key: &str, guard: DeleteGuard, cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
+/// One Replace as it was sent, for its completion: the guard it carried, the surface it was asked on, the mark of the
+/// user's answer it counts "moved on" from, and whether it carried YOLO consent.
+#[derive(Clone, Copy)]
+struct Sent {
+    guard: DeleteGuard,
+    surface: Surface,
+    mark: Mark,
+    consent: bool,
+}
+
+/// Send `key`'s plain Replace with `guard`, asked on `surface` in `window`, for the user's answer now. A YOLO question an
+/// earlier Replace of the session met is closed by now (an open one refuses the Replace before its question opens), and
+/// the next one asked replaces it.
+/// Visible to the crate for the launcher's tests, which put a plain Replace in flight on the session's key.
+pub(crate) fn send(
+    key: &str,
+    guard: DeleteGuard,
+    surface: Surface,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let sent = Sent {
+        guard,
+        surface,
+        mark: Mark::take(cx),
+        consent: false,
     };
-    let Ok(command) = command(key, guard) else {
+    start(key, sent, window, cx);
+}
+
+/// The user confirmed the YOLO question of `key`'s Replace, asked on `surface` with `guard`, at `answer`: send the same
+/// Replace again with consent, its completion settling in `window` and counting "moved on" from that answer's press.
+pub(super) fn send_with_consent(
+    key: &str,
+    guard: DeleteGuard,
+    surface: Surface,
+    answer: Mark,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let sent = Sent {
+        guard,
+        surface,
+        mark: answer,
+        consent: true,
+    };
+    start(key, sent, window, cx);
+}
+
+/// Send `key`'s Replace as `sent` says through the operation store, its completion settling in `window`, and start its
+/// row's clock. A session that already has a request in flight sends nothing. Returns whether it was sent.
+fn start(key: &str, sent: Sent, window: AnyWindowHandle, cx: &mut App) -> bool {
+    let Some(operations) = session::current_operations(cx) else {
+        return false;
+    };
+    let Ok(command) = command(key, sent.guard, sent.consent) else {
         tracing::warn!("a session key that cannot be a path segment was not replaced");
-        return;
+        return false;
     };
     let source = key.to_owned();
     let started = operations.update(cx, |operations, cx| {
         operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
-            settle(&source, settled, cx)
+            settle_sent(&source, sent, window, settled, cx)
         })
     });
     match started {
-        Ok(()) => outcome::start_clock(key, Work::Replace, cx),
-        Err(refused) => tracing::debug!(?refused, "a Replace was not sent"),
+        Ok(()) => {
+            outcome::start_clock(key, Work::Replace, cx);
+            true
+        }
+        Err(refused) => {
+            tracing::debug!(?refused, "a Replace was not sent");
+            false
+        }
     }
 }
 
-/// `source`'s Replace settled, from the row's question or the launcher's Replace with alike. A refusal is the operation
-/// store's to keep. A success's reply ([`SessionReplaceReply`]) is the replacement's own session (its `id` the key the
-/// helm files it under) and, when the source's Delete carried one, its `delete_notice`; see the module docs for where
-/// each goes. A reply that does not read so selects nothing.
+/// `source`'s plain Replace, sent as `sent`, settled. A refusal that carries the helm's YOLO marker asks the YOLO
+/// question where the Replace was asked ([`replace_yolo`]), which then says it in place of the store's record; any other
+/// refusal is the operation store's to keep. A success goes on as [`settle`], counting "moved on" from the user's answer
+/// in `sent` as well as from the store's own mark: a Replace sent again with consent counts from the YOLO answer's
+/// press, before the store sent it, and the permanent answer's host write ran in between.
+///
+/// The launcher's Replace with does not come here: its YOLO refusal asks the launcher's own question in the launcher
+/// (with its guarded answer), and only its success goes through [`settle`].
+fn settle_sent(source: &str, sent: Sent, window: AnyWindowHandle, settled: &Settled, cx: &mut App) {
+    if let Outcome::Refused(refusal) = &settled.outcome {
+        if refusal.has(HelmMarker::YoloConfirmation)
+            && replace_yolo::ask(source, sent.guard, sent.surface, sent.mark, window, cx)
+            && let Some(operations) = session::current_operations(cx)
+        {
+            // Called from the refusal's own completion, so the record is still this refusal's.
+            operations.update(cx, |operations, cx| {
+                operations.forget(&OpKey::session(source), cx)
+            });
+        }
+        return;
+    }
+    let settled = Settled {
+        outcome: settled.outcome.clone(),
+        user_moved_on: settled.user_moved_on || focus::has_moved_on(&sent.mark, cx),
+    };
+    settle(source, &settled, cx);
+}
+
+/// `source`'s Replace settled, from the row's question, the header's or the launcher's Replace with alike. A refusal is
+/// not handled here: plain Replace's is [`settle_sent`]'s, and Replace with's the launcher's. A success's reply
+/// ([`SessionReplaceReply`]) is the replacement's own session (its `id` the key the helm files it under) and, when the
+/// source's Delete carried one, its `delete_notice`; see the module docs for where each goes. A reply that does not read
+/// so selects nothing. `settled.user_moved_on` is the caller's to combine with the mark of the answer it counts from.
 pub(crate) fn settle(source: &str, settled: &Settled, cx: &mut App) {
     let Outcome::Done(body) = &settled.outcome else {
         return;
@@ -368,7 +481,7 @@ mod tests {
             DeleteGuard::AgentEnded,
             DeleteGuard::NothingAlive,
         ] {
-            let built = command("a", guard).unwrap();
+            let built = command("a", guard, false).unwrap();
             assert_eq!(built.work(), Work::Replace);
             assert_eq!(
                 built.path().as_str(),

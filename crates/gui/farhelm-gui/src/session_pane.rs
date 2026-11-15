@@ -4,10 +4,10 @@
 //! SPEC.md, "Session view": "Opening a session shows the agent's real TUI, live". The pane owns the selected session's
 //! terminals, the agent terminal and one per shell tab (the terminal area's [`TerminalSet`], which draws whichever the
 //! user chose), and draws the session's top row above them ([`header`]: the lifecycle actions, and the left region
-//! holding the set's tab strip and the open-tunnels pill), with the lines a long
-//! Restart or Replace and a refusal add between the two, and the details bar below it ([`details`]: the session's
-//! status, title, host and age). Neither row keeps anything that belongs to a session: both read the store and the
-//! operation store while they draw.
+//! holding the set's tab strip and the open-tunnels pill), with the lines a long Restart or Replace, a refusal and a
+//! header Replace's YOLO question add between the two, and the details bar below it ([`details`]: the session's status,
+//! title, host and age). Neither row keeps anything that belongs to a session: both read the store and the operation
+//! store while they draw.
 //!
 //! - **One set of terminals, remade on every change of selection.** Choosing another session drops the set (which ends
 //!   every one of its streams, tabs included) and makes a new one with a fresh attachment lease. This is the old app's
@@ -334,11 +334,11 @@ impl Render for SessionPane {
         let header = self.header_row(&key, step, window, cx);
         let lines = self.header_lines(&key, step, cx);
         let bar = self.details_bar(&key, window, cx);
-        // The top row, then the lines a long Restart or Replace and a refusal add, then the terminal, which takes the
-        // rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines show only while
-        // there is something to say), then the details bar. The bar comes last in drawing order as well as on screen,
-        // so its controls, when it has some, follow the top row and the terminal in Tab's order (SPEC.md: "Keyboard
-        // order follows the top row, terminal, then bottom bar").
+        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then the terminal,
+        // which takes the rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines
+        // show only while there is something to say), then the details bar. The bar comes last in drawing order as
+        // well as on screen, so its controls, when it has some, follow the top row and the terminal in Tab's order
+        // (SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar").
         div()
             .flex()
             .flex_col()
