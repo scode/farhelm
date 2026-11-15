@@ -31,7 +31,7 @@ use gpui::{
 
 use super::{Launcher, choices::status_line, row};
 use crate::components::{HoverHelp, OptionRow, Role, TextInput, Vertical};
-use crate::focus::Mark;
+use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, harness_label};
 use crate::launcher::model::{
@@ -237,6 +237,7 @@ impl Launcher {
                 container,
                 start: None,
                 anchor,
+                returns_to: ReturnTo::Opener,
             },
             &mark,
             window,

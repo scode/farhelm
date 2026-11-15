@@ -508,6 +508,7 @@ impl Opening {
                 container,
                 start: Some(start),
                 anchor: self.anchor.clone(),
+                returns_to: focus::ReturnTo::Opener,
             },
             &mark,
             window,

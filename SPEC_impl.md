@@ -501,11 +501,12 @@ which the coordinator makes with the same checks once a frame has drawn the cont
 draws while a frame is prepared tells it the target was drawn, and the move runs once that frame is drawn. Any other
 focus move but the coordinator's own recovery drops it, and so does a layer that took focus closing with focus returned
 (a dialog closed before its first frame keeps it, harmlessly, since its target is never drawn elsewhere), so a newer
-move wins, and area code never schedules a focus move on a frame itself. A dialog opened from a button names that button
-as where closing returns focus (`focus::ReturnTo::Control`) rather than focusing it before opening: on macOS a click
-leaves a button unfocused, so what held focus before the click would get it back, and a focus move made first costs a
-whole-window refresh and is refused from inside another dialog. `focus::move_within_control`, which carries focus along
-inside one control as part of the key the user pressed there, scrolls nothing.
+move wins, and area code never schedules a focus move on a frame itself. A dialog or menu opened from a button (a
+session row's menu toggle) names that button as where closing returns focus (`focus::ReturnTo::Control`) rather than
+focusing it before opening: on macOS a click leaves a button unfocused, so what held focus before the click would get it
+back, and a focus move made first costs a whole-window refresh and is refused from inside another dialog.
+`focus::move_within_control`, which carries focus along inside one control as part of the key the user pressed there,
+scrolls nothing.
 
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, by the review gate, which refuses area code that defers a focus move to a later frame itself (a

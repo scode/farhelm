@@ -512,6 +512,7 @@ impl TemplatesDialog {
                 container: cx.focus_handle(),
                 start: Some(focus[start].clone()),
                 anchor,
+                returns_to: ReturnTo::Opener,
             },
             &mark,
             window,
