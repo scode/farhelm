@@ -26,10 +26,10 @@
 //!   on needs no check of its own; the question itself opens only through the mark taken at the menu's Remove.
 //! - **Not started.** A Remove refused before anything is sent says why on the Hosts panel's line, naming the host,
 //!   until the next Remove or a reset ([`panel_lines`]): the host's key already has work in flight (the store's
-//!   refusal), or a session launch is in flight ([`launch_in_flight`]). The second is the migration's rule, decided by
-//!   its orchestrator on 2026-11-14 after the old app refused a host change during a launch and the reverse: each side
-//!   refuses its own action while the other's work is in flight in the operation store, with a reason, and no shared
-//!   lock.
+//!   refusal), or a session launch is in flight ([`super::launch_in_flight`], shared with Add host, setup and Re-run).
+//!   The second is the migration's rule, decided by its orchestrator on 2026-11-14 after the old app refused a host
+//!   change during a launch and the reverse: each side refuses its own action while the other's work is in flight in the
+//!   operation store, with a reason, and no shared lock.
 //! - **A refused permanent answer.** The removal goes ahead whether or not its preference save succeeds, and the
 //!   question has closed, so a refusal of that save shows on the panel's line too, "Remove hosts without asking:" and
 //!   the helm's words, or Settings' words for a press refused that way ([`Refused::WORDS`]) when the operation store
@@ -113,7 +113,7 @@ pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
     let removal = Removal::of(&view);
     // A line from an earlier Remove belongs to that attempt; this one says its own.
     show(cx, |lines| lines.not_started = None);
-    if launch_in_flight(cx) {
+    if super::launch_in_flight(cx) {
         not_started(&removal, Refusal::LaunchInFlight, cx);
     } else if asks_first(cx) {
         let _ = ask(host, mark, window, cx);
@@ -157,31 +157,6 @@ fn asks_first(cx: &App) -> bool {
             == Some(true)
     });
     !skips
-}
-
-/// Whether a session launch is in flight anywhere in the operation store, which refuses a Remove (the module docs).
-fn launch_in_flight(cx: &App) -> bool {
-    session::current_operations(cx)
-        .is_some_and(|operations| operations.read(cx).any_in_flight(creates_a_session))
-}
-
-/// Whether `work` creates a session on a host: what "a launch in flight" means for the rule that a host's removal waits
-/// for one: the launcher's New and Clone, and a session's Restart and Replace, each of which creates a session (decided
-/// by the migration's orchestrator on 2026-11-14). Exhaustive, so a new kind of work decides.
-fn creates_a_session(work: Work) -> bool {
-    match work {
-        Work::Launch | Work::Restart | Work::Replace => true,
-        Work::Rename
-        | Work::Delete(_)
-        | Work::Save
-        | Work::Stop
-        | Work::Seen
-        | Work::Probe
-        | Work::Setup
-        | Work::TunnelOpen
-        | Work::TunnelClose
-        | Work::RemoveHost => false,
-    }
 }
 
 /// Ask the removal confirmation for `host` over everything else in `window` (see the module docs), unless the user has
@@ -281,7 +256,7 @@ fn remove_command(host: i64) -> Result<Command, PathError> {
 /// permanent answer's preference waits on. The store records a refusal under the host's key, where the Hosts panel
 /// shows it, so the completion has nothing to do.
 fn submit(removal: &Removal, cx: &mut App) -> bool {
-    if launch_in_flight(cx) {
+    if super::launch_in_flight(cx) {
         not_started(removal, Refusal::LaunchInFlight, cx);
         return false;
     }
@@ -412,17 +387,16 @@ enum Refusal {
 }
 
 impl Refusal {
-    /// What the line says after the host's name, in the old app's wording for an action refused while another runs
-    /// ("<action>: not started, another operation is in progress; try again", `list/lifecycle.rs` at the reference
-    /// commit).
+    /// What the line says after the host's name and its colon, in the old app's wording for an action refused while
+    /// another runs ("<action>: not started, another operation is in progress; try again", `list/lifecycle.rs` at the
+    /// reference commit).
     fn words(self) -> &'static str {
         match self {
             Refusal::Busy => {
-                ": not started, another operation on this host is in progress; try again"
+                "not started, another operation on this host is in progress; try again"
             }
-            Refusal::LaunchInFlight => {
-                ": not started, a session launch is in progress; try again when it finishes"
-            }
+            // The words every host registry change refuses with during a launch.
+            Refusal::LaunchInFlight => super::LAUNCH_IN_FLIGHT,
         }
     }
 }
@@ -457,7 +431,7 @@ fn not_started(removal: &Removal, why: Refusal, cx: &mut App) {
     let line = HostSentence::new(SharedString::from("hosts-remove-not-started"))
         .text("Remove ")
         .host(&removal.name)
-        .text(why.words());
+        .text(format!(": {}", why.words()));
     show(cx, |lines| lines.not_started = Some((store, line)));
 }
 

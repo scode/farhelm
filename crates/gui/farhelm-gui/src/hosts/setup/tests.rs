@@ -1,6 +1,7 @@
 //! Tests of setting up an SSH host over the helm client's fake: the confirmation a probe's plan opens (what it shows,
 //! where focus starts, Copy plan), what each answer sends and under which key, setup without asking, and where a
-//! refused setup shows, before and after the user moved on; then the rerun of a failed setup from a host's menu.
+//! refused setup shows, before and after the user moved on; then the rerun of a failed setup from a host's menu, and
+//! the refusals of a setup and a rerun while a session launch is in flight.
 //!
 //! A new host's tests start where the Add host tests leave off, through the same root view and helpers
 //! (`hosts/add/tests.rs`): Add host opened from its rail button, a destination typed, Add pressed, and the fake helm
@@ -21,6 +22,7 @@ use crate::focus;
 use crate::hosts::add::tests::{
     alias, destination, dialog_key, error_line, one_probe, open_dialog, open_rail_with, type_text,
 };
+use crate::hosts::tests::{nothing_in_flight, start_work};
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{
@@ -795,4 +797,185 @@ fn a_reruns_plan_after_the_user_moved_on_opens_nothing_and_says_so(cx: &mut Test
         Some(super::RERUN_MOVED_ON)
     );
     assert_eq!(helm.commands(), [], "nothing was provisioned");
+}
+
+// ---- During a session launch ---------------------------------------------------------------------------------------
+
+/// The refusal every host registry change gives during a session launch, after the action's name.
+fn during_launch(action: &str) -> String {
+    format!("{action}: {}", crate::hosts::LAUNCH_IN_FLIGHT)
+}
+
+/// Why this matters: a setup is a host registry change, which the migration keeps out of the way of a session launch,
+/// and the setup question can stay open while a launch starts, so checking only at Add would let Set up put a new host
+/// beside the launch. The refusal takes the path a helm refusal of the setup takes, so the user can try again with the
+/// fields as they were. Specified: with the setup question open and a launcher `Launch` in flight, Set up sends no
+/// provision request and reopens Add host holding `dev@newbox` and `newbox1`, its error line reading "Add host: not
+/// started, a session launch is in progress; try again when it finishes".
+#[gpui::test]
+fn set_up_during_a_launch_sends_nothing_and_reopens_add_host_saying_why(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_with(cx, Vec::new());
+    probe_a_plan(&mut helm, cx);
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Set up host · dev@newbox"),
+        "the premise: the setup question is open"
+    );
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, "prompt-confirm");
+    assert_eq!(helm.commands(), [], "no setup was sent");
+    assert_eq!(destination_open(cx).as_deref(), Some("dev@newbox"));
+    assert_eq!(alias(cx), "newbox1");
+    assert_eq!(error_line(cx), Some(during_launch("Add host")));
+    assert_eq!(
+        label(cx, "hosts-setup-not-started"),
+        None,
+        "said once, in Add host"
+    );
+    assert_eq!(label(cx, "hosts-add-error"), None, "said once, in Add host");
+}
+
+/// Why this matters: a permanent answer whose setup was refused must not leave half its effect behind, or the next Add
+/// would skip the very question the user was answering. Specified: with the setup question open and a launcher
+/// `Launch` in flight, "Set up, don't ask again" sends neither the provision request nor the preference, and Add host
+/// reopens saying why.
+#[gpui::test]
+fn the_permanent_answer_during_a_launch_leaves_the_preference_off(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_with(cx, Vec::new());
+    probe_a_plan(&mut helm, cx);
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, "prompt-alternative-0");
+    assert_eq!(
+        helm.commands(),
+        [],
+        "neither the setup nor the preference was sent"
+    );
+    assert_eq!(error_line(cx), Some(during_launch("Add host")));
+}
+
+/// Why this matters: without asking, Add host closes as the plan goes out, and a submission refused at once must reopen
+/// it after that close, or the close would take the reopened dialog with it and the refusal would show nowhere.
+/// Specified: with "Set up new hosts without asking" on, a launcher `Launch` started (by no input) while the probe is
+/// out, and then a plan, nothing is provisioned, Add host is open holding `dev@newbox` and `newbox1` with "Add host:
+/// not started, …" in its error line, and the panel shows no line.
+#[gpui::test]
+fn without_asking_a_setup_refused_during_a_launch_reopens_add_host(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_with(cx, vec![preferences(true)]);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    keys(cx, "tab");
+    type_text(cx, "newbox1");
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert_eq!(helm.commands(), [], "no setup was sent");
+    assert_eq!(destination_open(cx).as_deref(), Some("dev@newbox"));
+    assert_eq!(alias(cx), "newbox1");
+    assert_eq!(error_line(cx), Some(during_launch("Add host")));
+    assert_eq!(label(cx, "hosts-setup-not-started"), None);
+}
+
+/// Why this matters: the same rule for a registered host's setup, which has no Add host to reopen, so the Hosts panel's
+/// line says it, naming the host as Remove's line does. Specified: with a rerun's setup question open for `build-box`
+/// and a session's `Restart` in flight, Set up sends no provision request, opens nothing, and the panel's line says
+/// "Set up build-box: not started, a session launch is in progress; try again when it finishes", with nothing under the
+/// row.
+#[gpui::test]
+fn set_up_of_a_rerun_during_a_launch_says_why_on_the_panel(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    let probe = choose_rerun(&mut helm, cx);
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert!(
+        label(cx, "prompt").is_some(),
+        "the premise: the setup question is open"
+    );
+    start_work(&mut helm, cx, Work::Restart, OpKey::session("s1"));
+    click(cx, "prompt-confirm");
+    assert_eq!(helm.commands(), [], "no setup was sent");
+    assert!(!any_open(cx), "nothing opened");
+    assert_eq!(
+        label(cx, "hosts-setup-not-started"),
+        Some(during_launch("Set up build-box"))
+    );
+    assert_eq!(label(cx, "host-error-2"), None, "no record under the row");
+}
+
+/// Why this matters: Re-run starts a host registry change too (its probe can register an answering supervisor, and its
+/// plan leads to a setup), so it waits for a launch as Add does, and says why. Specified: with a session's `Replace` in
+/// flight, choosing Re-run on `build-box` sends nothing and the panel's line says "Re-run build-box: not started, a
+/// session launch is in progress; try again when it finishes"; once the Replace settles, Re-run sends its probe and the
+/// line goes.
+#[gpui::test]
+fn re_run_during_a_launch_sends_nothing_and_says_why_on_the_panel(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    let replace = start_work(&mut helm, cx, Work::Replace, OpKey::session("s1"));
+    click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-rerun");
+    assert_eq!(helm.commands(), [], "no probe was sent");
+    assert_eq!(
+        label(cx, "hosts-setup-not-started"),
+        Some(during_launch("Re-run build-box"))
+    );
+
+    helm.reply(replace, 200, None);
+    settle(cx);
+    assert!(nothing_in_flight(cx), "the premise: the Replace settled");
+    choose_rerun(&mut helm, cx);
+    assert_eq!(label(cx, "hosts-setup-not-started"), None, "the line went");
+}
+
+/// Why this matters: once the user has moved on, a new host's setup refused during a launch has no dialog to reopen, so
+/// the Hosts panel says it, and in the words the panel gives a helm refusal of the same setup ("Add host: "), so one add
+/// does not read two ways depending on who refused it. Specified: with "Set up new hosts without asking" on, a key press
+/// while the probe is out, a launcher `Launch` in flight, and then a plan, nothing is provisioned, no layer opens, and
+/// the panel's line reads "Add host: not started, a session launch is in progress; try again when it finishes".
+#[gpui::test]
+fn a_setup_refused_during_a_launch_after_the_user_moved_on_says_add_host_on_the_panel(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _add) = open_rail_with(cx, vec![preferences(true)]);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    keys(cx, "tab");
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert_eq!(helm.commands(), [], "no setup was sent");
+    assert!(!any_open(cx), "nothing opened");
+    assert_eq!(
+        label(cx, "hosts-setup-not-started"),
+        Some(during_launch("Add host"))
+    );
+}
+
+/// Why this matters: the panel's line says a setup was not started, which stops being true once one is, so a setup that
+/// goes out must take it away, as a rerun that goes out does. Specified: after a Re-run refused during a session's
+/// `Replace` put "Re-run build-box: not started, …" on the panel, and the Replace settled, a setup submission that the
+/// operation store starts takes the line away.
+#[gpui::test]
+fn a_setup_that_goes_out_takes_the_not_started_line_away(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    let replace = start_work(&mut helm, cx, Work::Replace, OpKey::session("s1"));
+    click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-rerun");
+    assert!(
+        label(cx, "hosts-setup-not-started").is_some(),
+        "the premise: the line shows"
+    );
+    helm.reply(replace, 200, None);
+    settle(cx);
+    assert!(nothing_in_flight(cx), "the premise: the Replace settled");
+
+    cx.update(|window, cx| {
+        let offer = reference_offer(cx.focus_handle(), focus::Mark::take(cx));
+        super::submit(offer, window.window_handle(), cx);
+    });
+    settle(cx);
+    one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    assert_eq!(label(cx, "hosts-setup-not-started"), None, "the line went");
 }

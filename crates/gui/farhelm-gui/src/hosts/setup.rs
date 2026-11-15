@@ -39,6 +39,14 @@
 //!   without asking under the same preference. The probe's refusal, why setup is manual, and a plan that arrived after
 //!   the user moved on ([`RERUN_MOVED_ON`]) show under the row, the operation store's record under the host's key, as
 //!   does a refused submission: the host already has a row, so nothing reopens.
+//! - **During a launch.** A submission and a rerun refuse to start while a session launch is in flight
+//!   ([`super::launch_in_flight`]), as Add does. A new host's Add host reopens saying so, as for a helm refusal, while
+//!   the user has not moved on, and otherwise the Hosts panel's line says "Add host: not started, …", as it prefixes a
+//!   helm refusal; a registered host's refusal is on that line naming the host, "Set up <host>: not started, …" or
+//!   "Re-run <host>: not started, …", as Remove's line does for a Remove not started. "Set up, don't ask again" then
+//!   leaves the preference off: it is saved only when no launch holds the setup back. The old app held all of this back
+//!   behind its one page-wide token for launches and host registry changes; here each side refuses its own action
+//!   (decided by the migration's orchestrator on 2026-11-14).
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -190,7 +198,12 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
                     mark: Mark::take(cx),
                     ..offer
                 };
-                stop_asking(cx);
+                // A setup refused before it is sent (a launch in flight) leaves the preference off, so the question
+                // is asked again, as the old app, which held both back, did. Checked first, so that the preference
+                // save, when it goes, goes ahead of the setup as it always has.
+                if !super::launch_in_flight(cx) {
+                    stop_asking(cx);
+                }
                 submit(offer, window.window_handle(), cx);
             },
         )
@@ -213,7 +226,7 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
                 mark: Mark::take(cx),
                 ..offer
             };
-            submit(offer, window.window_handle(), cx)
+            submit(offer, window.window_handle(), cx);
         },
         window,
         cx,
@@ -235,11 +248,16 @@ pub(crate) fn provision_command(probe_id: &str) -> Result<Command, PathError> {
 /// Submit `offer` under its key, as the operation store's work, so it goes on whatever view is open. An accepted
 /// submission needs nothing more here: the run shows in the pushed host progress. A new host's refusal reopens Add host
 /// through [`Offer::mark`], or shows on the Hosts panel's line if the user moved on since; a registered host's shows
-/// under its row, where the operation store keeps it (the module docs).
+/// under its row, where the operation store keeps it (the module docs). Sends nothing while a session launch is in
+/// flight ([`refuse_during_launch`]).
 pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
+    if super::launch_in_flight(cx) {
+        refuse_during_launch(offer, window, cx);
+        return;
+    }
     let command = match provision_command(&offer.probe_id) {
         Ok(command) => command,
         Err(error) => {
@@ -251,44 +269,102 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     let new = matches!(offer.target, Target::New { .. });
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
-            let Outcome::Refused(refusal) = &settled.outcome else {
-                return;
-            };
-            let Target::New {
-                destination,
-                alias,
-                opener,
-            } = &offer.target
-            else {
-                return;
-            };
-            let reopened = !focus::has_moved_on(&offer.mark, cx)
-                && window
-                    .update(cx, |_, window, cx| {
-                        let seed = add::Seed {
-                            destination: destination.clone(),
-                            alias: alias.clone(),
-                            problem: add::error_line().host(&refusal.words),
-                        };
-                        add::reopen(opener, &offer.mark, Some(seed), window, cx).is_some()
-                    })
-                    .unwrap_or(false);
-            // Moved on, or Add host could not open (the window went inert): the panel's line is where it belongs. The
-            // words stay the operation store's record under this add's key, which nothing else starts work on.
-            if !reopened {
+            // A registered host's refusal needs nothing more: it is the store's record under the host's key, which
+            // its row shows.
+            // A new host's falls back to the panel's line, which reads the same record under the add's key, which
+            // nothing else starts work on.
+            if let Outcome::Refused(refusal) = &settled.outcome
+                && !reopen_new(&offer, add::error_line().host(&refusal.words), window, cx)
+                && matches!(offer.target, Target::New { .. })
+            {
                 show(cx, |lines| lines.setup = Some(offer.key.clone()));
             }
         })
     });
     match started {
         // A refusal still shown from an earlier add belongs to that add; a new one replaces it, and a rerun leaves it.
+        // A setup that was not started is over once one is.
         Ok(()) => {
-            if new {
-                show(cx, |lines| lines.setup = None);
-            }
+            show(cx, |lines| {
+                lines.not_started = None;
+                if new {
+                    lines.setup = None;
+                }
+            });
         }
         Err(not_started) => tracing::debug!(?not_started, "host setup not sent"),
     }
+}
+
+/// A new host's refused submission, `problem` its line in Add host: reopen Add host with the destination and alias as
+/// sent and `problem` in its error line, if the user has not moved on since [`Offer::mark`]. Whether it reopened; never
+/// for a registered host, whose refusals show elsewhere, nor once the user moved on or the window went inert, when the
+/// caller shows the refusal on the Hosts panel's line instead.
+fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx: &mut App) -> bool {
+    let Target::New {
+        destination,
+        alias,
+        opener,
+    } = &offer.target
+    else {
+        return false;
+    };
+    !focus::has_moved_on(&offer.mark, cx)
+        && window
+            .update(cx, |_, window, cx| {
+                let seed = add::Seed {
+                    destination: destination.clone(),
+                    alias: alias.clone(),
+                    problem,
+                };
+                add::reopen(opener, &offer.mark, Some(seed), window, cx).is_some()
+            })
+            .unwrap_or(false)
+}
+
+/// Refuse `offer`'s submission because a session launch is in flight ([`super::launch_in_flight`]), sending nothing:
+/// the plan stays unused, and the user can probe again once the launch is over. A new host's refusal reads "Add host:
+/// not started, …", the words Add itself shows for the same refusal and the prefix the panel gives a helm refusal of a
+/// new host's setup: in Add host reopened, or on the Hosts panel's line if the user moved on. A registered host's
+/// refusal is on the panel's line, "Set up <host>: not started, …", naming the host as Remove's line does
+/// ([`not_started`]).
+///
+/// Add host reopens on a later turn of the app, not now: a submission from the confirmation's answer runs while the
+/// window is being updated, where updating it again would fail. Add host's own close of the dialog, on the path
+/// without asking, is queued before this, so the reopened dialog is not closed with it.
+fn refuse_during_launch(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
+    let line = match &offer.target {
+        Target::New { .. } => {
+            not_started_line().text(format!("Add host: {}", super::LAUNCH_IN_FLIGHT))
+        }
+        Target::Registered { name, .. } => not_started_line()
+            .text("Set up ")
+            .host(name)
+            .text(format!(": {}", super::LAUNCH_IN_FLIGHT)),
+    };
+    cx.defer(move |cx| {
+        let problem = add::error_line().text(format!("Add host: {}", super::LAUNCH_IN_FLIGHT));
+        if !reopen_new(&offer, problem, window, cx) {
+            not_started(line, cx);
+        }
+    });
+}
+
+/// The Hosts panel's line for a setup or rerun not started during a launch, empty: what [`not_started`] shows.
+fn not_started_line() -> HostSentence {
+    HostSentence::new("hosts-setup-not-started")
+}
+
+/// Show `line` ([`not_started_line`] and the refusal) on the Hosts panel's line, saying a setup or rerun was not
+/// started because a session launch is in flight, until the next setup or rerun starts, Add host opens, or the UI
+/// session resets. The refusal is the app's own, of work that never started, so it is no record of the operation
+/// store, whose records are the helm's answers to work it was sent.
+fn not_started(line: HostSentence, cx: &mut App) {
+    let Some(store) = session::current_operations(cx).map(|operations| operations.entity_id())
+    else {
+        return;
+    };
+    show(cx, |lines| lines.not_started = Some((store, line)));
 }
 
 /// `POST /api/hosts/probe` for a registered SSH host's rerun of its setup: its destination with the install paths the
@@ -311,12 +387,21 @@ pub(crate) fn rerun_command(host: &HostView) -> Result<Command, PathError> {
 /// Run `host`'s failed setup again, the host menu's Re-run, with `mark` the [`Mark`] taken in its click handler: probe
 /// the host under its own key, and go on from the plan as the module docs say. Sends nothing for a host with no
 /// destination (the menu offers the rerun only on an SSH host, which always has one) or while work on the host is
-/// out.
+/// out. While a session launch is in flight ([`super::launch_in_flight`]) it sends nothing either, and says so on the
+/// Hosts panel's line: "Re-run <host>: not started, …" ([`not_started`]).
 pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
     if host.destination.is_none() {
+        return;
+    }
+    if super::launch_in_flight(cx) {
+        let line = not_started_line()
+            .text("Re-run ")
+            .host(&display_name(host))
+            .text(format!(": {}", super::LAUNCH_IN_FLIGHT));
+        not_started(line, cx);
         return;
     }
     let command = match rerun_command(host) {
@@ -375,8 +460,9 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
             }
         })
     });
-    if let Err(not_started) = started {
-        tracing::debug!(?not_started, "setup rerun probe not sent");
+    match started {
+        Ok(()) => show(cx, |lines| lines.not_started = None),
+        Err(not_started) => tracing::debug!(?not_started, "setup rerun probe not sent"),
     }
 }
 
@@ -424,8 +510,8 @@ fn stop_asking(cx: &mut App) {
 /// What the Hosts panel's line shows: a setup refused after the user moved on from it, by its host-add key (the words
 /// are the operation store's record under that key, so a reset, which empties the store, takes them away), and a
 /// refused permanent answer's words, copied, because Settings' saves share the preference row's key and its record
-/// would show their refusals too. Each stays until Add host opens again or the next one of its kind starts. The panel
-/// redraws when it changes ([`observe_panel_lines`]).
+/// would show their refusals too, and a setup or rerun not started during a launch. Each stays until Add host opens
+/// again or the next one of its kind starts. The panel redraws when it changes ([`observe_panel_lines`]).
 ///
 /// The copied words carry the entity id of the operation store they came from, and show only while that is the current
 /// store: a reset drops everything that came from the helm (SPEC_impl.md, "One failure path: the reset"), and a new
@@ -434,6 +520,9 @@ fn stop_asking(cx: &mut App) {
 struct PanelLines {
     setup: Option<OpKey>,
     stop_asking: Option<(EntityId, HostText)>,
+    /// A setup or rerun the app did not start because a session launch was in flight ([`not_started`]), with the id of
+    /// the store current then.
+    not_started: Option<(EntityId, HostSentence)>,
 }
 
 impl Global for PanelLines {}
@@ -454,12 +543,14 @@ pub(crate) fn forget_panel_lines(cx: &mut App) {
     show(cx, |lines| {
         lines.setup = None;
         lines.stop_asking = None;
+        lines.not_started = None;
     });
 }
 
-/// The Hosts panel's line, as sentences under their own ids: a setup refused after the user moved on from it, and a
-/// refused permanent answer, while it was refused by the current UI session's helm and the preference it tried to turn
-/// on is still off (once on, the refusal no longer matters). Empty when there is neither.
+/// The Hosts panel's line, as sentences under their own ids: a setup refused after the user moved on from it, a setup
+/// or rerun not started during a launch, and a refused permanent answer, while it was refused by the current UI
+/// session's helm and the preference it tried to turn on is still off (once on, the refusal no longer matters). Each of
+/// the last two only while it came from the current UI session's store. Empty when there is none.
 pub(crate) fn panel_lines(cx: &App) -> Vec<HostSentence> {
     let Some(lines) = cx.try_global::<PanelLines>() else {
         return Vec::new();
@@ -483,7 +574,16 @@ pub(crate) fn panel_lines(cx: &App) -> Vec<HostSentence> {
                 .text("Set up new hosts without asking: ")
                 .host(reason)
         });
-    setup.into_iter().chain(stop_asking).collect()
+    let not_started = lines
+        .not_started
+        .as_ref()
+        .filter(|(store, _)| Some(*store) == current)
+        .map(|(_, line)| line.clone());
+    setup
+        .into_iter()
+        .chain(not_started)
+        .chain(stop_asking)
+        .collect()
 }
 
 // ---- The plan --------------------------------------------------------------------------------------------------------

@@ -19,9 +19,12 @@
 //! rail's avatar menu will. [`open_settings`] opens a host's settings dialog ([`settings`]), which the menu's Settings
 //! calls.
 //!
-//! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button call. A new host
-//! without Farhelm goes on to the setup confirmation and the setup's submission ([`setup`]); a setup the helm refused
-//! after the user moved on from it shows at the top of the panel, since it has no row.
+//! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button (`+`) call, each
+//! naming itself as where closing the dialog returns focus. A new host without Farhelm goes on to the setup
+//! confirmation and the setup's submission ([`setup`]); a setup the helm refused after the user moved on from it shows
+//! at the top of the panel, since it has no row. Add host, a setup's submission, a row's Re-run and Remove refuse to
+//! start while a session launch is in flight ([`launch_in_flight`]), as the old app refused a host change during a
+//! launch.
 //!
 //! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
 //! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
@@ -35,14 +38,14 @@
 //!
 //! ## What it shows
 //!
-//! A heading band with the host count ("Hosts 3", read out as "3 hosts") and the Details switch, then one row per host
-//! in the registry's order, session-owned hosts included (SPEC.md: they "participate in ordinary host management"). A
-//! row is the host's identity mark, its name (the alias, else the helm's display name, "Local (this machine)" for the
-//! local host under the registry's own name; the destination behind an alias shows in the details), its phase dot
-//! and words ([`identity::phase`]), and the ⋯ toggle that opens its actions menu. Under it, while the row is open, the
-//! details: the destination behind an alias, what the helm knows about the phase (for a connected host its version,
-//! identity and session count) and the remedy where waiting will not help. The last refusal of work on the host shows
-//! under the row whether it is open or not.
+//! A heading band with the host count ("Hosts 3", read out as "3 hosts"), the Details switch and the add button, then
+//! one row per host in the registry's order, session-owned hosts included (SPEC.md: they "participate in ordinary host
+//! management"). A row is the host's identity mark, its name (the alias, else the helm's display name, "Local (this
+//! machine)" for the local host under the registry's own name; the destination behind an alias shows in the details),
+//! its phase dot and words ([`identity::phase`]), and the ⋯ toggle that opens its actions menu. Under it, while the row
+//! is open, the details: the destination behind an alias, what the helm knows about the phase (for a connected host its
+//! version, identity and session count) and the remedy where waiting will not help. The last refusal of work on the
+//! host shows under the row whether it is open or not.
 //!
 //! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): a setup is running on
 //! it that the user has not folded, its last provisioning run failed, the last work on it was refused, or it is the
@@ -65,8 +68,9 @@
 //!
 //! ## Not drawn yet
 //!
-//! NOTE: Each arrives with the piece of the port that gives it something to do: Update all and the add button in the
-//! heading, the inline `↑ Update` button, and Update's progress. The heading keeps its old height meanwhile.
+//! NOTE: Each arrives with the piece of the port that gives it something to do: Update all in the heading, the inline
+//! `↑ Update` button, and Update's progress. Until Update all arrives, the free space it took in the old heading goes
+//! to the two automatic margins, so Details sits further from the count than in the old app.
 
 pub mod add;
 pub(crate) mod identity;
@@ -94,7 +98,8 @@ use gpui::{
     WeakEntity, Window, div, px,
 };
 
-use crate::components::{Checkbox, HoverHelp, StatusMark, pulse_opacity};
+use crate::assets::Icon;
+use crate::components::{Checkbox, HoverHelp, IconButton, StatusMark, Tier, pulse_opacity};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
@@ -111,9 +116,16 @@ use offers::{HostKind, Locality};
 const HEADING_PAD: (f32, f32) = (4., 10.);
 const HEADING_GAP: f32 = 8.;
 
-/// The heading's height in the old app, where Update all and the 24-pixel add button set it: kept until they arrive, so
-/// the rows do not move when they do.
-const HEADING_HEIGHT: f32 = 32.;
+/// `.hosts-heading .add-host-button`: the add button's side, which with the padding sets the heading's 32-pixel height.
+const ADD_SIZE: f32 = 24.;
+
+/// What a host registry change refuses with while a session launch is in flight ([`launch_in_flight`]), after the name
+/// of the action that was not started ("Add host: ", or "Set up <host>: ", "Re-run <host>: ", "Remove <host>: " on the
+/// Hosts panel's line, "Destination: " in the host settings): the old app's form for an action refused while another
+/// runs ("<action>: not started, another operation is in progress; try again", `list/lifecycle.rs` at the reference
+/// commit), naming the launch.
+pub(crate) const LAUNCH_IN_FLIGHT: &str =
+    "not started, a session launch is in progress; try again when it finishes";
 
 /// `.hosts-heading .host-count`'s `gap: 1ch`: the width of a digit at the label's 13 pixels.
 const COUNT_GAP: f32 = 7.;
@@ -161,6 +173,9 @@ pub struct HostsPanel {
     /// Each drawn row's toggle, by host id, as last drawn: its anchor and its focus handle, which a press of the toggle
     /// opens the menu at ([`HostsPanel::toggle_menu`]). A row not drawn last frame has none.
     toggles: HashMap<i64, (Anchor, FocusHandle)>,
+    /// The heading's add button's focus handle, kept for the panel's life so the Add host dialog it opens can return
+    /// focus to it by name when it closes.
+    add_focus: FocusHandle,
     /// Redraws the panel when its top line changes (a setup refused after the user moved on, a refused "don't ask
     /// again"): that line lives in a global of the setup module, which notifies no view by itself.
     _lines: Subscription,
@@ -197,6 +212,7 @@ impl HostsPanel {
             details: false,
             menu: None,
             toggles: HashMap::new(),
+            add_focus: cx.focus_handle().tab_stop(true),
             _lines: setup::observe_panel_lines(cx),
             runs: PerSession::default(),
             _following: session::observe_current(cx, |panel: &mut Self, cx| panel.follow_runs(cx)),
@@ -405,7 +421,6 @@ impl Render for HostsPanel {
             .flex_wrap()
             .items_center()
             .gap(px(HEADING_GAP))
-            .min_h(px(HEADING_HEIGHT))
             .py(px(HEADING_PAD.0))
             .px(px(HEADING_PAD.1))
             .bg(theme::color(palette.bg_2))
@@ -427,7 +442,11 @@ impl Render for HostsPanel {
                         let _ = weak.update(cx, |panel, cx| panel.set_details(on, cx));
                     }),
                 ),
-            );
+            )
+            // The old actions group's automatic margin (`.hosts-heading-actions`), beside the switch's, as the old
+            // sheet gave both: the two share the heading's free space, and the button keeps the trailing edge. A
+            // button takes no margin of its own, so this holder carries it.
+            .child(div().ml_auto().child(add_button(&self.add_focus)));
         let status = match (status, count) {
             (Some((words, error)), _) => Some(
                 div()
@@ -714,6 +733,62 @@ fn count_heading(count: Option<usize>, palette: &Palette) -> impl IntoElement {
                 .text_color(theme::color(palette.fg_1))
                 .child(n.to_string())
         }))
+}
+
+/// The heading's add button (`.hosts-heading .add-host-button`): the old Add glyph, a plus, in a 24-pixel neutral
+/// square, named "Add host". It opens the Add host dialog with `focus`, its kept handle, as the opener, so closing the
+/// dialog returns focus to it, as the host rail's Add host does for its own. Never disabled, like the rail's: the old
+/// button was, while the old page's one token for launches and host registry changes was held, but here the dialog's
+/// Add refuses during a launch instead ([`launch_in_flight`]).
+fn add_button(focus: &FocusHandle) -> AnyElement {
+    let opener = focus.clone();
+    IconButton::new(
+        "hosts-add",
+        Icon::Add,
+        "Add host",
+        HoverHelp::tooltip(add::ADD_HOST_HELP),
+        Role::Button,
+    )
+    .tier(Tier::Neutral)
+    .square(px(ADD_SIZE))
+    .focus(focus)
+    .on_click(move |_, window, cx| {
+        // Taken in the handler, after the coordinator counted this press or key, so the dialog opens for this press and
+        // not for one the user has since moved on from.
+        let mark = Mark::take(cx);
+        add::open(&opener, &mark, window, cx);
+    })
+    .into_any_element()
+}
+
+/// Whether a session launch is in flight anywhere in the operation store: what a host registry change from this module
+/// (Add host's probe, a setup's submission, a row's Re-run, a host's removal) refuses to start during. The old app
+/// refused a host change during a launch and the reverse, through one page-wide token; the migration's orchestrator
+/// decided on 2026-11-14 that each side refuses its own action instead, with a reason, while the other's work is in
+/// flight in the operation store. `false` in an inert window, which has no store and starts nothing anyway.
+pub(crate) fn launch_in_flight(cx: &App) -> bool {
+    session::current_operations(cx)
+        .is_some_and(|operations| operations.read(cx).any_in_flight(creates_a_session))
+}
+
+/// Whether `work` creates a session on a host, which is what "a launch in flight" means for a host registry change:
+/// the launcher's New and Clone, and a session's Restart and Replace, each of which starts a session on its host
+/// (decided by the migration's orchestrator on 2026-11-14). Exhaustive with no catch-all, so a new kind of work must
+/// decide whether it counts.
+fn creates_a_session(work: Work) -> bool {
+    match work {
+        Work::Launch | Work::Restart | Work::Replace => true,
+        Work::Rename
+        | Work::Delete(_)
+        | Work::Save
+        | Work::Stop
+        | Work::Seen
+        | Work::Probe
+        | Work::Setup
+        | Work::TunnelOpen
+        | Work::TunnelClose
+        | Work::RemoveHost => false,
+    }
 }
 
 /// A host's identity mark in its row: its chosen shape and color at 12 pixels, a status named "Local" or "Remote" for

@@ -34,8 +34,8 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement,
-    Styled, Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
+    KeyDownEvent, ParentElement, Pixels, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, Styled, Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{Handler, HoverHelp};
@@ -187,6 +187,8 @@ pub struct Button {
     quiet: bool,
     /// What the button shows in place of its label's text, when it shows more than words.
     content: Option<AnyElement>,
+    /// A fixed square side in place of the tier's padding ([`Button::square`]).
+    side: Option<Pixels>,
     on_click: Option<Handler>,
     /// Keys the owner takes before the button's own Enter and Space ([`Button::on_key_down`]).
     on_key: Option<KeyHandler>,
@@ -224,6 +226,7 @@ impl Button {
             pressed: None,
             quiet: false,
             content: None,
+            side: None,
             on_click: None,
             on_key: None,
             focus: None,
@@ -330,6 +333,15 @@ impl Button {
     /// twice needs no hiding; content holding host text draws it through the host-text element, as everywhere.
     pub fn content(mut self, content: impl IntoElement) -> Self {
         self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Draw the button as a square of `side` with its icon or content centered, in place of its tier's padding and
+    /// height: the Hosts heading's add button (`.hosts-heading .add-host-button`, a 24-pixel neutral square around the
+    /// 14-pixel plus), which the tier's own padding would make 28 pixels. The tier still decides its colors and ring.
+    /// For a button that shows an icon or content: a text label would be clipped to the square.
+    pub fn square(mut self, side: Pixels) -> Self {
+        self.side = Some(side);
         self
     }
 
@@ -541,6 +553,12 @@ impl RenderOnce for Button {
             | Tier::DangerOutline
             | Tier::PrimaryOutline => metrics::BUTTON_PAD,
         };
+        // A fixed square centers what it shows instead of padding it.
+        let (pad_y, pad_x) = if self.side.is_some() {
+            (px(0.), px(0.))
+        } else {
+            (pad_y, pad_x)
+        };
         let pressed = self.pressed == Some(true);
         let ring_color = match self.tier {
             // The quiet look's fill is light in the light palette, where the inverse ring would not show.
@@ -568,6 +586,7 @@ impl RenderOnce for Button {
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
         // old toggle's, set by its text line and its own side padding; a rail entry is a fixed square.
         let (pad_x, height) = match self.tier {
+            _ if self.side.is_some() => (pad_x, self.side),
             Tier::RowMenu { .. } => (pad_x, Some(px(ROW_MENU_HEIGHT))),
             Tier::Rail => (pad_x, Some(px(RAIL_SIZE))),
             // The bolt keeps its tall, narrow box (`padding: 10px 5px`), not the square an icon-only button gets.
@@ -578,7 +597,8 @@ impl RenderOnce for Button {
             _ => (pad_y, None),
         };
         // A rail entry and an appearance choice are squares that never give up their width.
-        let square = matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
+        let square = self.side.is_some()
+            || matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
         let enabled = !self.disabled;
         // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
         let active = enabled && !self.busy;
@@ -678,11 +698,14 @@ impl RenderOnce for Button {
         if ring && pressed {
             // A pressed button's ring is the inverse ink inside its edge (`outline-color: var(--on-fill);
             // outline-offset: -4px`), as the old rail drew it: the accent ring would not read against the accent fill.
-            // The old navigation entries drew it a pixel further out (`outline-offset: -3px`).
-            let (inset, radius) = if self.tier == Tier::Nav {
-                (px(1.), metrics::RADIUS_SM - px(1.))
-            } else {
-                (px(2.), px(1.))
+            // The old navigation entries drew it a pixel further out (`outline-offset: -3px`). So did the chosen color
+            // swatch, whose ring is round: a browser's outline follows the button's radius, so the old ring was a
+            // circle inside the swatch's round edge. Here the ring box is the circle's side less the 1-pixel edge and
+            // the inset on each side, and its radius is half that, or the ring is a small square cut into the circle.
+            let (inset, radius) = match self.tier {
+                Tier::Nav => (px(1.), metrics::RADIUS_SM - px(1.)),
+                Tier::ColorChoice => (px(1.), px(COLOR_CHOICE_SIZE / 2. - 2.)),
+                _ => (px(2.), px(1.)),
             };
             button = button.child(
                 div()
@@ -827,6 +850,11 @@ impl IconButton {
     /// See [`Button::focus`].
     pub fn focus(self, handle: &FocusHandle) -> Self {
         IconButton(self.0.focus(handle))
+    }
+
+    /// See [`Button::square`].
+    pub fn square(self, side: Pixels) -> Self {
+        IconButton(self.0.square(side))
     }
 }
 
