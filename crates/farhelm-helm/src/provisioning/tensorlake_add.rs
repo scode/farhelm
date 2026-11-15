@@ -982,6 +982,9 @@ impl ProvisioningService {
             self.set_step(host, index, StepStatus::Failed, Some(message.clone()))
                 .await;
             let mut memory = self.memory.lock().await;
+            // Let go of the host before the failure is readable, so a removal
+            // right after it is not refused as busy (see `end_run`).
+            drop(host_write);
             if let Some(run) = memory.runs.get_mut(&host) {
                 run.status = RunStatus::Failed;
                 run.message = Some(message);
@@ -1040,6 +1043,10 @@ impl ProvisioningService {
                 self.set_step(host, index, StepStatus::Completed, None)
                     .await;
                 let mut memory = self.memory.lock().await;
+                // Let go of the host before the launch's end and its session
+                // are readable, so deleting the environment right after is not
+                // refused as busy (see `end_run`).
+                drop(host_write);
                 if let Some(run) = memory.runs.get_mut(&host) {
                     run.status = RunStatus::Completed;
                 }
@@ -1077,6 +1084,8 @@ impl ProvisioningService {
         };
         let _ = launch.result.send(result);
         self.manager.events().bump();
+        #[cfg(test)]
+        self.hold_at_run_end().await;
     }
 
     /// Select prepared-clone creation or ordinary recovery from durable
@@ -1598,7 +1607,9 @@ impl ProvisioningService {
         }
         self.manager.events().bump();
         self.manager.release_hold(host, true);
-        self.execute_actions(host, inner, *index).await;
+        // No lock to hand over: this add's own task holds the host's
+        // provisioning lock until it ends (`execute_tensorlake_add`).
+        self.execute_actions(host, inner, *index, None).await;
         Ok(())
     }
 

@@ -4904,3 +4904,60 @@ custom images were removed after observation.
 Class: product
 
 Cause: established
+
+## 2026-11-15 — scripted host's removal refused right after its setup completed (scripts/gui-e2e-smoke.py)
+
+`test_40_the_scripted_backend_sets_up_a_fake_ssh_host` failed in its cleanup on one shared Linux build worker: the
+helm's scripted provisioning backend carried the fake SSH host's setup to the end, the step read the run as `completed`
+through `GET /api/hosts/{id}/provisioning`, and its `DELETE /api/hosts/{id}` straight after was answered 409. It was the
+only failure of each run (the one skip is the Mac-only paste step), and it failed fast on that reply, not on a timeout.
+Three observations were reported, all on that worker; two runs are kept, and the same commit as one of them passed on
+another worker (that run's id is unavailable to this entry). The helm's events log in both kept runs shows every setup
+step through `attach-supervisor` and no removal, and the host stayed registered. The cause is in the helm, not the step:
+a confirmed run's task held the host's provisioning lock until the task itself ended, while the run published its end
+(status, busy marker cleared, feed bumped) a moment before that, and removal refuses with "busy with another operation"
+whenever it cannot take that lock at once. A client that removed the host as soon as it read the run as ended could land
+in that moment, and a loaded machine that parks the task's thread right after publishing widens it. Nothing else took
+the lock in these runs: the host never connected (its name does not resolve), so neither an automatic update nor a
+registry edit was in play. The old browser suite had met the same gap and polled removal through the 409 ("terminal
+progress can precede lock release", in its host-rail warning spec) rather than fixing the order. This is the first entry
+for the step. The step arrived on 2026-11-14 (#3502) and its cleanup's wait for the run to end before removing the host
+came with the area's host-setup work that day and the next; the helm's lock order dates from its first provisioning code
+(2026-08), and the latest helm change near it (#3693, 2026-11-15) bounded how long removal takes to answer without
+touching that order. Fixed in #3744: the run now gives up the lock in the same critical section of the helm's
+provisioning memory that publishes its end (`ProvisioningService::end_run` in
+`crates/farhelm-helm/src/provisioning/service.rs`), for completed, failed, used-as-is and refused-before-the-first-step
+runs, so whoever can read the end can also remove the host. The helm unit test
+`a_host_whose_setup_reads_as_ended_is_removed_at_once` parks the run's task right after it publishes its end and removes
+the host there, for a completed and a failed run. The same change lets go of the lock before publishing at the end of a
+disposable environment's session launch (covered by
+`recipe_session_task_publishes_success_and_cleans_a_connected_create_failure`) and at a Tensorlake add's own failure.
+Two places keep the gap, neither driven by this step: a Tensorlake host's setup not started for a session launch still
+holds the lock a moment past its published end (completed, or failed at a step of its inner install plan), and a session
+launch whose setup takes the inner install plan instead of a prepared clone (a fresh launch normally clones) publishes
+"completed" before its session exists, while still holding the lock.
+
+```text
+  File "scripts/gui-e2e-smoke.py", line 744, in test_40_the_scripted_backend_sets_up_a_fake_ssh_host
+    gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+urllib.error.HTTPError: HTTP Error 409: Conflict
+```
+
+Evidence: recorder runs `f826a679-2768-4cab-98a6-59b56877aba7` (clean commit `5631ca224c06601b5ebf25f217261368b355eab1`,
+27 steps, 81 s, failing on the same `DELETE`) and `273cb058-91e9-44fc-8554-af9819229aac` (clean commit
+`00c0e67402680798e0002b796a5839c8516db87a`, an area branch's commit, 38 steps, 165 s), both
+`python3 -B scripts/gui-e2e-smoke.py` in the recorder's generic mode with one app run and its steps in order, on an
+eight-CPU x86_64 Ubuntu 24.04 worker (Linux 6.8.0-117, Python 3.12.3, C.UTF-8) shared with other agents' builds and
+tests; load at the time was not recorded. The recorder scrubbed ambient `FARHELM_*` names and kept only its own
+`FARHELM_TEST_TRACE_DIR`. The third observation's run is unavailable. With the fix, the whole smoke passed 5 of 5 on
+that same worker (runs `9c9ead8d-fc21-4a4b-bb22-d5c04ddd2aa0`, `26d23633-15bf-44f0-bad0-c4c8de6c3d8e`,
+`3650eb66-c928-4f88-af79-abb0daf1e023`, `f9c448ae-5e1f-4700-8ea7-7cab3d485966` and
+`4d7696f8-801b-43da-b6b0-cc755d546c83`, 37 steps each, one after another), which shows the fix holds but says little
+about the old rate, since the gap was narrow to begin with. The unit test failed with the 409 under each of two
+mutations that keep the lock past the publication (runs `579e067a-f362-45e0-96ae-46d9053defe3` and
+`1e6d4b1c-dd33-4a31-9193-a1f890441c6a`) and passed without them. Both kept runs and their smoke run directories stay on
+that worker, private, until its `/tmp` ages them out.
+
+Class: product
+
+Cause: established

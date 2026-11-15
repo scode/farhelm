@@ -580,6 +580,12 @@ async fn recipe_session_preflight_never_builds_a_missing_software_snapshot() {
 /// Drive the owned setup task through a live scripted supervisor, rather than
 /// calling the session helper directly. Success retains its resource and clears
 /// admission; a post-attach refusal uses the same host teardown as explicit Delete.
+///
+/// Success also leaves the environment's provisioning lock free by the time
+/// the launch's end is published, while the task is parked right after it
+/// (the run end gate): the launch used to keep the lock until its task ended,
+/// so deleting the environment the moment its session appeared could be
+/// refused as busy, the same gap `end_run` closes for ordinary setup.
 #[farhelm_testtrace::test]
 async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_failure() {
     use farhelm_proto::ControlMsg;
@@ -595,6 +601,13 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
             ),
             "premise: a readable local key admits this fresh prepared source"
         );
+        let gate = Arc::new(TestBoundaryGate {
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        if !fails {
+            *f.service.run_end_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        }
         f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
         let response = f.session_launch(true).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -695,6 +708,14 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
                 1
             );
             assert_eq!(f.model().live_sandboxes().len(), 1);
+            tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+                .await
+                .expect("the launch's task reached the run end gate after publishing");
+            assert!(
+                f.harness.manager.try_host_provision_lock(host).is_some(),
+                "the environment's provisioning lock is free once the launch's end is published"
+            );
+            gate.release.notify_one();
         }
         let _ = done.send(());
         assert_eq!(
