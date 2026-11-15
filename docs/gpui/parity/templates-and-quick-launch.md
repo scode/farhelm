@@ -135,10 +135,14 @@ orchestrator.
   reads as the main row's digit. And a second prefix while armed ends the sequence and is consumed, which is what the
   old app's cancel amounted to (its terminal dropped the chord); passed on, it would reach the prefix's binding and arm
   a new, empty sequence.
-- **No entrance animation on the sequence pill.** The old pill faded and scaled in over 200 ms (off under reduced
-  motion). GPUI's one-shot animations are banned throughout the GUI crates, the component layer included, and only an
-  owner in the foundation ownership table's lint exceptions may switch the ban off, so the pill appears at once until
-  that exception exists.
+- **The session launcher's vertical margin on wide windows.** This area fixed the shared dialog frame's vertical margin
+  to the old `max(24px, 5dvh)` (`app.css` at the reference commit, line 128). The old launcher's backdrop alone used a
+  flat 24 pixels in windows at least 1000 pixels wide (line 6629, "Leave room for populated launch rows"), so the GPUI
+  launcher now keeps 5% of the height there, a little less room than the old one on a tall, wide window. Restoring that
+  exception is the launcher area's, which was told when the frame changed.
+- **The sequence pill fades in without scaling up.** The old pill faded and scaled up from 96% over 200 ms (off under
+  reduced motion). The GPUI pill keeps the fade (the component layer's one-shot entrance, also off under reduced motion)
+  but not the scale: GPUI cannot scale a box (SPEC_impl.md, "Animation time").
 - **The sequence pill is centered on the main area, not the terminal.** As the old stylesheet did, the pill is centered
   on the main pane (9 pixels lower in the Mac window with a session open). The old rule assumed a 30-pixel details bar
   under the terminal; until the details bar is ported, the pill sits about 15 pixels above the terminal's center. Its

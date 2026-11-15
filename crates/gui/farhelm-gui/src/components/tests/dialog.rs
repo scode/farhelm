@@ -142,7 +142,8 @@ fn a_dialogs_answers_wrap_in_a_narrow_window_in_every_footer_shape(cx: &mut Test
             .collect::<Vec<_>>()
     };
     let cx = open(cx, move |_, _| {
-        // As wide as the window, as the layer manager's overlay is, so the frame's `max_w_full` holds it to the window.
+        // As wide as the window, as the layer manager's overlay is; the frame caps its own width to the window less its
+        // side margins, whatever its parent's width.
         div()
             .w_full()
             .flex()
@@ -170,9 +171,10 @@ fn a_dialogs_answers_wrap_in_a_narrow_window_in_every_footer_shape(cx: &mut Test
     for (frame_id, ids) in FRAMES {
         let frame = bounds(cx, frame_id);
         let (first, last) = (bounds(cx, ids[0]), bounds(cx, ids[3]));
-        assert!(
-            frame.size.width <= px(360.),
-            "the premise: the frame is held to the narrow window: {frame:?}"
+        assert_eq!(
+            frame.size.width,
+            px(360. - 2. * 20.),
+            "the frame is held to the narrow window less its side margins: {frame:?}"
         );
         assert!(
             first.left() >= frame.left() && last.right() <= frame.right(),

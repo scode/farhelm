@@ -21,8 +21,8 @@ use super::Hint;
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
-use crate::test_support::{self, click, frame, keys, meta, settle, started};
-use crate::{layers, root};
+use crate::root;
+use crate::test_support::{self, any_open, click, frame, keys, meta, settle, started};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -180,13 +180,11 @@ pub(super) fn open_header<'a>(
     ]);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, Header::new);
-    window.simulate_resize(size(px(1600.), px(1000.)));
+    // Tall enough that the editor's whole pane, its status line under the panes included, fits the dialog's height
+    // cap (the window less 5% above and below), so tests read every line without scrolling.
+    window.simulate_resize(size(px(1600.), px(1200.)));
     settle(window);
     (helm, window)
-}
-
-pub(super) fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// Every line of text the window painted, joined with single spaces.
@@ -313,6 +311,27 @@ fn a_shortcut_opens_the_dialog_with_its_hint(cx: &mut TestAppContext) {
         text.contains("Give a template a number key with the key button beside its ⚡;"),
         "{text}"
     );
+}
+
+/// The window can be as narrow as 720 pixels (SPEC.md), and the old dialog clamped itself to the window less its
+/// backdrop's 20-pixel margins (`min(960px, 100%)`). Without that the 960-pixel dialog, centered, ran past both sides
+/// of a narrow window, its Close among what was cut off. Specified: in a 720-by-560 window the opened dialog is 20
+/// pixels clear of each side edge.
+#[gpui::test]
+fn the_dialog_fits_the_narrowest_window(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_header(cx, &templates(), None);
+    cx.simulate_resize(size(px(720.), px(560.)));
+    settle(cx);
+    assert_eq!(
+        cx.update(|window, _| window.viewport_size().width),
+        px(720.),
+        "the premise: the window is the narrowest SPEC.md allows"
+    );
+    click(cx, "templates-button");
+    assert!(any_open(cx), "the premise: the dialog opened");
+    let card = test_support::bounds(cx, "templates");
+    assert_eq!(card.left(), px(20.), "{card:?}");
+    assert_eq!(card.right(), px(700.), "{card:?}");
 }
 
 /// Escape closes the dialog, as its header Close does; nothing is unsaved yet to ask about.
