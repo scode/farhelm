@@ -724,10 +724,13 @@ systemd or SSH substrate ran.
   batch itself is a tool, not a gate. Run the tests when the script or the scene list changes.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
-  inside a module-level function that way): a clean class passes, a step inside a module-level function, one at module
-  level and one in another class are each reported with its line, the committed script passes with unittest collecting
-  every `def test_` it spells out, and `main` refuses before it makes a run directory or starts anything. Seconds;
-  starts nothing. Run it when `scripts/gui-e2e-smoke.py` changes, a new step included.
+  inside a module-level function that way), or while two steps share a number (areas merging steps under one number run
+  them in an order neither chose) or a name (Python keeps only the last): a clean class and distinct numbers pass, a
+  step inside a module-level function, one at module level and one in another class are each reported with its line, a
+  shared number is reported with every step and line using it, a step defined twice with both lines (once, not again as
+  a number clash), the committed script passes with unittest collecting every `def test_` it spells out, and `main`
+  refuses before it makes a run directory or starts anything. Seconds; starts nothing. Run it when
+  `scripts/gui-e2e-smoke.py` changes, a new step included.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app end-to-end smoke' --concurrency 'one app run, steps in order; one step starts and stops a second run' --termination-grace 30 -- python3 -B scripts/gui-e2e-smoke.py`
   — the GPUI app end to end (`scripts/gui-e2e-smoke.py`): the real app, its embedded helm and a real supervisor with
   three basic fake agents, driven through the bridge by `scripts/gui-agent.py`. In one app run (one step starts and
