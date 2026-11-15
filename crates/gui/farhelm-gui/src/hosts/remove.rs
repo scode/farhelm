@@ -313,7 +313,7 @@ fn stop_asking(cx: &mut App) {
         operations.start(&OpKey::preferences(), command, cx, |settled, cx| {
             if let Outcome::Refused(refusal) = &settled.outcome {
                 let line = stop_asking_line().host(&refusal.words);
-                let store = current_store_id(cx);
+                let store = super::current_operations_id(cx);
                 show(cx, |lines| {
                     lines.stop_asking = store.map(|store| (store, line))
                 });
@@ -324,7 +324,7 @@ fn stop_asking(cx: &mut App) {
         Ok(()) => show(cx, |lines| lines.stop_asking = None),
         Err(NotStarted::Busy(_)) => {
             let line = stop_asking_line().text(Refused::WORDS);
-            let store = current_store_id(cx);
+            let store = super::current_operations_id(cx);
             show(cx, |lines| {
                 lines.stop_asking = store.map(|store| (store, line))
             });
@@ -422,14 +422,9 @@ fn show(cx: &mut App, change: impl FnOnce(&mut PanelLines)) {
     change(cx.default_global::<PanelLines>());
 }
 
-/// The entity id of the current UI session's operation store, which a line is recorded against.
-fn current_store_id(cx: &App) -> Option<EntityId> {
-    session::current_operations(cx).map(|operations| operations.entity_id())
-}
-
 /// Record that `removal` was not started, for `why`.
 fn not_started(removal: &Removal, why: Refusal, cx: &mut App) {
-    let Some(store) = current_store_id(cx) else {
+    let Some(store) = super::current_operations_id(cx) else {
         return;
     };
     let line = HostSentence::new(SharedString::from("hosts-remove-not-started"))
@@ -452,7 +447,7 @@ pub(super) fn panel_lines(cx: &App) -> Vec<HostSentence> {
     let Some(lines) = cx.try_global::<PanelLines>() else {
         return Vec::new();
     };
-    let current = current_store_id(cx);
+    let current = super::current_operations_id(cx);
     let not_started = lines
         .not_started
         .as_ref()

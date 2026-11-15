@@ -270,6 +270,14 @@ pub(crate) fn skip_host_remove_command()
     Choice::SkipHostRemoveConfirmation.command(true)
 }
 
+/// `PUT /api/preferences` turning "Update remote hosts automatically" on, exactly as its switch here saves it: for the
+/// attention list's Always update and its Try again ([`crate::hosts::status::always_update`]), which set the same
+/// preference.
+pub(crate) fn auto_update_command()
+-> Result<crate::operations::Command, farhelm_helm_client::PathError> {
+    Choice::AutoUpdateRemoteHosts.command(true)
+}
+
 /// The platform Settings decides the tunnel switch for ([`terminal::shown_on`]): this build's, except where a test or a
 /// golden chose one with [`TunnelsPlatform`], so that the Mac's Terminal section is covered on any machine.
 fn tunnels_platform(cx: &App) -> Platform {
@@ -625,7 +633,13 @@ impl SettingsDialog {
     }
 
     /// The user turned `choice`'s switch to `on`: save it as the preference row's field ([`SettingsDialog::save_choice`]).
+    /// A press of "Update remote hosts automatically" is a newer choice than any earlier Always update, so that one's
+    /// failed save stops showing in the attention list ([`crate::hosts::status::auto_update_chosen`]), whether or not
+    /// this press's own save starts.
     fn toggle(&mut self, choice: Choice, on: bool, cx: &mut Context<Self>) {
+        if choice == Choice::AutoUpdateRemoteHosts {
+            crate::hosts::status::auto_update_chosen(cx);
+        }
         let index = Self::index(choice);
         self.save_choice(
             choice.id(),

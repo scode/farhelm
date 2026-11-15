@@ -487,7 +487,7 @@ fn the_panel_redraws_when_its_line_changes_alone(cx: &mut TestAppContext) {
         "the premise: nothing redraws the panel by itself"
     );
     cx.update(|_, cx| {
-        let store = session::current_operations(cx).map(|operations| operations.entity_id());
+        let store = crate::hosts::current_operations_id(cx);
         let words = crate::host_text::HostText::from_host("refused");
         super::show(cx, |lines| {
             lines.stop_asking = store.map(|store| (store, words))
