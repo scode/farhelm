@@ -306,6 +306,7 @@ impl SessionList {
         let current = self.current.current(cx);
         if current.hosts_shown {
             current.hosts_shown = false;
+            self.hosts_panel.update(cx, |panel, cx| panel.hidden(cx));
             cx.notify();
         }
     }

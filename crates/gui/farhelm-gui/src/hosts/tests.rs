@@ -13,7 +13,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
-use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
+use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus, StepStatus};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, ConnectionStage,
     HostStateView, HostView, KeyedEntry, RefreshView,
@@ -496,8 +496,9 @@ fn details_open_and_close_every_row(cx: &mut TestAppContext) {
 
 /// Why this matters: a failure must show its evidence without the user having to find the switch (the goal: a row
 /// "opens itself on a failure and shows remedies and diagnostics"), but only that row, and the global switch stays the
-/// user's. Specified: with Details off, a host whose last run failed opens with its details, a host whose run is still
-/// running stays closed, and the switch stays off; once a later run of the failed host completes, its row closes.
+/// user's. Specified: with Details off, a host whose last run failed opens with its details, a host whose Update is
+/// still running stays closed (SPEC.md: "While an update is running, its host row stays folded"), and the switch stays
+/// off; once a later run of the failed host completes, its row closes.
 #[gpui::test]
 fn a_failed_run_opens_only_its_own_row(cx: &mut TestAppContext) {
     let listed = reference_hosts();
@@ -507,7 +508,7 @@ fn a_failed_run_opens_only_its_own_row(cx: &mut TestAppContext) {
             hosts(&listed),
             progress(&[
                 run(2, ProvisioningOperation::Update, RunStatus::Failed),
-                run(3, ProvisioningOperation::Add, RunStatus::Running),
+                run(3, ProvisioningOperation::Update, RunStatus::Running),
             ]),
         ],
     );
@@ -518,7 +519,7 @@ fn a_failed_run_opens_only_its_own_row(cx: &mut TestAppContext) {
     assert_eq!(
         details(&nodes, 3),
         Vec::<String>::new(),
-        "a running run opens nothing yet"
+        "a running Update stays folded"
     );
 
     fake.push(CollectionChanges {
@@ -584,6 +585,425 @@ fn a_refusal_shows_under_its_row_and_opens_it(cx: &mut TestAppContext) {
     assert_eq!(details(&nodes, 2).len(), 2, "the refused host's row opened");
     assert_eq!(details(&nodes, 1), Vec::<String>::new());
     assert!(node(&nodes, "host-error-1").is_none());
+}
+
+// ---- Setup progress ------------------------------------------------------------------------------------------------
+
+/// Host 3's setup `run-3` in `status`, with three steps in `steps`' statuses: "Create directories", "Install the
+/// farhelm binary" and "Connect to the supervisor".
+fn setup_run(status: RunStatus, steps: [StepStatus; 3]) -> ProvisioningView {
+    let mut view = run(3, ProvisioningOperation::Add, status);
+    view.steps = [
+        "Create directories",
+        "Install the farhelm binary",
+        "Connect to the supervisor",
+    ]
+    .into_iter()
+    .zip(steps)
+    .map(|(name, status)| crate::hosts::progress::tests::step(name, status))
+    .collect();
+    view
+}
+
+/// Push `view` as host 3's progress, replacing whatever was there, and settle.
+fn push_run(fake: &mut FakeHelm, view: &ProvisioningView, cx: &mut VisualTestContext) {
+    fake.push(CollectionChanges {
+        collection: Collection::HostProgress,
+        meta: meta(&["3"]),
+        upsert: progress(std::slice::from_ref(view)).entries,
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+}
+
+/// Every line of text the window painted, joined with single spaces.
+fn painted(nodes: &[DriverNode]) -> String {
+    let lines: Vec<String> = nodes
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|line| line.text.to_string()))
+        .collect();
+    lines.join(" ")
+}
+
+/// Why this matters: SPEC.md, "Topology": "the running row expands once to show the helm's steps ... The user may fold
+/// that run ... the inline status still says setting up ... and shows the step count, current step and elapsed time.
+/// Success folds the row". The drive of the first Add host port found a new host's row showing no progress at all.
+/// Specified: with Details off, a running setup opens its row with "Setup provisioning Running", each step named with
+/// its result word, and Collapse; the inline status in place of the phase words reads 1 of 3 steps done with the
+/// running step named; Collapse closes the row and leaves the status; the same run pushed again stays folded; its
+/// success takes the status and the steps away and the row stays closed, back to its phase words.
+#[gpui::test]
+fn a_running_setup_opens_its_row_once_and_collapse_folds_it(cx: &mut TestAppContext) {
+    let running = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Completed,
+            StepStatus::Running,
+            StepStatus::Pending,
+        ],
+    );
+    let (mut fake, _, cx) = open_panel(
+        cx,
+        vec![
+            hosts(&reference_hosts()),
+            progress(std::slice::from_ref(&running)),
+        ],
+    );
+    let nodes = frame(cx);
+    assert!(!details_switch(&nodes), "the premise: Details is off");
+    assert_eq!(
+        label(&nodes, "host-run-title-3"),
+        "Setup provisioning Running"
+    );
+    let steps: Vec<String> = (0..3)
+        .map(|n| label(&nodes, &format!("host-step-3-{n}")))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            "Create directories: Completed",
+            "Install the farhelm binary: Running",
+            "Connect to the supervisor: Pending",
+        ]
+    );
+    assert_eq!(
+        label(&nodes, "host-status-3"),
+        "Setting up: 1 of 3 steps done, now Install the farhelm binary"
+    );
+    assert!(
+        node(&nodes, "host-run-fold-3").is_some(),
+        "Collapse is offered"
+    );
+    assert!(
+        node(&nodes, "host-run-2").is_none(),
+        "no other row shows a run"
+    );
+
+    test_support::click(cx, "host-run-fold-3");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-run-3").is_none(), "folded");
+    assert_eq!(details(&nodes, 3), Vec::<String>::new(), "the row closed");
+    assert!(
+        label(&nodes, "host-status-3").starts_with("Setting up: 1 of 3"),
+        "the inline status stays"
+    );
+    let mut later = running.clone();
+    later.steps[1].status = StepStatus::Completed;
+    later.steps[2].status = StepStatus::Running;
+    push_run(&mut fake, &later, cx);
+    assert!(
+        node(&frame(cx), "host-run-3").is_none(),
+        "the run's progress keeps its fold"
+    );
+
+    push_run(
+        &mut fake,
+        &setup_run(
+            RunStatus::Completed,
+            [
+                StepStatus::Completed,
+                StepStatus::Completed,
+                StepStatus::Completed,
+            ],
+        ),
+        cx,
+    );
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "host-status-3"),
+        "Connected",
+        "the phase words are back"
+    );
+    assert!(node(&nodes, "host-run-3").is_none());
+    assert_eq!(
+        details(&nodes, 3),
+        Vec::<String>::new(),
+        "success leaves it folded"
+    );
+}
+
+/// Why this matters: SPEC.md, "Topology": "failure opens it for the step and its reason", whatever the user folded, and
+/// the drive of the first Add host port found a failed setup's reason ("disk full") shown nowhere. Specified: a running
+/// setup the user folded, once pushed failed with its step's reason and the run's message, opens its row with
+/// "Setup provisioning Failed", the failed step named "Failed", its reason and the run's message under the steps, and
+/// no Collapse; the inline status gives way to the phase words.
+#[gpui::test]
+fn a_failed_setup_opens_its_row_with_the_step_and_the_reason(cx: &mut TestAppContext) {
+    let running = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Completed,
+            StepStatus::Running,
+            StepStatus::Pending,
+        ],
+    );
+    let (mut fake, _, cx) = open_panel(
+        cx,
+        vec![
+            hosts(&reference_hosts()),
+            progress(std::slice::from_ref(&running)),
+        ],
+    );
+    test_support::click(cx, "host-run-fold-3");
+    assert!(
+        node(&frame(cx), "host-run-3").is_none(),
+        "the premise: folded"
+    );
+
+    let mut failed = setup_run(
+        RunStatus::Failed,
+        [
+            StepStatus::Completed,
+            StepStatus::Failed,
+            StepStatus::Pending,
+        ],
+    );
+    failed.steps[1].message = Some("disk full".into());
+    failed.message =
+        Some("step 2 (install-farhelm) failed: disk full; rerun provisioning to continue".into());
+    push_run(&mut fake, &failed, cx);
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "host-run-title-3"),
+        "Setup provisioning Failed"
+    );
+    assert_eq!(
+        label(&nodes, "host-step-3-1"),
+        "Install the farhelm binary: Failed"
+    );
+    assert_eq!(label(&nodes, "host-step-3-1-message"), "disk full");
+    assert_eq!(
+        label(&nodes, "host-run-message-3"),
+        "step 2 (install-farhelm) failed: disk full; rerun provisioning to continue"
+    );
+    assert!(
+        node(&nodes, "host-run-fold-3").is_none(),
+        "a failure cannot be folded"
+    );
+    assert_eq!(label(&nodes, "host-status-3"), "Connected");
+    assert!(!details(&nodes, 3).is_empty(), "the row's details show too");
+}
+
+/// The text the window painted in its last drawn frame, without drawing another: so only a redraw the app asked for by
+/// itself can have changed it. Call [`frame`] once first, which turns the window's driver record on.
+fn last_painted(cx: &mut VisualTestContext) -> String {
+    painted(&cx.update(|window, _| window.driver_nodes().to_vec()))
+}
+
+/// How often the Hosts panel rendered since the render counter was last reset.
+fn panel_renders(cx: &mut VisualTestContext) -> usize {
+    cx.update(|_, cx| crate::render_count::count("hosts-panel", cx))
+}
+
+/// Why this matters: the elapsed time is measured by the client (SPEC.md: "client-measured elapsed time"), and it must
+/// keep counting on its own while nothing else changes, under reduced motion too, where no pulse redraws the panel. The
+/// one-second deadline the panel arms through the ticker is the only thing that redraws it then, so this reads what
+/// the window last drew rather than drawing a frame of its own. Specified: under reduced motion, a setup running when
+/// the panel first sees it reads "0:00"; after 7 seconds on the executor's clock, with nothing pushed, the panel has
+/// redrawn by itself and reads "0:07", and after 63 more, "1:10"; once the run completes, 5 more seconds redraw the
+/// panel not once.
+#[gpui::test]
+fn the_elapsed_time_counts_from_when_the_panel_first_saw_the_run(cx: &mut TestAppContext) {
+    let running = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Running,
+            StepStatus::Pending,
+            StepStatus::Pending,
+        ],
+    );
+    let (mut fake, _, cx) = open_panel(
+        cx,
+        vec![
+            hosts(&reference_hosts()),
+            progress(std::slice::from_ref(&running)),
+        ],
+    );
+    cx.update(|_, cx| crate::ticker::set_reduced_motion(true, cx));
+    let first = painted(&frame(cx));
+    assert!(first.contains("0:00"), "0:00 is painted: {first}");
+    for (wait, clock) in [(7, "0:07"), (63, "1:10")] {
+        cx.update(|_, cx| crate::render_count::reset(cx));
+        test_support::advance(cx, std::time::Duration::from_secs(wait));
+        assert!(panel_renders(cx) > 0, "the panel redrew by itself");
+        let text = last_painted(cx);
+        assert!(text.contains(clock), "{clock} is painted: {text}");
+    }
+
+    push_run(
+        &mut fake,
+        &setup_run(
+            RunStatus::Completed,
+            [
+                StepStatus::Completed,
+                StepStatus::Completed,
+                StepStatus::Completed,
+            ],
+        ),
+        cx,
+    );
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    test_support::advance(cx, std::time::Duration::from_secs(5));
+    assert_eq!(panel_renders(cx), 0, "no clock is left to keep");
+}
+
+/// The main window over a fleet with no sessions, `reference_hosts` and `runs` as the host progress, Sessions showing:
+/// the sidebar as the app draws it, with its one Hosts panel made but not drawn.
+fn main_with_runs<'a>(
+    cx: &'a mut TestAppContext,
+    runs: &[ProvisioningView],
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    crate::session_list::tests::open_main(cx, main_snapshot(runs))
+}
+
+/// [`main_with_runs`]'s snapshot.
+fn main_snapshot(runs: &[ProvisioningView]) -> Vec<CollectionState> {
+    vec![
+        crate::session_list::tests::listing(&[], &[]),
+        crate::session_list::tests::preferences(&[], None),
+        hosts(&reference_hosts()),
+        progress(runs),
+    ]
+}
+
+/// Why this matters: the panel keeps a run's first sight from the moment the run is pushed, whether or not Hosts shows
+/// (that is what its store subscription is for), because SPEC.md's elapsed time counts the run, not how long the panel
+/// has been open; and what it keeps belongs to one UI session, so a reset starts it over, as the old app's reload did.
+/// Specified: with Sessions showing, a setup pushed running and 5 seconds later Hosts pressed shows the row open with
+/// "0:05"; after Collapse and a reset that brings the same run back, the row is open again and reads "0:00".
+#[gpui::test]
+fn a_run_keeps_its_clock_while_hosts_is_closed_and_a_reset_starts_it_over(cx: &mut TestAppContext) {
+    let (mut fake, cx) = main_with_runs(cx, &[]);
+    assert!(
+        node(&frame(cx), "hosts-panel").is_none(),
+        "the premise: Sessions shows"
+    );
+    let running = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Running,
+            StepStatus::Pending,
+            StepStatus::Pending,
+        ],
+    );
+    push_run(&mut fake, &running, cx);
+    test_support::advance(cx, std::time::Duration::from_secs(5));
+    test_support::click(cx, "hosts-panel-toggle");
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "host-run-3").is_some(),
+        "the row opened for the run"
+    );
+    let text = painted(&nodes);
+    assert!(
+        text.contains("0:05"),
+        "the clock counted while Hosts was closed: {text}"
+    );
+
+    test_support::click(cx, "host-run-fold-3");
+    assert!(
+        node(&frame(cx), "host-run-3").is_none(),
+        "the premise: folded"
+    );
+    fake.break_channel();
+    test_support::settle(cx);
+    fake.connect(main_snapshot(std::slice::from_ref(&running)));
+    test_support::settle(cx);
+    // Whether Hosts still shows after a reset is the sidebar's own per-session state; this is about the panel.
+    if node(&frame(cx), "hosts-panel").is_none() {
+        test_support::click(cx, "hosts-panel-toggle");
+    }
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "host-run-3").is_some(),
+        "the fold went with the old UI session"
+    );
+    let text = painted(&nodes);
+    assert!(text.contains("0:00"), "the clock started over: {text}");
+}
+
+/// The ticker's count of delivered ticks.
+fn ticks(cx: &mut VisualTestContext) -> u64 {
+    cx.update(|_, cx| crate::ticker::ticks(cx))
+}
+
+/// The main window with a setup running on `gpu-1` and Hosts shown, after checking the premise every variant below
+/// needs: the setup's pulse makes the ticker tick.
+fn pulsing_hosts(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
+    let running = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Running,
+            StepStatus::Pending,
+            StepStatus::Pending,
+        ],
+    );
+    let (fake, cx) = main_with_runs(cx, std::slice::from_ref(&running));
+    test_support::click(cx, "hosts-panel-toggle");
+    let before = ticks(cx);
+    test_support::advance(cx, std::time::Duration::from_millis(500));
+    assert!(
+        ticks(cx) > before,
+        "the premise: the pulse ticks while Hosts shows"
+    );
+    (fake, cx)
+}
+
+/// Check that Sessions shows and that half a second on the executor's clock delivers no tick.
+fn no_ticks_with_sessions_shown(cx: &mut VisualTestContext) {
+    assert!(
+        node(&frame(cx), "hosts-panel").is_none(),
+        "the premise: Sessions shows"
+    );
+    let hidden = ticks(cx);
+    test_support::advance(cx, std::time::Duration::from_millis(500));
+    assert_eq!(ticks(cx), hidden, "nothing ticks for a panel nobody sees");
+}
+
+/// Why this matters: the ticker's rule is that no view holds the running pulse while it draws no pulsing mark, because
+/// a held pulse keeps the tick loop waking ten times a second; the sidebar keeps its one Hosts panel for the window's
+/// life and only stops drawing it when Sessions shows, so the panel must be told where the sidebar hides it.
+/// Specified: with a setup running and Hosts showing, the ticker ticks; once Hosts is pressed again and Sessions shows,
+/// half a second on the executor's clock delivers no tick.
+#[gpui::test]
+fn hiding_hosts_stops_the_setup_pulse(cx: &mut TestAppContext) {
+    let (_fake, cx) = pulsing_hosts(cx);
+    test_support::click(cx, "hosts-panel-toggle");
+    no_ticks_with_sessions_shown(cx);
+}
+
+/// Why this matters: Hosts also gives way to Sessions without its own control being pressed: a host choice on the rail
+/// returns to Sessions (SPEC.md: "All or a host avatar returns to Sessions"), and so does a reset, which starts the
+/// sidebar's state over. Either must let go of the pulse too, the first through the sidebar's other hiding path and the
+/// second through the panel's own following of the UI session. Specified: with a setup running and Hosts showing, a
+/// click on the rail's All shows Sessions and no tick follows; then, with Hosts shown again, a reset that brings the
+/// same run back leaves Sessions showing and no tick follows either.
+#[gpui::test]
+fn a_host_choice_and_a_reset_stop_the_setup_pulse_too(cx: &mut TestAppContext) {
+    let (mut fake, cx) = pulsing_hosts(cx);
+    test_support::click(cx, "host-rail-all");
+    no_ticks_with_sessions_shown(cx);
+
+    test_support::click(cx, "hosts-panel-toggle");
+    let before = ticks(cx);
+    test_support::advance(cx, std::time::Duration::from_millis(500));
+    assert!(
+        ticks(cx) > before,
+        "the premise: it ticks again with Hosts shown"
+    );
+    let running = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Running,
+            StepStatus::Pending,
+            StepStatus::Pending,
+        ],
+    );
+    fake.break_channel();
+    test_support::settle(cx);
+    fake.connect(main_snapshot(std::slice::from_ref(&running)));
+    test_support::settle(cx);
+    no_ticks_with_sessions_shown(cx);
 }
 
 // ---- The local host ------------------------------------------------------------------------------------------------

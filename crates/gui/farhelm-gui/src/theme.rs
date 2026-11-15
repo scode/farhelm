@@ -96,6 +96,9 @@ pub struct Palette {
     pub border: Token,
     /// `--border-dim`: quiet rules, such as between a dialog's header, body and footer.
     pub border_dim: Token,
+    /// `--border-nested`: the rule down the left of an indented section that belongs to the row above it, such as a
+    /// host's setup steps under its row.
+    pub border_nested: Token,
     /// `--border-sidebar-edge`: the sidebar's edge against the main pane.
     pub border_sidebar_edge: Token,
     /// `--border-row`: the hairline between stacked session rows.
@@ -181,6 +184,7 @@ pub const DARK: Palette = Palette {
     accent_edge: rgb_token(0x5268d0),
     border: rgb_token(0x485367),
     border_dim: rgb_token(0x303846),
+    border_nested: rgb_token(0x485367),
     border_sidebar_edge: rgb_token(0x3c4657),
     border_row: rgb_token(0x303846),
     border_dialog: rgb_token(0x59667c),
@@ -251,6 +255,7 @@ pub const LIGHT: Palette = Palette {
     accent_edge: rgb_token(0x4a63d8),
     border: rgb_token(0xb8c2d3),
     border_dim: rgb_token(0xd8deea),
+    border_nested: rgb_token(0xb8c2d3),
     border_sidebar_edge: rgb_token(0xcbd3e0),
     border_row: rgb_token(0xd8deea),
     border_dialog: rgb_token(0xb8c2d3),

@@ -20,8 +20,9 @@ use serde_json::{Value, json};
 
 use super::row::{ITEM_ID_PREFIX, ROW_ID_PREFIX, abbreviate_home, host_label};
 use super::selection::{self, Change, Listed, Open, Stamped};
-use super::status::{Live, pulse_opacity};
+use super::status::Live;
 use super::{CountLine, SessionList, count_line, empty_fleet};
+use crate::components::pulse_opacity;
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};

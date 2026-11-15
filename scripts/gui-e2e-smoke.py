@@ -9,7 +9,8 @@ terminal's: a large paste, on a Mac only, text an input method commits, and scro
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
 Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the
 host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
-rail's Add host; 42, the session list's status segments). The behavior itself is specified and tested in process
+rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
+and rerun in the Hosts panel). The behavior itself is specified and tested in process
 (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing
 here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
 (`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
@@ -700,6 +701,110 @@ class Smoke(unittest.TestCase):
         self.ok("press", "escape")
         self.ok("wait", "--gone", ADD_HOST_SUMMARY)
         self.assertRegex(self.ok("snapshot", "-i"), r'button "Add host" \[focused\]', "focus is back on Add host")
+
+    # ---- The settings-and-hosts area's setup progress, failure and rerun (43), on a host of its own -----------------
+
+    def test_43_a_fake_hosts_setup_shows_its_progress_and_failure_and_reruns(self) -> None:
+        """A host's setup takes a minute and can fail at any step, and the Hosts panel is where the user watches it and
+        tries again (SPEC.md, "Topology": the running row "expands once to show the helm's steps", "failure opens it for
+        the step and its reason"); the drive of the first Add host port found neither the progress nor the failure's
+        reason shown. This step sets a fake host up through the app's own Add host and setup question, holding the
+        scripted backend at the first step so the run is observed in progress, then lets it fail at installing the
+        binary, then reruns it from the row's menu with the backend succeeding. Specified: with Hosts shown and "Set up
+        new hosts without asking" off, Add host for a fresh `.example` destination asks "Set up host · <destination>",
+        and Set up starts a run whose row reads "Setting up: 0 of ..." with "Create directories: Running"; released, the
+        run fails, and the row shows "Setup provisioning Failed", a step marked Failed and the backend's reason "disk
+        full"; the row's menu offers Re-run, which asks again, and Set up starts a second run that completes. The fake
+        host is removed again once its last run has ended, the backend's script is emptied and Hosts is hidden, whatever
+        happened; the snapshot's names of the question, the status and the steps are the oracles."""
+        destination = f"setup-{uuid.uuid4().hex[:8]}.example"
+        held = {"hold_actions": True, "fail_action": "install-farhelm", "message": "disk full"}
+        gui_agent.script_hosts(RUN, {"targets": {f"ssh:{destination}": held}})
+        # No step turns the preference on; the step relies on the question, so it checks that rather than writing it.
+        self.assertNotEqual(
+            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("skip_host_setup_confirmation"),
+            True,
+            "premise: setup asks first",
+        )
+        host = None
+        try:
+            if HOSTS_PANEL not in self.ok("snapshot"):
+                self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "the Hosts panel showing")
+            question = f"Set up host · {destination}"
+            self.ok("click", "id:host-rail-add")
+            self.ok("wait", "--text", ADD_HOST_SUMMARY)
+            self.ok("fill", "id:add-host-destination", destination)
+            self.ok("click", "id:add-host-submit")
+            eventually(lambda: question in self.ok("snapshot"), "the setup question opening")
+            self.ok("click", "id:prompt-confirm")
+
+            def registered() -> int | None:
+                """The registry id the helm filed the destination under, once it has."""
+                hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+                return next((row["id"] for row in hosts if row.get("destination") == destination), None)
+
+            host = eventually(registered, f"{destination} being registered")
+
+            def showing(*texts: str):
+                """A check for `eventually`: the snapshot, once it names every one of `texts`."""
+
+                def check() -> str | None:
+                    shot = self.ok("snapshot")
+                    return shot if all(text in shot for text in texts) else None
+
+                return check
+
+            eventually(
+                showing("Setting up: 0 of", "Create directories: Running"),
+                "the row showing the held run's progress",
+            )
+
+            gui_agent.script_hosts(RUN, {"targets": {f"ssh:{destination}": {**held, "hold_actions": False}}})
+            failed = eventually(showing("Setup provisioning Failed"), "the row showing the failed run")
+            self.assertRegex(failed, r": Failed", "a step is marked Failed")
+            self.assertIn("disk full", failed, "the backend's reason shows")
+
+            gui_agent.script_hosts(RUN, {})
+            first = gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning")["run_id"]
+            self.ok("click", f"id:host-menu-toggle-{host}")
+            self.ok("click", "id:host-menu-rerun")
+            eventually(lambda: question in self.ok("snapshot"), "the rerun's setup question opening")
+            self.ok("click", "id:prompt-confirm")
+
+            def rerun_completed() -> bool:
+                """Whether a run other than the failed one has completed on the host."""
+                view = gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning")
+                return view.get("run_id") not in (None, first) and view.get("status") == "completed"
+
+            eventually(rerun_completed, f"the rerun of {destination}'s setup completing")
+            # The row's side of the success: the inline status gives way to the phase words and the row folds.
+            def folded() -> bool:
+                """Whether the row shows neither the inline status nor the run's steps any more."""
+                shot = self.ok("snapshot")
+                return "Setting up" not in shot and "Setup provisioning" not in shot
+
+            eventually(folded, "the row folding back to its phase words after the rerun")
+        finally:
+            failing = sys.exc_info()[0] is not None
+            try:
+                gui_agent.script_hosts(RUN, {})
+                if host is not None:
+
+                    def settled() -> bool:
+                        """Whether the host has no run going on, so the helm lets it be removed."""
+                        view = gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning")
+                        return view.get("status") != "running"
+
+                    eventually(settled, f"{destination}'s run ending before its host is removed")
+                    gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+                agent("press", "escape")
+                if HOSTS_PANEL in self.ok("snapshot"):
+                    self.ok("click", "id:hosts-panel-toggle")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 43 left host {host} ({destination}) behind: {error}", file=sys.stderr)
 
 
     # ---- The session list's status segments (42), on sessions of its own ---------------------------------------------
