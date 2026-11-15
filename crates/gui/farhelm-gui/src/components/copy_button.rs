@@ -6,9 +6,11 @@
 //! One shared control so they cannot drift apart; Copy plan and SSH help's commands use it.
 //!
 //! NOTE: No "copied" confirmation. Neither the old Copy plan nor SSH help's Copy showed one (reference commit
-//! `24bc0580`); a consumer whose old button did adds it here, through the ticker, when it is ported.
+//! `24bc0580`). The one old copy that did, the details bar's directory and command line, is a different control: a
+//! value drawn as itself rather than a labelled button, which says "✓ Copied" for a moment after each click
+//! ([`super::CopyField`]). Both write the clipboard through [`write`], so they cannot drift apart on how.
 
-use gpui::{ClipboardItem, SharedString};
+use gpui::{App, ClipboardItem, SharedString};
 
 use super::{Button, HoverHelp, Role, Tier};
 
@@ -25,7 +27,14 @@ pub fn copy_button(
     let text = text.into();
     Button::new(id, label, help, Role::Button)
         .tier(Tier::Neutral)
-        .on_click(move |_, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()))
-        })
+        .on_click(move |_, _, cx| write(&text, cx))
+}
+
+/// Put `text` on the system clipboard, byte for byte. Every copy control writes through here.
+///
+/// It never fails as far as the caller can tell: GPUI's write returns nothing, and SPEC.md wants a failed clipboard
+/// write to fail silently ("Clipboard writes use the system clipboard and fail silently"). So a control's confirmation
+/// says the user clicked, never that the platform took the text, as the old app's `copy_to_clipboard` documented.
+pub(super) fn write(text: &str, cx: &mut App) {
+    cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
 }
