@@ -31,8 +31,10 @@
 //! lands); Add host opens it for the destination typed there.
 //!
 //! The menu's Remove asks the removal confirmation, or with "Remove hosts without asking" on goes ahead at once
-//! ([`remove`]). A refused removal shows under its row, like any refused work on a host; a Remove that was not started
-//! at all (the host busy, a session launch in flight) says so at the top of the panel.
+//! ([`remove`]). A removal asked through the confirmation reports a refusal inside it, which stays up through the
+//! request, and so does one that was not started at all (the host busy, a session launch in flight). Only a Remove that
+//! asked nothing reports outside a question: a refusal under its row, like any refused work on a host, and a Remove
+//! not started at the top of the panel.
 //!
 //! A remote host's Update ([`update`]) is sent the same way from the menu's Update and its rerun of a failed one, from
 //! a row's inline `↑ Update` and, for every host whose Update is available, from the heading's Update all. A refused

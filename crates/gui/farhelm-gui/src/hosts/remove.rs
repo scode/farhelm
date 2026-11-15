@@ -13,42 +13,51 @@
 //!   answers in the old order: Cancel, "Remove, don't ask again" and Remove, where focus starts. When the host turned
 //!   busy between the menu and the question, Remove is unavailable and focus starts on Cancel (SPEC.md, "Opening and
 //!   closing"), and the permanent answer is left out, with the footer note that names it, since it would be a second
-//!   way to remove; the old dialog disabled both. The permanent answer also turns the preference on, under the
-//!   preference row's key, but only once its removal has been sent: a removal refused before anything is sent (below)
-//!   changes no preference either. The question closes when the registry no longer lists the host. Cancel returns
-//!   focus to what held it when the question opened: the row's menu toggle, which the menu gave focus back to as it
-//!   closed.
-//! - **The request** ([`submit`]) is `DELETE /api/hosts/{id}`, the operation store's work under the host's key, so it
-//!   goes on after every view involved has closed. A success needs nothing here: the pushed host list drops the row, and
-//!   focus, back on the row's toggle since the question closed, recovers as from any control that goes (SPEC.md, "Where
-//!   focus rests"). A refusal is the store's record under the host's key, which the Hosts panel shows under the host's
-//!   row, opening it. Nothing a result does opens a dialog or moves focus, so a result that arrives after the user moved
-//!   on needs no check of its own; the question itself opens only through the mark taken at the menu's Remove.
-//! - **Not started.** A Remove refused before anything is sent says why on the Hosts panel's line, naming the host,
-//!   until the next Remove or a reset ([`panel_lines`]): the host's key already has work in flight (the store's
-//!   refusal, "Not started:" and the store's shared reason), or a session launch is in flight
-//!   ([`super::launch_in_flight`], shared with Add host, setup and Re-run). The second is the migration's rule, decided
+//!   way to remove; the old dialog disabled both. Cancel returns focus to what held it when the question opened: the
+//!   row's menu toggle, which the menu gave focus back to as it closed.
+//! - **The request** ([`submit`]) is `DELETE /api/hosts/{id}`, the operation store's work under the host's key. Remove
+//!   and the permanent answer keep the question up while it runs ([`prompt::ask_fallible`]), every answer drawn busy,
+//!   as the old dialog stayed up through its request. A success needs nothing here: the pushed host list drops the row
+//!   before the helm's reply arrives, the question closes with its subject, and focus recovers as from any control that
+//!   goes (SPEC.md, "Where focus rests"). A refusal stays inside the question: "Farhelm refused this action:" and the
+//!   helm's words under the body, in the prompt's amber, with focus moved to Cancel, as the old dialog's refusal did,
+//!   and Remove pressed again retries. The question shows it, so it is dropped from the store's record under the host's
+//!   key, and the row neither shows it again nor opens for it. A removal without asking has no question, so its refusal
+//!   is the store's record, which the Hosts panel shows under the host's row, opening it.
+//! - **Not started.** A Remove refused before anything is sent says why, naming the host: the host's key already has
+//!   work in flight (the store's refusal, "Not started:" and the store's shared reason), or a session launch is in
+//!   flight ([`super::launch_in_flight`], shared with Add host, setup and Re-run). An answer on the question says it
+//!   inside the question, which stays up as for a refusal; the menu's Remove and a removal without asking say it on the
+//!   Hosts panel's line until the next Remove or a reset ([`panel_lines`]). The launch rule is the migration's, decided
 //!   by its orchestrator on 2026-11-14 after the old app refused a host change during a launch and the reverse: each
 //!   side refuses its own action while the other's work is in flight in the operation store, with a reason, and no
 //!   shared lock.
-//! - **A refused permanent answer.** The removal goes ahead whether or not its preference save succeeds, and the
-//!   question has closed, so a refusal of that save shows on the panel's line too, "Remove hosts without asking:" and
-//!   the helm's words, or Settings' words for a press refused that way ([`Refused::WORDS`], "Not saved:" and the
-//!   store's shared reason) when the operation store refused it because another preference save was in flight, until
-//!   the next permanent answer, a reset, or the preference turning on.
+//! - **The permanent answer's preference.** "Remove, don't ask again" also turns the preference on, under the
+//!   preference row's key, but only once its removal has been sent: a removal not started changes no preference. A
+//!   removal the helm then refuses leaves the preference on: the user chose not to be asked again, the old app stored
+//!   it before sending anything, and the question that stays up still offers both answers. The next Remove from the
+//!   host menu then goes without asking, until Settings' switch turns the preference off. A second press of the
+//!   permanent answer after such a refusal saves nothing once the helm lists the preference on. The removal goes ahead
+//!   whether or not that save succeeds, so a refusal of the save shows on the panel's line, "Remove hosts without
+//!   asking:" and the helm's words, or Settings' words for a press refused that way ([`Refused::WORDS`], "Not saved:"
+//!   and the store's shared reason) when the operation store refused it because another preference save was in flight,
+//!   until the next permanent answer, a reset, or the preference turning on.
 //!
-//! NOTE: Three of the recorded deviations (`docs/gpui/parity/settings-and-hosts.md`). The old dialog stayed open
-//! through its request and showed a refusal inside it; the prompt keeps a question open through its action only for an
-//! inline question's extra answer, so here the question closes on Remove and a refusal shows under the row. With the
-//! preference on, the old app opened a short refusal dialog, which is not ported yet; that refusal shows under the row
-//! too. And the old header drew the phase with its colored dot; the prompt's summary is a line of text, so the phase
-//! words and build are drawn in the summary's ink.
+//! NOTE: Three of the recorded deviations (`docs/gpui/parity/settings-and-hosts.md`). The old dialog turned its summary
+//! into a red "Farhelm refused this action" and drew the reason below the explanation in the body's ink; the prompt's
+//! summary is frozen, so those words lead the reason, which the prompt draws in its amber at the frame's text size.
+//! With the preference on, the old app opened a short refusal dialog, which is not ported yet; that refusal shows under
+//! the row. And the old header drew the phase with its colored dot; the prompt's summary is a line of text, so the
+//! phase words and build are drawn in the summary's ink.
 //!
 //! A Tensorlake or container host's removal deletes its machine and is a different command (Delete sandbox), which a
 //! later piece of the port brings; the menu offers no Remove on those hosts ([`super::offers::HostKind`]).
 
 #[cfg(test)]
 mod tests;
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences};
@@ -66,7 +75,7 @@ use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{LayerId, Subject};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
-use crate::prompt::{self, Answer, Question};
+use crate::prompt::{self, Answer, Attempt, Question};
 use crate::session;
 use crate::settings::Refused;
 use crate::theme;
@@ -115,14 +124,14 @@ pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
     // A line from an earlier Remove belongs to that attempt; this one says its own.
     show(cx, |lines| lines.not_started = None);
     if super::launch_in_flight(cx) {
-        not_started(&removal, Refusal::LaunchInFlight, cx);
+        not_started(&removal, Refusal::LaunchInFlight, None, cx);
     } else if asks_first(cx) {
         let _ = ask(host, mark, window, cx);
     } else {
         // TODO: with the preference on, the old app showed a refusal of this removal in the short host refusal dialog
         // ("Remove host · <name>", Close), opened through `mark`; it shows under the row until this opens that dialog
         // (`super::refusal`, which Update's refusals brought).
-        submit(&removal, cx);
+        submit(&removal, None, cx);
     }
 }
 
@@ -208,15 +217,19 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
     // Only beside an available Remove: with Remove unavailable it would be the one way left to remove the host. The
     // footer note names this answer, so it goes with it.
     if enabled {
-        question = question.note(UNDO_NOTE).alternative(
+        question = question.note(UNDO_NOTE).fallible_alternative(
             Answer {
                 label: "Remove, don't ask again".into(),
                 help: HoverHelp::tooltip("Remove it, and remove hosts without asking from now on"),
                 tier: Tier::DangerOutline,
             },
-            |removal, _, cx| {
-                // The preference follows the removal it answers: a removal refused before it was sent changes nothing.
-                if submit(&removal, cx) {
+            |removal, attempt, _, cx| {
+                // The preference follows the removal it answers once that is sent: a removal refused before it was
+                // sent changes nothing, and one the helm then refuses leaves the preference on (the module docs). A
+                // retry after that refusal saves nothing once the helm lists the preference on, since a second save
+                // would only repeat the first. Before then it still sends one, which the store may refuse as busy
+                // while the first is out.
+                if submit(&removal, Some(attempt), cx) && asks_first(cx) {
                     stop_asking(cx);
                 }
             },
@@ -227,13 +240,15 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
         // SPEC.md, "Opening and closing": the dialogs that share the host and Settings installer keep focus on the
         // control in use when their empty space is clicked.
         .keeps_focus_on_empty_click();
+    // The subject going is also how a successful removal closes the question: the helm's reply follows the pushed host
+    // list that no longer names the host.
     let subject = Subject::when(store, move |store, _| super::settings::gone(store, &key));
-    prompt::ask(
+    prompt::ask_fallible(
         question,
         Some(subject),
         mark,
-        |removal, _, cx| {
-            submit(&removal, cx);
+        |removal, attempt, _, cx| {
+            submit(&removal, Some(attempt), cx);
         },
         window,
         cx,
@@ -253,27 +268,59 @@ fn remove_command(host: i64) -> Result<Command, PathError> {
 }
 
 /// Send `removal` under its host's key as the operation store's work, unless a session launch is in flight or the key
-/// is busy, which the panel's line then says (the module docs). Returns whether the removal was sent, which the
-/// permanent answer's preference waits on. The store records a refusal under the host's key, where the Hosts panel
-/// shows it, so the completion has nothing to do.
-fn submit(removal: &Removal, cx: &mut App) -> bool {
+/// is busy (the module docs). Returns whether the removal was sent, which the permanent answer's preference waits on.
+///
+/// `attempt` is the confirmation's, which stays up until it settles; `None` is a removal without asking. With an
+/// attempt, every outcome settles it: a removal not started, or one the helm refused, fails it with the reason, which
+/// the question then shows, and the helm's answer otherwise succeeds it. Without one, a removal not started says why on
+/// the panel's line, and the store's record of a refusal under the host's key is the report, where the Hosts panel
+/// shows it.
+fn submit(removal: &Removal, attempt: Option<Attempt>, cx: &mut App) -> bool {
     if super::launch_in_flight(cx) {
-        not_started(removal, Refusal::LaunchInFlight, cx);
+        not_started(removal, Refusal::LaunchInFlight, attempt, cx);
         return false;
     }
+    // An inert window has no store, and the reset that made it inert closed every layer, the question included, so an
+    // attempt dropped here has nothing left to hold open.
     let Some(operations) = session::current_operations(cx) else {
         return false;
     };
     let command = match remove_command(removal.host) {
         Ok(command) => command,
         Err(error) => {
+            // A registry id always makes a path segment, so this is a bug report. Closing the question keeps it from
+            // staying frozen on an attempt that nothing would settle.
             tracing::debug!(?error, "host removal not built");
+            if let Some(attempt) = attempt {
+                attempt.succeeded(cx);
+            }
             return false;
         }
     };
     let key = OpKey::host(&HostView::key(removal.host));
+    // Shared with the completion, which the store keeps only when the removal goes out: a removal it refuses to start
+    // takes the attempt back to say why.
+    let attempt = Rc::new(Cell::new(attempt));
+    let settling = Rc::clone(&attempt);
+    let refused_key = key.clone();
     let started = operations.update(cx, |operations, cx| {
-        operations.start(&key, command, cx, |_, _| {})
+        operations.start(&key, command, cx, move |settled, cx| {
+            let Some(attempt) = settling.take() else {
+                return;
+            };
+            match &settled.outcome {
+                Outcome::Refused(refusal) => {
+                    attempt.failed(refused_line(&refusal.words), cx);
+                    // Shown inside the question, which is still up: it closes mid-attempt only when its host is gone,
+                    // and then no row draws the record either, or on a reset, which runs no completion. Dropped from
+                    // the store's record so the row does not report the one refusal a second time.
+                    if let Some(operations) = session::current_operations(cx) {
+                        operations.update(cx, |operations, cx| operations.forget(&refused_key, cx));
+                    }
+                }
+                Outcome::Done(_) | Outcome::Accepted(_) => attempt.succeeded(cx),
+            }
+        })
     });
     match started {
         Ok(()) => {
@@ -281,16 +328,28 @@ fn submit(removal: &Removal, cx: &mut App) -> bool {
             true
         }
         Err(NotStarted::Busy(_)) => {
-            not_started(removal, Refusal::Busy, cx);
+            not_started(removal, Refusal::Busy, attempt.take(), cx);
             false
         }
-        // A reset retired the store: the generic connection-lost notice is the report.
+        // A reset retired the store: the generic connection-lost notice is the report, and the reset closes the
+        // question.
         Err(not_started) => {
             tracing::debug!(?not_started, "host removal not sent");
             false
         }
     }
 }
+
+/// What the confirmation shows under its body when the helm refuses the removal: the old dialog's "Farhelm refused
+/// this action", led into the helm's own words, which may quote host values.
+fn refused_line(words: &HostText) -> HostSentence {
+    HostSentence::new("host-remove-refused")
+        .text(REFUSED_LEAD_IN)
+        .host(words)
+}
+
+/// The old dialog's refusal summary, which here leads the reason since the question's summary is frozen as it opened.
+const REFUSED_LEAD_IN: &str = "Farhelm refused this action: ";
 
 /// Turn on "Remove hosts without asking" for the permanent answer: only its field of the preference row, under the
 /// row's key, as Settings' switch saves it. Not retried. A refusal shows on the Hosts panel's line (the module docs),
@@ -376,7 +435,7 @@ impl Render for RemoveBody {
     }
 }
 
-// ---- The Hosts panel's line ------------------------------------------------------------------------------------------
+// ---- Removals not started, and the Hosts panel's line ---------------------------------------------------------------
 
 /// Why a Remove was not started.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -422,15 +481,23 @@ fn show(cx: &mut App, change: impl FnOnce(&mut PanelLines)) {
     change(cx.default_global::<PanelLines>());
 }
 
-/// Record that `removal` was not started, for `why`.
-fn not_started(removal: &Removal, why: Refusal, cx: &mut App) {
+/// Say that `removal` was not started, for `why`: inside the confirmation by failing its `attempt`, or, for a Remove
+/// that asked nothing, on the panel's line. The words are the same in both places, under an id of each place's own.
+fn not_started(removal: &Removal, why: Refusal, attempt: Option<Attempt>, cx: &mut App) {
+    let line = |id: &'static str| {
+        HostSentence::new(SharedString::from(id))
+            .text("Remove ")
+            .host(&removal.name)
+            .text(format!(": {}", why.words()))
+    };
+    if let Some(attempt) = attempt {
+        attempt.failed(line("host-remove-not-started"), cx);
+        return;
+    }
     let Some(store) = super::current_operations_id(cx) else {
         return;
     };
-    let line = HostSentence::new(SharedString::from("hosts-remove-not-started"))
-        .text("Remove ")
-        .host(&removal.name)
-        .text(format!(": {}", why.words()));
+    let line = line("hosts-remove-not-started");
     show(cx, |lines| lines.not_started = Some((store, line)));
 }
 
