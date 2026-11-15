@@ -13,6 +13,8 @@
 //! - `pill`: the progress pill and the "Started" report a hidden launcher leaves at the bottom of the window.
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //!   The Templates editor's model suggestions are its rows for one agent type.
+//! - [`recents`]: which recent setups the chosen host's launch history offers, in what order, and a row's words, with no
+//!   GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
 //! - [`search`]: the composer search's rules (what a query means, the rows it offers, the row preselected, what an
 //!   empty result says), with no view.
@@ -42,6 +44,7 @@ pub mod entry;
 pub mod launch;
 pub(crate) mod model;
 mod pill;
+pub mod recents;
 pub mod request;
 pub mod search;
 pub mod view;
@@ -62,6 +65,10 @@ mod folder_list_tests;
 pub(crate) mod launch_tests;
 #[cfg(test)]
 mod model_tests;
+#[cfg(test)]
+mod recents_tests;
+#[cfg(test)]
+mod recents_view_tests;
 #[cfg(test)]
 mod replace_with_tests;
 #[cfg(test)]
