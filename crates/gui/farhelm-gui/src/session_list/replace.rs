@@ -95,6 +95,28 @@ pub(crate) fn consequence(row: &SessionRow) -> String {
     )
 }
 
+/// What the launcher's Replace with shows beside its main action about `row`, its source, and the precondition a press
+/// then sends: Replace's consequence ending in "the session launched here takes its place." (the launcher's settings are
+/// an edited copy, so "the same settings" would be untrue there), and the Delete guard of the same row. A source showing
+/// nothing alive gets no warning and `NothingAlive`, so one restarted behind the user's back is kept rather than killed
+/// unannounced (SPEC.md, "Replace with": the launch button "is the confirmation of that delete"). The old launcher's
+/// `replace_with_warning` and `replace_with_consequence` at the reference commit; kept here beside plain Replace's
+/// wording so the two cannot drift apart.
+pub(crate) fn launcher_warning(row: &SessionRow) -> (Option<String>, DeleteGuard) {
+    if delete::shows_nothing_alive(row) {
+        return (None, DeleteGuard::NothingAlive);
+    }
+    let warning = delete::with_tabs(
+        "replacing",
+        row.info.tabs.len(),
+        &format!(
+            "{}; the session launched here takes its place.",
+            agent_clause(&row.info.status)
+        ),
+    );
+    (Some(warning), delete::guard(row))
+}
+
 /// What a confirmed Replace acts on: the source, by the key the helm files it under, and the guard of the row the
 /// question was drawn from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -223,10 +245,11 @@ pub(crate) fn send(key: &str, guard: DeleteGuard, cx: &mut App) {
     }
 }
 
-/// `source`'s Replace settled. A refusal is the operation store's to keep. A success's reply ([`SessionReplaceReply`])
-/// is the replacement's own session (its `id` the key the helm files it under) and, when the source's Delete carried
-/// one, its `delete_notice`; see the module docs for where each goes. A reply that does not read so selects nothing.
-fn settle(source: &str, settled: &Settled, cx: &mut App) {
+/// `source`'s Replace settled, from the row's question or the launcher's Replace with alike. A refusal is the operation
+/// store's to keep. A success's reply ([`SessionReplaceReply`]) is the replacement's own session (its `id` the key the
+/// helm files it under) and, when the source's Delete carried one, its `delete_notice`; see the module docs for where
+/// each goes. A reply that does not read so selects nothing.
+pub(crate) fn settle(source: &str, settled: &Settled, cx: &mut App) {
     let Outcome::Done(body) = &settled.outcome else {
         return;
     };

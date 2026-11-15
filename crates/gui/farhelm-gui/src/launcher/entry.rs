@@ -1,5 +1,6 @@
 //! The launcher's entry points: the ordinary public functions other surfaces call to open New (the session list's New
-//! button, the quick switcher's "New session named X" row, Cmd+N) and Clone (the row menu and the session header),
+//! button, the quick switcher's "New session named X" row, Cmd+N), Clone and Replace with (the row menu and the session
+//! header),
 //! what those surfaces need to draw their triggers, and the YOLO question the sidebar's plain Replace asks
 //! ([`ask_yolo_for_replace`]).
 //!
@@ -160,6 +161,36 @@ pub fn open_clone(session: &str, window: &mut Window, cx: &mut App) -> bool {
     let draft = LaunchDraft::clone_of(&row.info, host);
     let mark = Mark::take(cx);
     open_noted(draft, note, &mark, window, cx).is_some()
+}
+
+/// Open Replace with of the session `session` (its key) in `window`: the same launcher Clone opens, prefilled from the
+/// session's host, folder (its existing directory, even for a managed checkout), title and stored launch, whose launch
+/// creates the new session and then deletes the source, with plain Replace's contract (SPEC.md, "Replace with"). Call
+/// it from the handler of the user's action (the row menu's or the session header's "Replace with…"). Refused, returning
+/// `false`, exactly as [`open_clone`] is, and it likewise brings back a refused launch waiting behind its notice
+/// instead.
+///
+/// The host is the source's own row, held: the helm refuses a Replace with on another host, Clone being the way to move
+/// hosts, so there is no fallback and no note. While the source has anything alive the launcher shows Replace's warning
+/// beside its main action, following the source's state while it stays open, and a press carries the precondition
+/// matching what it showed. The replacement opens only while its source is still the open session, as plain Replace's
+/// does, and the source's row and header show the request while it waits, as they show plain Replace's.
+pub fn open_replace_with(session: &str, window: &mut Window, cx: &mut App) -> bool {
+    if layers::focus_layer_open(window, cx) || !new_available(cx) {
+        return false;
+    }
+    if launch::open_waiting(window, cx) {
+        return true;
+    }
+    let Some(store) = session::current_store(cx) else {
+        return false;
+    };
+    let Some(row) = store.read(cx).collections().get::<SessionRow>(session) else {
+        return false;
+    };
+    let draft = LaunchDraft::replace_with(session, &row.info, Some(row.host));
+    let mark = Mark::take(cx);
+    open(draft, &mark, window, cx).is_some()
 }
 
 /// The note under Host when a Clone's source host no longer names the install the session ran on (retargeted onto
