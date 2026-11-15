@@ -687,11 +687,6 @@ fn new_row(
         .text("New session named \"")
         .host(&HostText::from_host(name))
         .text("\"");
-    let ink = if selected {
-        palette.on_fill
-    } else {
-        palette.fg_0
-    };
     let row = OptionRow::new(
         NEW_ROW_ID,
         sentence.accessible_name(),
@@ -700,13 +695,7 @@ fn new_row(
     )
     .selected(selected)
     .on_click(on_click)
-    .child(
-        div()
-            .min_w_0()
-            .truncate()
-            .text_color(theme::color(ink))
-            .child(sentence),
-    );
+    .child(div().min_w_0().truncate().child(sentence));
     // GPUI draws one edge color for every side, so the old `border-top-color` is a one-pixel line laid over the row's
     // transparent top edge, drawn after the row so that its hover fill does not cover it.
     div()
@@ -801,10 +790,10 @@ fn result_row(
         Some(Badge::Ended { kind, line }) => (None, Some((kind, line))),
         None => (None, None),
     };
-    let (ink, quiet) = if selected {
-        (palette.on_fill, palette.on_accent_dim)
+    let quiet = if selected {
+        palette.on_accent_dim
     } else {
-        (palette.fg_0, palette.fg_1)
+        palette.fg_1
     };
     let small = |content: AnyElement, width: Pixels| {
         div()
@@ -859,8 +848,7 @@ fn result_row(
                 .w(columns.title)
                 .flex_none()
                 .min_w_0()
-                .truncate()
-                .text_color(theme::color(ink)),
+                .truncate(),
         )
         .child(small(agent, AGENT_COLUMN))
         .child(small(host, columns.host))
