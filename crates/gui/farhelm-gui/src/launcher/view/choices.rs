@@ -81,7 +81,7 @@ impl Launcher {
             })
     }
 
-    fn choose_harness(
+    pub(super) fn choose_harness(
         &mut self,
         harness: LaunchHarness,
         window: &mut Window,
@@ -94,7 +94,7 @@ impl Launcher {
         self.chose(edit, window, cx);
     }
 
-    fn choose_effort(&mut self, effort: Option<LaunchEffort>, cx: &mut Context<Self>) {
+    pub(super) fn choose_effort(&mut self, effort: Option<LaunchEffort>, cx: &mut Context<Self>) {
         self.draft.choose_effort(effort);
         self.notice = None;
         self.changed(cx);
@@ -104,7 +104,7 @@ impl Launcher {
     /// the draft's flags; choosing Custom moves focus on to its flags field, by key or click, as the old launcher did.
     /// The field appears only now, so the focus coordinator makes the move once a frame draws it, unless the user moves
     /// on first.
-    fn choose_permissions(
+    pub(super) fn choose_permissions(
         &mut self,
         permissions: Option<LaunchPermission>,
         window: &mut Window,

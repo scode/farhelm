@@ -883,11 +883,6 @@ impl Launcher {
             .into_any_element()
     }
 
-    /// The read-only folder field's focus handle, where the launcher starts while a managed checkout is chosen.
-    pub(super) fn checkout_folder_focus(&self, cx: &App) -> gpui::FocusHandle {
-        self.checkout.path.focus_handle(cx)
-    }
-
     /// The folder field while a managed checkout is chosen: read-only, showing the preview's path (SPEC.md: "the
     /// composer's folder field shows the current preview's effective path read-only, or a pending or error state").
     pub(super) fn checkout_folder_field(&self) -> AnyElement {
@@ -960,11 +955,6 @@ impl Launcher {
     /// Whether the repository field holds focus.
     pub(crate) fn repository_focused(&self, window: &Window, cx: &App) -> bool {
         self.checkout.repository.focus_handle(cx).is_focused(window)
-    }
-
-    /// Whether the read-only checkout folder field holds focus.
-    pub(crate) fn checkout_folder_focused(&self, window: &Window, cx: &App) -> bool {
-        self.checkout.path.focus_handle(cx).is_focused(window)
     }
 }
 
