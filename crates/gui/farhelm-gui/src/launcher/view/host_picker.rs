@@ -54,8 +54,8 @@ const LIST_PAD: f32 = 4.;
 const MARK: f32 = 14.;
 const MARK_GAP: f32 = 8.;
 
-/// What the host picker holds besides the draft: the open list, the highlighted host and the typed prefix. Nothing
-/// here is shared with another surface.
+/// What the host picker holds besides the draft: the open list, the highlighted host, the typed prefix and the opening's
+/// note. Nothing here is shared with another surface.
 #[derive(Default)]
 pub(super) struct HostPicker {
     /// The open list's layer, if open; the layer manager may close it on its own, so [`Launcher::host_list_open`] asks.
@@ -67,6 +67,10 @@ pub(super) struct HostPicker {
     typed: Option<(String, SystemTime)>,
     /// Where the button is drawn, for the list to open under it; refreshed every frame.
     anchor: Option<Anchor>,
+    /// Why the opening did not keep its source's host, said under the row until the user picks a host
+    /// ([`super::open_noted`]): once they have, the host is their choice and the note no longer describes it, as the old
+    /// launcher stopped saying it once the user took the host over.
+    pub(super) note: Option<&'static str>,
 }
 
 impl Launcher {
@@ -248,6 +252,7 @@ impl Launcher {
         let selected = local_state::selected(cx);
         let folder = default_folder(self.store.read(cx).collections(), selected.as_deref(), host);
         self.draft.choose_host(host, folder);
+        self.host_picker.note = None;
         self.sync_fields(window, cx);
         self.changed(cx);
     }

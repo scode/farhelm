@@ -30,7 +30,7 @@
 //! The slot's "waiting for the reply" is the hidden launcher's own lifetime, not a copy of the operation store's busy
 //! state: the store still says whether the create is in flight, and the launcher reads the refusal it shows from the
 //! store, by the launch's key. Dismissing the notice withdraws only the notice; the launcher stays in the slot, and New
-//! brings it back.
+//! (or Clone) brings it back.
 //!
 //! NOTE: Not built yet: the pending pill and the "Started" pill that report a launch while the launcher is hidden.
 

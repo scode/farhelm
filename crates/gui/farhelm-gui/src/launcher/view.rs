@@ -94,8 +94,25 @@ const PROMPT_ROWS: usize = 3;
 /// Restart starts on Cancel"; the search box comes later, and until then its place is the first field's). Closing
 /// returns focus to whatever held it when the launcher opened.
 pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+    open_noted(draft, None, mark, window, cx)
+}
+
+/// [`open`], with `host_note` said under the Host row until the user picks a host: why an opening did not keep the host
+/// its source names (Clone's, as the old launcher's `.create-session-host-note` said it). Something else an opening
+/// has to say (a banner, a refusal) belongs beside the note, as another argument here.
+pub(in crate::launcher) fn open_noted(
+    draft: LaunchDraft,
+    host_note: Option<&'static str>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     let store = session::current_store(cx)?;
-    let launcher = cx.new(|cx| Launcher::new(draft, &store, window, cx));
+    let launcher = cx.new(|cx| {
+        let mut launcher = Launcher::new(draft, &store, window, cx);
+        launcher.host_picker.note = host_note;
+        launcher
+    });
     let layer = show(&launcher, mark, window, cx)?;
     read_catalog(launcher.downgrade(), cx);
     #[cfg(test)]
@@ -1338,14 +1355,18 @@ impl Render for Launcher {
             )
         });
         let host_row = self.host_row(palette, window, cx);
-        let destination = div()
-            .flex()
-            .flex_col()
-            .gap(px(ROW_GAP))
-            .child(section_label("Destination", palette))
-            .child(host_row)
-            .child(row("launcher-folder-row", "Folder", folder, palette))
-            .children(name);
+        let destination =
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(ROW_GAP))
+                .child(section_label("Destination", palette))
+                .child(host_row)
+                .children(self.host_picker.note.map(|note| {
+                    choices::status_line("launcher-host-note", note.to_owned(), palette)
+                }))
+                .child(row("launcher-folder-row", "Folder", folder, palette))
+                .children(name);
         let (on_tab, on_tab_enter) = (weak.clone(), weak.clone());
         let tabs = (!self.draft.holds(Field::LaunchKind)).then(|| {
             TabStrip::new(
@@ -1510,6 +1531,7 @@ impl Render for Launcher {
                     .text_color(theme::color(palette.fg_0)),
             )
             .width(px(WIDTH))
+            .flat_margin_when_wide()
             .footer_lead(self.summary(&target, window, cx))
             .close(
                 "Close session launcher",
