@@ -18,8 +18,9 @@
 //! Browsing never changes the draft: only a pick does, through [`LaunchDraft::choose_host`], which re-seeds a folder
 //! the user has not typed or picked.
 //!
-//! NOTE: A host change seeds `~`. SPEC.md's per-host default (the open session's folder when it is on that host, else
-//! the newest recent setup's) arrives with recent setups and New's prefill.
+//! A pick re-seeds from New's per-host folder default (`entry::default_folder`: the open session's folder when it is on
+//! that host's install, else `~`). NOTE: the rest of SPEC.md's default, the newest recent setup's folder on that host,
+//! arrives with recent setups.
 //!
 //! [`LaunchDraft::choose_host`]: crate::launcher::draft::LaunchDraft::choose_host
 
@@ -38,7 +39,9 @@ use crate::focus::{self, Mark};
 use crate::host_text::HostSentence;
 use crate::hosts::identity::{display_name, host_mark};
 use crate::launcher::draft::Field;
+use crate::launcher::entry::default_folder;
 use crate::layers::{self, Anchor, LayerId, Popover};
+use crate::local_state;
 use crate::theme::{self, metrics};
 
 /// How long typed letters keep adding to one name prefix before the next letter starts a new one (the old picker's
@@ -242,7 +245,9 @@ impl Launcher {
         if self.draft.host == Some(host) {
             return;
         }
-        self.draft.choose_host(host, "~".to_owned());
+        let selected = local_state::selected(cx);
+        let folder = default_folder(self.store.read(cx).collections(), selected.as_deref(), host);
+        self.draft.choose_host(host, folder);
         self.sync_fields(window, cx);
         self.changed(cx);
     }

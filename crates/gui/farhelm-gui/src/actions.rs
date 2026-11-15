@@ -195,6 +195,16 @@ pub(crate) const QUICK_SWITCHER_CHORD: &str = if cfg!(target_os = "macos") {
     QUICK_SWITCHER_LINUX
 };
 
+/// New's chord in the Mac app (SPEC.md, "Desktop window chrome"); the Linux app has none. Spelled once here, for its
+/// binding and its row in [`TERMINAL_KEYS`]; the tests spell it out on their own.
+pub(crate) const NEW_SESSION_MAC: &str = "cmd-n";
+
+/// New's binding (Cmd+N to [`NewSession`] in [`CONTEXT`]), which [`install`] binds on macOS only. A function so the tests,
+/// which do not run on macOS, can check and bind it.
+pub(crate) fn new_session_binding() -> KeyBinding {
+    KeyBinding::new(NEW_SESSION_MAC, NewSession, Some(CONTEXT))
+}
+
 /// The chords a focused text field keeps for itself although Farhelm binds them elsewhere. [`install`] binds each to
 /// `NoAction` in [`TEXT_INPUT_CONTEXT`], which hides every binding further out for the same chord, so the key goes on
 /// to the field's own handling (here, nothing: Kit binds none of them). Bound on every platform: on macOS the Delete
@@ -229,6 +239,10 @@ actions!(
         /// (SPEC.md: Cmd+K on a Mac, Ctrl+Shift+K on Linux, also from a focused terminal). Runs once per press
         /// (`ONCE_PER_PRESS`).
         QuickSwitcher,
+        /// Open New, the session launcher with New's prefill (SPEC.md, "Desktop window chrome": Cmd+N in the Mac
+        /// app only, also from a focused terminal; the Linux app has no New shortcut). Runs once per press
+        /// (`ONCE_PER_PRESS`).
+        NewSession,
         /// Paste the clipboard's text into the focused terminal, as a paste its program can tell from typing. The
         /// terminal handles it; its keys are its rows of [`TERMINAL_KEYS`], and a menu item that dispatches it reaches
         /// the focused terminal the same way.
@@ -344,8 +358,11 @@ pub fn install(cx: &mut App) {
         // a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
         KeyBinding::new(QUICK_SWITCHER_CHORD, QuickSwitcher, Some(CONTEXT)),
     ]);
-    // Before the desktop module installs the Mac menu, which shows each item's chord only if it is bound by then.
     if cfg!(target_os = "macos") {
+        // SPEC.md, "Desktop window chrome": Cmd+N in the Mac app only. The main view hands it to the launcher's New; it
+        // works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
+        cx.bind_keys([new_session_binding()]);
+        // Before the desktop module installs the Mac menu, which shows each item's chord only if it is bound by then.
         cx.bind_keys(MAC_MENU_CHORDS.iter().map(|(chord, bind)| bind(chord)));
     }
     cx.bind_keys(
@@ -594,6 +611,8 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     // listed the same way and a held chord opens the switcher once; a repeat would only reach the ground's handler,
     // which refuses while the switcher is open, and listed, it never runs the opener again.
     &QuickSwitcher,
+    // Opening New, like opening the switcher above: a held Cmd+N opens it once.
+    &NewSession,
     // The Mac app menu's chords (`MAC_MENU_CHORDS`): a GPUI binding runs on every repeat of a held key, so without
     // these a held Ctrl+Cmd+F would flip full screen on and off, and a held Cmd+M, Cmd+H or Cmd+Q act again on each
     // repeat, which none of them can usefully do.
@@ -707,7 +726,7 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
     app("cmd-p", "ctrl-shift-p", "quick launch the marked template"),
     app("cmd-x", "ctrl-shift-x", "begin a quick-launch sequence"),
     TerminalKey {
-        mac: Some("cmd-n"),
+        mac: Some(NEW_SESSION_MAC),
         // SPEC.md: the Linux app has no New shortcut.
         linux: None,
         owner: KeyOwner::App,

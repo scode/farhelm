@@ -38,7 +38,7 @@ use gpui::{
     Window, div,
 };
 
-use crate::actions::{DeleteSession, QuickSwitcher, RenameSession};
+use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
@@ -190,6 +190,12 @@ impl Render for MainView {
             // The switcher holds the list weakly, so that a pick can show the session it opened.
             .on_action(move |_: &QuickSwitcher, window, cx| {
                 session_list::quick_switcher::open(list.clone(), window, cx)
+            })
+            // Taken whatever New does with it, as a once-per-press shortcut's handler must be (`actions.rs`). New
+            // itself refuses while a dialog or menu is open or a launch is pending (SPEC.md: "unless a modal is open
+            // or New is disabled").
+            .on_action(|_: &NewSession, window, cx| {
+                launcher::entry::open_new(window, cx);
             })
             .size_full()
             .bg(theme::color(palette.bg_0))
