@@ -596,11 +596,12 @@ fn escape_while_a_save_is_in_flight_keeps_the_field_open(cx: &mut TestAppContext
 
 /// Why this matters: every control in the dialog saves under the host's one key and none is drawn unavailable while
 /// another save runs, so each must say why its press sent nothing, in the place its own refusal would show. Specified:
-/// with the YOLO switch's save in flight, the alias field's Save sends nothing and draws "Not saved: another save was
-/// in progress. Try again." under the alias row, with the field still open; a click on Rocket sends nothing, keeps Cloud
-/// pressed and moves the line under the picker; a second click on YOLO, whose own save is in flight, moves it under the
-/// switch; the folder field's Use default, a view of its own, draws the line under the field too; once that save is
-/// answered, the alias Save sends and no line is left in the dialog's own controls.
+/// with the YOLO switch's save in flight, the alias field's Save sends nothing and draws Settings' busy line
+/// ([`Refused::WORDS`], "Not saved: another operation was in progress. Try again.") under the alias row, with the field
+/// still open; a click on Rocket sends nothing, keeps Cloud pressed and moves the line under the picker; a second click
+/// on YOLO, whose own save is in flight, moves it under the switch; the folder field's Use default, a view of its own,
+/// draws the line under the field too; once that save is answered, the alias Save sends and no line is left in the
+/// dialog's own controls.
 #[gpui::test]
 fn a_press_during_another_save_on_the_host_says_why_it_sent_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) =
@@ -899,10 +900,11 @@ fn the_host_folder_saves_under_the_hosts_key_and_use_default_clears_it(cx: &mut 
 /// NOTE). That is only sound if the key really does hold the folder's Save back, and the folder's save holds the other
 /// controls back, or two writes to one host could cross; and since nothing is drawn unavailable, a press the key holds
 /// back must say so, or it reads as a broken control. Specified: with a permission's save in flight, the field takes
-/// typing, and its Save sends nothing, still reads "Save" and draws "Not saved: another save was in progress. Try
-/// again." under the field; once that save is answered, Save sends the folder and the line goes; with the folder's
-/// save in flight, a permission's switch sends nothing, keeps showing the stored value and draws the line under itself;
-/// once the save is done and its read-back answered, the key is free and the field says "Checkout folder saved".
+/// typing, and its Save sends nothing, still reads "Save" and draws Settings' busy line ([`Refused::WORDS`], "Not
+/// saved: another operation was in progress. Try again.") under the field; once that save is answered, Save sends the
+/// folder and the line goes; with the folder's save in flight, a permission's switch sends nothing, keeps showing the
+/// stored value and draws the line under itself; once the save is done and its read-back answered, the key is free and
+/// the field says "Checkout folder saved".
 #[gpui::test]
 fn saves_on_the_host_wait_for_each_other_without_locking_the_folder(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_build_box(cx);

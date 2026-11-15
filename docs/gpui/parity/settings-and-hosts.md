@@ -599,8 +599,8 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **When Allow's save meets another preference save, the terminal's busy words show under the tunnel switch.** The press
   checks the preference row's key before asking, so this happens only when a save starts while the warning is up. The
   words are the terminal area's tunnel entry point's ("Another change to the preferences is still being saved; try
-  again"), not Settings' own busy line ("Not saved: another save was in progress. Try again."), since the entry point
-  reports its refusal as text.
+  again"), not Settings' own busy line ("Not saved: another operation was in progress. Try again."), since the entry
+  point reports its refusal as text.
 - **A tunnel switch refusal that arrives after Settings has closed is shown nowhere.** The old app's tunnel controller
   put such a failure in its global tunnel notice when no control was left to show it. Here, as for every Settings save,
   the reply settles nothing on screen once the dialog is gone; with no optimistic copy the switch's stored value is
@@ -616,15 +616,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   every switch's newest click per field and sent it after the earlier one ("the latest click wins"). Here the operation
   store admits one request on the preference row at a time, so the second click sends nothing: a second click on the
   same switch leaves it showing the value in flight, and one on another switch leaves that switch as it was, and either
-  way "Not saved: another save was in progress. Try again." shows under the control pressed, until a save from the same
-  view starts or another press is refused; the user clicks again after the reply, which the embedded helm sends within
-  milliseconds. The words are in the past tense because the line outlives the save that blocked the press. In a radio
-  group (Appearance, Terminal's link choice) the arrows move focus and the choice together, so a second arrow press
-  while the first choice's save is in flight moves focus to the next option while the choice stays where the first press
-  put it, with the line under the group. The refusal was accepted by the migration's orchestrator on 2026-11-14, since
-  preference saves are helm-local and take milliseconds, to be revisited only if a user meets it; the orchestrator asked
-  the same day that it not be silent. Covered by `a_press_during_another_settings_save_says_why_it_sent_nothing` and
-  `the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing`.
+  way "Not saved: another operation was in progress. Try again." shows under the control pressed, until a save from the
+  same view starts or another press is refused; the user clicks again after the reply, which the embedded helm sends
+  within milliseconds. The words are in the past tense because the line outlives the save that blocked the press. In a
+  radio group (Appearance, Terminal's link choice) the arrows move focus and the choice together, so a second arrow
+  press while the first choice's save is in flight moves focus to the next option while the choice stays where the first
+  press put it, with the line under the group. The refusal was accepted by the migration's orchestrator on 2026-11-14,
+  since preference saves are helm-local and take milliseconds, to be revisited only if a user meets it; the orchestrator
+  asked the same day that it not be silent. Covered by `a_press_during_another_settings_save_says_why_it_sent_nothing`
+  and `the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing`.
 - **Checkouts' fields are refused while another Settings save is in flight.** The default checkout folder and the
   post-clone command each had a request of their own in the old app, so no other Settings save ever held their Save
   back. Here they are helm configuration saved under the preference row's key, like the switches (above), so their Save
@@ -743,7 +743,7 @@ Where the port does not match the old app, and why. Each stays until the work na
   way. The old app showed nothing (its preference writer was fire-and-forget); the area's rule that a failed save is
   reported asks for the line. The old writer also queued a write behind a busy preference save, where this one is
   refused while another preference save is in flight (the operation store's one request per key) and the panel line says
-  so instead, in the words Settings uses for such a press ("Not saved: another save was in progress. Try again.").
+  so instead, in the words Settings uses for such a press ("Not saved: another operation was in progress. Try again.").
   Settings, the templates dialog's shortcut writes and a tunnel consent save under the same key; Settings cannot be open
   while the confirmation is, so it takes a save still in flight from just before, or one of the others
   (`a_permanent_answer_refused_for_another_preference_save_says_so_in_the_hosts_panel`).
@@ -780,7 +780,7 @@ Where the port does not match the old app, and why. Each stays until the work na
   this host"): the old menu items had none, and every menu item here has one.
 - **One save per host at a time, and nothing goes unavailable while one runs.** Every setting saves under the host's one
   operation key, so a click on another setting of the same host while a save is in flight sends nothing (the switch or
-  choice goes on showing what it showed) and "Not saved: another save was in progress. Try again." shows where that
+  choice goes on showing what it showed) and "Not saved: another operation was in progress. Try again." shows where that
   control's refusal would; the user clicks again after the reply, which the embedded helm sends within milliseconds. The
   old dialog instead disabled every control while any host write ran and while a field was open, and put focus back
   afterwards; here only the other field's Edit waits while a field is open. The checkout folder follows the same rule
@@ -827,17 +827,16 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **After a removal, focus recovers as from any control that goes** (SPEC.md, "Where focus rests": home, the selected
   session's terminal), where the old app moved it to the rail's Hosts control. Focus was back on the row's menu toggle
   since the question closed, and that toggle goes with the row.
-- Interim: **a Remove refused before anything is sent says why at the top of the Hosts panel**, naming the host: while
-  the host's key has other work in flight ("another operation on this host is in progress"), and while a session launch
-  is in flight. The old app ignored such a press without a word (its page lock). The words move to the shared wording
-  for the operation store's refusals once that exists. A launch is the launcher's New or Clone, or a session's Restart
-  or Replace, in flight.
+- **A Remove refused before anything is sent says why at the top of the Hosts panel**, naming the host: while the host's
+  key has other work in flight ("Not started: another operation was in progress. Try again.", the operation store's
+  shared reason after Remove's own lead-in), and while a session launch is in flight. The old app ignored such a press
+  without a word (its page lock). A launch is the launcher's New or Clone, or a session's Restart or Replace, in flight.
 - **"Remove, don't ask again" stores the preference only once its removal is sent.** The old app stored it first, so a
   removal its page lock then held back still turned the preference on; here a removal refused before anything is sent (a
   session launch in flight, the host's key busy) leaves the preference as it was.
 - **A refused "Remove, don't ask again" is reported** on the same panel line ("Remove hosts without asking: " and the
-  helm's words, or "Not saved: another save was in progress. Try again." when another preference save was in flight);
-  the old app showed nothing.
+  helm's words, or "Not saved: another operation was in progress. Try again." when another preference save was in
+  flight); the old app showed nothing.
 - **The footer note shows only beside the permanent answer.** With Remove unavailable the note naming "don't ask again"
   is left out with that answer; the old dialog always drew it, beside its disabled answers.
 - **The header is about 10 pixels taller** than the reference's, as the host settings dialog's is: the frame lays out

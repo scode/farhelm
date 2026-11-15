@@ -26,15 +26,16 @@
 //!   on needs no check of its own; the question itself opens only through the mark taken at the menu's Remove.
 //! - **Not started.** A Remove refused before anything is sent says why on the Hosts panel's line, naming the host,
 //!   until the next Remove or a reset ([`panel_lines`]): the host's key already has work in flight (the store's
-//!   refusal), or a session launch is in flight ([`super::launch_in_flight`], shared with Add host, setup and Re-run).
-//!   The second is the migration's rule, decided by its orchestrator on 2026-11-14 after the old app refused a host
-//!   change during a launch and the reverse: each side refuses its own action while the other's work is in flight in the
-//!   operation store, with a reason, and no shared lock.
+//!   refusal, "Not started:" and the store's shared reason), or a session launch is in flight
+//!   ([`super::launch_in_flight`], shared with Add host, setup and Re-run). The second is the migration's rule, decided
+//!   by its orchestrator on 2026-11-14 after the old app refused a host change during a launch and the reverse: each
+//!   side refuses its own action while the other's work is in flight in the operation store, with a reason, and no
+//!   shared lock.
 //! - **A refused permanent answer.** The removal goes ahead whether or not its preference save succeeds, and the
 //!   question has closed, so a refusal of that save shows on the panel's line too, "Remove hosts without asking:" and
-//!   the helm's words, or Settings' words for a press refused that way ([`Refused::WORDS`]) when the operation store
-//!   refused it because another preference save was in flight, until the next permanent answer, a reset, or the
-//!   preference turning on.
+//!   the helm's words, or Settings' words for a press refused that way ([`Refused::WORDS`], "Not saved:" and the
+//!   store's shared reason) when the operation store refused it because another preference save was in flight, until
+//!   the next permanent answer, a reset, or the preference turning on.
 //!
 //! NOTE: Three of the recorded deviations (`docs/gpui/parity/settings-and-hosts.md`). The old dialog stayed open
 //! through its request and showed a refusal inside it; the prompt keeps a question open through its action only for an
@@ -387,19 +388,22 @@ enum Refusal {
 }
 
 impl Refusal {
-    /// What the line says after the host's name and its colon, in the old app's wording for an action refused while
-    /// another runs ("<action>: not started, another operation is in progress; try again", `list/lifecycle.rs` at the
-    /// reference commit).
-    fn words(self) -> &'static str {
+    /// What the line says after the host's name and its colon. A busy key gets "Not started: " and the operation
+    /// store's shared reason ([`NotStarted::BUSY_REASON`]), which every area gives after a lead-in of its own, so a
+    /// Remove the store refused reads like any other press it refused; the migration's orchestrator decided that split
+    /// on 2026-11-14. A launch in flight keeps the old app's form for an action refused while another runs ("<action>:
+    /// not started, another operation is in progress; try again", `list/lifecycle.rs` at the reference commit), naming
+    /// the launch, as every host registry change does.
+    fn words(self) -> String {
         match self {
-            Refusal::Busy => {
-                "not started, another operation on this host is in progress; try again"
-            }
-            // The words every host registry change refuses with during a launch.
-            Refusal::LaunchInFlight => super::LAUNCH_IN_FLIGHT,
+            Refusal::Busy => format!("{BUSY_LEAD_IN}{}", NotStarted::BUSY_REASON),
+            Refusal::LaunchInFlight => super::LAUNCH_IN_FLIGHT.to_owned(),
         }
     }
 }
+
+/// What a Remove refused for a busy host key did not do, ahead of the store's reason ([`Refusal::words`]).
+const BUSY_LEAD_IN: &str = "Not started: ";
 
 /// What the Hosts panel's line shows for removals: a Remove that was not started, and a refused permanent answer's
 /// words. Each carries the entity id of the operation store current when it was recorded and shows only while that is
