@@ -144,7 +144,10 @@ pub fn plain(fields: &TemplateFields) -> String {
 /// A permission choice as a summary names it (the old app's `permission_label`). With no agent type the choice cannot
 /// be resolved yet, so a reset says only that it depends on the agent. With one, it names what the launch would
 /// request: the guarded mode by that agent's own name for it, or the agent's own setting.
-fn permission_label(agent: Option<LaunchHarness>, permission: Option<LaunchPermission>) -> String {
+pub(crate) fn permission_label(
+    agent: Option<LaunchHarness>,
+    permission: Option<LaunchPermission>,
+) -> String {
     let Some(harness) = agent else {
         return match permission {
             Some(_) => permission_display(permission).to_owned(),
