@@ -52,6 +52,8 @@
 //! - [`sounds`]: the status sounds as plain Rust: the rules for which one an observation plays, and the three sounds
 //!   synthesized into WAV bytes; observing the store and playing them come later.
 //! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
+//! - [`shortcuts`]: the Keyboard shortcuts overview, every app-wide shortcut in this client's form, from its chord
+//!   or the Help menu.
 //! - [`feedback`]: the Send feedback dialog, a private message to the maintainer sent through the helm.
 //! - [`trash`]: the session list header's Trash button, the archived-checkout reads behind its count, and the Trash
 //!   dialog it opens.
@@ -104,6 +106,7 @@ pub mod session;
 pub mod session_list;
 pub mod session_pane;
 pub mod settings;
+pub mod shortcuts;
 pub mod sidebar;
 pub mod sounds;
 pub mod store;

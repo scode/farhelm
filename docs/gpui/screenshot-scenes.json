@@ -976,6 +976,11 @@
       "reference": "feedback-dialog"
     },
     {
+      "golden": "keyboard-shortcuts-dialog",
+      "title": "The Keyboard shortcuts overview as Help opens it, in Linux forms, with a marked template and two number keys (the old overview was never captured)",
+      "reference": null
+    },
+    {
       "golden": "host-filter-empty",
       "title": "The session list with a host chosen over its empty listing: the pressed avatar, the chip and the sentence naming the host, with Show all hosts",
       "reference": "session-list-filter-empty"

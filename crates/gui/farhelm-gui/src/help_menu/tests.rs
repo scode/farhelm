@@ -110,13 +110,14 @@ fn open_menu(cx: &mut VisualTestContext) {
 
 // ---- The order of the items ----------------------------------------------------------------------------------------
 
-/// SPEC.md fixes the menu's order ("in order: **Send feedback**, **Chat on Discord**, **Documentation**, ..., **Release
-/// notes**, **SSH needs 2FA?** and **Welcome**", "Announcements appears directly after Release notes", "Check for
-/// updates last"), and the Linux-only notices item has no place in SPEC.md, so it goes at the very end where it moves
-/// nothing else. An item out of place is a menu the documentation no longer describes. Specified, for all eight
-/// combinations: Send feedback, Discord, Documentation, Release notes, SSH help and Welcome always, in that order, Send
-/// feedback first; a shown announcement adds Announcements right after Release notes; an updater adds Check for updates
-/// after the fixed items; Linux adds Open-Source Notices after everything, including after Check for updates.
+/// SPEC.md fixes the menu's order ("in order: **Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard
+/// shortcuts**, **Release notes**, **SSH needs 2FA?** and **Welcome**", "Announcements appears directly after Release
+/// notes", "Check for updates last"), and the Linux-only notices item has no place in SPEC.md, so it goes at the very
+/// end where it moves nothing else. An item out of place is a menu the documentation no longer describes. Specified,
+/// for all eight combinations: Send feedback, Discord, Documentation, Keyboard shortcuts, Release notes, SSH help and
+/// Welcome always, in that order, Send feedback first; a shown announcement adds Announcements right after Release
+/// notes; an updater adds Check for updates after the fixed items; Linux adds Open-Source Notices after everything,
+/// including after Check for updates.
 #[test]
 fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last() {
     for updater in [false, true] {
@@ -126,6 +127,7 @@ fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last()
                     Item::SendFeedback,
                     Item::ChatOnDiscord,
                     Item::Documentation,
+                    Item::KeyboardShortcuts,
                     Item::ReleaseNotes,
                 ];
                 if announced {
@@ -284,7 +286,7 @@ fn ssh_help_opens_from_the_menu_and_returns_focus_to_the_button(cx: &mut TestApp
     cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
     test_support::check(cx);
     open_menu(cx);
-    test_support::keys(cx, "down down down down");
+    test_support::keys(cx, "down down down down down");
     assert_eq!(focused_id(cx).as_deref(), Some("help-menu-ssh-help"));
     test_support::keys(cx, "enter");
     assert!(node(&frame(cx), MENU).is_none(), "the menu closed");

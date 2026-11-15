@@ -2558,6 +2558,43 @@ fn feedback_dialog_reuse_setup(state: &SceneState, window: &mut Window, cx: &mut
     feedback_dialog_scene(state, Some("you@example.test"), window, cx);
 }
 
+/// The Keyboard shortcuts overview as the `?` menu opens it, in this platform's forms (Linux, where the goldens run),
+/// over a preference row with ⚡ on `deploy` and number keys 1 and 0 assigned, so both kinds of template row show. The
+/// old app's overview was never captured as a reference scene, so SPEC.md and the old code are this picture's
+/// reference. The opener is the scene's ring handle, which stands in for the `?` button; the fake and the connection
+/// are kept for the scene's life, like the feedback dialog's.
+fn keyboard_shortcuts_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![preferences_state(Preferences {
+        quick_launch_template: Some("deploy".to_owned()),
+        template_shortcuts: [("1", "api review"), ("0", "nightly build")]
+            .into_iter()
+            .map(|(key, name)| (key.to_owned(), name.to_owned()))
+            .collect(),
+        ..Preferences::default()
+    })]);
+    // The rows read the store, which the snapshot reaches after this setup returns: open once the connection has a UI
+    // session, and only once.
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::shortcuts::open_from_menu(&opener, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-credentials`, `settings-terminal`,
 /// `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`): focus on the section's
@@ -4158,7 +4195,8 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "help-menu",
-        size: (420., 480.),
+        // The app's minimum window height, so the whole menu shows, Open-Source Notices last.
+        size: (420., 560.),
         draw: session_lists_then,
         setup: help_menu_setup,
     },
@@ -4210,6 +4248,12 @@ static SCENES: &[Scene] = &[
         size: (600., 620.),
         draw: empty,
         setup: feedback_dialog_reuse_setup,
+    },
+    Scene {
+        name: "keyboard-shortcuts-dialog",
+        size: (700., 1020.),
+        draw: empty,
+        setup: keyboard_shortcuts_dialog_setup,
     },
     Scene {
         name: "host-filter-empty",
