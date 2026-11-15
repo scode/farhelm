@@ -8,12 +8,13 @@
 //! a row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
-//! host failing to connect, and with a host's setup running and failed), the Add host dialog and the setup confirmation
-//! it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end, the version readout
-//! while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
-//! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
-//! (ordinary and maximized), and the Open-Source Notices window over a short fixture, in both appearances, compared
-//! pixel for pixel.
+//! host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a
+//! host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the host
+//! settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
+//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
+//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
+//! itself (ordinary and maximized), and the Open-Source Notices window over a short fixture, in both appearances,
+//! compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -2461,8 +2462,8 @@ fn hosts_panel_scene_with(
     keep.push(Box::new(panel));
 }
 
-/// The reference screens' three connected hosts, Details off (reference `hosts-panel`): the heading with its count and
-/// switch, and each row's mark, name and phase.
+/// The reference screens' three connected hosts, Details off (reference `hosts-panel`): the heading with its count,
+/// switch and Update all, and each row's mark, name and phase.
 fn hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), false, cx);
 }
@@ -2591,6 +2592,74 @@ fn host_setup_failed_hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &
     );
 }
 
+/// The Hosts panel with an Update on offer in two rows, Details off (no reference: the old reference screens show no
+/// outdated host): `build-box` on an older build, "Old version" with the amber outlined `↑ Update`, and `gpu-1` refused
+/// at the handshake on an older protocol, "Needs update" with the red one; the heading's Update all available.
+fn hosts_panel_updates_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{reference_hosts, skew};
+    let mut listed = reference_hosts();
+    listed[1].state = farhelm_proto::ui_channel::HostStateView::Connected {
+        identity: Some("c1182bd3-a604-4d1e-855d-ccbf6c992b0b".into()),
+        build_version: "0.15.0".into(),
+        old_version: true,
+        newer_version: false,
+        refresh: farhelm_proto::ui_channel::RefreshView::Ok { sessions: 1 },
+    };
+    listed[2].state = skew(1, 2);
+    hosts_panel_scene(state, &listed, false, cx);
+}
+
+/// `build-box`'s Update running at its second of three steps, Details off (no reference): the row stays folded and its
+/// inline status takes the phase words' place, the count, the running step and the clock without the visible verb.
+/// Motion is reduced, so the dot holds still, and the test clock does not move, so the elapsed time reads "0:00".
+fn host_update_running_hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{hosts, progress, reference_hosts, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus, StepStatus};
+    ticker::set_reduced_motion(true, cx);
+    let mut update = run(2, ProvisioningOperation::Update, RunStatus::Running);
+    update.steps = [
+        ("Upload the farhelm binary", StepStatus::Completed),
+        ("Install the farhelm binary", StepStatus::Running),
+        ("Connect to the supervisor", StepStatus::Pending),
+    ]
+    .into_iter()
+    .map(|(name, status)| crate::hosts::progress::tests::step(name, status))
+    .collect();
+    hosts_panel_scene_with(
+        state,
+        vec![hosts(&reference_hosts()), progress(&[update])],
+        false,
+        cx,
+    );
+}
+
+/// The host refusal dialog for a refused Update of `build-box` below the upgrade floor (no reference: the old dialog's
+/// look is reference `host-uninstall-refusal`, the same dialog for Uninstall): "Update host · build-box", the red
+/// summary, the destination and the helm's manual remedy naming the executable, and Close with focus.
+fn host_update_refusal_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::hosts::refusal::{self, Refusal};
+    let view = crate::hosts::tests::reference_hosts().remove(1);
+    let words = HostText::from_host(
+        "the host runs Farhelm 0.12.0, older than this helm's upgrade floor of 0.14.0; it is too old to \
+         update in place. On that host, stop its Farhelm supervisor service. Its Farhelm executable is \
+         /home/dev/.local/lib/farhelm/farhelm. Remove its installation directory only if that directory is \
+         dedicated to Farhelm (normally ~/.local/lib/farhelm). Then remove the host from Farhelm and set it \
+         up again",
+    );
+    let reason = crate::operations::Refusal {
+        words,
+        status: 409,
+        markers: Vec::new(),
+    };
+    let mark = Mark::take(cx);
+    let _ = refusal::open(
+        Refusal::of("Update host", &view, &reason),
+        &mark,
+        window,
+        cx,
+    );
+}
+
 /// The Hosts panel a scene's setup made, as [`hosts_panels`] draws it, in a column tall enough for a setup's nine
 /// steps under its row and a failure's messages after them, as the reference screens' sidebar was.
 fn tall_hosts_panels(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
@@ -2640,7 +2709,8 @@ fn take_pending(state: &SceneState) -> bool {
 }
 
 /// The reference screens' hosts in the Hosts panel, then `build-box`'s menu opened from its toggle (reference
-/// `host-menu`): the header naming it, its destination and build, Settings highlighted, and Remove behind a separator.
+/// `host-menu`): the header naming it, its destination and build, then Update, highlighted, Settings, and Remove
+/// behind a separator.
 /// The menu opens through [`host_menu_scene`] once the toggle has been drawn.
 fn host_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), false, cx);
@@ -3569,6 +3639,24 @@ static SCENES: &[Scene] = &[
         size: (640., 260.),
         draw: version_readout_tooltip,
         setup: version_readout_tooltip_setup,
+    },
+    Scene {
+        name: "hosts-panel-updates",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: hosts_panel_updates_setup,
+    },
+    Scene {
+        name: "host-update-running-hosts-panel",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: host_update_running_hosts_panel_setup,
+    },
+    Scene {
+        name: "host-update-refusal",
+        size: (640., 600.),
+        draw: empty,
+        setup: host_update_refusal_setup,
     },
 ];
 

@@ -141,11 +141,12 @@ pub(super) fn host_change_in_flight(cx: &App) -> bool {
 }
 
 /// Whether `work` is a registry change counted by its kind: a host probe registers a host that answers, a setup
-/// registers the host it sets up, and a removal takes a host out of the registry. Exhaustive, so a new kind of work
-/// decides (a host's Update, when it comes, counts).
+/// registers the host it sets up, a removal takes a host out of the registry, and an Update replaces the host's
+/// installation (the set the migration's orchestrator recorded on 2026-11-14). Exhaustive, so a new kind of work
+/// decides.
 fn changes_host_registry(work: Work) -> bool {
     match work {
-        Work::Probe | Work::Setup | Work::RemoveHost => true,
+        Work::Probe | Work::Setup | Work::RemoveHost | Work::UpdateHost => true,
         Work::Rename
         | Work::Delete(_)
         | Work::Save

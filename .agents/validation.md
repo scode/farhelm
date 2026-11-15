@@ -752,18 +752,20 @@ systemd or SSH substrate ran.
   each list only the session in that status, with the helm's count of its sessions in that status against the fleet as
   "N of M", and All lists both again with the plain count; and on three fake SSH hosts of its own, a host menu's Remove
   asks and Cancel keeps the host, while Remove, the permanent answer and then Remove without asking make the helm forget
-  each; and on three sessions of its own, once a line typed into the oldest has set the helm's activity order apart from
-  its creation order, choosing Newest created and then Title A–Z from the list title's order menu makes the helm store
-  each order and the window draw the three in the helm's own order for it, and Recently active is chosen again. A failed
-  run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still
-  stops its app run, for which the recorder's `--termination-grace` leaves it time. Under 30 seconds on a build worker
-  with the app already built (4 and 18 s measured, 23 s once the seen toggle's step was added); it builds the app first
-  unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux,
-  or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row
-  menu, session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick switcher, host rail
-  (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host menu and Remove host,
-  sidebar width or divider, terminal attach, paste, text input or scrollback, the order menu, the bridge's wiring, the
-  app's startup or `scripts/gui-agent.py` change.
+  each; and on a fake SSH host of its own, a host menu's Update shows its held run's progress inline with the row
+  folded, its failure opens the row on the failed step and the scripted backend's reason, and the menu's Re-run updates
+  the host; and on three sessions of its own, once a line typed into the oldest has set the helm's activity order apart
+  from its creation order, choosing Newest created and then Title A–Z from the list title's order menu makes the helm
+  store each order and the window draw the three in the helm's own order for it, and Recently active is chosen again. A
+  failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
+  recorder) still stops its app run, for which the recorder's `--termination-grace` leaves it time. Under 30 seconds on
+  a build worker with the app already built (4 and 18 s measured, 23 s once the seen toggle's step was added); it builds
+  the app first unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and
+  lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's
+  session list, row menu, session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick
+  switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host
+  menu, Remove host and host Update, sidebar width or divider, terminal attach, paste, text input or scrollback, the
+  order menu, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
