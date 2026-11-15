@@ -70,6 +70,10 @@ orchestrator.
 - **A recipe-and-place target's summary.** The old summary named a template's environment target by the environment
   code's label for it; until the launcher's environments work brings that label, the summary names the target's recipe
   ("New dev").
+- **One binding hint for a sequence's unbound keys.** When Enter outside the launcher finds both an unbound number key
+  and an unbound ⚡ in a sequence, the old app opened Templates with both hint lines; the GPUI dialog opens with one
+  hint, for whichever unbound reference came first in the queue. Tested by
+  `templates::sequence_tests::key_refusals_choose_a_hint_and_a_launcher_sentence`.
 
 ## Superseded
 
