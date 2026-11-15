@@ -33,6 +33,27 @@
       ]
     },
     {
+      "id": "app-title-band",
+      "title": "The title band with the running Fixture 1 open: the sidebar's app bar and the session pane's top row across the window's top, with the inset kept clear for the traffic lights on a Mac (on Linux the band's rows without them, below the window's own title bar, which the batch crops off)",
+      "reference": "macos-window-chrome",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "text:Fixture 1"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "Verifying"
+        ]
+      ]
+    },
+    {
       "id": "app-selected-waiting",
       "title": "The waiting Fixture 2 open, its terminal showing the question it waits on",
       "reference": "selected-waiting-session",
@@ -917,6 +938,16 @@
       "reference": "host-remove-confirmation"
     },
     {
+      "golden": "linux-title-bar",
+      "title": "The title bar the Linux window draws where the compositor draws none: the title, Minimize, Maximize and Close for the window in its ordinary state, then the same bar maximized, with Restore in Maximize's place",
+      "reference": null
+    },
+    {
+      "golden": "open-source-notices",
+      "title": "The Open-Source Notices window over a short fixture, at its opening width and cropped in height: the window's own title bar on Linux, then the notices in the terminal face, a long line wrapped at the window's column and a tab-indented line",
+      "reference": null
+    },
+    {
       "golden": "session-order-menu",
       "title": "The list title's order menu open below it: the shared header and the three orders, Recently active checked and highlighted (no Compact item yet)",
       "reference": "sort-menu"
@@ -1255,7 +1286,7 @@
     },
     {
       "id": "macos-window-chrome",
-      "ported": false
+      "ported": true
     }
   ]
 }
