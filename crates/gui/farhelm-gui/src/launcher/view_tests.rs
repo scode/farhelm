@@ -26,28 +26,52 @@ impl Global for Opened {}
 
 /// The helm's pinned host-list fixture's first host (id 1, "host1", connected), as the hosts collection.
 fn hosts() -> CollectionState {
+    fixture_hosts(&[0])
+}
+
+/// The helm's pinned host-list fixture's hosts at `positions`, in that order, as the hosts collection. The fixture's
+/// first three are host1 (connected), host2 (connecting) and host3 (unreachable); the eleventh, host11, is owned by a
+/// disposable environment.
+fn fixture_hosts(positions: &[usize]) -> CollectionState {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../farhelm-helm/http-contract/host-list.json"
     ))
     .unwrap();
-    let host: HostView = serde_json::from_value(fixture["hosts"][0].clone()).unwrap();
+    let hosts: Vec<HostView> = positions
+        .iter()
+        .map(|&index| serde_json::from_value(fixture["hosts"][index].clone()).unwrap())
+        .collect();
+    let keys: Vec<String> = hosts.iter().map(|host| host.id.to_string()).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
     CollectionState {
         collection: Collection::Hosts,
-        meta: meta(&["1"]),
-        entries: vec![KeyedEntry {
-            key: "1".into(),
-            value: serde_json::to_value(host).unwrap(),
-        }],
+        meta: meta(&keys),
+        entries: hosts
+            .into_iter()
+            .map(|host| KeyedEntry {
+                key: host.id.to_string(),
+                value: serde_json::to_value(host).unwrap(),
+            })
+            .collect(),
     }
 }
 
 /// The real main view over the fake helm with one host, session `a` and the preferences, and the launcher opened on
 /// `draft`, checked once settled.
 fn launcher_on(cx: &mut TestAppContext, draft: LaunchDraft) -> (FakeHelm, &mut VisualTestContext) {
+    launcher_with_hosts(cx, draft, hosts())
+}
+
+/// [`launcher_on`] with the hosts collection `hosts`.
+fn launcher_with_hosts(
+    cx: &mut TestAppContext,
+    draft: LaunchDraft,
+    hosts: CollectionState,
+) -> (FakeHelm, &mut VisualTestContext) {
     let (mut helm, _connection) = started(cx);
     helm.connect(vec![
         listing(&["a"], &[session("a")]),
-        hosts(),
+        hosts,
         preferences(&[], None),
     ]);
     cx.run_until_parked();
@@ -594,10 +618,11 @@ fn enter_on_a_harness_chip_chooses_it_and_presses_launch(cx: &mut TestAppContext
     );
 }
 
-/// Choosing Custom opens its flags editor, which shows the words the flags parse to, or why they do not. Enter on the
-/// Custom segment only chooses: a Custom choice has no flags yet, so launching from it could only fail. Specified, on
-/// Codex: Enter on the focused Custom segment chooses Custom and says nothing beside Launch; in the flags field,
-/// `--a 'b c'` shows its two words, apart, and an unclosed quote shows the error instead.
+/// Choosing Custom opens its flags editor and moves focus into it, and the editor shows the words the flags parse to,
+/// or why they do not. Enter on the Custom segment only chooses: a Custom choice has no flags yet, so launching from it
+/// could only fail. Specified, on Codex: Enter on the focused Custom segment chooses Custom, says nothing beside Launch
+/// and puts focus in the flags field; `--a 'b c'` there shows its two words, apart, and an unclosed quote shows the
+/// error instead.
 #[gpui::test]
 fn custom_opens_its_flags_editor_and_enter_there_only_chooses(cx: &mut TestAppContext) {
     // No host, so a press would be refused and say so: the check that Enter on Custom pressed nothing means something.
@@ -621,13 +646,12 @@ fn custom_opens_its_flags_editor_and_enter_there_only_chooses(cx: &mut TestAppCo
         None,
         "Enter on Custom did not press Launch"
     );
-    test_support::click(cx, "launcher-flags-row");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .flags
             .focus_handle(cx)
             .is_focused(window)),
-        "the premise: the click focused the flags field"
+        "choosing Custom moved focus into its flags field"
     );
     keys(cx, "- - a space ' b space c '");
     assert_eq!(draft(cx).agent.permission_flags, "--a 'b c'");
@@ -1180,4 +1204,288 @@ fn the_model_list_stops_at_260_pixels(cx: &mut TestAppContext) {
         list.size.height <= gpui::px(262.),
         "the list is capped: {list:?}"
     );
+}
+
+// ---- The host picker -------------------------------------------------------------------------------------------------
+
+/// The launcher on New on host1, with host1, host2, host3 and host11 registered, and folder `folder`.
+fn host_picker_on<'a>(cx: &'a mut TestAppContext, folder: &str) -> &'a mut VisualTestContext {
+    let (_helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), folder.into(), None),
+        fixture_hosts(&[0, 1, 2, 10]),
+    );
+    cx
+}
+
+/// Whether the host button holds focus.
+fn host_focused(cx: &mut VisualTestContext) -> bool {
+    read(cx, |launcher, window, _| {
+        launcher.host_focus.is_focused(window)
+    })
+}
+
+/// The Host row names the chosen host, and its list shows every host in the registry's order but those a disposable
+/// environment owns, each with its phase while not connected, so an unavailable host is seen as one; a click picks a
+/// host and closes the list, re-seeding a folder the user has not typed (SPEC.md, "Working directory"). Why this
+/// matters: the host is where the session runs, and a list that hid unavailable hosts or offered an environment's own
+/// host would send the user somewhere they did not mean.
+#[gpui::test]
+fn the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "/seeded");
+    assert_eq!(name_of(cx, "launcher-host").as_deref(), Some("Host: host1"));
+    test_support::click(cx, "launcher-host");
+    assert!(
+        has_node(cx, "launcher-host-list"),
+        "the click opened the list"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-host-option-2").as_deref(),
+        Some("host2 (Connecting)")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-host-option-3").as_deref(),
+        Some("host3 (Unreachable, retrying)")
+    );
+    assert!(
+        !has_node(cx, "launcher-host-option-11"),
+        "an environment's host is not offered"
+    );
+    test_support::click(cx, "launcher-host-option-3");
+    assert_eq!(draft(cx).host, Some(3));
+    assert!(
+        !has_node(cx, "launcher-host-list"),
+        "picking closed the list"
+    );
+    assert_eq!(
+        draft(cx).folder.value(),
+        "~",
+        "the untouched folder was re-seeded"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-host").as_deref(),
+        Some("Host: host3 (Unreachable, retrying)")
+    );
+}
+
+/// The keyboard: with the button focused, Down opens the list at the chosen host and moves on, Enter picks the
+/// highlighted host and closes the list; a typed folder survives the host change. Enter on the closed button presses
+/// the main action, under the choice controls' Enter rule (SPEC.md, "Creation": "Enter on the closed pickers ...
+/// launches with the shown values").
+#[gpui::test]
+fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "~");
+    test_support::click(cx, "launcher-folder-row");
+    keys(cx, "x");
+    keys(cx, "shift-tab");
+    assert!(
+        host_focused(cx),
+        "the premise: Shift+Tab from the folder reached the host button"
+    );
+    keys(cx, "down");
+    assert!(has_node(cx, "launcher-host-list"), "Down opened the list");
+    keys(cx, "down enter");
+    assert_eq!(
+        draft(cx).host,
+        Some(2),
+        "Enter picked the highlighted host2"
+    );
+    assert!(!has_node(cx, "launcher-host-list"));
+    assert_eq!(
+        draft(cx).folder.value(),
+        "~x",
+        "a typed folder survives the host change"
+    );
+    assert_eq!(shown_refusal(cx), None, "the premise: nothing said yet");
+    keys(cx, "enter");
+    assert!(
+        shown_refusal(cx).is_some(),
+        "Enter on the closed button pressed the main action"
+    );
+}
+
+/// Typeahead: letters typed within a second build a name prefix, and the highlight jumps to the first host it starts;
+/// Escape closes the list without a choice and leaves the launcher open (the old picker's typeahead and cancel).
+#[gpui::test]
+fn typeahead_finds_a_host_and_escape_cancels(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "~");
+    test_support::click(cx, "launcher-folder-row");
+    keys(cx, "shift-tab");
+    assert!(host_focused(cx), "the premise: the host button has focus");
+    keys(cx, "h o s t 3");
+    assert!(has_node(cx, "launcher-host-list"), "typing opened the list");
+    assert_eq!(
+        selected_state(cx, "launcher-host-option-3"),
+        Some(true),
+        "host3 is highlighted"
+    );
+    keys(cx, "escape");
+    assert!(
+        !has_node(cx, "launcher-host-list"),
+        "Escape closed the list"
+    );
+    assert!(is_open(cx), "but not the launcher");
+    assert_eq!(draft(cx).host, Some(1), "and chose nothing");
+}
+
+/// Restart with keeps the source's host, so the row shows it as text and draws no picker (SPEC.md, "Restart with": the
+/// held host stays visible).
+#[gpui::test]
+fn restart_with_shows_its_held_host_as_text(cx: &mut TestAppContext) {
+    let mut source = super::draft_tests::session(codex(None, None, None));
+    source.restart_offer = RestartOffer::Resume;
+    let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
+    let (_helm, cx) = launcher_on(cx, restart);
+    assert!(!has_node(cx, "launcher-host"), "no picker");
+    assert_eq!(name_of(cx, "launcher-host-name").as_deref(), Some("host1"));
+}
+
+/// The selected state the element under `id` reports in a fresh frame (`None` when selection does not apply to it).
+fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+    test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .and_then(|node| node.selected)
+}
+
+/// Cancel and the host button are reached with Tab like every other control: the launcher owns their focus handles (it
+/// starts Restart with on Cancel and watches the host button's focus), and a handle that was not a tab stop would leave
+/// a keyboard user unable to reach them. Specified: Tab from the launch kind's tabs eventually reaches Cancel, and
+/// Shift+Tab from the folder field reaches the host button.
+#[gpui::test]
+fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    assert!(
+        folder_focused(cx),
+        "the premise: focus starts in the folder"
+    );
+    keys(cx, "shift-tab");
+    assert!(
+        host_focused(cx),
+        "Shift+Tab from the folder reached the host button"
+    );
+    let mut reached = false;
+    for _ in 0..30 {
+        keys(cx, "tab");
+        if read(cx, |launcher, window, _| {
+            launcher.cancel_focus.is_focused(window)
+        }) {
+            reached = true;
+            break;
+        }
+    }
+    assert!(reached, "Tab reached Cancel");
+}
+
+/// A typed prefix that matches no host leaves the highlight on the chosen host, so Enter then picks it again and
+/// changes nothing (the old spec "host picker unmatched typeahead preserves a remote launch default": an unmatched
+/// prefix must not revive an older highlight and redirect Enter to it).
+#[gpui::test]
+fn unmatched_typeahead_keeps_the_chosen_host(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "~");
+    test_support::click(cx, "launcher-host");
+    keys(cx, "down down");
+    keys(cx, "escape");
+    assert_eq!(
+        draft(cx).host,
+        Some(1),
+        "the premise: browsing chose nothing"
+    );
+    keys(cx, "z q");
+    assert!(has_node(cx, "launcher-host-list"), "typing opened the list");
+    assert_eq!(
+        selected_state(cx, "launcher-host-option-1"),
+        Some(true),
+        "the chosen host stays highlighted"
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).host, Some(1));
+}
+
+/// On macOS a click does not focus a button, but the host list is driven by the button's keys and closes when the
+/// button loses focus, so opening it by a click moves focus to the button (the old spec "host picker opened without
+/// click focus still owns the keyboard and closes outside"). Specified under the macOS click rule, from the folder
+/// field: a click on the host button opens the list and focuses the button, Down and Enter then pick host2, and Tab
+/// away from a reopened list closes it.
+#[gpui::test]
+fn a_click_opened_host_list_owns_the_keyboard_on_macos(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "~");
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::click(cx, "launcher-folder-row");
+    assert!(
+        folder_focused(cx),
+        "the premise: the folder field has focus"
+    );
+    test_support::click(cx, "launcher-host");
+    assert!(
+        has_node(cx, "launcher-host-list"),
+        "the click opened the list"
+    );
+    assert!(
+        host_focused(cx),
+        "and moved focus to the button, though a Mac click focuses no button"
+    );
+    keys(cx, "down enter");
+    assert_eq!(draft(cx).host, Some(2), "the button's keys drove the list");
+    test_support::click(cx, "launcher-host");
+    assert!(
+        has_node(cx, "launcher-host-list"),
+        "the premise: the list is open again"
+    );
+    keys(cx, "tab");
+    assert!(
+        !has_node(cx, "launcher-host-list"),
+        "leaving the button closed the list"
+    );
+}
+
+/// While the chosen host is not in the registry the helm pushed (before hosts arrive, or with none registered, which
+/// the button cannot tell apart), the button shows nothing and is named just "Host" (SPEC.md: the host's value is
+/// empty before hosts arrive), rather than naming a host that is not there. Specified with an empty hosts collection.
+#[gpui::test]
+fn the_host_button_is_empty_before_hosts_arrive(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        fixture_hosts(&[]),
+    );
+    assert_eq!(name_of(cx, "launcher-host").as_deref(), Some("Host"));
+    assert!(
+        !has_node(cx, "launcher-host-name"),
+        "no host words are drawn"
+    );
+}
+
+/// The open list's other keys, as the old picker's: End and Home jump to the last and first host, Up moves back and
+/// stops at the first, and Space picks the highlighted host, as Enter does.
+#[gpui::test]
+fn home_end_up_and_space_in_the_host_list(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "~");
+    test_support::click(cx, "launcher-host");
+    assert!(host_focused(cx), "the premise: the button has focus");
+    keys(cx, "end");
+    assert_eq!(
+        selected_state(cx, "launcher-host-option-3"),
+        Some(true),
+        "End: the last host"
+    );
+    keys(cx, "home");
+    assert_eq!(
+        selected_state(cx, "launcher-host-option-1"),
+        Some(true),
+        "Home: the first host"
+    );
+    keys(cx, "up");
+    assert_eq!(
+        selected_state(cx, "launcher-host-option-1"),
+        Some(true),
+        "Up stops at the first host"
+    );
+    keys(cx, "down space");
+    assert_eq!(
+        draft(cx).host,
+        Some(2),
+        "Space picked the highlighted host2"
+    );
+    assert!(!has_node(cx, "launcher-host-list"));
 }

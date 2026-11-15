@@ -33,8 +33,8 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled,
-    Window, div, prelude::FluentBuilder as _, px, svg,
+    KeyDownEvent, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement,
+    Styled, Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{Handler, HoverHelp};
@@ -174,8 +174,13 @@ pub struct Button {
     /// What the button shows in place of its label's text, when it shows more than words.
     content: Option<AnyElement>,
     on_click: Option<Handler>,
+    /// Keys the owner takes before the button's own Enter and Space ([`Button::on_key_down`]).
+    on_key: Option<KeyHandler>,
     focus: Option<FocusHandle>,
 }
+
+/// A button owner's own key handler ([`Button::on_key_down`]).
+type KeyHandler = Rc<dyn Fn(&KeyDownEvent, &mut Window, &mut App)>;
 
 impl Button {
     /// A button. `id` must be stable and unique among its siblings (it keys the button's element state, the tooltip
@@ -206,6 +211,7 @@ impl Button {
             quiet: false,
             content: None,
             on_click: None,
+            on_key: None,
             focus: None,
         }
     }
@@ -309,6 +315,21 @@ impl Button {
     /// twice needs no hiding; content holding host text draws it through the host-text element, as everywhere.
     pub fn content(mut self, content: impl IntoElement) -> Self {
         self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Keys the owner handles while the button has focus, before the button's own Enter and Space activation: a key
+    /// `handler` takes, by stopping its propagation, goes no further, and any other key goes on to the activation and
+    /// past it. For a button that opens a list and drives it from the keyboard (the launcher's host picker, whose
+    /// arrows browse its hosts, whose letters type ahead, and whose Enter picks while the list is open), the old
+    /// buttons' own `onkeydown`. A disabled button takes no keys, so `handler` never runs for it; a busy one keeps focus
+    /// and still hands its keys to `handler` (only its own activation stops), so a handler that must not act while the
+    /// button is busy checks that itself.
+    pub fn on_key_down(
+        mut self,
+        handler: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_key = Some(Rc::new(handler));
         self
     }
 
@@ -687,7 +708,14 @@ impl RenderOnce for Button {
         }
         let button = super::with_hover_help(button, &self.id, &self.help, true, window, cx);
         let button = if enabled {
-            focus::track(button, &focus, focus::OnPress::Control)
+            let button = focus::track(button, &focus, focus::OnPress::Control);
+            // Registered before the activation below, so the owner's handler sees each key first.
+            match self.on_key {
+                Some(on_key) => {
+                    button.on_key_down(move |event, window, cx| on_key(event, window, cx))
+                }
+                None => button,
+            }
         } else {
             // Not tracked, so neither Tab nor a click can focus it; a press of any mouse button is still this
             // control's, so it does not reach the page's empty-space handler and move focus.

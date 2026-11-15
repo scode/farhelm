@@ -430,7 +430,15 @@ impl Render for ModelRows {
             children.push(
                 OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
                     .selected(active == Some(index))
-                    .child(words)
+                    // The highlighted row's words take the fill's ink, as the old list's selected row did.
+                    .child(if active == Some(index) {
+                        div()
+                            .text_color(theme::color(palette.on_fill))
+                            .child(words)
+                            .into_any_element()
+                    } else {
+                        words.into_any_element()
+                    })
                     .on_click(move |_, window, cx| {
                         let option = option.clone();
                         let _ =

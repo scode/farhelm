@@ -18,9 +18,7 @@
 //! launches"), except Custom, whose Enter only chooses, since a Custom choice with no flags yet cannot launch.
 //!
 //! NOTE: Not built yet: the model field (with its catalog list), and Restart with's "Changed" markers beside each
-//! choice. An agent switch's escalation (the red banner, with Undo) is computed by the draft and not yet shown. The old
-//! launcher also moved focus into the flags editor on choosing Custom, by key or click; the focus coordinator has no
-//! call yet for moving focus between two controls of the open dialog, so that waits for one (recorded as a deviation).
+//! choice. An agent switch's escalation (the red banner, with Undo) is computed by the draft and not yet shown.
 
 use farhelm_proto::launcher::{EFFORT_ORDER, compatible_efforts};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
@@ -34,6 +32,7 @@ use super::{LABEL_COLUMN, LABEL_GAP, Launcher, help_line, row};
 use crate::components::{
     Button, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, TextInput, Tier,
 };
+use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::launcher::draft::{Edit, Field, Mode, RestartBaseline, harness_label};
 use crate::launcher::request::capitalized;
@@ -102,17 +101,23 @@ impl Launcher {
     }
 
     /// A permission chosen by hand (`None` is the agent's own setting). Leaving Custom empties its flags field with
-    /// the draft's flags.
+    /// the draft's flags; choosing Custom moves focus on to its flags field, by key or click, as the old launcher did.
+    /// The field appears only now, so the focus coordinator makes the move once a frame draws it, unless the user moves
+    /// on first.
     fn choose_permissions(
         &mut self,
         permissions: Option<LaunchPermission>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let mark = Mark::take(cx);
         self.draft.choose_permissions(permissions);
         self.notice = None;
         self.sync_fields(window, cx);
         self.changed(cx);
+        if permissions == Some(LaunchPermission::Custom) {
+            focus::focus_in_layer(&self.flags.focus_handle(cx), &mark, window, cx);
+        }
     }
 
     /// Enter on a permission segment, after the shared rule applied its choice: launch, unless that choice is Custom,
