@@ -70,6 +70,12 @@ struct E2eBehavior {
     action_delay_ms: u64,
     /// Reused-image degradation without turning file delivery into a refusal.
     github_cli: bool,
+    /// The supervisor's unit file is gone and its unit inactive, as a host is
+    /// after an uninstall run that failed past removing the unit. An
+    /// uninstall then plans without a connection (SPEC.md, "Topology": such a
+    /// retry may go ahead offline), which is the one way a fake host, whose
+    /// supervisor the helm never reaches, can be uninstalled end to end.
+    unit_removed: bool,
 }
 
 impl Default for E2eBehavior {
@@ -88,6 +94,7 @@ impl Default for E2eBehavior {
             fail_action: None,
             action_delay_ms: 0,
             github_cli: true,
+            unit_removed: false,
         }
     }
 }
@@ -425,10 +432,11 @@ impl ProvisioningBackend for E2eProvisioningBackend {
 
     /// Every removable file is reported present, not a symlink, and at its
     /// own canonical path, and the unit running under provisioning's kill
-    /// policy, so an injected UNINSTALL plans its full step list. The steps
-    /// themselves are simulated like every other action, which is what keeps
-    /// an end-to-end run's real remote supervisor running while the panel
-    /// uninstalls it.
+    /// policy, so an injected UNINSTALL plans its full step list; with
+    /// `unit_removed`, the unit file is reported gone and the unit inactive
+    /// instead. The steps themselves are simulated like every other action,
+    /// which is what keeps an end-to-end run's real remote supervisor running
+    /// while the panel uninstalls it.
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
@@ -447,16 +455,25 @@ impl ProvisioningBackend for E2eProvisioningBackend {
             exists: true,
             symlink: false,
         };
+        // The unit file is the first path asked about.
+        let unit_removed = behavior.unit_removed;
         Ok(UninstallInspection {
             paths: paths
                 .iter()
-                .map(|path| present(path.to_path_buf()))
+                .enumerate()
+                .map(|(index, path)| HostPath {
+                    exists: !(unit_removed && index == 0),
+                    ..present(path.to_path_buf())
+                })
                 .collect(),
             default_state_dir: present(PathBuf::from(behavior.home).join(".local/state/farhelm")),
-            unit_active_state: "active".to_string(),
+            unit_active_state: if unit_removed { "inactive" } else { "active" }.to_string(),
             // The unit loaded from the planned path, which is the first one
-            // asked about.
-            unit_fragment: paths.first().map(|path| present(path.to_path_buf())),
+            // asked about; none once the file is gone.
+            unit_fragment: paths
+                .first()
+                .filter(|_| !unit_removed)
+                .map(|path| present(path.to_path_buf())),
             mounts: Vec::new(),
         })
     }

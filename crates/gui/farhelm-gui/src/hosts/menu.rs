@@ -16,8 +16,9 @@
 //! desktop app, where the app's updater runs, that machine's Update is live instead, "Check for a newer Farhelm and
 //! install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose progress and outcome
 //! show beside the version readout, so the menu just closes, as the old one did; and on an SSH host, behind a separator
-//! in the danger red, Remove, which forgets the host ([`super::remove`]). Settings and Remove are unavailable while the
-//! host has work in flight or a run going on.
+//! in the danger red, Uninstall, which removes Farhelm from the host ([`super::uninstall`]), and Remove, which forgets
+//! the host ([`super::remove`]). Settings, Uninstall and Remove are unavailable while the host has work in flight or a
+//! run going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -29,7 +30,7 @@
 //!
 //! NOTE: Each of the other commands arrives with the piece of the port that sends it, at its place in the old order
 //! (a rerun, Update, Settings, then Uninstall and Remove behind a separator), and the toggle keeps the old hover help,
-//! which names them already. Not ported: the old menu's Retry and Adopt (the
+//! which names them already. Not ported yet: the old menu's Retry and Adopt (the
 //! migration's settings-and-hosts area left both out of the port's second milestone on 2026-11-14), opening the menu
 //! with the arrow keys from the closed toggle, and the flyout's pointer notch.
 
@@ -353,12 +354,34 @@ impl Render for HostMenu {
                 super::remove::start(host, &mark, window, cx);
             })
         });
-        let removal = remove.map(|remove| {
-            [
-                menu_separator(cx).into_any_element(),
-                remove.into_any_element(),
-            ]
+        // Uninstall where the offers say, before Remove in the destructive group, as the old menu ordered them.
+        let uninstall = offered.uninstall.map(|enabled| {
+            let (menu, host) = (cx.weak_entity(), self.host);
+            MenuItem::new(
+                "host-menu-uninstall",
+                Icon::Uninstall,
+                "Uninstall",
+                HoverHelp::tooltip(super::uninstall::UNINSTALL_HELP),
+                Role::MenuItem,
+            )
+            .description("Remove Farhelm from this host, keeping its data")
+            .danger()
+            .disabled(!enabled)
+            .on_click(move |_, window, cx| {
+                // As Update's: the mark of this click, before the menu closes; the confirmation and a refusal open
+                // only through it.
+                let mark = Mark::take(cx);
+                close(&menu, window, cx);
+                super::uninstall::start(host, mark, window, cx);
+            })
         });
+        let destructive: Vec<AnyElement> = uninstall
+            .map(IntoElement::into_any_element)
+            .into_iter()
+            .chain(remove.map(IntoElement::into_any_element))
+            .collect();
+        let removal = (!destructive.is_empty())
+            .then(|| std::iter::once(menu_separator(cx).into_any_element()).chain(destructive));
         panel.child(header(&view, &name)).child(
             div()
                 .id("host-menu-items")

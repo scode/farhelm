@@ -245,14 +245,15 @@ cleanup when the bound passes says that, not that the host timed out; a supervis
 selected folders aside and answers without waiting for their removal, so only a hung host meets the bound. Host
 management's routes that can wait as long answer within the same bound, each saying where its late outcome shows: a host
 probe (a supervisor that answers late is still registered, so it appears in the pushed hosts list; otherwise the user
-probes again), an Update's plan (nothing changed, so the user asks again), and a destination or alias change, which
-waits for any setup or update running on that host (SPEC.md, "Waiting between operations on one host") and lands when
-the run ends; those two first refuse at once what the registry already refuses, so the reply that they are still waiting
-is not given for a change that cannot land as things stand. Environment and sandbox deletes, Suspend, Resume and the
-uninstall plan are not bounded yet and are bounded, or take the accepted form, when the work that ports them needs it. A
-credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts (decided by the
-migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still being delivered to
-are reported as not delivered (see "Named credential catalog").
+probes again), an Update's plan (nothing changed, so the user asks again), an uninstall's plan (nothing changed, so the
+user chooses uninstall again), and a destination or alias change, which waits for any setup or update running on that
+host (SPEC.md, "Waiting between operations on one host") and lands when the run ends; those two first refuse at once
+what the registry already refuses, so the reply that they are still waiting is not given for a change that cannot land
+as things stand. Environment and sandbox deletes, Suspend and Resume are not bounded yet and are bounded, or take the
+accepted form, when the work that ports them needs it. A credential replacement waits the same bound, counted from its
+handler's start, for delivery to its hosts (decided by the migration's orchestrator on 2026-11-15); being already saved,
+it is not refused, and the hosts still being delivered to are reported as not delivered (see "Named credential
+catalog").
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's

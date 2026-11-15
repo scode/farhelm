@@ -1156,6 +1156,26 @@
       "golden": "host-update-refusal",
       "title": "The host refusal dialog for an Update refused below the upgrade floor, with the helm's manual remedy (the old dialog's look is reference host-uninstall-refusal)",
       "reference": null
+    },
+    {
+      "golden": "host-uninstall-refusal",
+      "title": "The host refusal dialog for an uninstall refused while a session still runs on the host, in the helm's words, with Close and no Remove",
+      "reference": "host-uninstall-refusal"
+    },
+    {
+      "golden": "host-uninstall-confirmation",
+      "title": "The uninstall confirmation a host menu's Uninstall opens: the host's mark, name, phase and build, the numbered plan with Copy plan, the kept data note, and Cancel and Uninstall (no reference captured the old dialog)",
+      "reference": null
+    },
+    {
+      "golden": "host-uninstall-running-hosts-panel",
+      "title": "The Hosts panel with a host's uninstall running, its row open on the steps with Collapse and its inline status reading Uninstalling (no reference shows an uninstall run)",
+      "reference": null
+    },
+    {
+      "golden": "hosts-panel-uninstall-notice",
+      "title": "The Hosts panel after an uninstall this window confirmed: the one-line removal notice with Copy and the dismiss control above the remaining hosts (no reference shows it)",
+      "reference": null
     }
   ],
   "reference_scenes": [
@@ -1381,7 +1401,7 @@
     },
     {
       "id": "host-uninstall-refusal",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-setup-running",

@@ -9,9 +9,10 @@
 //! "Remove hosts without asking" on, the removal itself. The helm sets that marker only on an uninstall plan's
 //! refusals, so an Update's refusal shows Close alone.
 //!
-//! So far an Update's refused plan opens it ([`super::update`]); the old app also opened it for a refused setup,
-//! uninstall, Suspend, Resume, Retry, Adopt and, with "Remove hosts without asking" on, Remove, which take it as their
-//! pieces of the port arrive ([`Refusal::of`] takes the action's words).
+//! So far an Update's refused plan ([`super::update`]) and an uninstall's refused plan or confirmation
+//! ([`super::uninstall`], "Uninstall Farhelm") open it; the old app also opened it for a refused setup, Suspend,
+//! Resume, Retry, Adopt and, with "Remove hosts without asking" on, Remove, which take it as their pieces of the port
+//! arrive ([`Refusal::of`] takes the action's words).
 //!
 //! It is not a question: it asks nothing, so it is a dialog of its own with Close in its footer and the header's ×, as
 //! SSH help is; Remove, when drawn, hands over to Remove host's own question rather than acting itself. What it shows is

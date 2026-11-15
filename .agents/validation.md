@@ -769,7 +769,10 @@ systemd or SSH substrate ran.
   from the Help menu, Welcome reopens the Welcome card with focus on Got it, and Escape closes it with focus back on the
   ? button, the helm's `welcome_seen` unchanged; and the smoke's own run, started as every `gui-agent.py start` is with
   the start dialogs off, shows no Welcome card and leaves it unseen, while a second app run started with
-  `--start-dialogs` (no sessions, `--no-build`, stopped whatever happens) shows the card by itself and writes nothing. A
+  `--start-dialogs` (no sessions, `--no-build`, stopped whatever happens) shows the card by itself and writes nothing;
+  and on a fake SSH host of its own, a host menu's Uninstall opens the helm's refusal of a host it cannot check, and
+  once the scripted backend reports the unit file gone, the confirmation's Uninstall starts a run the row shows, after
+  which the helm forgets the host and the Hosts panel shows the removal notice until its dismiss control hides it. A
   failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
   recorder) still stops its app run, and the second run if one is up, for which the recorder's `--termination-grace`
   leaves it time: 30 s covers the two `stop`s in a row, each a few seconds normally. Its 29 steps took 80 s on a build
@@ -778,10 +781,11 @@ systemd or SSH substrate ran.
   needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI
   does not run it. Run it when the app's session list, row menu, session header, Delete, Rename, Stop, Restart, Replace,
   Mark read and Mark unread, quick switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings
-  gear), status segments, host menu, Remove host and host Update, Help menu or Send feedback dialog, Welcome card or the
-  start dialogs (the Welcome card and announcements at a window start), Trash button and dialog, approval cards or their
-  region, the helm's approval path, sidebar width or divider, terminal attach, paste, text input or scrollback, the
-  order menu, the heading's New, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  gear), status segments, host menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog,
+  Welcome card or the start dialogs (the Welcome card and announcements at a window start), Trash button and dialog,
+  approval cards or their region, the helm's approval path, sidebar width or divider, terminal attach, paste, text input
+  or scrollback, the order menu, the heading's New, the bridge's wiring, the app's startup or `scripts/gui-agent.py`
+  change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

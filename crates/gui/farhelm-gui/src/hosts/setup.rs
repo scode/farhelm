@@ -216,7 +216,7 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
             },
         )
         .body(|offer: &Offer, _, cx| {
-            let body = PlanBody::new(offer);
+            let body = PlanBody::new(&offer.confirmation, &offer.steps);
             cx.new(|_| body)
         })
         .tile(move |_, cx| host_mark(icon, color, px(24.), theme::palette(cx)))
@@ -623,22 +623,28 @@ struct Step {
     explanation: Option<HostText>,
 }
 
-/// The confirmation's body: the helm's plan, copied out of the frozen offer when the question opens, so it shows that
-/// plan for as long as it is open (`Question::body`).
-struct PlanBody {
+/// A host confirmation's body: the helm's numbered plan, copied out of the question's frozen value when it opens, so it
+/// shows that plan for as long as it is open (`Question::body`). The setup confirmation and the uninstall confirmation
+/// ([`super::uninstall`]) both draw it, as the old app's two dialogs shared `PlanStepList`, so the two plans cannot
+/// drift apart in how they show the helm's promises.
+pub(super) struct PlanBody {
     lead: HostText,
     steps: Vec<Step>,
+    /// What an uninstall keeps (`PlanSteps::kept`): the host's data directory, which no step touches, in the helm's
+    /// words. A setup's plan keeps nothing.
+    kept: Option<HostText>,
     /// The helm's plan text, which Copy plan copies exactly, trailing newline included.
     confirmation: SharedString,
 }
 
 impl PlanBody {
-    fn new(offer: &Offer) -> Self {
+    /// The body for the helm's plan `steps`, whose plan text `confirmation` is what Copy plan copies.
+    pub(super) fn new(confirmation: &str, steps: &PlanSteps) -> Self {
         let text = |value: &str| HostText::from_host(value);
         PlanBody {
-            lead: text(&offer.steps.lead),
-            steps: offer
-                .steps
+            lead: text(&steps.lead),
+            kept: steps.kept.as_deref().map(text),
+            steps: steps
                 .steps
                 .iter()
                 .map(|step| Step {
@@ -651,7 +657,7 @@ impl PlanBody {
                     explanation: step.explanation.as_deref().map(text),
                 })
                 .collect(),
-            confirmation: offer.confirmation.clone().into(),
+            confirmation: SharedString::from(confirmation.to_owned()),
         }
     }
 }
@@ -701,9 +707,21 @@ impl Render for PlanBody {
             .line_height(px(PLAN_LINE))
             .text_color(theme::color(palette.fg_0))
             .child(heading)
-            // An uninstall's plan also carries what it keeps (`PlanSteps::kept`); a setup's never does, so it is not
-            // drawn here until Uninstall shares this body.
             .children(steps)
+            // `.provisioning-plan-kept`: what an uninstall keeps, on an amber wash with an amber edge, apart from the
+            // steps because no step touches it. The old wash was `--warn` at 10%; the palette's nearest is the
+            // warning chip's 12%.
+            .children(self.kept.as_ref().map(|kept| {
+                div()
+                    .id("plan-kept")
+                    .mt(px(14.))
+                    .py(px(7.))
+                    .px(px(9.))
+                    .border_l_2()
+                    .border_color(theme::color(palette.warn))
+                    .bg(theme::color(palette.warn_chip_bg))
+                    .child(HostSentence::new("plan-kept-text").host(kept))
+            }))
     }
 }
 

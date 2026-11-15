@@ -151,11 +151,14 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
             }),
         });
     }
-    // Exhaustive, so a new kind of work decides here whether a host shows it as working.
+    // Exhaustive, so a new kind of work decides here whether a host shows it as working. An uninstall's requests are
+    // not: its plan request asks for a question the user may still cancel, as a rerun's probe does, and its confirming
+    // request is accepted with the run already pushed, which the branch above shows.
     let activity = match in_flight? {
         Work::Setup => Activity::Setup,
         Work::UpdateHost => Activity::Update,
-        Work::Probe
+        Work::UninstallHost
+        | Work::Probe
         | Work::RemoveHost
         | Work::Save
         | Work::Rename

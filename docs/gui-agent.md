@@ -109,9 +109,11 @@ Each entry may set `probe` (`absent`, `supervisor` or `error`), `inspect` (`supp
 (what an answering supervisor reports), `home` and `user_unit_dir`, `github_cli` (whether the host has GitHub's command
 line, true by default), `hold_actions` (true holds every step until it is set back to false, for at most 30 seconds),
 `fail_action` (the step to fail, by the name the backend records for it in `events.jsonl`, such as `install-farhelm`;
-the names are the labels in `e2e.rs`) and `action_delay_ms` (a pause before each step, at most 30 seconds). The backend
-appends one line per probe and step to `events.jsonl` beside it (`{"event": ..., "target": ...}`), which tells a step
-what the helm actually did.
+the names are the labels in `e2e.rs`), `action_delay_ms` (a pause before each step, at most 30 seconds) and
+`unit_removed` (the supervisor's unit file reported gone and its unit inactive, as after an uninstall that failed past
+removing it: an uninstall then plans without a connection, which is the only way a fake host, never connected, can be
+uninstalled; without it, uninstall refuses a fake host as not connected). The backend appends one line per probe and
+step to `events.jsonl` beside it (`{"event": ..., "target": ...}`), which tells a step what the helm actually did.
 
 ## What a run is made of
 
