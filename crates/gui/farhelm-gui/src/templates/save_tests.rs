@@ -324,6 +324,59 @@ fn the_command_tab_offers_only_its_own_fields() {
     );
 }
 
+/// SPEC.md: "A GitHub repository is always checked", and a managed checkout's set-aside folder is not where the session
+/// would run, so offering it would save a destination the user never chose. Specified: with a folder typed and then a
+/// repository chosen, the destination offered is the repository, shown as `gh:owner/repo`, checked without any hand mark,
+/// and saved in the template format as `{"github": "owner/repo"}`; with only typed repository text, no destination is
+/// offered at all.
+#[test]
+fn a_chosen_repository_is_offered_checked_and_the_folder_is_not() {
+    let mut draft = codex_draft();
+    draft.edit_folder("/typed".into());
+    draft.edit_repository_query("example/proj".into());
+    let typed = Candidate::from_draft(&draft, &hosts());
+    assert_eq!(
+        typed.fields.destination, None,
+        "typed repository text is no destination"
+    );
+    draft.choose_repository(farhelm_proto::parse_github_repo("example/project").unwrap());
+    let candidate = Candidate::from_draft(&draft, &hosts());
+    assert_eq!(
+        candidate.fields.destination,
+        Some(TemplateDestination::Github("example/project".into()))
+    );
+    assert!(candidate.checked.contains(&Field::Destination));
+    assert_eq!(
+        choice_text(Field::Destination, &candidate.fields).as_deref(),
+        Some("gh:example/project")
+    );
+    let saved = serde_json::to_value(candidate.selected(&candidate.checked, None)).unwrap();
+    assert_eq!(saved["destination"], json!({"github": "example/project"}));
+}
+
+/// A Clone into a managed checkout ignores the copied title it has not been told to keep (SPEC.md, "Managed checkouts":
+/// "Clone into a different repository ... ignore an untouched copied title: the session is unnamed"), so Save as
+/// template must not offer that title as the session name. Specified: a Clone with a repository chosen offers no name;
+/// once a name is typed, that name is offered, checked.
+#[test]
+fn a_clone_into_a_checkout_offers_no_copied_title() {
+    let mut draft = clone_draft();
+    assert_eq!(
+        Candidate::from_draft(&draft, &hosts())
+            .fields
+            .name
+            .as_deref(),
+        Some("source"),
+        "the premise: a Clone in a folder offers its copied title"
+    );
+    draft.choose_repository(farhelm_proto::parse_github_repo("example/project").unwrap());
+    assert_eq!(Candidate::from_draft(&draft, &hosts()).fields.name, None);
+    draft.edit_name("review".into());
+    let candidate = Candidate::from_draft(&draft, &hosts());
+    assert_eq!(candidate.fields.name.as_deref(), Some("review"));
+    assert!(candidate.checked.contains(&Field::Name));
+}
+
 /// SPEC.md: the session-name row defaults "to base for a typed name and retain[s] a template-supplied kind", and "A host
 /// without a usable recorded install identity is omitted". Specified: a name a template set as Fixed is checked and
 /// offered as Fixed, and unchecking the name drops its kind; a host with no recorded identity is not offered.

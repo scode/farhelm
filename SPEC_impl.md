@@ -8293,22 +8293,26 @@ In the launcher, `tl:name` offers templates (the only search scope that does). I
 completed sequence. It first removes the batch's assignments that match held values and folds the batch with
 `apply_template` on a snapshot of the launcher's draft, so a refusal anywhere in it applies nothing; then it replays the
 exact cleaned templates the fold accepted through the draft's own hand-edit methods (launch kind, agent type or the
-command's declared agent, model, effort, permissions and custom words, wrapper prefix, the command fields, host, folder,
-name), and sets directly only what has no hand edit: the session name's base or fixed kind, the removal of a retired
-container choice, and the initial prompt the fold leaves (it drops a dormant prompt when a template switches to an agent
-that cannot take one). That replay is what makes remembered defaults, recent setups and a pending checkout preview react
-exactly as they do to the same edits by hand, with no provenance tracking for templates. The escalation banner is judged
-once per batch: the draft right after the batch's last agent switch against the draft from before the batch, and not
-when the template that made that switch chose the permission itself. A GitHub repository destination is refused until
-the GPUI launcher holds managed checkouts. The Templates dialog beside New has a bounded list column and a
-selected-template editor, side by side at every window size the desktop app allows. A draft holds the wire fields
-directly, so absence means no visible field, while explicit null resets and false approval assertions survive editing.
-Add/remove actions change presence; defaults are values inside the controls. The editor's agent/command/don't-switch
-selector writes the kind, with don't-switch offering only placement and name. A kindless stored template is inferred in
-the draft only, marked unsaved against its original baseline; saving explicitly stores that switch. Per-harness choices
-use the shared capability answers and release catalog, not another agent table. Model text is unrestricted and
-suggestions use the existing catalog filter; other incompatible choices stay visible and refuse save until corrected or
-removed. Fields need not form a complete launch, because another stacked template can supply what they omit.
+command's declared agent, model, effort, permissions and custom words, wrapper prefix, the command fields, host, the
+folder or the repository pick, name), and sets directly only what has no hand edit: the session name's base or fixed
+kind, the removal of a retired container choice, and the initial prompt the fold leaves (it drops a dormant prompt when
+a template switches to an agent that cannot take one). That replay is what makes remembered defaults, recent setups and
+a pending checkout preview react exactly as they do to the same edits by hand, with no provenance tracking for
+templates. The escalation banner is judged once per batch: the draft right after the batch's last agent switch against
+the draft from before the batch, and not when the template that made that switch chose the permission itself. A GitHub
+repository destination is parsed as `owner/repo` before anything applies (a refusal of the whole batch, in the old app's
+words), then chosen through the draft's own repository choice, as a pick from the repository field's suggestions is. The
+snapshot reads a managed checkout's chosen repository as the destination and a repository query nobody chose as no
+destination, and while a checkout is chosen it never reads the folder set aside for it. The Templates dialog beside New
+has a bounded list column and a selected-template editor, side by side at every window size the desktop app allows. A
+draft holds the wire fields directly, so absence means no visible field, while explicit null resets and false approval
+assertions survive editing. Add/remove actions change presence; defaults are values inside the controls. The editor's
+agent/command/don't-switch selector writes the kind, with don't-switch offering only placement and name. A kindless
+stored template is inferred in the draft only, marked unsaved against its original baseline; saving explicitly stores
+that switch. Per-harness choices use the shared capability answers and release catalog, not another agent table. Model
+text is unrestricted and suggestions use the existing catalog filter; other incompatible choices stay visible and refuse
+save until corrected or removed. Fields need not form a complete launch, because another stacked template can supply
+what they omit.
 
 Opening another row, new, duplicate, close and Escape share a pending departure and the same inline
 save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
