@@ -9,10 +9,9 @@
 //! agent and status, or the destination and build), above a hairline. A menu draws it before the element with the menu
 //! role, so the header is read as the menu's subject, not as one of its commands.
 //!
-//! It draws exactly what the session row menu's own header draws today (`session_list::menu`'s `header`), so that menu
-//! can move onto this component with no change on screen; the host menu uses it already. [`MenuHeader::clamp_name`] is
-//! the old `clamp_title`, for the accessible name of a menu and of the button that opens it, which the session menu's
-//! `clamp_name` also is.
+//! Both row menus draw it: the host menu (`hosts::menu`) and the session row's (`session_list::menu`), which moved onto
+//! it from a private copy with no change on screen. [`MenuHeader::clamp_name`] is the old `clamp_title`, for the
+//! accessible name of a menu and of the button that opens it, in both menus.
 //!
 //! The Help menu's header is the app's own words ("Help" over "Farhelm guides and feedback", the old `BarMenuFlyout`'s),
 //! so [`MenuHeader::app`] draws a title that is not host text; everything else about the look is shared.

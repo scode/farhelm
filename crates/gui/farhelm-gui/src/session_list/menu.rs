@@ -1,14 +1,15 @@
 //! A session row's actions menu: the ⋯ button at the end of the row, and the menu it opens below itself.
 //!
 //! Ported from the old app's `list/row.rs` (the menu toggle, `menu_label`, `menu_header_summary_parts` and the Delete
-//! item) and the stylesheet's `.session-row-menu`, `.session-row-menu-panel` and `.menu-header` rules at the reference
-//! commit. The menu is a popover of the layer manager, anchored to its row's button through an [`Anchor`] kept under the
-//! session's key, so an open menu moves with its session when the list reorders and closes when the row is no longer
-//! drawn (SPEC.md, "Things changing underneath" and "Nothing closes a dialog … it did not open").
+//! item) and the stylesheet's `.session-row-menu` and `.session-row-menu-panel` rules at the reference commit. The menu
+//! is a popover of the layer manager, anchored to its row's button through an [`Anchor`] kept under the session's key,
+//! so an open menu moves with its session when the list reorders and closes when the row is no longer drawn (SPEC.md,
+//! "Things changing underneath" and "Nothing closes a dialog … it did not open").
 //!
-//! The menu's header names the session and says, in one line, which agent it runs and its status; below it come the
-//! commands, in a [`Role::Menu`] of their own, so the header is not read out as one of them. Up and Down walk the
-//! commands (the layer manager's menu context), and the pointer moves the same highlight.
+//! The menu's header is the shared [`MenuHeader`], which the host menu draws too: it names the session and says, in one
+//! line, which agent it runs and its status. Below it come the commands, in a [`Role::Menu`] of their own, so the
+//! header is not read out as one of them. Up and Down walk the commands (the layer manager's menu context), and the
+//! pointer moves the same highlight.
 //!
 //! The menu names its button as where closing returns focus ([`focus::ReturnTo::Control`]), so Escape and every command
 //! chosen from it leave focus on the button, also on macOS, where the click that opened the menu left the button
@@ -56,12 +57,11 @@ use gpui::{
 use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier, menu_separator};
+use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
 use crate::focus::{self, Mark};
-use crate::host_text::{self, HostSentence, HostText};
+use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::prompt::{self, Question};
-use crate::theme::{self, metrics};
 use crate::{local_state, session};
 
 /// The id prefix of a row's menu button; the rest is the session's key.
@@ -69,10 +69,6 @@ pub(crate) const BUTTON_ID_PREFIX: &str = "session-menu-";
 
 /// `.session-row-menu-panel:not(.menu-prompt)`'s width.
 const PANEL_WIDTH: f32 = 246.;
-
-/// How many characters of a title the menu button's accessible name keeps: a title has no length bound, and an
-/// accessible name is read aloud in full. The old app's `clamp_title` kept the same.
-const NAME_TITLE_CHARS: usize = 64;
 
 /// The layer a row last opened from its menu button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -405,27 +401,13 @@ pub(crate) fn skips_questions(collections: &Collections) -> bool {
 }
 
 /// The menu's and its button's accessible name for a session titled `title` (as the host wrote it): "Session actions
-/// for" and the title escaped as the screen shows it, cut short. Every row has a button, so the name must say whose.
+/// for" and the title escaped as the screen shows it, cut short ([`MenuHeader::clamp_name`], which the host menu's
+/// name uses too). Every row has a button, so the name must say whose.
 fn actions_label(title: &str) -> String {
-    let title = HostSentence::new("session-actions-name")
-        .host(&HostText::from_host(title))
-        .accessible_name();
-    format!("Session actions for {}", clamp_name(&title))
-}
-
-/// `name` cut to [`NAME_TITLE_CHARS`] characters with an ellipsis, never inside an escape (`<U+202E>`), which would
-/// otherwise read as a different character.
-fn clamp_name(name: &str) -> String {
-    let Some((cut, _)) = name.char_indices().nth(NAME_TITLE_CHARS) else {
-        return name.to_owned();
-    };
-    let mut kept = &name[..cut];
-    if let Some(open) = kept.rfind("<U+")
-        && !kept[open..].contains('>')
-    {
-        kept = &kept[..open];
-    }
-    format!("{kept}…")
+    format!(
+        "Session actions for {}",
+        MenuHeader::clamp_name(&HostText::from_host(title))
+    )
 }
 
 /// The open menu of one row: drawn from the store while it is open, so its header and its commands' availability
@@ -537,7 +519,7 @@ impl Render for RowMenu {
             LifecycleCommand::Delete,
         );
         panel
-            .child(header(&self.key, row, &title, cx))
+            .child(MenuHeader::new(&title, summary(&self.key, row)))
             .child(
                 div()
                     .id("session-menu-items")
@@ -558,11 +540,11 @@ impl Render for RowMenu {
     }
 }
 
-/// The menu's header, `.menu-header`: the session's title, then its agent and status on one line, above a hairline.
-/// Both may quote a host (the title, and a command launch's program), so both are host text. The agent is its display
-/// name for an agent Farhelm knows, and the launched program's name otherwise.
-fn header(key: &str, row: &SessionRow, title: &HostText, cx: &App) -> impl IntoElement {
-    let palette = theme::palette(cx);
+/// The line under the session's title in the menu's header: its agent, then its status, as "Codex · Running". It may
+/// quote a host (a command launch's program), so it is host text. The agent is its display name for an agent Farhelm
+/// knows, and the launched program's name otherwise; a status that draws no badge leaves the agent alone, with no
+/// separator.
+fn summary(key: &str, row: &SessionRow) -> HostSentence {
     let mut summary = HostSentence::new(SharedString::from(format!("session-menu-summary-{key}")));
     summary = match agent_name(row) {
         AgentName::Known(agent) => summary.text(agent),
@@ -577,31 +559,7 @@ fn header(key: &str, row: &SessionRow, title: &HostText, cx: &App) -> impl IntoE
     ) {
         summary = summary.text(" · ").text(word);
     }
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(2.))
-        .min_w_0()
-        .pt(px(6.))
-        .pb(px(8.))
-        .px(px(11.))
-        .mb(px(4.))
-        .border_b_1()
-        .border_color(theme::color(palette.border_dim))
-        .child(
-            host_text::element(title)
-                .text_size(metrics::TEXT_SM)
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::color(palette.fg_0))
-                .line_clamp(3),
-        )
-        .child(
-            div()
-                .text_size(px(11.))
-                .text_color(theme::color(palette.fg_1))
-                .line_clamp(4)
-                .child(summary),
-        )
+    summary
 }
 
 /// What a session runs, by the name the user knows it by: the one rule for the menu's header and the quick switcher's
@@ -631,18 +589,6 @@ fn program_name(invocation: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A long title must not make the menu button's accessible name run on, and cutting it must not leave half an
-    /// escape that reads as some other character. Specified: a name within the limit is kept whole; a longer one is
-    /// cut at the limit with an ellipsis; a cut that would split a `<U+XXXX>` escape drops the whole escape instead.
-    #[test]
-    fn a_long_name_is_cut_with_an_ellipsis_and_never_inside_an_escape() {
-        assert_eq!(clamp_name("short"), "short");
-        let long = "a".repeat(80);
-        assert_eq!(clamp_name(&long), format!("{}…", "a".repeat(64)));
-        let escaped = format!("{}<U+202E>tail", "b".repeat(60));
-        assert_eq!(clamp_name(&escaped), format!("{}…", "b".repeat(60)));
-    }
 
     /// The menu header names a command launch's agent by the program it runs, since that is all Farhelm knows about
     /// it. Specified: the first word's file name, with arguments and directories dropped, and nothing for nothing.
