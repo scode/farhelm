@@ -28,6 +28,7 @@ use super::answers::{self, ARM_DELAY, Arming, Sent};
 use super::host_add::{AgentRequest, NOT_CONFIRMED};
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::Mark;
+use crate::host_text::tests::painted_words;
 use crate::hosts::add::tests::{alias, alias_focused, destination, error_line, type_text};
 use crate::hosts::add::{NotOpened, open_for_agent};
 use crate::hosts::tests::{connected, host, hosts, start_work};
@@ -225,12 +226,12 @@ const SELECT_ALL: &str = if cfg!(target_os = "macos") {
     "ctrl-a"
 };
 
-/// Every line of text the window painted, joined with single spaces (a sentence's parts are painted apart, so the
-/// spaces between them are normalized).
+/// Every line of text the window painted, as words on screen (a sentence's isolates left out), joined with single
+/// spaces.
 fn painted(cx: &mut VisualTestContext) -> String {
     let lines: Vec<String> = frame(cx)
         .into_iter()
-        .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
+        .flat_map(|node| node.texts.into_iter().map(|line| painted_words(&line.text)))
         .collect();
     lines
         .join(" ")
@@ -239,8 +240,8 @@ fn painted(cx: &mut VisualTestContext) -> String {
         .join(" ")
 }
 
-/// The strings painted inside the element with id `id`, joined with single spaces: what one part of the dialog shows,
-/// apart from the fields, which may hold the same text.
+/// The strings painted inside the element with id `id`, as words on screen (a sentence's isolates left out), joined
+/// with single spaces: what one part of the dialog shows, apart from the fields, which may hold the same text.
 fn painted_in(cx: &mut VisualTestContext, id: &str) -> String {
     let nodes = frame(cx);
     let Some(top) = nodes
@@ -260,7 +261,12 @@ fn painted_in(cx: &mut VisualTestContext, id: &str) -> String {
     };
     (0..nodes.len())
         .filter(|&index| inside(index))
-        .flat_map(|index| nodes[index].texts.iter().map(|text| text.text.to_string()))
+        .flat_map(|index| {
+            nodes[index]
+                .texts
+                .iter()
+                .map(|text| painted_words(&text.text))
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }

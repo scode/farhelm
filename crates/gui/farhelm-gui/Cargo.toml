@@ -64,6 +64,13 @@ gpui_platform = { workspace = true, features = ["test-support"] }
 gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.12" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# macOS's own text system (CoreText through GPUI's Mac text system), for the host-sentence tests that must see how a Mac
+# shapes isolates: the Linux engine above is not what a Mac user's text goes through, and the platform object that owns
+# it can only be built on the main thread, which no test runs on. Already built for the Mac platform crate, so naming
+# it adds no crate.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui_apple = { package = "gpui-pre-apple", version = "=0.3.12", features = ["font-kit"] }
+
 # A panic inside an AppKit callback aborts the app, and nearly all GUI code runs inside one, so the GUI crates never
 # unwrap or expect outside tests (crates/gui/clippy.toml lets tests). SPEC_impl.md, "Startup and quit: the bootstrap".
 [lints.clippy]

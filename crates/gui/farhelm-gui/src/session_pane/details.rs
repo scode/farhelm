@@ -213,14 +213,15 @@ fn badge(status: Status, pulse: u64, palette: &Palette) -> Div {
                 Line::Sentence(sentence) => HoverHelp::sentence(sentence),
             };
             let quotes_host = ended.host.is_some();
-            // The words and the host value side by side on one line, each its own text element, as the host-text rule
-            // requires (one run could not keep the value's direction to itself). With a host value it is the part that
-            // gives way, since the words carry the status itself and the exit code; with none the words do. The old
-            // badge was one text run that ellipsized at its end; here, once the host value is cut to nothing, the words
-            // never shrink, so a bar too narrow for them clips them at the badge's edge with no ellipsis (and perhaps a
-            // dangling dash). A shrink factor far below the value's would not help: any shrink at all ellipsizes the
-            // words while the value still shows. That takes a pane far narrower than the 320-pixel floor leaves for
-            // the badge beside a title and a host, and the whole wording stays the hover help.
+            // The words and the host value side by side on one line, each its own text element (a host value drawn
+            // alone keeps its direction to itself), so each can be cut short on its own, which a sentence's one text
+            // element cannot do. With a host value it is the part that gives way, since the words carry the status
+            // itself and the exit code; with none the words do. The old badge was one text run that ellipsized at its
+            // end; here, once the host value is cut to nothing, the words never shrink, so a bar too narrow for them
+            // clips them at the badge's edge with no ellipsis (and perhaps a dangling dash). A shrink factor far below
+            // the value's would not help: any shrink at all ellipsizes the words while the value still shows. That
+            // takes a pane far narrower than the 320-pixel floor leaves for the badge beside a title and a host, and
+            // the whole wording stays the hover help.
             let wording = div()
                 .flex()
                 .flex_row()
