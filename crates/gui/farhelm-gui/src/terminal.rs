@@ -23,6 +23,7 @@ mod disclosure;
 mod style;
 #[cfg(test)]
 mod tests;
+pub(crate) mod text_size;
 pub(crate) mod tunnels;
 
 use std::cell::RefCell;
@@ -64,7 +65,7 @@ impl TextSize {
     pub const MIN: u8 = 9;
     /// The largest size, in points.
     pub const MAX: u8 = 28;
-    /// The old app's default terminal text size.
+    /// The old app's default terminal text size, and the size while the helm's preference is unset.
     pub const DEFAULT: TextSize = TextSize(14);
 
     /// A size in points, clamped into the supported range.
@@ -77,6 +78,14 @@ impl TextSize {
         self.0
     }
 }
+
+// The helm stores the size as its `terminal_text_size` preference and refuses a write outside this range, so the two
+// ranges must be one: a size the view clamps differently from the helm would be written and refused, or stored and
+// drawn at another size.
+const _: () = assert!(
+    *farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE.start() == TextSize::MIN as u32
+        && *farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE.end() == TextSize::MAX as u32
+);
 
 /// The terminal font's measured character in logical pixels, and the font size its glyphs are shaped at.
 ///
@@ -307,6 +316,14 @@ pub struct TerminalView {
 }
 
 impl TerminalView {
+    /// Draw at `metrics` from now on: the text size changed ([`text_size`]). The owner refits the grid to it.
+    pub fn set_metrics(&mut self, metrics: CellMetrics, cx: &mut Context<Self>) {
+        if self.metrics != metrics {
+            self.metrics = metrics;
+            cx.notify();
+        }
+    }
+
     /// A view for a new attachment: an empty model behind its catch-up placeholder. A reconnect makes a new view, as a
     /// new attachment must start a new model.
     pub fn new(metrics: CellMetrics) -> Self {

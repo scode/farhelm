@@ -2389,11 +2389,11 @@ client of this helm; existing controls with a natural place in the main UI stay 
 every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
 order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
 that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
-and announcement dismissal (host rail expansion, terminal text size and sound switches, by contrast, are deliberately
-per device; see Session list, Terminal experience and Status). A client that asks the helm for no particular order gets
-creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
-does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+and announcement dismissal (host rail expansion and sound switches, by contrast, are deliberately per device; see
+Session list and Status). A client that asks the helm for no particular order gets creation time. No mandatory
+hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
+implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
+`farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -2871,9 +2871,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program. Cmd/Ctrl
   with = or − and no Shift are not app shortcuts and reach a focused terminal like any other key: there is no interface
   zoom (decided 2026-11-13). On Linux this takes over Ctrl+Shift+− (Ctrl+_, undo in readline and emacs) inside the
-  terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions of = and −. The size is remembered per
-  device, deliberately unlike the session list's preference: it is about the screen in front of the user, not a choice
-  every client should share. Only the terminal text changes; the rest of the UI keeps its size.
+  terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions of = and −. The size is a helm
+  preference shared by every client of the helm, 14 points until it is first changed, and a change reaches every open
+  client live (the maintainer decided on 2026-11-13 that terminal text size is a helm preference rather than a
+  per-device one; the old app's per-device size is not carried over, so everyone starts at 14 points). Only the terminal
+  text changes; the rest of the UI keeps its size.
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
   a day later, and the buffer is still there. Farhelm avoids storing terminal output except where it directly helps the
   user, such as error reporting. When an agent never starts, its durable error may include the failed launch's last five

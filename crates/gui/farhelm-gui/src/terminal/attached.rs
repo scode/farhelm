@@ -324,6 +324,12 @@ pub struct AttachedTerminal {
     /// Follows the pushed state ([`AttachedTerminal::follow_store`]): reads the session's tunnels when they are due, and
     /// keeps the frame's color, as the terminal is made and whenever the store changes.
     _tunnel_reads: session::ObservingCurrent,
+    /// Follows text size steps this client has sent and the helm has not answered yet ([`super::text_size`]).
+    _size_steps: Subscription,
+    /// The text size the terminal is drawn at: the size current when it was made, then each size
+    /// [`AttachedTerminal::follow_text_size`] took on. The maker measures the metrics it passes in at that same current
+    /// size (the session pane does); a terminal handed metrics for another size would keep them until the size moves.
+    text_size: super::TextSize,
     /// How many delivery turns ran, and how many times output was applied to a view, so tests can check the per-turn
     /// bound and that consecutive output is applied as one batch.
     #[cfg(test)]
@@ -354,10 +360,15 @@ impl AttachedTerminal {
         ];
         #[cfg(any(feature = "agent", test))]
         probe::enroll(cx.weak_entity(), cx);
+        super::text_size::enroll(cx.weak_entity(), cx);
         let tunnels = cx.new(|cx| Tunnels::new(target.session.clone(), cx));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
         let tunnel_reads =
             session::observe_current(cx, |owner: &mut Self, cx| owner.follow_store(cx));
+        // A text size step this client sent is held before the helm answers, outside the store, so the store observer
+        // above does not see it.
+        let size_steps =
+            cx.observe_global::<super::text_size::State>(|owner, cx| owner.follow_text_size(cx));
         AttachedTerminal {
             target,
             hold: None,
@@ -410,6 +421,8 @@ impl AttachedTerminal {
             frame: None,
             _tunnels: tunnel_watch,
             _tunnel_reads: tunnel_reads,
+            _size_steps: size_steps,
+            text_size: super::text_size::current(cx),
             #[cfg(test)]
             turns: 0,
             #[cfg(test)]
@@ -1972,6 +1985,7 @@ impl AttachedTerminal {
     /// only when that changed.
     fn follow_store(&mut self, cx: &mut Context<Self>) {
         self.keep_tunnels_current(cx);
+        self.follow_text_size(cx);
         let frame = self.frame_color(cx);
         if frame != self.frame {
             self.frame = frame;
@@ -2000,6 +2014,33 @@ impl AttachedTerminal {
             .map(|host| host.color)
     }
 
+    /// Draw at the current text size ([`super::text_size::current`]) when it changed: re-measure the cell, hand the new
+    /// metrics to the views, and redraw, after which the pane's fit sends the program its new rows and columns. Every
+    /// open terminal does this, so they step together.
+    fn follow_text_size(&mut self, cx: &mut Context<Self>) {
+        let size = super::text_size::current(cx);
+        if size == self.text_size {
+            return;
+        }
+        // Recorded only once measured, so a size the text system could not measure is tried again at the next change.
+        let Some(metrics) = CellMetrics::measure(size, cx) else {
+            tracing::warn!(
+                points = size.points(),
+                "could not measure the terminal font at its new size"
+            );
+            return;
+        };
+        self.text_size = size;
+        self.metrics = metrics;
+        for view in [self.committed.clone(), self.staging.clone()]
+            .into_iter()
+            .flatten()
+        {
+            view.update(cx, |view, cx| view.set_metrics(metrics, cx));
+        }
+        cx.notify();
+    }
+
     /// Tell the program that every button its mouse reporting holds came up, where the pointer was last seen, and
     /// forget them: a terminal going inert sees no more releases, and a program left mid-drag would stay so. Sent past
     /// [`AttachedTerminal::send_user`]'s inert guard, since this runs as the terminal goes inert.
@@ -2026,6 +2067,12 @@ impl AttachedTerminal {
     #[cfg(test)]
     pub(crate) fn frame(&self) -> Option<HostColor> {
         self.frame
+    }
+
+    /// The cell the grid is fitted and drawn at, for tests that check a terminal opened at the current text size.
+    #[cfg(test)]
+    pub(crate) fn metrics(&self) -> CellMetrics {
+        self.metrics
     }
 
     /// Read the session's tunnels when they are due ([`Tunnels::stale`]): as a remote session's terminal opens, so its

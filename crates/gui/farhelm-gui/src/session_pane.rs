@@ -54,10 +54,10 @@
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
 //! NOTE: Not ported yet: terminal tabs (the top row's left region holds only the terminal's open-tunnels pill until the
-//! terminal area brings them), the text size control (the terminal is drawn at the old default size), the details bar's
-//! managed-checkout mark and copy buttons, the details bar of a session the list does not show (it waits for the helm
-//! to keep the open session in the listing; see [`details`]), and the card a session without terminal contents shows
-//! instead. With no tabs, the scrim covers the agent terminal only, where the old one covered every pane.
+//! terminal area brings them), the details bar's managed-checkout mark and copy buttons, the details bar of a session
+//! the list does not show (it waits for the helm to keep the open session in the listing; see [`details`]), and the
+//! card a session without terminal contents shows instead. With no tabs, the scrim covers the agent terminal only,
+//! where the old one covered every pane.
 
 pub(crate) mod details;
 pub(crate) mod header;
@@ -84,8 +84,8 @@ use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
 use crate::session::{self, PerSession, UiSession};
 use crate::session_list::{age, delete};
+use crate::terminal::CellMetrics;
 use crate::terminal::attached::{AttachedTerminal, TerminalTarget};
-use crate::terminal::{CellMetrics, TextSize};
 use crate::theme::metrics;
 use crate::{layers, session_list, theme, ticker};
 
@@ -155,15 +155,18 @@ struct Mounted {
 }
 
 impl Mounted {
-    /// The agent terminal of the session filed under `key`, made for `session` with a lease of its own, at the old
-    /// app's default text size. `None` when the text system cannot measure the terminal font, which is logged: the pane
-    /// then stays blank, and the next change it observes tries again, most likely with the same result.
+    /// The agent terminal of the session filed under `key`, made for `session` with a lease of its own, at the text
+    /// size every open terminal is drawn at now ([`crate::terminal::text_size::current`]). `None` when the text system
+    /// cannot measure the terminal font, which is logged: the pane then stays blank, and the next change it observes
+    /// tries again, most likely with the same result.
     fn new(
         session: &Entity<UiSession>,
         key: String,
         cx: &mut Context<SessionPane>,
     ) -> Option<Self> {
-        let Some(metrics) = CellMetrics::measure(TextSize::DEFAULT, cx) else {
+        // At the size every open terminal is drawn at now, so a new one does not start at the default and jump.
+        let Some(metrics) = CellMetrics::measure(crate::terminal::text_size::current(cx), cx)
+        else {
             tracing::warn!(
                 "could not measure the terminal font; the session's terminal is not shown"
             );

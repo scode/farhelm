@@ -1,7 +1,8 @@
 //! Tests of the open session's top row: the actions' order, labels and hover help, Restart's offer and its request,
 //! that Stop, Replace and Delete from the header ask the row's questions and send the row's preconditions, a pending
-//! Delete and Stop, exclusion, a session the list does not show, where Escape and Cancel leave focus, and the row's
-//! layout at the 650-pixel floor with the real text system.
+//! Delete and Stop, exclusion, a session the list does not show, where Escape and Cancel leave focus, the row's
+//! layout at the 650-pixel floor with the real text system, and the terminal text size group at the start of the
+//! actions (its steps, readout, range, shortcut, and the size a terminal opens at).
 //!
 //! Everything but the layout test runs in the real main view over the helm client's fake, as the session list's own
 //! lifecycle tests do (whose fixtures these share), and reads what the window sent from the fake and what it drew from
@@ -856,8 +857,35 @@ fn drawn_node(nodes: &[gpui::DriverNode], action: Action) -> &gpui::DriverNode {
 }
 
 /// Each of the four actions in `nodes` is drawn whole (nothing of it clipped) inside a 650-pixel pane, and all four sit
-/// on one line.
+/// on one line; so are the text size group's two buttons and readout, which share that line and whose buttons track a
+/// focus handle, so Tab reaches them (SPEC.md names text size first among what must stay whole and reachable at 650
+/// pixels).
 fn assert_whole_on_one_line(nodes: &[gpui::DriverNode]) {
+    use crate::terminal::text_size::{LARGER_ID, READOUT_ID, SMALLER_ID};
+    let action_row = drawn_node(nodes, Action::Stop).bounds;
+    let middle = action_row.origin.y + action_row.size.height / 2.;
+    for id in [SMALLER_ID, READOUT_ID, LARGER_ID] {
+        let node = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} was drawn"));
+        let bounds = node.bounds;
+        assert!(
+            bounds.size.width > px(0.)
+                && node.visible_bounds == bounds
+                && bounds.origin.x >= px(0.)
+                && bounds.origin.x + bounds.size.width <= px(650.),
+            "{id} is drawn whole inside the pane: {bounds:?}, visible {:?}",
+            node.visible_bounds
+        );
+        assert!(
+            bounds.origin.y <= middle && middle <= bounds.origin.y + bounds.size.height,
+            "{id} is on the actions' line: {bounds:?}, the line's middle at {middle:?}"
+        );
+        if id != READOUT_ID {
+            assert!(node.focus.is_some(), "{id} tracks a focus handle");
+        }
+    }
     let mut tops = Vec::new();
     for action in Action::ALL {
         let node = drawn_node(nodes, action);
@@ -988,8 +1016,8 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
 /// SPEC.md: "Stop, Restart, Replace, Clone, Delete and the tunnel pill remain fully visible and keyboard reachable from
 /// a 650px main pane". The pill is the first thing in the top row's left region, so it is what can push the actions,
 /// and with a long host name it is wide: it must give up its width first, cutting the host short and keeping both
-/// ports. Today the pill at its widest and the four actions fit in 650 pixels without the pill shrinking, so this pins
-/// that fit; the pill's shrinking is what keeps it once the tab strip and the text size group join the row. Specified:
+/// ports. With the text size group at the start of the actions, the pill at its widest no longer fits beside them, so
+/// it gives up width, down to no less than its floor for a mapping (154 pixels). Specified:
 /// in a 650-pixel pane, with a session on a remote host whose terminal lists one tunnel on a host with a very long
 /// name, each of the four actions is drawn whole inside the pane, all on one line, and the pill is drawn whole inside
 /// the pane too, tracking a focus handle so Tab reaches it.
@@ -1086,10 +1114,10 @@ fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
         .iter()
         .find(|node| node.element_id.as_deref() == Some("session-tunnel-pill"))
         .expect("the pill is drawn");
-    assert_eq!(
-        pill.bounds.size.width,
-        px(280.),
-        "the premise: the long host name makes the pill as wide as it gets"
+    assert!(
+        pill.bounds.size.width < px(280.) && pill.bounds.size.width >= px(154.),
+        "the pill gave way to the actions, down to no less than its floor: {:?}",
+        pill.bounds.size.width
     );
     assert!(
         pill.bounds.size.width > px(0.)
@@ -1102,5 +1130,284 @@ fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
     assert!(
         pill.focus.is_some(),
         "and tracks a focus handle, so Tab reaches it"
+    );
+}
+
+// ---- The terminal text size ----------------------------------------------------------------------------------------
+
+/// A snapshot with session `a` open and the shared `terminal_text_size` preference at `points` (unset for `None`).
+fn sized(points: Option<u32>) -> Vec<CollectionState> {
+    let mut snapshot = snapshot_of(vec![entry(&session("a"), 0)], false);
+    if let Some(points) = points {
+        snapshot[1].entries[0].value["terminal_text_size"] = json!(points);
+    }
+    snapshot
+}
+
+/// Push the shared `terminal_text_size` preference at `points`, as the helm does once it stores a write, with session
+/// `a` still the last visited.
+fn push_size(fake: &mut FakeHelm, points: u32, cx: &mut VisualTestContext) {
+    let mut preferences = preferences_entry(&["a"], false);
+    preferences.value["terminal_text_size"] = json!(points);
+    fake.push(CollectionChanges {
+        collection: Collection::Preferences,
+        meta: meta(&[PREFERENCES_KEY]),
+        upsert: vec![preferences],
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+}
+
+/// The size the group's readout paints.
+fn readout(cx: &mut VisualTestContext) -> String {
+    let nodes = frame(cx);
+    let at = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(crate::terminal::text_size::READOUT_ID))
+        .expect("the readout is drawn");
+    nodes
+        .iter()
+        .enumerate()
+        .filter(|(index, node)| *index == at || node.parent == Some(at))
+        .flat_map(|(_, node)| node.texts.iter().map(|text| text.text.to_string()))
+        .collect()
+}
+
+/// The text size writes the window sent since the last call, by their ids and sizes, left unanswered; anything else it
+/// sent (a seen mark) is answered with success at once.
+fn size_writes(fake: &mut FakeHelm) -> Vec<(u64, Value)> {
+    let mut found = Vec::new();
+    for command in fake.commands() {
+        let body = command.body.clone().unwrap_or_default();
+        if command.method == Method::Put
+            && command.path == "/api/preferences"
+            && body.get("terminal_text_size").is_some()
+        {
+            found.push((command.id, body["terminal_text_size"].clone()));
+        } else {
+            fake.reply(command.id, 200, None);
+        }
+    }
+    found
+}
+
+/// SPEC.md, "Terminal experience": the magnifier − / + buttons "step every open terminal's text size together ...
+/// within a fixed range", with the display-only readout between them following every change; the size is the helm's
+/// shared preference, unset meaning 14 points. The size must show the step at once and survive the helm's answer, or a
+/// press would flicker back until the push lands, and a held key would step from a stale size. Specified: with the
+/// preference unset the readout shows 14; Larger sends `terminal_text_size: 15` and shows 15 before any answer; with
+/// the helm's push of 15 and its answer it still shows 15; two quick Smaller presses send 14 then 13 and show 13; the
+/// answer to the first alone leaves 13 shown; the push of 13 and the second answer leave 13.
+#[gpui::test]
+fn the_text_size_buttons_step_the_shared_size_and_the_readout_follows(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, sized(None));
+    size_writes(&mut fake);
+    assert_eq!(readout(cx), "14", "unset is the old default");
+
+    test_support::click(cx, crate::terminal::text_size::LARGER_ID);
+    let writes = size_writes(&mut fake);
+    assert_eq!(
+        writes
+            .iter()
+            .map(|(_, size)| size.clone())
+            .collect::<Vec<_>>(),
+        [json!(15)]
+    );
+    assert_eq!(readout(cx), "15", "the step shows before the helm answers");
+    push_size(&mut fake, 15, cx);
+    fake.reply(writes[0].0, 204, None);
+    test_support::settle(cx);
+    assert_eq!(readout(cx), "15");
+
+    test_support::click(cx, crate::terminal::text_size::SMALLER_ID);
+    test_support::click(cx, crate::terminal::text_size::SMALLER_ID);
+    let writes = size_writes(&mut fake);
+    assert_eq!(
+        writes
+            .iter()
+            .map(|(_, size)| size.clone())
+            .collect::<Vec<_>>(),
+        [json!(14), json!(13)],
+        "the second press steps from the first's size, not the stored one"
+    );
+    assert_eq!(readout(cx), "13");
+    fake.reply(writes[0].0, 204, None);
+    test_support::settle(cx);
+    assert_eq!(
+        readout(cx),
+        "13",
+        "an answer to an earlier step leaves the latest held"
+    );
+    push_size(&mut fake, 13, cx);
+    fake.reply(writes[1].0, 204, None);
+    test_support::settle(cx);
+    assert_eq!(readout(cx), "13");
+}
+
+/// A refused or failed write must not leave the terminals at a size the helm never stored, which every other client
+/// and the next start would disagree with: the hold ends with the helm's answer whatever it is, and the size falls back
+/// to the stored one. Specified: at a stored 16, Larger shows 17; the helm's refusal brings back 16 and nothing more is
+/// sent.
+#[gpui::test]
+fn a_refused_text_size_falls_back_to_the_stored_one(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, sized(Some(16)));
+    size_writes(&mut fake);
+    assert_eq!(readout(cx), "16");
+    test_support::click(cx, crate::terminal::text_size::LARGER_ID);
+    let writes = size_writes(&mut fake);
+    assert_eq!(writes.len(), 1);
+    assert_eq!(readout(cx), "17");
+    fake.reply(
+        writes[0].0,
+        400,
+        Some(json!({"error": "terminal_text_size out of range"})),
+    );
+    test_support::settle(cx);
+    assert_eq!(readout(cx), "16", "back to what the helm stores");
+    assert_eq!(size_writes(&mut fake), []);
+}
+
+/// The range is fixed (9 to 28 points, the glyph atlas's bound), and the helm refuses a size outside it, so a step past
+/// an end must send nothing rather than a write certain to be refused. A stored size outside the range (an older or
+/// foreign client) draws at the default rather than at a size the terminal was never meant to take. Specified: at 28,
+/// Larger sends nothing and the readout stays 28; at 9, Smaller sends nothing and it stays 9; a stored 40 reads 14.
+#[gpui::test]
+fn the_text_size_stops_at_the_ends_of_its_range(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, sized(Some(28)));
+    size_writes(&mut fake);
+    test_support::click(cx, crate::terminal::text_size::LARGER_ID);
+    assert_eq!(size_writes(&mut fake), [], "nothing past the top");
+    assert_eq!(readout(cx), "28");
+    push_size(&mut fake, 9, cx);
+    assert_eq!(readout(cx), "9");
+    test_support::click(cx, crate::terminal::text_size::SMALLER_ID);
+    assert_eq!(size_writes(&mut fake), [], "nothing past the bottom");
+    assert_eq!(readout(cx), "9");
+    push_size(&mut fake, 40, cx);
+    assert_eq!(
+        readout(cx),
+        "14",
+        "a stored size out of range draws at the default"
+    );
+}
+
+/// SPEC.md, "Terminal experience": "While a terminal is open the shortcut works wherever focus is"; with none open it
+/// has nothing to size and must not write the shared preference behind the user's back. The chord's binding is the
+/// physical-key table's (its own tests); this is what the action does once dispatched. Specified: with session `a`'s
+/// terminal open, the Larger and Smaller actions dispatched to the window send 15 and then 14 (stepping from the held
+/// size). The window without a terminal is the next test.
+#[gpui::test]
+fn the_text_size_shortcut_steps_only_while_a_terminal_is_open(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, sized(None));
+    size_writes(&mut fake);
+    assert!(
+        cx.update(|_, cx| crate::terminal::text_size::any_terminal_open(cx)),
+        "the premise: a terminal is open"
+    );
+    cx.dispatch_action(crate::actions::IncreaseTerminalTextSize);
+    test_support::settle(cx);
+    cx.dispatch_action(crate::actions::DecreaseTerminalTextSize);
+    test_support::settle(cx);
+    assert_eq!(
+        size_writes(&mut fake)
+            .into_iter()
+            .map(|(_, size)| size)
+            .collect::<Vec<_>>(),
+        [json!(15), json!(14)]
+    );
+}
+
+/// [`the_text_size_shortcut_steps_only_while_a_terminal_is_open`]'s other half, in a window with no session open, so
+/// no terminal: the shortcut sends nothing.
+#[gpui::test]
+fn the_text_size_shortcut_does_nothing_without_a_terminal(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(Vec::new(), false));
+    size_writes(&mut fake);
+    assert!(
+        !cx.update(|_, cx| crate::terminal::text_size::any_terminal_open(cx)),
+        "the premise: no terminal is open"
+    );
+    cx.dispatch_action(crate::actions::IncreaseTerminalTextSize);
+    test_support::settle(cx);
+    assert_eq!(size_writes(&mut fake), []);
+}
+
+/// A terminal opened while the size is not the default must start at that size: it takes a size change only when the
+/// size moves, so one measured at the default would stay at 14 points while the readout said otherwise, until the next
+/// step. Specified: with the shared preference stored at 20, the open session's terminal fits and draws its grid at the
+/// font measured at 20 points.
+#[gpui::test]
+fn a_terminal_opens_at_the_current_text_size(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, sized(Some(20)));
+    let (opened, wanted) = cx.update(|_, cx| {
+        let opened: Vec<_> = crate::terminal::text_size::open_terminals(cx)
+            .iter()
+            .map(|terminal| terminal.read(cx).metrics())
+            .collect();
+        let wanted = crate::terminal::CellMetrics::measure(crate::terminal::TextSize::new(20), cx);
+        (opened, wanted)
+    });
+    assert_eq!(opened.len(), 1, "the premise: the open session's terminal");
+    assert!(Some(opened[0]) == wanted, "it opened at 20 points");
+}
+
+/// The old app's limit-button case: a press on a size button at the end of the range once dropped the terminal's focus,
+/// so the next typing went nowhere. Here a click focuses a control only where the platform's rule says so (SPEC.md,
+/// "Keyboard focus"); under the Mac's rule the terminal must keep focus through any press, at a limit or not, so typing
+/// goes on reaching the program. Specified: with clicks not focusing controls and the terminal focused, Larger at 28
+/// (sending nothing) and then Smaller (stepping to 27) each leave focus on the terminal.
+#[gpui::test]
+fn a_text_size_press_leaves_focus_on_the_terminal_under_the_macs_click_rule(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, sized(Some(28)));
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    size_writes(&mut fake);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("terminal-grid"),
+        "the premise: the terminal is home"
+    );
+    test_support::click(cx, crate::terminal::text_size::LARGER_ID);
+    assert_eq!(size_writes(&mut fake), [], "the premise: at the limit");
+    assert_eq!(focused_id(cx).as_deref(), Some("terminal-grid"));
+    test_support::click(cx, crate::terminal::text_size::SMALLER_ID);
+    assert_eq!(size_writes(&mut fake).len(), 1);
+    assert_eq!(focused_id(cx).as_deref(), Some("terminal-grid"));
+}
+
+/// SPEC_impl.md, "The store, and how views redraw": a step held ahead of the store belongs to the UI session, and a
+/// reset forgets it, since the reset drops the reply that would end the hold. A hold that outlived the reset would keep
+/// every terminal at a size the helm may never have stored, with nothing left to release it. Specified: Larger shows
+/// 15 with its write unanswered; after the channel breaks and the reconnect's snapshot still has the size unset, the
+/// readout shows 14 and the reopened terminal draws at the font measured at 14 points.
+#[gpui::test]
+fn a_reset_forgets_an_unanswered_text_size_step(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, sized(None));
+    size_writes(&mut fake);
+    test_support::click(cx, crate::terminal::text_size::LARGER_ID);
+    assert_eq!(
+        size_writes(&mut fake).len(),
+        1,
+        "the premise: one write, unanswered"
+    );
+    assert_eq!(readout(cx), "15");
+
+    fake.break_channel();
+    test_support::settle(cx);
+    fake.connect(sized(None));
+    test_support::settle(cx);
+    size_writes(&mut fake);
+    assert_eq!(readout(cx), "14", "the reset forgot the step");
+    let (newest, wanted) = cx.update(|_, cx| {
+        let newest = crate::terminal::text_size::open_terminals(cx)
+            .last()
+            .map(|terminal| terminal.read(cx).metrics());
+        let wanted = crate::terminal::CellMetrics::measure(crate::terminal::TextSize::DEFAULT, cx);
+        (newest, wanted)
+    });
+    assert!(
+        newest.is_some() && newest == wanted,
+        "the reopened terminal draws at 14 points"
     );
 }
