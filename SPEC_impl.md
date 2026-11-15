@@ -423,13 +423,6 @@ count of feed subscribers: the helm's own internal subscriptions to the feed nev
 Enforced by tests of an agent request with a connected UI, after a disconnect and after a takeover, and a test that a
 displaced UI cannot take a terminal back.
 
-NOTE: Interim, until the desktop app's approvals area lands (SPEC.md, "Agent-spawned sessions", decided by the
-maintainer on 2026-11-13): in the embedded helm a connected window does not get cards, so a request that needs approval
-is refused at once, with its own message, instead of waiting. It is one switch, `window_without_cards`, set by the
-embedded helm's startup and read only where the approvals module decides whether to card a request; that module's docs
-say how to remove it. A standalone `farhelm helm run` keeps the card path, which only the end-to-end tests reach,
-through a stand-in UI on the test credential; a remote helm a desktop app attaches to would need the switch too.
-
 ### Bulk data stays separate
 
 Terminal streams stay one stream per terminal, with their own reconnect handling, because the supervisor and host behind
@@ -8291,10 +8284,11 @@ this agent-requested operation.
 
 Pending approvals are an in-memory table in the helm (`approvals::Approvals`). Nothing is persisted: a helm restart
 drops the table and the parked requests with it, and the asking CLI gets the relay's ordinary "helm went away" ending.
-The GUI reads the table through `GET /api/approvals` and learns of changes from the fleet invalidation feed, which every
-insert and removal bumps; it answers with `POST /api/approvals/{id}`, which returns 410 once the request no longer
-waits. An entry leaves the table exactly once: the user's answer, the asking session being deleted, the requesting
-connection going away (checked on every feed change and at least every 5 seconds), or the wait expiring after 9 minutes
+The GUI gets the table as the UI channel's pushed approvals collection, which the helm re-reads from its own
+`GET /api/approvals` whenever the fleet invalidation feed is bumped, as every insert and removal does; it answers with
+`POST /api/approvals/{id}` through the same channel, which returns 410 once the request no longer waits. An entry leaves
+the table exactly once: the user's answer, the asking session being deleted, the requesting connection going away
+(checked on every feed change and at least every 5 seconds), or the wait expiring after 9 minutes
 (`farhelm_proto::approvals::APPROVAL_WAIT`). Every ending passes through one drop guard that removes the entry if it is
 still there and bumps the feed, so no card outlives the request it describes. Card ids are random, not sequential.
 
@@ -8312,31 +8306,27 @@ take their drawing and warning from the session list's shield (`crate::permissio
 applies, rather than classifying command strings again; stored workspace trust and permission flags keep their separate
 meaning.
 
-The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
-follows the actual main-pane rectangle and the terminal area's top, falling back to the top row's bottom when no
-terminal surface is shown. Anchoring below the top row and conditional bands keeps approval cards from covering those
-in-flow notices. Floating tunnel surfaces independently declare terminal-link coverage. This accounts for sidebar width,
-narrow-window shell scrolling, native top chrome, and conditional notices without fixed offsets. Width is capped at
-660px with 12px margins; the region's height is capped at 75% of the pane and at the space remaining below its top. CSS
-flex sizing keeps the card header and answer bar fixed while shrinking long-text boxes toward their two-line floor
-before the intervening body scrolls. Waiting headers have their own bounded scrolling list, and a late-answer notice is
-a fixed item. The fallback minimum measures the header, requester and answer bar at the actual card width, including
-their spacing, plus the notice and waiting list. Those fixed siblings consume the same cap; comparing only the card's
-minimum with the whole region could clip its answers. When that combined minimum cannot fit below the anchor, the
-geometry helper uses the whole viewport. Below the minimum even there, CSS lets the whole region scroll instead of
-clipping answers. The existing size observer follows only those fixed inputs, alongside the pane, sidebar and chrome;
-direct-child observation rebinds them when the request, notice or waiting list changes. Body and text-box heights are
-outputs of CSS shrinking, never inputs to this measurement. Terminal output mutations remain unobserved. Listeners and
-observers are released when the region leaves the DOM. Sidebar size is an input even at the pane's minimum width, where
-a resize moves the pane without changing its size.
+The approval region is the layer manager's approval slot (`layers::install_approval_region`; "Overlays: the layer
+manager" has its rules): installed once per window, drawn above every dialog and popover and below the pill and the
+tooltip, so a card stays answerable while a dialog is open, and drawing nothing while no request waits and no
+late-answer notice shows. It reads the pushed requests as it draws and keeps only what the user did there: the chosen
+request, the answer bar's pause, and why the card's last action opened nothing. It places itself from two anchors other
+views draw: the main pane, and the open session's terminal area, whose top clears the tabs and the lines above the
+terminal; with no session open, the pane's top. Which anchor applies is decided from state (a session is selected and
+still listed), never from an anchor's last drawn bounds. Width is capped at 660px with 12px margins; the region's height
+is capped at 75% of the pane and at the space remaining below its top. Flex sizing keeps the card's header, From line
+and answer bar fixed while its long-text boxes shrink toward their two-line floor before the card's body scrolls;
+waiting headers have their own bounded scrolling list, and the late-answer notice is a fixed item above the card. The
+fallback minimum is those fixed parts at the card's actual width, with their spacing, plus the notice and the waiting
+list, measured as they are drawn (wrapping decides them), with one more frame when a measurement changes: when it cannot
+fit below the anchor the region uses the whole window, and below the minimum even there the whole region scrolls instead
+of clipping answers.
 
 "A GUI is connected" means a window holds the helm's UI seat (`gui_connected` in the helm's approvals module reads it;
 see "The seat: one UI per helm"): the seat is what a window holds for its whole connected life, and the UI channel that
 holds it is what pushes the card to it. A displaced window, or one whose channel dropped, has given the seat up, so a
 request then is refused as having no window to ask in rather than waiting on a card nobody can see. The helm's own
-internal subscriptions to the fleet feed never count as a window. For now a connected window in the desktop app's helm
-gets no card either: its requests are refused at once with an interim message of their own (see the NOTE in "The seat:
-one UI per helm").
+internal subscriptions to the fleet feed never count as a window.
 
 Waiting needs time budgets that outlast the wait. `AgentVerb::may_wait_for_user` names the verbs that can wait (every
 acting verb, no listing); the supervisor's relay gives those an answer budget of its ordinary agent upcall timeout plus
@@ -8390,24 +8380,23 @@ and refused on every other action or answer, with bounded nonempty text checked 
 in the dialog's ordinary add binding. The existing approval table's take elects the sole answering window. A HostAdd
 Allow carries a oneshot receipt with its destination: the answer POST returns 204 only after the waiting host-add
 handler selected that answer and passed its final origin check. A failed send, expiry, or dropped receipt returns Gone
-and permits no browser probe. Sending the positive receipt is the last fallible approval step, with no intervening await
-or later origin veto. Other actions keep their existing answer semantics.
+and permits no discovery probe. Sending the positive receipt is the last fallible approval step, with no intervening
+await or later origin veto. Other actions keep their existing answer semantics.
 
-The UI keeps a page-local opening between approval cards and the hosts panel, without another pending registry or
-installer. Newly observed requests show their cards in every window without opening a dialog or moving focus. Only the
-card's explicit open action queues the ordinary add dialog. `HostModal` admission waits for existing dialogs, and the
-hosts panel keeps a manual add draft or pending submission ahead of an agent opening. Explicit opens are presented in
-click order after the current form closes; successful reads drop queued ids that no longer wait. Admission also
-preserves a setup submission's draft until its POST has resolved and any definite refusal has reopened it. One shared
-synchronous answer guard and the existing 700ms arm pause cover the card and dialog. The pause restarts only when the
-card list or selection changes, so a dialog admitted after waiting behind another dialog, draft or submission opens
-already armed. Successful listing absence can retire a pending dialog, but failed reads prove nothing and an answering
-dialog waits for its own reply. Only the successful receipt continues the same form's ordinary probe with captured
-edited fields. An immutable agent-origin bit travels through setup submission and definite refusal/reopen; the
-provisionable branch skips setup only for a user-originated add whose preference is true. The receipt attests to
-approval, not discovery or installation: browser or reply loss can interrupt the continuation before a probe reaches the
-helm. There is no correlation, persistence, or automatic replay across that gap; once a probe or setup request itself
-accepts work, its ordinary server-owned lifetime applies.
+An agent's host add is answered through the ordinary Add host dialog (`hosts::add::open_for_agent`), with the request's
+state in the approvals module (`approvals::host_add`); nothing else keeps a pending registry or an installer of its own.
+A request arriving shows its card without opening a dialog or moving focus; only the card's explicit action opens the
+dialog, prefilled. While another dialog is open, or a host is being probed, set up or removed, that action is refused
+with a reason on the card, keeping the open dialog, its draft and the request (the old app queued such opens in click
+order instead; the GPUI app has no dialog that waits for the dialog slot yet). The dialog's answers and the card's run
+under the request's one operation key, so the first pressed wins, and both observe the same 700ms arm pause. The dialog
+closes when its request stops waiting while no answer of its own is out, and when its Allow comes back late. Only the
+helm's bodiless receipt continues the same dialog's ordinary probe with the edited fields; any other success starts
+nothing. An agent-origin flag travels through the setup submission and a refused setup's reopen, so the provisionable
+branch skips the setup confirmation only for a user-originated add whose preference is true. The receipt attests to
+approval, not discovery or installation: a lost reply can interrupt the continuation before a probe reaches the helm.
+There is no correlation, persistence, or automatic replay across that gap; once a probe or setup request itself accepts
+work, its ordinary server-owned lifetime applies.
 
 Protocol 63 adds `AgentVerb::HostEdit` and `HostRemove`, answered by `AgentReply::HostEdited` and `HostRemoved`, with
 the approval kinds `ApprovalAction::HostEdit` and `HostRemove`. Both kinds return true from
