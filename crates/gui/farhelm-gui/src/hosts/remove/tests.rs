@@ -17,8 +17,9 @@ use serde_json::{Value, json};
 
 use crate::focus::Mark;
 use crate::hosts::tests::{hosts, open_panel_in_column, reference_hosts};
-use crate::operations::{Command, OpKey, Work};
+use crate::operations::{Command, NotStarted, OpKey, Work};
 use crate::session;
+use crate::settings::Refused;
 use crate::test_support::{any_open, click, focused_id, frame, keys, meta, settle};
 
 /// The helm's refusal of a host whose setup, update or uninstall is running, in its own words.
@@ -475,8 +476,8 @@ fn a_permanent_answer_whose_removal_is_refused_stores_no_preference(cx: &mut Tes
 /// editor, ntfy's form, the checkout field and the setup confirmation, whose saves outlive their views, so one can be in
 /// flight when the answer is pressed; the operation store then refuses this save, and the area's rule is that a failed
 /// save is reported, never treated as saved. Specified: with a preference save in flight, "Remove, don't ask again"
-/// sends the removal and no preference save, and the Hosts panel's line reads "Remove hosts without asking: Not saved:
-/// another save was in progress. Try again."
+/// sends the removal and no preference save, and the Hosts panel's line reads "Remove hosts without asking: " and
+/// Settings' words for such a press ([`Refused::WORDS`], "Not saved: another operation was in progress. Try again.").
 #[gpui::test]
 fn a_permanent_answer_refused_by_another_preference_save_says_so(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
@@ -488,15 +489,16 @@ fn a_permanent_answer_refused_by_another_preference_save_says_so(cx: &mut TestAp
         [(format!("{:?} /api/hosts/2", Method::Delete), None)]
     );
     assert_eq!(
-        label(cx, "hosts-remove-stop-asking-error").as_deref(),
-        Some("Remove hosts without asking: Not saved: another save was in progress. Try again.")
+        label(cx, "hosts-remove-stop-asking-error"),
+        Some(format!("Remove hosts without asking: {}", Refused::WORDS))
     );
 }
 
 /// The menu holds Remove unavailable while the host has work in flight, but work can start on the host after the
 /// question opened; the operation store then refuses the removal, and that refusal must say so rather than do nothing.
 /// Specified: with the question open, a save starting on `build-box`'s key makes Remove send nothing, and the Hosts
-/// panel's line reads "Remove build-box: not started, another operation on this host is in progress; try again".
+/// panel's line reads "Remove build-box: Not started: " and the operation store's shared reason
+/// ([`NotStarted::BUSY_REASON`], "another operation was in progress. Try again.").
 #[gpui::test]
 fn a_busy_host_refuses_remove_with_a_reason(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
@@ -506,9 +508,10 @@ fn a_busy_host_refuses_remove_with_a_reason(cx: &mut TestAppContext) {
     click(cx, "prompt-confirm");
     assert_eq!(sent(&mut helm), [], "no removal went out");
     assert_eq!(
-        label(cx, "hosts-remove-not-started").as_deref(),
-        Some(
-            "Remove build-box: not started, another operation on this host is in progress; try again"
-        )
+        label(cx, "hosts-remove-not-started"),
+        Some(format!(
+            "Remove build-box: Not started: {}",
+            NotStarted::BUSY_REASON
+        ))
     );
 }
