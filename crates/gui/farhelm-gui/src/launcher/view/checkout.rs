@@ -1007,20 +1007,21 @@ impl Launcher {
         let tracker = anchor.track();
         self.checkout.anchor = Some(anchor.clone());
         let weak = cx.weak_entity();
-        let field = super::launcher_input(
-            "launcher-repository",
-            &self.checkout.repository,
-            "Repository",
-            HoverHelp::tooltip(
-                "Repository: the GitHub owner/repo to clone; type to filter, then choose one",
-            ),
-        )
-        .monospace()
-        .on_vertical(move |arrow, window, cx| {
-            let _ = weak.update(cx, |launcher, cx| {
-                launcher.repository_arrow(arrow, window, cx)
+        let field = self
+            .launcher_input(
+                "launcher-repository",
+                &self.checkout.repository,
+                "Repository",
+                HoverHelp::tooltip(
+                    "Repository: the GitHub owner/repo to clone; type to filter, then choose one",
+                ),
+            )
+            .monospace()
+            .on_vertical(move |arrow, window, cx| {
+                let _ = weak.update(cx, |launcher, cx| {
+                    launcher.repository_arrow(arrow, window, cx)
+                });
             });
-        });
         let control = div().relative().min_w_0().child(field).child(tracker);
         let mut rows = Vec::new();
         // The old order: the setup field above the repository field, which it is the precondition for.
@@ -1178,7 +1179,7 @@ impl Launcher {
     /// The folder field while a managed checkout is chosen: read-only, showing the preview's path (SPEC.md: "the
     /// composer's folder field shows the current preview's effective path read-only, or a pending or error state").
     pub(super) fn checkout_folder_field(&self) -> AnyElement {
-        super::launcher_input(
+        self.launcher_input(
             "launcher-checkout-folder",
             &self.checkout.path,
             "Folder",

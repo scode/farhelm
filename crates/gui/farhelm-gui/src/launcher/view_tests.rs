@@ -91,7 +91,7 @@ pub(super) fn launcher_with_hosts(
 }
 
 /// Run `read` on the open launcher.
-pub(super) fn read<T>(
+pub(crate) fn read<T>(
     cx: &mut VisualTestContext,
     read: impl FnOnce(&Launcher, &gpui::Window, &gpui::App) -> T,
 ) -> T {
@@ -120,14 +120,14 @@ fn is_open(cx: &mut VisualTestContext) -> bool {
 
 /// The text fields a test clicks into.
 #[derive(Clone, Copy)]
-enum Field {
+pub(crate) enum Field {
     Folder,
     Wrapper,
     Prompt,
 }
 
 /// Whether `field` holds focus.
-fn focused(cx: &mut VisualTestContext, field: Field) -> bool {
+pub(crate) fn focused(cx: &mut VisualTestContext, field: Field) -> bool {
     read(cx, |launcher, window, cx| {
         let state = match field {
             Field::Folder => &launcher.folder,
