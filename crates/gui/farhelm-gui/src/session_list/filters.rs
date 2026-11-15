@@ -303,7 +303,7 @@ impl SessionList {
         }
         // SPEC.md: "All or a host avatar returns to Sessions". The old app closed the Hosts panel on every choice, the
         // choice already in force included, so this comes before the check that a repeated choice sends nothing.
-        self.show_sessions(cx);
+        self.hide_hosts(cx);
         let query = Query {
             host,
             ..self.current.current(cx).filters.chosen()
@@ -331,7 +331,7 @@ impl SessionList {
     /// therefore has no case here. A widening query the helm refuses keeps both choices the way any refused query
     /// does ([`Choice::settle`]).
     pub(crate) fn picked_from_switcher(&mut self, row: &SessionRow, cx: &mut Context<Self>) {
-        self.show_sessions(cx);
+        self.hide_hosts(cx);
         let Some(store) = session::current_store(cx) else {
             return;
         };
@@ -342,17 +342,6 @@ impl SessionList {
         );
         if hidden {
             self.send_query(Query::default(), cx);
-        }
-    }
-
-    /// Show Sessions in place of the Hosts panel, if the panel shows. The quick switcher's pick calls it unguarded: the
-    /// switcher cannot be open while the window is inert, since a reset closes every dialog.
-    fn show_sessions(&mut self, cx: &mut Context<Self>) {
-        let current = self.current.current(cx);
-        if current.hosts_shown {
-            current.hosts_shown = false;
-            self.hosts_panel.update(cx, |panel, cx| panel.hidden(cx));
-            cx.notify();
         }
     }
 

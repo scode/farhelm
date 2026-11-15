@@ -29,6 +29,17 @@
 //!   ends, and scroll it into view. Focus stays in the search field the whole time: the rows are not focusable
 //!   ([`OptionRow`]), and the field hands Up and Down over rather than moving its caret ([`TextInput::on_vertical`]).
 //!   Hover only paints. Enter picks the selected row and a click picks the clicked one.
+//! - **New session named X.** While the trimmed query is not empty, a row pinned below the scrolling matches offers
+//!   `New session named "X"` for the trimmed query (SPEC.md's "New session named X" paragraph; the old row's words,
+//!   escaped as host text, and its hover help). A query that starts with `tl:`, in any case, offers no New row: SPEC.md
+//!   replaces sessions and the New row with templates there, so that a template search never names a session `tl:…`.
+//!   It comes after the last match in arrow-key order, so it is selected
+//!   when nothing matches, a failed read included, but the arrows cannot reach it and Enter picks nothing while the
+//!   read is loading (the old switcher had no selection at all until the reply). A click picks it even then, as the
+//!   old row's did. Picking it closes the switcher first, since New refuses while any dialog is open, which returns
+//!   focus to the switcher's opener; New then opens with that name ([`super::open_new`]) and takes the opener as its
+//!   own, so closing New returns focus to where it was before the switcher opened. A refused New (a launch pending)
+//!   leaves focus there and opens nothing, as the old switcher did.
 //! - **Picking.** A pick closes the switcher, then opens the session through the list's own [`selection::choose`], so
 //!   it is selected, remembered with the helm and its terminal takes focus, the already open session's included
 //!   (SPEC.md, "Where focus rests": "Choosing a session, including the one already selected, focuses its terminal").
@@ -46,10 +57,10 @@
 //! that scrolls. The layer manager places it near the window's top and caps its height
 //! ([`DialogPlacement::Top`]); the card keeps the old side margin by capping its own width.
 //!
-//! NOTE: Not built here, each waiting for the area that brings it: the `New session named "X"` row, the `tl:`
-//! templates section and its hint, and the Quick launch row (the launcher area); and the host's chosen mark beside its
-//! name (host marks arrive with the sidebar's row marks). The old layout for windows narrower than 600 pixels is not
-//! ported either, because the window's minimum width is 720.
+//! NOTE: Not built here, each waiting for the area that brings it: the `tl:` templates section and its hint (a `tl:`
+//! query only hides the New row meanwhile, and still searches sessions), and the Quick launch row (the launcher area);
+//! and the host's chosen mark beside its name (host marks arrive with the sidebar's row marks). The old layout for
+//! windows narrower than 600 pixels is not ported either, because the window's minimum width is 720.
 
 #[cfg(test)]
 mod tests;
@@ -57,9 +68,10 @@ mod tests;
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::ui_channel::{SessionList, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, FontWeight, HighlightStyle, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, FontWeight, HighlightStyle,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use super::menu::{self, AgentName};
@@ -97,6 +109,12 @@ const ROW_CHROME: Pixels = px(22.);
 /// The words of the cap notice, shown when the helm's listing cap cut the snapshot.
 pub(crate) const CAP_NOTICE: &str =
     "Only the most recently active sessions were searched; the helm's listing limit was reached.";
+
+/// The New row's element id (the old `.quick-switcher-new`).
+pub(crate) const NEW_ROW_ID: &str = "quick-switcher-new";
+
+/// The New row's hover help, the old row's `data-tooltip`.
+pub(crate) const NEW_ROW_HELP: &str = "Open New with this name; nothing launches yet";
 
 // ---- Matching -----------------------------------------------------------------------------------------------------------
 
@@ -258,14 +276,17 @@ enum Read {
 }
 
 /// The open switcher: its field, its read, which row is selected, and its layer.
+///
+/// Its rows, in arrow-key order, are the matches and then, while the trimmed query is not empty, the New row
+/// ([`Rows`]).
 pub(crate) struct QuickSwitcher {
     /// The window's session list, told about every pick so that it can show the session the pick opened.
     list: WeakEntity<super::SessionList>,
     /// The search field. Its text is the query; the switcher keeps no copy of it.
     input: TextInputState,
     read: Read,
-    /// The selected row's position among the matches, kept within them wherever it is used, since the matches change
-    /// with every edit and when the read arrives.
+    /// The selected row's position among the rows (the matches, then the New row), kept within them wherever it is
+    /// used ([`Rows::selected`]), since the rows change with every edit and when the read arrives.
     selected: usize,
     /// The results list's scroll position, which follows the selected row.
     scroll: ScrollHandle,
@@ -318,6 +339,16 @@ impl QuickSwitcher {
         }
     }
 
+    /// The rows for the field's text now: the matches and whether the New row shows, and with them which rows the
+    /// arrows walk.
+    fn rows(&self, cx: &App) -> Rows {
+        Rows {
+            matches: self.matches(cx),
+            new: shows_new_row(&self.input.text(cx)),
+            loading: matches!(self.read, Read::Loading),
+        }
+    }
+
     /// The user edited the query: the first match is selected again, and shown.
     fn edited(&mut self, cx: &mut Context<Self>) {
         self.selected = 0;
@@ -326,9 +357,11 @@ impl QuickSwitcher {
     }
 
     /// Up or Down in the field: move the selection one row, stopping at either end, and scroll it into view. With
-    /// nothing listed there is nothing to move.
+    /// nothing the arrows can reach there is nothing to move. The New row is pinned outside the scrolling list, so it
+    /// is always in view and selecting it scrolls nothing.
     fn step(&mut self, direction: Vertical, cx: &mut Context<Self>) {
-        let count = self.matches(cx).len();
+        let rows = self.rows(cx);
+        let count = rows.reachable();
         if count == 0 {
             return;
         }
@@ -337,20 +370,19 @@ impl QuickSwitcher {
             Vertical::Up => current.saturating_sub(1),
             Vertical::Down => (current + 1).min(count - 1),
         };
-        self.scroll.scroll_to_item(self.selected);
+        if self.selected < rows.matches.len() {
+            self.scroll.scroll_to_item(self.selected);
+        }
         cx.notify();
     }
 
-    /// Enter: pick the selected row, if there is one.
+    /// Enter: pick the selected row, if there is one. Nothing while the read is loading, the New row included.
     fn pick_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Read::Loaded(list) = &self.read else {
-            return;
-        };
-        let matches = ranked(&list.sessions, &self.input.text(cx));
-        let Some(&index) = matches.get(self.selected.min(matches.len().saturating_sub(1))) else {
-            return;
-        };
-        self.pick(index, window, cx);
+        match self.rows(cx).selected(self.selected) {
+            Some(Selected::Session(index)) => self.pick(index, window, cx),
+            Some(Selected::New) => self.pick_new(window, cx),
+            None => {}
+        }
     }
 
     /// Open the session at `index` in the switcher's listing as the user's choice, after closing the switcher (the
@@ -373,6 +405,21 @@ impl QuickSwitcher {
             .update(cx, |list, cx| list.picked_from_switcher(row, cx));
     }
 
+    /// Pick the New row: close the switcher, then open New named with the trimmed query (the module docs say why in
+    /// that order, and where focus goes). Only reached while the New row shows ([`shows_new_row`]).
+    fn pick_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.input.text(cx);
+        let name = query.trim();
+        debug_assert!(
+            shows_new_row(&query),
+            "the New row is picked only while it shows"
+        );
+        if let Some(layer) = self.layer.take() {
+            layers::close(layer, window, cx);
+        }
+        super::open_new(&self.list, Some(name), window, cx);
+    }
+
     /// Close: close the switcher, picking nothing.
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(layer) = self.layer.take() {
@@ -387,8 +434,9 @@ impl Render for QuickSwitcher {
         let viewport = window.viewport_size();
         let width = CARD_MAX_WIDTH.min(viewport.width - CARD_MARGIN * 2.);
         let query = self.input.text(cx);
-        let matches = self.matches(cx);
-        let selected = self.selected.min(matches.len().saturating_sub(1));
+        let listed = self.rows(cx);
+        let selected = listed.selected(self.selected);
+        let matches = &listed.matches;
 
         let pulses = ticker::is_active(window, cx)
             && match &self.read {
@@ -457,17 +505,16 @@ impl Render for QuickSwitcher {
             Read::Loaded(_) => None,
         };
         let columns = Columns::for_card(width);
-        let rows: Vec<AnyElement> = match &self.read {
+        let result_rows: Vec<AnyElement> = match &self.read {
             Read::Loaded(list) => matches
                 .iter()
-                .enumerate()
-                .map(|(position, &index)| {
+                .map(|&index| {
                     let row = &list.sessions[index];
                     let weak = weak.clone();
                     result_row(
                         row,
                         query.trim(),
-                        position == selected,
+                        selected == Some(Selected::Session(index)),
                         step,
                         columns,
                         palette,
@@ -482,15 +529,37 @@ impl Render for QuickSwitcher {
         };
         let results = div()
             .id("quick-switcher-results")
-            .role(Role::ListBox)
-            .aria_label("Sessions")
             .track_scroll(&self.scroll)
             .flex()
             .flex_col()
             .flex_shrink_1()
             .min_h(px(0.))
             .overflow_y_scroll()
-            .children(rows);
+            .children(result_rows);
+        let new_row = listed.new.then(|| {
+            let weak = weak.clone();
+            new_row(
+                query.trim(),
+                selected == Some(Selected::New),
+                palette,
+                move |_, window, cx| {
+                    let _ = weak.update(cx, |switcher, cx| switcher.pick_new(window, cx));
+                },
+            )
+        });
+        // One list for assistive technology, the old `.quick-switcher-options` listbox: the scrolling matches, then
+        // the New row pinned below them, which keeps its place while the matches scroll. Only the matches give up
+        // height when the card is capped.
+        let options = div()
+            .id("quick-switcher-options")
+            .role(Role::ListBox)
+            .aria_label("Sessions and new session")
+            .flex()
+            .flex_col()
+            .flex_shrink_1()
+            .min_h(px(0.))
+            .child(results)
+            .children(new_row);
         let cap = match &self.read {
             Read::Loaded(list) if list.truncated => Some(quiet(CAP_NOTICE, palette)),
             Read::Loaded(_) | Read::Loading | Read::Failed(_) => None,
@@ -542,10 +611,120 @@ impl Render for QuickSwitcher {
             .child(field)
             .child(heading)
             .children(state)
-            .child(results)
+            .child(options)
             .children(cap)
             .child(footer)
     }
+}
+
+/// The switcher's rows for one query, in arrow-key order: the matches, then the New row when it shows.
+struct Rows {
+    /// The matches, as indices into the listing, in the order they are listed.
+    matches: Vec<usize>,
+    /// Whether the New row shows ([`shows_new_row`]), whatever the read's state.
+    new: bool,
+    /// Whether the read is still loading, when no row can be selected, the New row included.
+    loading: bool,
+}
+
+/// Whether `query` offers the New row: its trimmed text is not empty and does not start with `tl:` in any case, the
+/// templates' prefix (the old switcher's `show_new`, which left the row out in template mode).
+fn shows_new_row(query: &str) -> bool {
+    let query = query.trim();
+    !query.is_empty()
+        && !query
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("tl:"))
+}
+
+/// A row the selection can rest on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Selected {
+    /// The session at this index in the listing.
+    Session(usize),
+    /// The New row.
+    New,
+}
+
+impl Rows {
+    /// How many rows the arrows walk: none while loading (the old switcher counted none until its read answered, so
+    /// Enter could not mistake a list still on its way for one with no matches), else every match and the New row.
+    fn reachable(&self) -> usize {
+        if self.loading {
+            0
+        } else {
+            self.matches.len() + usize::from(self.new)
+        }
+    }
+
+    /// The row at position `selected`, kept within the reachable rows (so the last one when the rows got fewer); `None`
+    /// when no row is reachable.
+    fn selected(&self, selected: usize) -> Option<Selected> {
+        let count = self.reachable();
+        if count == 0 {
+            return None;
+        }
+        let position = selected.min(count - 1);
+        Some(match self.matches.get(position) {
+            Some(&index) => Selected::Session(index),
+            None => Selected::New,
+        })
+    }
+}
+
+/// The New row for the trimmed query `name` (the old `.quick-switcher-new`): `New session named "name"`, with the name
+/// escaped as host text since it may hold characters that draw as nothing (the old `display_peer`), in a row with the
+/// result rows' box and a top edge in the dialog's border ink that sets it apart from the matches above. On the
+/// selected row the accent edge goes all the way round instead, as in the old sheet, where the selected rule outranked
+/// the top edge's. A click on it does `on_click`.
+fn new_row(
+    name: &str,
+    selected: bool,
+    palette: &Palette,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let sentence = HostSentence::new("quick-switcher-new-text")
+        .text("New session named \"")
+        .host(&HostText::from_host(name))
+        .text("\"");
+    let ink = if selected {
+        palette.on_fill
+    } else {
+        palette.fg_0
+    };
+    let row = OptionRow::new(
+        NEW_ROW_ID,
+        sentence.accessible_name(),
+        HoverHelp::tooltip(NEW_ROW_HELP),
+        Role::ListBoxOption,
+    )
+    .selected(selected)
+    .on_click(on_click)
+    .child(
+        div()
+            .min_w_0()
+            .truncate()
+            .text_color(theme::color(ink))
+            .child(sentence),
+    );
+    // GPUI draws one edge color for every side, so the old `border-top-color` is a one-pixel line laid over the row's
+    // transparent top edge, drawn after the row so that its hover fill does not cover it.
+    div()
+        .flex_none()
+        .relative()
+        .child(row)
+        .when(!selected, |row| {
+            row.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(1.))
+                    .bg(theme::color(palette.border_dialog)),
+            )
+        })
+        .into_any_element()
 }
 
 /// The 12-pixel quiet line the old heading, footer and cap notice shared.

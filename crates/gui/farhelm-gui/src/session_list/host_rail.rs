@@ -125,24 +125,43 @@ impl SessionList {
     /// control keeps focus"), also where a click focuses no button (macOS), as the old app focused it explicitly.
     /// `mark` is the one taken in the control's handler.
     fn toggle_hosts(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
-        let current = self.current.current(cx);
-        current.hosts_shown = !current.hosts_shown;
-        if current.hosts_shown {
-            self.hosts_panel.update(cx, |panel, cx| panel.shown(cx));
+        if self.current.current(cx).hosts_shown {
+            self.hide_hosts(cx);
         } else {
-            self.hosts_panel.update(cx, |panel, cx| panel.hidden(cx));
+            self.show_hosts(cx);
         }
-        cx.notify();
         focus::focus_control(&self.hosts_focus, mark, window, cx);
     }
 
-    /// Show the Hosts panel, as pressing Hosts does, without a press or a focus move: for a golden scene, which has no
-    /// focus handle of the foot to hand a mark to.
-    #[cfg(test)]
+    /// Show Sessions in place of the Hosts panel, if the panel shows, without a focus move. The query, the sort and the
+    /// open session are untouched. Every path that hides the panel goes through here, because the panel must hear of it
+    /// ([`HostsPanel::hidden`]: the rail's warnings keep their own copy of whether Hosts shows): Hosts pressed again,
+    /// SPEC.md's returns to Sessions ("All or a host avatar returns to Sessions, as does an accepted quick-switcher pick
+    /// or New handoff"; [`Self::choose_host`], [`Self::picked_from_switcher`], [`super::open_new`]). Unguarded: none of
+    /// those runs while the window is inert, and a reset shows Sessions on its own.
+    ///
+    /// [`HostsPanel::hidden`]: crate::hosts::HostsPanel::hidden
+    pub(super) fn hide_hosts(&mut self, cx: &mut Context<Self>) {
+        let current = self.current.current(cx);
+        if current.hosts_shown {
+            current.hosts_shown = false;
+            self.hosts_panel.update(cx, |panel, cx| panel.hidden(cx));
+            cx.notify();
+        }
+    }
+
+    /// Show the Hosts panel in place of the list's column, if it does not show, without a focus move. The one path
+    /// that shows it, because the panel must hear of it ([`HostsPanel::shown`], which acknowledges the hosts' warnings):
+    /// Hosts pressed, and a golden scene, which has no focus handle of the foot to hand a mark to.
+    ///
+    /// [`HostsPanel::shown`]: crate::hosts::HostsPanel::shown
     pub(crate) fn show_hosts(&mut self, cx: &mut Context<Self>) {
-        self.current.current(cx).hosts_shown = true;
-        self.hosts_panel.update(cx, |panel, cx| panel.shown(cx));
-        cx.notify();
+        let current = self.current.current(cx);
+        if !current.hosts_shown {
+            current.hosts_shown = true;
+            self.hosts_panel.update(cx, |panel, cx| panel.shown(cx));
+            cx.notify();
+        }
     }
 }
 

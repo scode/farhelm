@@ -2,24 +2,23 @@
 """End-to-end smoke test of the GPUI app: the real app, its embedded helm and a real supervisor with fake agents,
 driven through the test-automation bridge (`scripts/gui-agent.py`, `docs/gui-agent.md`).
 
-NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice's path through the app once each
-(the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
+NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice's path through the app once each (the
+session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
-Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the
-host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
-rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
-and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's
-Help menu and SSH help; 46, the session list's order menu; 47, the settings-and-hosts area's host Update, its
-progress, failure and rerun; 48, the other-dialogs area's Send feedback, up to but never including Send; 49, the
-session list header's Trash; 50, the session view's open session that a status filter hides, named and
-renamed). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
-`hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`); nothing here checks layout or wording beyond the names
-it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
-session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match
-in drawing order, which is the header's.
+Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the host
+rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host rail's Add
+host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure and rerun in the
+Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's Help menu and SSH help; 46, the
+session list's order menu; 47, the settings-and-hosts area's host Update, its progress, failure and rerun; 48, the
+other-dialogs area's Send feedback, up to but never including Send; 49, the session list header's Trash; 50, the session
+view's open session that a status filter hides, named and renamed; 51, the session list heading's New and the quick
+switcher's New row). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
+`session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`,
+`trash/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
+(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
+Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -134,6 +133,10 @@ FEEDBACK_REUSE = "Re-use for future feedback"
 # The Trash dialog's opening words: drawn whatever the hosts' trash holds, so the oracle for the dialog open and closed
 # (step 49).
 TRASH_INTRO = "Folders of managed checkouts whose last session was deleted."
+
+# The launcher's header summary in New: text only the open launcher draws (New's hover help says it with a lowercase
+# "start", which this does not match), so waiting for it (or for it to go) tells whether the launcher is open (step 51).
+LAUNCHER_SUMMARY = "Start an agent or a command on any host"
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -1288,6 +1291,50 @@ class Smoke(unittest.TestCase):
             result = agent("click", "id:session-status-All")
             if result.returncode != 0 and not failing:
                 self.fail(f"choosing All again failed:\n{result.stdout}{result.stderr}")
+
+    # ---- The session list's New and the quick switcher's New row (51), on a session of their own ---------------------
+
+    def test_51_new_and_the_switchers_new_row_open_the_launcher(self) -> None:
+        """New is how a session starts, and both of the window's triggers for it reach the launcher through the helm's
+        live state: the heading's button, and the quick switcher's "New session named X" row, which needs the switcher's
+        own read of the helm's listing first. Neither may start a session (SPEC.md: "Launch remains the user's action").
+        Specified, with this step's own session open (titled with a per-run stamp): a click on the heading's New opens
+        the launcher (its "Start an agent or a command on any host" summary) and Escape closes it; the platform's chord
+        opens the switcher, a name filled into its search field offers `New session named "<name>"`, and a click on
+        that row closes the switcher and opens the launcher with the name in its Name field; Escape closes it, and the
+        helm lists the same sessions as before and still remembers this step's session as the last selected."""
+        stamp = uuid.uuid4().hex[:8]
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"New origin {stamp}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        origin = eventually(lambda: listed_id(title), f"{title} in the helm's listing")
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        eventually(lambda: last_selected() == origin, "premise: the helm remembering the session as selected")
+        before = set(listed_titles())
+
+        self.ok("click", "id:new-session-button")
+        self.ok("wait", "--text", LAUNCHER_SUMMARY)
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", LAUNCHER_SUMMARY)
+
+        name = f"named-{stamp}"
+        self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
+        self.ok("wait", "--text", "Recent sessions")
+        self.ok("fill", "text:Search sessions", name)
+        self.ok("wait", "--text", "New session named")
+        self.assertIn(f'New session named \\"{name}\\"', self.ok("snapshot", "-i"), "the row names the typed name")
+        self.ok("click", "id:quick-switcher-new")
+        self.ok("wait", "--gone", SWITCHER_FOOTER)
+        self.ok("wait", "--text", LAUNCHER_SUMMARY)
+        self.ok("wait", "--text", name)
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", LAUNCHER_SUMMARY)
+        self.assertEqual(set(listed_titles()), before, "neither New started a session")
+        self.assertEqual(last_selected(), origin, "and the open session is unchanged")
 
 
 def trash_close_focused(snapshot: str) -> bool:
