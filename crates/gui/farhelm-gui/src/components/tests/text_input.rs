@@ -1,5 +1,5 @@
-//! Tests of the text input: the events it reports to its owner, the growing box, the field that keeps line breaks, and
-//! the Up and Down keys it hands to the owner of the list beside it.
+//! Tests of the text input: the events it reports to its owner, the growing box, the field that keeps line breaks,
+//! whether an Enter was a held repeat, and the Up and Down keys it hands to the owner of the list beside it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -114,7 +114,10 @@ fn a_text_input_reports_edits_and_enter_and_not_a_value_set_by_its_owner(cx: &mu
     );
 
     keys(cx, "enter");
-    assert_eq!(*events.borrow(), [TextInputEvent::Submitted]);
+    assert_eq!(
+        *events.borrow(),
+        [TextInputEvent::Submitted { held: false }]
+    );
     let text = cx.update(|_, cx| field.read(cx).state.text(cx));
     assert_eq!(
         text.as_ref(),
@@ -371,14 +374,14 @@ fn typing_enter_in_the_field_that_keeps_line_breaks_submits_and_inserts_nothing(
         keys(cx, chord);
         assert_eq!(
             take(cx, kept),
-            ("ab".into(), vec![TextInputEvent::Submitted]),
+            ("ab".into(), vec![TextInputEvent::Submitted { held: false }]),
             "{chord} submitted and inserted nothing"
         );
         keys(cx, SELECT_ALL);
         keys(cx, chord);
         assert_eq!(
             take(cx, kept),
-            ("ab".into(), vec![TextInputEvent::Submitted]),
+            ("ab".into(), vec![TextInputEvent::Submitted { held: false }]),
             "{chord} with the text selected submitted and replaced nothing"
         );
         keys(cx, "end");
@@ -390,6 +393,110 @@ fn typing_enter_in_the_field_that_keeps_line_breaks_submits_and_inserts_nothing(
         take(cx, &fields[1]).0,
         "x",
         "Tab moved focus on to the next field"
+    );
+}
+
+// ---- A held Enter ---------------------------------------------------------------------------------------------------
+
+/// Why this matters: Kit's field submits on every auto-repeat of a held Enter, and an owner whose main action must run
+/// once per press (SPEC.md for the launcher: "A held Enter never launches") can tell a repeat from a press only by what
+/// the event says. A flag read from the wrong key-down would launch on a repeat or drop a real press.
+///
+/// Specification: in the single-line field and in the field that keeps line breaks, a fresh Enter reports
+/// `Submitted { held: false }`, its auto-repeat `Submitted { held: true }`, and the next fresh Enter
+/// `Submitted { held: false }` again, each with nothing else, and the text stays as typed.
+#[gpui::test]
+fn an_enter_says_whether_it_was_a_held_repeat(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("line", TextInputState::new),
+            ("kept", TextInputState::new_keeping_line_breaks),
+        ],
+    );
+    for (selector, field) in ["line", "kept"].into_iter().zip(&fields) {
+        click(cx, selector);
+        keys(cx, "a");
+        assert_eq!(
+            take(cx, field),
+            ("a".into(), vec![TextInputEvent::Changed]),
+            "the premise: {selector} has focus"
+        );
+        for held in [false, true, false] {
+            super::press(cx, "enter", held);
+            assert_eq!(
+                take(cx, field),
+                ("a".into(), vec![TextInputEvent::Submitted { held }]),
+                "{selector}: an Enter with held {held}"
+            );
+        }
+    }
+}
+
+/// Why this matters: Enter pressed elsewhere (on one field, or on a control that moves focus) can go on repeating into
+/// a field once focus is there. Were that first repeat reported as a fresh press, an owner's once-per-press action
+/// would run on a key the user pressed for something else. The checkbox, the radio group and the select read the
+/// platform's held flag the same way, so no control disagrees about which Enter is held.
+///
+/// Specification: after a fresh Enter in one field and a click on a second, the held repeat that arrives in the second
+/// reports `Submitted { held: true }` there, and the first field reports nothing more.
+#[gpui::test]
+fn a_held_enter_first_pressed_elsewhere_is_held_in_the_field(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("first", TextInputState::new),
+            ("second", TextInputState::new),
+        ],
+    );
+    click(cx, "first");
+    super::press(cx, "enter", false);
+    assert_eq!(
+        take(cx, &fields[0]).1,
+        [TextInputEvent::Submitted { held: false }],
+        "the premise: the first press was the first field's"
+    );
+    click(cx, "second");
+    // Asserted rather than shown by typing, which would put a keystroke between the press and its repeat.
+    assert!(
+        cx.update(|window, cx| fields[1].read(cx).state.focus_handle(cx).is_focused(window)),
+        "the premise: the second field has focus"
+    );
+    super::press(cx, "enter", true);
+    assert_eq!(
+        take(cx, &fields[1]).1,
+        [TextInputEvent::Submitted { held: true }]
+    );
+    assert_eq!(take(cx, &fields[0]).1, [], "the first field saw no repeat");
+}
+
+/// Why this matters: an Enter chord Kit has no binding for (Alt+Enter) passes the field's key-down listener and submits
+/// nothing, so its held flag stays recorded. The Shift+Enter that the field keeping line breaks rewrites at the action
+/// never passes that listener; were it to read the leftover flag, a fresh press would be reported as held, and an owner
+/// that skips held Enters would drop it.
+///
+/// Specification: in the field that keeps line breaks, a held Alt+Enter reports nothing and leaves the text, and a
+/// fresh Shift+Enter after it reports `Submitted { held: false }`.
+#[gpui::test]
+fn a_shift_enter_never_reads_an_earlier_enter_that_submitted_nothing(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(cx, &[("kept", TextInputState::new_keeping_line_breaks)]);
+    click(cx, "kept");
+    keys(cx, "a");
+    assert_eq!(
+        take(cx, &fields[0]),
+        ("a".into(), vec![TextInputEvent::Changed]),
+        "the premise: kept has focus"
+    );
+    super::press(cx, "alt-enter", true);
+    assert_eq!(
+        take(cx, &fields[0]),
+        ("a".into(), vec![]),
+        "the premise: a held Alt+Enter submits nothing"
+    );
+    super::press(cx, "shift-enter", false);
+    assert_eq!(
+        take(cx, &fields[0]),
+        ("a".into(), vec![TextInputEvent::Submitted { held: false }])
     );
 }
 

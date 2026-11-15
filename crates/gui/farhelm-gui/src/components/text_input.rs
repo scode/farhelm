@@ -11,7 +11,8 @@
 //! An editor learns what happens in the field through [`TextInputState::subscribe`]: every edit the user makes
 //! ([`TextInputEvent::Changed`], which a draft mirrors) and Enter ([`TextInputEvent::Submitted`], which saves). Kit's
 //! own event type stays behind this module, so the rest of the app never matches on Kit's variants. Every kind of field
-//! reports edits the same way and is drawn by the same [`TextInput`]; only the growing box reports no Enter.
+//! reports edits the same way and is drawn by the same [`TextInput`]; only the growing box reports no Enter. Each Enter
+//! says whether it was a held key's repeat (the section "A held Enter" below).
 //!
 //! ## Line breaks
 //!
@@ -50,9 +51,25 @@
 //! NOTE: A lone `\r` is kept but is not a line break in Kit's layout; it draws as whatever the font has for it. A
 //! pasted `\r\n` breaks the line at its `\n` and keeps the `\r` at the end of the first line.
 //!
-//! NOTE: Enter's event comes from Kit's binding, which runs on every auto-repeat, so a held Enter submits again on each
-//! repeat. An editor that saves through the operation store is refused while its save is in flight, which covers the
-//! Rename editor; SPEC.md's "Repeated or composing Enter cannot answer" a question is the prompt's, not this field's.
+//! ## A held Enter
+//!
+//! Enter's event comes from Kit's binding, which runs on every auto-repeat, so a held Enter submits again on each
+//! repeat. The field does not drop those repeats, since that would change every editor at once: one that saves through
+//! the operation store is refused while its save is in flight, which covers the Rename editor, and SPEC.md's "Repeated
+//! or composing Enter cannot answer" a question is the prompt's, not this field's. It says instead which Enter was a
+//! repeat ([`TextInputEvent::Submitted`]'s `held`), so an owner whose main action must run once per press (the
+//! launcher's: "A held Enter never launches") skips the held ones, as the checkbox, the radio group and the select skip
+//! held keys.
+//!
+//! Only a key-down says whether it was held, and Kit's binding runs before any key listener sees it (SPEC_impl.md,
+//! "GPUI cookbook: traps", "Key bindings beat key listeners"). [`TextInput`] records the Enter key-down as it passes
+//! the field's wrapper, after Kit has emitted its event; the event reaches the owner's subscription only when GPUI
+//! flushes effects after the whole keystroke ("Effects flush only after the outermost update returns"), and reads the
+//! record then.
+//!
+//! NOTE: Shift+Enter in the field that keeps line breaks is turned into a plain Enter at the action, which then stops
+//! the keystroke, so no key listener sees its key-down. It is reported as not held, a held one included. No owner of
+//! that field yet runs an action that must ignore a held Enter.
 //!
 //! ## Up and Down
 //!
@@ -96,8 +113,17 @@ pub enum TextInputEvent {
     /// Enter never edits it.
     Changed,
     /// The user pressed Enter in the field (with or without Shift or the platform modifier): the editor's main action.
-    /// Never reported by a growing box ([`TextInputState::new_growing`]), where Enter types a line break.
-    Submitted,
+    /// Never reported by a growing box ([`TextInputState::new_growing`]), where Enter types a line break. A subscriber
+    /// that treats a held Enter like any other matches `Submitted { .. }`.
+    Submitted {
+        /// Whether this Enter was an auto-repeat of a key already down: the platform's `is_held`, which the checkbox,
+        /// the radio group and the select read the same way. That is so wherever the key's first press went, so a held
+        /// Enter that carried focus into this field from another control is held here too. Reported, never acted on:
+        /// whether a held Enter may run the editor's action is the editor's to decide (the module docs, "A held
+        /// Enter"). Always `false` for a Shift+Enter in the field that keeps line breaks
+        /// ([`TextInputState::new_keeping_line_breaks`]), whose key-down no listener sees (the module docs' NOTE).
+        held: bool,
+    },
 }
 
 /// Which of Kit's fields holds the text.
@@ -120,9 +146,17 @@ pub(crate) const GROWING_MAX_ROWS: usize = 12;
 /// shows the input for as long as it shows it.
 ///
 /// Clones share the state, and with it the text as last reported or set, which [`TextInputEvent::Changed`] is judged
-/// against, and whether the field is read-only ([`TextInputState::set_read_only`]).
+/// against, whether the field is read-only ([`TextInputState::set_read_only`]), and the held flag of the last Enter
+/// key-down that passed [`TextInput`] and no submission has read yet (the module docs, "A held Enter"). An Enter that
+/// submits nothing, such as Alt+Enter, leaves its flag there until the next Enter key-down overwrites it or a
+/// submission reads or clears it.
 #[derive(Clone)]
-pub struct TextInputState(Field, Rc<RefCell<SharedString>>, Rc<Cell<bool>>);
+pub struct TextInputState(
+    Field,
+    Rc<RefCell<SharedString>>,
+    Rc<Cell<bool>>,
+    Rc<Cell<Option<bool>>>,
+);
 
 impl TextInputState {
     /// A new, empty single-line input state with Kit's right-click menu turned off. Line breaks inserted in any way
@@ -149,6 +183,7 @@ impl TextInputState {
             })),
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(None)),
         )
     }
 
@@ -169,6 +204,7 @@ impl TextInputState {
             Field::Row(area),
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(None)),
         )
     }
 
@@ -187,6 +223,7 @@ impl TextInputState {
             Field::Area(area),
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(None)),
         )
     }
 
@@ -274,6 +311,7 @@ impl TextInputState {
         on_event: impl Fn(&mut V, TextInputEvent, &mut Window, &mut Context<V>) + 'static,
     ) -> Subscription {
         let last = self.1.clone();
+        let held = self.3.clone();
         // Kit emits its Enter event in a growing box too, after typing the line break; there it is an edit, not a
         // submission. Exhaustive, so a new kind decides whether Enter submits it.
         let submits = match self.0 {
@@ -295,7 +333,10 @@ impl TextInputState {
                     last.replace(text);
                     TextInputEvent::Changed
                 }
-                InputEvent::PressEnter { .. } if submits => TextInputEvent::Submitted,
+                // Taken, so a later Enter whose key-down this field never saw cannot read this one's.
+                InputEvent::PressEnter { .. } if submits => TextInputEvent::Submitted {
+                    held: held.take().unwrap_or(false),
+                },
                 InputEvent::PressEnter { .. } => return,
                 InputEvent::Focus | InputEvent::Blur => return,
             };
@@ -447,6 +488,14 @@ impl RenderOnce for TextInput {
         let handle = self.state.focus_handle(cx);
         let wrapper = crate::focus::record_position(wrapper, &handle);
         let wrapper = super::with_hover_help(wrapper, &self.id, &self.help, false, window, cx);
+        // Whether the Enter is held, for its submission (the module docs, "A held Enter"). In the capture phase, so the
+        // field's own listeners cannot stop the key-down before it is recorded.
+        let (held, unheld) = (self.state.3.clone(), self.state.3.clone());
+        let wrapper = wrapper.capture_key_down(move |event, _, _| {
+            if event.keystroke.key == "enter" {
+                held.set(Some(event.is_held));
+            }
+        });
         // Caught on the way down, in the capture phase, because Kit's own handler on the field consumes both actions
         // and stops them there (the module docs, "Up and Down").
         let wrapper = match self.on_vertical {
@@ -490,6 +539,9 @@ impl RenderOnce for TextInput {
                 // before Kit's own handler on the field sees it, it is sent on as a plain Enter, which Kit submits.
                 .capture_action(move |action: &Enter, window, cx| {
                     if action.shift {
+                        // Stopped at the action, so no key-down is recorded: reported as not held, rather than as
+                        // whatever an earlier Enter left (the module docs, "A held Enter").
+                        unheld.set(None);
                         let plain = Enter {
                             secondary: action.secondary,
                             shift: false,

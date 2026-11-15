@@ -198,7 +198,7 @@ impl DraftInput {
         input.set_text(value.to_owned(), window, cx);
         let events = input.subscribe(window, cx, move |view, event, window, cx| match event {
             TextInputEvent::Changed => field(view).edited(window, cx),
-            TextInputEvent::Submitted => on_submit(view, window, cx),
+            TextInputEvent::Submitted { .. } => on_submit(view, window, cx),
         });
         DraftInput {
             draft: Draft::load(value.to_owned()),
