@@ -3070,8 +3070,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - A terminal recovering on its own reattaches the ordinary way: the window holding the seat is the session's only
   viewer, so there is no one else to leave alone. One race remains. A window that was just displaced can have a terminal
   reconnect land before the helm's notice that it was displaced, taking that terminal from the window that now holds the
-  seat. That window gets it back by attaching again, as it does when its own attachment is replaced (decided 2026-11-15;
-  until that is built, the terminal shows that it was taken over and offers Take control).
+  seat. That window gets it back by itself, attaching again after the same short wait as when its own attachment is
+  replaced, with nothing for the user to do (decided 2026-11-15).
 - Selecting text copies it to the system clipboard: a plain drag when the pane has no mouse reporting active, or
   Shift-drag (Option-drag on macOS) to force a local selection when it does — the same modifier xterm itself uses to win
   a selection back from an app that has grabbed the mouse. A terminal program's own OSC 52 WRITE is honored the same

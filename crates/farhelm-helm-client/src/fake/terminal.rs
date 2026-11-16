@@ -53,8 +53,8 @@ pub enum FakeTerminalRequest {
     /// size as the socket's first message once that socket opens ([`FakeAttach::resize_on_open`]). At any other time
     /// (waiting for the user, between reconnect attempts) it only stores the size for the next attach's query.
     Resize { cols: u16, rows: u16 },
-    /// The user's "Take control". It attaches again only from `Detached` or `Refused`; anywhere else the real stream
-    /// ignores it.
+    /// A take-control request (the GUI's Reconnect on the terminal's status line). It attaches again only from
+    /// `Detached` or `Refused`; anywhere else the real stream ignores it.
     TakeControl,
     /// A request to end a reconnect's wait early. During a wait the fake starts the attempt, as the real stream does;
     /// anywhere else it is ignored.
@@ -200,8 +200,8 @@ impl FakeTerminal {
         self.emit(TerminalEvent::ReplayComplete);
     }
 
-    /// The helm detached this viewer. `taken_over`, `tab_closed` and `stalled` stop the stream in `Detached` until the
-    /// GUI takes control; `replaced`, `other` and a missing code reconnect, so the GUI sees `Reconnecting`. Panics
+    /// The helm detached this viewer. `tab_closed` and `stalled` stop the stream in `Detached` until the GUI takes
+    /// control; `replaced`, `taken_over`, `other` and a missing code reconnect, so the GUI sees `Reconnecting`. Panics
     /// unless a socket is open.
     pub fn detach(&mut self, code: Option<DetachCode>, reason: &str) {
         self.require_socket();
@@ -469,7 +469,8 @@ mod tests {
     }
 
     /// GUI tests trust this fake in place of a real terminal stream, so it must keep the stream's contract: the state
-    /// sequence of an attachment, a reconnect and a takeover, and `Closed` on close. All of it with no runtime.
+    /// sequence of an attachment, a reconnect and a detach that stops the stream, and `Closed` on close. All of it
+    /// with no runtime.
     #[test]
     fn the_fake_keeps_the_streams_states() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
@@ -510,13 +511,13 @@ mod tests {
         );
         assert_eq!(events.try_recv(), Some(TerminalEvent::ReplayComplete));
 
-        // A takeover waits for the user; take-control attaches again.
-        fake.detach(Some(DetachCode::TakenOver), "taken over");
+        // A stall waits for the user; take-control attaches again.
+        fake.detach(Some(DetachCode::Stalled), "stalled");
         assert_eq!(
             state(events.try_recv()),
             StreamState::Detached {
-                code: Some(DetachCode::TakenOver),
-                reason: "taken over".into()
+                code: Some(DetachCode::Stalled),
+                reason: "stalled".into()
             }
         );
         handle.take_control();
@@ -561,7 +562,7 @@ mod tests {
         fake.replay_complete();
 
         // The size at take-control goes in the query; one sent after it follows on the socket.
-        fake.detach(Some(DetachCode::TakenOver), "taken over");
+        fake.detach(Some(DetachCode::Stalled), "stalled");
         handle.resize(120, 40);
         handle.take_control();
         handle.resize(90, 20);
@@ -576,7 +577,7 @@ mod tests {
         fake.replay_complete();
 
         // A resize there and back while connecting leaves the query's size current, so nothing follows it.
-        fake.detach(Some(DetachCode::TakenOver), "taken over");
+        fake.detach(Some(DetachCode::Stalled), "stalled");
         handle.take_control();
         handle.resize(70, 20);
         handle.resize(90, 20);
@@ -615,7 +616,7 @@ mod tests {
         fake.replay_complete();
 
         // The same after take-control: its first attempt fails, and the retry asks for the size held since.
-        fake.detach(Some(DetachCode::TakenOver), "taken over");
+        fake.detach(Some(DetachCode::Stalled), "stalled");
         handle.take_control();
         assert_eq!(fake.phase(), FakePhase::Attaching);
         handle.resize(120, 40);
@@ -683,13 +684,17 @@ mod tests {
     }
 
     /// The fake decides which detach codes stop the stream by calling the real stream's own `detach_stops`, so the
-    /// two cannot disagree on a code. This test pins one stopping and one reconnecting code, and that the fake acts on
-    /// both answers: a stopping code waits in `Detached`, any other reconnects.
+    /// two cannot disagree on a code. This test pins a stopping code (`stalled`), `replaced` and `taken_over`, the last
+    /// of which reconnects exactly as `replaced` does (in the single-UI app its only source is a window that was just
+    /// displaced reconnecting a terminal before its Displaced notice arrived, and the window holding the seat attaches
+    /// again), and that the fake acts on both answers: a stopping code waits in `Detached`, any other reconnects on the
+    /// ladder's first rung.
     #[test]
     fn a_detach_stops_or_reconnects_by_the_real_streams_rule() {
         for (code, stops) in [
-            (Some(DetachCode::TakenOver), true),
+            (Some(DetachCode::Stalled), true),
             (Some(DetachCode::Replaced), false),
+            (Some(DetachCode::TakenOver), false),
         ] {
             let (mut fake, _handle, mut events) = FakeTerminal::open(&attach());
             fake.attach();
@@ -709,8 +714,8 @@ mod tests {
     }
 
     /// A refusal (a revoked credential, a session that is gone) is the one state besides a detach that only the user
-    /// ends, so the GUI's "Take control" action must work from it: input meanwhile is dropped, take-control attaches
-    /// again, and closing still reports `Closed`.
+    /// ends, so the GUI's take-control request (its Reconnect) must work from it: input meanwhile is dropped,
+    /// take-control attaches again, and closing still reports `Closed`.
     #[test]
     fn a_refusal_waits_for_take_control() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());

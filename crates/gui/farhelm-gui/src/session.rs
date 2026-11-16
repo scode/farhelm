@@ -559,7 +559,8 @@ impl UiSession {
     }
 
     /// File transfers through this session's connection to the helm: the plain-HTTP side beside the channel, for a
-    /// terminal's file links. `None` only when the connection has no helm client (tests that serve none).
+    /// terminal's file links and its uploads (pasted or dropped files). `None` only when the connection has no helm
+    /// client (tests that serve none).
     ///
     /// Unlike [`UiSession::terminal_opener`], this does not stop at retirement: a transfer is an HTTP request of its
     /// own, not part of the channel the reset replaced, and the terminals that hold it are retired with the session.
