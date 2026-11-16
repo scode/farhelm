@@ -26,18 +26,37 @@ now a stalled viewer's, since a displaced window shows no terminal (decided by t
 `a_stalled_snapshot_still_selects_and_copies_and_sends_nothing`. A detach during the first replay (now a stall, for the
 same reason), with no earlier screen, keeps what arrived of it as the snapshot by
 crates/gui/farhelm-gui/src/terminal/attached/tests.rs `a_stall_during_the_first_replay_keeps_what_arrived` (it was
-missing: the pane stayed blank); a replay cut off by a dropped link instead reconnects and replays, which is the
-recovery work's. Its file-link cases by crates/gui/farhelm-gui/src/terminal/files/tests.rs: "a printed path hovers with
-its host check and downloads on click" by `a_click_saves_into_downloads_and_the_line_says_where`; "a redraw that changes
-the hovered path withdraws its click; the same text redrawn keeps it" by
-`a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`; "in the desktop app, the platform's
-modifier-click opens an allowed file after saving it" by `the_modifier_click_opens_only_what_the_helm_offered`; "a
-relabelled OSC 8 file link is checked afresh and downloads" by `a_relabel_withdraws_the_click_until_checked_again`. Not
-ported, by SPEC.md's own decision: a change to only an adjacent row of a hovered link judged again (the warning "need
-not follow later redraws of other rows while the pointer rests", "Terminal experience"). Superseded: a pointer move
-between a relabel and its paint (the browser's frame timing; the GPUI view looks the hover up again as the output
-applies). Its attachment cases by crates/gui/farhelm-gui/src/terminal/attachments/tests.rs: the paste through the
-attachment rules (a copied file winning over the text the clipboard also carries, and its host path typed as a paste) by
+missing: the pane stayed blank). Its "a grid frame that breaks the format ends the attachment with a visible error"
+case, whose harness had no reconnect policy, now with the old app's policy (the fault is a transport loss: a fresh
+attach and a full replay, and the red band only once recovery stops): the faulted stream is closed and a new one
+attaches at the fitted size after the ladder's first rung, its replay replacing the kept screen only once complete,
+under the reconnect card with no red band and none of the fault's words, by
+crates/gui/farhelm-gui/src/terminal/attached/tests.rs
+`a_protocol_fault_restarts_the_stream_and_its_replay_replaces_the_screen`; a fault on every replay waiting 0.5, 1, 2, 4,
+8 and 15 s and the seventh showing "Terminal stream error: " with the model's words and Reconnect, with nothing
+restarting after it, by `repeated_protocol_faults_back_off_and_end_in_the_red_band` (a recorded deviation from the old
+app, which probed every 30 s forever: a peer that breaks the format will not be fixed by a full replay every 30 s, which
+would also spend idle CPU for nothing; decided by the migration's orchestrator on 2026-11-16); Reconnect from there
+attaching at once and counting from the first rung by `reconnect_after_the_stream_error_attaches_a_fresh_stream`;
+Reconnect now skipping a restart's wait by `reconnect_now_skips_a_restarts_wait`; the count starting over only once a
+restart has stayed live 15 s by `the_fault_count_starts_over_only_once_a_restart_has_held`; edge cases by
+`a_fault_after_a_restart_went_live_keeps_climbing_past_the_hold`, `the_rest_of_a_faulted_streams_batch_is_not_applied`,
+`a_resize_during_a_restarts_wait_waits_for_the_restart`, `a_resize_under_the_stream_error_opens_nothing`,
+`a_restarts_first_screen_at_another_size_is_resized_once`, `a_reset_during_a_restarts_wait_opens_nothing` and
+`a_reset_under_the_stream_error_leaves_reconnect_inert`. The fault's text goes to the log while recovering, which no
+test reads, and the old case's bad foreground color stands in as a second hello, another message the model refuses; a
+replay cut off by a dropped link instead reconnects and replays, which is the recovery work's. Its file-link cases by
+crates/gui/farhelm-gui/src/terminal/files/tests.rs: "a printed path hovers with its host check and downloads on click"
+by `a_click_saves_into_downloads_and_the_line_says_where`; "a redraw that changes the hovered path withdraws its click;
+the same text redrawn keeps it" by `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`;
+"in the desktop app, the platform's modifier-click opens an allowed file after saving it" by
+`the_modifier_click_opens_only_what_the_helm_offered`; "a relabelled OSC 8 file link is checked afresh and downloads" by
+`a_relabel_withdraws_the_click_until_checked_again`. Not ported, by SPEC.md's own decision: a change to only an adjacent
+row of a hovered link judged again (the warning "need not follow later redraws of other rows while the pointer rests",
+"Terminal experience"). Superseded: a pointer move between a relabel and its paint (the browser's frame timing; the GPUI
+view looks the hover up again as the output applies). Its attachment cases by
+crates/gui/farhelm-gui/src/terminal/attachments/tests.rs: the paste through the attachment rules (a copied file winning
+over the text the clipboard also carries, and its host path typed as a paste) by
 `a_pasted_file_is_uploaded_and_its_host_path_typed`, and the drop that uploads the file and types its path by
 `two_dropped_files_are_typed_as_two_words_in_order` (a native drop navigates nowhere, so that half needs no test).
 Pending: the rest of the spec; refusing a link or tunnel click whose display another Farhelm surface covers (it waits
@@ -359,22 +378,23 @@ the kept screen, with no red band and without taking focus, by crates/gui/farhel
 `a_dropped_stream_shows_the_reconnect_card_over_the_kept_screen`; one press sends one reconnect-now request by
 `reconnect_now_sends_one_request_per_press`, and the keyboard reaches and presses it by
 `reconnect_now_is_reached_and_pressed_from_the_keyboard`; the card stays through the reconnect's catch-up and goes when
-it is live by `the_card_stays_through_the_reconnects_catch_up_and_goes_when_it_is_live`; stalls, refusals, closes and
-protocol faults keep the red band by `detached_refused_and_closed_streams_keep_the_red_band` and
-`a_fault_during_a_reconnect_ends_the_card`; the card's look, and its cut-short scrolling pane, by no golden since the
-repository stopped taking new ones (decided by the migration's orchestrator on 2026-11-15), and by no app scene yet,
-since the screenshot batch cannot drop a terminal's stream. A Restart reattaching without the card or a red band, held
-for the whole recovery the Restart began because the helm answers it before the reattach, by
-crates/gui/farhelm-gui/src/session_pane/tests.rs `a_restart_reattaches_without_a_card_or_a_red_band`, and the card once
-an attempt fails, or the reattach drops before it goes live, by `a_restarts_failed_reattach_shows_the_card` and
-`a_restarts_reattach_that_drops_mid_replay_shows_the_card` (decided by the migration's orchestrator on 2026-11-15). A
-stuck Restart stays silent for at most about a minute: the first attempt's socket must open within the stream's 30 s
-watchdog, and an opened one that never attaches is ended by the same watchdog, after which the second attempt shows the
-card. The bound does not cover a reattach that attaches and then stalls in its replay while its link keeps answering
-pings: that one stays hidden until it fails, drops or completes. Tab terminals are not held, since a Restart detaches no
-tab, by crates/gui/farhelm-gui/src/terminal/set/tests.rs `a_restart_does_not_hold_a_tabs_reconnect_card`; an inert
-terminal draws no card by crates/gui/farhelm-gui/src/terminal/attached/tests.rs
-`an_inert_terminal_draws_no_reconnect_card`, and the card keeps presses from the screen behind it by
+it is live by `the_card_stays_through_the_reconnects_catch_up_and_goes_when_it_is_live`; stalls, refusals and closes
+keep the red band by `detached_refused_and_closed_streams_keep_the_red_band`, while a protocol fault in the reconnect's
+catch-up keeps the card and restarts the stream by `a_fault_during_a_reconnects_catch_up_restarts_it`; the card's look,
+and its cut-short scrolling pane, by no golden since the repository stopped taking new ones (decided by the migration's
+orchestrator on 2026-11-15), and by no app scene yet, since the screenshot batch cannot drop a terminal's stream. A
+Restart reattaching without the card or a red band, held for the whole recovery the Restart began because the helm
+answers it before the reattach, by crates/gui/farhelm-gui/src/session_pane/tests.rs
+`a_restart_reattaches_without_a_card_or_a_red_band`, and the card once an attempt fails, or the reattach drops before it
+goes live, by `a_restarts_failed_reattach_shows_the_card` and `a_restarts_reattach_that_drops_mid_replay_shows_the_card`
+(decided by the migration's orchestrator on 2026-11-15). A stuck Restart stays silent for at most about a minute: the
+first attempt's socket must open within the stream's 30 s watchdog, and an opened one that never attaches is ended by
+the same watchdog, after which the second attempt shows the card. The bound does not cover a reattach that attaches and
+then stalls in its replay while its link keeps answering pings: that one stays hidden until it fails, drops or
+completes. Tab terminals are not held, since a Restart detaches no tab, by
+crates/gui/farhelm-gui/src/terminal/set/tests.rs `a_restart_does_not_hold_a_tabs_reconnect_card`; an inert terminal
+draws no card by crates/gui/farhelm-gui/src/terminal/attached/tests.rs `an_inert_terminal_draws_no_reconnect_card`, and
+the card keeps presses from the screen behind it by
 `a_drag_on_the_card_reaches_nothing_behind_it_and_the_scrim_lets_presses_through`. The card's phase and attempt line,
 from what the fake stream reports: the old card's four templates word for word, with the scheduled wait rounded as the
 old card rounded it, by crates/gui/farhelm-gui/src/terminal/attached/tests.rs `the_phase_line_says_the_old_cards_words`

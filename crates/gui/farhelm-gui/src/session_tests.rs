@@ -229,7 +229,7 @@ fn a_live_sessions_opener_opens_the_attach_it_is_given(cx: &mut TestAppContext) 
     cx.run_until_parked();
     let session = current(&connection, cx).unwrap();
 
-    let open = opener(&session, cx);
+    let mut open = opener(&session, cx);
     let attach = terminal_attach("a");
     let (handle, mut events) = open(attach.clone());
     let mut opened = opened.borrow_mut();
@@ -283,8 +283,8 @@ fn a_retired_session_opens_no_terminal_even_through_an_earlier_opener(cx: &mut T
     let retirements: [fn(&mut FakeHelm); 2] = [FakeHelm::break_channel, FakeHelm::displace];
     for retire in retirements {
         let session = current(&connection, cx).unwrap();
-        let kept = opener(&session, cx);
-        let kept_past_the_session = opener(&session, cx);
+        let mut kept = opener(&session, cx);
+        let mut kept_past_the_session = opener(&session, cx);
         retire(&mut fake);
         cx.run_until_parked();
         assert!(

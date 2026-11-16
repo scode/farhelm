@@ -542,6 +542,14 @@ refusal waits for the user. Every attach is the ordinary one under the view's le
 alike, because the app is single-UI ("The seat: one UI per helm"). `crates/farhelm-helm-client/src/terminal.rs` has the
 rules.
 
+A protocol fault, a message the terminal's grid model refuses, is not a lost connection, and the stream never sees it:
+the terminal closes the stream itself, keeps its last screen under the reconnect card and opens a fresh one, which
+replays from nothing (`crates/gui/farhelm-gui/src/terminal/attached.rs`). It waits the same six rungs between restarts,
+but the seventh fault in a row stops on the red "Terminal stream error" band with Reconnect instead of probing every 30
+s, as the old app did: a peer that breaks the format will not be fixed by a full replay every 30 s, which would also
+spend idle CPU for nothing (decided by the migration's orchestrator on 2026-11-16). A restart that stays live for 15 s
+has its count forgotten.
+
 ### The store, and how views redraw
 
 Owner: the store.
