@@ -190,26 +190,16 @@ fn send(host: i64, remedy: Remedy, mark: Mark, window: AnyWindowHandle, cx: &mut
     let kind = remedy.kind();
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
-            let Outcome::Refused(refusal) = &settled.outcome else {
-                return;
-            };
-            let Some(view) = listed(host, cx) else {
-                return;
-            };
-            let shown = window
-                .update(cx, |_, window, cx| {
-                    refusal::open(
-                        refusal::Refusal::of(remedy.action(), &view, refusal),
-                        &mark,
-                        window,
-                        cx,
-                    )
-                })
-                .ok()
-                .flatten()
-                .is_some();
-            if shown && let Some(operations) = session::current_operations(cx) {
-                operations.update(cx, |operations, cx| operations.forget(&refused_key, cx));
+            if let Outcome::Refused(refusal) = &settled.outcome {
+                refusal::show_and_forget(
+                    host,
+                    remedy.action(),
+                    refusal,
+                    &refused_key,
+                    &mark,
+                    window,
+                    cx,
+                );
             }
         })
     });

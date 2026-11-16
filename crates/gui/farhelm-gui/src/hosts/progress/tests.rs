@@ -213,6 +213,15 @@ fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
         "an uninstall's requests, the continuation's over its failed run"
     );
     assert_eq!(status(None, None, Some(Work::Save), at(0)), None);
+    // A sandbox's Suspend or Resume out on the host's key reads "Suspending…" or "Resuming…" until the helm answers.
+    assert_eq!(
+        status(None, None, Some(Work::Resume), at(0)),
+        Some(Status::Lifecycle(crate::hosts::offers::Lifecycle::Resume))
+    );
+    assert_eq!(
+        status(None, None, Some(Work::Suspend), at(0)),
+        Some(Status::Lifecycle(crate::hosts::offers::Lifecycle::Suspend))
+    );
     assert_eq!(
         status(
             Some(&setup("run-a", RunStatus::Completed)),
@@ -256,4 +265,7 @@ fn a_running_status_is_described_by_its_cards_words_and_a_pending_one_is_not() {
     assert!(described(&running(Run::Update)));
     assert!(!described(&Status::Pending(Run::Setup)));
     assert!(!described(&Status::Pending(Run::Update)));
+    assert!(!described(&Status::Lifecycle(
+        crate::hosts::offers::Lifecycle::Resume
+    )));
 }

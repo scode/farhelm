@@ -33,10 +33,9 @@
 //! focus goes back to what held it before the menu opened, or, when that was the control itself (a click focuses it on
 //! Linux), home.
 //!
-//! NOTE: Each of the other commands (Suspend, Resume) arrives with the piece of the port that sends it,
-//! at its place in the old order (Retry, Suspend or Resume, Adopt, a rerun, Update, Settings, then Uninstall and Remove
-//! behind a separator), and the toggle keeps the old hover help, which names them already. Not ported: opening the
-//! menu with the arrow keys from the closed toggle, and the flyout's pointer notch.
+//! On a sandbox or container, Suspend or Resume shows after Retry, at its place in the old order
+//! ([`super::lifecycle`]). Not ported: opening the menu with the arrow keys from the closed toggle, and the flyout's
+//! pointer notch.
 
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
@@ -46,7 +45,7 @@ use gpui::{
 };
 
 use super::identity::{display_name, phase};
-use super::offers::{self, HostKind, Offers, Rerun, Update};
+use super::offers::{self, HostKind, Lifecycle, Offers, Rerun, Update};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
 use crate::environment_ui::ProviderUi;
@@ -305,6 +304,28 @@ impl Render for HostMenu {
                 super::remedies::retry(host, mark, window, cx);
             })
         });
+        // Suspend or Resume, on a sandbox or container: after Retry, in the old order. `help` is `Some` wherever the
+        // offer is, since both need the host's provider.
+        let lifecycle = offered.lifecycle.and_then(|(verb, enabled)| {
+            let help = super::lifecycle::help(&view, verb)?;
+            let (menu, host) = (cx.weak_entity(), self.host);
+            // The old menu drew Suspend with the stop glyph; here Pause's two bars name it (a recorded deviation).
+            let (id, icon, label) = match verb {
+                Lifecycle::Suspend => ("host-menu-suspend", Icon::Pause, "Suspend"),
+                Lifecycle::Resume => ("host-menu-resume", Icon::Restart, "Resume"),
+            };
+            let item = MenuItem::new(id, icon, label, HoverHelp::tooltip(help), Role::MenuItem)
+                .disabled(!enabled)
+                .on_click(move |_, window, cx| {
+                    let mark = Mark::take(cx);
+                    close(&menu, window, cx);
+                    match verb {
+                        Lifecycle::Suspend => super::lifecycle::suspend(host, mark, window, cx),
+                        Lifecycle::Resume => super::lifecycle::resume(host, mark, window, cx),
+                    }
+                });
+            Some(item)
+        });
         // Adopt, while the host is still mismatched: the identity it names and sends is the one the menu opened with
         // (`HostMenu::adopt_identity`), never one read again later (`super::remedies`).
         let adopt = offered
@@ -507,6 +528,7 @@ impl Render for HostMenu {
                 .flex()
                 .flex_col()
                 .children(retry)
+                .children(lifecycle)
                 .children(adopt)
                 .children(rerun)
                 .children(update)

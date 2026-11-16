@@ -300,6 +300,11 @@ pub(crate) enum Status {
     /// confirming request, before the helm accepts it) and no run shows yet: "Setting up…", "Updating…" or
     /// "Uninstalling…" alone.
     Pending(Run),
+    /// A sandbox's or container's lifecycle request is out under the host's key (the Hosts panel's Suspend or Resume,
+    /// `super::lifecycle`; a session's runs on its own key and shows here only once the helm pushes the changing
+    /// phase): "Suspending…" or "Resuming…" alone, until the helm answers. A 504 at the helm's bound ends it, and the
+    /// row then shows the pushed phase's words, which say the same while the change runs (`super::lifecycle`).
+    Lifecycle(super::offers::Lifecycle),
     /// A run shows: how many steps are done of how many, its current step, and how long since this UI first saw it
     /// running.
     Running {
@@ -365,10 +370,11 @@ pub(crate) fn status(
         | Work::TabClose
         | Work::Pin
         | Work::MovePin
-        | Work::Suspend
-        | Work::Resume
         | Work::StopAndSuspend
         | Work::EnvironmentDelete => None,
+        // A host's Suspend and Resume run on its key (`super::lifecycle`), and start no run.
+        Work::Suspend => Some(Status::Lifecycle(super::offers::Lifecycle::Suspend)),
+        Work::Resume => Some(Status::Lifecycle(super::offers::Lifecycle::Resume)),
     }
 }
 
@@ -430,6 +436,15 @@ pub(crate) fn status_mark(
         .child(dot);
     let sentence = HostSentence::new(SharedString::from(format!("host-progress-{id}")));
     let (line, sentence, help) = match status {
+        Status::Lifecycle(change) => {
+            let words = change.pending_words();
+            let sentence = sentence.text(words);
+            (
+                line.child(words),
+                sentence.clone(),
+                HoverHelp::sentence(sentence),
+            )
+        }
         Status::Pending(run) => {
             let words = format!("{}…", run.verb());
             let sentence = sentence.text(words.clone());
@@ -492,7 +507,7 @@ pub(crate) fn status_mark(
 pub(super) fn described(status: &Status) -> bool {
     match status {
         Status::Running { .. } => true,
-        Status::Pending(_) => false,
+        Status::Pending(_) | Status::Lifecycle(_) => false,
     }
 }
 

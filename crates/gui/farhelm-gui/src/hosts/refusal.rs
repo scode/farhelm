@@ -9,9 +9,10 @@
 //! "Remove hosts without asking" on, the removal itself. The helm sets that marker only on an uninstall plan's
 //! refusals, so an Update's refusal shows Close alone.
 //!
-//! So far an Update's refused plan ([`super::update`]) and an uninstall's refused plan or confirmation
-//! ([`super::uninstall`], "Uninstall Farhelm") open it; the old app also opened it for a refused setup, Suspend,
-//! Resume, Retry, Adopt and, with "Remove hosts without asking" on, Remove, which take it as their pieces of the port
+//! So far an Update's refused plan ([`super::update`]), an uninstall's refused plan or confirmation
+//! ([`super::uninstall`], "Uninstall Farhelm"), a refused Retry or Adopt ([`super::remedies`]) and a refused Suspend or
+//! Resume ([`super::lifecycle`]) open it, all but the uninstall's through [`show_and_forget`]; the old app also opened
+//! it for a refused setup and, with "Remove hosts without asking" on, Remove, which take it as their pieces of the port
 //! arrive ([`Refusal::of`] takes the action's words).
 //!
 //! It is not a question: it asks nothing, so it is a dialog of its own with Close in its footer and the header's ×, as
@@ -22,8 +23,8 @@
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{HelmMarker, HostView};
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, FocusHandle, FontWeight, IntoElement,
-    ParentElement as _, Render, Styled as _, WeakEntity, Window, div, px,
+    AnyWindowHandle, App, AppContext as _, ClickEvent, Context, FocusHandle, FontWeight,
+    IntoElement, ParentElement as _, Render, Styled as _, WeakEntity, Window, div, px,
 };
 
 use super::identity::{display_name, host_mark};
@@ -32,6 +33,7 @@ use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Dialog, LayerId};
+use crate::operations::OpKey;
 use crate::theme::{self, metrics};
 
 /// The host's mark in the header's tile, as the other host dialogs draw it.
@@ -142,6 +144,36 @@ pub(crate) fn open(
     )?;
     dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
     Some(layer)
+}
+
+/// Show `refusal`, the helm's refusal of `action` on `host`, in the dialog through `mark` in `window`, with the host as
+/// the registry lists it now, then drop the store's record of it under `key`, so the row neither shows it again nor
+/// opens for it, as the old app kept a refusal in its dialog alone. Nothing opens once the user has moved on since
+/// `mark`, the window is gone, or the registry no longer lists the host, and the record then stays under the row, the
+/// one place left to show it. How the Hosts panel's commands show a refusal (`super::lifecycle`,
+/// `super::remedies`, `super::update`).
+pub(super) fn show_and_forget(
+    host: i64,
+    action: &'static str,
+    refusal: &crate::operations::Refusal,
+    key: &OpKey,
+    mark: &Mark,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    let Some(view) = super::listed(host, cx) else {
+        return;
+    };
+    let shown = window
+        .update(cx, |_, window, cx| {
+            open(Refusal::of(action, &view, refusal), mark, window, cx)
+        })
+        .ok()
+        .flatten()
+        .is_some();
+    if shown && let Some(operations) = crate::session::current_operations(cx) {
+        operations.update(cx, |operations, cx| operations.forget(key, cx));
+    }
 }
 
 /// The open dialog.

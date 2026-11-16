@@ -11,6 +11,8 @@
 //! text element so a host value's direction cannot reorder the words around it. Builds, a connected host's identity and
 //! the destination are its monospace parts, as the old app's `DetailPart::MonoPeer` runs were.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::tensorlake::{LifecycleDirection, TunnelState, TunnelView};
 use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, HostView, RefreshView};
@@ -53,16 +55,44 @@ pub(crate) fn words(state: &HostStateView) -> &'static str {
         HostStateView::IdentityUnverified { .. } => "Identity unverified",
         HostStateView::Duplicate { .. } => "Duplicate",
         HostStateView::TensorlakeChanging { starting: true, .. } => "Starting…",
-        HostStateView::TensorlakeChanging { direction, .. } => match direction {
-            LifecycleDirection::Suspending => "Suspending…",
-            LifecycleDirection::Resuming => "Resuming…",
-        },
+        HostStateView::TensorlakeChanging { direction, .. } => changing_words(*direction),
         HostStateView::Suspended { .. } => "Suspended",
         HostStateView::Stopped { .. } => "Stopped",
         HostStateView::Retired { .. } => "Retired",
         HostStateView::Deleting { failure: None } => "Deleting…",
         HostStateView::Deleting { failure: Some(_) } => "Deleting failed",
     }
+}
+
+/// What a sandbox or container says while its provider changes it in `direction`: "Suspending…" or "Resuming…". The
+/// one source of those words, which the pushed phase ([`words`]), the Hosts row's request in flight
+/// (`crate::hosts::offers::Lifecycle::pending_words`) and a session's pending control
+/// (`crate::session_list::environment::Pending::label`) all show, so the row and the session never word it apart.
+pub(crate) fn changing_words(direction: LifecycleDirection) -> &'static str {
+    match direction {
+        LifecycleDirection::Suspending => "Suspending…",
+        LifecycleDirection::Resuming => "Resuming…",
+    }
+}
+
+/// How long ago Farhelm asked the provider to change `host`'s machine, as its changing row says it after the phase's
+/// words (SPEC.md, "Topology": "**Suspending…**, with a spinner and how long ago Tensorlake was asked"): "asked
+/// Tensorlake 12 s ago", the old `TensorlakeChangingStatus`'s elapsed, in the provider's words. `None` while the host
+/// is not changing or has no provider. A viewer clock behind the helm's reads 0 s rather than wrapping, as the old
+/// `lifecycle_age_secs` clamped it; the row redraws from the ticker's one-second clock while it shows (`crate::hosts`).
+pub(crate) fn asked_ago(host: &HostView, now: SystemTime) -> Option<String> {
+    let HostStateView::TensorlakeChanging { requested_at, .. } = host.state else {
+        return None;
+    };
+    let provider = HostKind::of(host).provider()?;
+    let now = now.duration_since(UNIX_EPOCH).map_or(0, |since| {
+        i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+    });
+    let seconds = now.saturating_sub(requested_at).max(0) / 1_000;
+    Some(format!(
+        "asked {} {seconds} s ago",
+        ProviderUi(provider).lifecycle_asked()
+    ))
 }
 
 /// The color group a phase's dot and words take, by what someone watching the panel should do about it. Deliberately
@@ -357,9 +387,10 @@ fn tunnel_lines<'a>(
     std::iter::once(health).chain(forwards)
 }
 
-/// [`evidence`] for `host`: a machine's deletion is worded for the host's provider ("Farhelm is deleting this sandbox,
-/// its files and its snapshots", or the failure and Retry, then the helm's reason), as the old row worded it; every
-/// other phase, and a host with no provider, reads as [`evidence`] says.
+/// [`evidence`] for `host`: a machine's change ("Asked Tensorlake to resume at …") and its deletion ("Farhelm is
+/// deleting this sandbox, its files and its snapshots", or the failure and Retry, then the helm's reason) are worded
+/// for the host's provider, as the old row worded them; every other phase, and a host with no provider, reads as
+/// [`evidence`] says.
 fn host_evidence(
     line: HostSentence,
     host: &HostView,
@@ -367,6 +398,23 @@ fn host_evidence(
     zone: Zone,
 ) -> HostSentence {
     match (&host.state, HostKind::of(host).provider()) {
+        // The old `lifecycle_request_detail`: whom Farhelm asked, in the provider's words.
+        (
+            HostStateView::TensorlakeChanging {
+                direction,
+                requested_at,
+                ..
+            },
+            Some(provider),
+        ) => line.text(format!(
+            "Asked {} to {} at {}; waiting for confirmation",
+            ProviderUi(provider).lifecycle_asked(),
+            match direction {
+                LifecycleDirection::Suspending => "suspend",
+                LifecycleDirection::Resuming => "resume",
+            },
+            local_time::stamp(requested_at / 1000, zone)
+        )),
         (HostStateView::Deleting { failure }, Some(provider)) => {
             let line = line.text(ProviderUi(provider).deleting_detail(failure.is_some()));
             match failure {

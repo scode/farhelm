@@ -17,7 +17,7 @@
 //!   local host without a supervisor offers no install.
 //! - The `confirmation_may_open` output, which made Settings on every host wait for another host's confirmation, is
 //!   dropped with the old modal queue it existed for. A host's own Settings still waits for that host's own work.
-//! - Suspend and Resume come with their own piece of the port, and are not offered here.
+//! - A sandbox's or container's Suspend and Resume are offered here ([`Offers::lifecycle`]).
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
 //! draws Retry ([`Offers::retry`]), which on a host whose machine's deletion failed deletes it again, and, for a
@@ -31,6 +31,7 @@
 use farhelm_proto::ProviderKind;
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
+use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 
 #[cfg(test)]
@@ -263,9 +264,9 @@ pub(crate) fn run_active(progress: Option<&ProvisioningView>) -> bool {
     progress.is_some_and(|run| run.run_id.is_some() && run.status == RunStatus::Running)
 }
 
-/// What the host's actions menu offers, and which of its offers can be chosen now. The menu lists them in the old
-/// order (Retry, Adopt, a rerun, Update, Settings, then Uninstall and Remove behind a separator); an absent offer
-/// leaves no gap.
+/// What the host's actions menu offers, and which of its offers can be chosen now. The menu lists them in the old order
+/// (Retry, Suspend or Resume, Adopt, a rerun, Update, Settings, then Uninstall and Remove behind a separator); an
+/// absent offer leaves no gap.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Offers {
     /// Settings is always offered: every host has its permissions, whatever else its dialog lets the user change.
@@ -286,6 +287,12 @@ pub(crate) struct Offers {
     /// whose removal deletes it ([`HostKind::provider`]) in every phase but a deletion under way, with whether it can
     /// be chosen now: `false` while the host is busy. A deletion that failed offers it again beside Retry.
     pub(crate) delete: Option<(ProviderKind, bool)>,
+    /// Suspend or Resume, on a sandbox or container ([`HostKind::provider`]) in every phase but its deletion, as the
+    /// old menu offered them: Resume where it is suspended, stopped with its place available, or between states (the
+    /// old row's `offers_resume`), Suspend otherwise, an unreachable one included. With whether it can be chosen now:
+    /// `false` while the host is busy or its change is under way, as the old item was disabled then. The menu draws
+    /// both, the row's inline Resume only Resume (`super::lifecycle`).
+    pub(crate) lifecycle: Option<(Lifecycle, bool)>,
     /// Uninstall, which removes Farhelm from the host, offered only where the panel uninstalls
     /// ([`HostKind::uninstalls_from_panel`]): `Some(true)` when it can be chosen now, `Some(false)` while the host is
     /// busy. A failed uninstall is continued by choosing it again, so a failed run leaves it available.
@@ -331,6 +338,57 @@ pub(crate) enum SetupRerun {
     /// Ask for a plan for the sandbox the host names; a plan is the sandbox's creation question ("Create Tensorlake
     /// sandbox"), skipped by Tensorlake's own "Create Tensorlake sandboxes without asking".
     Tensorlake,
+}
+
+/// The provider lifecycle command a sandbox's or container's row offers ([`Offers::lifecycle`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Lifecycle {
+    /// Freeze a machine, asked first unless its activity is known (`super::lifecycle`).
+    Suspend,
+    /// Resume a suspended or stopped machine, never asked first.
+    Resume,
+}
+
+impl Lifecycle {
+    /// What the row says while this request is out, the words of the pushed phase that follows it
+    /// ([`super::identity::phase::changing_words`]): "Suspending…" or "Resuming…".
+    pub(crate) fn pending_words(self) -> &'static str {
+        super::identity::phase::changing_words(match self {
+            Lifecycle::Suspend => LifecycleDirection::Suspending,
+            Lifecycle::Resume => LifecycleDirection::Resuming,
+        })
+    }
+}
+
+/// The provider lifecycle command `host` offers in its phase, whatever is in flight on it: Resume where it is
+/// [`resumable`] or between states, Suspend in every other phase but a deletion, and nothing on a host with no provider
+/// ([`HostKind::provider`]). The Hosts panel's Suspend asks it again before asking and before sending, since the phase
+/// can change while the activity read or the question is out (`super::lifecycle`).
+pub(super) fn lifecycle_of(host: &HostView) -> Option<Lifecycle> {
+    HostKind::of(host).provider()?;
+    match &host.state {
+        // Any deletion, a failed one included, unlike `deleting` in [`offers`], which is a deletion under way only:
+        // the old menu withheld Suspend and Resume on every deletion, so Retry or Delete is a failed one's only remedy.
+        HostStateView::Deleting { .. } => None,
+        HostStateView::TensorlakeChanging { .. } => Some(Lifecycle::Resume),
+        state if resumable(state) => Some(Lifecycle::Resume),
+        _ => Some(Lifecycle::Suspend),
+    }
+}
+
+/// Whether a machine in `state` is resumable: suspended, or stopped with its place available, as the old row's
+/// `offers_resume` and the old session controls counted it (a stopped container waiting for its container host has
+/// nothing to start yet). The one predicate for both surfaces: a session's control reads it too
+/// (`crate::session_list::environment::Environment::resumable`), though the two offer different things around it.
+pub(crate) fn resumable(state: &HostStateView) -> bool {
+    matches!(
+        state,
+        HostStateView::Suspended { .. }
+            | HostStateView::Stopped {
+                waiting_for_place: false,
+                ..
+            }
+    )
 }
 
 /// Which failed run a rerun repeats.
@@ -407,6 +465,10 @@ impl Update {
 /// - **Retry** in every phase of every kind but a deletion under way, and **Adopt** only for a mismatched identity,
 ///   both chosen only while the host is idle. The old menu offered Retry "in every phase, like the button it replaces",
 ///   and on a failed deletion its Retry deleted again.
+/// - **Resume** on a sandbox or container that is suspended, stopped with its place available, or between states
+///   ([`resumable`], the old row's `offers_resume`), chosen only while the host is idle and its change is not running;
+///   **Suspend** on one in any other phase but a deletion, an unreachable one included, chosen only while the host is
+///   idle ([`lifecycle_of`]).
 pub(crate) fn offers(
     host: &HostView,
     progress: Option<&ProvisioningView>,
@@ -424,6 +486,8 @@ pub(crate) fn offers(
     // A deletion under way offers nothing that touches the machine: Retry, Delete sandbox and the like come back if it
     // fails, which the helm reports as a deletion with a failure.
     let deleting = matches!(host.state, HostStateView::Deleting { failure: None });
+    // The provider's change is under way: Resume shows, unavailable, until it settles.
+    let changing = matches!(host.state, HostStateView::TensorlakeChanging { .. });
     let rerun = failed_operation(progress)
         .filter(|_| provisions && !in_flight && !suspended)
         .and_then(|operation| match operation {
@@ -457,6 +521,8 @@ pub(crate) fn offers(
             .map(|provider| (provider, !busy)),
         uninstall: kind.uninstalls_from_panel().then_some(!busy),
         retry: (!deleting).then_some(!busy),
+        // A Suspend is never offered while the change runs ([`lifecycle_of`]), so `changing` only greys a Resume.
+        lifecycle: lifecycle_of(host).map(|verb| (verb, !busy && !changing)),
         adopt: adoptable(&host.state).map(|_| !busy),
     }
 }

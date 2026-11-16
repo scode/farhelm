@@ -136,7 +136,8 @@ fn the_badge_needs_an_available_update_and_an_older_build_or_protocol() {
 /// Specified: a running Update with three steps is Update with 1 of 3 done and the running step named; a running
 /// uninstall is Uninstall; a running run wins over requests out; without one, a confirmed setup's submission out is
 /// Setup and an Update's requests Update, both without steps; a rerun's probe (nothing confirmed yet, as in the old
-/// app), a removal, a host settings save, a failed or completed run and an idle host are no live work.
+/// app), a removal, a host settings save, a sandbox's Resume, a failed or completed run and an idle host are no live
+/// work.
 #[test]
 fn live_work_is_the_running_run_or_else_the_requests_out() {
     let mut update = run(2, Update, Running);
@@ -178,6 +179,13 @@ fn live_work_is_the_running_run_or_else_the_requests_out() {
     assert_eq!(pending(Work::Probe), None, "a rerun's probe");
     assert_eq!(pending(Work::RemoveHost), None, "a removal");
     assert_eq!(pending(Work::Save), None, "a settings save");
+    // SPEC.md's working rows and rings are setup, Update and uninstall only; the old attention list treated an
+    // explicit lifecycle request as routine work.
+    assert_eq!(
+        pending(Work::Resume),
+        None,
+        "a sandbox's or container's Resume"
+    );
     assert_eq!(live(Some(&run(2, Update, Failed)), None), None, "failed");
     assert_eq!(live(Some(&run(2, Add, Completed)), None), None, "completed");
     assert_eq!(live(None, None), None, "idle");
