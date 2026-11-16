@@ -305,6 +305,22 @@ or fresh `image.png`, the documented false positive, a nameless non-image, the f
 a pasted image over as bytes with no file name, so every pasted image gets a generated name and no name is judged
 (decided by the terminal area's owner on 2026-11-15)
 
+### `copy-on-select.test.js` (unit tests)
+
+Tests: 21. Covers: the old JS unit tests (`crates/farhelm-ui/js-tests/`): gesture copying and the drag-copy notice.
+
+partly: the notice's cases by crates/gui/farhelm-gui/src/terminal/attached/tests.rs
+`a_plain_drag_under_mouse_reporting_raises_the_notice_after_the_grace_window`,
+`no_notice_after_a_forced_drag_a_click_or_a_drag_without_mouse_reporting`,
+`a_program_clipboard_write_in_the_grace_window_suppresses_the_notice`, `only_codex_has_its_own_copy_instruction` (the
+text and the platform's key), `the_notice_sits_three_rows_from_the_release_with_its_fallbacks` (the five placement
+cases, the row height and the clamp to the window's content area), `the_notice_goes_after_thirty_seconds` and
+`the_notices_x_puts_it_away_keeping_focus_and_sending_nothing`; the copy decisions by the selection tests there
+(`a_drag_selects_and_copies_and_a_click_does_not`, `under_mouse_reporting_only_the_forcing_modifier_selects`). Not
+ported: a press on the scrollbar (no case yet), the narrowed viewport's remeasuring (GPUI lays the popover out on its
+own, not at its last place), a retained selection under a plain tracked press (a reported press clears the selection
+here), and the browser-global and listener-disposal cases, which have no counterpart
+
 ### `tests/terminal-flood.spec.ts`
 
 Tests: 3. Covers: a terminal socket for an unknown session reports why.
@@ -363,10 +379,12 @@ for a way to ask the layer manager what covers a popover
 
 Tests: 55. Covers: multi-host.
 
-partly: its three stale-session cases (a supervisor outage keeping the screen behind one calm card and reattaching
-promptly) are the sidebar and session view area's, ported with the unavailable card
-(docs/gpui/parity/sidebar-and-session-view.md, its `terminal-multihost.spec.ts` (stale) row). Waiting: the rest of the
-spec
+partly: none of its cases is the terminal's own; the spec is about hosts. Its three stale-session cases (a supervisor
+outage keeping the screen behind one calm card and reattaching promptly) are the sidebar and session view area's, ported
+with the unavailable card (docs/gpui/parity/sidebar-and-session-view.md, its `terminal-multihost.spec.ts` (stale)
+entry). Its host Uninstall, Retry and Adopt cases are settings-and-hosts' (docs/gpui/parity/settings-and-hosts.md, its
+Uninstall and Retry and Adopt sections); the rest (the host list, menus and settings, creating and cloning across hosts)
+are not the terminal's either, and this entry tracks none of them
 
 ### `tests/terminal-reconnect.spec.ts`
 
@@ -456,7 +474,15 @@ Tests: 3. Covers: mouse-modes-restored-on-reattach.
 
 partly: `mouse-modes-restored-on-reattach`'s client half by crates/gui/farhelm-gui/src/terminal/attached/tests.rs
 `mouse_reporting_survives_a_reattach` (the replay carrying the mode is the supervisor's); the two drag-copy notice tests
-wait for the notice (M3)
+by crates/gui/farhelm-gui/src/terminal/attached/tests.rs
+`a_plain_drag_under_mouse_reporting_raises_the_notice_after_the_grace_window`,
+`no_notice_after_a_forced_drag_a_click_or_a_drag_without_mouse_reporting`,
+`a_program_clipboard_write_in_the_grace_window_suppresses_the_notice` (the copied drag),
+`the_drawn_notice_sits_three_terminal_rows_from_its_release`,
+`the_notices_x_puts_it_away_keeping_focus_and_sending_nothing`,
+`a_press_on_the_notice_reaches_the_terminal_and_puts_it_away`, `the_notice_goes_after_thirty_seconds` and
+`a_codex_sessions_notice_names_codexs_own_copy_key`; the ×'s hover help and the hidden-tab case are not covered (a
+notice whose terminal is hidden is closed for good, a deviation below)
 
 ### `tests/ime-composition.spec.ts`
 
@@ -528,3 +554,11 @@ stay.
   it.
 - The scrollbar shows hover help ("Drag to scroll back through the terminal's history"), which the old one did not: the
   GPUI component layer gives every control a label, hover help and a role. Meant to stay.
+- The drag-copy notice does not open after a key press or a click anywhere in the window during its grace window: the
+  layer manager refuses an open once the user has moved on since the release, where the old one showed regardless. Nor
+  does it open while its terminal's link destination display is open as the grace window ends (chosen in the notice's
+  code review on 2026-11-16). The old app drew the display above the notice; here both are popovers in stack order, so
+  the notice would cover the display, and the display's cover check, to be a hit test, would not see a popover that lets
+  the pointer through. A notice whose terminal is hidden (another tab chosen) is closed and does not come back with the
+  terminal, where the old one, hidden with its pane, did. A notice taller than the window is cut at the window's content
+  area's height less 8 pixels where the old one scrolled. (`attached.rs`, "The drag-copy notice".)

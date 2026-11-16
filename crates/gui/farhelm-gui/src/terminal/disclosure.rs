@@ -39,7 +39,9 @@ pub(crate) type Drawn = Rc<Cell<Option<(Bounds<Pixels>, Size<Pixels>)>>>;
 
 /// Whether a panel drawn at `drawn` was fully visible: inside the window it was drawn in (the old app's
 /// `disclosureFits`). Its other half, refusing when another surface is drawn over the panel, is not built: a dialog or
-/// menu opened above the panel is not checked for.
+/// menu opened above the panel is not checked for. When it is built, as a hit test, a popover that lets the pointer
+/// through (`layers::Popover::passes_pointer`) registers no hit area and is invisible to it, so that popover's owner
+/// must keep it off the panel: the terminal's drag-copy notice does not open while the panel is open.
 pub(crate) fn fully_visible(drawn: &Drawn) -> bool {
     let Some((bounds, window)) = drawn.get() else {
         return false;
