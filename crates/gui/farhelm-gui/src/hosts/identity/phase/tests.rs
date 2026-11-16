@@ -318,11 +318,11 @@ fn the_local_hosts_missing_supervisor_says_to_reopen_the_app() {
     );
 }
 
-/// Why this matters: the helm's dial failure for its own machine always carries hand-start advice ("start it with
-/// `farhelm supervisor run`"), written for a hand-started helm and wrong for the desktop app's own machine, so it must
-/// never join the remedy; it stays only as the evidence of what happened. Specified: with the helm's real dial failure
-/// ([`LOCAL_DIAL_FAILURE`]), the local host's evidence is that failure verbatim and its remedy is the app's sentence
-/// alone.
+/// Why this matters: the local row's remedy is the app's sentence alone, because the desktop app starts this machine's
+/// supervisor when it opens, and the helm's dial failure is shown only as evidence of what happened (the deviation for
+/// the local row in `docs/gpui/parity/settings-and-hosts.md` records the decision). Specified: with the helm's real
+/// dial failure ([`LOCAL_DIAL_FAILURE`]), the local host's evidence is that failure verbatim and its remedy is the
+/// app's sentence alone.
 #[test]
 fn the_local_remedy_is_the_apps_sentence_alone_and_the_helms_detail_stays_evidence() {
     assert_eq!(

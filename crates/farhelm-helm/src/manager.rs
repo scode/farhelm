@@ -260,10 +260,9 @@ pub enum UnreachableCause {
     /// listening on the unix socket in the helm's own state directory.
     ///
     /// Distinguished because this is the one unreachable host the user can
-    /// fix with a command on the machine they are already sitting at, and
-    /// PLAN_M6.md is explicit that a registered destination with no
-    /// supervisor gets a manual-path hint and never an offer to install
-    /// (provisioning is M7's). The hint TEXT is the UI's, next PR; what
+    /// fix on the machine they are already sitting at (with the desktop app,
+    /// by quitting it and opening it again), and PLAN_M6.md is explicit that
+    /// it never gets an offer to install (provisioning is M7's). The hint TEXT is the UI's, next PR; what
     /// this variant guarantees is that the manager distinguishes the case
     /// honestly instead of collapsing it into a generic connection
     /// failure the UI could only guess at.
@@ -11767,9 +11766,14 @@ mod tests {
 
     /// The local row with no supervisor running must be honestly
     /// distinguished from a generic unreachable host, because it is the
-    /// one case whose remedy is a command on the machine the user is
-    /// already sitting at (PLAN_M6.md: a manual-path hint, never an offer
-    /// to install — provisioning is M7's).
+    /// one case whose remedy is something the user does on the machine they
+    /// are already sitting at (with the desktop app, quitting it and opening
+    /// it again), never an offer to install. Its recorded error names no
+    /// hand-start command: the desktop app starts the helm's own machine's
+    /// supervisor when it opens (or a unit `farhelm helm setup` wrote does),
+    /// so `farhelm supervisor run` is the wrong fix there, and the dial
+    /// (`farhelm_supervisor::service::connect`) leaves the remedy to its
+    /// caller.
     ///
     /// Runs against the REAL [`SystemTransport`] and a genuinely empty
     /// state directory, not a scripted peer: the whole claim is about how
@@ -11809,15 +11813,20 @@ mod tests {
         .await
         .expect("the local row must reach unreachable promptly")
         .expect("actor is running");
+        let HostState::Unreachable {
+            cause: UnreachableCause::LocalSupervisorNotRunning,
+            last_error,
+        } = &state
+        else {
+            panic!("an absent local socket must be classified as no local supervisor: {state:?}");
+        };
         assert!(
-            matches!(
-                &state,
-                HostState::Unreachable {
-                    cause: UnreachableCause::LocalSupervisorNotRunning,
-                    ..
-                }
-            ),
-            "an absent local socket must be classified as the manual-start case: {state:?}"
+            last_error.contains("supervisor does not appear to be running"),
+            "the error must say no supervisor answered: {last_error}"
+        );
+        assert!(
+            !last_error.contains("farhelm supervisor run"),
+            "the local row's error must name no hand-start command: {last_error}"
         );
     }
 

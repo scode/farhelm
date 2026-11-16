@@ -833,15 +833,15 @@ fn log_process_line(host: HostId, destination: &str, line: &SshStderrLine, relay
 /// [`LocalSupervisorNotRunning`], leaving every other failure untouched.
 ///
 /// The two `io::ErrorKind`s below are the same pair
-/// `farhelm_supervisor::service::connect` itself keys its remedy message
-/// off — nothing is listening on the socket, or there is no socket file at
-/// all. That duplication is deliberate and narrow: this side needs the
-/// answer as a TYPE (a state-machine input), that side needs it as prose
-/// (an operator's remedy), and re-deriving it here from the kinds is
+/// `farhelm_supervisor::service::connect` itself keys its "no supervisor"
+/// message off — nothing is listening on the socket, or there is no socket
+/// file at all. That duplication is deliberate and narrow: this side needs
+/// the answer as a TYPE (a state-machine input), that side needs it as prose
+/// (an operator's message), and re-deriving it here from the kinds is
 /// cheaper and clearer than either parsing that prose or reshaping a
 /// public API for one caller. Every other kind — permission denied, a
-/// non-directory path component — keeps its original error, because
-/// "start a supervisor" would be wrong advice for all of them.
+/// non-directory path component — keeps its original error, because "no
+/// supervisor is running" would be the wrong diagnosis for all of them.
 pub(crate) fn classify_local_dial(error: anyhow::Error) -> anyhow::Error {
     let refused = error
         .chain()

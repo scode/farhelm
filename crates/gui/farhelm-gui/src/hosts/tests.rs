@@ -113,12 +113,13 @@ pub(crate) fn connecting(attempt: u32, error: Option<&str>) -> HostStateView {
 /// The helm's dial failure for its own machine with no supervisor running, exactly as it reaches the window. Outermost
 /// first: the host manager's stage context for the dial (`stage_failure_context`, "connecting to the local
 /// supervisor"), the helm's `classify_local_dial` context, `farhelm_supervisor::service::connect`'s context naming the
-/// socket and the hand-start command, then the operating system's error; joined the way the manager records an error
-/// (`{error:#}`) and then Debug-quoted by its `peer_text`, which is why the value carries the surrounding double quotes.
-/// It carries the hand-start command, which is why the local row keeps it on the evidence line and out of the remedy.
+/// socket, then the operating system's error; joined the way the manager records an error (`{error:#}`) and then
+/// Debug-quoted by its `peer_text`, which is why the value carries the surrounding double quotes. It names no
+/// hand-start command: the dial leaves remedies to its callers, and the helm adds none for its own machine, whose
+/// supervisor the desktop app starts when it opens.
 pub(crate) const LOCAL_DIAL_FAILURE: &str = "\"connecting to the local supervisor: no supervisor is running on this \
      machine: supervisor does not appear to be running (socket /srv/state/supervisor.sock is not accepting \
-     connections); start it with `farhelm supervisor run --state-dir /srv/state`: Connection refused (os error 111)\"";
+     connections): Connection refused (os error 111)\"";
 
 /// The helm's own machine with no supervisor running, the helm's dial failure reading `error`.
 pub(crate) fn local_down(error: &str) -> HostStateView {

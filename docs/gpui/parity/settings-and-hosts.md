@@ -1605,14 +1605,18 @@ Where the port does not match the old app, and why. Each stays until the work na
   The old app showed the helm's dial failure as the remedy whenever there was one, and its own words only when there was
   none. Its evidence line was always the fixed "No supervisor is running on this machine"; that sentence now shows only
   when the helm gives no detail, and otherwise the evidence line is the helm's dial failure. The remedy is now always
-  the app's sentence alone because the helm's detail is dial advice for a hand-started helm (start
-  `farhelm supervisor run` with the right state directory), which is wrong for the desktop app's own machine: the app
-  starts that supervisor itself whenever it opens and none answers (decided by the migration's orchestrator on
-  2026-11-16). The old app also probed the machine once per down transition and showed the probe's `farhelm helm setup`
-  handoff, turning the global Details switch on to do it. The probe and its handoff are not ported, and none is planned
-  (decided by the migration's settings-and-hosts area on 2026-11-14); the switch is left to the user (SPEC.md: no run
-  writes it). The old menu's "Set up automatically" is not ported either: the panel never installs a supervisor on the
-  helm's own machine (SPEC.md, "Topology"; settled for the port by the migration's orchestrator on 2026-11-14).
+  the app's sentence alone because the helm's dial advice for a hand-started helm (start `farhelm supervisor run` with
+  the right state directory) is wrong for the desktop app's own machine: the app starts that supervisor itself whenever
+  it opens and none answers (decided by the migration's orchestrator on 2026-11-16). For the same reason the helm's dial
+  failure for its own machine, which the desktop app supervises, no longer carries that advice at all, so the evidence
+  line shows only the connection error; a remote host's row keeps the helm's own start command, written from the host
+  entry. A helm started by hand loses the advice for its own machine too, which is accepted because the maintainer
+  decided that the standalone helm and `farhelm helm setup` are removed (2026-11-13, confirmed 2026-11-16). The old app
+  also probed the machine once per down transition and showed the probe's `farhelm helm setup` handoff, turning the
+  global Details switch on to do it. The probe and its handoff are not ported, and none is planned (decided by the
+  migration's settings-and-hosts area on 2026-11-14); the switch is left to the user (SPEC.md: no run writes it). The
+  old menu's "Set up automatically" is not ported either: the panel never installs a supervisor on the helm's own
+  machine (SPEC.md, "Topology"; settled for the port by the migration's orchestrator on 2026-11-14).
 - A row also opens while the last work on its host was refused, with the helm's words under it, until the next work on
   that host starts; the old app opened it only for provisioning errors, and showed other refusals under the row closed.
   Both kinds of refusal now go through the one operation key a host has.

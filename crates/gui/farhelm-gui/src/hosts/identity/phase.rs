@@ -404,9 +404,10 @@ pub(crate) fn evidence(
 /// get none: one is still trying and the other is re-probed forever, so telling the user to act would invent work. The
 /// one exception is the helm's own machine with no supervisor, whose remedy is the app's sentence alone, "Quit Farhelm
 /// and open it again; it starts this machine's supervisor when it opens", because the desktop app starts that
-/// supervisor whenever it opens and none answers. The helm's dial failure stays on the evidence line ([`evidence`])
-/// and never joins the remedy: its advice (start `farhelm supervisor run` with the right state directory) is written
-/// for a hand-started helm, which is wrong for the desktop app's own machine.
+/// supervisor whenever it opens and none answers. The helm's dial failure stays on the evidence line ([`evidence`]), as
+/// what happened, and never joins the remedy. (The helm's dial of its own machine carries no hand-start advice; for a
+/// remote host with no supervisor, the helm names the start command itself, from that host entry's program and state
+/// directory.)
 ///
 /// The remedy is appended to `line`. Visible to the crate for the session pane's unavailable card, which explains an
 /// unreachable session with it where there is one, as the old card did.

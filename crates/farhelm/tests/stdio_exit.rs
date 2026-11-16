@@ -56,36 +56,81 @@ async fn collect_stdio(child: &mut Child) -> Output {
 }
 
 /// Initial connection failures must not claim that a supervisor accepted the
-/// connection, regardless of which exit status provisioning receives.
-async fn assert_initial_failure(state_dir: &std::path::Path, code: i32) {
+/// connection, regardless of which exit status provisioning receives. Returns
+/// the helper's stderr, for the caller's checks of its diagnostic.
+async fn assert_initial_failure(state_dir: &std::path::Path, code: i32) -> String {
     let mut child = spawn_stdio(state_dir, Stdio::null());
     let output = collect_stdio(&mut child).await;
     assert_eq!(output.status.code(), Some(code), "{output:?}");
     assert!(output.stdout.is_empty(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
-        !String::from_utf8_lossy(&output.stderr)
-            .contains(farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER),
+        !stderr.contains(farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER),
         "an initial connection failure emitted a connected marker: {output:?}"
+    );
+    stderr
+}
+
+/// Assert that `stderr` holds `internal stdio`'s hand-start command for an
+/// absent supervisor on `state_dir`, as words a shell would split into
+/// exactly `farhelm supervisor run --state-dir <state_dir>`. Splitting with an
+/// independent parser, rather than rebuilding the quoted text the way the
+/// helper does, is what proves the quoting.
+fn assert_start_advice(stderr: &str, state_dir: &std::path::Path) {
+    let command = stderr
+        .split_once("start it with `")
+        .and_then(|(_, rest)| rest.split_once('`'))
+        .map(|(command, _)| command)
+        .unwrap_or_else(|| panic!("no start command in: {stderr}"));
+    let words = shell_words::split(command).expect("the command must be valid shell words");
+    let state_dir = state_dir.to_string_lossy().into_owned();
+    assert_eq!(
+        words,
+        [
+            "farhelm",
+            "supervisor",
+            "run",
+            "--state-dir",
+            state_dir.as_str()
+        ],
+        "{stderr}"
     );
 }
 
 /// Missing and refused sockets are positive absence; a different connection
 /// error must not grant the helm permission to offer provisioning.
+///
+/// The two absent cases also print the hand-start command on this state dir,
+/// read in the helm's log and by someone running `internal stdio` by hand (a
+/// remote host's row shows the helm's own command for exit 75 instead). It is
+/// reached over ssh with a state dir that is usually not the remote default,
+/// so a command printed without `--state-dir` would start a supervisor where
+/// the helm will still not find it, and a state dir with a space must stay
+/// one shell word. The supervisor's dial names no remedy, so the command is
+/// `internal stdio`'s own, and an unrelated failure (ENOTDIR) gets none.
 #[farhelm_testtrace::test]
 async fn stdio_exit_75_is_reserved_for_positive_absence() {
     let root = farhelm_teststate::tempdir().expect("isolated stdio state roots");
-    assert_initial_failure(&root.path().join("missing"), 75).await;
+    let missing = root.path().join("missing state");
+    assert!(
+        !missing.exists(),
+        "the premise: nothing at the missing state dir"
+    );
+    let stderr = assert_initial_failure(&missing, 75).await;
+    assert_start_advice(&stderr, &missing);
 
     let refused = root.path().join("refused");
     std::fs::create_dir(&refused).expect("create refused state directory");
     let socket = refused.join("supervisor.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind stale socket");
     drop(listener);
-    assert_initial_failure(&refused, 75).await;
+    let stderr = assert_initial_failure(&refused, 75).await;
+    assert_start_advice(&stderr, &refused);
 
     let not_directory = root.path().join("not-a-directory");
     std::fs::write(&not_directory, b"not a directory").expect("create ENOTDIR fixture");
-    assert_initial_failure(&not_directory, 1).await;
+    let stderr = assert_initial_failure(&not_directory, 1).await;
+    assert!(!stderr.contains("farhelm supervisor run"), "{stderr}");
 }
 
 /// A real accepted socket proves the marker's meaning, and known forwarded
