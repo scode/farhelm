@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Stand-in agent and state sweep for Farhelm's test suites; never shipped"
+description = "Stand-in agent, test helm and state sweep for Farhelm's test suites; never shipped"
 
 # Test-harness support, never shipped; see `farhelm-helm/Cargo.toml` for why
 # every non-shipping member says so explicitly.
@@ -14,6 +14,9 @@ dist = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+# `helm` runs the helm library's standalone entry, with the library's own
+# argument struct, as the e2e suite's separate helm process.
+farhelm-helm.workspace = true
 # The record-writing scripts write conversation records exactly where the
 # supervisor's own locators look, so they share its path and time helpers.
 farhelm-supervisor.workspace = true
