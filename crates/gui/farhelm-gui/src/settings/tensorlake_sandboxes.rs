@@ -32,12 +32,11 @@
 //!   list is read again, which shows how the cleanup stands.
 //! - **Plain commands.** Nothing here is a saved choice, so reads go out with [`crate::operations::read`] and Deletes
 //!   with [`crate::operations::send`]. Every name, state and reason is the helm's or Tensorlake's, drawn as host text.
-//!
-//! NOTE: Times are UTC, as everywhere in this app until a shared local-time helper exists: "None found · checked" and a
-//! row's creation time use [`crate::hosts::identity::utc_stamp`]. For "checked", SPEC.md asks for the viewer's local
-//! time and the old list showed local hours and minutes (the GUI carries no time zone database; accepted as a deviation
-//! by the migration's coordinator on 2026-11-15). The old creation time was UTC already, to the minute; it now has
-//! seconds too, the app's one stamp form.
+//! - **Times are the viewer's.** "None found · checked HH:MM" is the hours and minutes of the last answered read in the
+//!   viewer's local time, as SPEC.md asks and the old list showed it; a row's creation time is the app's stamp, to the
+//!   second, in local time too ([`crate::local_time`]). The old creation time was UTC, to the minute; the maintainer
+//!   decided on 2026-11-15 that the app's times are local. The read's instant is kept, not its words, so a zone change
+//!   shows at the next draw; a clock at or before 1970 is broken, and "None found" then gives no time at all.
 //!
 //! NOTE: A successful Test no longer reads a failed list again, as the old list did after a rejected key was fixed
 //! elsewhere; Refresh does (the coordinator's list of re-reads above, 2026-11-15).
@@ -56,11 +55,13 @@ use super::tensorlake_key::{TensorlakeAccount, path};
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
-use crate::hosts::identity::utc_stamp;
 use crate::hosts::offers::HostKind;
+use crate::local_time::{self, Zone};
 use crate::prompt::{self, Answer, Inline, Question};
 use crate::session::{self, ObservingCurrent};
+use crate::session_list::age;
 use crate::theme::{self, metrics};
+use crate::ticker;
 
 /// The list's element id; its parts are `-refresh`, `-status`, `-error` and `-delete-error` after it, and row `<n>`'s
 /// `tensorlake-sandbox-<n>`, with `-delete` and `-cleanup-error` after that.
@@ -98,8 +99,9 @@ pub(super) struct Sandboxes {
     failure: Option<HostText>,
     /// Whether the current round's read is out.
     checking: bool,
-    /// When the last read that answered found the rows above, already worded.
-    checked_at: Option<String>,
+    /// When the last read that answered found the rows above: `None` before one answered, then the instant in seconds
+    /// since the epoch, worded as it is drawn, or `None` inside from a broken clock, which shows no time.
+    checked_at: Option<Option<i64>>,
     /// The current round: one more for every read started. An answer of another round is dropped.
     round: u64,
     /// The account state the list last acted on; `None` until the account read answers.
@@ -220,7 +222,7 @@ impl Sandboxes {
             Ok(rows) => {
                 self.rows = rows;
                 self.failure = None;
-                self.checked_at = Some(checked_at(cx));
+                self.checked_at = Some(age::seconds(ticker::wall_now(cx)));
             }
             Err(reason) => self.failure = Some(reason),
         }
@@ -341,9 +343,9 @@ impl Sandboxes {
             || self.delete_failure.is_some()
     }
 
-    /// One row: the sandbox's name, its state with "from another helm" and its creation time, a failed cleanup's
-    /// reason, and Delete, Retry cleanup or Cleaning up….
-    fn row(&self, row: &OrphanSandbox, index: usize, cx: &Context<Self>) -> Div {
+    /// One row: the sandbox's name, its state with "from another helm" and its creation time (in `zone`, the viewer's),
+    /// a failed cleanup's reason, and Delete, Retry cleanup or Cleaning up….
+    fn row(&self, row: &OrphanSandbox, index: usize, zone: Zone, cx: &Context<Self>) -> Div {
         let palette = theme::palette(cx);
         let id = format!("tensorlake-sandbox-{index}");
         let mut details = HostSentence::new(SharedString::from(format!("{id}-details")))
@@ -352,7 +354,8 @@ impl Sandboxes {
             details = details.text(" · from another helm");
         }
         if let Some(created) = row.created_at {
-            details = details.text(format!(" · Created {}", utc_stamp(created / 1000)));
+            let created = local_time::stamp(created / 1000, zone);
+            details = details.text(format!(" · Created {created}"));
         }
         let cleanup_failure = match &row.cleanup {
             Some(OrphanCleanup::Failed { reason }) if self.asking_about(cx) != Some(&row.id) => {
@@ -477,12 +480,17 @@ impl Render for Sandboxes {
                     .child(HEADING),
             )
             .children(refresh);
+        let zone = local_time::zone(cx);
         let status = if self.checking {
             Some(Self::status("Checking…".into(), cx))
         } else if self.rows.is_empty() && self.failure.is_none() {
-            self.checked_at
-                .as_ref()
-                .map(|checked| Self::status(format!("None found · checked {checked}").into(), cx))
+            self.checked_at.map(|checked| {
+                let words = match checked {
+                    Some(at) => format!("None found · checked {}", local_time::clock(at, zone)),
+                    None => "None found".to_owned(),
+                };
+                Self::status(words.into(), cx)
+            })
         } else {
             None
         };
@@ -490,7 +498,7 @@ impl Render for Sandboxes {
             self.rows
                 .iter()
                 .enumerate()
-                .map(|(index, row)| self.row(row, index, cx)),
+                .map(|(index, row)| self.row(row, index, zone, cx)),
         );
         let failure = |id: &'static str, reason: &HostText| {
             choices::host_failure_line(id, HostSentence::new(id).host(reason), cx)
@@ -523,16 +531,6 @@ impl Render for Sandboxes {
                     .map(|reason| failure(DELETE_ERROR_ID, reason)),
             )
     }
-}
-
-/// Now, worded for "checked …" (the module docs' note on time).
-fn checked_at(cx: &App) -> String {
-    let secs = crate::ticker::wall_now(cx)
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
-        });
-    utc_stamp(secs)
 }
 
 /// The fleet's Tensorlake hosts ([`Sandboxed`]), or `None` while the hosts collection is missing or not available,

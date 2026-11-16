@@ -56,6 +56,7 @@ use crate::components::{Button, HoverHelp, MenuHeader, Role, Tier, rail_entry};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
+use crate::local_time::{self, Zone};
 use crate::notices_bell::{entry_frame, hairline, list_panel};
 use crate::session_list::host_rail::expansion::Expansion;
 use crate::theme::{self, Palette, Token};
@@ -465,6 +466,7 @@ impl Render for NoticesPanel {
             .trash
             .upgrade()
             .map(|trash| trash.update(cx, |trash, cx| trash.snapshot(cx)));
+        let zone = local_time::zone(cx);
         let mut body = div()
             .id("rail-notices-entries")
             .flex()
@@ -483,6 +485,7 @@ impl Render for NoticesPanel {
                 &self.button,
                 &self.bell,
                 &self.trash,
+                zone,
                 palette,
             ));
         }
@@ -573,7 +576,12 @@ impl Actions {
 /// One trash cleanup notice (`.rail-notice`): the host and what happened, the checkout's repository and last measured
 /// size, the reason in red (greyed with the rest once resolved), when it last failed, and for an unresolved notice the
 /// promise of a retry at the host's supervisor restart with Retry now beside Open Trash. `host` is the registry's name
-/// for the notice's host, or `None` for a host the registry does not list ("Unknown host", as the old panel said).
+/// for the notice's host, or `None` for a host the registry does not list ("Unknown host", as the old panel said). When
+/// it last failed is to the minute in `zone`, the viewer's local time.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one notice's parts and the handles its actions reach, passed through once"
+)]
 fn entry(
     notice: &Notice,
     host: Option<HostText>,
@@ -581,6 +589,7 @@ fn entry(
     button: &WeakEntity<NoticesButton>,
     bell: &FocusHandle,
     trash: &WeakEntity<TrashButton>,
+    zone: Zone,
     palette: &Palette,
 ) -> impl IntoElement {
     let NoticeContent::StuckTrash {
@@ -645,7 +654,7 @@ fn entry(
         .child(quiet(div()).child(
             HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-time"))
                 .text("Last failed ")
-                .mono(&HostText::from_host(listing::stamp(*at))),
+                .mono(&HostText::from_host(local_time::minute(*at, zone))),
         ))
         .when(!notice.resolved, |content| {
             content.child(

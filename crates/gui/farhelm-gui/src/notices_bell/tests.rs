@@ -21,6 +21,7 @@ use super::{
 use crate::assets::Icon;
 use crate::host_text::HostText;
 use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::local_time;
 use crate::session_list::tests::{
     Fixture, TEST_NOW, change, listing, listing_meta, open_main, painted, preferences, selected,
     session,
@@ -411,8 +412,9 @@ fn the_bell_opens_its_list_beside_it_without_opening_the_session(cx: &mut TestAp
 /// entry the way the row's activity age has it, and the entries new since the list was last opened set apart", and
 /// resolved entries "remain visible, greyed and marked 'Resolved'", never new. Specified: under a read mark of 4, with
 /// entries 4 (an hour ago), 5 (two minutes ago, unresolved) and 6 (resolved), the list draws 6, 5, 4 top to bottom; the
-/// word New appears once and Resolved once; entry 5's age reads "2m ago" and is named by its full stamp; the bell counts
-/// one unread, the resolved entry not among them.
+/// word New appears once and Resolved once; entry 5's age reads "2m ago" and is named by its full stamp in the viewer's
+/// local time (two hours east of UTC here, which moves it into the next day); the bell counts one unread, the resolved
+/// entry not among them.
 #[gpui::test]
 fn entries_are_newest_first_with_new_ones_set_apart_and_resolved_greyed(cx: &mut TestAppContext) {
     let notes = json!([
@@ -426,6 +428,7 @@ fn entries_are_newest_first_with_new_ones_set_apart_and_resolved_greyed(cx: &mut
         bell_name(cx).as_deref(),
         Some("Notifications for a: 1 unread")
     );
+    cx.update(|_, cx| local_time::pin(2 * 3_600, cx));
     open_list(cx);
     let nodes = frame(cx);
     let top = |seq: u64| {
@@ -440,12 +443,9 @@ fn entries_are_newest_first_with_new_ones_set_apart_and_resolved_greyed(cx: &mut
     assert_eq!(texts.iter().filter(|text| *text == "Resolved").count(), 1);
     let age = node(&nodes, "notification-age-5").expect("entry 5's age");
     assert!(texts.contains(&"2m ago".to_owned()), "{texts:?}");
-    assert!(
-        age.label
-            .as_deref()
-            .is_some_and(|label| label.starts_with("Last activity ") && label.ends_with(" UTC")),
-        "{:?}",
-        age.label
+    assert_eq!(
+        age.label.as_deref(),
+        Some("Last activity 2025-07-02 01:57:58")
     );
 }
 

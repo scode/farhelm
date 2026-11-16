@@ -18,6 +18,7 @@ use super::tests::{
     section_button, sent,
 };
 use crate::layers;
+use crate::local_time;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{click, focused_id, keys, settle};
@@ -153,7 +154,8 @@ fn credential_work(cx: &mut VisualTestContext, name: &str) -> Option<Work> {
 /// old Add was unavailable until the list loaded). SPEC.md: "Lists show the name, recipe use and saved or replaced
 /// time", and agent logins of either agent share one list. Specified: showing Credentials sends the section's reads,
 /// one catalog read among them; before the catalog answers, Add GitHub token is unavailable and "Loading credentials…"
-/// shows; once answered, each entry is drawn as a row in its kind's list with its use and its UTC time, Saved for a
+/// shows; once answered, each entry is drawn as a row in its kind's list with its use and its time to the minute in the
+/// viewer's local time (the app's zone pinned five and a half hours east of UTC here, with no zone named), Saved for a
 /// first revision and Replaced for a later one; a list with no entries says "None saved."; showing Sessions and
 /// Credentials again reads the catalog once more and nothing else.
 #[gpui::test]
@@ -161,6 +163,7 @@ fn credentials_reads_its_catalog_whenever_shown_and_lists_each_entry_in_its_kind
     cx: &mut TestAppContext,
 ) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.update(|_, cx| local_time::pin(5 * 3_600 + 1_800, cx));
     open_settings(cx);
     click(cx, section_button(Section::Credentials));
     let reads = sent(&mut helm);
@@ -187,13 +190,11 @@ fn credentials_reads_its_catalog_whenever_shown_and_lists_each_entry_in_its_kind
     assert!(!drawn(cx, "credentials-loading"));
     let text = painted(cx);
     assert!(
-        text.contains("ci-token Used by recipes: build Saved 2026-11-14, 09:05 UTC"),
+        text.contains("ci-token Used by recipes: build Saved 2026-11-14, 14:35"),
         "{text}"
     );
     assert!(
-        text.contains(
-            "claude-login No recipes use this credential. Replaced 2026-11-14, 09:05 UTC"
-        ),
+        text.contains("claude-login No recipes use this credential. Replaced 2026-11-14, 14:35"),
         "{text}"
     );
     assert!(

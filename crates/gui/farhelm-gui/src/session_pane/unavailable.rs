@@ -56,6 +56,7 @@ use super::details::{self, Status};
 use crate::components::{self, Ring, spinner_icon};
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::{self, phase};
+use crate::local_time::Zone;
 use crate::session;
 use crate::session_list::age::{self, Age};
 use crate::session_list::status::{self, HostLookup};
@@ -127,7 +128,7 @@ pub(crate) struct Notice {
 
 impl Notice {
     /// The notice for `row`, whose host the registry in `collections` places (or fails to).
-    pub(crate) fn of(row: &SessionRow, collections: &Collections) -> Notice {
+    pub(crate) fn of(row: &SessionRow, collections: &Collections, zone: Zone) -> Notice {
         let failure = match collections
             .meta(Collection::Hosts)
             .map(|meta| &meta.availability)
@@ -146,6 +147,7 @@ impl Notice {
             HostLookup::of(collections, row.host),
             failure,
             twin,
+            zone,
         )
     }
 
@@ -158,13 +160,15 @@ impl Notice {
 
 /// The notice for a session on the host the helm calls `host_name`, which the registry places as `lookup`; `failure`
 /// is the helm's words for a host list it could not read, and `twin` names another host by id, as a duplicate's lines
-/// need. The old `stale_session_notice`, case for case. A session that names no host is "This session's host" ("this
-/// session's host" inside a sentence), and the name is the helm's as sent, as the old card's was.
+/// need; `zone` is the viewer's, for the times the host's evidence gives. The old `stale_session_notice`, case for case.
+/// A session that names no host is "This session's host" ("this session's host" inside a sentence), and the name is the
+/// helm's as sent, as the old card's was.
 pub(crate) fn notice(
     host_name: &str,
     lookup: HostLookup<'_>,
     failure: Option<&str>,
     twin: impl Fn(i64) -> Option<HostText>,
+    zone: Zone,
 ) -> Notice {
     let cause = status::cause(lookup);
     let named = |line: HostSentence, inside: bool| {
@@ -182,7 +186,12 @@ pub(crate) fn notice(
     let detail = HostSentence::new(DETAIL_ID);
     // The Hosts panel's evidence line after the host's name: the old card's `{name}: {host_state_detail}`.
     let evidence = |host: &HostView| {
-        phase::evidence(named(detail.clone(), false).text(": "), &host.state, &twin)
+        phase::evidence(
+            named(detail.clone(), false).text(": "),
+            &host.state,
+            &twin,
+            zone,
+        )
     };
     let (explanation, detail) = match lookup {
         HostLookup::Pending => (named(explanation.text("Checking "), true).text("…"), None),
@@ -208,7 +217,7 @@ pub(crate) fn notice(
                 Some(evidence(host)),
             ),
             HostStateView::Stopped { .. } => {
-                (phase::evidence(explanation, &host.state, &twin), None)
+                (phase::evidence(explanation, &host.state, &twin, zone), None)
             }
             HostStateView::TensorlakeChanging { direction, .. } => (
                 named(explanation, false).text(match direction {
@@ -391,15 +400,15 @@ pub(crate) struct Band {
 }
 
 impl Band {
-    /// The band for `row` with the viewer's clock at `now` ([`age::seconds`]): `None` for a session the card does not
-    /// show, and for one with no status to draw (nobody classified it) and no age, for which the old view drew no band
-    /// either.
-    pub(crate) fn of(row: &SessionRow, now: Option<i64>) -> Option<Band> {
+    /// The band for `row` with the viewer's clock at `now` ([`age::seconds`]) and the age's stamp in `zone`: `None` for
+    /// a session the card does not show, and for one with no status to draw (nobody classified it) and no age, for
+    /// which the old view drew no band either.
+    pub(crate) fn of(row: &SessionRow, now: Option<i64>, zone: Zone) -> Option<Band> {
         let band = Band {
             status: status::live(row)
                 .map(Status::Live)
                 .or_else(|| status::ended_words(row, false).map(Status::Ended)),
-            age: age::of(row.info.effective_activity(), now),
+            age: age::of(row.info.effective_activity(), now, zone),
         };
         let something = band.status.is_some() || band.age.is_some();
         (shows_row(row) && something).then_some(band)

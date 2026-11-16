@@ -17,6 +17,7 @@ use super::tests::{
     available, drawn, fill, into_view, label_of, open_rail, open_rail_with_hosts, painted,
     push_hosts, sent,
 };
+use crate::local_time;
 use crate::test_support::{click, focused_id, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -75,13 +76,15 @@ fn status(cx: &mut VisualTestContext) -> Option<String> {
 /// not read, since that read lists the user's Tensorlake account for nothing, and a key saved in this opening must read
 /// it, since it is the first time a read can answer. Specified: with no key saved, the list is not drawn and nothing
 /// reads it; a key saved in the section's form reads it once, and while that read is out the list shows "Checking…"
-/// with Refresh busy (focusable, taking no press); answered empty, it says "None found · checked" and a UTC time and
-/// Refresh takes presses again; Refresh pressed by keyboard reads once more and keeps focus while its read is out and
-/// after it answers, as a busy button does; and a second key saved over the first reads once more too, since the list
-/// it shows belongs to the key that was saved.
+/// with Refresh busy (focusable, taking no press); answered empty, it says "None found · checked" and the hours and
+/// minutes of the answer in the viewer's local time (the app's zone pinned five hours west of UTC, so the test clock's
+/// 23:59:58 UTC reads 18:59) and Refresh takes presses again; Refresh pressed by keyboard reads once more and keeps
+/// focus while its read is out and after it answers, as a busy button does; and a second key saved over the first reads
+/// once more too, since the list it shows belongs to the key that was saved.
 #[gpui::test]
 fn a_saved_key_reads_the_list_which_says_when_it_found_none(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.update(|_, cx| local_time::pin(-5 * 3_600, cx));
     let read = show_tensorlake(&mut helm, cx);
     helm.reply(read.id, 200, Some(account(false, false)));
     settle(cx);
@@ -103,11 +106,7 @@ fn a_saved_key_reads_the_list_which_says_when_it_found_none(cx: &mut TestAppCont
     );
     helm.reply(read.id, 200, Some(json!([])));
     settle(cx);
-    let found = status(cx).unwrap_or_default();
-    assert!(
-        found.starts_with("None found · checked ") && found.ends_with(" UTC"),
-        "{found}"
-    );
+    assert_eq!(status(cx).as_deref(), Some("None found · checked 18:59"));
     assert_eq!(busy_state(cx, "tensorlake-sandboxes-refresh"), READY);
     press(cx, "tensorlake-sandboxes-refresh");
     let read = one_list_read(&mut helm);
@@ -259,12 +258,14 @@ fn only_a_tensorlake_host_coming_or_going_reads_the_list_again(cx: &mut TestAppC
 /// SPEC.md: each row "shows its creation time when available, its state, and **from another helm** when its name
 /// carries another helm's tag", and "Unfinished cleanup remains in the list with its error and **Retry cleanup** ...
 /// running cleanup shows **Cleaning up…**". These come from the helm's list, so they must show whatever the GUI did
-/// before. Specified: a row's details are its state, "from another helm" when so marked and its creation time in UTC;
+/// before. Specified: a row's details are its state, "from another helm" when so marked and its creation time to the
+/// second in the viewer's local time (the app's zone pinned an hour east of UTC here);
 /// a failed cleanup's row shows "Cleanup unfinished:" with the helm's reason and offers Retry cleanup; a running
 /// cleanup's row offers Cleaning up…, unavailable.
 #[gpui::test]
 fn rows_show_their_state_and_cleanup(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.update(|_, cx| local_time::pin(3_600, cx));
     let read = show_with_key(&mut helm, cx);
     let mut other = sandbox("sb-2", "farhelm-host-zzzz-other-abcd");
     other["from_another_helm"] = json!(true);
@@ -287,7 +288,7 @@ fn rows_show_their_state_and_cleanup(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(
         label_of(cx, "tensorlake-sandbox-1-details").as_deref(),
-        Some("running · from another helm · Created 2026-11-14 09:05:00 UTC")
+        Some("running · from another helm · Created 2026-11-14 10:05:00")
     );
     assert_eq!(
         label_of(cx, "tensorlake-sandbox-0-details").as_deref(),

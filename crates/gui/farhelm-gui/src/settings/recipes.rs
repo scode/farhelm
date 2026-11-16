@@ -91,8 +91,10 @@ use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, LayerId};
+use crate::local_time::{self, Zone};
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
+use crate::session_list::age;
 use crate::theme::{self, Palette, metrics};
 use crate::ticker;
 
@@ -331,18 +333,6 @@ fn status_line(line: &Line, sentence: HostSentence, pulse: f32, cx: &App) -> Div
         .child(sentence)
 }
 
-/// A UTC date and minute, `2026-11-03 14:02 UTC`: the old row's stamp. Labelled UTC because the helm's epoch seconds
-/// are not the viewer's local time, and the GUI carries no time zone database.
-fn utc_minute(secs: i64) -> String {
-    let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(86_400));
-    let time = secs.rem_euclid(86_400);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
-        time / 3600,
-        time % 3600 / 60
-    )
-}
-
 /// "step 5 of 9".
 fn step_of(step: BuildStep) -> String {
     format!("step {} of {}", step.number(), BuildStep::COUNT)
@@ -354,13 +344,14 @@ fn step_of(step: BuildStep) -> String {
 /// new one replaces it. A running or interrupted build, and anything that still awaits deletion, show even after a base
 /// change. A save never replaces the current snapshot, so a changed base or package list warns until a successful build
 /// records it; packages count as unchanged in any order. A base the snapshot's provider cannot run says so and offers
-/// no build, since the helm would refuse it.
-pub(super) fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
+/// no build, since the helm would refuse it. When the snapshot was built is written to the minute in `zone`, the
+/// viewer's local time, as the old row wrote it in UTC.
+pub(super) fn snapshot_status(view: &RecipeView, zone: Zone) -> SnapshotStatus {
     let mut lines = Vec::new();
     if let Some(snapshot) = &view.snapshot {
         let mut built = vec![Words::App(format!(
             "Snapshot built {}",
-            utc_minute(snapshot.built_at)
+            local_time::minute(snapshot.built_at, zone)
         ))];
         for version in [&snapshot.claude_version, &snapshot.codex_version]
             .into_iter()
@@ -751,19 +742,20 @@ impl Recipes {
 
     /// One recipe's row (`.recipe-row`): its name, summary, per-place lines from the pushed `places`, snapshot status,
     /// prepared-snapshot line, the build it offers, and the helm's words for its last refused build or rebuild.
-    /// `pulse` is the running pulse's opacity now, and `now` the viewer's time in seconds since the epoch, for the
-    /// prepared line's ages.
+    /// `pulse` is the running pulse's opacity now, `now` the viewer's time in seconds since the epoch, for the prepared
+    /// line's ages, and `zone` the viewer's, for the times it gives.
     fn row(
         &self,
         view: &RecipeView,
         places: &places::Places,
         pulse: f32,
         now: Option<i64>,
+        zone: Zone,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let palette = theme::palette(cx);
         let name = view.name.clone();
-        let status = snapshot_status(view);
+        let status = snapshot_status(view, zone);
         let key = OpKey::recipe(&name);
         let (in_flight, refusal) = session::current_operations(cx)
             .map(|operations| {
@@ -807,7 +799,7 @@ impl Recipes {
             .min_w_0()
             .children(lines);
         // `.recipe-row-prepared`: preparation is a status region of its own, apart from the build, as in the old row.
-        let prepared = prepared::prepared_status(view, now);
+        let prepared = prepared::prepared_status(view, now, zone);
         let prepared_sentence = prepared.sentence(format!("recipe-{name}-prepared-line"));
         let prepared = div()
             .id(ElementId::Name(format!("recipe-{name}-prepared").into()))
@@ -904,7 +896,7 @@ impl Recipes {
                             .text_color(theme::color(palette.fg_1))
                             .child(summary(view)),
                     )
-                    .children(self.place_lines(&name, places, in_flight, cx))
+                    .children(self.place_lines(&name, places, in_flight, zone, cx))
                     .child(snapshot)
                     .child(prepared)
                     .children(actions)
@@ -914,13 +906,15 @@ impl Recipes {
     }
 
     /// The rows, the empty line or the loading line, whichever the pushed `catalog` calls for. A catalog the helm could
-    /// not read with no rows to keep draws none of them: its reason, drawn below, is the whole story.
+    /// not read with no rows to keep draws none of them: its reason, drawn below, is the whole story. `zone` is the
+    /// viewer's, read once for the draw.
     fn listing(
         &self,
         catalog: Option<&Catalog>,
         places: &places::Places,
         pulse: f32,
         now: Option<i64>,
+        zone: Zone,
         cx: &Context<Self>,
     ) -> Option<AnyElement> {
         match catalog {
@@ -948,7 +942,7 @@ impl Recipes {
                         catalog
                             .rows
                             .iter()
-                            .map(|view| self.row(view, places, pulse, now, cx)),
+                            .map(|view| self.row(view, places, pulse, now, zone, cx)),
                     )
                     .into_any_element(),
             ),
@@ -1022,10 +1016,8 @@ impl Render for Recipes {
         if ages != self.clock.is_some() {
             self.clock = ages.then(|| ticker::clock(cx));
         }
-        let now = ticker::wall_now(cx)
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .and_then(|since| i64::try_from(since.as_secs()).ok());
+        let now = age::seconds(ticker::wall_now(cx));
+        let zone = local_time::zone(cx);
         let pulse = pulse_opacity(
             self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             palette.status_pulse_min,
@@ -1056,7 +1048,7 @@ impl Render for Recipes {
         });
         section
             .child(choices::help(HELP, cx))
-            .children(self.listing(catalog.as_ref(), &places, pulse, now, cx))
+            .children(self.listing(catalog.as_ref(), &places, pulse, now, zone, cx))
             .children(self.read_failure(catalog.as_ref(), cx))
             // `.recipe-new`: below the list and any failure, as wide as its words.
             .child(div().flex().child(new_recipe))

@@ -71,6 +71,7 @@ use crate::assets;
 use crate::components::pulse_opacity;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::{self, host_mark, phase};
+use crate::local_time;
 use crate::render_count;
 use crate::session;
 use crate::theme::{self, Palette, metrics};
@@ -287,8 +288,12 @@ impl Card {
                 .get::<HostView>(&HostView::key(id))
                 .map(identity::display_name)
         };
-        let connection =
-            phase::connection_line(&entry, format!("host-card-connection-{host}"), twin);
+        let connection = phase::connection_line(
+            &entry,
+            format!("host-card-connection-{host}"),
+            twin,
+            local_time::zone(cx),
+        );
         let message = run.message.as_deref().map(|message| {
             HostSentence::new(SharedString::from(format!("host-card-run-message-{host}")))
                 .host(&HostText::from_host(message))

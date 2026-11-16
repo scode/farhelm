@@ -4,7 +4,7 @@
 use crate::session_list::host_rail::tests::{hosts, local, remote};
 use crate::session_list::tests::{TEST_NOW, listing, session};
 use crate::theme;
-use crate::{session, ticker};
+use crate::{local_time, session, ticker};
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::Collection;
 use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px};
@@ -128,7 +128,7 @@ pub(super) fn session_details_bars(state: &SceneState, _: &mut Window, cx: &mut 
         .unwrap_or_default()
         .iter()
         .filter_map(|key| collections.get::<SessionRow>(key))
-        .map(|row| Details::of(row, collections, now))
+        .map(|row| Details::of(row, collections, now, local_time::zone(cx)))
         .collect();
     let narrow = shown.first().cloned();
     div()
@@ -189,7 +189,7 @@ pub(super) fn session_details_copy_warning(
     let collections = store.read(cx).collections();
     let shown = collections
         .get::<SessionRow>("a")
-        .map(|row| Details::of(row, collections, now));
+        .map(|row| Details::of(row, collections, now, local_time::zone(cx)));
     div()
         .w(px(620.))
         .pt(px(48.))
@@ -288,8 +288,15 @@ pub(super) fn session_unavailable_cards(
         let row: SessionRow = serde_json::from_value(fixture.stale().entry().value)
             .unwrap_or_else(|error| panic!("a session row: {error}"));
         let host = crate::hosts::tests::host(2, "ssh", host_state);
-        let notice = notice(&row.host_name, HostLookup::Known(&host), None, |_| None);
-        let band = Band::of(&row, now).map(|band| band.draw(theme::palette(cx)));
+        let zone = local_time::zone(cx);
+        let notice = notice(
+            &row.host_name,
+            HostLookup::Known(&host),
+            None,
+            |_| None,
+            zone,
+        );
+        let band = Band::of(&row, now, zone).map(|band| band.draw(theme::palette(cx)));
         let card = draw(
             Drawn {
                 notice,

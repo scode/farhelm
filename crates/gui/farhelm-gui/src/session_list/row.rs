@@ -88,6 +88,7 @@ use crate::assets::{self, Icon};
 use crate::components::{HoverHelp, ListRow, Role, StatusMark};
 use crate::focus;
 use crate::host_text::{self, HostSentence, HostText, Line};
+use crate::local_time::Zone;
 use crate::theme::{self, Palette, metrics};
 
 /// The id prefix of a session row's open control; the rest is the session's key, so the control's focus and hover
@@ -180,6 +181,9 @@ pub(super) struct Steps {
     /// The viewer's clock in seconds since the epoch ([`age::seconds`] of [`crate::ticker::wall_now`]), read once per
     /// frame so every row's age is counted from the same instant; `None` when it is unusable, and no row draws an age.
     pub(super) now: Option<i64>,
+    /// The viewer's time zone ([`crate::local_time::zone`]), read once per frame with `now`, for the full stamps under
+    /// the ages and in the summary card.
+    pub(super) zone: Zone,
     /// Whether the rows are compact (see the module docs): the helm-wide preference, or the choice the order menu is
     /// saving while its write is in flight ([`super::order`]). Read once per frame, so no two rows differ.
     pub(super) compact: bool,
@@ -355,7 +359,7 @@ pub(crate) fn row(
         .child(age_track(
             &id,
             bell,
-            age::of(row.info.effective_activity(), steps.now),
+            age::of(row.info.effective_activity(), steps.now, steps.zone),
             inks,
             place,
         ));

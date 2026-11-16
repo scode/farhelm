@@ -9,17 +9,19 @@
 //! the first window see them; then Kit's own init (it installs its theme and the text input's actions), then the
 //! bundled fonts, then Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings
 //! (after Kit's, so a deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer
-//! manager's registries, the ticker, the notice center and the local state that survives resets, and, in test builds,
-//! the render counter. Last come the desktop integration's menus, after every key binding exists, because a Mac menu
-//! reads the shortcuts it shows once, when it is set. Then the coordinator starts following the host's answer for which
-//! controls Tab reaches, the ticker takes the host's reduced-motion setting (and, in an agent build, counts every window
-//! as active, so a run under headless Mutter, which reports every window inactive, still animates), the desktop
-//! integration keeps the host's source of the license notices and the host's updater (so the window's first frame
-//! already knows whether an updater runs), the host's status-sound player is installed if it has one (before any
-//! window exists to decide a sound), and the UI channel to the helm opens, so the window's first frame already
-//! reflects where the connection stands. Only then does a window open, at the frame the host restored if it restored
-//! one; once it is open, the window is handed to the desktop integration, which makes its close quit the app, tells the
-//! host about every change to its frame, and follows the host's reports of a second launch, which bring it forward.
+//! manager's registries, the ticker, the local time zone (UTC until the host's arrives), the notice center and the local
+//! state that survives resets, and, in test builds, the render counter. Last come the desktop integration's menus,
+//! after every key binding exists, because a Mac menu reads the shortcuts it shows once, when it is set. Then the
+//! coordinator starts following the host's answer for which controls Tab reaches, the ticker takes the host's
+//! reduced-motion setting (and, in an agent build, counts every window as active, so a run under headless Mutter, which
+//! reports every window inactive, still animates), the app's clock times follow the host's time zone if it hands one in
+//! (so the window's first frame already writes local times), the desktop integration keeps the host's source of the
+//! license notices and the host's updater (so the window's first frame already knows whether an updater runs), the
+//! host's status-sound player is installed if it has one (before any window exists to decide a sound), and the UI
+//! channel to the helm opens, so the window's first frame already reflects where the connection stands. Only then does
+//! a window open, at the frame the host restored if it restored one; once it is open, the window is handed to the
+//! desktop integration, which makes its close quit the app, tells the host about every change to its frame, and follows
+//! the host's reports of a second launch, which bring it forward.
 //! Everything from [`install`] on is `start`, which a test runs on GPUI's test platform.
 //!
 //! The desktop integration ([`crate::desktop`]) is area code. The bootstrap only calls into it at those points and
@@ -44,7 +46,9 @@ use crate::assets::{self, Assets};
 use crate::main_view::MainView;
 use crate::render_count;
 use crate::theme::{self, Preference};
-use crate::{actions, desktop, focus, layers, local_state, notices, session, sounds, ticker};
+use crate::{
+    actions, desktop, focus, layers, local_state, local_time, notices, session, sounds, ticker,
+};
 
 /// The smallest window the app supports, in logical pixels.
 ///
@@ -88,6 +92,7 @@ pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     focus::install(cx);
     layers::install(cx);
     ticker::install(cx);
+    local_time::install(cx);
     notices::install(cx);
     local_state::install(cx);
     render_count::install(cx);
@@ -277,6 +282,10 @@ pub struct Host {
     /// Installed before the main window opens, so the player is already in place for the first sound the window
     /// decides.
     pub player: Option<Rc<dyn sounds::Player>>,
+    /// The platform's time zone, which every clock time the app shows is written in ([`local_time`]). `None` writes
+    /// them in UTC (tests, and a host that cannot read one). Followed before the main window opens, so its first frame
+    /// already shows local times.
+    pub time_zone: Option<&'static dyn local_time::TimeZone>,
 }
 
 /// The part of the [`Host`] that [`start`] uses: everything but the quit wiring, which [`run`] installs before it, and
@@ -290,6 +299,7 @@ struct Startup {
     updater: Option<desktop::UpdaterHost>,
     activations: Option<desktop::Activations>,
     player: Option<Rc<dyn sounds::Player>>,
+    time_zone: Option<&'static dyn local_time::TimeZone>,
 }
 
 /// Install all app-wide state, open the main window and hand it to the desktop integration, returning the window: the
@@ -305,10 +315,14 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
         updater,
         activations,
         player,
+        time_zone,
     } = startup;
     install(cx)?;
     focus::follow_tab_reach(tab_reach, cx);
     ticker::set_reduced_motion(reduced_motion, cx);
+    if let Some(time_zone) = time_zone {
+        local_time::follow_platform(time_zone, cx);
+    }
     // Headless Mutter reports every window inactive forever, and the bridge's runs are where an agent watches the app
     // animate, so agent builds count windows as active (SPEC_impl.md, "GPUI cookbook").
     #[cfg(feature = "agent")]
@@ -355,6 +369,7 @@ pub fn run(host: Host) {
         updater,
         activations,
         player,
+        time_zone,
     } = host;
     let startup = Startup {
         tab_reach: Rc::from(tab_reach),
@@ -365,6 +380,7 @@ pub fn run(host: Host) {
         updater,
         activations,
         player,
+        time_zone,
     };
     gpui_platform::application()
         .with_assets(Assets)
@@ -453,7 +469,7 @@ mod tests {
     }
 
     /// A startup with every optional host value absent: no helm, no saved frame, no updater, no second launches, no
-    /// player.
+    /// player, no time zone.
     fn startup_without_host_values() -> Startup {
         Startup {
             tab_reach: Rc::new(|| focus::TabReach::EveryControl),
@@ -464,14 +480,15 @@ mod tests {
             updater: None,
             activations: None,
             player: None,
+            time_zone: None,
         }
     }
 
     /// Nothing else runs the real startup sequence end to end (`run` needs the real platform), so a startup that
     /// fails, or opens a window too many or none, would otherwise first show in a launched app. Specifies that the whole
     /// startup, with every optional host value absent (no helm, no saved frame, no updater, no second launches, no
-    /// player), succeeds on GPUI's test platform, opens exactly the main window it returns, and installs no sound
-    /// player.
+    /// player, no time zone), succeeds on GPUI's test platform, opens exactly the main window it returns, installs no
+    /// sound player, and writes times in UTC.
     #[gpui::test]
     fn the_startup_opens_only_the_main_window_without_host_values(cx: &mut TestAppContext) {
         let main = cx
@@ -488,6 +505,11 @@ mod tests {
             assert!(
                 sounds::installed_player(cx).is_none(),
                 "no player is installed"
+            );
+            assert_eq!(
+                local_time::stamp(0, local_time::zone(cx)),
+                "1970-01-01 00:00:00",
+                "UTC without the host's zone"
             );
         });
     }
@@ -516,5 +538,24 @@ mod tests {
             let installed = sounds::installed_player(cx).expect("a player is installed");
             assert!(Rc::ptr_eq(&installed, &player), "the host's own player");
         });
+    }
+
+    /// The host's time zone is the only way the app's times become local, and a seam that dropped it would fail
+    /// silently: every time would read in UTC with no zone named, which passes for local time and is hours off.
+    /// Specifies that a startup with a host zone writes times in it once the main window is open (one without writes
+    /// them in UTC: `the_startup_opens_only_the_main_window_without_host_values`).
+    #[gpui::test]
+    fn the_startup_writes_times_in_the_hosts_time_zone(cx: &mut TestAppContext) {
+        // Three hours east of UTC all year, standing in for the host's zone.
+        let east = crate::local_time_tests::stand_in(Some(3 * 3_600));
+        let startup = Startup {
+            time_zone: Some(east),
+            ..startup_without_host_values()
+        };
+        cx.update(|cx| start(startup, cx))
+            .expect("the startup succeeds with a time zone");
+        cx.run_until_parked();
+        let shown = cx.update(|cx| local_time::stamp(0, local_time::zone(cx)));
+        assert_eq!(shown, "1970-01-01 03:00:00");
     }
 }

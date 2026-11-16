@@ -125,6 +125,7 @@ use crate::components::{Spinner, status_card, status_heading};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
+use crate::local_time;
 use crate::session::{self, PerSession, UiSession};
 use crate::session_list::{age, delete, restart};
 use std::rc::Rc;
@@ -531,13 +532,18 @@ impl Render for SessionPane {
             .filter(|row| unavailable::shows_row(row))
             .and_then(|row| {
                 let store = session::current_store(cx)?;
-                Some(unavailable::Notice::of(row, store.read(cx).collections()))
+                Some(unavailable::Notice::of(
+                    row,
+                    store.read(cx).collections(),
+                    local_time::zone(cx),
+                ))
             });
         // The stale band, from the store's row too, with the viewer's clock.
         let now = age::seconds(ticker::wall_now(cx));
+        let zone = local_time::zone(cx);
         let band = stored
             .as_ref()
-            .and_then(|row| unavailable::Band::of(row, now));
+            .and_then(|row| unavailable::Band::of(row, now, zone));
         let deleting = delete::in_flight(&key, cx);
         // The unavailable card's heading turns the spinner too, as the old card's did.
         let spins = (deleting.is_some() || Self::header_spins(&key, cx) || notice.is_some())
@@ -661,11 +667,12 @@ impl SessionPane {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
+        let zone = local_time::zone(cx);
         let shown = session::current_store(cx).and_then(|store| {
             let collections = store.read(cx).collections();
             collections
                 .get::<SessionRow>(key)
-                .map(|row| details::Details::of(row, collections, now))
+                .map(|row| details::Details::of(row, collections, now, zone))
         });
         let pulses =
             shown.as_ref().is_some_and(details::Details::pulses) && ticker::is_active(window, cx);

@@ -92,12 +92,11 @@ fn totals_qualify_unchecked_entries_and_partial_sizes() {
     assert_eq!(space(512, false), "512 B");
 }
 
-/// Why this matters: archive and failure times are the host's recorded UTC times, shown to the minute as the old
-/// dialog did, and the folders to copy work out of must each be named once. Specified: a stamp prints as
-/// `YYYY-MM-DD HH:MM UTC`; the folders are the distinct parents of every checkout's and diagnostic's path, sorted.
+/// Why this matters: the folders to copy work out of must each be named once. Specified: the folders are the distinct
+/// parents of every checkout's and diagnostic's path, sorted. (The archive and failure times are the dialog's, in the
+/// viewer's zone: `trash/dialog/tests.rs` and `rail_notices/tests.rs` pin them.)
 #[test]
-fn stamps_are_utc_minutes_and_folders_are_each_parent_once() {
-    assert_eq!(stamp(1_794_591_655), "2026-11-13 17:40 UTC");
+fn folders_are_each_parent_once() {
     let listing = CheckoutTrashListing {
         checkouts: vec![archive("a", None), archive("b", None)],
         issues: vec![unchecked("u")],

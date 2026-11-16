@@ -73,6 +73,7 @@ use crate::components::{CopyFeedback, CopyField, HoverHelp, Role, StatusMark};
 use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::hosts::identity;
 use crate::layers;
+use crate::local_time::Zone;
 use crate::session_list::abbreviate_home;
 use crate::session_list::age::{self, Age};
 use crate::session_list::row_marks::{self, HelpPlace, HostMark, Locality};
@@ -207,8 +208,13 @@ pub(crate) struct Host {
 
 impl Details {
     /// What the bar shows for `row` over `collections`, with the viewer's clock at `now` (seconds since the epoch,
-    /// [`age::seconds`]; `None` when it cannot be used, and no age is shown).
-    pub(crate) fn of(row: &SessionRow, collections: &Collections, now: Option<i64>) -> Details {
+    /// [`age::seconds`]; `None` when it cannot be used, and no age is shown) and the age's stamp in `zone`.
+    pub(crate) fn of(
+        row: &SessionRow,
+        collections: &Collections,
+        now: Option<i64>,
+        zone: Zone,
+    ) -> Details {
         let status = if row.stale {
             None
         } else {
@@ -227,7 +233,7 @@ impl Details {
         let age = if row.stale {
             None
         } else {
-            age::of(row.info.effective_activity(), now)
+            age::of(row.info.effective_activity(), now, zone)
         };
         let cwd = row.info.cwd.as_str();
         let checkout = row.info.working_copy.as_ref().map(|copy| Checkout {

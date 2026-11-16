@@ -30,6 +30,7 @@ use super::tests::{
 };
 use crate::hosts::tests::{aliased, connected, host, hosts};
 use crate::layers;
+use crate::local_time::{self, Zone};
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{advance, click, meta, settle};
@@ -50,9 +51,9 @@ fn prepared_recipe() -> RecipeView {
     recipe
 }
 
-/// The line `recipe` shows at `now`: its tone, its words and whether it runs.
+/// The line `recipe` shows at `now`, its times five hours west of UTC: its tone, its words and whether it runs.
 fn prepared(recipe: &RecipeView, now: Option<i64>) -> (Tone, String, bool) {
-    let line = prepared_status(recipe, now);
+    let line = prepared_status(recipe, now, Zone::fixed(-5 * 3_600));
     (line.tone, line.text(), line.running)
 }
 
@@ -60,8 +61,9 @@ fn prepared(recipe: &RecipeView, now: Option<i64>) -> (Tone, String, bool) {
 /// freshness decision: the viewer's clock moves the age on, past expiry too, but only the helm marks a snapshot stale.
 /// Specified (the old `prepared_status_keeps_readiness_last_checked_and_ages_display_only`): a recipe never prepared
 /// says the first new host or session prepares it, muted; a ready one is positive, "when last checked", with its age
-/// in seconds, minutes or hours (never negative), its Farhelm version and the 24-hour rule, or its UTC time when the
-/// viewer's clock cannot say; and ages saturate at the extremes.
+/// in seconds, minutes or hours (never negative), its Farhelm version and the 24-hour rule, or, when the viewer's clock
+/// cannot say, its time to the minute in the viewer's local time (five hours west of UTC, which puts 00:01 UTC on the
+/// first day of 1970 on the evening before); and ages saturate at the extremes.
 #[test]
 fn prepared_status_keeps_readiness_last_checked_and_ages_display_only() {
     assert_eq!(
@@ -80,7 +82,7 @@ fn prepared_status_keeps_readiness_last_checked_and_ages_display_only() {
         (Some(7300), "2 h ago"),
         (Some(86_500), "24 h ago"),
         (Some(86_501), "24 h ago"),
-        (None, "1970-01-01 00:01 UTC"),
+        (None, "1969-12-31 19:01"),
     ] {
         assert_eq!(
             prepared(&recipe, now),
@@ -311,9 +313,9 @@ fn one_rebuild(helm: &mut FakeHelm, name: &str, host: i64) -> FakeCommand {
 /// the lines come from the store with nothing read, and the account place is the row's built-snapshot line's, so
 /// drawing it here too would say the same thing twice. Specified: showing Recipes reads only the account; the row has
 /// one line per container place from the pushed places, none for the Tensorlake account: a registered host by its name
-/// ("build-box · Ready · Built <UTC>" with a pending cleanup), and a host the registry no longer lists as "Unavailable
-/// place", building with the helm's step and its Rebuild unavailable; a push that moves the second place's step draws
-/// the new step with nothing sent.
+/// ("build-box · Ready · Built <time>" with a pending cleanup, the time in the app's zone, pinned two hours east of UTC
+/// here), and a host the registry no longer lists as "Unavailable place", building with the helm's step and its Rebuild
+/// unavailable; a push that moves the second place's step draws the new step with nothing sent.
 #[gpui::test]
 fn the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name(cx: &mut TestAppContext) {
     let (mut helm, cx) = show_recipes_with_places(
@@ -333,6 +335,8 @@ fn the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name(cx: &mu
             ),
         ],
     );
+    cx.update(|_, cx| local_time::pin(2 * 3_600, cx));
+    crate::test_support::redraw(cx);
     assert!(!drawn(cx, "recipe-rust-dev-places-reading"));
     assert!(
         !drawn(cx, "recipe-rust-dev-place-account"),
@@ -341,7 +345,7 @@ fn the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name(cx: &mu
     assert_eq!(
         label_of(cx, "recipe-rust-dev-place-7").as_deref(),
         Some(
-            "build-box · Ready · Built 2026-11-03 14:02:05 UTC · Previous image cleanup is unfinished"
+            "build-box · Ready · Built 2026-11-03 16:02:05 · Previous image cleanup is unfinished"
         )
     );
     assert_eq!(

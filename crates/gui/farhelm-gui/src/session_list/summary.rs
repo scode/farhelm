@@ -15,7 +15,7 @@
 //!   color, never the selected row's inverse ink, and the helm's full name for it), Checkout (the repository and the
 //!   checkout's folder), Directory (the full path, unabbreviated: SPEC.md says an abbreviation is never the only place
 //!   a value is recorded, and this is where the row's `~` form is recorded in full), Started and Last active (the
-//!   relative age and the UTC stamp).
+//!   relative age and the stamp), each stamp in the viewer's local time ([`crate::local_time`]).
 //! - **A footer**: "Click to open" and "⋯ For actions".
 //!
 //! What the card shows is decided by [`Summary::of`], a pure function of the session's row, the registry and the
@@ -54,6 +54,7 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity;
 use crate::launcher::draft::harness_label;
 use crate::launcher::recents::explicit_before_permissions;
+use crate::local_time::{self, Zone};
 use crate::permission::observed_yolo_mode;
 use crate::permission::words;
 use crate::session;
@@ -130,9 +131,9 @@ pub(crate) enum Fact {
     Checkout { repo: HostText, folder: HostText },
     /// The working directory, in full.
     Directory(HostText),
-    /// When the session was created, as a UTC stamp.
+    /// When the session was created, as a stamp in the viewer's zone.
     Started(String),
-    /// When the agent was last active: the relative age and the UTC stamp, `2m · 2023-11-14 22:13:20 UTC`.
+    /// When the agent was last active: the relative age and the stamp in the viewer's zone, `2m · 2023-11-14 22:13:20`.
     LastActive(String),
 }
 
@@ -179,12 +180,14 @@ pub(crate) struct Summary {
 
 impl Summary {
     /// `row`'s card, its sentences under ids made from `key`, with the viewer's clock at `now` (seconds since the epoch,
-    /// [`age::seconds`]; `None` when it cannot be used, and the card has no Last active, as the row has no age).
+    /// [`age::seconds`]; `None` when it cannot be used, and the card has no Last active, as the row has no age) and its
+    /// stamps written in `zone`, the viewer's.
     pub(crate) fn of(
         key: &str,
         row: &SessionRow,
         collections: &Collections,
         now: Option<i64>,
+        zone: Zone,
     ) -> Summary {
         let status = status::live(row)
             .map(CardStatus::Live)
@@ -213,14 +216,14 @@ impl Summary {
             facts.push(Fact::Directory(HostText::from_host(row.info.cwd.as_str())));
         }
         if row.info.created_at > 0 {
-            facts.push(Fact::Started(identity::utc_stamp(row.info.created_at)));
+            facts.push(Fact::Started(local_time::stamp(row.info.created_at, zone)));
         }
         let activity = row.info.effective_activity();
-        if let Some(age) = age::of(activity, now) {
+        if let Some(age) = age::of(activity, now, zone) {
             facts.push(Fact::LastActive(format!(
                 "{} · {}",
                 age.short,
-                identity::utc_stamp(activity)
+                local_time::stamp(activity, zone)
             )));
         }
         Summary {
@@ -323,7 +326,7 @@ impl Render for SummaryCard {
         let Some(row) = collections.get::<SessionRow>(&self.key) else {
             return div().into_any_element();
         };
-        let summary = Summary::of(&self.key, row, collections, self.steps.now);
+        let summary = Summary::of(&self.key, row, collections, self.steps.now, self.steps.zone);
         draw(&self.key, &summary, theme::palette(cx), self.steps.pulse)
     }
 }

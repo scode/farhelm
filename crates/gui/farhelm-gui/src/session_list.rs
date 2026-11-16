@@ -231,6 +231,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::hosts::HostsPanel;
 use crate::layers::Anchor;
 use crate::local_state::{self, LocalState};
+use crate::local_time;
 use crate::main_view::MainView;
 use crate::operations;
 use crate::rail_notices::NoticesButton;
@@ -828,6 +829,7 @@ impl Render for SessionList {
             pulse: self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             spinner: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
             now: age::seconds(ticker::wall_now(cx)),
+            zone: local_time::zone(cx),
             compact: self.order_state(cx).read(cx).compact_shown(stored_compact),
         };
         if self.sync_rows(keys, window, cx) {

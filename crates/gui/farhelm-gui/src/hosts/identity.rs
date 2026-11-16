@@ -10,9 +10,6 @@
 //! lines are the Hosts panel's, and the session pane's unavailable card reads two of their parts, the evidence and the
 //! remedy ([`phase::evidence`], [`phase::remedy`]), so that a session on an unreachable host says what the host's row
 //! says.
-//!
-//! [`utc_stamp`] is here too: the phase details print their times through it, and the session row's age is to use it
-//! as well, importing it from here rather than from inside [`phase`].
 
 pub(crate) mod phase;
 
@@ -117,18 +114,4 @@ pub(crate) fn tint(color: HostColor, palette: &Palette) -> Token {
         HostColor::Copper => palette.host[5],
         HostColor::Red => palette.host[6],
     }
-}
-
-/// `secs` since the epoch as `YYYY-MM-DD HH:MM:SS UTC`, the old app's unambiguous stamp (`activity::utc_stamp`): a
-/// zone-qualified time needs no time zone database, which the GUI does not carry. It is the app's one timestamp form:
-/// the Hosts panel's detail lines ([`phase::detail_lines`]) print when a suspension was noticed or a provider was asked
-/// through it, and a session row's age shows its last activity in it, as the old app's did. Seconds, not the
-/// milliseconds the helm pushes: callers divide first. Times before 1970 are written as they are, not refused.
-pub(crate) fn utc_stamp(secs: i64) -> String {
-    const SECS_PER_DAY: i64 = 86_400;
-    // Euclidean division, so a stamp before 1970 still lands on its own day rather than reflecting around the epoch.
-    let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(SECS_PER_DAY));
-    let of_day = secs.rem_euclid(SECS_PER_DAY);
-    let (hour, minute, second) = (of_day / 3_600, (of_day % 3_600) / 60, of_day % 60);
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
 }

@@ -18,6 +18,7 @@ use super::{
     RETRY_ID_PREFIX, bell_help, bell_ink, bell_label, is_unread, newest_first,
 };
 use crate::hosts::tests::hosts;
+use crate::local_time;
 use crate::session_list::tests::{listing, open_main, painted};
 use crate::test_support::{self, any_open, focused_id, frame, meta};
 use crate::theme;
@@ -231,8 +232,9 @@ fn the_bell_reports_its_unread_count_in_its_name_and_beside_the_glyph(cx: &mut T
 /// bell opens the panel named "Notifications" beside it (its left edge past the bell's right), headed "Notifications"
 /// over "About your hosts and Farhelm"; the newer notice comes first; an unresolved notice paints its host's name with
 /// ": trash could not be freed", the checkout's name, its repository and "4.0 KiB last measured", the reason, "Last
-/// failed" with the failure's minute in UTC and the promise of a retry, with Retry now and Open Trash; the resolved one
-/// paints "Resolved" and offers Open Trash but no Retry now.
+/// failed" with the failure's minute in the viewer's local time (the app's zone pinned three hours west of UTC here,
+/// with no zone named) and the promise of a retry, with Retry now and Open Trash; the resolved one paints "Resolved"
+/// and offers Open Trash but no Retry now.
 #[gpui::test]
 fn the_panel_lists_notices_newest_first_beside_the_bell(cx: &mut TestAppContext) {
     let held = [
@@ -241,6 +243,7 @@ fn the_panel_lists_notices_newest_first_beside_the_bell(cx: &mut TestAppContext)
     ];
     let (_fake, cx) = open(cx, &held);
     cx.simulate_resize(size(px(1200.), px(800.)));
+    cx.update(|_, cx| local_time::pin(-3 * 3_600, cx));
     test_support::settle(cx);
     open_panel(cx);
     let nodes = frame(cx);
@@ -284,7 +287,7 @@ fn the_panel_lists_notices_newest_first_beside_the_bell(cx: &mut TestAppContext)
     );
     assert_eq!(
         label("rail-notice-1-time").as_deref(),
-        Some("Last failed 2026-11-13 17:45 UTC")
+        Some("Last failed 2026-11-13 14:45")
     );
     assert!(node(&nodes, &format!("{RETRY_ID_PREFIX}1")).is_some());
     assert!(
