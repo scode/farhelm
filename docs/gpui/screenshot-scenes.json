@@ -587,6 +587,22 @@
       ]
     },
     {
+      "id": "app-terminal-host-frame",
+      "title": "Settings' Color terminal frames by host turned on: the terminal's thin frame in its host's identity color",
+      "reference": null,
+      "mockup": false,
+      "start": ["--sessions", "1"],
+      "steps": [
+        ["click", "text:Fixture 1"],
+        ["terminal-text", "--wait", "\n>"],
+        ["click", "id:app-settings-toggle"],
+        ["click", "id:settings-section-sessions"],
+        ["click", "id:settings-color-terminal-frames"],
+        ["press", "escape"],
+        ["wait", "--idle"]
+      ]
+    },
+    {
       "id": "app-terminal-link-lookalike",
       "title": "A program's hyperlink whose text names another address, hovered: the loud destination warning beside the pointer",
       "reference": null,
@@ -603,7 +619,7 @@
         [
           "terminal-text",
           "--wait",
-          "FAKE-AGENT READY"
+          "\n>"
         ],
         [
           "press",
@@ -653,7 +669,7 @@
         [
           "terminal-text",
           "--wait",
-          "echo:"
+          "/\n>"
         ],
         [
           "hover",
@@ -666,40 +682,6 @@
       ]
     },
     {
-      "id": "app-terminal-host-frame",
-      "title": "Settings' Color terminal frames by host turned on: the terminal's thin frame in its host's identity color",
-      "reference": null,
-      "mockup": false,
-      "start": ["--sessions", "1"],
-      "steps": [
-        ["click", "text:Fixture 1"],
-        ["terminal-text", "--wait", "FAKE-AGENT READY"],
-        ["click", "id:app-settings-toggle"],
-        ["click", "id:settings-section-sessions"],
-        ["click", "id:settings-color-terminal-frames"],
-        ["press", "escape"],
-        ["wait", "--idle"]
-      ]
-    },
-    {
-      "id": "app-terminal-text-size",
-      "title": "The terminal text size stepped up four times from the top row's − / + group, its readout showing 18 and + naming its shortcut",
-      "reference": null,
-      "mockup": false,
-      "start": ["--sessions", "1"],
-      "steps": [
-        ["click", "text:Fixture 1"],
-        ["terminal-text", "--wait", "FAKE-AGENT READY"],
-        ["click", "id:terminal-text-size-larger"],
-        ["click", "id:terminal-text-size-larger"],
-        ["click", "id:terminal-text-size-larger"],
-        ["click", "id:terminal-text-size-larger"],
-        ["hover", "text:Fixture 1"],
-        ["hover", "id:terminal-text-size-larger"],
-        ["wait", "--idle"]
-      ]
-    },
-    {
       "id": "app-terminal-tabs",
       "title": "Two shell tabs opened with New terminal, the agent terminal shown, and Terminal 1's hover help",
       "reference": null,
@@ -707,13 +689,13 @@
       "start": ["--sessions", "1"],
       "steps": [
         ["click", "text:Fixture 1"],
-        ["terminal-text", "--wait", "FAKE-AGENT READY"],
+        ["terminal-text", "--wait", "\n>"],
         ["click", "id:session-terminal-add"],
         ["wait", "--text", "Terminal 1"],
         ["click", "id:session-terminal-add"],
         ["wait", "--text", "Terminal 2"],
         ["click", "id:session-terminal-tab-agent"],
-        ["terminal-text", "--wait", "FAKE-AGENT READY"],
+        ["terminal-text", "--wait", "\n>"],
         ["hover", "text:Terminal 1"],
         ["wait", "--idle"]
       ]
@@ -934,6 +916,26 @@
           "wait",
           "1000"
         ]
+      ]
+    },
+    {
+      "id": "app-terminal-text-size",
+      "title": "The terminal text size stepped up four times from the top row's − / + group, its readout showing 18 and + naming its shortcut",
+      "reference": null,
+      "mockup": false,
+      "start": ["--sessions", "1"],
+      "steps": [
+        ["press", "escape"],
+        ["press", "escape"],
+        ["click", "text:Fixture 1"],
+        ["terminal-text", "--wait", "\n>"],
+        ["click", "id:terminal-text-size-larger"],
+        ["click", "id:terminal-text-size-larger"],
+        ["click", "id:terminal-text-size-larger"],
+        ["click", "id:terminal-text-size-larger"],
+        ["hover", "text:Fixture 1"],
+        ["hover", "id:terminal-text-size-larger"],
+        ["wait", "--idle"]
       ]
     },
     {

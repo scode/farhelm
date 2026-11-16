@@ -3933,6 +3933,55 @@ fn a_two_row_lookalike_hyperlink_warns_on_both_rows_and_still_opens(cx: &mut Tes
     assert_eq!(h.cx.opened_url().as_deref(), Some("https://example.com/x"));
 }
 
+/// A lookalike label can be thousands of characters long, and the warning shows it under "Text says:". It must wrap
+/// inside the warning: laid out beside its label in a wrapping row, it once kept its whole width, so the warning ran
+/// past the window's right edge and hid the end of the text the user is being warned about.
+///
+/// Spec: in a window 520 pixels wide, a hyperlink to `https://evil.example/` whose label is twelve rows of repeated
+/// `https://bank.example/`, rested on, shows the warning; the claimed text ends inside the warning, and the warning
+/// inside the window.
+#[gpui::test]
+fn a_long_lookalike_label_wraps_inside_the_window(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.cx.simulate_resize(gpui::size(px(520.), px(600.)));
+    let piece = "https://bank.example/ ".repeat(3);
+    let rows: Vec<serde_json::Value> = (0..12)
+        .map(|row| {
+            serde_json::json!([row, {"w": true, "r": [[0, piece.chars().count(), piece, [0, -1, -1], 0]]}])
+        })
+        .collect();
+    h.attach_rows(
+        serde_json::Value::Array(rows),
+        serde_json::json!([["long", "https://evil.example/"]]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(4, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, true),
+        "the premise: the warning shows"
+    );
+    let display = h.cx.debug_bounds("terminal-link-disclosure").unwrap();
+    let claimed =
+        h.cx.debug_bounds("terminal-link-disclosure-claimed")
+            .unwrap();
+    assert!(
+        claimed.right() <= display.right(),
+        "the claimed text ends at {:?}, past the warning's edge {:?}",
+        claimed.right(),
+        display.right()
+    );
+    let window = h.cx.update(|window, _| window.viewport_size());
+    assert!(
+        display.right() <= window.width,
+        "the warning ends at {:?}, past the window's width {:?}",
+        display.right(),
+        window.width
+    );
+}
+
 /// A label is the program's text, so the display shows it as data: a right-to-left override cannot reorder what the
 /// user reads, and it shows as its escape (SPEC.md: host text is drawn escaped). A target that is not a web address
 /// never reaches the browser and gets no display offering it. Specified: a hyperlink to `https://example.com/page`
