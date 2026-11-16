@@ -707,6 +707,20 @@ pub(crate) fn blank_screen(cols: u16, rows: u16) -> Vec<GridOutput> {
     .collect()
 }
 
+/// Show the frame drawn last, as the platform's frame loop does: let whatever is queued run and draw, run the window's
+/// next-frame callbacks (which GPUI runs at the next frame it shows, when the frame drawn last is on screen or goes up
+/// right after them, with no input in between), and let what they queued run.
+/// Tests have no frame loop, so without this nothing that waits for a frame to be shown ever learns it was: a reworded
+/// question's answers other than Cancel act only once a frame showing its new words is on screen
+/// ([`crate::prompt::Open::reword`]), so a test that rewords and then answers calls this in between.
+pub(crate) fn show_next_frame(cx: &mut VisualTestContext) {
+    settle(cx);
+    cx.update(|window, cx| {
+        window.simulate_next_frame(cx);
+    });
+    settle(cx);
+}
+
 /// Tests of the shared helpers above, one per helper, appended with it.
 mod shared_helper_tests {
     use gpui::{IntoElement as _, ParentElement as _, TestAppContext, div};
@@ -978,6 +992,56 @@ mod shared_helper_tests {
         assert!(
             focused(cx, &second),
             "under the Mac rule the click left focus where it was"
+        );
+    }
+
+    /// Why this matters: tests have no frame loop, so a drawn frame is never shown unless a test asks for it, and a
+    /// reworded question answers with Confirm only once a frame showing its new words is on screen. A helper that drew
+    /// without showing would leave such a test's Enter doing nothing, and the test would pass or fail on something
+    /// else. Specified: a question with focus on Confirm, reworded from "alpha" to "beta", takes no Enter before the
+    /// helper runs; after it, Enter confirms once, on "beta".
+    #[gpui::test]
+    fn show_next_frame_lets_a_reworded_question_answer(cx: &mut TestAppContext) {
+        use super::{question, show_next_frame};
+        use crate::focus::Mark;
+        use crate::prompt;
+        use std::cell::RefCell;
+
+        let cx = open(cx, |_, _| div().into_any_element());
+        let ran = Rc::new(RefCell::new(Vec::<String>::new()));
+        let record = ran.clone();
+        let asked = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            prompt::ask_rewordable(
+                question("alpha"),
+                None,
+                &mark,
+                move |frozen, _, _| record.borrow_mut().push(frozen),
+                window,
+                cx,
+            )
+        });
+        settle(cx);
+        let asked = asked.expect("the premise: the question opened");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("prompt-confirm"),
+            "the premise: focus starts on Confirm"
+        );
+        let reworded = cx.update(|window, cx| asked.reword(question("beta"), window, cx));
+        assert!(reworded, "the premise: the question was reworded");
+        keys(cx, "enter");
+        assert!(
+            ran.borrow().is_empty(),
+            "before the frame was shown, Enter did nothing: {:?}",
+            ran.borrow()
+        );
+        show_next_frame(cx);
+        keys(cx, "enter");
+        assert_eq!(
+            *ran.borrow(),
+            ["beta"],
+            "after it, Enter confirmed the new value"
         );
     }
 }

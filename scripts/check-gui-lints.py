@@ -54,6 +54,7 @@ EXCEPTION_OWNERS = {
     ("farhelm-gui/src/focus.rs", "apply"),
     ("farhelm-gui/src/focus.rs", "track_raw"),
     ("farhelm-gui/src/layers.rs", "overlay"),
+    ("farhelm-gui/src/prompt.rs", "when_shown"),
     ("farhelm-gui/src/theme.rs", "raw"),
     ("farhelm-gui/src/ticker.rs", "timer"),
 }
