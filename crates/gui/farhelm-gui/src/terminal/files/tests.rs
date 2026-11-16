@@ -10,12 +10,14 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use farhelm_grid_model::GridOutput;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
 use farhelm_helm_client::fake::transfers::{FakeAnswer, FakeTransfer, FakeTransfers};
 use farhelm_helm_client::terminal::AttachmentLease;
+use farhelm_helm_client::{OpenOutcome, SavedDownload};
 use farhelm_proto::grid::{GridInput, MouseEventKind};
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
@@ -30,7 +32,7 @@ use super::*;
 use crate::session;
 use crate::terminal::CellMetrics;
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
-use crate::test_support::{self, redraw, settle};
+use crate::test_support::{self, advance, redraw, settle};
 use crate::{root, theme};
 
 // ---- Pure rules ------------------------------------------------------------------------------------------------------
@@ -165,13 +167,14 @@ fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
 
 /// The window's root: the terminal in a fixed 816 by 496 pane, wired through [`root`] so its display opens as a layer.
 struct Pane {
-    owner: Entity<AttachedTerminal>,
+    /// The terminal; `None` once a test has closed it.
+    owner: Option<Entity<AttachedTerminal>>,
     root: root::Attachment,
 }
 
 impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let pane = div().w(px(816.)).h(px(496.)).child(self.owner.clone());
+        let pane = div().w(px(816.)).h(px(496.)).children(self.owner.clone());
         root::wrap(div().size_full().child(pane), &self.root, window, cx)
     }
 }
@@ -180,11 +183,16 @@ impl Render for Pane {
 /// stream and the test's side of its checks.
 struct Harness<'a> {
     cx: &'a mut VisualTestContext,
+    /// The window's root, which a test closes the terminal through.
+    pane: Entity<Pane>,
     owner: Entity<AttachedTerminal>,
     stream: Rc<RefCell<Option<FakeTerminal>>>,
     /// The size the stream attached at, once [`Harness::show`] attached it.
     size: (u16, u16),
     transfers: FakeTransfers,
+    /// Every save the terminal asked for so far, in order: the path, whether it asked to open the save, and the answer
+    /// the save waits on (taken by [`Harness::save`]).
+    downloads: Vec<(String, bool, Option<FakeAnswer<SavedDownload>>)>,
     /// The UI channel's helm: it keeps the UI session the terminal was made for current, and pushes preferences.
     helm: FakeHelm,
 }
@@ -224,17 +232,19 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
         let metrics = CellMetrics::new(10., 22., 16.).unwrap();
         let owner = cx.new(|cx| AttachedTerminal::new(&session, target, metrics, open, cx));
         Pane {
-            owner,
+            owner: Some(owner),
             root: root::attach(window, cx),
         }
     });
-    let owner = cx.update(|_, cx| pane.read(cx).owner.clone());
+    let owner = cx.update(|_, cx| pane.read(cx).owner.clone().unwrap());
     Harness {
         cx,
+        pane,
         owner,
         stream,
         size: (0, 0),
         transfers,
+        downloads: Vec::new(),
         helm,
     }
 }
@@ -357,12 +367,12 @@ impl Harness<'_> {
         redraw(self.cx);
     }
 
-    /// The checks the terminal started since the last call, by the path each asked about, all for session `s1`.
+    /// The checks the terminal started since the last call, by the path each asked about, all for session `s1`. Saves
+    /// it started meanwhile are kept in [`Harness::downloads`].
     fn checks(&mut self) -> Vec<(String, FakeAnswer<FileStat>)> {
-        self.transfers
-            .take()
-            .into_iter()
-            .map(|transfer| match transfer {
+        let mut checks = Vec::new();
+        for transfer in self.transfers.take() {
+            match transfer {
                 FakeTransfer::Stat {
                     session,
                     path,
@@ -372,11 +382,43 @@ impl Harness<'_> {
                         session, "s1",
                         "a check asks about the terminal's own session"
                     );
-                    (path, answer)
+                    checks.push((path, answer));
                 }
-                other => panic!("only checks go out on a hover: {other:?}"),
-            })
-            .collect()
+                FakeTransfer::Download {
+                    session,
+                    path,
+                    open,
+                    answer,
+                } => {
+                    assert_eq!(session, "s1", "a save asks the terminal's own session");
+                    self.downloads.push((path, open, Some(answer)));
+                }
+                other => panic!("a file link starts checks and saves only: {other:?}"),
+            }
+        }
+        checks
+    }
+
+    /// Answer the latest save the terminal asked for, which must not have been answered yet, and draw the outcome. No
+    /// check may be in flight: collecting the saves takes the checks too.
+    fn save(&mut self, result: Result<SavedDownload, TransferError>) {
+        assert!(
+            self.checks().is_empty(),
+            "the premise: no check is in flight"
+        );
+        let answer = self
+            .downloads
+            .last_mut()
+            .and_then(|(_, _, answer)| answer.take())
+            .expect("the premise: a save waits for its answer");
+        answer.answer(result);
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The status line at the top of the terminal, as it reads.
+    fn status(&mut self) -> Option<String> {
+        test_support::label(self.cx, "terminal-file-message-line")
     }
 
     /// The one check started since the last call, which must have asked about `path`.
@@ -413,11 +455,17 @@ impl Harness<'_> {
             .map(|selector| selector.trim_start_matches("terminal-file-status-"))
     }
 
-    /// The resolved paths of the clicks a check admitted so far.
+    /// The resolved paths of the clicks a check admitted so far: the saves the terminal asked the helm for.
     fn admitted(&mut self) -> Vec<String> {
-        let owner = self.owner.clone();
-        self.cx
-            .update(|_, cx| owner.read(cx).files().read(cx).admitted.clone())
+        // A check drained here would be dropped, which answers it as a lost connection.
+        assert!(
+            self.checks().is_empty(),
+            "the premise: no check is in flight"
+        );
+        self.downloads
+            .iter()
+            .map(|(path, ..)| path.clone())
+            .collect()
     }
 
     /// The refused click's explanation at the top of the terminal, if one shows.
@@ -885,8 +933,8 @@ fn a_click_right_after_output_changed_the_path_is_judged_on_the_new_text(cx: &mu
     h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
     h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
     settle(h.cx);
+    let _fresh = h.check("plans.txt");
     assert_eq!(h.admitted(), Vec::<String>::new());
-    drop(h.checks());
 }
 
 /// A check's answer changes what the display shows, and until the new display has painted, the user has not seen it:
@@ -1051,4 +1099,393 @@ fn a_file_click_is_farhelms_whatever_the_link_choice(cx: &mut TestAppContext) {
     h.checked(on, "notes.txt", 10);
     h.click(on);
     assert_eq!(h.admitted(), ["/work/notes.txt"]);
+}
+
+// ---- Downloads and the status line -----------------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// A click at `at`, where the pointer already rests, with `modifiers` held.
+    fn click_with(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
+        self.cx
+            .simulate_mouse_down(at, MouseButton::Left, modifiers);
+        self.cx.simulate_mouse_up(at, MouseButton::Left, modifiers);
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The latest save the terminal asked for: its path and whether it asked to open the save.
+    fn last_save(&mut self) -> (String, bool) {
+        assert!(
+            self.checks().is_empty(),
+            "the premise: no check is in flight"
+        );
+        let (path, open, _) = self
+            .downloads
+            .last()
+            .expect("the premise: a save was asked for");
+        (path.clone(), *open)
+    }
+
+    /// The sizes the terminal asked its program for since the last call.
+    fn resizes(&mut self) -> Vec<(u16, u16)> {
+        let mut stream = self.stream.borrow_mut();
+        let stream = stream.as_mut().unwrap();
+        stream
+            .received()
+            .into_iter()
+            .filter_map(|request| match request {
+                FakeTerminalRequest::Resize { cols, rows } => Some((cols, rows)),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// A save into Downloads under the name the helm chose, where the user can find it.
+fn saved(path: &str, open: OpenOutcome) -> SavedDownload {
+    SavedDownload {
+        path: path.into(),
+        open,
+    }
+}
+
+/// The click is the whole point of a file link: it must ask the helm to save the very file the check disclosed, and
+/// then say where it went, since the helm, not the user, picks a free name. Specified (SPEC.md: "The desktop app saves
+/// into Downloads under a unique name and shows where it went ... Plain click only downloads"; the save half of the e2e
+/// "file hover and complete browser download", and the old "modifier opening is native-only and save outcomes survive
+/// opener refusal" for the plain case): a plain click asks the session's host for the resolved path, without opening,
+/// and the status line says "Downloading…", then "Saved to" the path the helm answered; a second click whose save the
+/// helm put under a free name shows that name.
+#[gpui::test]
+fn a_click_saves_into_downloads_and_the_line_says_where(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let on = h.at(2, 0);
+    h.checked(on, "notes.txt", 10);
+    h.click(on);
+    assert_eq!(h.last_save(), ("/work/notes.txt".to_owned(), false));
+    assert_eq!(h.status().as_deref(), Some("Downloading…"));
+    h.save(Ok(saved(
+        "/home/u/Downloads/notes.txt",
+        OpenOutcome::NotAsked,
+    )));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Saved to /home/u/Downloads/notes.txt")
+    );
+
+    h.click(on);
+    h.save(Ok(saved(
+        "/home/u/Downloads/notes (1).txt",
+        OpenOutcome::NotAsked,
+    )));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Saved to /home/u/Downloads/notes (1).txt")
+    );
+}
+
+/// A success is news for a moment, while a failure is something the user must read, so they leave differently
+/// (SPEC.md: "success fades after a few seconds, while a failure stays until the next click or download there").
+/// Specified (the old "browser and native successes fade, while a failure waits for a terminal click" and "replacement
+/// cancels an earlier notice deadline and retires a failure"): a success is gone five seconds after it showed, not
+/// before; a later download replaces it and the earlier deadline does not take the new line away; a failure, in the
+/// helm's words, stays past that deadline, a press anywhere in the terminal takes it away, and so does the next
+/// download.
+#[gpui::test]
+fn a_success_fades_and_a_failure_stays_until_the_next_press_or_download(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let (on, blank) = (h.at(2, 0), h.at(40, 5));
+    h.checked(on, "notes.txt", 10);
+    h.click(on);
+    h.save(Ok(saved(
+        "/home/u/Downloads/notes.txt",
+        OpenOutcome::NotAsked,
+    )));
+    advance(h.cx, Duration::from_millis(4_900));
+    assert!(h.status().is_some(), "still shown just before five seconds");
+    advance(h.cx, Duration::from_millis(100));
+    assert_eq!(h.status(), None, "gone at five seconds");
+
+    h.click(on);
+    h.save(Ok(saved(
+        "/home/u/Downloads/notes.txt",
+        OpenOutcome::NotAsked,
+    )));
+    advance(h.cx, Duration::from_secs(3));
+    h.click(on);
+    advance(h.cx, Duration::from_secs(3));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Downloading…"),
+        "the old deadline went with its line"
+    );
+
+    h.save(Err(TransferError::Refused {
+        status: 502,
+        message: "the host went away".into(),
+    }));
+    let failed = "Download failed: the host went away";
+    advance(h.cx, Duration::from_secs(10));
+    assert_eq!(h.status().as_deref(), Some(failed), "a failure stays");
+    h.click(on);
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Downloading…"),
+        "the next download replaces it"
+    );
+    h.save(Err(TransferError::Lost("connection reset".into())));
+    assert!(
+        h.status()
+            .is_some_and(|line| line.starts_with("Download failed: "))
+    );
+    h.rest_on(blank);
+    assert!(h.status().is_some(), "moving the pointer leaves it");
+    h.click(blank);
+    assert_eq!(h.status(), None, "a press in the terminal takes it away");
+}
+
+/// Opening is the one thing a click can do beyond saving, so it must take the platform's own modifier and only what
+/// the user was offered at hover; and an opening that fails must not undo the save (SPEC.md: "Cmd-click on macOS
+/// (Ctrl-click elsewhere) also opens the completed save ... an opening failure leaves the save successful and says why
+/// it was not opened"). Specified (the old "modifier opening is native-only and save outcomes survive opener refusal"
+/// and "a native modified click saves without opening when hover offered only download"): off a Mac a Ctrl-click on a
+/// file the helm offered opening asks to open, and the line adds "opened", or, when the helm could not, "not opened:"
+/// and its reason after where the file was saved; Cmd does nothing there; on a Mac Cmd opens and Ctrl does not; a
+/// modified click on a file the hover offered no opening for saves without asking to open and says opening was not
+/// offered.
+#[gpui::test]
+fn the_modifier_click_opens_only_what_the_helm_offered(cx: &mut TestAppContext) {
+    let (ctrl, cmd) = (
+        Modifiers {
+            control: true,
+            ..Modifiers::none()
+        },
+        Modifiers {
+            platform: true,
+            ..Modifiers::none()
+        },
+    );
+    let mut h = harness(cx);
+    let owner = h.owner.clone();
+    h.cx.update(|_, cx| owner.update(cx, |owner, _| owner.set_platform(Platform::Linux)));
+    h.show(
+        vec![row(0, "notes.txt", false), row(1, "data.bin", false)],
+        None,
+    );
+    let on = h.at(2, 0);
+    h.checked(on, "notes.txt", 10);
+    let saved_to = "/home/u/Downloads/notes.txt";
+    h.click_with(on, ctrl);
+    assert_eq!(h.last_save(), ("/work/notes.txt".to_owned(), true));
+    h.save(Ok(saved(saved_to, OpenOutcome::Opened)));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Saved to /home/u/Downloads/notes.txt · opened")
+    );
+    h.click_with(on, ctrl);
+    h.save(Ok(saved(
+        saved_to,
+        OpenOutcome::NotOpened("no app opens it".into()),
+    )));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Saved to /home/u/Downloads/notes.txt · not opened: no app opens it")
+    );
+    h.click_with(on, cmd);
+    assert!(!h.last_save().1, "Cmd is not the modifier off a Mac");
+
+    let other = h.at(2, 1);
+    h.rest_on(other);
+    let answer = h.check("data.bin");
+    let mut unlisted = ready("/work/data.bin", 10);
+    unlisted.can_open = Some(false);
+    h.answer(answer, unlisted);
+    h.click_with(other, ctrl);
+    assert_eq!(h.last_save(), ("/work/data.bin".to_owned(), false));
+    h.save(Ok(saved(
+        "/home/u/Downloads/data.bin",
+        OpenOutcome::NotAsked,
+    )));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Saved to /home/u/Downloads/data.bin · not opened: opening was not offered")
+    );
+
+    // On a Mac. The hover takes the platform when its display next changes, so the pointer leaves and comes back.
+    h.cx.update(|_, cx| owner.update(cx, |owner, _| owner.set_platform(Platform::Mac)));
+    let away = h.at(40, 5);
+    h.rest_on(away);
+    h.checked(on, "notes.txt", 10);
+    h.click_with(on, cmd);
+    assert!(h.last_save().1, "Cmd opens on a Mac");
+    h.click_with(on, ctrl);
+    assert!(!h.last_save().1, "Ctrl does not");
+}
+
+/// The status line sits over the top of the terminal, and the program must never be resized for it: a resize would
+/// redraw the program's screen on every download. Specified (SPEC.md: the status "appears at the top of that
+/// terminal"; the old message was positioned over the grid): showing the status line, and then a failure that stays,
+/// asks the program for no new size and leaves the grid's area where it was.
+#[gpui::test]
+fn the_status_line_never_resizes_the_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let on = h.at(2, 0);
+    h.checked(on, "notes.txt", 10);
+    drop(h.resizes());
+    let before = h.at(0, 0);
+    h.click(on);
+    h.save(Err(TransferError::Lost("connection reset".into())));
+    assert!(h.status().is_some(), "the premise: the line shows");
+    assert_eq!(h.resizes(), Vec::<(u16, u16)>::new());
+    assert_eq!(h.at(0, 0), before, "the grid did not move");
+}
+
+/// A TUI that breaks a long path itself still printed one file, and both halves must name it, check it once and save
+/// it whole, or a click on the tail would save the wrong file or none (SPEC.md: "a path cut by a program's line break
+/// links to the joined path from either half"). Specified (the e2e "both halves of a program-broken path disclose and
+/// download the whole file"): a path whose head ends four columns short of the right edge, continued indented on the
+/// next row, is checked once as the joined path, from its head; resting on the tail is the same hover and asks
+/// nothing; a click on the tail saves the whole file.
+#[gpui::test]
+fn both_halves_of_a_cut_path_check_and_save_the_whole_file(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let head = format!("{}/work/broken-", " ".repeat(61));
+    h.show(
+        vec![row(0, &head, false), row(1, "  file.txt", false)],
+        None,
+    );
+    assert_eq!(
+        h.size.0, 78,
+        "the premise: the head ends four columns short of the edge"
+    );
+    let (on_head, on_tail) = (h.at(66, 0), h.at(4, 1));
+    h.checked(on_head, "/work/broken-file.txt", 29);
+    h.rest_on(on_tail);
+    assert!(h.checks().is_empty(), "the tail is the same hover");
+    h.click(on_tail);
+    assert_eq!(h.last_save(), ("/work/broken-file.txt".to_owned(), false));
+}
+
+impl Harness<'_> {
+    /// As if the destination display the pointer rests on had run past the window's bottom edge when last drawn, so
+    /// the next click on its link is refused. No frame may come before that click, or the display records itself again.
+    fn stage_off_window(&mut self) {
+        let owner = self.owner.clone();
+        self.cx.update(|_, cx| {
+            let drawn = owner
+                .read(cx)
+                .disclosure_drawn()
+                .expect("the premise: a display is shown");
+            let (bounds, window) = drawn.get().expect("the premise: the display was drawn");
+            drawn.set(Some((
+                Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
+                window,
+            )));
+        });
+    }
+}
+
+/// The terminal has one message line, and the newer of a refusal and a download's outcome must show there: a save that
+/// fails while a refused click's explanation stands would otherwise stay hidden behind it and be cleared with it at the
+/// next press, never seen (the old app's late message replaced the refusal). Specified: with a save in flight, a click
+/// refused for a hidden display shows its explanation; the save then fails, and the failure shows in its place and
+/// stays until the next press.
+#[gpui::test]
+fn a_save_failing_behind_a_refusal_shows_its_failure(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let on = h.at(2, 0);
+    h.checked(on, "notes.txt", 10);
+    h.click(on);
+    h.stage_off_window();
+    h.click(on);
+    assert_eq!(
+        h.refusal().as_deref(),
+        Some(FILE_REFUSAL),
+        "the premise: the refusal shows"
+    );
+    h.save(Err(TransferError::Lost("connection reset".into())));
+    assert_eq!(h.refusal(), None);
+    let failed = h.status().expect("the failure shows");
+    assert!(failed.starts_with("Download failed: "), "{failed:?}");
+    advance(h.cx, Duration::from_secs(10));
+    assert_eq!(h.status(), Some(failed), "and stays");
+}
+
+/// A refusal takes the message line from a download's outcome for good: once the refusal is cleared at the next press,
+/// an older success must not come back as if it were news. Both refusals clear it, a file click's and a web link's.
+/// Specified: a success shows; a file click refused for a hidden display shows the refusal, and after the next press
+/// neither shows; again, with a program's web hyperlink refused for a hidden display.
+#[gpui::test]
+fn a_refusal_takes_the_status_lines_place(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(
+        vec![row(0, "notes.txt", false), row(1, "click here", true)],
+        Some("https://example.com/page"),
+    );
+    let (on, web, blank) = (h.at(2, 0), h.at(2, 1), h.at(40, 5));
+    for refused in [on, web] {
+        h.checked(on, "notes.txt", 10);
+        h.click(on);
+        h.save(Ok(saved(
+            "/home/u/Downloads/notes.txt",
+            OpenOutcome::NotAsked,
+        )));
+        assert!(h.status().is_some(), "the premise: the success shows");
+        h.rest_on(refused);
+        h.stage_off_window();
+        h.click(refused);
+        assert!(h.refusal().is_some(), "the refusal shows");
+        h.rest_on(blank);
+        h.click(blank);
+        assert_eq!(h.refusal(), None);
+        assert_eq!(
+            h.status(),
+            None,
+            "and the success it replaced does not come back"
+        );
+    }
+}
+
+/// A save is the user's request, not the hover's: moving the pointer on must not abandon it, while closing the
+/// terminal must, so the helm removes what it staged rather than leaving a save nobody will hear about. Specified: a
+/// save asked for and still in flight is not abandoned when the pointer leaves the link; it is once the terminal is
+/// closed.
+#[gpui::test]
+fn a_save_outlives_the_hover_but_not_the_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let (on, away) = (h.at(2, 0), h.at(40, 5));
+    h.checked(on, "notes.txt", 10);
+    h.click(on);
+    h.rest_on(away);
+    assert_eq!(h.admitted(), ["/work/notes.txt"]);
+    let pending = |downloads: &Vec<(String, bool, Option<FakeAnswer<SavedDownload>>)>| {
+        downloads[0]
+            .2
+            .as_ref()
+            .expect("the save is unanswered")
+            .abandoned()
+    };
+    assert!(!pending(&h.downloads), "leaving the link keeps the save");
+
+    let pane = h.pane.clone();
+    h.cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.owner = None;
+            cx.notify();
+        })
+    });
+    let Harness {
+        cx,
+        owner,
+        downloads,
+        ..
+    } = h;
+    drop(owner);
+    redraw(cx);
+    assert!(pending(&downloads), "closing the terminal abandons it");
 }

@@ -85,6 +85,33 @@ pub(super) fn recorder(drawn: Drawn) -> impl IntoElement {
     .size_full()
 }
 
+/// The look the terminal's one message line has, whatever it says (the old `.terminal-file-message`): a status line
+/// over the top of the grid's area, clear of the newest output at the bottom, at most three lines tall, under element
+/// id `id` and named `label`. The owner's refused-click line and the download status line both draw through it, which
+/// is why it lives here, with what web links and file links share, rather than with either.
+pub(crate) fn message_line(
+    id: &'static str,
+    label: gpui::SharedString,
+    content: impl IntoElement,
+    cx: &App,
+) -> gpui::AnyElement {
+    let palette = theme::palette(cx);
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(crate::components::Role::Status)
+        .aria_label(label)
+        .px(px(6.))
+        .py(px(4.))
+        .max_h(px(54.))
+        .overflow_hidden()
+        .bg(theme::color(palette.bg_2))
+        .text_color(theme::color(palette.fg_1))
+        .text_size(metrics::TEXT_SM)
+        .child(content)
+        .into_any_element()
+}
+
 /// The panel's view: one disclosure, as the grid model judged it when the hover started (SPEC.md: the warning is
 /// judged then and need not follow later redraws while the pointer rests).
 pub(crate) struct DisclosureView {
