@@ -118,8 +118,8 @@ fn row_height(cx: &mut VisualTestContext, key: &str) -> f32 {
     }
 }
 
-/// The row's own hover help, which is also its description: shown once the pointer rests on the row's title, clear of
-/// every mark.
+/// The words of the row's own hover help, its summary card, which are also its description: reported once the pointer
+/// rests on the row's title, clear of every mark.
 fn row_help(cx: &mut VisualTestContext, key: &str) -> Option<String> {
     let row = format!("session-row-{key}");
     let title = texts_within(&frame(cx), &row)
@@ -311,13 +311,14 @@ fn a_compact_stale_row_draws_a_clock_named_and_helped_by_its_cause(cx: &mut Test
     );
 }
 
-/// What a compact row hides must still reach a screen reader and the pointer (SPEC.md: the ended details "remain in
-/// accessible text and tooltips", the cause too, and the folder is "shown on hover" in the Compact item's own words).
-/// The row's hover help is also its accessible description, so pinning one pins both. Specified, in compact mode: a
-/// stale row that exited with code 17 is helped `Exited (code 17) · Waiting for supervisor · /home/user/src/b — open this
-/// session`; a running row on a connected host `Running · /home/user/src/a — open this session`; a running row with no
-/// directory `Running — open this session`; and with compact off, the running row keeps its plain `Running — open this
-/// session`.
+/// What a compact row hides must still reach a screen reader (SPEC.md: the ended details "remain in accessible text and
+/// tooltips", the cause too). The row's hover help is its summary card, and these are the card's words: the row's
+/// accessible description, and the text the layer manager reports for the showing card. The pointer's half is the
+/// card's folder and the ended and stale marks' own help (`summary_tests.rs`,
+/// `a_compact_row_shows_the_same_card_with_its_hidden_folder`). Specified, in compact mode: a stale row that exited with
+/// code 17 is described `Exited (code 17) · Waiting for supervisor · /home/user/src/b — open this session`; a running
+/// row on a connected host `Running · /home/user/src/a — open this session`; a running row with no directory `Running —
+/// open this session`; and with compact off, the running row keeps its plain `Running — open this session`.
 #[gpui::test]
 fn a_compact_rows_help_says_what_its_hidden_lines_would(cx: &mut TestAppContext) {
     let rows = [

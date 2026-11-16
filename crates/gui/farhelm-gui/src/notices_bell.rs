@@ -334,17 +334,16 @@ pub(crate) fn bell(
     let (opener, bell_focus) = (anchor.clone(), focus.clone());
     // The readout tier draws no padding, edge or fill, at rest or under the pointer, so the button is exactly the old
     // bell's box and the glyph's ink is all that changes; keyboard focus still draws every control's ring.
-    let button = Button::new(
-        id.clone(),
-        bell_label(&title, unread),
-        HoverHelp::tooltip(bell_help(unread)),
-        Role::Button,
-    )
-    .tier(Tier::Readout { focus_fill: false })
-    .expanded(open)
-    .focus(&focus)
-    .content(glyph)
-    .on_click(move |_, window, cx| toggle(&toggled, &state, &opener, &bell_focus, window, cx));
+    // Beside the sidebar, as every session-row hover is (SPEC.md, "Session list": "including the summary card and
+    // notification bell"), the ring in the on-fill ink on the selected row's accent fill.
+    let help = HoverHelp::tooltip(bell_help(unread)).beside();
+    let help = if selected { help.ring_on_fill() } else { help };
+    let button = Button::new(id.clone(), bell_label(&title, unread), help, Role::Button)
+        .tier(Tier::Readout { focus_fill: false })
+        .expanded(open)
+        .focus(&focus)
+        .content(glyph)
+        .on_click(move |_, window, cx| toggle(&toggled, &state, &opener, &bell_focus, window, cx));
     Some(
         div()
             .relative()

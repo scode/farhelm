@@ -37,10 +37,17 @@
 //! status details in accessible text and a tooltip". So an ended status draws its mark in the status column
 //! ([`status::EndedGlyph`], named and helped by the complete wording, with no mark-read action: SPEC.md's "Ended icons
 //! do not have the live dot's mark-read action"), and a stale row draws a clock after its title, named by its cause and
-//! helped as the cause is on a noncompact row. What the hidden lines said reaches the row's own hover help and
-//! description instead ([`compact_help`]): the complete ended wording, the cause and the full working directory, which
-//! the old row kept in hidden text inside its button and, for the directory, in its summary card (not ported). The
-//! compact menu item says "with the folder shown on hover", and the help is where the folder shows.
+//! helped as the cause is on a noncompact row. The row's hover help is the same summary card as a noncompact row's,
+//! which shows the full working directory (the compact menu item says "with the folder shown on hover"), and its
+//! description says what the hidden lines said ([`compact_help`]): the complete ended wording, the cause and the full
+//! working directory, which the old row kept in hidden text inside its button.
+//!
+//! **Hover help beside the sidebar.** The row's own hover help is its summary card ([`super::summary`]), shown from the
+//! title or any part of the open control no mark covers, and every mark's help asks to sit beside the sidebar too
+//! ([`row_marks::HelpPlace`]): SPEC.md, "Session list", puts every session-row hover "just right of the sidebar" with a
+//! notch and a ring on its target, the ring in the on-fill ink on the selected row. The innermost control's help wins
+//! ([`crate::layers::hover_began`]), so a mark's own help replaces the card while the pointer is on the mark. The bell
+//! asks for the same placement in [`crate::notices_bell`], which draws it.
 //!
 //! The row's list item records whether the pointer is over it ([`RowHover`]), for its menu button's reveal
 //! ([`super::menu`]).
@@ -68,14 +75,15 @@ use gpui::{
 };
 
 use super::marking::Gesture;
-use super::row_marks::{self, RowMarks};
+use super::row_marks::{self, HelpPlace, RowMarks};
 use super::selection::Listed;
 use super::status::{self, Badge};
+use super::summary::{self, SummaryCard};
 use super::{age, delete, outcome, replace, replace_yolo, stop};
 use crate::assets::{self, Icon};
 use crate::components::{HoverHelp, ListRow, Role, StatusMark};
 use crate::focus;
-use crate::host_text::{self, HostSentence, HostText};
+use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::theme::{self, Palette, metrics};
 
 /// The id prefix of a session row's open control; the rest is the session's key, so the control's focus and hover
@@ -206,12 +214,13 @@ impl Inks {
 }
 
 /// Draw `session`'s row, its animations at the list's `steps`, `menu`, its actions menu button, at its end, and `bell`,
-/// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `focus`
-/// is the row's own focus handle, which the list owns and registers with its list state: the row's item tracks it so it
-/// contains whichever of the row's controls holds focus, and never takes focus itself. `hover` is where the item
-/// records whether the pointer is over it, for the menu button's reveal. `marked` draws the marked look (see the module
-/// docs). `on_open` runs when the user activates the row, with the gesture the click's modifiers ask for; the
-/// keyboard's Enter and Space carry none, so they always open.
+/// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `card` is the row's summary
+/// card ([`SummaryCard::of`]), its open control's hover help. `focus` is the row's own focus handle, which the list
+/// owns and registers with its list state: the row's item tracks it so it contains whichever of the row's controls
+/// holds focus, and never takes focus itself. `hover` is where the item records whether the pointer is over it, for the
+/// menu button's reveal. `marked` draws the marked look (see the module docs). `on_open` runs when the user activates
+/// the row, with the gesture the click's modifiers ask for; the keyboard's Enter and Space carry none, so they always
+/// open.
 #[allow(
     clippy::too_many_arguments,
     reason = "one row's inputs, all drawn from by one function"
@@ -224,6 +233,7 @@ pub(crate) fn row(
     steps: Steps,
     menu: AnyElement,
     bell: Option<AnyElement>,
+    card: Entity<SummaryCard>,
     focus: &FocusHandle,
     hover: RowHover,
     on_open: impl Fn(Gesture, &mut Window, &mut App) + 'static,
@@ -238,9 +248,11 @@ pub(crate) fn row(
     let inks = Inks::of(palette, selected, row.stale);
     let marks = RowMarks::of(row, collections, selected, palette);
     let cause = status::stale_cause(row, collections);
+    let place = HelpPlace::Row { selected };
     // The row's accessible name is its title, escaped as the screen shows it, after "Pinned" on a pinned row as the old
-    // open button's name read its pin glyph first; its status word joins the hover help, which is also its accessible
-    // description. A compact row's help says what its hidden lines would have.
+    // open button's name read its pin glyph first. Its hover help is the summary card, beside the sidebar, in either
+    // density; the card's words, which are the row's accessible description, are its status word and what a click does,
+    // and on a compact row what its hidden lines would have said.
     let label = if row.pinned {
         HostSentence::new(id.clone()).text("Pinned ")
     } else {
@@ -249,14 +261,16 @@ pub(crate) fn row(
     .host(&title)
     .accessible_name();
     let item_label = label.clone();
-    let help = if compact {
-        compact_help(&id, row, cause)
+    let words: Line = if compact {
+        compact_help(&id, row, cause).into()
     } else {
-        HoverHelp::tooltip(match Badge::word(badge.as_ref()) {
+        match Badge::word(badge.as_ref()) {
             Some(word) => format!("{word} — open this session"),
             None => "Open this session".to_owned(),
-        })
+        }
+        .into()
     };
+    let help = place.place(HoverHelp::card(summary::CARD_WIDTH, card, words));
 
     let (live, ended) = match badge {
         Some(Badge::Live(live)) => (Some(live), None),
@@ -297,7 +311,7 @@ pub(crate) fn row(
                 .children(
                     marks
                         .host
-                        .map(|mark| row_marks::host_mark(&id, mark, palette)),
+                        .map(|mark| row_marks::host_mark(&id, mark, palette, place)),
                 ),
         )
         // A pending Stop goes before the title, as the old `.stop-progress` did.
@@ -308,7 +322,7 @@ pub(crate) fn row(
         // A pinned row's glyph, immediately before the title ([`super::pins`]).
         .children(
             row.pinned
-                .then(|| super::pins::glyph(&id, inks.secondary, metrics::ROW_SLOT_GAP)),
+                .then(|| super::pins::glyph(&id, inks.secondary, metrics::ROW_SLOT_GAP, place)),
         )
         // A pending Delete takes the title's place on screen, as the old row's did; the open control and the list item
         // keep the title as their accessible names.
@@ -331,12 +345,13 @@ pub(crate) fn row(
                 .filter(|_| compact)
                 .map(|cause| stale_mark(&id, cause, palette, selected)),
         )
-        .child(row_marks::agent_track(&id, &marks))
+        .child(row_marks::agent_track(&id, &marks, place))
         .child(age_track(
             &id,
             bell,
             age::of(row.info.effective_activity(), steps.now),
             inks,
+            place,
         ));
 
     let mut control = ListRow::new(id.clone(), label, help, Role::Button)
@@ -421,7 +436,7 @@ fn marker(key: &str, selected: bool, palette: &Palette) -> impl IntoElement {
 /// [`age_min_width`] wide that never shrinks, with the full timestamp as its hover help. The track stays (empty) for a
 /// session with no age, so that row's title still ends where the others' do. `bell`, the row's notification bell when
 /// it has one, goes first in the track, just before the age, where the old activity column reserved the bell's slot;
-/// the two are centred on one line.
+/// the two are centred on one line. The age's help shows where `place` says, beside the sidebar.
 ///
 /// The age is a status mark, not a control: nothing to press, so no tab stop, and its press reaches the open control
 /// around it, which opens the row as a press anywhere else on it does. Its accessible name is the timestamp itself,
@@ -432,6 +447,7 @@ fn age_track(
     bell: Option<AnyElement>,
     age: Option<age::Age>,
     inks: Inks,
+    place: HelpPlace,
 ) -> impl IntoElement {
     div()
         .id(SharedString::from(format!("{row_id}{AGE_TRACK_ID_SUFFIX}")))
@@ -446,7 +462,7 @@ fn age_track(
             StatusMark::new(
                 format!("{row_id}{AGE_ID_SUFFIX}"),
                 age.full.clone(),
-                HoverHelp::tooltip(age.full),
+                place.place(HoverHelp::tooltip(age.full)),
                 Role::Label,
                 age.short,
             )
@@ -462,7 +478,7 @@ fn age_track(
 /// the shape of how the session ended ([`status::EndedGlyph`]) in its ink, named by the complete ended wording the
 /// noncompact row shows on its own line (`Exited (code unknown) — stopped by user`) and helped by the same words. A
 /// status mark, not a control: no mark-read action, no tab stop, and a press on it opens the row as a press anywhere
-/// else on the row does.
+/// else on the row does. Its help shows beside the sidebar, as every row hover's.
 fn ended_mark(
     row_id: &SharedString,
     row: &SessionRow,
@@ -482,6 +498,7 @@ fn ended_mark(
         ),
         None => HoverHelp::tooltip(words.words.clone()),
     };
+    let help = HelpPlace::Row { selected }.place(help);
     let name = words.line(id.clone()).accessible_text();
     let ink = glyph.color(palette, selected);
     Some(
@@ -493,7 +510,7 @@ fn ended_mark(
 
 /// A compact stale row's clock after its title (`.compact-qualifier`), named by the row's cause and helped as the cause
 /// is on a noncompact row (`Waiting for supervisor: this is the session's last-known state`). Its id is the cause's on a
-/// noncompact row, so either is found the same way.
+/// noncompact row, so either is found the same way. Its help shows beside the sidebar, as every row hover's.
 fn stale_mark(
     row_id: &SharedString,
     cause: &'static str,
@@ -505,7 +522,7 @@ fn stale_mark(
         StatusMark::new(
             id.clone(),
             cause,
-            HoverHelp::tooltip(status::cause_help(cause)),
+            HelpPlace::Row { selected }.place(HoverHelp::tooltip(status::cause_help(cause))),
             Role::Status,
             cause,
         )
@@ -517,12 +534,18 @@ fn stale_mark(
     )
 }
 
-/// A compact row's hover help, which is also its accessible description: what its hidden lines would have said, then
-/// what a click does. Its parts, each only when the row has it, joined by ` · `: the status (the complete ended wording,
-/// or the live word), a stale row's cause, and the full working directory (unabbreviated, as the old row's hidden copy
-/// and its summary card gave it); then ` — open this session`. For example `Exited (code 17) · Waiting for supervisor ·
-/// /home/user/src/a — open this session`. A sentence, since the wording and the directory are host text.
-fn compact_help(row_id: &SharedString, row: &SessionRow, cause: Option<&'static str>) -> HoverHelp {
+/// A compact row's words for its summary card, which are its accessible description and what the tooltip reports: what
+/// its hidden lines would have said, then what a click does. The card itself shows the folder; these words keep the
+/// complete ended wording and the cause for assistive technology, as SPEC.md asks of compact rows. Its parts, each
+/// only when the row has it, joined by ` · `: the status (the complete ended wording, or the live word), a stale row's
+/// cause, and the full working directory (unabbreviated, as the old row's hidden copy gave it); then ` — open this
+/// session`. For example `Exited (code 17) · Waiting for supervisor · /home/user/src/a — open this session`. A
+/// sentence, since the wording and the directory are host text.
+fn compact_help(
+    row_id: &SharedString,
+    row: &SessionRow,
+    cause: Option<&'static str>,
+) -> HostSentence {
     let mut help = HostSentence::new(SharedString::from(format!("{row_id}-help")));
     let mut first = true;
     let mut separate = |help: HostSentence| {
@@ -546,12 +569,11 @@ fn compact_help(row_id: &SharedString, row: &SessionRow, cause: Option<&'static 
     if !row.info.cwd.is_empty() {
         help = separate(help).mono(&HostText::from_host(row.info.cwd.as_str()));
     }
-    help = if first {
+    if first {
         help.text("Open this session")
     } else {
         help.text(" — open this session")
-    };
-    HoverHelp::sentence(help)
+    }
 }
 
 /// The line under the title that holds what the first line has no room for: an ended status in full, wrapping rather
@@ -590,7 +612,8 @@ fn detail_line(
                 StatusMark::new(
                     format!("{row_id}{CAUSE_ID_SUFFIX}"),
                     cause,
-                    HoverHelp::tooltip(status::cause_help(cause)),
+                    HelpPlace::Row { selected }
+                        .place(HoverHelp::tooltip(status::cause_help(cause))),
                     Role::Status,
                     cause,
                 )
@@ -689,7 +712,7 @@ pub(crate) fn short_name(host: &HostView) -> String {
 /// Ported from the old app's `abbreviate_home`, with its three exclusions: a `.` or `..` segment anywhere (the path
 /// would not resolve under that home, so folding it would claim something the path contradicts), macOS's
 /// `/Users/Shared` (not anyone's home), and a bare account with nothing after it (folding would erase the one thing the
-/// path says). The row only shortens; the full path is what a later summary card shows.
+/// path says). The row only shortens; the full path is what its summary card shows ([`super::summary`]).
 pub(crate) fn abbreviate_home(cwd: &str) -> String {
     for prefix in ["/home/", "/Users/"] {
         let Some(rest) = cwd.strip_prefix(prefix) else {

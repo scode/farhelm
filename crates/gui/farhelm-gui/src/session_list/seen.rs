@@ -30,6 +30,7 @@ use gpui::{AnyElement, App, IntoElement as _, SharedString};
 use serde_json::json;
 
 use super::delete;
+use super::row_marks::HelpPlace;
 use super::selection::Listed;
 use super::status::{self, Live};
 use crate::components::{HoverHelp, MarkToggle, Role};
@@ -125,7 +126,10 @@ pub(crate) fn send(key: &str, toggle: Toggle, cx: &mut App) {
 /// `session`'s live status mark as drawn in its row, at pulse step `step`: the dot, as a [`MarkToggle`] that sends the
 /// row's toggle when clicked. Its accessible name is the action and the session's title ("Mark read: <title>", the title
 /// as host text), so a screen reader's list of buttons tells one row's dot from another's; its hover help names the
-/// status and the action. While the session has a request in flight the click does nothing.
+/// status and the action, beside the sidebar as every row hover is ([`HelpPlace::Row`]). Its ring is square on the
+/// dot's 8-pixel box, as the old outline was (`.status-dot.tooltip-target-ring`, on a box with no radius of its own): a
+/// ring of the dot's own round size would lie on the shape's edge and vanish into it, where a square's corners stand
+/// clear of every shape. While the session has a request in flight the click does nothing.
 pub(super) fn dot(session: Listed, live: Live, selected: bool, step: u64, cx: &App) -> AnyElement {
     let row = session.row;
     let mark = live.mark(theme::palette(cx), selected, row.stale, step);
@@ -141,7 +145,7 @@ pub(super) fn dot(session: Listed, live: Live, selected: bool, step: u64, cx: &A
     let toggle_control = MarkToggle::new(
         id,
         name,
-        HoverHelp::tooltip(dot_help(live, toggle)),
+        HelpPlace::Row { selected }.place(HoverHelp::tooltip(dot_help(live, toggle))),
         Role::Button,
     )
     .mark(mark);
