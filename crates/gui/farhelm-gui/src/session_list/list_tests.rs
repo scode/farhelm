@@ -291,12 +291,12 @@ fn a_press_on_a_scrolled_away_menu_button_brings_its_row_back_and_opens_the_menu
     );
 }
 
-/// A click on a row's control focuses it on Linux, and focus moving into a row is what scrolls its neighbors into view
-/// for the keyboard. Scrolling on a click's press would move the row away before the release, which then lands on
-/// something else, and the click is lost (the review gate reproduced it with a frame between press and release, which
-/// the bridge never leaves). Only keyboard focus moves scroll. Specified: pressing the last row painted whose top lies
-/// inside the list's view (the rows painted past the view's edge are clipped, so a press there misses them), drawing a
-/// frame, then releasing at the same point opens that session, and the row did not move in between.
+/// A click on a row's control focuses it under Linux's rule, and focus moving into a row is what scrolls its neighbors
+/// into view for the keyboard. Scrolling on a click's press would move the row away before the release, which then
+/// lands on something else, and the click is lost (the review gate reproduced it with a frame between press and
+/// release, which the bridge never leaves). Only keyboard focus moves scroll. Specified: pressing the last row painted
+/// whose top lies inside the list's view (the rows painted past the view's edge are clipped, so a press there misses
+/// them), drawing a frame, then releasing at the same point opens that session, and the row did not move in between.
 #[gpui::test]
 fn a_click_on_an_edge_row_opens_it_without_scrolling(cx: &mut TestAppContext) {
     let rows = fleet(200);
@@ -324,15 +324,13 @@ fn a_click_on_an_edge_row_opens_it_without_scrolling(cx: &mut TestAppContext) {
         first_mouse: false,
     });
     test_support::redraw(cx);
-    // The premise the test exists for holds only where a click focuses controls; on macOS the press focuses nothing,
-    // so the row stays put with or without the keyboard-only rule and the test checks only that the click opens it.
-    if crate::focus::CLICK_FOCUSES_CONTROLS {
-        assert_eq!(
-            focused_id(cx).as_deref(),
-            Some(selector),
-            "the premise: the press focused the row's control"
-        );
-    }
+    // The harness runs Linux's click rule on every OS (`test_support::install`), so the press focuses the row's control
+    // here on a Mac too, which is the premise the test exists for.
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(selector),
+        "the premise: the press focused the row's control"
+    );
     assert_eq!(
         test_support::bounds(cx, selector).top(),
         before.top(),
