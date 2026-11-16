@@ -48,7 +48,7 @@ fn tooltip_frame(help: layers::Help) -> Vec<gpui::DriverNode> {
         })
         .unwrap();
     cx.update_window(window.into(), |_, window, cx| {
-        layers::show_tooltip_at(&owner, help, point(px(20.), px(20.)), window, cx);
+        layers::show_tooltip_at(&owner, help.into(), point(px(20.), px(20.)), window, cx);
     })
     .unwrap();
     cx.run_until_parked();

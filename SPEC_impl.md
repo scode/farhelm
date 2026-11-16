@@ -739,7 +739,28 @@ Hover help comes in the old app's two forms. Short help is one line of wording o
 eight lines. Help in paragraphs, for help whose closing sentences matter (the agent mark's and the permission shield's,
 which end in the permission's caveat and the stored command), is drawn on a card at most 440 pixels wide, a blank line
 between paragraphs and no line clamp, as the old app's `data-tooltip-paragraphs` help was; both are clipped at the
-window's height less 8 pixels.
+window's height less 8 pixels. A third form, for the session row's summary card, draws a view of the caller's on a card
+of fixed width with no padding and no clamp (the old `data-kind="card"`, `min(310px, 100vw - 8px)` wide), with words of
+the caller's for assistive technology, clipped at the same height.
+
+Ordinary help sits below and right of where the pointer came to rest; anchoring it above its control, as the old app
+did, is still to come. Help a control asks to have beside the sidebar (SPEC.md's session-row hovers and host progress
+card) is placed against that control, from the bounds it records as each frame is prepared, and against the edge the
+sidebar draws (`layers::beside_edge`), deciding the place as the frame is laid out so it follows a moved row in that
+frame. The numbers are the old app's `placeSessionCard` and `placeTooltip` (`tooltip.js` at `24bc0580`): left at the
+sidebar's outer right edge plus 6 pixels (at least 4), top centered on the control and kept 4 pixels inside the window,
+never shifted sideways; when the card, at its own maximum width, would come within 4 pixels of the window's right edge,
+the old ordinary placement against the control instead (centered across it, above with a 6-pixel gap, else below with a
+28-pixel one, else the roomier side, clamped 4 pixels inside). Only beside, a notch (the visible half of the old 10 by
+10 square turned 45 degrees, under the card, level with the control's center but at least 12 pixels, or half the card's
+height, from its top and bottom) and a 1-pixel ring just inside the control, in the accent or the on-fill color of a
+selected row, with the control's corners, clipped where the control is clipped, as the old inset-shadow ring was. With
+no edge drawn, such help is ordinary help at the pointer. The old app placed help beside the sidebar only for a control
+inside it; here any control asking for it is placed against the edge, so only controls inside the sidebar ask. A
+control's bounds are taken inside its border, where the ring goes, so a bordered control's fallback gap is that much
+wider than the old one, which measured from the border box. One deviation: the old hover closed on any scroll of a
+container holding its control; here it stays and follows the control while the pointer stays on it, since the layer
+manager does not know which scrolling element holds a control.
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
