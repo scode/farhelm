@@ -38,10 +38,19 @@
 //!   instead, between the top row's lines and the terminal area, the status as the list's mark grey and still, since a
 //!   cached status is no evidence of anything live.
 //!
-//! NOTE: Not ported: the old card's Resume host button for a suspended or stopped environment, which waits for the
-//! environment sessions' port; until then such a card explains and offers nothing. The old card's fixed, full-height
-//! layout for a short window is not ported either: here the card's region scrolls within the area the terminal takes,
-//! which at the window's minimum height is still several hundred pixels tall.
+//! - **A suspended or stopped host offers Resume** ([`Offer`]): "Resume", the filled primary button, on a session's own
+//!   environment (`session_list::environment`), and "Resume host" on an ordinary host, the old card's, while the host
+//!   is suspended or stopped and not waiting for its place. It sends the same Resume as the row's and the header's,
+//!   with no question, on the session's key; a refusal shows on the card under the explanation rather than above it. A 504 at the helm's bound is not one: the card then follows the
+//!   pushed phase ("is resuming").
+//! - **A suspended environment says so in its own words.** Its heading is "Session suspended" with the pause glyph in
+//!   place of the spinner, its explanation the provider's (what is preserved and what still bills), and its
+//!   diagnostics who suspended it and when, with a failed resume's reason first ([`ProviderUi::suspended_detail`]). An
+//!   environment that is starting again names that cause ("Session unavailable — starting environment") with the
+//!   provider's starting words. A stopped container keeps the ordinary card: it is never called suspended.
+//!
+//! NOTE: Not ported: the old card's fixed, full-height layout for a short window. Here the card's region scrolls within
+//! the area the terminal takes, which at the window's minimum height is still several hundred pixels tall.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::tensorlake::LifecycleDirection;
@@ -53,13 +62,18 @@ use gpui::{
 };
 
 use super::details::{self, Status};
-use crate::components::{self, Ring, spinner_icon};
+use crate::assets::Icon;
+use crate::components::{self, Button, HoverHelp, Ring, Tier, spinner_icon};
+use crate::environment_ui::ProviderUi;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::{self, phase};
 use crate::local_time::Zone;
+use crate::operations::Work;
 use crate::session;
 use crate::session_list::age::{self, Age};
+use crate::session_list::environment::{self, Environment};
 use crate::session_list::status::{self, HostLookup};
+use crate::session_list::{menu, outcome};
 use crate::theme::{self, Palette, metrics};
 use crate::{focus, layers};
 
@@ -117,14 +131,35 @@ pub(crate) fn shows(key: &str, cx: &App) -> bool {
 // ---- What the card says ---------------------------------------------------------------------------------------------
 
 /// The card's words for one stale session: the cause its heading names, the explanation under it and the smaller
-/// diagnostics line, if any. The old `SessionUnavailableNotice`, without its Resume host.
+/// diagnostics line, if any, and the Resume it offers. The old `SessionUnavailableNotice`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Notice {
-    /// The session list's cause, as its row names it (`status::cause`): "Waiting for supervisor", say.
+    /// The session list's cause, as its row names it (`status::cause`): "Waiting for supervisor", say; or the card's
+    /// own for a session's environment ("Suspended", "Starting environment", the old card's).
     pub(crate) cause: &'static str,
     pub(crate) explanation: HostSentence,
     pub(crate) detail: Option<HostSentence>,
+    /// Whether the heading reads "Session suspended" with the pause glyph: a session's own environment, suspended.
+    pub(crate) suspended: bool,
+    /// The Resume the card offers, if any (see the module docs).
+    pub(crate) resume: Option<Offer>,
 }
+
+/// A card's Resume: the host it resumes, and the provider's words when that host is the session's own environment
+/// (`None` for an ordinary host, whose button reads "Resume host").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Offer {
+    pub(crate) host: i64,
+    pub(crate) environment: Option<ProviderUi>,
+    /// Stopped rather than suspended, so the environment's Resume starts it again ([`ProviderUi::resume_help`]).
+    pub(crate) stopped: bool,
+}
+
+/// The id of the card's Resume button.
+pub(crate) const RESUME_ID: &str = "session-unavailable-resume";
+
+/// The id of the line under the explanation that shows a refused Resume.
+pub(crate) const RESUME_FAILURE_ID: &str = "session-unavailable-resume-failure";
 
 impl Notice {
     /// The notice for `row`, whose host the registry in `collections` places (or fails to).
@@ -152,8 +187,11 @@ impl Notice {
     }
 
     /// The heading: the cause continues the sentence, so it is lowered (the old card's `to_ascii_lowercase`; every
-    /// cause is the app's own ASCII wording, never a host's).
+    /// cause is the app's own ASCII wording, never a host's). A suspended environment's reads "Session suspended".
     pub(crate) fn heading(&self) -> String {
+        if self.suspended {
+            return "Session suspended".to_owned();
+        }
         format!("Session unavailable — {}", self.cause.to_ascii_lowercase())
     }
 }
@@ -247,10 +285,67 @@ pub(crate) fn notice(
             ),
         },
     };
-    Notice {
+    let notice = Notice {
         cause,
         explanation,
         detail,
+        suspended: false,
+        resume: None,
+    };
+    match lookup {
+        HostLookup::Known(host) => environment_notice(notice, host, zone),
+        HostLookup::Pending | HostLookup::Failed | HostLookup::Absent => notice,
+    }
+}
+
+/// `notice` with what a suspended, stopped or starting `host` changes in it: the Resume it offers, and, for a session's
+/// own environment, the provider's words for being suspended or starting again (the old `sandbox_sessions::
+/// unavailable_notice` and `stale_session_notice`'s `resume_host`).
+fn environment_notice(mut notice: Notice, host: &HostView, zone: Zone) -> Notice {
+    let environment = Environment::of_host(host).map(|environment| environment.ui);
+    notice.resume = match host.state {
+        HostStateView::Suspended { .. } => Some(Offer {
+            host: host.id,
+            environment,
+            stopped: false,
+        }),
+        HostStateView::Stopped {
+            waiting_for_place: false,
+            ..
+        } => Some(Offer {
+            host: host.id,
+            environment,
+            stopped: true,
+        }),
+        _ => None,
+    };
+    let Some(ui) = environment else {
+        return notice;
+    };
+    match &host.state {
+        HostStateView::Suspended {
+            observed_at,
+            suspended_by_farhelm_at,
+            resume_failed,
+        } => Notice {
+            cause: "Suspended",
+            explanation: HostSentence::new(EXPLANATION_ID).text(ui.suspended_explanation()),
+            detail: Some(ui.suspended_detail(
+                HostSentence::new(DETAIL_ID),
+                *observed_at,
+                *suspended_by_farhelm_at,
+                resume_failed.as_deref(),
+                zone,
+            )),
+            suspended: true,
+            ..notice
+        },
+        HostStateView::TensorlakeChanging { starting: true, .. } => Notice {
+            cause: "Starting environment",
+            explanation: HostSentence::new(EXPLANATION_ID).text(ui.starting_help()),
+            ..notice
+        },
+        _ => notice,
     }
 }
 
@@ -259,6 +354,8 @@ pub(crate) fn notice(
 /// What the card draws: its notice, the focus handle its stop tracks (home while it shows), the scroll state of its
 /// region, both kept by the pane, and the spinner's step.
 pub(crate) struct Drawn<'a> {
+    /// The session the card is for, whose key its Resume is sent on.
+    pub(crate) key: &'a str,
     pub(crate) notice: Notice,
     pub(crate) focus: &'a FocusHandle,
     pub(crate) scroll: &'a ScrollHandle,
@@ -278,6 +375,7 @@ pub(crate) struct Drawn<'a> {
 /// `role="status"` was read.
 pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElement {
     let Drawn {
+        key,
         notice,
         focus,
         scroll,
@@ -287,6 +385,28 @@ pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElemen
     let palette = theme::palette(cx);
     let accent = theme::color(palette.accent);
     let heading = notice.heading();
+    // A suspended environment's heading carries the pause glyph, still, where any other cause turns the spinner.
+    let glyph = if notice.suspended {
+        gpui::svg()
+            .path(Icon::Pause.path())
+            .size(px(SPINNER))
+            .flex_none()
+            .text_color(accent)
+            .into_any_element()
+    } else {
+        spinner_icon(step, px(SPINNER), accent).into_any_element()
+    };
+    let resume = notice.resume.map(|offer| resume_button(key, offer, cx));
+    // A refused Resume shows here, the card being where it was pressed; the header leaves it out meanwhile.
+    let refused = outcome::current_line(key, cx)
+        .filter(|failure| failure.work == Work::Resume && notice.resume.is_some())
+        .map(|failure| {
+            div()
+                .mt(px(DETAIL_GAP))
+                .text_size(px(DETAIL_SIZE))
+                .text_color(theme::color(palette.fg_1))
+                .child(HostSentence::new(RESUME_FAILURE_ID).host(&failure.message))
+        });
     let card = div()
         .id(INNER_CARD_ID)
         .debug_selector(|| INNER_CARD_ID.into())
@@ -317,7 +437,7 @@ pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElemen
                 .text_color(accent)
                 .text_size(px(HEADING_SIZE))
                 .font_weight(FontWeight::SEMIBOLD)
-                .child(spinner_icon(step, px(SPINNER), accent))
+                .child(glyph)
                 .child(heading),
         )
         .child(
@@ -327,6 +447,8 @@ pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElemen
                 .text_color(theme::color(palette.fg_1))
                 .child(notice.explanation),
         )
+        .children(resume.map(|button| div().mt(px(EXPLANATION_GAP)).flex().child(button)))
+        .children(refused)
         .children(notice.detail.map(|detail| {
             div()
                 .mt(px(DETAIL_GAP))
@@ -387,6 +509,45 @@ pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElemen
         })
         .child(stop)
         .into_any_element()
+}
+
+/// The card's Resume for `key`'s session, as `offer` says: "Resume" in the primary tier for its own environment, with
+/// the provider's help, or "Resume host" for an ordinary host (the old card's plain button). It sends the session's
+/// Resume (`session_list::environment::resume`), and is unavailable while the session's commands are refused, a Resume
+/// already pending among them.
+fn resume_button(key: &str, offer: Offer, cx: &App) -> Button {
+    let (label, tier, help) = match offer.environment {
+        Some(ui) => ("Resume", Tier::Primary, ui.resume_help(offer.stopped)),
+        None => (
+            "Resume host",
+            Tier::Ghost,
+            "Resume host: this session continues when its host resumes",
+        ),
+    };
+    let key = key.to_owned();
+    Button::new(RESUME_ID, label, HoverHelp::tooltip(help), Role::Button)
+        .icon(Icon::Play)
+        .tier(tier)
+        .compact()
+        .disabled(menu::refused(&key, cx))
+        .on_click(move |_, _, cx| environment::resume(&key, offer.host, cx))
+}
+
+/// Whether `key`'s card shows a refused Resume itself (see [`draw`]), so the lines above the terminal leave it out
+/// rather than show it twice.
+pub(crate) fn shows_resume_refusal(key: &str, cx: &App) -> bool {
+    let offered = session::current_store(cx).is_some_and(|store| {
+        let collections = store.read(cx).collections();
+        collections
+            .get::<SessionRow>(key)
+            .filter(|row| shows_row(row))
+            .is_some_and(|row| {
+                Notice::of(row, collections, crate::local_time::zone(cx))
+                    .resume
+                    .is_some()
+            })
+    });
+    offered && outcome::current_line(key, cx).is_some_and(|failure| failure.work == Work::Resume)
 }
 
 // ---- The band -------------------------------------------------------------------------------------------------------

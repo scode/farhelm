@@ -15,7 +15,9 @@
 //!   session differently from its row.
 //! - **The host is the helm's full name**, never the row's short one, as the session sent it ([`identity::named`]): the
 //!   local host under the registry's own name reads `Local (this machine)`, and a session that names no host shows none
-//!   rather than an invented one.
+//!   rather than an invented one. A session in its own environment names it as its row does ("dev sandbox"), with its
+//!   provider's mark for the host mark (`session_list::environment`), and while that environment is suspended the bar
+//!   says "Suspended" with the pause glyph where the age would be, as the old bar did.
 //! - **What a status cannot claim, it leaves out.** An unclassified session has no badge but keeps its age (SPEC.md,
 //!   "Status": a session nothing has classified "shows no status and still shows its age"). A stale session (its host is
 //!   not connected) has neither: its last-known status and age belong in the stale band, a later piece, and SPEC.md says
@@ -70,12 +72,14 @@ use gpui::{
 
 use crate::assets::Icon;
 use crate::components::{CopyFeedback, CopyField, HoverHelp, Role, StatusMark};
+use crate::environment_ui::ProviderUi;
 use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::hosts::identity;
 use crate::layers;
 use crate::local_time::Zone;
 use crate::session_list::abbreviate_home;
 use crate::session_list::age::{self, Age};
+use crate::session_list::environment::Environment;
 use crate::session_list::row_marks::{self, HelpPlace, HostMark, Locality};
 use crate::session_list::status::{self, EndedWords, Live};
 use crate::theme::{self, Palette, metrics};
@@ -94,6 +98,8 @@ pub(crate) const HOST_MARK_ID: &str = "session-details-host";
 pub(crate) const HOST_NAME_ID: &str = "session-details-host-name";
 /// The age's id.
 pub(crate) const AGE_ID: &str = "session-details-age";
+/// The suspended environment's mark's id, in the age's place.
+pub(crate) const SUSPENDED_ID: &str = "session-details-suspended";
 /// The managed-checkout mark's id.
 pub(crate) const CHECKOUT_ID: &str = "session-details-checkout";
 /// The directory's copy field's id.
@@ -150,6 +156,9 @@ pub(crate) struct Details {
     pub(crate) host: Option<Host>,
     /// The age, or `None` for a stale session, one with no stamp, or a viewer clock that cannot be used.
     pub(crate) age: Option<Age>,
+    /// Whether the session's own environment is suspended, so the bar says so where the age would be, as the old bar
+    /// did (`session_list::environment`).
+    pub(crate) suspended: bool,
     /// The managed checkout, or `None` for a session without one.
     pub(crate) checkout: Option<Checkout>,
     /// The working directory's copy field.
@@ -202,7 +211,11 @@ pub(crate) enum Status {
 pub(crate) struct Host {
     /// The row's host mark, `None` when the host cannot be placed.
     pub(crate) mark: Option<HostMark>,
-    /// The helm's full name for the host, with the local host's own wording.
+    /// The provider of the session's own environment, whose mark the bar draws in place of the host mark, as the row
+    /// does; `None` for an ordinary host.
+    pub(crate) environment: Option<ProviderUi>,
+    /// The helm's full name for the host, with the local host's own wording, or the environment's name ("dev
+    /// sandbox") for a session in its own environment.
     pub(crate) name: HostText,
 }
 
@@ -222,12 +235,17 @@ impl Details {
                 .map(Status::Live)
                 .or_else(|| status::ended_words(row, false).map(Status::Ended))
         };
+        let environment = Environment::of(row, collections);
         let host = (!row.host_name.is_empty()).then(|| {
             let mark = HostMark::of(row, collections, None);
             let local = mark.is_some_and(|mark| mark.locality == Locality::Local);
             Host {
                 mark,
-                name: identity::named(&row.host_name, local),
+                environment: environment.map(|environment| environment.ui),
+                name: environment.map_or_else(
+                    || identity::named(&row.host_name, local),
+                    |environment| HostText::from_host(environment.label()),
+                ),
             }
         });
         let age = if row.stale {
@@ -249,6 +267,7 @@ impl Details {
             title: HostText::from_host(row.info.title.as_str()),
             host,
             age,
+            suspended: environment.is_some_and(|environment| environment.suspended()),
             checkout,
             directory: CopyValue::new(directory_label(cwd), cwd),
             command: CopyValue::new(row.info.invocation.clone(), &row.info.invocation),
@@ -374,6 +393,10 @@ pub(crate) fn bar(details: Details, copies: &Copies, pulse: u64, cx: &App) -> Di
         .child(title(&details.title, palette))
         .children(details.host.map(|host| host_part(host, palette)))
         .children(details.age.map(|age| age_part(age, AGE_ID)))
+        // A suspended environment says so where the age would be (left out while stale anyway), as the old bar did.
+        .children(details.suspended.then(|| {
+            row_marks::suspended_mark(SUSPENDED_ID.into(), true, palette.fg_1, HelpPlace::Ordinary)
+        }))
         .children(
             details
                 .checkout
@@ -608,18 +631,19 @@ fn host_part(host: Host, palette: &Palette) -> Div {
         .gap(px(HOST_GAP))
         .min_w_0()
         .overflow_hidden()
-        .children(host.mark.map(|mark| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .child(row_marks::host_mark(
-                    BAR_ID,
-                    mark,
-                    palette,
-                    HelpPlace::Ordinary,
-                ))
-        }))
+        .children(
+            match host.environment {
+                Some(ui) => Some(
+                    row_marks::environment_mark(BAR_ID, ui, palette.fg_1, HelpPlace::Ordinary)
+                        .into_any_element(),
+                ),
+                None => host.mark.map(|mark| {
+                    row_marks::host_mark(BAR_ID, mark, palette, HelpPlace::Ordinary)
+                        .into_any_element()
+                }),
+            }
+            .map(|mark| div().flex_none().flex().items_center().child(mark)),
+        )
         .child(
             StatusMark::new(
                 HOST_NAME_ID,

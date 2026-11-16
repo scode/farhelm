@@ -71,6 +71,13 @@
 //! old app, whose `data-session-marked` was for its stylesheet and its tests; tests find the marker by its debug
 //! selector, `session-marked-<key>`.
 //!
+//! **An environment session** ([`super::environment`]) draws its provider's mark in the locality slot in place of the
+//! host mark (named `Sandbox` or `Container`, [`row_marks::environment_mark`]), and its last line names the host by its
+//! environment ("dev sandbox", "dev container on Build machine"). While its environment is suspended the pause-marked
+//! Suspended badge stands where a stale row's cause would ("Host suspended"), on the ended line or, compact, after the
+//! title; a stopped one keeps its cause ("Environment stopped"). A pending Suspend, Resume or Stop and suspend, or the
+//! provider's change it asked for, shows its spinner and words before the title, as a pending Stop does.
+//!
 //! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
 //! start where they did in the old app. The managed checkout's form of the last line (and its compact mark after the
 //! title) is not ported yet.
@@ -83,6 +90,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 
+use super::environment::{self, Environment};
 use super::marking::Gesture;
 use super::row_marks::{self, HelpPlace, RowMarks};
 use super::selection::Listed;
@@ -112,6 +120,10 @@ pub(super) const AGE_ID_SUFFIX: &str = "-age";
 /// The id suffix of a stale row's cause, after the row's open control id (`session-row-<key>-cause`): the words on a
 /// noncompact row's ended line, and the clock after a compact row's title, so either is found the same way.
 pub(super) const CAUSE_ID_SUFFIX: &str = "-cause";
+
+/// The id suffix of a suspended environment session's badge, after the row's open control id
+/// (`session-row-<key>-suspended`), in either density.
+pub(super) const SUSPENDED_ID_SUFFIX: &str = "-suspended";
 
 /// The id suffix of a row's age track, the column the age is right-aligned in (`session-row-<key>-age-track`).
 pub(super) const AGE_TRACK_ID_SUFFIX: &str = "-age-track";
@@ -266,8 +278,32 @@ pub(crate) fn row(
     let badge = status::row_badge(row, format!("{id}-status").into());
     let inks = Inks::of(palette, selected, row.stale);
     let marks = RowMarks::of(row, collections, selected, palette);
-    let cause = status::stale_cause(row, collections);
     let place = HelpPlace::Row { selected };
+    // A session in its own environment draws its provider's mark in the locality slot, and a suspended one the
+    // Suspended badge where a stale row's cause would be ([`super::environment`]).
+    let environment = Environment::of(row, collections);
+    let suspended = environment.is_some_and(|environment| environment.suspended());
+    let cause = status::stale_cause(row, collections).filter(|_| !suspended);
+    let slot_mark = match environment {
+        Some(environment) => row_marks::environment_mark(
+            &id,
+            environment.ui,
+            if selected {
+                palette.on_fill
+            } else {
+                palette.fg_1
+            },
+            place,
+        )
+        .into_any_element(),
+        None => marks
+            .host
+            .map(|mark| row_marks::host_mark(&id, mark, palette, place).into_any_element())
+            .unwrap_or_else(|| div().into_any_element()),
+    };
+    let pending = environment
+        .and_then(|environment| environment::pending(session.key, environment, cx))
+        .filter(|_| !stop::in_flight(session.key, cx));
     // The row's accessible name is its title, escaped as the screen shows it, after "Pinned" on a pinned row as the old
     // open button's name read its pin glyph first, and after the retired prefix on a retired session's row, as the old
     // title read. Its hover help is the summary card, beside the sidebar, in either density; the card's words, which are
@@ -330,17 +366,30 @@ pub(crate) fn row(
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(
-                    marks
-                        .host
-                        .map(|mark| row_marks::host_mark(&id, mark, palette, place)),
-                ),
+                .child(slot_mark),
         )
-        // A pending Stop goes before the title, as the old `.stop-progress` did.
-        .children(
-            stop::in_flight(session.key, cx)
-                .then(|| stop::progress(session.key, steps.spinner, selected, cx)),
-        )
+        // A pending Stop goes before the title, as the old `.stop-progress` did, and so does an environment's pending
+        // Suspend, Resume or Stop and suspend, in the same look.
+        .children(stop::in_flight(session.key, cx).then(|| {
+            stop::progress(
+                session.key,
+                "session-stop-progress",
+                stop::PROGRESS_LABEL,
+                steps.spinner,
+                selected,
+                cx,
+            )
+        }))
+        .children(pending.map(|pending| {
+            stop::progress(
+                session.key,
+                "session-environment-progress",
+                pending.label(),
+                steps.spinner,
+                selected,
+                cx,
+            )
+        }))
         // A pinned row's glyph, immediately before the title ([`super::pins`]).
         .children(
             row.pinned
@@ -354,12 +403,14 @@ pub(crate) fn row(
             }
             None => title_element(&title, retired, inks),
         })
-        // A compact stale row's clock, after the title, which gives way to it (`.compact-qualifier`).
+        // A compact stale row's clock, after the title, which gives way to it (`.compact-qualifier`), or a compact
+        // suspended row's pause mark in its place.
         .children(
             cause
                 .filter(|_| compact)
                 .map(|cause| stale_mark(&id, cause, palette, selected)),
         )
+        .children((compact && suspended).then(|| suspended_mark(&id, false, selected, inks)))
         .child(row_marks::agent_track(&id, &marks, place))
         .child(age_track(
             &id,
@@ -372,8 +423,10 @@ pub(crate) fn row(
     let mut control = ListRow::new(id.clone(), label, help, Role::Button)
         .selected(selected)
         .line(identity);
-    if !compact && (ended.is_some() || cause.is_some()) {
-        control = control.line(detail_line(&id, ended, cause, palette, selected, inks));
+    if !compact && (ended.is_some() || cause.is_some() || suspended) {
+        control = control.line(detail_line(
+            &id, ended, cause, suspended, palette, selected, inks,
+        ));
     }
     if !compact && let Some(meta) = meta_line(session, collections, inks) {
         control = control.line(meta);
@@ -637,6 +690,22 @@ fn compact_help(
     }
 }
 
+/// The row's Suspended mark ([`row_marks::suspended_mark`]) under `<row id>-suspended`, worded on the ended line and
+/// the glyph alone after a compact row's title, in the row's secondary ink, its help beside the sidebar.
+fn suspended_mark(
+    row_id: &SharedString,
+    worded: bool,
+    selected: bool,
+    inks: Inks,
+) -> impl IntoElement {
+    row_marks::suspended_mark(
+        SharedString::from(format!("{row_id}{SUSPENDED_ID_SUFFIX}")),
+        worded,
+        inks.secondary,
+        HelpPlace::Row { selected },
+    )
+}
+
 /// The line under the title that holds what the first line has no room for: an ended status in full, wrapping rather
 /// than truncating (`.session-row-detail`), then a stale row's cause, on the same wrapping line when it fits. Drawn
 /// only for a row that has either; a live row on a connected host keeps two lines.
@@ -644,10 +713,15 @@ fn compact_help(
 /// The cause is a status mark with its hover help (`<cause>: this is the session's last-known state`), the old
 /// `.stale-badge` capsule with the capsule's padding taken off inside this line, so it starts at the title's edge like
 /// the ended words do; it never wraps inside itself.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one line's parts and the row's inks, all drawn from by one function"
+)]
 fn detail_line(
     row_id: &SharedString,
     ended: Option<(status::Ended, host_text::Line)>,
     cause: Option<&'static str>,
+    suspended: bool,
     palette: &Palette,
     selected: bool,
     inks: Inks,
@@ -681,6 +755,7 @@ fn detail_line(
                 .ink(inks.secondary),
             )
         }))
+        .children(suspended.then(|| suspended_mark(row_id, true, selected, inks)))
 }
 
 /// The `host:~/path` line: the host's short name (or the helm's name for a host the registry no longer lists), a
@@ -692,6 +767,10 @@ fn detail_line(
 fn meta_line(session: Listed, collections: &Collections, inks: Inks) -> Option<impl IntoElement> {
     let row = session.row;
     let (host, cwd) = meta_parts(row, collections.get::<HostView>(&HostView::key(row.host)));
+    // An environment session's host goes by its environment's name ("dev sandbox"), not the registry's.
+    let host = Environment::of(row, collections)
+        .map(Environment::label)
+        .or(host);
     if host.is_none() && cwd.is_none() {
         return None;
     }

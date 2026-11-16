@@ -20,6 +20,10 @@
 //!   names a tab the host could not close as "Stop: <that notice>", for as long as [`super::outcome`] says. A plain
 //!   success says nothing: the pushed list already shows the session stopped.
 //!
+//! - **An environment session's question says more.** It goes on to say what plain Stop leaves running in the
+//!   environment and offers **Stop and suspend** between Cancel and Confirm stop, sending that request with the
+//!   question's own preconditions ([`super::environment`]).
+//!
 //! The question, the preconditions, the command and the progress are functions of a session's row, so the open
 //! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and a bulk Stop of
 //! the marked sessions (`super::bulk`) sends each of them the request its row would, through [`start`].
@@ -33,8 +37,10 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
+use super::environment::{self, Environment};
 use super::{SessionList, menu};
 use crate::components::{HoverHelp, Tier, spinner_icon};
+use crate::environment_ui::ProviderUi;
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Settled, Work};
@@ -93,10 +99,22 @@ pub(crate) struct Frozen {
 
 /// The row's Stop question for `row`, filed under `key`, asked with `guard`: the consequence, then the title quoted on
 /// a line of its own, as the old row's question had them. Its answer is "Confirm stop" in the danger tier, and its
-/// Cancel says in its help what Cancel keeps, as the old row's did.
-pub(crate) fn question(key: &str, row: &SessionRow, guard: SessionStopRequest) -> Question<Frozen> {
+/// Cancel says in its help what Cancel keeps, as the old row's did. For a session in its own environment
+/// (`environment`, its provider's words and its host's id) the consequence goes on to say what plain Stop leaves
+/// running, and the question offers Stop and suspend between Cancel and Confirm stop, sending it at once with the
+/// question's preconditions (`super::environment::stop_and_suspend`).
+pub(crate) fn question(
+    key: &str,
+    row: &SessionRow,
+    guard: SessionStopRequest,
+    environment: Option<(ProviderUi, i64)>,
+) -> Question<Frozen> {
     let title = HostText::from_host(row.info.title.as_str());
-    Question::new(
+    let consequence = match environment {
+        Some((ui, _)) => format!("{} {}", consequence(row), environment::stop_note(ui)),
+        None => consequence(row),
+    };
+    let question = Question::new(
         "Stop confirmation",
         Answer::new(
             "Confirm stop",
@@ -108,7 +126,7 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: SessionStopRequest) -
             guard,
         },
     )
-    .line(consequence(row))
+    .line(consequence)
     .line(
         HostSentence::new(SharedString::from(format!("session-stop-title-{key}")))
             .text("\"")
@@ -120,7 +138,14 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: SessionStopRequest) -
         HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
         Tier::Neutral,
     ))
-    .keeps_focus_on_empty_click()
+    .keeps_focus_on_empty_click();
+    match environment {
+        Some((_, host)) => question.alternative(
+            environment::stop_and_suspend_answer(),
+            move |frozen, _, cx| environment::stop_and_suspend(&frozen.key, host, frozen.guard, cx),
+        ),
+        None => question,
+    }
 }
 
 /// The session's Stop, `POST /api/sessions/{id}/stop`, with both preconditions always spelled out: an omitted body
@@ -175,7 +200,11 @@ pub(crate) fn begin<'a>(
         send(key, guard, cx);
         return None;
     }
-    Some(move || question(key, row, guard))
+    let environment = session::current_store(cx).and_then(|store| {
+        Environment::of(row, store.read(cx).collections())
+            .map(|environment| (environment.ui, environment.host.id))
+    });
+    Some(move || question(key, row, guard, environment))
 }
 
 /// A Stop question was confirmed: send the Stop it froze.
@@ -259,9 +288,19 @@ pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
     })
 }
 
-/// The row's in-progress mark for `key`'s pending Stop: the spinner at `step` and "Stopping…", before the title, in the
-/// accent, or in the fill's ink on the selected row (the old `.stop-progress`, which shared `.delete-progress`'s look).
-pub(super) fn progress(key: &str, step: u8, selected: bool, cx: &App) -> impl IntoElement {
+/// The row's in-progress mark for `key`'s pending request: the spinner at `step` and `label` ("Stopping…" for a Stop),
+/// before the title, in the accent, or in the fill's ink on the selected row (the old `.stop-progress`, which shared
+/// `.delete-progress`'s look). An environment's pending Suspend, Resume or Stop and suspend draws the same mark
+/// (`super::environment::Pending`). Its id is `<stem>-<key>` and its debug selector `stem`, so each request's mark is
+/// found by its own stem (`session-stop-progress`, `session-environment-progress`).
+pub(super) fn progress(
+    key: &str,
+    stem: &'static str,
+    label: &'static str,
+    step: u8,
+    selected: bool,
+    cx: &App,
+) -> impl IntoElement {
     let palette = theme::palette(cx);
     let ink = theme::color(if selected {
         palette.on_fill
@@ -269,12 +308,10 @@ pub(super) fn progress(key: &str, step: u8, selected: bool, cx: &App) -> impl In
         palette.accent
     });
     div()
-        .id(ElementId::Name(
-            format!("session-stop-progress-{key}").into(),
-        ))
-        .debug_selector(|| "session-stop-progress".into())
+        .id(ElementId::Name(format!("{stem}-{key}").into()))
+        .debug_selector(move || stem.into())
         .role(Role::Status)
-        .aria_label(PROGRESS_LABEL)
+        .aria_label(label)
         .flex()
         .flex_row()
         .flex_none()
@@ -285,7 +322,7 @@ pub(super) fn progress(key: &str, step: u8, selected: bool, cx: &App) -> impl In
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(ink)
         .child(spinner_icon(step, px(12.), ink))
-        .child(PROGRESS_LABEL)
+        .child(label)
 }
 
 #[cfg(test)]
