@@ -6,8 +6,8 @@
 //! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
 //! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status card
 //! stands over ([`AttachedTerminal::set_inert`]), the reconnect card with its phase and attempt line and its
-//! Reconnect now (below), and a pasted file or image, which is uploaded and its host path typed
-//! ([`super::attachments`]), since. Dropped files come later in that work. The session pane
+//! Reconnect now (below), and a pasted or dropped file or image, which is uploaded and its host path typed, with
+//! the attachments' strip over the bottom right ([`super::attachments`]), since. The session pane
 //! ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
@@ -184,8 +184,8 @@ use farhelm_proto::grid::{GridInput, MouseEventKind};
 use farhelm_proto::host_appearance::HostColor;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, Bounds, ClipboardItem, Context, DispatchPhase,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
+    AnyElement, AnyView, App, AppContext as _, Bounds, ClipboardItem, Context, DispatchPhase, Div,
+    ElementInputHandler, Entity, EntityInputHandler, ExternalPaths, FocusHandle, HoverListenerMode,
     InteractiveElement, IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render,
     ScrollDelta, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
@@ -193,7 +193,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
-use super::attachments::{self, Attachments, Paste, Uploaded};
+use super::attachments::{self, Attachments, Offered, Paste, Uploaded};
 use super::files::{FileLinks, StatusShown};
 use super::tunnels::{self, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
@@ -552,7 +552,14 @@ impl AttachedTerminal {
         let file_status = cx.subscribe(&files, |owner, _, _: &StatusShown, cx| {
             owner.file_status_shown(cx)
         });
-        let attachments = cx.new(|_| Attachments::new(target.session.clone(), transfers.clone()));
+        let attachments = cx.new(|cx| {
+            Attachments::new(
+                target.session.clone(),
+                target.tab.as_deref(),
+                transfers.clone(),
+                cx,
+            )
+        });
         let attachment_watch = [
             cx.observe(&attachments, |_, _, cx| cx.notify()),
             cx.subscribe(&attachments, Self::attachment_uploaded),
@@ -669,6 +676,11 @@ impl AttachedTerminal {
             self.paste = None;
         }
         self.inert = inert;
+        // A drop refused while the veil stood over a live terminal asked for exactly this.
+        if !inert && self.is_live() {
+            self.attachments
+                .update(cx, |attachments, cx| attachments.live(cx));
+        }
         cx.notify();
     }
 
@@ -1077,6 +1089,9 @@ impl AttachedTerminal {
                 self.recovery = None;
                 self.recovery_held = false;
                 cx.notify();
+                // The attachments' not-connected refusal asked for exactly this, so it goes.
+                self.attachments
+                    .update(cx, |attachments, cx| attachments.live(cx));
                 // As for a state change in `output`: a reconnect that goes live in a hidden window draws nothing.
                 self.report_focus(self.window_focus, cx);
             }
@@ -1440,9 +1455,7 @@ impl AttachedTerminal {
     /// The paste hook: `item`, read for a paste the user made while `attachment` was live (`None` when none was),
     /// typed as text or handed to the attachments ([`attachments::classify`]). Text keeps the paste's stamp, so it goes
     /// nowhere if another attachment is live by now, or if none was; an attachment's path is typed into whichever is
-    /// live when its upload completes. Files or an image offered to a terminal that is not live, or is inert, are
-    /// refused on the refusal line ([`attachments::DETACHED_TEXT`]) rather than uploaded, since nothing could take
-    /// their path (the old app's refusal); like a refused click's explanation, it goes at the next press.
+    /// live when its upload completes. Files or an image go where a drop's do ([`AttachedTerminal::offer`]).
     fn pasted(
         &mut self,
         attachment: Option<Attachment>,
@@ -1455,15 +1468,31 @@ impl AttachedTerminal {
                     self.send_user(attachment, pasted_text(&text), cx);
                 }
             }
-            Paste::Attach(offered) if self.is_live() && !self.inert => self
-                .attachments
-                .update(cx, |attachments, cx| attachments.attach(offered, cx)),
-            Paste::Attach(_) => {
-                self.refusal = Some(attachments::DETACHED_TEXT.into());
-                cx.notify();
-            }
+            Paste::Attach(offered) => self.offer(offered, cx),
             Paste::Nothing => {}
         }
+    }
+
+    /// The drop hook: files dropped anywhere on this terminal's pane, its veil included, are offered as a paste's are.
+    fn dropped(&mut self, paths: &ExternalPaths, _: &mut Window, cx: &mut Context<Self>) {
+        let offered: Vec<Offered> = paths.paths().iter().cloned().map(Offered::File).collect();
+        if !offered.is_empty() {
+            self.offer(offered, cx);
+        }
+    }
+
+    /// Files or an image the user pasted or dropped here: attached while the terminal is live, and otherwise refused
+    /// in the strip ([`attachments::DETACHED_TEXT`]) rather than uploaded, since nothing could take their path (the old
+    /// app's refusal). The refusal goes once the terminal is live again ([`AttachedTerminal::replay_complete`]).
+    fn offer(&mut self, offered: Vec<Offered>, cx: &mut Context<Self>) {
+        let live = self.is_live() && !self.inert;
+        self.attachments.update(cx, |attachments, cx| {
+            if live {
+                attachments.attach(offered, cx);
+            } else {
+                attachments.refuse(cx);
+            }
+        });
     }
 
     /// An attachment's upload finished: type its host path, shell-quoted, at the program's cursor as it is now, as a
@@ -1577,6 +1606,9 @@ impl AttachedTerminal {
         self.live = false;
         self.blink = None;
         self.paste = None;
+        // The uploads stop with the terminal, and say so in the session's next agent terminal.
+        self.attachments
+            .update(cx, |attachments, cx| attachments.hand_over(cx));
         cx.notify();
     }
 
@@ -1841,6 +1873,9 @@ impl AttachedTerminal {
             // The card takes the pointer: a press on its words must not reach the screen behind it. The scrim around
             // it does not (see the module docs).
             .occlude()
+            // The drop hook: occluding, the card hides the pane's own drop target under it, so a file dropped on the
+            // card would be lost without a target of its own. The terminal is reconnecting, so the drop is refused.
+            .on_drop(cx.listener(Self::dropped))
             .child(status_heading(step, RECONNECTING_TEXT, cx))
             .child(
                 div()
@@ -2064,15 +2099,15 @@ impl Render for AttachedTerminal {
             .refusal_line(cx)
             .or_else(|| self.files.read(cx).status_line(cx));
         let tunnel_notice = tunnels::notice_line(&self.tunnels, window, cx);
-        // Until the attachments get their status strip, their failure lines sit here with the refusal line.
-        let attachment_status = self.attachments.read(cx).status_line(cx);
-        // The refused click's explanation, the tunnel notice and the attachment failures, stacked at the top of the
-        // grid's area so none hides another. Drawn outside the grid's element: a press on the notice's Dismiss must not
-        // also be a press on the terminal (a selection, a mouse report, a link under it), and its button must not sit
-        // inside the terminal's key context, where Tab and Escape are the program's.
+        // The attachments' strip, over the bottom right of the grid's area: it takes no room, so it never resizes the
+        // program, and no pointer, so the grid under it keeps every gesture.
+        let attachment_strip = self.attachments.read(cx).strip(cx);
+        // The refused click's explanation and the tunnel notice, stacked at the top of the grid's area so neither
+        // hides the other. Drawn outside the grid's element: a press on the notice's Dismiss must not also be a press
+        // on the terminal (a selection, a mouse report, a link under it), and its button must not sit inside the
+        // terminal's key context, where Tab and Escape are the program's.
         // Neither the refusal line nor the tunnel notice (whose Dismiss Tab could reach) is drawn under the veil.
-        let notices = refusal.is_some() || tunnel_notice.is_some() || attachment_status.is_some();
-        let overlay = (!self.inert && notices).then(|| {
+        let overlay = (!self.inert && (refusal.is_some() || tunnel_notice.is_some())).then(|| {
             div()
                 .absolute()
                 .top(px(PANE_PADDING + 4.))
@@ -2083,7 +2118,6 @@ impl Render for AttachedTerminal {
                 .gap(px(4.))
                 .children(refusal)
                 .children(tunnel_notice)
-                .children(attachment_status)
         });
         let hovering_link = self.points_at_link(cx);
         // The grid's area is what takes focus and keys, not the whole pane: the status line above it holds a Take
@@ -2192,6 +2226,9 @@ impl Render for AttachedTerminal {
         .size_full();
         div()
             .id("attached-terminal")
+            // The one drop target: the whole pane, its status line and placeholder included, so a file dropped on a
+            // terminal that is catching up or reconnecting is refused rather than ignored.
+            .on_drop(cx.listener(Self::dropped))
             .relative()
             .size_full()
             .flex()
@@ -2214,13 +2251,19 @@ impl Render for AttachedTerminal {
                     // inset shadow lay beneath the terminal's content.
                     .children(self.frame.map(|color| host_frame(color, cx)))
                     .child(body)
-                    .children(overlay),
+                    .children(overlay)
+                    .children(attachment_strip),
             )
             .children(placeholder)
             // Over the screen and the frame, and after the grid's area in Tab's order (see the module docs).
             .children(card)
-            // Last, over everything the pane draws: the status line and the placeholder too.
-            .children(self.inert.then(|| inert_scrim(cx)))
+            // Last, over everything the pane draws: the status line and the placeholder too. It takes drops as the pane
+            // does, since it covers the pane, so a file dropped on the terminal's veil is refused, not lost; one dropped
+            // on the card standing over it is ignored, as the old app ignored drops that missed the terminal.
+            .children(
+                self.inert
+                    .then(|| inert_scrim(cx).on_drop(cx.listener(Self::dropped))),
+            )
             .child(measure)
     }
 }
@@ -2253,7 +2296,7 @@ const HOST_FRAME_WIDTH: f32 = 4.;
 /// The veil over an inert terminal ([`AttachedTerminal::set_inert`]): the old terminal scrim (`--scrim`) across the
 /// whole pane, status line included, taking every press, hover and wheel turn, so the terminal under it is seen and not
 /// touched.
-fn inert_scrim(cx: &App) -> AnyElement {
+fn inert_scrim(cx: &App) -> Div {
     div()
         .debug_selector(|| INERT_SCRIM_ID.into())
         .absolute()
@@ -2263,7 +2306,6 @@ fn inert_scrim(cx: &App) -> AnyElement {
         .bottom_0()
         .bg(theme::color(theme::palette(cx).scrim))
         .occlude()
-        .into_any_element()
 }
 
 /// The inert terminal's veil's element id, and the bridge's selector for it.

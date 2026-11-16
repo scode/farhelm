@@ -1,13 +1,15 @@
-//! The attachments' contract for a paste, against the helm client's fake terminal and fake transfers: which flavor of a
-//! paste wins, what a pasted file or image is uploaded as, when and how its host path is typed, and what every failure
-//! says. One test per sentence of SPEC.md's "Attachments" in this scope, ported from the old app's
-//! `crates/farhelm-ui/src/attachments.rs` tests, `crates/farhelm-ui/js-tests/clipboard-name.test.js` and the paste
-//! cases of `e2e/tests/terminal-attachments.spec.ts` (each test names the cases it replaces). Drops, the status strip and
-//! uploads cut off when the terminal goes away are not in this scope yet.
+//! The attachments' contract, against the helm client's fake terminal and fake transfers: which flavor of a paste wins,
+//! what a pasted or dropped file or image is uploaded as, when and how its host path is typed, what the strip says
+//! while uploads run and after they fail, what a terminal that is not live refuses, and what a terminal that goes away
+//! leaves behind. One test per sentence of SPEC.md's "Attachments", ported from the old app's
+//! `crates/farhelm-ui/src/attachments.rs` tests, `crates/farhelm-ui/js-tests/clipboard-name.test.js`,
+//! `e2e/tests/terminal-attachments.spec.ts` and the attachment cases of `e2e/grid-client/grid-attach.spec.ts` (each test
+//! names the cases it replaces).
 //!
-//! The terminal is a real attached owner in a window from the shared harness, pasting through its own Paste action;
-//! the fake transfers hold each upload's answer until the test gives it, which is how a test sees the state while an
-//! upload runs.
+//! The terminal is a real attached owner in a window from the shared harness, pasting through its own Paste action and
+//! taking drops as the platform delivers them (the files entering the window, then released over the pane); the fake
+//! transfers hold each upload's answer until the test gives it, which is how a test sees the state while an upload
+//! runs.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -22,16 +24,17 @@ use farhelm_input_mapping::Platform;
 use farhelm_proto::grid::GridInput;
 use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
 use gpui::{
-    AppContext as _, ClipboardString, Context, Entity, ExternalPaths, FocusHandle, ImageFormat,
-    IntoElement, ParentElement, Render, Styled, TestAppContext, VisualTestContext, Window, div, px,
+    AppContext as _, ClipboardString, Context, Entity, ExternalPaths, FileDropEvent, FocusHandle,
+    ImageFormat, IntoElement, ParentElement, Render, Styled, TestAppContext, VisualTestContext,
+    Window, div, px,
 };
 
 use super::*;
 use crate::actions::{self, THIS_PLATFORM};
 use crate::session;
 use crate::terminal::CellMetrics;
-use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
-use crate::test_support::{self, keys, settle};
+use crate::terminal::attached::{AttachedTerminal, OpenStream, RECONNECT_CARD_ID, TerminalTarget};
+use crate::test_support::{self, keys, redraw, settle};
 use crate::{focus, root};
 
 // ---- Pure rules ------------------------------------------------------------------------------------------------------
@@ -189,26 +192,64 @@ fn a_typed_path_is_one_shell_word() {
 
 // ---- Harness ---------------------------------------------------------------------------------------------------------
 
-/// The window's root: the terminal in a fixed 816 by 496 pane, and below it a button that focus can move to, wired
-/// through [`root`] as the app's root views are.
+/// The window's root: the terminal in a fixed 816 by 496 pane, below it a button that focus can move to and the
+/// further terminals a test adds ([`Harness::add`]), each in a smaller pane, wired through [`root`] as the app's root
+/// views are.
 struct Pane {
     owner: Entity<AttachedTerminal>,
     elsewhere: FocusHandle,
+    extra: Extra,
     root: root::Attachment,
 }
 
+/// The further terminals, which a test adds and takes away.
+type Extra = Rc<RefCell<Vec<Entity<AttachedTerminal>>>>;
+
 impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let pane = div().w(px(816.)).h(px(496.)).child(self.owner.clone());
+        let pane = div()
+            .debug_selector(|| MAIN_PANE.into())
+            .w(px(816.))
+            .h(px(496.))
+            .child(self.owner.clone());
         let elsewhere = test_support::button("elsewhere", &self.elsewhere);
+        let owners = self.extra.borrow().clone();
+        let extra = owners.iter().map(|owner| {
+            div()
+                .debug_selector(|| EXTRA_PANE.into())
+                .w(px(816.))
+                .h(px(160.))
+                .child(owner.clone())
+        });
+        let extra: Vec<_> = extra.collect();
         root::wrap(
-            div().size_full().child(pane).child(elsewhere),
+            div()
+                .size_full()
+                .child(pane)
+                .child(elsewhere)
+                .children(extra),
             &self.root,
             window,
             cx,
         )
     }
 }
+
+/// The snapshot a fresh helm sends: an empty preferences row.
+fn preferences() -> Vec<CollectionState> {
+    vec![CollectionState {
+        collection: Collection::Preferences,
+        meta: test_support::meta(&[PREFERENCES_KEY]),
+        entries: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: serde_json::json!({}),
+        }],
+    }]
+}
+
+/// The selectors of the main terminal's pane and of an added terminal's (the tests add one at a time).
+const MAIN_PANE: &str = "attachments-test-main-pane";
+const EXTRA_PANE: &str = "attachments-test-extra-pane";
 
 /// An attached terminal of session `s1`, drawn, live and focused, uploading through the fake transfers.
 struct Harness<'a> {
@@ -218,8 +259,15 @@ struct Harness<'a> {
     elsewhere: FocusHandle,
     stream: Rc<RefCell<Option<FakeTerminal>>>,
     transfers: FakeTransfers,
-    /// Keeps the UI session the terminal was made for current.
-    _helm: FakeHelm,
+    /// The terminals a test added, drawn below the main one.
+    extra: Extra,
+    /// The UI session the terminals were made for, for terminals a test adds.
+    session: Entity<session::UiSession>,
+    /// The UI channel's helm: it keeps the UI session the terminal was made for current, and a test breaks and reopens
+    /// the channel through it.
+    helm: FakeHelm,
+    /// The window's connection, which makes a new UI session after a reset.
+    connection: Entity<session::Connection>,
 }
 
 /// A connected app with the terminal drawn in its own window, its UI session's transfers the fake's (served through
@@ -249,34 +297,18 @@ fn harness_with(
     if let Some(served) = served {
         cx.update(|cx| connection.update(cx, |connection, _| connection.serve_transfers(served)));
     }
-    helm.connect(vec![CollectionState {
-        collection: Collection::Preferences,
-        meta: test_support::meta(&[PREFERENCES_KEY]),
-        entries: vec![KeyedEntry {
-            key: PREFERENCES_KEY.into(),
-            value: serde_json::json!({}),
-        }],
-    }]);
+    helm.connect(preferences());
     cx.run_until_parked();
     let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
     let stream: Rc<RefCell<Option<FakeTerminal>>> = Rc::default();
-    let slot = stream.clone();
+    let extra: Extra = Rc::default();
+    let (made, drawn) = (session.clone(), extra.clone());
     let (pane, cx) = test_support::open_view(cx, |window, cx| {
-        let open: OpenStream = Box::new(move |attach| {
-            let (fake, handle, events) = FakeTerminal::open(&attach);
-            *slot.borrow_mut() = Some(fake);
-            (handle, events)
-        });
-        let target = TerminalTarget {
-            session: "s1".into(),
-            tab: None,
-            lease: AttachmentLease::new(),
-        };
-        let metrics = CellMetrics::new(10., 22., 16.).unwrap();
-        let owner = cx.new(|cx| AttachedTerminal::new(&session, target, metrics, open, cx));
+        let owner = cx.new(|cx| terminal(&made, "s1", None, &stream, cx));
         Pane {
             owner,
             elsewhere: cx.focus_handle().tab_stop(true),
+            extra: drawn,
             root: root::attach(window, cx),
         }
     });
@@ -290,7 +322,10 @@ fn harness_with(
         elsewhere,
         stream,
         transfers,
-        _helm: helm,
+        extra,
+        session,
+        helm,
+        connection,
     };
     h.attach();
     let handle = h.cx.update(|_, cx| h.owner.read(cx).focus_handle().clone());
@@ -302,25 +337,128 @@ fn harness_with(
     h
 }
 
+/// An attached terminal of session `session` (its tab `tab`, or its agent terminal), whose opener leaves the fake
+/// stream it opens in `stream`.
+fn terminal(
+    ui: &Entity<session::UiSession>,
+    session: &str,
+    tab: Option<&str>,
+    stream: &Rc<RefCell<Option<FakeTerminal>>>,
+    cx: &mut Context<AttachedTerminal>,
+) -> AttachedTerminal {
+    let slot = stream.clone();
+    let open: OpenStream = Box::new(move |attach| {
+        let (fake, handle, events) = FakeTerminal::open(&attach);
+        *slot.borrow_mut() = Some(fake);
+        (handle, events)
+    });
+    let target = TerminalTarget {
+        session: session.into(),
+        tab: tab.map(Into::into),
+        lease: AttachmentLease::new(),
+    };
+    let metrics = CellMetrics::new(10., 22., 16.).unwrap();
+    AttachedTerminal::new(ui, target, metrics, open, cx)
+}
+
+/// Attach `stream` (again, after a dropped link) and replay a blank screen, which makes `owner` live.
+fn attach_stream(
+    cx: &mut VisualTestContext,
+    owner: &Entity<AttachedTerminal>,
+    stream: &Rc<RefCell<Option<FakeTerminal>>>,
+) {
+    {
+        let mut stream = stream.borrow_mut();
+        let stream = stream
+            .as_mut()
+            .expect("the premise: the measured terminal opened its stream");
+        let asked = stream.attach();
+        for message in test_support::blank_screen(asked.cols, asked.rows) {
+            stream.output(message);
+        }
+        stream.replay_complete();
+    }
+    settle(cx);
+    assert!(
+        cx.update(|_, cx| owner.read(cx).is_live()),
+        "the premise: the terminal is live"
+    );
+}
+
+/// The input a terminal's stream carried since the last call, with whether it reached its attachment.
+fn sent_on(stream: &Rc<RefCell<Option<FakeTerminal>>>) -> Vec<(GridInput, bool)> {
+    stream
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .received()
+        .into_iter()
+        .filter_map(|request| match request {
+            FakeTerminalRequest::Input { input, delivered } => Some((input, delivered)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The strip's lines in `owner`, as assistive technology reads them.
+fn lines_of(cx: &mut VisualTestContext, owner: &Entity<AttachedTerminal>) -> Vec<String> {
+    cx.update(|_, cx| {
+        let attachments = owner.read(cx).attachments().clone();
+        let lines = attachments.read(cx).lines_shown();
+        lines.into_iter().map(String::from).collect()
+    })
+}
+
 impl Harness<'_> {
     /// Attach the stream (again, after a dropped link) and replay a blank screen, which makes the terminal live.
     fn attach(&mut self) {
-        {
-            let mut stream = self.stream.borrow_mut();
-            let stream = stream
-                .as_mut()
-                .expect("the premise: the measured terminal opened its stream");
-            let asked = stream.attach();
-            for message in test_support::blank_screen(asked.cols, asked.rows) {
-                stream.output(message);
-            }
-            stream.replay_complete();
-        }
+        let (owner, stream) = (self.owner.clone(), self.stream.clone());
+        attach_stream(self.cx, &owner, &stream);
+    }
+
+    /// Add a live terminal of `session` (`tab`, or its agent terminal) below the main one, made for the same UI session
+    /// and so uploading through the same transfers, and return it with its stream.
+    fn add(
+        &mut self,
+        session: &str,
+        tab: Option<&str>,
+    ) -> (Entity<AttachedTerminal>, Rc<RefCell<Option<FakeTerminal>>>) {
+        let stream: Rc<RefCell<Option<FakeTerminal>>> = Rc::default();
+        let ui = self.session.clone();
+        let owner = self
+            .cx
+            .update(|_, cx| cx.new(|cx| terminal(&ui, session, tab, &stream, cx)));
+        self.extra.borrow_mut().push(owner.clone());
+        redraw(self.cx);
+        attach_stream(self.cx, &owner, &stream);
+        (owner, stream)
+    }
+
+    /// Take the added terminals away and let them go, as a closed tab's or a left session's terminal goes.
+    fn remove_added(&mut self) {
+        self.extra.borrow_mut().clear();
+        redraw(self.cx);
+    }
+
+    /// Drop `paths` on the middle of the pane drawn under `selector`, as the platform delivers a drop from a file
+    /// manager: the files enter the window there, then are released.
+    fn drop_files(&mut self, selector: &'static str, paths: Vec<PathBuf>) {
+        let position = test_support::center(self.cx, selector);
+        self.cx.simulate_event(FileDropEvent::Entered {
+            position,
+            paths: ExternalPaths(paths.into()),
+        });
+        self.cx.simulate_event(FileDropEvent::Submit { position });
         settle(self.cx);
-        assert!(
-            self.cx.update(|_, cx| self.owner.read(cx).is_live()),
-            "the premise: the terminal is live"
-        );
+    }
+
+    /// Where the main terminal's grid is drawn.
+    fn grid_bounds(&mut self) -> gpui::Bounds<gpui::Pixels> {
+        test_support::frame(self.cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("terminal-grid"))
+            .expect("the premise: the grid is drawn")
+            .bounds
     }
 
     /// Drop the stream's link, so the terminal reconnects and is not live.
@@ -342,33 +480,28 @@ impl Harness<'_> {
 
     /// The input the terminal sent since the last call, with whether the stream carried each to its attachment.
     fn sent(&mut self) -> Vec<(GridInput, bool)> {
-        self.stream
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .received()
-            .into_iter()
-            .filter_map(|request| match request {
-                FakeTerminalRequest::Input { input, delivered } => Some((input, delivered)),
-                _ => None,
-            })
-            .collect()
+        sent_on(&self.stream)
     }
 
     /// The uploads started since the last call, as (what, proposed name, answer), all for session `s1`.
     fn uploads(&mut self) -> Vec<(UploadSource, String, FakeAnswer<String>)> {
+        self.uploads_in("s1")
+    }
+
+    /// The uploads started since the last call, all for session `session`.
+    fn uploads_in(&mut self, session: &str) -> Vec<(UploadSource, String, FakeAnswer<String>)> {
         self.transfers
             .take()
             .into_iter()
             .map(|transfer| match transfer {
                 FakeTransfer::Upload {
-                    session,
+                    session: asked,
                     source,
                     filename,
                     answer,
                 } => {
                     assert_eq!(
-                        session, "s1",
+                        asked, session,
                         "an upload goes to the terminal's own session"
                     );
                     (source, filename, answer)
@@ -378,9 +511,19 @@ impl Harness<'_> {
             .collect()
     }
 
-    /// The one upload started since the last call, which must be `source` proposed as `filename`.
+    /// The one upload started since the last call, which must be `source` proposed as `filename`, for session `s1`.
     fn upload(&mut self, source: UploadSource, filename: &str) -> FakeAnswer<String> {
-        let mut uploads = self.uploads();
+        self.upload_in("s1", source, filename)
+    }
+
+    /// [`Harness::upload`], for session `session`.
+    fn upload_in(
+        &mut self,
+        session: &str,
+        source: UploadSource,
+        filename: &str,
+    ) -> FakeAnswer<String> {
+        let mut uploads = self.uploads_in(session);
         assert_eq!(uploads.len(), 1, "one upload went out");
         let (asked, name, answer) = uploads.remove(0);
         assert_eq!((asked, name.as_str()), (source, filename));
@@ -396,11 +539,7 @@ impl Harness<'_> {
     /// The attachment lines the terminal draws now, as assistive technology reads them, checked against the frame.
     fn lines(&mut self) -> Vec<String> {
         let owner = self.owner.clone();
-        let lines: Vec<String> = self.cx.update(|_, cx| {
-            let attachments = owner.read(cx).attachments().clone();
-            let lines = attachments.read(cx).lines_shown();
-            lines.into_iter().map(String::from).collect()
-        });
+        let lines = lines_of(self.cx, &owner);
         let drawn = test_support::label(self.cx, "terminal-attachment-status");
         assert_eq!(
             drawn,
@@ -669,8 +808,8 @@ fn each_failure_says_whether_the_file_was_attached(cx: &mut TestAppContext) {
     h.paste(vec![file(&path_text)]);
     assert_eq!(
         h.lines(),
-        Vec::<String>::new(),
-        "the next paste that attaches clears them"
+        ["Attaching Cargo.toml…"],
+        "the next paste that attaches replaces them with its own upload"
     );
     let _held = h.upload(UploadSource::File(path), "Cargo.toml");
 }
@@ -695,7 +834,8 @@ fn with_no_helm_client_a_paste_fails_visibly(cx: &mut TestAppContext) {
 /// A published attachment must never disappear silently, and a terminal that is not live has nowhere to type its path.
 /// Specified: an upload that completes while the stream reconnects types nothing, then or once the terminal is live
 /// again, and a line hands the user the path. Replaces the old spec's "an upload that outlives its socket reports the
-/// path it could not insert" (the reconnect case; a terminal taken away mid-upload is not in this scope yet).
+/// path it could not insert" (the reconnect case; a terminal taken away mid-upload is
+/// `a_closed_tab_reports_its_cut_off_uploads_in_the_agent_terminal`).
 #[gpui::test]
 fn an_upload_that_lands_with_no_live_terminal_shows_its_path(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -719,21 +859,387 @@ fn an_upload_that_lands_with_no_live_terminal_shows_its_path(cx: &mut TestAppCon
     );
 }
 
+// ---- Not live ----------------------------------------------------------------------------------------------------------
+
 /// SPEC.md: an attachment must never disappear silently, and a terminal that is not live has nowhere to type a path.
-/// Specified: a file pasted while the stream reconnects uploads nothing and shows the not-connected refusal on the
-/// terminal's refusal line; text pasted then goes nowhere, as before. Replaces the paste half of the old spec's "a
-/// payload dropped on a detached terminal is refused instead of uploaded" (its clearing on reconnect is not in this
-/// scope: the line goes at the next press, as a refused click's does).
+/// The refusal is about the connection, so it must not outlive it, or it would sit on a working terminal. Specified: a
+/// file pasted while the stream reconnects uploads nothing and shows the not-connected refusal in the strip; text pasted
+/// then goes nowhere; once the terminal is live again the refusal goes. After the next lost link a dropped file is
+/// refused the same way, and goes the same way. Replaces the paste and drop halves of the old spec's "a payload dropped
+/// on a detached terminal is refused instead of uploaded", "the not-connected refusal clears when the terminal
+/// reconnects", and the pane half of "a file dropped where no live terminal takes it is refused, never opened by the
+/// page".
 #[gpui::test]
-fn a_paste_into_a_terminal_that_is_not_live_is_refused(cx: &mut TestAppContext) {
+fn a_paste_or_drop_into_a_terminal_that_is_not_live_is_refused_until_it_is_live(
+    cx: &mut TestAppContext,
+) {
     let mut h = harness(cx);
     h.drop_link();
     h.paste(vec![file(real_file().to_str().unwrap()), text("/home/u/a")]);
-    assert!(h.uploads().is_empty(), "nothing is uploaded for it");
-    assert_eq!(
-        test_support::label(h.cx, "terminal-link-refusal").as_deref(),
-        Some(DETACHED_TEXT)
-    );
+    assert!(h.uploads().is_empty(), "nothing is uploaded for a paste");
+    assert_eq!(h.lines(), [DETACHED_TEXT]);
     h.paste(vec![text("typed")]);
     assert_eq!(h.sent(), [], "nothing is typed while not live");
+    h.attach();
+    assert_eq!(
+        h.lines(),
+        Vec::<String>::new(),
+        "live again, the paste's refusal goes"
+    );
+
+    h.drop_link();
+    h.drop_files(MAIN_PANE, vec![real_file()]);
+    assert!(h.uploads().is_empty(), "nothing is uploaded for a drop");
+    assert_eq!(h.lines(), [DETACHED_TEXT], "the drop's own refusal");
+    h.attach();
+    assert_eq!(
+        h.lines(),
+        Vec::<String>::new(),
+        "live again, the drop's refusal goes"
+    );
+}
+
+/// Going live takes away the refusal only: a failure beside it is about a file, not the connection, and must stay.
+/// Specified: an upload started while live, then a paste refused after the link drops, then the running upload failing,
+/// leave the refusal and the failure; once the terminal is live again only the failure remains.
+#[gpui::test]
+fn going_live_takes_away_the_refusal_and_keeps_a_failure(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.paste(vec![file(real_file().to_str().unwrap())]);
+    let running = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    h.drop_link();
+    h.paste(vec![file(real_file().to_str().unwrap())]);
+    h.answer(
+        running,
+        Err(TransferError::Refused {
+            status: 404,
+            message: "no such session".into(),
+        }),
+    );
+    let failed = "Attaching Cargo.toml failed: no such session — it was not attached, and no path was inserted";
+    assert_eq!(h.lines(), [DETACHED_TEXT, failed], "the premise: both show");
+    h.attach();
+    assert_eq!(h.lines(), [failed]);
+}
+
+/// An inert terminal (a status card stands over it) takes nothing, and its veil covers the pane, so a drop lands on the
+/// veil. Specified: a file dropped there is refused in the strip and uploads nothing, rather than vanishing; once the
+/// veil lifts from the live terminal, the refusal goes. Focus moves off the terminal first, as the session view moves it
+/// when it puts the card up: focus resting on an inert terminal, which takes nothing, is what the focus invariant the
+/// harness checks after every step refuses.
+#[gpui::test]
+fn a_drop_on_an_inert_terminal_is_refused_until_the_veil_lifts(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let elsewhere = h.elsewhere.clone();
+    h.cx.update(|window, cx| {
+        let chosen = focus::Mark::take(cx);
+        focus::focus_control(&elsewhere, &chosen, window, cx);
+    });
+    let owner = h.owner.clone();
+    owner.update(h.cx, |owner, cx| owner.set_inert(true, cx));
+    settle(h.cx);
+    h.drop_files(MAIN_PANE, vec![real_file()]);
+    assert!(h.uploads().is_empty());
+    assert_eq!(h.lines(), [DETACHED_TEXT]);
+    owner.update(h.cx, |owner, cx| owner.set_inert(false, cx));
+    settle(h.cx);
+    assert_eq!(h.lines(), Vec::<String>::new());
+}
+
+/// While its stream comes back, a terminal shows the reconnect card over its grid, and the card occludes the pointer,
+/// so a drop on it never reaches the pane's own drop target under it; without a target of its own the file would be
+/// lost without a word (SPEC.md: an attachment must never disappear silently). Specified: with the card drawn (the
+/// premise, checked), a file dropped on the card itself uploads nothing and the strip shows the not-connected refusal.
+#[gpui::test]
+fn a_drop_on_the_reconnect_card_is_refused(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.drop_link();
+    redraw(h.cx);
+    assert!(
+        h.cx.debug_bounds(RECONNECT_CARD_ID).is_some(),
+        "the premise: the reconnect card is drawn over the terminal"
+    );
+    h.drop_files(RECONNECT_CARD_ID, vec![real_file()]);
+    assert!(h.uploads().is_empty(), "nothing is uploaded for it");
+    assert_eq!(h.lines(), [DETACHED_TEXT]);
+}
+
+// ---- Drops -----------------------------------------------------------------------------------------------------------
+
+/// A drop is the other way to attach, and several files must reach the program as several words, in the order dropped,
+/// or a shell sees one impossible path. Specified: two files dropped on the terminal upload one at a time under their
+/// own names, and each path is typed as its own paste with its trailing space, first then second. Replaces the old
+/// spec's "a file dropped on the agent terminal uploads and inserts its host path at the cursor" and "two dropped files
+/// insert both paths, each its own word", and grid-attach's "a drop on a grid terminal uploads the file and pastes its
+/// path without navigating".
+#[gpui::test]
+fn two_dropped_files_are_typed_as_two_words_in_order(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let second = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
+    h.drop_files(MAIN_PANE, vec![real_file(), second.clone()]);
+    let answer = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    h.answer(answer, Ok("/state/a/Cargo.toml".into()));
+    let answer = h.upload(UploadSource::File(second), "lib.rs");
+    h.answer(answer, Ok("/state/a/lib.rs".into()));
+    assert_eq!(
+        h.sent(),
+        [
+            (typed("/state/a/Cargo.toml "), true),
+            (typed("/state/a/lib.rs "), true)
+        ]
+    );
+}
+
+/// SPEC.md sends a drop to the terminal it lands on, a tab's included; the agent terminal beside it must not get the
+/// path. Specified: a file dropped on a tab's pane, with the agent terminal drawn beside it, is uploaded once and its
+/// path typed into the tab's stream only; a directory dropped there is refused in the tab's strip, the agent
+/// terminal's staying empty. Replaces the old spec's "a file dropped on a tab inserts its path in that tab, leaving the
+/// agent terminal untouched" and "an attachment failure stays in the terminal that received it".
+#[gpui::test]
+fn a_drop_on_a_tab_reaches_only_that_tab(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let (tab, tab_stream) = h.add("s1", Some("t1"));
+    h.drop_files(EXTRA_PANE, vec![real_file()]);
+    let answer = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    h.answer(answer, Ok("/state/t/Cargo.toml".into()));
+    assert_eq!(
+        sent_on(&tab_stream),
+        [(typed("/state/t/Cargo.toml "), true)]
+    );
+    assert_eq!(h.sent(), [], "the agent terminal beside it gets nothing");
+    h.drop_files(EXTRA_PANE, vec![PathBuf::from(env!("CARGO_MANIFEST_DIR"))]);
+    assert_eq!(
+        lines_of(h.cx, &tab),
+        ["farhelm-gui is a directory — this version attaches files only, so nothing was uploaded"]
+    );
+    let main = h.owner.clone();
+    assert_eq!(lines_of(h.cx, &main), Vec::<String>::new());
+}
+
+/// SPEC.md rejects dropped directories visibly in v1. Specified: a dropped directory uploads nothing, types nothing,
+/// and its line names it. Replaces the drop half of the old spec's "a dropped directory is rejected visibly, uploading
+/// nothing and pasting nothing".
+#[gpui::test]
+fn a_dropped_directory_is_refused_visibly(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.drop_files(MAIN_PANE, vec![PathBuf::from(env!("CARGO_MANIFEST_DIR"))]);
+    assert!(h.uploads().is_empty());
+    assert_eq!(h.sent(), []);
+    assert_eq!(
+        h.lines(),
+        ["farhelm-gui is a directory — this version attaches files only, so nothing was uploaded"]
+    );
+}
+
+// ---- The strip -------------------------------------------------------------------------------------------------------
+
+/// A strip that took room from the grid would resize the program twice per upload, reflowing its scrollback and
+/// redrawing a full-screen agent. Specified: while the strip shows, the grid is drawn at exactly its size and place
+/// before, and no resize reaches the stream. Replaces the old spec's "the attachment indicator never resizes the
+/// terminal".
+#[gpui::test]
+fn the_strip_never_resizes_the_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    redraw(h.cx);
+    let before = h.grid_bounds();
+    h.stream.borrow_mut().as_mut().unwrap().received();
+    h.paste(vec![file(real_file().to_str().unwrap())]);
+    let _held = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    redraw(h.cx);
+    assert_eq!(
+        h.lines(),
+        ["Attaching Cargo.toml…"],
+        "the premise: the strip shows"
+    );
+    assert_eq!(h.grid_bounds(), before);
+    let resized = h
+        .stream
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .received()
+        .into_iter()
+        .any(|request| matches!(request, FakeTerminalRequest::Resize { .. }));
+    assert!(!resized, "no resize went out");
+}
+
+/// The busy line must describe what is still running, not what started last, or it names a file that already landed.
+/// Specified: two pasted files read "Attaching 2 files…" while the first runs and the second waits, then the second's
+/// own name once the first is done, and nothing once both are. Replaces the old spec's "the indicator names the upload
+/// still running, not the one that just finished" and the busy half of "typing stays live during an upload".
+#[gpui::test]
+fn the_strip_names_what_is_running_and_counts_what_waits(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let second = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
+    h.paste(vec![ClipboardEntry::ExternalPaths(ExternalPaths(
+        vec![real_file(), second.clone()].into(),
+    ))]);
+    assert_eq!(h.lines(), ["Attaching 2 files…"]);
+    let answer = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    h.answer(answer, Ok("/state/Cargo.toml".into()));
+    assert_eq!(h.lines(), ["Attaching lib.rs…"]);
+    let answer = h.upload(UploadSource::File(second), "lib.rs");
+    h.answer(answer, Ok("/state/lib.rs".into()));
+    assert_eq!(h.lines(), Vec::<String>::new());
+}
+
+// ---- A terminal going away -------------------------------------------------------------------------------------------
+
+/// SPEC.md: an attachment must never disappear silently, and a closed tab takes its terminal with it. Specified: a tab
+/// closed while one dropped file uploads and another waits abandons the running request, and the session's agent
+/// terminal then shows a line for each: the running one's outcome cannot be told, the waiting one was never sent.
+/// Replaces the old spec's "uploads cut off by a reconnect are reported by the remounted terminal" (here a terminal
+/// goes away whole; a stream's reconnect keeps its uploads, as
+/// `typing_goes_on_during_an_upload_and_the_path_lands_after_it` shows).
+#[gpui::test]
+fn a_closed_tab_reports_its_cut_off_uploads_in_the_agent_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let (tab, _stream) = h.add("s1", Some("t1"));
+    let second = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
+    h.drop_files(EXTRA_PANE, vec![real_file(), second]);
+    let running = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    drop(tab);
+    h.remove_added();
+    assert!(
+        running.abandoned(),
+        "the request was abandoned with its terminal"
+    );
+    assert_eq!(
+        h.lines(),
+        [
+            "Attaching Cargo.toml was interrupted — whether it was attached cannot be told, and no path was inserted",
+            "Attaching lib.rs was interrupted before it was sent, so nothing was uploaded",
+        ]
+    );
+}
+
+/// A failure the user has not read yet, and an upload cut off by leaving the session, must still be there when the
+/// session's terminal is back, or the file vanishes without a word. Specified: a session's agent terminal that goes
+/// away (the session left) with a failure on its strip and an upload running leaves both, the upload as cut off; the
+/// session's next agent terminal shows them, in that order. Replaces the old spec's "an upload failure stays on screen
+/// across a reconnect" (here across the terminal being made again) and "leaving mid-upload and reopening leaves exactly
+/// one set of hooks" (a reopened terminal uploads nothing twice: it never saw the first upload).
+#[gpui::test]
+fn a_failure_and_a_cut_off_upload_outlive_their_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let (owner, _stream) = h.add("s2", None);
+    let second = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
+    h.drop_files(EXTRA_PANE, vec![real_file(), second.clone()]);
+    let answer = h.upload_in("s2", UploadSource::File(real_file()), "Cargo.toml");
+    h.answer(
+        answer,
+        Err(TransferError::Refused {
+            status: 500,
+            message: "no space left on device".into(),
+        }),
+    );
+    let _running = h.upload_in("s2", UploadSource::File(second), "lib.rs");
+    drop(owner);
+    h.remove_added();
+
+    let (owner, _stream) = h.add("s2", None);
+    assert_eq!(
+        lines_of(h.cx, &owner),
+        [
+            "Attaching Cargo.toml failed: no space left on device — whether it was attached cannot be told, and no \
+             path was inserted",
+            "Attaching lib.rs was interrupted — whether it was attached cannot be told, and no path was inserted",
+        ]
+    );
+    assert!(h.uploads_in("s2").is_empty(), "nothing is uploaded again");
+    let main = h.owner.clone();
+    assert_eq!(
+        lines_of(h.cx, &main),
+        Vec::<String>::new(),
+        "another session's terminal shows nothing of it"
+    );
+}
+
+/// A reset of the window's connection retires its UI session and every terminal with it (SPEC_impl.md, "One failure
+/// path: the reset"), and an upload running then must neither go on unseen nor vanish (SPEC.md, "Attachments").
+/// Specified: breaking the channel while an upload runs retires the old UI session and abandons the request; once the
+/// channel is back, the session's new agent terminal shows the upload as cut off, its outcome not to be told.
+#[gpui::test]
+fn a_reset_reports_a_cut_off_upload_in_the_new_agent_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let old = h.session.clone();
+    h.paste(vec![file(real_file().to_str().unwrap())]);
+    let running = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+
+    h.helm.break_channel();
+    settle(h.cx);
+    assert!(
+        h.cx.update(|_, cx| old.read(cx).is_retired()),
+        "the premise: the reset retired the old UI session"
+    );
+    assert!(running.abandoned(), "the request went with the terminal");
+
+    h.helm.connect(preferences());
+    settle(h.cx);
+    let connection = h.connection.clone();
+    let new =
+        h.cx.update(|_, cx| connection.read(cx).session().cloned())
+            .expect("the premise: the channel is back with a new UI session");
+    assert!(new != old, "the premise: a new UI session");
+    h.session = new;
+    let (owner, _stream) = h.add("s1", None);
+    assert_eq!(
+        lines_of(h.cx, &owner),
+        [
+            "Attaching Cargo.toml was interrupted — whether it was attached cannot be told, and no path was inserted"
+        ]
+    );
+}
+
+/// The lines a reset leaves must not stay for the life of the app once their session is gone, while those of a session
+/// still there must wait for it (SPEC_impl.md, "One failure path: the reset"). Specified: a reset cutting off an upload
+/// in session `s1` and one in `s2` leaves lines for both; the next snapshot's complete listing names `s1` only, and
+/// with it `s2`'s lines go while `s1`'s stay, so `s1`'s next agent terminal shows its line and `s2`'s shows nothing.
+#[gpui::test]
+fn after_a_reset_the_lines_of_a_session_gone_from_the_listing_go(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.paste(vec![file(real_file().to_str().unwrap())]);
+    let _s1 = h.upload(UploadSource::File(real_file()), "Cargo.toml");
+    let (_other, _stream) = h.add("s2", None);
+    h.drop_files(EXTRA_PANE, vec![real_file()]);
+    let _s2 = h.upload_in("s2", UploadSource::File(real_file()), "Cargo.toml");
+
+    h.helm.break_channel();
+    settle(h.cx);
+    let carried = |h: &mut Harness<'_>, key: &str| {
+        h.cx.update(|_, cx| {
+            cx.try_global::<Carried>()
+                .is_some_and(|carried| carried.0.contains_key(key))
+        })
+    };
+    assert!(
+        carried(&mut h, "s1") && carried(&mut h, "s2"),
+        "the premise: the reset left lines for both sessions"
+    );
+
+    let mut snapshot = preferences();
+    snapshot.push(test_support::sessions(&["s1"]));
+    h.helm.connect(snapshot);
+    settle(h.cx);
+    assert!(
+        !carried(&mut h, "s2"),
+        "a session the listing no longer has loses its lines"
+    );
+    assert!(carried(&mut h, "s1"), "a session still listed keeps them");
+
+    let connection = h.connection.clone();
+    h.session =
+        h.cx.update(|_, cx| connection.read(cx).session().cloned())
+            .expect("the premise: the channel is back with a new UI session");
+    h.remove_added();
+    let (s2, _stream) = h.add("s2", None);
+    assert_eq!(lines_of(h.cx, &s2), Vec::<String>::new());
+    h.remove_added();
+    let (s1, _stream) = h.add("s1", None);
+    assert_eq!(
+        lines_of(h.cx, &s1),
+        [
+            "Attaching Cargo.toml was interrupted — whether it was attached cannot be told, and no path was inserted"
+        ]
+    );
 }
