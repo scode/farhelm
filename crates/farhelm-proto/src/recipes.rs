@@ -643,9 +643,8 @@ pub fn check_tunnel_host(host: &str) -> bool {
 /// and anything else (ntfy's server URL rule). The messages are fixed so a
 /// refusal cannot echo what was typed.
 ///
-/// This is a structural check without a URL library (the UI's wasm build
-/// keeps this crate's dependencies small); the helm also parses the URL
-/// properly before storing it.
+/// This is a structural check without a URL library; the helm also parses
+/// the URL properly before storing it.
 pub fn check_base_url(url: &str) -> Result<(), &'static str> {
     const SHAPE: &str = "use an http or https base URL without credentials, query or fragment";
     if url.is_empty() {

@@ -3009,7 +3009,7 @@ async fn settled_absence_and_definite_refusal_allow_delete() {
 }
 
 /// Names are ownership tags, not arbitrary display text. Sanitizing Unicode
-/// and punctuation must not collide with the browser harness's reserved tag.
+/// and punctuation must not collide with the Tensorlake test harness's reserved tag.
 #[test]
 fn names_fit_tensorlake_grammar() {
     for name in ["", "---", "😀", "GPU Dev / 1", &"a".repeat(300)] {

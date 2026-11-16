@@ -32,7 +32,8 @@ pub const FEEDBACK_OS_MAX_CHARS: usize = 128;
 pub enum FeedbackSurface {
     /// The native desktop app.
     Desktop,
-    /// The web UI in a browser.
+    /// The removed web UI in a browser. No client sends it any more; it is
+    /// still one of the two surface words the website endpoint accepts.
     Web,
 }
 
@@ -59,7 +60,7 @@ pub struct FeedbackSubmission {
     pub version: String,
     /// Desktop app or web UI.
     pub surface: FeedbackSurface,
-    /// The operating system the browser or webview reports.
+    /// The operating system the client reports.
     pub os: String,
 }
 

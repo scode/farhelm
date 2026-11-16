@@ -14,8 +14,8 @@ scratch when the stored one is gone or stale.
 ## When and how much
 
 - Only on request. The template carries rootless Podman and the exact cached production base, so the real environment
-  e2e test runs there too. Builds, lints, doctests and the UI's desktop tests stay local: the sandboxes have no Rust
-  toolchain and no WebKitGTK.
+  e2e test runs there too. Builds, lints, doctests and the GUI's tests stay local: the sandboxes have no Rust toolchain
+  and none of the GPUI app's libraries (`scripts/tensorlake/bootstrap.sh` installs the packages they have).
 - The maintainer's request states a budget: how many sandboxes may exist at once. Stay at or below it (`--shards`).
 - Name owned sandboxes `farhelm-sbx-<checkout>-<n>` (`--prefix farhelm-sbx-<checkout>-`), where `<checkout>` is the
   checkout directory's name lowercased with everything outside `[a-z0-9]` turned into `-`. A sandbox with that prefix

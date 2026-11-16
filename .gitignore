@@ -13,18 +13,21 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
-# Playwright: installed deps and per-run artifacts (traces, screenshots)
+# Installed JavaScript dependencies (the docs website's `bun install`).
 node_modules/
+
+# Leftovers of the removed browser suite (Playwright, under e2e/) and the media captures that drove it, which
+# existing checkouts may still hold: run artifacts, stack descriptions and a minted auth state. Nothing creates them
+# any more; they stay ignored so that jj never sweeps one into a commit.
 test-results/
 playwright-report/
-# What start-stack.sh publishes about the stack it booted, for the
-# multi-host tests that have to reach behind the API (see that script).
-# Per-run and removed by its cleanup trap.
 e2e/.stack-info.json
-# Minted by Playwright's global auth setup and removed with the stack.
 e2e/.auth/storage-state.json
-# The browser suite's per-slot equivalents of both (e2e/stack-slots.ts).
 e2e/.stacks/
+e2e/readme-hero/.stack-info.json
+e2e/readme-video/.stack-info.json
+e2e/docs-shots/.stack-info.json
+e2e/docs-shots/.fleet.json
 
 # Leftover of the removed pinned test tmux build, which existing checkouts may
 # still hold (a built tmux and its build tree). Nothing creates it any more and it
@@ -55,15 +58,6 @@ e2e/.stacks/
 # files, and review reports private to the session that created them.
 .agent-delegation/
 
-# What the README hero capture's stack script publishes about the fleet it
-# booted (e2e/readme-hero/start-stack.sh); per run, removed by its trap.
-e2e/readme-hero/.stack-info.json
-# The demo video's equivalent (e2e/readme-video.config.ts), same lifecycle.
-e2e/readme-video/.stack-info.json
-# The docs screenshots' equivalents (e2e/docs-shots.config.ts): the stack info and
-# the staged fleet's ids, both per run.
-e2e/docs-shots/.stack-info.json
-e2e/docs-shots/.fleet.json
 __pycache__/
 
 # Astro build output and content-collection cache for the docs website;

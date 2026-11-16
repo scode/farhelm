@@ -45,7 +45,7 @@ pub enum Script {
     /// Accepts `spawn <cwd>` on stdin and runs this binary's `spawn`
     /// command as the current session, reporting the child id. The
     /// `spawn-parented <cwd>` form supplies this session's id explicitly,
-    /// so browser tests can observe the public parent filter too.
+    /// so a test can observe the public parent filter too.
     ///
     /// The spawned child inherits this same command and script but remains
     /// idle until driven, which keeps the fixture deterministic instead of

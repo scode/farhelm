@@ -1,7 +1,7 @@
 //! Tests for the Tensorlake account slice: the HTTP client against an owned
 //! stub server (request shapes, lenient decoding, error classification), the
 //! stored account row and its migration, the helm tag, Farhelm's ssh key, the
-//! browser suite's fake, and the `/api/tensorlake` routes through the real
+//! filesystem fake (`e2e.rs`), and the `/api/tensorlake` routes through the real
 //! router. No test reaches Tensorlake or changes process configuration: the
 //! client is pointed at the stub through its constructor, and the routes get
 //! a stub through the harness's injection seam.
@@ -770,7 +770,7 @@ async fn a_helm_without_a_key_store_still_reads_its_settings() {
 }
 
 // ---------------------------------------------------------------------------
-// The browser suite's fake
+// The filesystem fake (`e2e.rs`)
 // ---------------------------------------------------------------------------
 
 /// A state directory with a marked fake directory inside it.

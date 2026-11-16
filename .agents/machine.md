@@ -85,7 +85,7 @@ also stages image copies under `/var/tmp` unless `TMPDIR` says otherwise, so run
 
 Leave these where they already go:
 
-- The checkout's own build output (`target/`, the dx output), which stays wherever the build puts it.
+- The checkout's own build output (`target/`), which stays wherever the build puts it.
 - Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, dprint's plugins. Use them
   the way the tools do by default; do not redirect them.
 - State created by the repo's harnesses and scripts: the `fh-it.*`, `fh-e2e.*` and `fh-smoke.*` test directories (the

@@ -14,29 +14,25 @@ numbering from that file is preserved for cross-reference with older logs.
     cannot recur. The four-thread cap stays as a resource bound (`.config/nextest.toml`). `lore/PLAN.md`'s M6.5
     amendment carries the detailed evidence and discriminator. A load-shaped flake seen now is new evidence; do not
     classify it as oversubscription without a mechanism.
-12. **Playwright flood-harness sightings.** The flood test now lives in `e2e/tests/terminal-flood.spec.ts`. The
-    second-occurrence trigger fired, but it was not a recurrence of the original `drain socket closed before FLOOD-DONE`
-    error. WebKit instead exhausted a fixed 45-second completion budget while the in-page verifier was still making
-    correct forward progress. The whole-stream test now fails corruption immediately, renews a bounded stall budget when
-    progress advances, and retains an independent hard cap for a producer that only limps forever. The original
-    premature socket-close shape has still occurred once. Record and investigate another occurrence of either exact
-    shape rather than folding the two mechanisms together.
-13. **WebKit engine-process crashes.** A final-tip run lost both terminal and feed WebSockets when WebKit reported
-    `Network process crashed`; the helm and supervisor were still healthy. The old one-project-per-engine layout had
-    kept one browser alive for all 294 WebKit cases. Playwright now starts a fresh browser for each spec file while
-    keeping the one-worker shared-stack contract. The failed case passed 11 fresh-process reruns and the complete
-    588-case suite; the historical run's longest browser lifetime was 21.4 minutes in the then-unsplit WebKit terminal
-    project. The terminal family is now split across per-file projects. If this recurs inside a fresh per-file project,
-    retain the trace and treat it as new evidence. Do not fold it into the flood-harness timeouts or a server-side
-    disconnect unless the matching process evidence supports that mechanism.
-14. **Playwright route-handler teardown failures.** A later WebKit terminal run finished the test's assertions, then
-    failed because an invalidation-driven host refresh had entered `route.fetch()` just before Playwright disposed the
-    page's request context. The trace showed the second GET begin before after-hooks and its JSON read fail only after
-    context teardown started. Every terminal test now unregisters its page routes after the case and waits for handlers
-    already in flight; the failed case passed 21 standalone fresh-process runs and the complete 588-case suite
-    afterward. A recurrence is a route-lifetime problem only if the trace again shows an intercepted request crossing
-    into context teardown — do not group a WebKit process crash, a server disconnect, or a request that genuinely failed
-    before teardown under this heading.
+12. **Playwright flood-harness sightings (closed: the browser suite went with the old app).** The flood test lived in
+    `e2e/tests/terminal-flood.spec.ts`. The second-occurrence trigger fired, but it was not a recurrence of the original
+    `drain socket closed before FLOOD-DONE` error: WebKit had exhausted a fixed 45-second completion budget while the
+    in-page verifier was still making correct forward progress. The whole-stream test was then changed to fail
+    corruption immediately, renew a bounded stall budget when progress advanced, and keep an independent hard cap for a
+    producer that only limped forever. The original premature socket-close shape occurred once.
+13. **WebKit engine-process crashes (closed: the browser suite went with the old app).** A final-tip run lost both
+    terminal and feed WebSockets when WebKit reported `Network process crashed`; the helm and supervisor were still
+    healthy. The one-project-per-engine layout had kept one browser alive for all 294 WebKit cases, and Playwright was
+    changed to start a fresh browser for each spec file while keeping the one-worker shared-stack contract. The failed
+    case passed 11 fresh-process reruns and the complete 588-case suite; the run's longest browser lifetime was 21.4
+    minutes in the then-unsplit WebKit terminal project, after which the terminal family was split across per-file
+    projects.
+14. **Playwright route-handler teardown failures (closed: the browser suite went with the old app).** A later WebKit
+    terminal run finished the test's assertions, then failed because an invalidation-driven host refresh had entered
+    `route.fetch()` just before Playwright disposed the page's request context. The trace showed the second GET begin
+    before after-hooks and its JSON read fail only after context teardown started. Every terminal test was changed to
+    unregister its page routes after the case and wait for handlers already in flight; the failed case then passed 21
+    standalone fresh-process runs and the complete 588-case suite.
 15. **Review-cap residue.** The review swarms ran a hard three-pass cap, and the test-quality lens (often docs too) was
     still producing accepted findings AT the cap on every large PR: #114 (plan), #115 (proto), #117 (auth), #118
     (spawn), #119/#120 (grouping+archive), #121 (provisioning), #122 (UI provisioning), #123 (packaging) — the cap, not
