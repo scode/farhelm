@@ -719,21 +719,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::put(sessions::clear_notifications),
         )
         .route("/api/sessions/{id}/term", get(terminal::term_ws))
-        // The non-displacing attach lives at its own PATH rather than
-        // behind a query flag, and the difference is the whole safety
-        // property (PLAN_M6.md item 7). A flag is something an older helm
-        // ignores while happily performing the displacing attach the
-        // caller was trying to avoid — the browser has no handshake to
-        // catch that with, and the build stamp it does have can be up to a
-        // poll interval stale, which is exactly the window a rolled-back
-        // helm lives in. A path an older helm does not serve cannot be
-        // misread: the upgrade fails with an API 404, the attempt counts as a
-        // failure, the ladder carries on, and the stamp check latches the
-        // mismatch moments later.
-        .route(
-            "/api/sessions/{id}/term/unowned",
-            get(terminal::term_ws_if_unowned),
-        )
         // Host management (PLAN_M6.md item 5). The two verb routes are
         // shaped like the session verbs (`/stop`, `/rename`) rather than as
         // PATCHes, for the reason `rename_session` records: each changes

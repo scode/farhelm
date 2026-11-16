@@ -247,7 +247,6 @@ mod tests {
         for route in [
             farhelm_proto::ui_channel::UI_CHANNEL_PATH,
             "/api/sessions/missing/term",
-            "/api/sessions/missing/term/unowned",
         ] {
             assert!(
                 matches!(

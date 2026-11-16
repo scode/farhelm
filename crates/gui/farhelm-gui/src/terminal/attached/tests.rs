@@ -254,7 +254,6 @@ fn opener(slot: Opened) -> OpenStream {
         let (fake, handle, events) = FakeTerminal::open(&attach);
         // What the opener was given; no resize can have overtaken it yet.
         let asked = FakeAttach {
-            take_control: true,
             cols: attach.cols,
             rows: attach.rows,
             resize_on_open: None,
@@ -480,7 +479,6 @@ fn the_stream_opens_at_the_fitted_size(cx: &mut TestAppContext) {
     assert_eq!(
         asked,
         Some(FakeAttach {
-            take_control: true,
             cols: FITTED.0,
             rows: FITTED.1,
             resize_on_open: None,
@@ -490,7 +488,6 @@ fn the_stream_opens_at_the_fitted_size(cx: &mut TestAppContext) {
     assert_eq!(
         h.fake().attach(),
         FakeAttach {
-            take_control: true,
             cols: FITTED.0,
             rows: FITTED.1,
             resize_on_open: None,
@@ -904,7 +901,7 @@ fn history(lines: usize, cols: u16) -> GridOutput {
 /// user to fix something nobody broke (old `terminal-restart.spec.ts`, "a restarted session's terminal still shows the
 /// previous run's scrollback above the new one", whose client half this is). The old screen must give way to the new
 /// run's in one redraw, never to half a replay. Specified: with a live, focused terminal showing "screen" above 40 history lines, a
-/// detach with `other` offers no Take control and keeps "screen" up; the stream reattaches by the non-displacing route,
+/// detach with `other` offers no Take control and keeps "screen" up; the stream reattaches by itself,
 /// and while the new replay (a screen with "new run" on its first row and the 40 lines above it) arrives nothing is
 /// redrawn and "screen" stays; on completion the owner redraws once to show "new run" with no line of the old screen,
 /// following the bottom; the wheel then reaches the carried-over history, and a typed key is delivered to the new
@@ -933,7 +930,6 @@ fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
     assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
 
     let asked = h.fake().attach();
-    assert!(!asked.take_control, "it reattaches without displacing");
     let mut replay = first_screen(asked.cols, asked.rows, "new run");
     replay.push(history(40, asked.cols));
     let mut replay = replay.into_iter();
@@ -1002,7 +998,6 @@ fn a_takeover_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext
         "the premise: Take control attaches again"
     );
     let asked = h.fake().attach();
-    assert!(asked.take_control, "the premise: as a takeover");
     for message in first_screen(asked.cols, asked.rows, "$ echo") {
         h.fake().output(message);
     }
@@ -1082,7 +1077,7 @@ fn a_programs_clipboard_write_reaches_the_clipboard(cx: &mut TestAppContext) {
 // ---- What the pane says --------------------------------------------------------------------------------------------
 
 /// A detach that waits for the user shows "Detached:" with the helm's reason, escaped as host text, and a Take
-/// control button that attaches again through the displacing route. A refusal shows the old app's "Connection error"
+/// control button that attaches again. A refusal shows the old app's "Connection error"
 /// and offers the same, since the stream waits for Take control there too: without the button the terminal would stay
 /// dead until the session is reopened. A tab closed after it was attached says nothing at all: the session view drops
 /// it moments later, and SPEC.md has a reaped tab disappear silently.
@@ -1113,7 +1108,7 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
     );
     settle(h.cx);
     assert_eq!(h.status(), None);
-    assert!(h.fake().attach().take_control);
+    h.fake().attach();
 
     h.fake().drop_link();
     h.fake().refuse(401);

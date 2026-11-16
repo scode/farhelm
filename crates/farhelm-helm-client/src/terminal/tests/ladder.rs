@@ -65,7 +65,7 @@ fn offsets(attempts: &Attempts) -> Vec<u128> {
 /// whose helm stays unreachable must climb the approved ladder (0.5, 1, 2, 4, 8 and 15 s), then probe every 30 s
 /// without ever giving up, and tell its card about every wait and every attempt as it goes. This pins the attempts'
 /// start times exactly, the full feed of `Reconnecting` states (each wait with its delay, each attempt in flight, the
-/// count running past six into probing), and that only the first attach takes the displacing route. Without the
+/// count running past six into probing), and that every attempt asks for the one terminal route. Without the
 /// terminal's own ladder the attempts would follow the UI channel's 1, 2, 4, 8 s doubling; announced once per outage,
 /// the feed would hold one state.
 #[tokio::test(start_paused = true)]
@@ -92,14 +92,8 @@ async fn an_unreachable_terminal_climbs_the_ladder_then_probes_every_30_s() {
             0, 500, 1_500, 3_500, 7_500, 15_500, 30_500, 60_500, 90_500, 120_500
         ]
     );
-    let attempts = attempts.lock().unwrap();
-    assert!(
-        attempts[0].1.starts_with("/api/sessions/s1/term?"),
-        "{:?}",
-        attempts[0]
-    );
-    for (_, path) in &attempts[1..] {
-        assert!(path.starts_with("/api/sessions/s1/term/unowned?"), "{path}");
+    for (_, path) in attempts.lock().unwrap().iter() {
+        assert!(path.starts_with("/api/sessions/s1/term?"), "{path}");
     }
 }
 
@@ -144,53 +138,4 @@ async fn a_5xx_upgrade_answer_is_retried_and_any_other_refusal_waits_for_the_use
         tokio::time::sleep(Duration::from_secs(600)).await;
         assert_eq!(offsets(&attempts), [0], "{status}: retried by itself");
     }
-}
-
-/// A stream opened without the intent to take its terminal (a tab a recovering view opens while it may have missed a
-/// takeover) must not displace whoever holds it, so its first attach takes the non-displacing route; that the helm
-/// then refuses it with the ordinary takeover notice is the helm's own contract. Only a later take-control displaces.
-#[tokio::test(start_paused = true)]
-async fn a_stream_that_does_not_take_control_first_attaches_without_displacing() {
-    let unowned = TerminalAttach {
-        take_control: false,
-        ..attach("s1")
-    };
-    let script = vec![
-        ConnectError::Refused { status: 404 },
-        ConnectError::Failed("refused".into()),
-    ];
-    let (handle, mut events, attempts) = scripted(unowned, script);
-    assert_eq!(
-        events_now(&mut events, 2).await,
-        [
-            TerminalEvent::State(StreamState::Attaching),
-            TerminalEvent::State(StreamState::Refused { status: 404 }),
-        ]
-    );
-    handle.take_control();
-    // `Attaching`, then the failed attempt's wait, which comes only once that attempt was made.
-    assert_eq!(
-        events_now(&mut events, 2).await,
-        [
-            TerminalEvent::State(StreamState::Attaching),
-            reconnecting(1, 6, Retrying, Some(500)),
-        ]
-    );
-    let paths: Vec<String> = attempts
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(_, path)| path.clone())
-        .collect();
-    assert_eq!(paths.len(), 2);
-    assert!(
-        paths[0].starts_with("/api/sessions/s1/term/unowned?"),
-        "{}",
-        paths[0]
-    );
-    assert!(
-        paths[1].starts_with("/api/sessions/s1/term?"),
-        "{}",
-        paths[1]
-    );
 }

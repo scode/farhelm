@@ -3979,6 +3979,13 @@ impl SupervisorClient {
     /// Attach only if no OTHER client holds this session, refusing rather
     /// than displacing one that does (`ControlMsg::Attach::if_unowned`).
     ///
+    /// The helm itself never makes this attach: its terminal route makes
+    /// only the ordinary one, since the app is single-UI (SPEC_impl.md,
+    /// "The seat: one UI per helm"). The
+    /// e2e harnesses still call it, to read a session's terminal without
+    /// taking it from the test's own attachment and to pin the supervisor's
+    /// support for the flag, which the supervisor keeps for older helms.
+    ///
     /// The counterpart to [`Self::attach_terminal`], and a separate entry
     /// point rather than a flag on it because the difference is not a
     /// parameter a caller tunes — it is which of two DIFFERENT operations

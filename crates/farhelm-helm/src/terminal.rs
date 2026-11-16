@@ -10,25 +10,31 @@
 //! which is why nearly everything here is about teardown rather than about
 //! bytes.
 //!
+//! Every attach this route makes is the supervisor's ordinary one under the
+//! client's lease, which takes the session's terminals from whoever holds
+//! them. The app is single-UI (SPEC_impl.md, "The seat: one UI per
+//! helm"), so the helm has no non-displacing route: it never sets the
+//! protocol's `ControlMsg::Attach::if_unowned`,
+//! which the supervisor still honors for older helms.
+//!
 //! ## Auth is refused before upgrade; attach failures are delivered on-socket
 //!
-//! The API authentication boundary runs before `serve_term_upgrade`, so an
+//! The API authentication boundary runs before `term_ws`, so an
 //! unauthenticated request receives HTTP 401 and never becomes a WebSocket.
-//! After that boundary, `serve_term_upgrade` accepts the upgrade and does everything else
+//! After that boundary, `term_ws` accepts the upgrade and does everything else
 //! afterwards: `serve_term` resolves the query (`resolve_attach_request`),
 //! routes to the owning host, and only then sends the `Attach`. So by the
-//! time anything can be refused — an
-//! unparseable `?lease=`, an unknown session or tab, a non-connected host,
-//! another client already holding the session — the WebSocket is open.
+//! time anything can be refused — an unparseable `?lease=`, an unknown
+//! session or tab, a non-connected host — the WebSocket is open.
 //!
 //! Every one of those refusals therefore leaves the same way: a
 //! `{"type":"detached","reason":...}` text frame, then a close. That
 //! uniformity is the point. The notice carries a detach code the client acts
-//! on (wait for Take control, stop retrying a closed tab, reconnect after
-//! transport trouble) and a reason. The desktop client shows the reason when
-//! the code stops the stream (a takeover, a closed tab, a stall); an `other`
-//! refusal sends it into its reconnect backoff, and the reason reaches only
-//! its log for now. The rule dates from the browser client, which could not
+//! on (stop retrying a closed tab, reconnect after transport trouble) and a
+//! reason. The desktop client shows the reason when the code stops the
+//! stream (a takeover, a closed tab, a stall); an `other` refusal sends it
+//! into its reconnect backoff, and the reason reaches only its log for
+//! now. The rule dates from the browser client, which could not
 //! read a status code off a failed upgrade at all: the alternative was a
 //! socket that opened and closed with nothing said, which the user
 //! experienced as a terminal that flickered and vanished, blamed on the
@@ -82,7 +88,7 @@ use farhelm_proto::terminal_socket::{TerminalClientMessage, TerminalServerMessag
 use farhelm_proto::{ErrorKind, TerminalSelector};
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::error;
 
 // ---- The attachment trace -----------------------------------------------
 
@@ -252,9 +258,8 @@ fn resolve_attach_request(q: &TermQuery) -> anyhow::Result<(TerminalSelector, &s
 /// `resolve_attach_request` refusing the shape, from the session's host
 /// being unreachable, or from the supervisor refusing the attach itself,
 /// all are, from the client's perspective, "this attach did not happen,"
-/// and all leave through that one arm, with a detach code (`taken_over`,
-/// `tab_closed` or `other`) read from the error's kind (and, for
-/// `tab_closed`, whether a tab was asked for).
+/// and all leave through that one arm, with a detach code (`tab_closed` or
+/// `other`) read from the error's kind and whether a tab was asked for.
 ///
 /// That uniformity is also what gives the terminal socket its half of
 /// SPEC.md's host-unreachable story for free: the refusal text names the
@@ -273,37 +278,14 @@ async fn attach_from_query(
     state: &AppState,
     session_id: &str,
     q: &TermQuery,
-    if_unowned: bool,
 ) -> anyhow::Result<(Arc<SupervisorClient>, String, u32, TermStream)> {
     let (terminal, lease) = resolve_attach_request(q)?;
     let key = resolve_session_ref(state, session_id).await?;
     let (_claim, client) = route_active_session(state, &key).await?;
-    // Which of the two attach contracts this socket wants, decided by the
-    // query the client sent: an unattended reconnect refuses rather than
-    // displaces (see `TermQuery::if_unowned`), everything else is the
-    // ordinary last-attach-wins attach.
-    let (channel, stream) = if if_unowned {
-        client
-            .attach_terminal_if_unowned(&key.session_id, q.cols, q.rows, terminal, lease)
-            .await?
-    } else {
-        client
-            .attach_terminal(&key.session_id, q.cols, q.rows, terminal, lease)
-            .await?
-    };
+    let (channel, stream) = client
+        .attach_terminal(&key.session_id, q.cols, q.rows, terminal, lease)
+        .await?;
     Ok((client, key.session_id, channel, stream))
-}
-
-/// Whether this failure is the supervisor refusing a non-displacing attach
-/// because another client holds the session.
-///
-/// `anyhow`'s `downcast_ref` searches the root cause and every context
-/// layer above it, so this survives callers that annotate the error on the
-/// way out — which is exactly what comparing rendered text does not.
-fn refused_as_taken_over(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<SupervisorError>()
-        .is_some_and(|supervised| supervised.kind() == ErrorKind::TakenOver)
 }
 
 /// Whether this failure says the TAB being attached does not exist, which
@@ -359,14 +341,6 @@ fn control_frame(message: &TerminalServerMessage) -> ws::Message {
 /// dumb.
 ///
 /// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
-/// The sibling route `/api/sessions/{id}/term/unowned` (PLAN_M6.md item 7)
-/// is this same socket attached NON-DISPLACINGLY, and its refusal arrives
-/// here as an ordinary `{"type":"detached","reason":"another client
-/// attached"}` notice — the same notice, and the same string, a client
-/// displaced while attached receives. That identity is the point: a
-/// client that was away when it lost the session renders the state it is
-/// actually in without a second vocabulary for it. See `term_ws_if_unowned`
-/// for why it is a path rather than a parameter.
 ///
 /// `?tab=<id>` and `?lease=<id>` (PLAN_M4.md item 5) select which of the
 /// session's terminals this socket attaches and under which client
@@ -425,27 +399,21 @@ pub(crate) async fn term_ws(
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
 ) -> impl IntoResponse {
-    serve_term_upgrade(state, id, q, upgrade, false)
-}
-
-/// The same socket, attached NON-DISPLACINGLY: refused rather than taking
-/// the session from another client (`ControlMsg::Attach::if_unowned`).
-///
-/// A route of its own, served only by a helm that understands the contract
-/// — see `build_router` for why the request has to be unaskable rather
-/// than merely ignorable. The client's reconnect uses it, automatic or
-/// hurried by the client's reconnect-now request, and so does a first
-/// attach opened without the intent to take the terminal (a tab a
-/// recovering view opens while it may have missed a takeover). Opening a
-/// terminal the user asked for and Take control both carry the intent to
-/// take it and go to the ordinary path.
-pub(crate) async fn term_ws_if_unowned(
-    State(state): State<Arc<AppState>>,
-    upgrade: WebSocketUpgrade,
-    AxPath(id): AxPath<String>,
-    Query(q): Query<TermQuery>,
-) -> impl IntoResponse {
-    serve_term_upgrade(state, id, q, upgrade, true)
+    upgrade
+        .protocols([crate::auth::WS_PROTOCOL])
+        // Both bounds, not just the message: a peer can otherwise send one
+        // enormous frame or a run of small ones assembled into one message,
+        // and only one of those is what `max_message_size` alone stops. The
+        // tungstenite 0.29 default frame bound is 16 MiB, and its frame
+        // reader reserves the declared length before any payload arrives.
+        .max_frame_size(TERM_WS_MAX_MESSAGE)
+        .max_message_size(TERM_WS_MAX_MESSAGE)
+        .on_upgrade(move |socket| async move {
+            if let Err(e) = serve_term(state, id, q, socket).await {
+                // A refusal can carry host text into the operator's terminal.
+                error!(error = %crate::manager::peer_text(&format!("{e:#}")), "terminal websocket ended with error");
+            }
+        })
 }
 
 /// The largest WebSocket message, and frame, a terminal socket accepts from
@@ -461,56 +429,6 @@ pub(crate) async fn term_ws_if_unowned(
 /// a detach notice naming it, instead of by the socket layer, whose error
 /// closes the socket with nothing said.
 const TERM_WS_MAX_MESSAGE: usize = farhelm_proto::MAX_FRAME_LEN as usize;
-
-/// The upgrade both terminal routes share; `if_unowned` is the one thing
-/// they differ in.
-fn serve_term_upgrade(
-    state: Arc<AppState>,
-    id: String,
-    q: TermQuery,
-    upgrade: WebSocketUpgrade,
-    if_unowned: bool,
-) -> axum::response::Response {
-    // Kept for the log line below, which runs after `id` has moved into
-    // the handler.
-    let id_for_log = id.clone();
-    upgrade
-        .protocols([crate::auth::WS_PROTOCOL])
-        // Both bounds, not just the message: a peer can otherwise send one
-        // enormous frame or a run of small ones assembled into one message,
-        // and only one of those is what `max_message_size` alone stops. The
-        // tungstenite 0.29 default frame bound is 16 MiB, and its frame
-        // reader reserves the declared length before any payload arrives.
-        .max_frame_size(TERM_WS_MAX_MESSAGE)
-        .max_message_size(TERM_WS_MAX_MESSAGE)
-        .on_upgrade(move |socket| async move {
-            if let Err(e) = serve_term(state, id, q, socket, if_unowned).await {
-                // A refused non-displacing attach is an ORDINARY outcome,
-                // not a fault: a client whose reconnect finds the session
-                // held by someone else is the reconnect working exactly as
-                // designed (PLAN_M6.md item 7), and logging each such
-                // refusal at ERROR would fill the helm's log
-                // with the sound of nothing going wrong. It is still
-                // logged, because SPEC.md lists reconnection among the
-                // things that must be observable — just at the level the
-                // event deserves.
-                //
-                // Classified by DOWNCAST, the same way `http_error` reads a
-                // supervisor failure's kind, rather than by comparing the
-                // rendered message: `{e:#}` folds in every `.context(...)`
-                // layer, so a caller adding one anywhere above this would
-                // silently promote a routine refusal back to ERROR. Only the
-                // kind (`ErrorKind::TakenOver`) is checked: the message is
-                // user-facing prose and decides nothing.
-                if refused_as_taken_over(&e) {
-                    info!(session = %id_for_log, "terminal reconnect refused: another client holds this session");
-                } else {
-                    // A refusal can carry host text into the operator's terminal.
-                    error!(error = %crate::manager::peer_text(&format!("{e:#}")), "terminal websocket ended with error");
-                }
-            }
-        })
-}
 
 /// How long a terminal WebSocket's outbound drain gets to deliver its
 /// final detach notice once the handler is unwinding.
@@ -567,7 +485,6 @@ async fn serve_term(
     session_id: String,
     q: TermQuery,
     mut socket: ws::WebSocket,
-    if_unowned: bool,
 ) -> anyhow::Result<()> {
     use futures_util::{SinkExt, StreamExt};
 
@@ -582,12 +499,10 @@ async fn serve_term(
     // `Result` is what keeps this a single arm instead of two copies of
     // the same three lines.
     let (client, bare_session_id, channel, mut events) =
-        match attach_from_query(&state, &session_id, &q, if_unowned).await {
+        match attach_from_query(&state, &session_id, &q).await {
             Ok(parts) => parts,
             Err(e) => {
-                let code = if refused_as_taken_over(&e) {
-                    farhelm_proto::DetachCode::TakenOver
-                } else if refused_as_missing_tab(&e, &q) {
+                let code = if refused_as_missing_tab(&e, &q) {
                     farhelm_proto::DetachCode::TabClosed
                 } else {
                     farhelm_proto::DetachCode::Other
@@ -2095,47 +2010,39 @@ mod tests {
         );
     }
 
-    /// The unattended attach route reaches the supervisor as a
-    /// NON-DISPLACING attach, and the ordinary route does not (PLAN_M6.md
-    /// item 7).
+    /// The terminal route reaches the supervisor as its ordinary attach,
+    /// never with the protocol's `if_unowned` set.
     ///
-    /// Pinned at the wire because that is where the safety property lives:
-    /// the client's automatic reconnect asks for the refusal by CHOOSING
-    /// A PATH, and what has to be true is that the path it chose becomes
-    /// the flag the supervisor reads. A regression that dropped the flag
-    /// would leave every automatic reconnect displacing again — silently,
-    /// and only observably in a two-client race.
+    /// Every attach the app makes goes through this route: the app is
+    /// single-UI (SPEC_impl.md, "The seat: one UI per helm"), so a
+    /// reconnect is an attach like the first. Pinned at
+    /// the wire because a route that set the flag would have the supervisor
+    /// refuse every attach while another lease holds the session, and the
+    /// helm would then pass that refusal on as transport trouble the client
+    /// keeps retrying.
     #[farhelm_testtrace::test]
-    async fn the_unowned_route_asks_the_supervisor_not_to_displace() {
-        for (path, expected) in [
-            ("/api/sessions/sess-1/term", false),
-            ("/api/sessions/sess-1/term/unowned", true),
-        ] {
-            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-            let peer = tokio::spawn(async move {
-                let (r, w) = tokio::io::split(peer_side);
-                let mut reader = FrameReader::new(r);
-                let mut writer = FrameWriter::new(w);
-                handshake(&mut reader, &mut writer, "supervisor")
-                    .await
+    async fn the_terminal_route_makes_the_ordinary_attach() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request =
+                farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
                     .unwrap();
-                let request =
-                    farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
-                        .unwrap();
-                let ControlMsg::Attach { if_unowned, .. } = request else {
-                    panic!("expected an Attach, got {request:?}");
-                };
-                if_unowned
-            });
-            let mut harness = rest_harness::spliced_helm(client_side).await;
-            let addr = harness.serve().await;
-            let (_ws, asked) = tokio::join!(connect_session(&harness, addr, path), peer);
-            assert_eq!(
-                asked.unwrap(),
-                expected,
-                "{path} must attach with if_unowned={expected}"
-            );
-        }
+            let ControlMsg::Attach { if_unowned, .. } = request else {
+                panic!("expected an Attach, got {request:?}");
+            };
+            if_unowned
+        });
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let path = "/api/sessions/sess-1/term";
+        let (_ws, asked) = tokio::join!(connect_session(&harness, addr, path), peer);
+        assert!(!asked.unwrap(), "{path} must attach with if_unowned unset");
     }
 
     /// Every reply carries this helm's build stamp (PLAN_M6.md item 6), so

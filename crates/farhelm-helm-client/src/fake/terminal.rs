@@ -63,8 +63,8 @@ pub enum FakeTerminalRequest {
     Close,
 }
 
-/// What one attach asked the helm for: the route (displacing or not) and the size, as the real stream would have put
-/// them in the attach request, and the resize it sends first on the socket, if any.
+/// What one attach asked the helm for: the size, as the real stream would have put it in the attach request, and the
+/// resize it sends first on the socket, if any. There is no route to report: every attach is the ordinary one.
 ///
 /// The size is the one the stream held when the attempt started, because the real stream builds the request then: on
 /// entering `Attaching` (at open or take-control), when a reconnect's wait ended ([`FakeTerminal::end_wait`], a
@@ -73,10 +73,6 @@ pub enum FakeTerminalRequest {
 /// connects, comes as `resize_on_open`; resizes during a wait apply to the attempt that follows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FakeAttach {
-    /// The displacing route: only the first attempt after open (when [`TerminalAttach::take_control`] asked for it)
-    /// or after a take-control. Every other attach, the retry after that attempt failed included, is the
-    /// non-displacing reconnect.
-    pub take_control: bool,
     /// The terminal width, in columns, that the attach's query asked for.
     pub cols: u16,
     /// The terminal height, in rows, that the attach's query asked for.
@@ -89,16 +85,14 @@ pub struct FakeAttach {
 /// Where the stream is, from the test's side. Only some of these are states the GUI sees: `Open` shows nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FakePhase {
-    /// Connecting for the first time, or again after a take-control; the next attach displaces (the first one only
-    /// when [`TerminalAttach::take_control`] asked for it).
+    /// Connecting for the first time, or again after a take-control.
     Attaching,
     /// An attach's socket is open but nothing has arrived on it: the GUI still sees the previous state and its input
     /// is dropped. The first output or end of replay makes it `Attached`.
     Open,
     /// The attachment is live; input is delivered.
     Attached,
-    /// The link is gone and the stream is coming back by itself, waiting for its next attempt or with one in flight;
-    /// the next attach does not displace.
+    /// The link is gone and the stream is coming back by itself, waiting for its next attempt or with one in flight.
     Reconnecting,
     /// Stopped by a detach that waits for the user; only take-control attaches again.
     Detached,
@@ -122,11 +116,6 @@ pub struct FakeTerminal {
     ladder: Ladder,
     /// The wait the GUI was last shown, while it runs: `Some` from a break or failed attempt until the attempt starts.
     waiting: Option<ReconnectStatus>,
-    /// Whether the next attach takes the displacing route: from open as [`TerminalAttach::take_control`] says, true
-    /// after a take-control, false once one attempt has been made, whether its socket opened or the link was lost
-    /// first. The real stream clears it after every connect outcome except a refusal it does not retry, which waits
-    /// for take-control and sets it again.
-    take_control_next: bool,
     /// The size held when the current attempt started (entering `Attaching`, a reconnect's wait ending, or a proven
     /// link's drop, whose attempt starts at once), which its attach asks for.
     attempt_size: (u16, u16),
@@ -166,7 +155,6 @@ impl FakeTerminal {
             phase: FakePhase::Attaching,
             ladder: Ladder::new(ladder),
             waiting: None,
-            take_control_next: attach.take_control,
             attempt_size: size,
             size,
             attachments: 0,
@@ -190,12 +178,10 @@ impl FakeTerminal {
         self.start_attempt();
         let (cols, rows) = self.attempt_size;
         let request = FakeAttach {
-            take_control: self.take_control_next,
             cols,
             rows,
             resize_on_open: (self.size != (cols, rows)).then_some(self.size),
         };
-        self.take_control_next = false;
         self.phase = FakePhase::Open;
         request
     }
@@ -233,8 +219,7 @@ impl FakeTerminal {
     /// The attach failed, or the socket dropped or its watchdog fired: the GUI sees the next reconnect wait, a
     /// `Reconnecting` numbered on the ladder (which starts over when the socket had gone live). During a wait, the
     /// attempt starts and fails, so the GUI sees it start and then the next wait. Call [`FakeTerminal::end_wait`] or
-    /// [`FakeTerminal::attach`] to move on. A failed displacing attach is not tried again as one: the retry is a
-    /// non-displacing reconnect, as in the real stream.
+    /// [`FakeTerminal::attach`] to move on.
     pub fn drop_link(&mut self) {
         self.settle();
         assert!(
@@ -264,7 +249,6 @@ impl FakeTerminal {
         );
         self.ladder.reset();
         self.phase = FakePhase::Reconnecting;
-        self.take_control_next = false;
         self.attempt_size = self.size;
         let status = self.ladder.schedule(true);
         self.emit(TerminalEvent::State(StreamState::Reconnecting(status)));
@@ -359,7 +343,6 @@ impl FakeTerminal {
             Request::TakeControl => {
                 if matches!(self.phase, FakePhase::Detached | FakePhase::Refused) {
                     self.phase = FakePhase::Attaching;
-                    self.take_control_next = true;
                     self.attempt_size = self.size;
                     self.ladder.reset();
                     self.emit(TerminalEvent::State(StreamState::Attaching));
@@ -406,9 +389,6 @@ impl FakeTerminal {
             self.ladder.reset();
         }
         self.phase = FakePhase::Reconnecting;
-        // The real stream drops the displacing route after any connect outcome but a refusal it does not retry.
-        // `attach` already cleared it when the socket opened; this covers an attach that failed before it did.
-        self.take_control_next = false;
         let status = self.ladder.schedule(false);
         self.waiting = Some(status);
         self.emit(TerminalEvent::State(StreamState::Reconnecting(status)));
@@ -464,7 +444,6 @@ mod tests {
             lease: AttachmentLease::new(),
             cols: 80,
             rows: 24,
-            take_control: true,
         }
     }
 
@@ -490,14 +469,13 @@ mod tests {
     }
 
     /// GUI tests trust this fake in place of a real terminal stream, so it must keep the stream's contract: the state
-    /// sequence of an attachment, a reconnect and a takeover; the displacing route only for the first attach and after
-    /// take-control; and `Closed` on close. All of it with no runtime.
+    /// sequence of an attachment, a reconnect and a takeover, and `Closed` on close. All of it with no runtime.
     #[test]
-    fn the_fake_keeps_the_streams_states_and_routes() {
+    fn the_fake_keeps_the_streams_states() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
         assert_eq!(state(events.try_recv()), StreamState::Attaching);
 
-        assert!(fake.attach().take_control);
+        fake.attach();
         fake.output(GridOutput::HistoryReset);
         fake.replay_complete();
         assert_eq!(
@@ -510,7 +488,7 @@ mod tests {
         );
         assert_eq!(events.try_recv(), Some(TerminalEvent::ReplayComplete));
 
-        // Each wait and each attempt is shown, numbered on the ladder, and the reconnect is non-displacing.
+        // Each wait and each attempt is shown, numbered on the ladder.
         fake.drop_link();
         fake.drop_link();
         assert_eq!(
@@ -523,7 +501,7 @@ mod tests {
             reconnecting(2, Retrying, Some(1_000))
         );
         assert_eq!(events.try_recv(), None);
-        assert!(!fake.attach().take_control);
+        fake.attach();
         assert_eq!(state(events.try_recv()), reconnecting(2, Retrying, None));
         fake.replay_complete();
         assert_eq!(
@@ -532,7 +510,7 @@ mod tests {
         );
         assert_eq!(events.try_recv(), Some(TerminalEvent::ReplayComplete));
 
-        // A takeover waits for the user; take-control attaches through the displacing route again.
+        // A takeover waits for the user; take-control attaches again.
         fake.detach(Some(DetachCode::TakenOver), "taken over");
         assert_eq!(
             state(events.try_recv()),
@@ -544,27 +522,26 @@ mod tests {
         handle.take_control();
         assert_eq!(fake.phase(), FakePhase::Attaching);
         assert_eq!(state(events.try_recv()), StreamState::Attaching);
-        assert!(fake.attach().take_control);
+        fake.attach();
 
         handle.close();
         assert_eq!(fake.phase(), FakePhase::Closed);
         assert_eq!(state(events.try_recv()), StreamState::Closed);
     }
 
-    /// The real stream builds a displacing attach the moment it starts attaching, so a GUI that opens at one size and
+    /// The real stream builds its attach request the moment it starts attaching, so a GUI that opens at one size and
     /// fits while the attach connects asks (and gets its replay started) at the first size, and the fitted size
     /// follows as the socket's first resize. A fake that reported the fitted size in the query would let a GUI test
     /// pass whose replay the real app draws at another size; one that reported no resize would hide that the helm
     /// does learn the fitted size, which is what the GUI relies on instead of resending it. A reconnect asks for the
     /// latest size in its query and sends no resize.
     #[test]
-    fn a_displacing_attach_asks_for_the_size_it_started_with() {
+    fn an_attach_asks_for_the_size_it_started_with() {
         let (mut fake, handle, _events) = FakeTerminal::open(&attach());
         handle.resize(100, 30);
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: true,
                 cols: 80,
                 rows: 24,
                 resize_on_open: Some((100, 30)),
@@ -576,7 +553,6 @@ mod tests {
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: false,
                 cols: 100,
                 rows: 30,
                 resize_on_open: None,
@@ -592,7 +568,6 @@ mod tests {
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: true,
                 cols: 120,
                 rows: 40,
                 resize_on_open: Some((90, 20)),
@@ -608,7 +583,6 @@ mod tests {
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: true,
                 cols: 90,
                 rows: 20,
                 resize_on_open: None,
@@ -616,12 +590,12 @@ mod tests {
         );
     }
 
-    /// A displacing attach that fails before its socket opens is retried by the real stream as an ordinary reconnect
-    /// at the latest size, never as a second takeover. A fake that kept the displacing route armed would tell a GUI
-    /// test that the retry displaces the other viewer, at the size from before the GUI's resize, when the app does
-    /// neither. Pins both the first attach after open and the one after a take-control.
+    /// An attach that fails before its socket opens is retried by the real stream as an ordinary reconnect at the
+    /// latest size. A fake that retried at the failed attach's size would tell a GUI test the retry asks for the size
+    /// from before the GUI's resize, when the app does not. Pins both the first attach after open and the one after a
+    /// take-control.
     #[test]
-    fn a_failed_displacing_attach_retries_without_displacing() {
+    fn a_failed_attach_retries_at_the_latest_size() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
         assert_eq!(state(events.try_recv()), StreamState::Attaching);
         handle.resize(100, 30);
@@ -633,7 +607,6 @@ mod tests {
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: false,
                 cols: 100,
                 rows: 30,
                 resize_on_open: None,
@@ -641,7 +614,7 @@ mod tests {
         );
         fake.replay_complete();
 
-        // The same after take-control: its first attempt fails, and the retry does not displace.
+        // The same after take-control: its first attempt fails, and the retry asks for the size held since.
         fake.detach(Some(DetachCode::TakenOver), "taken over");
         handle.take_control();
         assert_eq!(fake.phase(), FakePhase::Attaching);
@@ -650,7 +623,6 @@ mod tests {
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: false,
                 cols: 120,
                 rows: 40,
                 resize_on_open: None,
@@ -738,7 +710,7 @@ mod tests {
 
     /// A refusal (a revoked credential, a session that is gone) is the one state besides a detach that only the user
     /// ends, so the GUI's "Take control" action must work from it: input meanwhile is dropped, take-control attaches
-    /// through the displacing route, and closing still reports `Closed`.
+    /// again, and closing still reports `Closed`.
     #[test]
     fn a_refusal_waits_for_take_control() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
@@ -752,7 +724,7 @@ mod tests {
         handle.take_control();
         assert_eq!(fake.phase(), FakePhase::Attaching);
         assert_eq!(state(events.try_recv()), StreamState::Attaching);
-        assert!(fake.attach().take_control);
+        fake.attach();
 
         // A reconnect can be refused too: the refusal answers the attempt, which starts first.
         fake.drop_link();
@@ -778,10 +750,9 @@ mod tests {
         );
     }
 
-    /// An undecodable grid message is a lost link to the GUI: `Reconnecting`, dropped input, and a reconnect that
-    /// never displaces anyone.
+    /// An undecodable grid message is a lost link to the GUI: `Reconnecting`, dropped input, and a reconnect.
     #[test]
-    fn a_protocol_fault_reconnects_without_displacing() {
+    fn a_protocol_fault_reconnects() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
         fake.attach();
         fake.replay_complete();
@@ -799,7 +770,7 @@ mod tests {
                 delivered: false
             }]
         );
-        assert!(!fake.attach().take_control);
+        fake.attach();
     }
 
     /// A group typed for an attachment that has since been replaced is dropped whole, even though the stream is live
@@ -910,9 +881,9 @@ mod tests {
     /// test: no wait before the first attempt, then, if it fails, the ladder's second rung, as the real stream does
     /// after a link that answered a ping. On the real side,
     /// `only_an_attachment_that_answered_a_ping_reconnects_at_once` pins the first half (attempt 1 in flight with no
-    /// wait, non-displacing); the second rung after it follows from the shared `Ladder::schedule`. The proven link
-    /// drops after an earlier outage, whose count going live does not clear, so the drop itself must start the ladder
-    /// over. The attempt is non-displacing and asks for the size held when the link dropped.
+    /// wait); the second rung after it follows from the shared `Ladder::schedule`. The proven link drops after an
+    /// earlier outage, whose count going live does not clear, so the drop itself must start the ladder over. The
+    /// attempt asks for the size held when the link dropped.
     #[test]
     fn a_proven_link_reconnects_at_once_and_then_climbs_from_the_second_rung() {
         let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
@@ -931,7 +902,6 @@ mod tests {
         assert_eq!(
             fake.attach(),
             FakeAttach {
-                take_control: false,
                 cols: 100,
                 rows: 30,
                 resize_on_open: None,
@@ -942,31 +912,6 @@ mod tests {
             state(events.try_recv()),
             reconnecting(2, Retrying, Some(1_000))
         );
-    }
-
-    /// A terminal opened without the intent to take it (a tab a recovering view opens, say) must not displace another
-    /// viewer with its first attach, and a GUI test must be able to see that: the fake reports the non-displacing
-    /// route for that attach, at the size the stream opened with, while a take-control after it still displaces.
-    #[test]
-    fn a_first_attach_that_does_not_take_control_does_not_displace() {
-        let unowned = TerminalAttach {
-            take_control: false,
-            ..attach()
-        };
-        let (mut fake, handle, mut events) = FakeTerminal::open(&unowned);
-        assert_eq!(state(events.try_recv()), StreamState::Attaching);
-        assert_eq!(
-            fake.attach(),
-            FakeAttach {
-                take_control: false,
-                cols: 80,
-                rows: 24,
-                resize_on_open: None,
-            }
-        );
-        fake.detach(Some(DetachCode::TakenOver), "another client attached");
-        handle.take_control();
-        assert!(fake.attach().take_control);
     }
 
     /// The real stream ends when every handle is dropped; the fake must show `Closed` too, or a GUI test could keep
