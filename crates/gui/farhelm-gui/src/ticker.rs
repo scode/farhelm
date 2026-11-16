@@ -49,6 +49,14 @@
 //! step of one cycle counted from the tick count, so every pulsing dot in the app steps together. A new phase goes here
 //! too, beside the tick that drives it.
 //!
+//! Animations that share a tick share a frame, so the cadences are laid out to land on the same ticks. A cadence of
+//! every N ticks counts from the next multiple of N at or after the tick it started on, not from that tick itself: the
+//! blink then changes half only on multiples of [`BLINK_HALF_TICKS`], which are all pulse steps, and a window that both
+//! blinks and pulses draws four frames a second instead of six. Counted from its own start, a blink that started on
+//! any tick but 0 or 3 within the pulse's five-tick pattern fell between the pulse's steps, and the window drew about
+//! 1.5 times the idle frames; since focus moves on clicks, that was the usual case (the terminal area's TE-P2
+//! measurement, 2026-11-16).
+//!
 //! Every handle (an animation's, a blink's, a pulse's, either clock's [`Clock`]) works the same way: the view keeps it
 //! as a field, the ticker keeps only a weak reference to it, and dropping it, or the view that holds it, ends that
 //! view's notifications. A loop finds out at its next wake-up that nobody is left and stops there, so no timer outlives
@@ -128,7 +136,8 @@ struct Subscriber {
     view: EntityId,
     window: AnyWindowHandle,
     cadence: Cadence,
-    /// The tick count when the subscriber started, which [`Cadence::Every`] counts from.
+    /// The tick count [`Cadence::Every`] counts from: [`Cadence::start`] of the count when the subscriber started, which
+    /// may still lie ahead of the count.
     since: u64,
 }
 
@@ -171,7 +180,9 @@ impl Period {
 /// Which ticks a subscriber hears about.
 #[derive(Clone, Copy)]
 enum Cadence {
-    /// Every this many ticks, counted from the subscriber's own start: each one's phase is its own.
+    /// Every this many ticks, on the multiples of it: a subscriber's phase is counted from the first multiple at or
+    /// after the tick it started on ([`Cadence::start`]), so every subscriber of one cadence is notified on the same
+    /// ticks.
     Every(u64),
     /// Each tick on which the shared pulse phase ([`pulse_step`]) moves to its next step, whenever the subscriber
     /// started: the phase is everyone's.
@@ -179,11 +190,28 @@ enum Cadence {
 }
 
 impl Cadence {
+    /// The tick count a subscriber that starts at tick count `ticks` counts its phase from: for [`Cadence::Every`], the
+    /// next multiple of its period at or after `ticks` (the module docs say why), and `ticks` itself for the pulse,
+    /// whose phase comes from the count alone.
+    ///
+    /// The result can lie up to a period minus one tick ahead of `ticks`. Until the count reaches it the subscriber
+    /// stays in its first phase (a blink in its shown half) and is not notified.
+    fn start(self, ticks: u64) -> u64 {
+        match self {
+            Cadence::Every(every) => ticks.next_multiple_of(every),
+            Cadence::PulseStep => ticks,
+        }
+    }
+
     /// Whether tick number `now` (at least 1: the count moves before anyone is notified) is one this cadence is
-    /// notified on, for a subscriber that started at tick count `since`.
+    /// notified on, for a subscriber whose phase counts from tick count `since` ([`Cadence::start`]).
+    ///
+    /// An every-N subscriber is first notified a whole period after `since`, never at `since` itself: its phase does
+    /// not change there (a blink is shown both before and at `since`), so a notification there would only redraw its
+    /// window for nothing.
     fn due(self, now: u64, since: u64) -> bool {
         match self {
-            Cadence::Every(every) => (now - since).is_multiple_of(every),
+            Cadence::Every(every) => now > since && (now - since).is_multiple_of(every),
             Cadence::PulseStep => pulse_step(now) != pulse_step(now - 1),
         }
     }
@@ -203,9 +231,15 @@ pub struct Animating {
 
 /// Held by a view whose cursor blinks, for as long as it blinks. Dropping it stops the view's blink ticks; making a new
 /// one starts the blink over on its shown half, which is how a terminal that takes focus shows its cursor at once.
+///
+/// That first shown half lasts from half a second up to 0.9 s, not exactly half a second: the blink's halves change
+/// only on multiples of [`BLINK_HALF_TICKS`], so that they land on the pulse's frames (the module docs say why), and
+/// the first half also covers the ticks up to the first such multiple.
 #[must_use = "a view blinks only while it holds this"]
 pub struct Blinking {
     _alive: Rc<()>,
+    /// The tick count the halves count from, the same as the subscriber's: [`Cadence::start`] of the count when the
+    /// blink started, so it may lie ahead of the count while the first shown half lasts.
     since: u64,
 }
 
@@ -216,6 +250,8 @@ impl Blinking {
     pub fn is_on(&self, cx: &App) -> bool {
         match installed::<Ticker>(cx) {
             Some(ticker) if !ticker.reduced_motion => {
+                // Saturating, because `since` lies ahead of the count until the first multiple of the half comes: the
+                // ticks before it are part of the first shown half.
                 (ticker.ticks.saturating_sub(self.since) / BLINK_HALF_TICKS).is_multiple_of(2)
             }
             _ => true,
@@ -342,14 +378,16 @@ pub fn pulse<V: 'static>(window: &Window, cx: &mut Context<V>) -> Pulsing {
 }
 
 /// Subscribe the view `cx` belongs to, notified on the ticks `cadence` picks, and start the tick loop unless it runs or
-/// motion is reduced. Returns the handle's liveness token and the tick count it started at.
+/// motion is reduced. Returns the handle's liveness token and the tick count its phase counts from
+/// ([`Cadence::start`]), which a handle that reads its own phase ([`Blinking`]) must count from too, or it would change
+/// phase on ticks its view is not notified on.
 fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, cadence: Cadence) -> (Rc<()>, u64) {
     let alive = Rc::new(());
     let view = cx.entity_id();
     let Some(ticker) = installed_mut::<Ticker>(cx) else {
         return (alive, 0);
     };
-    let since = ticker.ticks;
+    let since = cadence.start(ticker.ticks);
     ticker.animating.push(Subscriber {
         alive: Rc::downgrade(&alive),
         view,
