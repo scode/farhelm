@@ -254,6 +254,41 @@ fn a_refused_expansion_leaves_the_rail_as_stored_and_shows_nothing(cx: &mut Test
     assert_eq!(value, json!(true), "a later press still sends");
 }
 
+/// The rail's write shares the preference row's one request at a time with the list's order, so a press while an order
+/// write is out must wait for it rather than be lost (SPEC.md, "Losing the connection to the helm": an action is never
+/// lost silently), and it must widen the rail at once, as a press does when nothing is in flight. This exercises the
+/// queue's wait on a write it did not send. Specified: with `{"list_sort": "title"}` sent from the order menu and
+/// unanswered, a click on the control sends nothing yet while the rail is 220 pixels wide and the control is named
+/// "Collapse navigation rail"; once the helm answers the order write, exactly `{"host_rail_open": true}` is sent and
+/// the rail stays expanded.
+#[gpui::test]
+fn a_press_during_an_order_write_is_shown_at_once_and_sent_after_it(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open(cx, None);
+    click(cx, crate::session_list::order::TITLE_ID);
+    click(cx, "session-order-title");
+    let (order, body) = test_support::one_command(&mut fake, Method::Put, "/api/preferences");
+    assert_eq!(
+        body,
+        json!({ "list_sort": "title" }),
+        "the premise: the order write is in flight"
+    );
+
+    click(cx, TOGGLE_ID);
+    assert_eq!(
+        fake.commands(),
+        [],
+        "nothing is sent while the order's is out"
+    );
+    assert_eq!(rail_width(cx), px(220.), "shown at once");
+    assert_eq!(label(&frame(cx), TOGGLE_ID), COLLAPSE_NAME);
+
+    fake.reply(order, 200, None);
+    test_support::settle(cx);
+    let (_, value) = one_write(&mut fake);
+    assert_eq!(value, json!(true));
+    assert_eq!(rail_width(cx), px(220.));
+}
+
 /// The old toggle was an ordinary button: Tab reaches it after Help, and Enter and Space activate it without moving
 /// focus (the old `keyboard activation expands and collapses the rail`). Focus staying on it matters more here than for
 /// most buttons, since its name, look and width change under it. Specified (Linux's rule): with focus on Hosts, three

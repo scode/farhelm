@@ -132,7 +132,9 @@
 //! filled control, drawn disabled while New is unavailable (a launch pending, a host change in flight).
 //!
 //! The order menu also holds Compact, the helm-wide density preference: with it on, every row is one line
-//! ([`row`]'s "Compact rows"), read once per frame like the steps of the animations.
+//! ([`row`]'s "Compact rows"), read once per frame like the steps of the animations. The order, Compact and the
+//! rail's expansion are written the same way ([`queued_preference`]): a choice made while another preference save is
+//! in flight is shown at once and sent once that save settles, never dropped.
 //!
 //! Shift-click and Cmd-click (Ctrl-click on Linux) on a row mark sessions without opening them ([`marking`]). The marks
 //! belong to the UI session, and every frame projects them onto the rows it shows; while any is shown, the heading's
@@ -163,6 +165,7 @@ pub(crate) mod order;
 pub(crate) mod outcome;
 pub(crate) mod pin_drag;
 pub(crate) mod pins;
+pub(crate) mod queued_preference;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
 pub(crate) mod replace;
