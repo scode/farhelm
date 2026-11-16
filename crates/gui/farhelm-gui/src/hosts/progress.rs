@@ -397,12 +397,19 @@ pub(crate) fn clock(elapsed: Duration) -> String {
 }
 
 /// Host `id`'s inline status (`.host-update-running`): drawn under `host-status-<id>` like the phase words it replaces,
-/// as a status named for its count and step and whose hover says the same at length (the step name is cut short
-/// on screen, as the old label's was). SPEC.md gives this hover the progress card ([`card`]) instead, which waits for
-/// a form of card help that makes the card as the tooltip shows; until then the hover is that one line. The
-/// dot is at `pulse`'s opacity. A setup and an uninstall draw their verb before the count; an Update does not, though
-/// its name and hover still start with it ([`Run::draws_verb`]).
-pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palette) -> AnyElement {
+/// as a status named for its count and step (the step name is cut short on screen, as the old label's was). While a
+/// run is going on, its hover is the progress card beside the sidebar ([`card_help`]), whose words, naming the host by
+/// `name`, are also the status's accessible description; while only its requests are out ("Setting up…"), there are no
+/// steps to show, and the hover is the words, as the old label had no card then. The dot is at `pulse`'s opacity. A
+/// setup and an uninstall draw their verb before the count; an Update does not, though its name and hover still start
+/// with it ([`Run::draws_verb`]).
+pub(crate) fn status_mark(
+    id: i64,
+    name: &HostText,
+    status: &Status,
+    pulse: f32,
+    palette: &Palette,
+) -> AnyElement {
     let dot = div()
         .flex_none()
         .size(px(DOT))
@@ -418,10 +425,15 @@ pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palett
         .whitespace_nowrap()
         .child(dot);
     let sentence = HostSentence::new(SharedString::from(format!("host-progress-{id}")));
-    let (line, sentence) = match status {
+    let (line, sentence, help) = match status {
         Status::Pending(run) => {
             let words = format!("{}…", run.verb());
-            (line.child(words.clone()), sentence.text(words))
+            let sentence = sentence.text(words.clone());
+            (
+                line.child(words),
+                sentence.clone(),
+                HoverHelp::sentence(sentence),
+            )
         }
         Status::Running {
             run,
@@ -453,21 +465,48 @@ pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palett
                         .font_family(assets::TERMINAL_FONT)
                         .child(clock(*elapsed)),
                 );
-            (line, sentence)
+            (line, sentence, card_help(id, name))
         }
     };
     StatusMark::new(
         SharedString::from(format!("host-status-{id}")),
         sentence.accessible_name(),
-        HoverHelp::sentence(sentence),
+        help,
         Role::Status,
         "",
     )
     .ink(palette.warn)
-    .described(false)
+    .described(described(status))
     .truncate()
     .content(line)
     .into_any_element()
+}
+
+/// Whether `status`'s hover help is also its accessible description: a running status's is, since the card's words
+/// ("Progress of the run on <host>") say what the hover holds, which the status's name does not; a pending status's
+/// is not, since its help is its name again, which a screen reader would read twice.
+pub(super) fn described(status: &Status) -> bool {
+    match status {
+        Status::Running { .. } => true,
+        Status::Pending(_) => false,
+    }
+}
+
+/// The running status's hover (SPEC.md, "Topology": "Hovering that status opens the same card as a working host in
+/// the attention list"): host `id`'s progress card ([`card`]), made only while it shows (lazy card help, since the
+/// card holds the ticker's clock and its running step's pulse) and placed beside the sidebar, as the old card was
+/// (`data-tooltip-anchor="session-row"`). Its words, which name the host by `name`, are what the tooltip reports and
+/// the status's accessible description ([`status_mark`] describes a running status by them).
+///
+/// It is the status's one help, and nothing inside the status has its own, so moving the pointer within the status
+/// keeps the one card showing rather than making it again, which would restart its pulse. The help is made anew in
+/// every render, as every control's is; the layer manager keeps a showing card's view and uses the latest builder
+/// only for the next showing.
+fn card_help(id: i64, name: &HostText) -> HoverHelp {
+    let text = HostSentence::new(SharedString::from(format!("host-progress-card-help-{id}")))
+        .text("Progress of the run on ")
+        .host(name);
+    HoverHelp::card_with(card::WIDTH, move |_, cx| card::view(id, cx).into(), text).beside()
 }
 
 // ---- The step list --------------------------------------------------------------------------------------------------

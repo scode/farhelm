@@ -57,8 +57,9 @@
 //! [`HostsPanel::shown`] wherever it shows the panel, as it calls [`HostsPanel::hidden`] wherever it hides it.
 //!
 //! [`progress_card`] makes the progress card of a host's running setup, Update or uninstall ([`progress::card`]): the
-//! hover card SPEC.md gives the Hosts row's inline status and the attention list's working rows alike. Nothing draws it
-//! yet: wiring it as their hover waits for a form of card help that makes the card as the tooltip shows.
+//! hover card SPEC.md gives the Hosts row's inline status and the attention list's working rows alike. The row's
+//! running status offers it as lazy card help beside the sidebar ([`progress::status_mark`]); the attention list's
+//! working rows are to do the same.
 //!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
@@ -730,7 +731,7 @@ impl HostsPanel {
                     .pl(px(MARK + ROW_GAP))
                     .pr(px(DETAIL_PAD_X))
                     .min_w_0()
-                    .child(progress::status_mark(id, status, pulse, palette)),
+                    .child(progress::status_mark(id, &name, status, pulse, palette)),
             ),
             None => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
