@@ -942,6 +942,13 @@ systemd or SSH substrate ran.
   `shellcheck scripts/devbuild-mac.sh scripts/test-provision-centos.sh` — syntax and shell checks for the build scripts
   that add purpose-specific Rust targets. Target selection uses the checkout's pin even when invoked from elsewhere;
   devbuild's printed install commands name that toolchain too. Run when either script changes.
+- `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` — the build command of
+  the release's desktop archive (`packaging/farhelm-desktop/dist.toml`). The self-test is the script's whole validation
+  and builds nothing: against stand-in files it stages a good binary with the icon, and refuses a binary without
+  `install.sh`'s marker, one carrying the test-automation bridge, one whose `--licenses` fails or prints other notices,
+  notices whose first line is empty, an `install.sh` or a bridge protocol source in which it cannot find its text, and a
+  build without `FARHELM_RELEASE_BUILD`. Run it when the script or `install.sh`'s marker line changes; seconds, no
+  network. It is bash 3.2-safe, so it also runs under macOS's `/bin/bash`.
 - `dprint check`
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops

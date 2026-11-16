@@ -1,129 +1,220 @@
 #!/usr/bin/env bash
-# Build the release `farhelm-desktop` binary and hand it to cargo-dist.
+# Build the release `farhelm-desktop` binary, check it, and stage it with the
+# app icon for cargo-dist.
 #
-# ## Why this is not a cargo build
+# Usage: build-desktop-binary.sh [--self-test]
 #
-# `farhelm-desktop`'s `asset!()` paths are written into the binary by dx AFTER
-# the link: manganis emits a placeholder into a `__ASSETS__` section and dx
-# scans the built file and overwrites each one with the real content-hashed
-# name. rustc never learns them. A binary from a plain `cargo build` therefore
-# asks for the same nonsensical placeholder path for every asset and renders
-# an empty window — see `crates/farhelm-desktop/README.md` and
-# `scripts/check-desktop-assets.sh` for the long version.
+# ## Why this is still a script
 #
-# cargo-dist has no post-build hook, so the way to get a dx-built binary into
-# a dist-managed archive is to declare the shell as a GENERIC package whose
-# `build-command` is this script (`packaging/farhelm-desktop/dist.toml`). dist
-# runs it with the package directory as the working directory, then collects
-# `farhelm-desktop` from the package's `out-dir`.
+# `farhelm-desktop` is an ordinary cargo binary, but the release still
+# describes it to cargo-dist as a GENERIC package
+# (`packaging/farhelm-desktop/dist.toml`, which says why and what may replace
+# it), so that its archive also carries `Farhelm.icns`, from which
+# `install.sh` assembles `Farhelm.app`. A generic package builds through its
+# own `build-command`, which is this script: dist runs it with the package
+# directory as the working directory, then collects both files from the
+# package's `out-dir`, `target/dist-desktop`.
 #
-# ## What this does NOT do
+# It refuses to run unless FARHELM_RELEASE_BUILD is set and not empty: that
+# variable is what makes `crates/farhelm-helm/build.rs` mark the build as
+# release-shaped, and a desktop app built without it embeds a helm that
+# defaults to no host payloads, so adding or updating a remote host from the
+# shipped app would be refused.
 #
-# It does not build the web bundle and it does not wipe `target/dx`: the
-# release workflow's build setup (`.github/dist-build-setup.yml`) already did
-# both, and `FARHELM_UI_DIST` points into the tree it produced. A
-# `rm -rf target/dx` here would delete the very bundle this build has to embed.
+# ## What it checks, and why
+#
+# The checks read the very file about to be archived, because a tag can point
+# at a commit no other check ran on, and each of these failures ships
+# something nobody notices until a Mac user installs or updates:
+#
+# - The installer's marker. `install.sh` refuses a desktop binary that lacks a
+#   fixed piece of text (the refusal it prints when its own version folder is
+#   missing), the sign of a build that understands the side-by-side layout. The
+#   text is read at run time from that `grep -qF` line in `install.sh`, not
+#   copied here, so this checks exactly what the installer will check; a test in
+#   `crates/farhelm-desktop/src/bundle.rs` ties the same line to the Rust code.
+#   Not finding that line is a refusal too.
+# - No test-automation bridge (the crate's `agent` feature), whose
+#   unauthenticated socket lets any process of the same user drive the app
+#   (`docs/gui-agent.md`, "Why the bridge never ships"). The GUI already refuses
+#   to compile it into an optimized build; this is the check on the artifact.
+#   The text looked for is the name of the variable the vendored `gpui-agent`
+#   crate reads to start serving its socket, read at run time from
+#   `SOCKET_ENV` in `vendor/gpui-agent/crates/protocol/src/lib.rs`. That crate
+#   is an optional dependency of `farhelm-gui` that only the `agent` feature
+#   turns on, and nothing else in the dependency graph uses its protocol crate,
+#   so a binary without the bridge cannot contain the text. Not finding the
+#   constant is a refusal too.
+# - The license notices. `farhelm-desktop --licenses` prints the notices that
+#   must travel with the binary and exits before the app starts, so it runs
+#   headless here; its output must hold the committed dependency notices'
+#   first line, which must not be empty.
+#
+# `--self-test` is this script's own validation: it runs the checks and the
+# staging against stand-in files in a temporary directory and builds nothing.
+#
+# Bash 3.2-safe on purpose: macOS runners' `/bin/bash` is still 3.2.
 
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 out_dir="$repo/target/dist-desktop"
-dx_root="$repo/target/dx/farhelm-desktop/release"
-
-# A desktop binary without the embedded UI tree is a window that 404s every
-# asset request (D12), and it would also be missing D13's release marker. That
-# is a supported DEVELOPER build and an unshippable release artifact, so this
-# refuses rather than quietly producing one.
-: "${FARHELM_UI_DIST:?FARHELM_UI_DIST must point at a dx-built web bundle; a release desktop binary embeds it}"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-cd "$repo"
+# Every refusal is one plain line and a non-zero exit. The checks below spell
+# out `|| refuse` and `|| exit 1` rather than lean on `set -e`, because the
+# self-test runs them inside `if`, where bash ignores errexit.
+refuse() {
+  echo "build-desktop-binary.sh: $*" >&2
+  exit 1
+}
 
-# `--package` names the crate to build. It is not optional here for a reason
-# specific to this crate: `farhelm-desktop` is EXCLUDED from the workspace's
-# `default-members` (so ordinary builds never compile WebKit), so a selection
-# left to dx would pick something else entirely. `--platform desktop` resolves
-# to the host's native bundle format, making this a native build on whatever
-# runner dist scheduled it on — there is no cross-compilation path here.
-echo "== building farhelm-desktop with dx"
-dx build --package farhelm-desktop --platform desktop --release
+# The lines the checks read their texts from: `install.sh`'s marker check and
+# the bridge's socket variable (see the header).
+# shellcheck disable=SC2016 # `$` here is awk's, matched literally
+marker_line='/grep -qF / && /"\$STAGING_DIR\/farhelm-desktop"/'
+bridge_line='/pub const SOCKET_ENV: &str = "/'
 
-# dx nests the executable differently per platform: macOS gets an `.app`
-# bundle (named by PascalCasing the binary name), Linux gets a plain `app/`
-# directory. Both known layouts are named explicitly so the common case fails
-# with a useful message rather than a mystery, and the search below is the
-# fallback for a dx that has moved things again. `.dSYM` is excluded because
-# macOS debug bundles contain a DWARF file with the same name as the binary.
-binary=""
-for candidate in \
-  "$dx_root/macos/FarhelmDesktop.app/Contents/MacOS/farhelm-desktop" \
-  "$dx_root/linux/app/farhelm-desktop"; do
-  if [ -f "$candidate" ]; then
-    binary=$candidate
-    break
+# source_text <file> <quote> <awk pattern> <what>: print the one quoted string
+# (the second field, split on <quote>) of the one line of <file> that matches
+# <awk pattern>, or refuse naming <what>. This is how the checks read their
+# texts from the files that define them rather than from copies here.
+source_text() {
+  local found
+  found=$(awk -F "$2" "$3 { print \$2 }" "$1") || exit 1
+  case $found in
+    "" | *$'\n'*) refuse "cannot find the one $4 in $1" ;;
+  esac
+  printf '%s\n' "$found"
+}
+
+# check_binary <binary> <install.sh> <gpui-agent protocol lib.rs> <dependency
+# notices>: refuse a binary the installer would turn away, one that carries the
+# bridge, or one whose `--licenses` fails or lacks the notices file's first
+# line. Runs the binary.
+check_binary() {
+  local binary=$1 marker bridge header
+  [ -f "$binary" ] || refuse "no farhelm-desktop at $binary"
+  marker=$(source_text "$2" "'" "$marker_line" "grep -qF line for farhelm-desktop") || exit 1
+  bridge=$(source_text "$3" '"' "$bridge_line" "pub const SOCKET_ENV line") || exit 1
+  LC_ALL=C grep -qF -e "$marker" "$binary" \
+    || refuse "$binary lacks the text install.sh checks for ('$marker'), so the installer would refuse it"
+  if LC_ALL=C grep -qF -e "$bridge" "$binary"; then
+    refuse "$binary carries the test-automation bridge ($bridge), which must never ship"
   fi
-done
+  header=$(sed -n 1p "$4") || exit 1
+  [ -n "$header" ] || refuse "the dependency notices $4 start with an empty line"
+  "$binary" --licenses >"$work/licenses" || refuse "$binary --licenses failed"
+  grep -qF -e "$header" "$work/licenses" \
+    || refuse "$binary --licenses does not print the dependency notices ('$header')"
+}
 
-if [ -z "$binary" ]; then
-  # A read loop rather than `mapfile`: this runs on macOS runners, where
-  # `/bin/bash` is still 3.2 and has no such builtin.
-  found=()
-  while IFS= read -r candidate; do
-    found+=("$candidate")
-  done < <(find "$dx_root" -type f -name farhelm-desktop -not -path '*.dSYM*')
-  if [ "${#found[@]}" -ne 1 ]; then
-    echo "expected exactly one farhelm-desktop under $dx_root, found ${#found[@]}" >&2
-    # `${a[@]+"${a[@]}"}` because expanding an EMPTY array under `set -u` is an
-    # error in bash 3.2, which is the bash a macOS runner has.
-    for path in ${found[@]+"${found[@]}"}; do
-      echo "  $path" >&2
-    done
-    exit 1
-  fi
-  binary=${found[0]}
-  echo "== dx layout changed; using $binary"
-fi
+# stage <binary> <icon> <directory>: the two files dist collects. The icon is
+# staged here and declared under `binaries` because that is the one collection
+# path dist 0.32 honors for a generic package.
+stage() {
+  mkdir -p "$3" || exit 1
+  install -m 0755 "$1" "$3/farhelm-desktop" || exit 1
+  install -m 0644 "$2" "$3/Farhelm.icns" || exit 1
+  echo "== wrote $3/farhelm-desktop and $3/Farhelm.icns"
+}
 
-# The whole reason this script exists, asserted on the artifact itself: ask the
-# binary what assets it will request and refuse one still carrying manganis's
-# placeholder. `CARGO_MANIFEST_DIR` is scrubbed because `Asset::resolve`
-# consults it at RUNTIME and would resolve every asset to its absolute source
-# path, hiding exactly the failure this checks for.
+build() {
+  local target_dir binary
+  # Checked first, before minutes of compiling; the header says why.
+  [ -n "${FARHELM_RELEASE_BUILD:-}" ] \
+    || refuse "FARHELM_RELEASE_BUILD is not set; without it the app's helm cannot provision remote hosts"
+  cd "$repo" || exit 1
+  # `-p` because `farhelm-desktop` is outside the workspace's default members.
+  # Its own features only: never `agent`.
+  echo "== building farhelm-desktop"
+  cargo build --release --locked -p farhelm-desktop || exit 1
+  # Cargo reads a relative CARGO_TARGET_DIR against its working directory,
+  # which is the repository root here.
+  target_dir=${CARGO_TARGET_DIR:-target}
+  case $target_dir in /*) ;; *) target_dir="$repo/$target_dir" ;; esac
+  binary="$target_dir/release/farhelm-desktop"
+  check_binary "$binary" "$repo/scripts/install.sh" "$repo/vendor/gpui-agent/crates/protocol/src/lib.rs" \
+    "$repo/crates/farhelm/notices/dependencies.txt"
+  echo "== $binary carries the installer's marker and the notices, and no bridge"
+  stage "$binary" "$repo/packaging/farhelm-desktop/Farhelm.icns" "$out_dir"
+}
+
+# --- Self-test ----------------------------------------------------------------
 #
-# Captured into a variable rather than piped into `grep` so that a binary that
-# fails to run at all fails this script. Inside an `if`, a broken pipeline is
-# just a false condition, and the check would pass by saying nothing.
-env -u CARGO_MANIFEST_DIR "$binary" --print-assets | sort -u >"$work/requested"
-if [ ! -s "$work/requested" ]; then
-  echo "$binary reported no assets at all; something is wrong with the build" >&2
-  exit 1
-fi
-if grep -q 'replaced by dx' "$work/requested"; then
-  echo "$binary carries placeholder asset names; dx did not process it" >&2
-  exit 1
-fi
+# One good stand-in must pass and be staged, and each refusal must fire for its
+# own reason. Stand-in binaries are shell scripts whose comments hold the texts
+# the checks grep for, and which answer `--licenses` or fail it. The marker and
+# the bridge text come from the real `install.sh` and protocol source, so the
+# self-test also proves both are still found there.
 
-# Rewritten names are necessary but not sufficient: they also have to name
-# files that EXIST in the bundle this binary embedded. `check-desktop-assets.sh`
-# owns that comparison — it is the shared parity verdict, in both
-# directions — and this calls it rather than growing a second, weaker copy.
-# This is the shipped-artifact parity check. It remains necessary even though
-# ordinary CI no longer pays for a separate dx asset rebuild: a tag can point
-# at a commit that never passed PR CI, and this compares the exact bytes about
-# to be archived.
-echo "== comparing requested assets against the embedded bundle"
-"$repo/scripts/check-desktop-assets.sh" --compare "$FARHELM_UI_DIST" "$work/requested"
+# stand_in <name> <comment text> <--licenses output, or empty to fail it>
+stand_in() {
+  printf '#!/bin/sh\n# %s\n' "$2" >"$work/$1"
+  if [ -n "$3" ]; then
+    printf "printf '%%s\\\\n' '%s'\n" "$3" >>"$work/$1"
+  else
+    printf 'exit 3\n' >>"$work/$1"
+  fi
+  chmod 0755 "$work/$1"
+}
 
-mkdir -p "$out_dir"
-install -m 0755 "$binary" "$out_dir/farhelm-desktop"
-echo "== wrote $out_dir/farhelm-desktop"
+self_test() {
+  local inst=$repo/scripts/install.sh proto=$repo/vendor/gpui-agent/crates/protocol/src/lib.rs
+  local marker bridge failures=0 row binary installer protocol notices expected what
+  marker=$(source_text "$inst" "'" "$marker_line" "grep -qF line for farhelm-desktop") || exit 1
+  bridge=$(source_text "$proto" '"' "$bridge_line" "pub const SOCKET_ENV line") || exit 1
+  printf 'Notices header\nmore\n' >"$work/notices"
+  printf '\nmore\n' >"$work/empty-header"
+  printf 'icon' >"$work/icon"
+  printf 'no such line here\n' >"$work/plain"
+  stand_in good "$marker" 'Notices header'
+  stand_in old 'an older build' 'Notices header'
+  stand_in bridge "$marker $bridge" 'Notices header'
+  stand_in no-notices "$marker" ''
+  stand_in wrong-notices "$marker" 'something else'
+  if (check_binary "$work/good" "$inst" "$proto" "$work/notices" \
+    && stage "$work/good" "$work/icon" "$work/out") >/dev/null \
+    && [ -x "$work/out/farhelm-desktop" ] && [ -f "$work/out/Farhelm.icns" ]; then
+    echo "ok: a good binary is checked and staged with the icon"
+  else
+    echo "FAIL: a good binary was refused or not staged" && failures=1
+  fi
+  # Each row: the stand-in, the installer, protocol source and notices it is
+  # checked against, the refusal expected, and what the case is.
+  for row in "old|$inst|$proto|notices|lacks the text install.sh checks for|a build without the marker" \
+    "bridge|$inst|$proto|notices|carries the test-automation bridge|a build with the bridge" \
+    "no-notices|$inst|$proto|notices|--licenses failed|a build whose --licenses fails" \
+    "wrong-notices|$inst|$proto|notices|does not print the dependency notices|a build printing other notices" \
+    "good|$inst|$proto|empty-header|start with an empty line|a notices file with an empty first line" \
+    "good|$work/plain|$proto|notices|cannot find the one grep -qF line|an install.sh without the line" \
+    "good|$inst|$work/plain|notices|cannot find the one pub const SOCKET_ENV|a protocol without SOCKET_ENV"; do
+    IFS='|' read -r binary installer protocol notices expected what <<<"$row"
+    if (check_binary "$work/$binary" "$installer" "$protocol" "$work/$notices") 2>"$work/err"; then
+      echo "FAIL: $what was accepted" && failures=1
+    elif grep -qF -e "$expected" "$work/err"; then
+      echo "ok: $what is refused: $(cat "$work/err")"
+    else
+      echo "FAIL: $what is refused for another reason: $(cat "$work/err")" && failures=1
+    fi
+  done
+  # The release-build refusal, through `build` itself. PATH is emptied so that,
+  # should the refusal ever stop firing, the build fails at `cargo` instead of
+  # compiling, and the message check below reports it.
+  if (FARHELM_RELEASE_BUILD='' PATH=/nonexistent build) >/dev/null 2>"$work/err"; then
+    echo "FAIL: a build without FARHELM_RELEASE_BUILD was accepted" && failures=1
+  elif grep -qF -e "FARHELM_RELEASE_BUILD is not set" "$work/err"; then
+    echo "ok: a build without FARHELM_RELEASE_BUILD is refused: $(cat "$work/err")"
+  else
+    echo "FAIL: a build without FARHELM_RELEASE_BUILD is refused for another reason: $(cat "$work/err")" && failures=1
+  fi
+  return "$failures"
+}
 
-# The app icon ships in the archive next to the binary so `install.sh` can
-# assemble `Farhelm.app` from checksummed release files. It is staged here and
-# declared in `binaries` because that is the one collection path dist 0.32
-# honors for a generic package — see the `binaries` comment in
-# `packaging/farhelm-desktop/dist.toml` for why `include` was not an option.
-install -m 0644 "$repo/packaging/farhelm-desktop/Farhelm.icns" "$out_dir/Farhelm.icns"
-echo "== wrote $out_dir/Farhelm.icns"
+case "${1:-}" in
+  "") build ;;
+  --self-test) self_test ;;
+  *) refuse "usage: build-desktop-binary.sh [--self-test]" ;;
+esac

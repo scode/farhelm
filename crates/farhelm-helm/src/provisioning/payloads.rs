@@ -105,8 +105,9 @@ pub enum PayloadSelection {
 }
 
 /// Development helms intentionally carry no cross-compiled install
-/// payloads (D13): a build without an embedded web UI is not release-shaped,
-/// so "add host" has nothing to offer beyond the paths this message names.
+/// payloads (D13): a build without `FARHELM_RELEASE_BUILD` (`build.rs`) is
+/// not release-shaped, so "add host" has nothing to offer beyond the paths
+/// this message names.
 #[derive(Debug)]
 pub(super) struct NoPayloads;
 

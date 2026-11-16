@@ -92,6 +92,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   PR's diff in its landing step, so there is nothing to run it on here)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
+- `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` (the desktop archive's
+  build command; the self-test builds nothing)
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` (the focused
   nextest producer). Its actual payload/install contract runs in the sweep's real Podman selection.
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
