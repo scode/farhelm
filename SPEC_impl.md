@@ -5194,9 +5194,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   startup file that overwrote user edits every boot would make the two fight. Validation is all-or-nothing — a malformed
   file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing written,
   since a helm that came up with three of five guaranteed hosts looks healthy and is not.
-- axum serving: REST for CRUD (sessions, hosts), a WebSocket event stream for live session-list updates, and a WebSocket
-  per attached terminal. The helm serves no page; the desktop's embedded helm uses a fresh kernel-selected loopback
-  port. Loopback bind enforced — refuses non-loopback per SPEC.md.
+- axum serving: REST for CRUD (sessions, hosts), the UI channel's WebSocket (`GET /api/ui`, which pushes live state; see
+  "The UI channel"), and a WebSocket per attached terminal. The helm serves no page; the desktop's embedded helm uses a
+  fresh kernel-selected loopback port. Loopback bind enforced — refuses non-loopback per SPEC.md.
 - The desktop app's credential is the only credential the helm accepts in production; there is no browser sign-in. The
   one other credential is the test hook `farhelm helm run --test-credential-file PATH` (hidden): a standalone helm mints
   one in memory the same way and writes it to a new 0600 file, so end-to-end tests can reach the real binary's API. The

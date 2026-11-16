@@ -2567,7 +2567,7 @@ mod tests {
     /// `changed` return, since `set_alias` only calls `events().bump()`
     /// when the store reports a real change (a registry reconcile that
     /// changes no host's shape is itself a no-op bump-wise; see
-    /// `events.rs`).
+    /// `feed::tests::registry_shape_changes_invalidate_and_no_op_reconciles_do_not`).
     #[farhelm_testtrace::test]
     async fn setting_an_alias_bumps_the_revision_only_on_a_real_change() {
         let harness = lone_local_helm().await;
@@ -3147,19 +3147,20 @@ mod tests {
     /// The adoption's invalidation arrives AFTER the state it invalidates
     /// has been settled, never before.
     ///
-    /// Spec: by the time `/api/events` carries the bump an adoption
-    /// publishes, the host's own state has already stopped being an identity
-    /// mismatch — so a client that re-reads on that notification cannot see
-    /// the newly adopted identity sitting beside an offer to adopt it.
+    /// Spec: by the time an adoption bumps the fleet revision, the host's
+    /// own state has already stopped being an identity mismatch — so the UI
+    /// channel's re-read of the hosts collection on that bump cannot push the
+    /// newly adopted identity sitting beside an offer to adopt it.
     ///
     /// The ordering is the entire content of this test, and the bug it
     /// closes is a loop rather than a cosmetic glitch: the top-level identity
     /// is read from the registry (already updated by the commit) while the
-    /// phase comes from the actor (not yet touched), so a client woken by the
-    /// bump would render "this host reports identity-after, which you have
-    /// not accepted" and offer the adopt verb again — for an adoption that
-    /// has already happened. Pressing it is refused, because the host is no
-    /// longer mismatched, so the offer is one the UI cannot honour.
+    /// phase comes from the actor (not yet touched), so a re-read on the
+    /// bump would make the GUI render "this host reports identity-after,
+    /// which you have not accepted" and offer the adopt verb again — for an
+    /// adoption that has already happened. Pressing it is refused, because
+    /// the host is no longer mismatched, so the offer is one the UI cannot
+    /// honour.
     ///
     /// Observed from INSIDE the bump rather than from a subscriber, and that
     /// is not a shortcut. There is no await point between the state publish
