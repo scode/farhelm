@@ -13,7 +13,10 @@
 //!   change. Its [`channel::ChannelEvents`] stream is the single ordered feed the GUI drains; a command's completion
 //!   resolves only after every event the helm sent before its reply has been handed out.
 //! - [`collections`] applies that feed to keyed collections with one generic code path.
-//! - [`terminal`] attaches terminal streams (the agent terminal and tabs) and reconnects them.
+//! - [`terminal`] attaches terminal streams (the agent terminal and tabs) and reconnects them, on a reconnect ladder of
+//!   their own whose every wait and attempt the terminal's outage card is told about
+//!   ([`terminal::ReconnectStatus`]).
+//! - `reconnect` holds the two reconnect policies: the UI channel's doubling backoff and the terminal ladder.
 //! - [`transfers`] is the plain-HTTP side: a file path's hover check, saving a file into Downloads, and attachment
 //!   uploads. The transfers stay off the UI channel so a large one never delays a command, and the hover check does
 //!   because a channel command cannot be cancelled on its own (see its module docs).

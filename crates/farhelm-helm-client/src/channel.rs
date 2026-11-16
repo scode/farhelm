@@ -45,23 +45,26 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
 use crate::collections::{PushedChanges, PushedState, decode_changes, decode_state};
-use crate::reconnect::Backoff;
+use crate::reconnect::{Backoff, TerminalLadder};
 use crate::ws::ConnectError;
 use farhelm_proto::ui_channel::ApiPath;
 
-/// Timing for one channel, and for each terminal stream ([`crate::terminal`]), which follows the same liveness and
-/// reconnect rules. Tests shrink or pause these; nothing here reads the wall clock (all of it is tokio time,
-/// so a paused test clock drives it).
+/// Timing for one channel, and for each terminal stream ([`crate::terminal`]). Both use the same watchdog and ping
+/// interval; their reconnect waits differ (`crate::reconnect` says why): the channel doubles from `reconnect_initial`,
+/// a terminal climbs `terminal_ladder`. Tests shrink or pause these; nothing here reads the wall clock (all of it is
+/// tokio time, so a paused test clock drives it).
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
     /// How long the snapshot, an admitted command or a ping may stay unanswered before the channel counts as broken.
     pub watchdog: Duration,
     /// How often to ping while connected. Only one ping is outstanding at a time.
     pub ping_interval: Duration,
-    /// The first wait after a failed attempt (or after a break that does not earn an immediate reconnect); it doubles
-    /// per further failure up to `reconnect_max`.
+    /// The UI channel's first wait after a failed attempt (or after a break that does not earn an immediate
+    /// reconnect); it doubles per further failure up to `reconnect_max`. Terminal streams ignore both.
     pub reconnect_initial: Duration,
     pub reconnect_max: Duration,
+    /// A terminal stream's reconnect schedule. The UI channel ignores it.
+    pub terminal_ladder: TerminalLadder,
 }
 
 impl Default for ChannelConfig {
@@ -71,6 +74,7 @@ impl Default for ChannelConfig {
             ping_interval: Duration::from_secs(5),
             reconnect_initial: Duration::from_secs(1),
             reconnect_max: Duration::from_secs(8),
+            terminal_ladder: TerminalLadder::default(),
         }
     }
 }
@@ -312,8 +316,8 @@ struct Task {
     items: mpsc::UnboundedSender<Item>,
     next_id: u64,
     state: Option<ChannelState>,
-    /// The wait before the next attempt after a break, shared policy with the terminal streams: a helm that keeps
-    /// dropping connections right after their snapshot gets a growing wait instead of a loop of snapshots and resets.
+    /// The wait before the next attempt after a break: a helm that keeps dropping connections right after their
+    /// snapshot gets a growing wait instead of a loop of snapshots and resets.
     backoff: Backoff,
 }
 

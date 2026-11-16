@@ -548,7 +548,7 @@ impl AttachedTerminal {
             StreamState::Attaching | StreamState::Attached(_) => None,
             // The heading of the old app's outage card. Its explanation, phase and Reconnect now are the terminal
             // area's later work.
-            StreamState::Reconnecting => {
+            StreamState::Reconnecting(_) => {
                 line("Session unavailable — reconnecting".into(), None, false)
             }
             // The old app offered Take control only after a takeover. The helm client parks a stalled viewer and a
@@ -752,6 +752,7 @@ impl AttachedTerminal {
             lease: self.target.lease.clone(),
             cols,
             rows,
+            take_control: true,
         });
         self.handle = Some(handle);
         self.pump = Some(cx.spawn(async move |owner, cx| {
@@ -906,7 +907,9 @@ impl AttachedTerminal {
         // sent while the new attach is opening from being forgotten; the first attach starts with none.
         if matches!(
             state,
-            StreamState::Reconnecting | StreamState::Detached { .. } | StreamState::Refused { .. }
+            StreamState::Reconnecting(_)
+                | StreamState::Detached { .. }
+                | StreamState::Refused { .. }
         ) {
             self.resized_since_attach = false;
         }

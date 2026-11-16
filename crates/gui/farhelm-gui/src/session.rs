@@ -594,6 +594,7 @@ mod tests {
             lease: AttachmentLease::new(),
             cols: 80,
             rows: 24,
+            take_control: true,
         };
         let closed = Some(TerminalEvent::State(StreamState::Closed));
 

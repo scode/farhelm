@@ -2,19 +2,27 @@
 //!
 //! GUI tests drive a `FakeTerminal` in place of a real stream, because GPUI's deterministic test executor panics on
 //! anything that waits on tokio. The fake therefore restates the real stream's rules rather than running them: its
-//! states, one announcement per outage, which attach displaces and at what size, and which requests each state
-//! ignores. Only `detach_stops` is shared code. A rule changed in `terminal.rs` and not in the fake would leave every
-//! GUI test built on the fake passing against the old rule, so this test plays one script against both and requires
-//! them to agree, step by step, on what the GUI was shown and on what reached the helm.
+//! states, when it shows a reconnect wait and an attempt, which attach displaces and at what size, and which requests
+//! each state ignores. Only `detach_stops` and the ladder's numbers are shared code. A rule changed in `terminal.rs`
+//! and not in the fake would leave every GUI test built on the fake passing against the old rule, so this test plays
+//! one script against both and requires them to agree, step by step, on what the GUI was shown and on what reached
+//! the helm.
 //!
 //! NOTE: This compares the GUI's event feed, the route and size of every accepted attach and the resize sent as its
-//! socket opens, and which input reached the helm. It does not compare timing (pings, the watchdog, the backoff),
-//! which the fake does not model and the real stream's own tests pin, nor the route of an attach that failed or was
-//! refused, which the fake does not report. One script cannot reach every state, so some of the fake's rules are
-//! pinned only by its own tests: see the test's docstring for which.
+//! socket opens, and which input reached the helm. It does not compare timing (pings, the watchdog, how long a wait
+//! lasts), which the fake does not model and the real stream's own tests pin, nor the route of an attach that failed
+//! or was refused, which the fake does not report. A wait's end has no step of its own: the real stream ends each wait
+//! by itself within the step, so the fake's run ends every wait as soon as a step starts one. One script cannot reach
+//! every state, so some of the fake's rules are pinned only by its own tests: see the test's docstring for which.
 
 use super::*;
 use crate::fake::terminal::{FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest};
+
+/// The ladder both sides climb: short, so the real stream's waits end within a step, and only two retries long, so
+/// the script reaches the probes. The waits differ so that a status showing the wrong rung is seen.
+fn parity_ladder() -> TerminalLadder {
+    ladder(&[10, 20], 30)
+}
 
 /// How long the real stream gets for any one step. Generous: every step completes in milliseconds, and a stream
 /// that diverged from the fake waits for something that never comes, so this only bounds how long a failure takes.
@@ -65,7 +73,7 @@ struct Observed {
 ///
 /// On the real side every GUI step lands where the stream's next move does not depend on timing: before a connect the
 /// test has not answered yet, while the stream waits for the user, or while a socket is open and the test can see the
-/// request handled on it (see `run_real`). Never during a backoff, where a resize might or might not beat the
+/// request handled on it (see `run_real`). Never during a reconnect wait, where a resize might or might not beat the
 /// reconnect.
 fn script() -> Vec<Step> {
     use Step::*;
@@ -75,8 +83,8 @@ fn script() -> Vec<Step> {
         Resize(100, 30),
         Fail,
         Accept,
-        // A socket that opened but never went live leaves the outage announced once and drops input; the first output
-        // makes it live.
+        // A socket that opened but never went live counts as a failed attempt, so the ladder climbs on, and drops
+        // input; the first output makes it live.
         DropLink,
         Accept,
         Input("before live"),
@@ -117,6 +125,14 @@ fn script() -> Vec<Step> {
         Accept,
         ReplayComplete,
         Input("after the refusal"),
+        // An outage that runs past the two retries into probing, one attempt refused with a 5xx and retried like any
+        // failed one, and ended by an attachment.
+        DropLink,
+        Fail,
+        Refuse(503),
+        Fail,
+        Accept,
+        ReplayComplete,
     ];
     // Each remaining detach code, followed by a take-control that only a stopped stream acts on.
     for code in [
@@ -124,10 +140,20 @@ fn script() -> Vec<Step> {
         Some(DetachCode::Other),
         None,
         Some(DetachCode::TabClosed),
-        Some(DetachCode::Stalled),
     ] {
         steps.extend([Detach(code), TakeControl, Accept, ReplayComplete]);
     }
+    // A take-control starts the ladder over by itself. The restart an attachment earns is applied only when its link
+    // next drops, and a stopping detach is not a drop, so without the take-control's own reset the count would still
+    // stand at attempt 1 from the last reconnect in the loop above, and this failed take-control attach would show
+    // attempt 2 and its wait instead of attempt 1.
+    steps.extend([
+        Detach(Some(DetachCode::Stalled)),
+        TakeControl,
+        Fail,
+        Accept,
+        ReplayComplete,
+    ]);
     // A close while the stream waits for the user still ends in `Closed`.
     steps.extend([Detach(Some(DetachCode::TakenOver)), Close]);
     steps
@@ -149,7 +175,8 @@ fn newest(events: &[TerminalEvent], stamp: &mut u64) {
 /// Play the script against the fake. Index 0 is what the GUI saw on open; index `i` is step `i - 1`. Beside each
 /// step's observations goes the fake's phase after it, which tells `run_real` whether a socket is open and live.
 fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
-    let (mut fake, handle, mut events) = FakeTerminal::open(&attach("s1"));
+    let (mut fake, handle, mut events) =
+        FakeTerminal::open_with_ladder(&attach("s1"), parity_ladder());
     let (mut observed, mut phases) = (Vec::new(), Vec::new());
     let mut stamp = 0;
     for step in std::iter::once(None).chain(steps.iter().copied().map(Some)) {
@@ -191,6 +218,15 @@ fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
         while let Some(event) = events.try_recv() {
             seen.events.push(event);
         }
+        // A wait the step started ends within it on the real side, which then shows its attempt starting.
+        if let Some(TerminalEvent::State(StreamState::Reconnecting(status))) = seen.events.last()
+            && status.next_attempt_in.is_some()
+        {
+            fake.end_wait();
+            while let Some(event) = events.try_recv() {
+                seen.events.push(event);
+            }
+        }
         newest(&seen.events, &mut stamp);
         observed.push(seen);
     }
@@ -219,12 +255,12 @@ fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
 async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -> Vec<Observed> {
     let (addr, mut connections) = listen().await;
     // The watchdog never fires and only the first ping on each socket is sent (none is answered), so only the script
-    // ends a socket; the short backoff keeps reconnects prompt.
+    // ends a socket; the short ladder keeps reconnects prompt.
     let config = ChannelConfig {
         ping_interval: Duration::from_millis(20),
         watchdog: Duration::from_secs(3600),
-        reconnect_initial: Duration::from_millis(10),
-        reconnect_max: Duration::from_millis(10),
+        terminal_ladder: parity_ladder(),
+        ..ChannelConfig::default()
     };
     let (handle, mut events) =
         open_terminal(HelmEndpoint::new(addr, "test-secret"), attach("s1"), config);
@@ -413,16 +449,18 @@ fn attach_of(uri: &str) -> FakeAttach {
 
 /// The fake terminal must show the GUI what the real stream shows and send the helm what the real stream sends, or GUI
 /// tests built on it pass against rules the app does not follow. One script covers most of the rules the fake restates:
-/// the state sequence (`Attached` on the first output rather than on open, `Reconnecting` once per outage and again
-/// after a refusal, `Closed` last), which detach codes stop the stream, an undecodable message as a lost link, that
+/// the state sequence (`Attached` on the first output rather than on open, `Reconnecting` at each wait and each attempt
+/// with the ladder starting over after an attachment and a take-control and running on into probing, a 5xx refusal
+/// retried, `Closed` last), which detach codes stop the stream, an undecodable message as a lost link, that
 /// only take-control from a stopped or refused stream displaces and that a failed displacing attach retries without
 /// displacing, the size each attach asks for (including a resize made while live), the resize that follows an attach
 /// whose query a resize overtook while it connected, input dropped while no attachment is live (with a socket open or
 /// not), and input stamped for an earlier attachment dropped while a later one is live. Each step's observations must
 /// be equal on both sides.
 ///
-/// Not compared here: a close from any state but waiting for the user, and the stream ending when the GUI drops every
-/// handle or its feed. The fake's own tests and the real stream's tests pin those separately.
+/// Not compared here: a close from any state but waiting for the user, the stream ending when the GUI drops every
+/// handle or its feed, and a proven link's drop (no step answers a ping). The fake's own tests and the real stream's
+/// tests pin those separately.
 #[tokio::test]
 async fn the_fake_terminal_and_the_real_stream_agree_on_one_script() {
     tokio::time::timeout(Duration::from_secs(120), async {
