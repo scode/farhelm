@@ -79,10 +79,10 @@ pub(crate) fn minimum_allowance() -> Size<Pixels> {
 /// `Window::viewport_size` includes both, so anything sized or placed against it could take room that is not there:
 /// a tall host progress card and a dialog at its height limit covered the bar, as settings-and-hosts and templates
 /// reported on 2026-11-15, and the expanded host rail took the main pane below its floor under Mutter, where the frame
-/// is 42 pixels wide (found by the migration's review gate the same day). The layer manager fits its dialogs and
-/// tooltips into this, and the dialog frame, the host progress card and the sidebar's shown width size themselves
-/// against it, as the old app's page was the whole of its window. Under a compositor that draws the decorations, and
-/// on macOS, it is the whole window.
+/// is 42 pixels wide (found by the migration's review gate the same day). The layer manager keeps its dialogs,
+/// popovers and tooltips inside this, the notices panels cap their height by it, and the dialog frame, the host
+/// progress card and the sidebar's shown width size themselves against it, as the old app's page was the whole of its
+/// window. Under a compositor that draws the decorations, and on macOS, it is the whole window.
 ///
 /// It follows the window's state the way Kit's frame and the bar do: a maximized, fullscreen or tiled window has no
 /// shadow margin or border on its tiled sides (GPUI reports every side tiled for a fullscreen window, and usually for

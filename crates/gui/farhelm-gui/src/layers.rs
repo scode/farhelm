@@ -36,15 +36,18 @@
 //!   control it is about (a row's Delete question, opened from the row's menu, as the old app turned the menu into the
 //!   question). An anchored layer is as wide as its content, or exactly as wide as its anchor when the anchor asks for
 //!   that ([`Anchor::matching_width`]): a select's list under its control, a floating list under its field.
-//! - **Dialogs and tooltips sit in the window's content area.** A dialog is sized and centered, and a tooltip (at the
-//!   pointer, beside the sidebar or against a focused control) is kept, inside the part of the window that holds the
-//!   page ([`crate::desktop::linux_title_bar::content_area`]), as in the old app's page: on Linux, inside the frame
-//!   GPUI Kit draws around the window and below the window's own title bar, both of which the window's reported size
-//!   includes, so a tall card or a dialog at its height limit placed against the whole window covered the bar
-//!   (settings-and-hosts and templates reported it on 2026-11-15). A dialog's veil still covers the bar, so the bar
-//!   stays inert while a dialog is open. Under a compositor's decorations and on macOS the content area is the whole
-//!   window. Popovers, the pills and the approval region are still placed against the whole window: the notices
-//!   panels cap their height by it, so moving the popover clamp alone would push a full panel off the window.
+//! - **Dialogs, popovers and tooltips sit in the window's content area.** A dialog is sized and centered, a popover
+//!   is placed, flipped and kept, and a tooltip (at the pointer, beside the sidebar or against a focused control) is
+//!   kept, inside the part of the window that holds the page ([`crate::desktop::linux_title_bar::content_area`]), as
+//!   in the old app's page: on Linux, inside the frame GPUI Kit draws around the window and below the window's own
+//!   title bar, both of which the window's reported size includes, so a tall card or a dialog at its height limit
+//!   placed against the whole window covered the bar (settings-and-hosts and templates reported it on 2026-11-15), and
+//!   a wide popover near the right edge ended in Kit's frame, outside the page, where SPEC.md has a click on a
+//!   terminal link refused while its destination display is not wholly inside the page (popovers moved into the
+//!   content area on 2026-11-16, [`popover_origin`] says more). The notices panels cap their height by the content
+//!   area too, so a full one still fits. A dialog's veil still covers the bar, so the bar stays inert while a dialog
+//!   is open. Under a compositor's decorations and on macOS the content area is the whole window. The pills and the
+//!   approval region are still placed against the whole window.
 //! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
 //!   text included: labels are no longer selectable, so the GPUI migration settled on 2026-11-13 that a click on one
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
@@ -337,11 +340,11 @@ impl Kind {
 }
 
 /// Where a popover sits against its anchor. Each but [`Placement::By`] is the old app's placement for the overlays that
-/// used it, and each is kept inside the window by the same clamp.
+/// used it, and each is kept inside the window's content area by the same clamp ([`popover_origin`]).
 #[derive(Clone)]
 pub enum Placement {
-    /// Below the anchor, left edges aligned, or above it when it would run off the bottom and there is more room above:
-    /// the old menus and popup lists.
+    /// Below the anchor, left edges aligned, or above it when it would run off the content area's bottom and fits
+    /// above: the old menus and popup lists.
     Below,
     /// Beside the anchor, to its right: the left edge 10 pixels past the anchor's right edge and the top 4 pixels above
     /// the anchor's. The old session row menu's flyout (`session_menu_placement_style` in `menu_panel.rs` at reference
@@ -349,11 +352,12 @@ pub enum Placement {
     /// list. Like the old one it never changes to another side when the window is narrow: the clamp only shifts it back
     /// inside.
     ///
-    /// NOTE: The clamp is the one every popover shares, which keeps the popover flush inside the window. The old
+    /// NOTE: The clamp is the one every popover shares, which keeps the popover flush inside the content area. The old
     /// flyout's own clamp differed, a deviation recorded when this was ported: it kept 8 pixels from the edges, it held
     /// a fixed 528 pixels of room below the menu's top rather than the menu's own height (so a short menu on a low row
     /// moved up further than it does here), and it capped the menu's height and scrolled it, where this one would run
-    /// past the bottom of a window shorter than the menu (the full row menu fits in the minimum window).
+    /// past the bottom of a content area shorter than the menu (the full row menu fits in the minimum window, whose
+    /// content area keeps the app's minimum size: `linux_title_bar::minimum_allowance`).
     Beside,
     /// Wherever the anchor's owner says ([`Anchor::placed_by`]), asked as each frame is laid out ([`PlaceBy`] has the
     /// rule's inputs and what it may do). For an overlay whose rule needs its own measured size and facts only its
@@ -368,9 +372,9 @@ pub enum Placement {
 /// size and `area`, the area the window's content is laid out in (all in window coordinates), the popover's top-left
 /// corner.
 ///
-/// The rule keeps the popover inside `area` itself. The shared clamp that follows it is the window's, as for every
-/// popover: a point inside `area` is inside the window, so the clamp leaves a rule's answer as it was, and it only
-/// catches a rule that does not keep inside.
+/// The rule keeps the popover inside `area` itself. The shared clamp that follows it keeps every popover inside the
+/// same area ([`popover_origin`]), so it leaves a rule's answer as it was, and it only catches a rule that does not
+/// keep inside.
 ///
 /// It is called while the frame is laid out, with no app access, once per frame for as long as the popover shows: it
 /// must be cheap and pure, and read only cells or anchors ([`Anchor::drawn_bounds`] gives this frame's bounds there).
@@ -2229,6 +2233,54 @@ const BESIDE_GAP: Pixels = px(10.);
 /// `top: rect.min_y() - 4`.
 const BESIDE_RISE: Pixels = px(4.);
 
+/// The top-left corner, in window coordinates, of a popover `size` big placed by `placement` against `anchor` (this
+/// frame's bounds, `None` while the anchor has never been drawn) and kept inside `area`, the window's content area
+/// ([`crate::desktop::linux_title_bar::content_area`]).
+///
+/// Every placement answers inside `area`: flush against its right and bottom edges when it would run past them, and
+/// against its left and top edges as a last resort, which a popover wider or taller than the area also gets. Below
+/// flips above its anchor when it would run past the area's bottom and fits above it within the area's top. The area,
+/// not the window, because on Linux the window holds GPUI Kit's frame and the window's own title bar, and a popover
+/// clamped to the window could end in the frame, outside the page. SPEC.md refuses a click on a terminal link whose
+/// destination display is not wholly inside the page, and a display ending in Kit's frame is not, though the click
+/// check (`terminal::disclosure`'s `fully_visible`) measures against the whole window and did not refuse it. The layer
+/// manager's owner moved popovers into the area on 2026-11-16. Under a compositor's decorations and on macOS the area is
+/// the whole window.
+///
+/// Crate-visible, and a pure function of its inputs, for `layers_tests.rs`: no test window reports client decorations,
+/// so the tests pass a Linux content area apart from the window themselves.
+pub(crate) fn popover_origin(
+    anchor: Option<Bounds<Pixels>>,
+    placement: &Placement,
+    size: Size<Pixels>,
+    area: Bounds<Pixels>,
+) -> Point<Pixels> {
+    let mut origin = match (anchor, placement) {
+        (Some(anchor), Placement::Beside) => {
+            point(anchor.right() + BESIDE_GAP, anchor.top() - BESIDE_RISE)
+        }
+        (Some(anchor), Placement::Below) => {
+            let below = anchor.bottom() + POPOVER_GAP;
+            let above = anchor.top() - POPOVER_GAP - size.height;
+            // Below unless it would run off the area's bottom and it fits above, under the area's top.
+            let y = if below + size.height > area.bottom() && above >= area.top() {
+                above
+            } else {
+                below
+            };
+            point(anchor.left(), y)
+        }
+        // The rule keeps inside the area itself ([`PlaceBy`]); the clamp below only catches one that does not.
+        (Some(anchor), Placement::By(place)) => place(anchor, size, area),
+        (None, _) => area.origin,
+    };
+    // Shift left when it overflows the right edge, up when it overflows the bottom, and back to the left and top edges
+    // as a last resort: `max` comes last, so a popover larger than the area starts at its top-left corner.
+    origin.x = origin.x.min(area.right() - size.width).max(area.left());
+    origin.y = origin.y.min(area.bottom() - size.height).max(area.top());
+    origin
+}
+
 impl IntoElement for PlacedPopover {
     type Element = Self;
 
@@ -2289,34 +2341,12 @@ impl Element for PlacedPopover {
                 self.child.layout_as_root(space, window, cx)
             }
         };
-        let viewport = window.viewport_size();
-        let mut origin = match (self.anchor.get(), &self.placement) {
-            (Some(anchor), Placement::Beside) => {
-                point(anchor.right() + BESIDE_GAP, anchor.top() - BESIDE_RISE)
-            }
-            (Some(anchor), Placement::Below) => {
-                let below = anchor.bottom() + POPOVER_GAP;
-                let above = anchor.top() - POPOVER_GAP - size.height;
-                // Below unless it would run off the bottom and there is more room above.
-                let y = if below + size.height > viewport.height && above >= px(0.) {
-                    above
-                } else {
-                    below
-                };
-                point(anchor.left(), y)
-            }
-            // The rule gets the area the window's content is laid out in ([`PlaceBy`]): on Linux, inside the frame
-            // Kit draws and below the title bar. The clamp below stays the window's whatever area the rule gets.
-            (Some(anchor), Placement::By(place)) => place(
-                anchor,
-                size,
-                crate::desktop::linux_title_bar::content_area(window),
-            ),
-            (None, _) => point(px(0.), px(0.)),
-        };
-        // Keep it inside the window: shift left when it overflows the right edge, down from the top as a last resort.
-        origin.x = origin.x.min(viewport.width - size.width).max(px(0.));
-        origin.y = origin.y.min(viewport.height - size.height).max(px(0.));
+        let origin = popover_origin(
+            self.anchor.get(),
+            &self.placement,
+            size,
+            crate::desktop::linux_title_bar::content_area(window),
+        );
         if child.is_some() {
             // Laid out at this element's own place: move it by the difference.
             let offset = origin - bounds.origin;

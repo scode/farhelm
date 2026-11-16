@@ -35,10 +35,10 @@
 //!
 //! NOTE: Deviations from the old flyout, both from the layer manager's one beside placement (its `Placement::Beside`
 //! docs record the shared clamp): the old Help menu hung from its toggle's bottom edge and kept at least 8 pixels from
-//! the window's edges, where this one is placed from the toggle's top and kept flush inside the window, so at the
-//! rail's foot it sits on the window's bottom edge; and the old flyout's pointer notch toward the toggle is not drawn
-//! (the session row's menu has the same gap). The old toggle's `aria-haspopup` is not ported either, as for every menu
-//! button so far.
+//! the window's edges, where this one is placed from the toggle's top and kept flush inside the window's content area,
+//! so at the rail's foot it sits on that area's bottom edge; and the old flyout's pointer notch toward the toggle is not
+//! drawn (the session row's menu has the same gap). The old toggle's `aria-haspopup` is not ported either, as for every
+//! menu button so far.
 //!
 //! [`Expansion`]: crate::session_list::host_rail::expansion::Expansion
 

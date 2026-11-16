@@ -721,12 +721,43 @@ pub(crate) fn show_next_frame(cx: &mut VisualTestContext) {
     settle(cx);
 }
 
+/// A rectangle from its left, top, width and height, in pixels: how placement tests write anchors, areas and the
+/// bounds they expect.
+pub(crate) fn rect(left: f32, top: f32, width: f32, height: f32) -> Bounds<Pixels> {
+    Bounds::new(
+        gpui::point(px(left), px(top)),
+        gpui::size(px(width), px(height)),
+    )
+}
+
+/// The surface of the 1642 by 1076 Linux window the 2026-11-15 reports measured (settings-and-hosts' host progress
+/// card, templates' launcher), the window [`linux_content_area`] is the content area of.
+pub(crate) fn linux_window() -> gpui::Size<Pixels> {
+    gpui::size(px(1642.), px(1076.))
+}
+
+/// The content area of [`linux_window`] when the compositor leaves the decorations to the window, as Mutter does: 21,
+/// 55, 1600 by 1000 (right edge 1621, bottom edge 1055), inside GPUI Kit's 20-pixel shadow margin and 1-pixel border
+/// and below the window's own 34-pixel title bar. No test window reports client decorations, so tests of what is kept
+/// inside this area call their placement or sizing rule as a pure function with it.
+pub(crate) fn linux_content_area() -> Bounds<Pixels> {
+    crate::desktop::linux_title_bar::content_area_in(
+        linux_window(),
+        gpui::Decorations::Client {
+            tiling: gpui::Tiling::default(),
+        },
+        Some(px(20.)),
+        crate::desktop::linux_title_bar::HEIGHT,
+    )
+}
+
 /// Tests of the shared helpers above, one per helper, appended with it.
 mod shared_helper_tests {
     use gpui::{IntoElement as _, ParentElement as _, TestAppContext, div};
 
     use super::{any_open, handle, open_dialog, settle, terminal_focused};
     use super::{button, focused, focused_id, keys, open};
+    use gpui::px;
     use gpui::{InteractiveElement as _, Styled as _};
     use std::cell::Cell;
     use std::rc::Rc;
@@ -993,6 +1024,31 @@ mod shared_helper_tests {
             focused(cx, &second),
             "under the Mac rule the click left focus where it was"
         );
+    }
+
+    /// Why this matters: placement tests compare the bounds they expect with [`super::rect`], so a helper that swapped
+    /// width and height, or took a right edge for a width, would pass a wrong expectation silently.
+    ///
+    /// Specification: `rect(10, 20, 30, 40)` has its left at 10, its top at 20, its right at 40 and its bottom at 60.
+    #[test]
+    fn rect_takes_left_top_width_and_height() {
+        let drawn = super::rect(10., 20., 30., 40.);
+        let edges = (drawn.left(), drawn.top(), drawn.right(), drawn.bottom());
+        assert_eq!(edges, (px(10.), px(20.), px(40.), px(60.)));
+    }
+
+    /// Why this matters: tests of what stays inside the Linux content area state their numbers against these edges,
+    /// and their window premises against [`super::linux_window`]; the helpers must be the area and window those
+    /// numbers were worked out for.
+    ///
+    /// Specification: the area is 21, 55, 1600 by 1000, and lies inside the 1642 by 1076 window with 21 pixels of frame
+    /// to its right and below it.
+    #[test]
+    fn the_linux_content_area_is_the_measured_windows_inside_its_frame_and_bar() {
+        let (area, window) = (super::linux_content_area(), super::linux_window());
+        assert_eq!(area, super::rect(21., 55., 1600., 1000.));
+        let frame = (window.width - area.right(), window.height - area.bottom());
+        assert_eq!(frame, (px(21.), px(21.)));
     }
 
     /// Why this matters: tests have no frame loop, so a drawn frame is never shown unless a test asks for it, and a
