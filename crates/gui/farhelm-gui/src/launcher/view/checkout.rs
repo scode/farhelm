@@ -324,8 +324,19 @@ pub(in crate::launcher) fn repository_choices(
 
 impl Launcher {
     /// The chosen host as the store holds it now, while it is connected with an installation identity: the only host
-    /// either read can ask about, since the helm binds both to that identity.
+    /// either read can ask about, since the helm binds both to that identity. None while a new environment is chosen:
+    /// its checkout's folder is previewed by the helm once the environment's Farhelm connects, and the host's checkout
+    /// folder setup is not its concern (SPEC.md, "Managed checkouts": a recipe-target launch "is another exception").
     fn checkout_host(&self, cx: &App) -> Option<HostView> {
+        if self.draft.target.is_some() {
+            return None;
+        }
+        self.connected_host(cx)
+    }
+
+    /// The chosen host as the store holds it now, while it is connected with an installation identity. The repository
+    /// suggestions ask it whatever the placement, since a new environment's repository is chosen the same way.
+    fn connected_host(&self, cx: &App) -> Option<HostView> {
         let view = self.chosen_host(cx)?.clone();
         let connected = matches!(view.state, HostStateView::Connected { .. });
         let identified = view.identity.as_deref().is_some_and(|id| !id.is_empty());
@@ -372,7 +383,12 @@ impl Launcher {
         {
             return None;
         }
-        let host = self.checkout_host_key(cx)?;
+        let host = self.connected_host(cx)?;
+        let host = HostKey {
+            host: host.id,
+            incarnation: host.incarnation,
+            identity: host.identity.unwrap_or_default(),
+        };
         Some(SuggestKey {
             host: host.host,
             incarnation: host.incarnation,
@@ -846,6 +862,9 @@ impl Launcher {
         };
         let (text, placeholder) = match (&checkout.repo, self.checkout_preview(cx)) {
             (None, _) => (String::new(), "Select a repository"),
+            (Some(_), _) if self.draft.target.is_some() => {
+                (String::new(), "Cloned inside the new environment")
+            }
             (Some(_), Preview::Ready(preview)) => (
                 farhelm_proto::text::escaped(&preview.binding.cwd).to_string(),
                 "",
@@ -1020,6 +1039,9 @@ impl Launcher {
     /// helm has answered, and while it has not, that the launcher waits, or the helm's refusal. A polite live status,
     /// so a change is announced without interrupting.
     fn preview_block(&self, repo: &GithubRepo, palette: &theme::Palette, cx: &App) -> AnyElement {
+        if self.draft.target.is_some() {
+            return environment_checkout(repo, palette);
+        }
         let host = self
             .chosen_host(cx)
             .map(super::host_name_with_phase)
@@ -1099,6 +1121,10 @@ impl Launcher {
                 "Managed checkout (select a repository)".to_owned()
             }
             (None, _) => format!("Managed checkout: {} (select a repository)", checkout.query),
+            // A new environment's checkout has no folder yet: the helm names it once the environment connects.
+            (Some(repo), _) if self.draft.target.is_some() => {
+                format!("gh:{}", repo_identifier(repo))
+            }
             (Some(_), Preview::Ready(preview)) => preview.binding.cwd.clone(),
             (Some(repo), Preview::Waiting | Preview::Failed) => {
                 format!("gh:{} (preview pending)", repo_identifier(repo))
@@ -1271,4 +1297,28 @@ fn draw_repository_rows(
         children,
         highlighted: active,
     }
+}
+
+/// The preview line of a managed checkout into a new environment: no folder to preview yet, since the helm obtains the
+/// preview once the environment's Farhelm connects and clones the repository inside it (SPEC_impl.md, "Tensorlake
+/// sandbox sessions": "carry repository and naming intent until the new supervisor connects").
+fn environment_checkout(repo: &GithubRepo, palette: &theme::Palette) -> AnyElement {
+    let heading = HostSentence::new("launcher-preview-heading")
+        .text("Managed checkout of ")
+        .host(&HostText::from_host(repo_identifier(repo)))
+        .text(" in the new environment");
+    div()
+        .id("launcher-preview")
+        .debug_selector(|| "launcher-preview-environment".to_owned())
+        .role(Role::Status)
+        .aria_label(heading.accessible_name())
+        .pl(px(LABEL_COLUMN + LABEL_GAP))
+        .flex()
+        .flex_col()
+        .gap(px(2.))
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.fg_1))
+        .child(heading)
+        .child(div().child("Cloned inside it once it starts"))
+        .into_any_element()
 }

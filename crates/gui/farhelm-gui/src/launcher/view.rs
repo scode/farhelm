@@ -10,7 +10,9 @@
 //!   press of it has to say pinned under them, as the old footer's column did. Save as template opens its inline panel
 //!   at the end of the body (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
 //! - **The body**, in reading and Tab order: the composer search box ([`search`]), the recent setups while any match
-//!   ([`recents`]), the destination rows (Where, Host, a managed checkout's repository and preview, Folder, Name), the
+//!   ([`recents`]), the destination rows (Where, Runs on, Host, a managed checkout's repository and preview, Folder,
+//!   Name; with a new environment chosen, Runs on's Recipe, Container host and note stand in for Host, a folder
+//!   destination is its fixed home, and a managed checkout is cloned inside it: [`placement`]), the
 //!   Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not drawn, but its draft is kept
 //!   (SPEC.md: "switching tabs keeps each tab's draft"). The Agent tab's harness, effort and permission choices are
 //!   drawn by [`choices`].
@@ -108,6 +110,7 @@ mod history;
 mod host_picker;
 mod latest;
 mod model_field;
+mod placement;
 mod recents;
 mod save;
 mod search;
@@ -171,6 +174,7 @@ pub(in crate::launcher) fn open_noted(
     });
     let layer = show(&launcher, mark, window, cx)?;
     read_catalog(launcher.downgrade(), cx);
+    placement::check_container_hosts(cx);
     #[cfg(test)]
     layers::record_opened(&launcher, cx);
     Some(layer)
@@ -1487,7 +1491,18 @@ impl Launcher {
             Mode::New | Mode::Clone | Mode::ReplaceWith { .. } => None,
         };
         let registered = self.chosen_host(cx).map(host_name_with_phase);
-        let host = source
+        // A new environment is named as the old footer named it, "new <recipe> container on <host>".
+        let environment = self.draft.target.as_ref().map(|target| {
+            let hosts: Vec<HostView> = collections
+                .ordered::<HostView>()
+                .into_iter()
+                .cloned()
+                .collect();
+            let label = crate::environment_ui::launch_target_label(target, &hosts);
+            HostText::from_host(format!("new {}", label.raw()))
+        });
+        let host = environment
+            .or(source)
             .or(registered)
             .unwrap_or_else(|| HostText::from_host("Unavailable host"));
         TargetWords {
@@ -2034,9 +2049,11 @@ impl Render for Launcher {
         // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all
         // (SPEC.md, "Restart with": held fields' "editing controls are hidden", and "The held agent type, host and
         // folder stay visible").
+        // A new environment's folder is its home, shown as a held destination is (SPEC.md: "Folder is fixed to the new
+        // sandbox's home, without Browse or recent folders").
         let folder: AnyElement = if self.draft.destination_kind() == DestinationKind::Checkout {
             self.checkout_folder_field()
-        } else if self.draft.holds(Field::Destination) {
+        } else if self.draft.holds(Field::Destination) || self.draft.target.is_some() {
             div()
                 .pt(px(8.))
                 .font_family(crate::assets::TERMINAL_FONT)
@@ -2120,8 +2137,20 @@ impl Render for Launcher {
                     .children(taken);
             Some(row("launcher-name-row", caption, field, palette))
         };
+        // With a new environment chosen, Runs on's rows stand in for the Host row (`placement`); the Where row stays,
+        // a folder destination being the environment's home and a managed checkout cloned inside it.
+        let environment = self.draft.target.clone();
         let where_row = self.where_row(palette, cx);
-        let host_row = self.host_row(palette, window, cx);
+        let placement = self.placement_rows(palette, cx);
+        let host_row = environment
+            .is_none()
+            .then(|| self.host_row(palette, window, cx));
+        let environment_note = environment.as_ref().map(|target| {
+            help_line(
+                crate::environment_ui::ProviderUi(target.provider()).launch_help(),
+                palette,
+            )
+        });
         // Under the host, as the old launcher said it there as well as beside Launch: the folder was taken on the
         // installation this host row named before.
         let installation_moved = self
@@ -2135,22 +2164,28 @@ impl Render for Launcher {
                 )
             });
         let checkout_rows = self.checkout_rows(palette, window, cx);
-        let destination =
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(ROW_GAP))
-                .child(section_label("Destination", palette))
-                .children(where_row)
-                .child(host_row)
-                .children(self.host_picker.note.map(|note| {
-                    choices::status_line("launcher-host-note", note.to_owned(), palette)
-                }))
-                .children(installation_moved)
-                .children(checkout_rows)
-                .child(row("launcher-folder-row", "Folder", folder, palette))
-                .children(self.folder_problem_line(palette, cx))
-                .children(name);
+        let destination = div()
+            .flex()
+            .flex_col()
+            .gap(px(ROW_GAP))
+            .child(section_label("Destination", palette))
+            .children(where_row)
+            .children(placement)
+            .children(host_row)
+            .children(
+                self.host_picker
+                    .note
+                    .filter(|_| environment.is_none())
+                    .map(|note| {
+                        choices::status_line("launcher-host-note", note.to_owned(), palette)
+                    }),
+            )
+            .children(installation_moved)
+            .children(checkout_rows)
+            .child(row("launcher-folder-row", "Folder", folder, palette))
+            .children(environment_note)
+            .children(self.folder_problem_line(palette, cx))
+            .children(name);
         let (on_tab, on_tab_enter) = (weak.clone(), weak.clone());
         let tabs = (!self.draft.holds(Field::LaunchKind)).then(|| {
             TabStrip::new(
@@ -2196,7 +2231,12 @@ impl Render for Launcher {
             .children(fields);
         let search = self.search_row(palette, window, cx);
         // Recent setups sit between the search box and the destination, and take no room without rows (`recents`).
-        let recents = self.recents_strip(palette, window, cx);
+        // Not while a new environment is chosen: its folder is fixed, and recent setups name an existing host's folders.
+        let recents = if self.draft.target.is_some() {
+            None
+        } else {
+            self.recents_strip(palette, window, cx)
+        };
         let body = div()
             .flex()
             .flex_col()

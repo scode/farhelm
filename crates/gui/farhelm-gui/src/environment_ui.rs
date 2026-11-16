@@ -7,9 +7,10 @@
 //! surface has needed so far, starting with an agent's environment-launch approval card; the launcher's and host
 //! management's environment surfaces add their own methods here as they are ported, rather than starting a second
 //! module. The Hosts panel's deletion of a sandbox or container and its details take theirs from here too
-//! (`host_delete_label`, `delete_consequence`, `deleting_detail`, `locality_label`). The session list's and the session view's environment session rows, controls and suspended card take theirs
-//! from the section on a session's own environment below. The launcher's refusals and its name for a new environment
-//! take their words from here (`recipe_refusal`, [`target_label`]).
+//! (`host_delete_label`, `delete_consequence`, `deleting_detail`, `locality_label`). The session list's and the session
+//! view's environment session rows, controls and suspended card take theirs from the section on a session's own
+//! environment below. The launcher's Runs on switch, its note and its refusals take their words from here (`segment`,
+//! `launch_help`, `recipe_refusal`, [`target_label`]).
 
 use farhelm_proto::recipes::{RecipeBase, RecipeView};
 use farhelm_proto::ui_channel::HostView;
@@ -148,6 +149,77 @@ impl ProviderUi {
             }
             (ProviderKind::Podman, true) => {
                 "Farhelm could not finish deleting this container; it may remain. Retry finishes the deletion"
+            }
+        }
+    }
+
+    /// The launcher's Runs on segment for this provider, which names the new resource a launch creates rather than an
+    /// existing host (the old app's `ProviderUi::segment`).
+    pub(crate) fn segment(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "New sandbox",
+            ProviderKind::Podman => "New container",
+        }
+    }
+
+    /// The segment's hover help, the old segment buttons' tooltips.
+    pub(crate) fn segment_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Create a disposable Tensorlake sandbox from a built recipe"
+            }
+            ProviderKind::Podman => {
+                "Create a disposable container from a recipe on one of your hosts"
+            }
+        }
+    }
+
+    /// Where the launcher's Runs on switch creates this provider's environment when its segment is entered, or `None`
+    /// when it has no usable place, which hides the segment (SPEC.md: "A segment with no usable place is hidden").
+    /// `container_hosts` are the hosts whose Podman is usable now, in the registry's order, and `last` the container host
+    /// last launched on (the pushed preferences' `last_container_host`). A container goes to the last container host
+    /// while it is usable, else the first usable one (the old `PlacementPicker`'s default). The Tensorlake account's
+    /// prerequisites (its API key) come from the Tensorlake settings read, which the launcher's New sandbox brings;
+    /// until then the account offers no usable place, so New sandbox stays hidden.
+    pub(crate) fn launch_place(self, container_hosts: &[i64], last: Option<i64>) -> Option<Place> {
+        match self.0 {
+            ProviderKind::Tensorlake => None,
+            ProviderKind::Podman => last
+                .filter(|last| container_hosts.contains(last))
+                .or_else(|| container_hosts.first().copied())
+                .map(Place::PodmanHost),
+        }
+    }
+
+    /// The words of the launcher's note on how the chosen recipe stands at the chosen place, for a provider whose
+    /// places each build the recipe themselves (the old `PlacementPicker`'s status line); `None` for one whose built
+    /// recipe the account holds, which the recipe's own refusal covers ("No snapshot yet").
+    pub(crate) fn launch_place_note(self) -> Option<LaunchPlaceNote> {
+        match self.0 {
+            ProviderKind::Tensorlake => None,
+            ProviderKind::Podman => Some(LaunchPlaceNote {
+                building: "Preparing…",
+                ready_on: "Ready on",
+                first_launch: "Builds on first launch here (a few minutes)",
+                checking: "Checking build status…",
+            }),
+        }
+    }
+
+    /// The launcher's note under Folder while a recipe is chosen: where the session's files live, and what the new
+    /// environment costs while it runs and when its last session goes (the old app's `ProviderUi::launch_help`, worded
+    /// as it was).
+    pub(crate) fn launch_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "A new Tensorlake sandbox for this session. It bills while running. Suspend stops CPU and memory \
+                 billing; snapshot storage still bills. Deleting its last session removes the sandbox and its files. \
+                 After Farhelm disconnects, Tensorlake suspends it after 30 minutes without activity."
+            }
+            ProviderKind::Podman => {
+                "A new container for this session, built from the recipe on its container host. The checkout and files \
+                 live inside it. Suspend freezes processes while keeping memory in use; deleting its last session \
+                 removes the container and its files."
             }
         }
     }
@@ -561,6 +633,30 @@ pub(crate) fn launch_target_label(target: &LaunchTarget, hosts: &[HostView]) -> 
         .and_then(|id| hosts.iter().find(|host| host.id == id))
         .map(|host| display_name(host).raw().to_owned());
     HostText::from_host(target_label(target, place_name.as_deref()))
+}
+
+/// The Runs on switch's environment segments, in the old switch's order (after Existing host).
+pub(crate) const RUNS_ON: [ProviderKind; 2] = [ProviderKind::Podman, ProviderKind::Tensorlake];
+
+// `RUNS_ON` is a list, which the compiler does not hold to every provider, and a provider missing from it never gets a
+// segment. This match has no `_` arm, so a new provider stops the build here until someone places it in `RUNS_ON` (or
+// decides it gets no segment) and adds it to this match (AGENTS.md, "Code rules").
+const _: () = match ProviderKind::Podman {
+    ProviderKind::Podman | ProviderKind::Tensorlake => (),
+};
+
+/// A provider's words for the launcher's note on the chosen recipe at the chosen place, as
+/// [`ProviderUi::launch_place_note`] chooses them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LaunchPlaceNote {
+    /// While the place builds or prepares the recipe.
+    pub(crate) building: &'static str,
+    /// Before the place's name, once it has the recipe ready ("Ready on <name>").
+    pub(crate) ready_on: &'static str,
+    /// Before anything is built there.
+    pub(crate) first_launch: &'static str,
+    /// While the place's state for the recipe has not been pushed.
+    pub(crate) checking: &'static str,
 }
 
 /// A provider's words for a recipe's per-place line, as [`ProviderUi::recipe_place`] chooses them.
