@@ -694,7 +694,9 @@ users can find both the removal procedure and its safety guarantees.
 
 The standalone installer temporarily supports only a Mac installing the desktop app, on Apple silicon (including
 Rosetta). This limits only the installer: Linux remains supported for running a helm and session hosts, which the helm
-provisions over SSH itself. Other operating systems are refused before any download or filesystem change.
+provisions over SSH itself. Other operating systems are refused before any download or filesystem change. The desktop
+app also runs on Linux, but there it has no installer and no updates and is run from a build: the maintainer decided on
+2026-11-15 to defer Linux installation and updates for the desktop app beyond the GPUI migration.
 
 The installer runs as the current user without root. On the Mac, `~/Applications/Farhelm.app` is the whole installation
 and, for now, the only user-facing way to launch Farhelm; `~/.local/bin/farhelm` is only a link into it, for using
@@ -801,8 +803,8 @@ Hover wording explains the readout's check or restart action. Automatic work tha
 qualifying failures show as described above. The desktop settings dialog has a switch for installing updates
 automatically, on by default; turning it off stops the startup and daily checks and the background installs, while
 on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic updates
-off, the user updates through an on-demand check or by running the installer, as before. None of this applies to the web
-UI, to a build from main, or to remote hosts. Remote hosts have their own Update actions and the separate,
+off, the user updates through an on-demand check or by running the installer, as before. None of this applies to a build
+from main, to the desktop app on Linux, or to remote hosts. Remote hosts have their own Update actions and the separate,
 off-by-default **Update remote hosts automatically** setting described under Topology.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
