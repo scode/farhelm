@@ -1124,9 +1124,6 @@ pub(crate) struct FleetBuilder {
     /// kind of test that needs refreshes to actually recur — the ones about
     /// a refresh RACING something else.
     refresh: Option<Duration>,
-    /// Overrides `/api/events`'s subscriber bound, so a test can exhaust it
-    /// with a handful of real sockets instead of sixty-four.
-    event_subscriber_cap: Option<usize>,
     /// A stand-in for the desktop-only admitted link opener; tests never open a real browser.
     link_opener: Option<crate::LinkOpener>,
     /// Where `POST /api/feedback` sends, when a test points it at a
@@ -1270,7 +1267,6 @@ impl FleetBuilder {
             // against it, so it is part of what those tests exercise.
             port: 7433,
             refresh: None,
-            event_subscriber_cap: None,
             link_opener: None,
             feedback: None,
             approval_wait: None,
@@ -1298,18 +1294,6 @@ impl FleetBuilder {
     /// Observe native opening after admission without reaching the operating system's browser.
     pub(crate) fn link_opener(mut self, opener: crate::LinkOpener) -> FleetBuilder {
         self.link_opener = Some(opener);
-        self
-    }
-
-    /// Admit at most `cap` event subscriptions, so the endpoint's refusal is
-    /// reachable through real sockets.
-    ///
-    /// The bound this replaces is sized for a browser population rather than
-    /// for a test (`crate::events::MAX_SUBSCRIBERS`), and reaching it by
-    /// opening that many connections would say more about the test's patience
-    /// than about the endpoint.
-    pub(crate) fn event_subscriber_cap(mut self, cap: usize) -> FleetBuilder {
-        self.event_subscriber_cap = Some(cap);
         self
     }
 
@@ -1472,12 +1456,6 @@ impl FleetBuilder {
                 .unwrap_or(farhelm_proto::approvals::APPROVAL_WAIT),
         );
         let state = AppState {
-            // The only override any fixture makes, and it exists so the
-            // feed's own bound can be exhausted through real sockets — see
-            // `AppState::event_subscriber_cap`.
-            event_subscriber_cap: self
-                .event_subscriber_cap
-                .unwrap_or(crate::events::MAX_SUBSCRIBERS),
             link_opener: self.link_opener,
             // Offline unless a test injected a stand-in, like every
             // test-built helm (`AppState::with_provisioning`).
@@ -1771,10 +1749,10 @@ impl WsTestClient {
     /// Attempt the upgrade, returning the HTTP status line's code instead of
     /// panicking when the server refuses.
     ///
-    /// Exists for the tests whose subject IS the refusal — a bound reached
-    /// BEFORE the upgrade answers an ordinary HTTP status, and the difference
-    /// between that and a socket that opens and immediately closes is the
-    /// whole point of admitting early.
+    /// Exists for the tests whose subject IS the refusal — a missing
+    /// credential refused BEFORE the upgrade answers an ordinary HTTP status,
+    /// and the difference between that and a socket that opens and
+    /// immediately closes is the whole point of refusing early.
     pub(crate) async fn try_connect(
         addr: std::net::SocketAddr,
         path: &str,
@@ -1932,13 +1910,6 @@ impl WsTestClient {
 
     pub(crate) async fn send_text(&mut self, text: &str) {
         self.send(1, text.as_bytes()).await;
-    }
-
-    /// Answer a server keepalive without making ordinary receive calls
-    /// implicitly prove peer liveness. Tests that model a healthy browser
-    /// choose when to answer; tests for vanished peers deliberately do not.
-    pub(crate) async fn send_pong(&mut self) {
-        self.send(0xA, &[]).await;
     }
 
     /// Read one server frame's (opcode, payload), or `None` once the

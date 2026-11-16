@@ -1856,19 +1856,12 @@ async fn await_seat(harness: &rest_harness::Harness, held: bool) {
 /// Agent approvals ask the seat whether a window is open (SPEC.md, "One GUI
 /// at a time"): a connected UI counts; one that disconnected does not; and a
 /// takeover moves the seat to the new UI, whose old holder is told it was
-/// displaced. The old `/api/events` subscription no longer counts.
+/// displaced.
 #[farhelm_testtrace::test]
 async fn approvals_follow_the_seat_through_connect_disconnect_and_takeover() {
     let mut harness = rest_harness::idle_helm().await;
     let addr = harness.serve().await;
     assert!(!crate::approvals::gui_connected(&harness.state));
-
-    let events = WsTestClient::connect(addr, "/api/events").await;
-    assert!(
-        !crate::approvals::gui_connected(&harness.state),
-        "an events subscriber is not a window"
-    );
-    drop(events);
 
     let mut first = WsTestClient::connect(addr, UI_CHANNEL).await;
     let _snapshot = recv_message(&mut first).await;

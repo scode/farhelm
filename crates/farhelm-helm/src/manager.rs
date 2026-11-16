@@ -63,7 +63,7 @@
 //! transactional [`HelmStore`] call — an abort can lose the fact that a
 //! refresh was in flight, never leave one half-applied.
 
-pub use crate::feed::{FeedSeat, FleetEvents};
+pub use crate::feed::FleetEvents;
 pub use crate::transport::{
     HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportConnection, TransportPair,
 };
@@ -1220,9 +1220,9 @@ pub struct ConnectionManager {
     /// actors could not reach would need a second path back out to whoever
     /// held it.
     events: Arc<FleetEvents>,
-    /// Which GUI holds this helm, if any (see [`UiSeat`]). Beside the feed
-    /// because both answer "who is watching": agent approvals ask the seat
-    /// whether a window is open, where they used to count feed subscribers.
+    /// Which GUI holds this helm, if any (see [`UiSeat`]). Agent approvals
+    /// ask the seat whether a window is open, never the feed: the helm's own
+    /// tasks subscribe to the feed too, so a subscription is not a window.
     ui_seat: UiSeat,
     /// Per-host lock serializing a provisioning run against edits of that
     /// host's registry row (retarget, alias, removal); see
