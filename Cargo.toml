@@ -161,8 +161,8 @@ regex = "1"
 #   would hash something other than the signed artifact. (Not a default.)
 # - `stream` for the byte-at-a-time download loop (a release archive is tens
 #   of megabytes; it is never buffered whole in memory).
-# - `json` is not used by the download source at all — it is farhelm's and
-#   farhelm-desktop's, and stays for them.
+# - `json` is not used by the download source at all — it is farhelm's,
+#   farhelm-desktop's and farhelm-helm-client's, and stays for them.
 reqwest = { version = "0.13", features = ["json", "stream"] }
 # `bundled` compiles SQLite from source rather than linking the host's
 # libsqlite3 — required for the musl-static supervisor artifacts

@@ -20,7 +20,7 @@ use std::time::Duration;
 use farhelm_helm_client::collections::Collections;
 use farhelm_helm_client::{
     ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelState, CommandFuture,
-    HelmConnection, HelmEndpoint, Method, PushedState,
+    HelmConnection, HelmEndpoint, Method, PushedState, TransferError,
 };
 use farhelm_proto::ui_channel::{Collection, HostView, Preferences};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -338,6 +338,59 @@ fn a_wrong_credential_is_not_retried_until_the_user_asks() {
             .await;
         assert_eq!(proxy.connections(), 2);
     });
+}
+
+/// The transfer client and the helm's real transfer routes must agree on the wire, and with no supervisor here the
+/// helm's own refusals are what show it. Stat, download and upload each reach their route with the device credential
+/// accepted and a request the route decodes (a body it could not read would be refused before the handler runs, with
+/// other words), and each comes back as the helm's refusal with its status and words: no such session for stat and
+/// upload (whose `Content-Length` check comes first), and for download the missing native save, because the client
+/// always asks for one and this helm was given no Downloads directory. A wrong credential is refused before any route,
+/// and its JSON body is replaced by a sentence the GUI can show.
+#[test]
+fn transfers_reach_the_helms_routes_with_the_device_credential() {
+    let helm = Helm::start();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.txt");
+    std::fs::write(&file, b"hello").unwrap();
+    let session = farhelm_proto::SessionRef::new(&uuid::Uuid::new_v4().to_string(), "s1")
+        .unwrap()
+        .to_string();
+    let refused = |status: u16, message: &str| TransferError::Refused {
+        status,
+        message: message.into(),
+    };
+    let (connection, _gui) = open(helm.endpoint());
+    let (stranger, _stranger_gui) = open(HelmEndpoint::new(helm.addr, "AAAAAAAAAAAAAAAAAAAAAA"));
+    let transfers = connection.transfers();
+    block_on(async {
+        assert_eq!(
+            within_step(transfers.stat(&session, "a.txt")).await,
+            Err(refused(404, "no such session on this host entry"))
+        );
+        assert_eq!(
+            within_step(transfers.download(&session, "a.txt", false)).await,
+            Err(refused(404, "native Downloads save is unavailable"))
+        );
+        assert_eq!(
+            within_step(transfers.upload(&session, file, "a.txt")).await,
+            Err(refused(404, "no such session on this host entry"))
+        );
+        let error = within_step(stranger.transfers().stat(&session, "a.txt"))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            refused(401, "the helm did not accept this app's credential")
+        );
+    });
+}
+
+/// Await `work`, failing the test after [`STEP`].
+async fn within_step<T>(work: impl Future<Output = T>) -> T {
+    tokio::time::timeout(STEP, work)
+        .await
+        .expect("answered in time")
 }
 
 // ---------------------------------------------------------------------------
