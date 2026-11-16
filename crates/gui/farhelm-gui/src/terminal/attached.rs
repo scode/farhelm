@@ -31,9 +31,9 @@
 //!   and is coming back by itself says so on a calm card over the kept screen instead ("The reconnect card" below).
 //!   Its owner can hold these back, with the exit line, while something else explains what is happening
 //!   ([`AttachedTerminal::hold_notices`]).
-//! - A protocol fault ends the stream. A message the grid model refuses means the peer broke the format; the owner
-//!   closes the stream and says so on the status line. It does not restart the attachment by itself (that, too, waits
-//!   for the terminal area).
+//! - A protocol fault restarts the stream. A message the grid model refuses means the peer broke the format, so that
+//!   attachment cannot go on; the owner closes its stream and, after a backoff, opens a fresh one, whose replay
+//!   rebuilds the screen from nothing. Only a peer that keeps faulting ends on the red band ("Protocol faults" below).
 //! - It retires with its UI session. A reset or a displacement retires the [`UiSession`] the owner was made for
 //!   (SPEC_impl.md, "One failure path: the reset"); the owner then closes its stream, cancels its delivery and drops its
 //!   views, so no reconnect worker or old screen outlives the session.
@@ -51,8 +51,9 @@
 //!
 //! - **When.** From the stream's `Reconnecting` until the attachment it comes back on has replayed and gone live
 //!   ([`AttachedTerminal::reconnecting`]). The card stays through that catch-up, as the old one stayed until the replay
-//!   was revealed: the kept screen is not live and takes no input until then. A detach that waits for the user, a
-//!   refusal, a close or a protocol fault ends it, and their band takes over.
+//!   was revealed: the kept screen is not live and takes no input until then. A protocol fault restarts the stream
+//!   and keeps the card up through the restart's wait and catch-up ("Protocol faults" below). A detach that waits for
+//!   the user, a refusal, a close, or a protocol fault past the restarts' bound ends it, and their band takes over.
 //! - **What it draws.** The component layer's accent card ([`crate::components::status_card`], which the session pane's
 //!   Delete scrim shares) on the terminal scrim, with the heading and its spinner, the old explanation line, the phase
 //!   and attempt line ("The phase line" below) and Reconnect now, which asks the stream to skip its backoff
@@ -101,6 +102,36 @@
 //! until the replay was revealed. The old card's fifth template, for a page whose helm was another build and so would
 //! not reconnect by itself, has no counterpart: the stream reports no such state.
 //!
+//! ## Protocol faults
+//!
+//! The grid format's rule is that a receiver which refuses a message ends that attachment: the peer broke the format,
+//! and nothing after it can be trusted to apply to the screen this side holds. The old app treated that ending as one
+//! more transport loss (`streamFailed` in terminal.js at the reference commit): the terminal went onto its reconnect
+//! ladder, a fresh attach replayed it from nothing, and the red "Terminal stream error" banner showed only where
+//! recovery could not run. This owner does the same, as far as the stream lets it:
+//!
+//! - **The seam.** The stream cannot be told to drop its socket and reattach: its handle closes it or, from a stopped
+//!   state, takes control, and nothing in between. So the owner closes the faulted stream and opens a new one through
+//!   its opener ([`OpenStream`], which is reusable for this), the ordinary attach under the view's lease, at the size
+//!   last fitted. Nothing the old stream had queued is applied: delivery goes on only while the owner holds a stream's
+//!   handle, and the fault drops it.
+//! - **The screen.** The last complete screen stays up, the half-applied replay or the faulted live screen's update
+//!   goes, and the restart's replay is staged off screen and replaces the kept screen only once complete, as for any
+//!   reattach. Nothing is live in between, so no input goes anywhere.
+//! - **The card.** The reconnect card shows from the fault until the restart's replay goes live, with the phase line
+//!   counting the restarts on the stream ladder's rungs ("Reconnecting in 1s (attempt 1 of 6)…" while waiting,
+//!   "Reconnecting (attempt 1 of 6)…" once the new stream is attaching). Reconnect now skips the wait.
+//! - **The bound.** Consecutive faults wait the ladder's six active retries in turn, 0.5, 1, 2, 4, 8 and 15 s, and the
+//!   seventh shows the red band, "Terminal stream error: …" with the model's own words, and Reconnect, which opens a
+//!   fresh stream at once and counts again from the first rung. There is no probing phase as for a lost network: a
+//!   peer that breaks the format on every replay does not get better with time (a judgment, not a measurement).
+//! - **When the count starts over.** Once a restart has stayed live for [`FAULTS_FORGOTTEN_AFTER`] with no fault, or
+//!   on the user's Reconnect. A drop the stream recovers from meanwhile does not stop that clock, but its reattach
+//!   going live starts it again.
+//!
+//! The restart's own outages are the stream's: a restart whose socket drops climbs the stream's ladder, numbered
+//! afresh from its first attempt, and a restart that is refused or detached for good shows that band.
+//!
 //! ## Input
 //!
 //! The grid's area (the pane below its status line) is one focusable element in [`actions::TERMINAL_CONTEXT`], tracked
@@ -143,9 +174,11 @@
 //! current state when it starts asking or a new attachment goes live ([`AttachedTerminal::report_focus`]).
 //!
 //! Input goes out only while the terminal is live ([`AttachedTerminal::is_live`]): never while it catches up on a
-//! replay, reconnects, waits detached or refused, after a protocol fault, or once retired. Keys typed then are
-//! dropped, not kept for later, as the helm client drops input for a stream that is not attached. Each group of input
-//! is stamped with the attachment it was typed for, so the helm client never writes it to a later one.
+//! replay, reconnects, restarts after a protocol fault, waits detached, refused or on a stream error, or once retired.
+//! Keys typed then are dropped, not kept for later, as the helm client drops input for a stream that is not attached.
+//! Each group of input is stamped with the attachment it was typed for, so the helm client never writes it to a later
+//! one. Stamps are counted per stream, so a paste still reading the clipboard when a fault closes the stream is
+//! dropped rather than stamped into the restart's.
 //!
 //! The cursor blinks on the ticker ([`ticker::blink`]) only while the terminal has focus in an active window and is
 //! live, and is drawn outlined otherwise. Blinking only while focused is the old app's rule. Drawing the outline in an
@@ -169,7 +202,7 @@ use farhelm_grid_model::{
 };
 use farhelm_helm_client::terminal::{
     Attachment, AttachmentLease, ReconnectPhase, ReconnectStatus, StreamState, TerminalAttach,
-    TerminalEvent, TerminalEvents, TerminalHandle,
+    TerminalEvent, TerminalEvents, TerminalHandle, TerminalLadder,
 };
 use farhelm_input_mapping::pointer::{
     Geometry, MouseDeduper, WheelAccumulator, WheelUnit, mode_reports, wheel_goes_to_program,
@@ -291,11 +324,21 @@ pub struct TerminalTarget {
     pub lease: AttachmentLease,
 }
 
-/// Opens the stream once the owner knows its size. The app passes its UI session's
-/// [`UiSession::terminal_opener`], which opens nothing once the session is retired; tests pass one that hands out a
-/// fake terminal's handle and feed. Called at most once
-/// per owner: the stream reconnects by itself, and the status line's Reconnect goes through the same stream.
-pub type OpenStream = Box<dyn FnOnce(TerminalAttach) -> (TerminalHandle, TerminalEvents)>;
+/// How long after a restart's replay goes live, with no fault since, its fault count starts over (see "Protocol
+/// faults" in the module docs). Not as soon as the replay completes: a peer that faults on live output right after
+/// every replay would then loop on the first rung, a full replay every half second, forever. As long as the ladder's
+/// longest active retry, so a peer that faults again within that time keeps climbing the rungs rather than starting
+/// over at the first; the length is a judgment, not a measurement.
+pub(crate) const FAULTS_FORGOTTEN_AFTER: Duration = Duration::from_secs(15);
+
+/// Opens a stream once the owner knows its size. The app passes its UI session's [`UiSession::terminal_opener`],
+/// which opens nothing once the session is retired; tests pass one that hands out a fake terminal's handle and feed.
+///
+/// Called once when the terminal is first fitted, and again only to replace a stream the owner closed over a protocol
+/// fault (see "Protocol faults" in the module docs): a stream reconnects by itself, and the status line's Reconnect
+/// after a stop goes through the same stream. The owner closes the old stream before it opens the next, so it never
+/// holds two live streams under one lease.
+pub type OpenStream = Box<dyn FnMut(TerminalAttach) -> (TerminalHandle, TerminalEvents)>;
 
 /// What the status line says, and whether it offers Reconnect. `reason` is the helm's or supervisor's own
 /// explanation of a detach, which is host-supplied text and is drawn escaped after `words`.
@@ -336,11 +379,25 @@ pub struct AttachedTerminal {
     /// Holds back as much of the notices as it says; `None` holds nothing.
     hold: Option<NoticeHold>,
     metrics: CellMetrics,
-    /// Taken when the stream is opened, and dropped on retirement so a late fit cannot open one.
+    /// Opens the first stream and each restart after a protocol fault. Dropped on retirement so a late fit or a
+    /// restart's wait cannot open one.
     opener: Option<OpenStream>,
+    /// The current stream's handle. `None` before the first fit, and after a protocol fault closed the stream until
+    /// the restart (or the user's Reconnect) opens the next.
     handle: Option<TerminalHandle>,
-    /// The delivery loop, which owns the stream's event feed. Dropping it cancels delivery and ends the stream.
+    /// The delivery loop, which owns the stream's event feed. Dropping it cancels delivery and ends the stream. It
+    /// delivers only while `handle` is set: a protocol fault drops the handle inside the loop's own delivery, so
+    /// `deliver` returns false and the loop ends in that same turn, before any restart can open the next stream. The
+    /// next open replaces the finished task.
     pump: Option<Task<()>>,
+    /// Protocol faults since the count last started over ([`FAULTS_FORGOTTEN_AFTER`] after a restart went live, or the
+    /// user's Reconnect), which picks the next restart's rung and, past the last rung, the red band.
+    faults: u32,
+    /// The wait before restarting a stream closed over a protocol fault; firing opens the next stream.
+    restart: Option<ticker::Deadline>,
+    /// Forgets the fault count [`FAULTS_FORGOTTEN_AFTER`] after a restart's replay went live; cancelled by the next
+    /// fault.
+    forget_faults: Option<ticker::Deadline>,
     /// The stream state last delivered.
     stream: StreamState,
     /// The stream's latest report on its recovery from a drop, `Some` exactly while it is coming back: set by each
@@ -366,7 +423,8 @@ pub struct AttachedTerminal {
     staging: Option<Entity<TerminalView>>,
     /// Whether `committed` belongs to the live attachment, so output goes to it rather than being dropped.
     live: bool,
-    /// The status line after a protocol fault. Once set the stream is closed and nothing else is delivered.
+    /// The status line once protocol faults ran past the restarts' bound. While set there is no stream, nothing is
+    /// delivered and nothing restarts by itself; the user's Reconnect clears it and opens a fresh stream.
     fault: Option<SharedString>,
     /// The grid size last fitted, which the stream was opened at or last resized to.
     fit: Option<(u16, u16)>,
@@ -579,6 +637,9 @@ impl AttachedTerminal {
             opener: (!retired).then_some(open),
             handle: None,
             pump: None,
+            faults: 0,
+            restart: None,
+            forget_faults: None,
             stream: StreamState::Attaching,
             recovery: None,
             recovery_held: false,
@@ -718,8 +779,9 @@ impl AttachedTerminal {
         if self.retired {
             return None;
         }
+        // Faults past the restarts' bound: nothing restarts by itself any more, so the band offers the user's Reconnect.
         if let Some(fault) = &self.fault {
-            return line(fault.to_string(), None, false);
+            return line(fault.to_string(), None, true);
         }
         match &self.stream {
             // A drop the stream recovers from by itself is the reconnect card's, never the red band's (SPEC.md:
@@ -799,13 +861,17 @@ impl AttachedTerminal {
         self.recovery.filter(|_| self.reconnecting())
     }
 
-    /// The user's Reconnect now: ask the stream to skip what is left of its backoff and attach at once. Sends nothing
-    /// unless the stream is coming back from a drop. During the catch-up of the attachment it came back on there is no
-    /// backoff left to skip, and the stream ignores the request then.
-    pub fn reconnect_now(&self) {
-        if self.reconnecting()
-            && let Some(handle) = &self.handle
-        {
+    /// The user's Reconnect now: skip what is left of the backoff and attach at once. During a restart's wait after a
+    /// protocol fault that opens the restart's stream now; otherwise it asks the stream to skip its own wait. Does
+    /// nothing unless the terminal is coming back by itself. During the catch-up of the attachment it came back on
+    /// there is no backoff left to skip, and the stream ignores the request then.
+    pub fn reconnect_now(&mut self, cx: &mut Context<Self>) {
+        if !self.reconnecting() {
+            return;
+        }
+        if self.restart.is_some() {
+            self.restart_stream(cx);
+        } else if let Some(handle) = &self.handle {
             handle.reconnect_now();
         }
     }
@@ -819,16 +885,30 @@ impl AttachedTerminal {
             .map(|placement| placement.lift)
     }
 
-    /// The user's Reconnect on the status line: attach again after a detach that stopped the stream (a stall, say) or a
-    /// refusal. Only the states that wait for it offer it, and it sends nothing in any other. Unlike
-    /// [`AttachedTerminal::reconnect_now`], which only shortens a recovery already under way, this starts the attach
-    /// that nothing else would.
+    /// The user's Reconnect on the status line: attach again after a detach that stopped the stream (a stall, say), a
+    /// refusal, or protocol faults past the restarts' bound. Only the states that wait for it offer it, and it does
+    /// nothing in any other. Unlike [`AttachedTerminal::reconnect_now`], which only shortens a recovery already under
+    /// way, this starts the attach that nothing else would.
+    ///
+    /// After the stream error there is no stream left to ask, so this opens a fresh one at once. Either way the fault
+    /// count starts over: the user asked to try again, and a fault after this is the start of a new recovery.
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
+        // No retired check: retiring drops the opener and the handle, so neither branch can attach anything then.
+        if self.fault.take().is_some() {
+            self.faults = 0;
+            if let Some(fit) = self.fit {
+                self.open(fit, cx);
+            }
+            cx.notify();
+            return;
+        }
         let waiting = matches!(
             self.stream,
             StreamState::Detached { .. } | StreamState::Refused { .. }
         );
-        if let (Some(handle), true, None) = (&self.handle, waiting, &self.fault) {
+        if let (Some(handle), true) = (&self.handle, waiting) {
+            self.faults = 0;
+            self.forget_faults = None;
             handle.take_control();
             cx.notify();
         }
@@ -860,9 +940,6 @@ impl AttachedTerminal {
             // Only the screen's placement reads it; anything else a new scale changes arrives as output.
             cx.notify();
         }
-        if self.fault.is_some() {
-            return;
-        }
         let width = f32::from(pane.size.width) - 2. * PANE_PADDING;
         let height = f32::from(pane.size.height) - 2. * PANE_PADDING;
         let Some(size) = fit(self.metrics, width, height, scale) else {
@@ -873,13 +950,17 @@ impl AttachedTerminal {
         }
         self.fit = Some(size);
         match &self.handle {
-            None => self.open(size, cx),
             // The stream delivers a resize whatever state it is in: at once on an open socket, as the first message
             // of a socket still connecting, and in the query of a later attach otherwise.
             Some(handle) => {
                 handle.resize(size.0, size.1);
                 self.resized_since_attach = true;
             }
+            // No stream yet: the first fit opens it.
+            None if self.restart.is_none() && self.fault.is_none() => self.open(size, cx),
+            // A stream closed over a protocol fault: the restart, or the user's Reconnect after the stream error,
+            // opens the next at the size kept above.
+            None => {}
         }
     }
 
@@ -910,9 +991,10 @@ impl AttachedTerminal {
         }
     }
 
-    /// Open the stream at `size` and start delivering its events.
+    /// Open a stream at `size` and start delivering its events: the first one, or the next after a protocol fault
+    /// closed the last (the caller has closed it already).
     fn open(&mut self, (cols, rows): (u16, u16), cx: &mut Context<Self>) {
-        let Some(open) = self.opener.take() else {
+        let Some(open) = self.opener.as_mut() else {
             return;
         };
         let (handle, mut events) = open(TerminalAttach {
@@ -923,6 +1005,8 @@ impl AttachedTerminal {
             rows,
         });
         self.handle = Some(handle);
+        // This attach asks for the size in its query, so no resize is on its way for it.
+        self.resized_since_attach = false;
         self.pump = Some(cx.spawn(async move |owner, cx| {
             while let Some(first) = events.recv().await {
                 let mut batch = vec![first];
@@ -945,7 +1029,13 @@ impl AttachedTerminal {
         }));
     }
 
-    /// Apply one turn's events in order. Returns whether delivery should go on.
+    /// Apply one turn's events of the current stream, in order. Returns whether delivery should go on: not once the
+    /// owner retired or closed the stream over a protocol fault, both of which drop the handle.
+    ///
+    /// The handle is what tells this stream's events from a later one's. That holds because a fault drops it only
+    /// from inside this delivery (the grid model refuses a message this call applies), so the loop that called it ends
+    /// before a restart's wait or the user's Reconnect can open the next stream and set a handle again. A fault raised
+    /// anywhere else would need a per-stream token instead.
     fn deliver(&mut self, batch: Vec<TerminalEvent>, cx: &mut Context<Self>) -> bool {
         #[cfg(test)]
         {
@@ -953,7 +1043,8 @@ impl AttachedTerminal {
         }
         let mut events = batch.into_iter().peekable();
         while let Some(event) = events.next() {
-            if self.retired || self.fault.is_some() {
+            // The rest of a faulted stream's batch is never applied to the screen the restart keeps.
+            if self.handle.is_none() {
                 break;
             }
             match event {
@@ -970,7 +1061,7 @@ impl AttachedTerminal {
                 TerminalEvent::State(state) => self.stream_changed(state, cx),
             }
         }
-        !self.retired && self.fault.is_none()
+        self.handle.is_some()
     }
 
     /// Apply consecutive output to the view that should get it: the staged replay, or the live screen.
@@ -1034,6 +1125,17 @@ impl AttachedTerminal {
                 // Back, if it was coming back: the reconnect card goes in the same redraw that shows the new screen.
                 self.recovery = None;
                 self.recovery_held = false;
+                // A restart after protocol faults is back, but its count stands for a while in case it faults again.
+                if self.faults > 0 {
+                    let owner = cx.weak_entity();
+                    self.forget_faults =
+                        Some(ticker::after(FAULTS_FORGOTTEN_AFTER, cx, move |cx| {
+                            let _ = owner.update(cx, |owner, _| {
+                                owner.faults = 0;
+                                owner.forget_faults = None;
+                            });
+                        }));
+                }
                 cx.notify();
                 // The attachments' not-connected refusal asked for exactly this, so it goes.
                 self.attachments
@@ -1096,19 +1198,15 @@ impl AttachedTerminal {
                 // after any attachment, so the attempt number alone would never show this failure.
                 let reattach_dropped =
                     self.recovery.is_some() && matches!(self.stream, StreamState::Attached(_));
-                if self.recovery.is_none() {
-                    self.card_scroll = ScrollHandle::new();
-                    self.recovery_held = self.held(cx) == Hold::ReconnectCard;
-                }
-                // An attempt failed: past the owner's request, this outage is the user's to see.
-                if status.attempt > 1 || reattach_dropped {
-                    self.recovery_held = false;
-                }
-                // Each report replaces the last: the phase line shows the wait or the attempt the stream is on now.
-                self.recovery = Some(*status);
+                self.recovering(*status, reattach_dropped, cx);
             }
             // Keeps the report of the attempt that attached, which the line still shows as in flight.
             StreamState::Attached(_) => {}
+            // A stream opened to restart after a protocol fault begins here: that is the restart's attempt under way,
+            // which the card goes on showing, not the end of the recovery. No other `Attaching` arrives during a
+            // recovery: a stream's own reconnect reports `Reconnecting`, and a take-control's follows a detach or a
+            // refusal, which ended the recovery.
+            StreamState::Attaching if self.recovery.is_some() => {}
             StreamState::Attaching
             | StreamState::Detached { .. }
             | StreamState::Refused { .. }
@@ -1121,15 +1219,87 @@ impl AttachedTerminal {
         cx.notify();
     }
 
-    /// End the stream over a message the grid model refused: the peer broke the format, so this attachment cannot go
-    /// on (the format's rule). The error's wording is the model's or decoder's own, never peer text.
+    /// The terminal is coming back by itself, and `status` is where its recovery stands now: the stream's own report
+    /// of a reconnect, or a restart's after a protocol fault. `failed` says the attempt before this report failed in a
+    /// way its number cannot show (a reattach that attached, then dropped or faulted before it went live).
+    fn recovering(&mut self, status: ReconnectStatus, failed: bool, cx: &mut Context<Self>) {
+        if self.recovery.is_none() {
+            self.card_scroll = ScrollHandle::new();
+            self.recovery_held = self.held(cx) == Hold::ReconnectCard;
+        }
+        // An attempt failed: past the owner's request, this outage is the user's to see.
+        if status.attempt > 1 || failed {
+            self.recovery_held = false;
+        }
+        // Each report replaces the last: the phase line shows the wait or the attempt the terminal is on now.
+        self.recovery = Some(status);
+    }
+
+    /// A message the grid model refused: the peer broke the format, so this attachment cannot go on (the format's
+    /// rule). Close the stream and restart it after the next rung's wait, or past the last rung show the stream error
+    /// with Reconnect (see "Protocol faults" in the module docs). The error's wording is the model's or decoder's own,
+    /// never peer text, and it is logged because the card does not show it.
     fn fail(&mut self, error: GridError, cx: &mut Context<Self>) {
-        tracing::warn!(%error, "a terminal stream broke the grid format; closing it");
-        self.fault = Some(format!("Terminal stream error: {error}").into());
+        // A fault during a recovery's catch-up is that reattach failing; any other fault starts a recovery.
+        let failed = self.recovery.is_some();
+        // Taking the handle also ends delivery: `deliver` applies nothing more of this batch and its loop ends.
+        if let Some(handle) = self.handle.take() {
+            handle.close();
+        }
         self.staging = None;
         self.live = false;
-        if let Some(handle) = &self.handle {
-            handle.close();
+        // A paste still reading the clipboard is stamped with this stream's attachment, and the next stream counts its
+        // stamps from 1 again, so it could match the restart's attachment: drop it, as going inert does. Only review
+        // checks this line: the test clipboard answers at once, so no test can fault while a paste is still reading.
+        self.paste = None;
+        // A count that a restart's hold was about to forget stands again: this fault is part of the same recovery.
+        self.forget_faults = None;
+        self.faults = self.faults.saturating_add(1);
+        let rungs = TerminalLadder::default().retries;
+        let of = u32::try_from(rungs.len()).unwrap_or(u32::MAX);
+        let rung = usize::try_from(self.faults - 1)
+            .ok()
+            .and_then(|index| rungs.get(index).copied());
+        tracing::warn!(
+            %error,
+            fault = self.faults,
+            of,
+            restarting = rung.is_some(),
+            "a terminal stream broke the grid format; closing it"
+        );
+        match rung {
+            Some(wait) => {
+                let status = ReconnectStatus {
+                    attempt: self.faults,
+                    of,
+                    phase: ReconnectPhase::Retrying,
+                    next_attempt_in: Some(wait),
+                };
+                self.recovering(status, failed, cx);
+                let owner = cx.weak_entity();
+                self.restart = Some(ticker::after(wait, cx, move |cx| {
+                    let _ = owner.update(cx, |owner, cx| owner.restart_stream(cx));
+                }));
+            }
+            None => {
+                self.fault = Some(format!("Terminal stream error: {error}").into());
+                self.recovery = None;
+                self.recovery_held = false;
+            }
+        }
+        cx.notify();
+    }
+
+    /// A restart's wait after a protocol fault is over (or the user skipped it): open the next stream at the size last
+    /// fitted, with the card showing the restart's attempt as under way.
+    fn restart_stream(&mut self, cx: &mut Context<Self>) {
+        // No retired check: retiring cancels the wait and drops the opener, and Reconnect now is not offered then.
+        self.restart = None;
+        if let Some(status) = &mut self.recovery {
+            status.next_attempt_in = None;
+        }
+        if let Some(fit) = self.fit {
+            self.open(fit, cx);
         }
         cx.notify();
     }
@@ -1547,6 +1717,8 @@ impl AttachedTerminal {
             handle.close();
         }
         self.pump = None;
+        self.restart = None;
+        self.forget_faults = None;
         self.committed = None;
         self.select = None;
         self.staging = None;
@@ -1806,7 +1978,7 @@ impl AttachedTerminal {
         .tier(Tier::Neutral)
         .compact()
         .on_click(move |_, _, cx| {
-            let _ = owner.update(cx, |owner, _| owner.reconnect_now());
+            let _ = owner.update(cx, |owner, cx| owner.reconnect_now(cx));
         });
         let card = status_card(cx)
             .id("terminal-reconnect-card")

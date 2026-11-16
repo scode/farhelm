@@ -3058,7 +3058,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   user to discover by typing. Recovery follows the same two regimes as a host connection: bounded retries, then periodic
   re-probing, so a terminal whose network comes back overnight is simply there again. Which phase it is in is visible in
   the terminal itself, along with a way to retry immediately, and a recovered terminal reattaches exactly as any attach
-  does — landing where the session is now, not scrolling its history past again.
+  does — landing where the session is now, not scrolling its history past again. A stream that keeps sending messages
+  the terminal cannot read has not lost its connection, and re-probing would only replay the same break: it gets the
+  same bounded retries, then stops on an error line with a way to retry.
 - A window displaced from the seat shows no terminal screen and reattaches nothing: it goes wholly inert until the user
   takes the seat back (One GUI at a time). A viewer detached for stalling keeps its last screen, no longer live, and its
   reason rather than reattaching: the wedge is why it was detached, and returning into the same wedge repeats it. It

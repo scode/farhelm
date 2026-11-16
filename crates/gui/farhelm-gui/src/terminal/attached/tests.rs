@@ -123,7 +123,8 @@ impl Render for Pane {
     }
 }
 
-/// Where an owner's opener leaves the fake stream it opened and the attach it was asked for.
+/// Where an owner's opener leaves the fake stream it opened and the attach it was asked for. An owner opens again only
+/// to restart after a protocol fault; the newer stream then takes the slot, and the closed one is dropped.
 pub(in crate::terminal) type Opened = Rc<RefCell<Option<(FakeTerminal, FakeAttach)>>>;
 
 /// One owner in its window (and maybe a second), the helm behind its UI session, and the fake stream each opened
@@ -1186,31 +1187,6 @@ fn a_tab_closed_before_it_was_ever_attached_explains_itself(cx: &mut TestAppCont
     assert!(!line.offers_reconnect);
 }
 
-/// A message the grid model refuses ends the stream: the owner closes it, says "Terminal stream error:" with the
-/// model's own words and offers nothing, and delivers nothing after it. The screen from before the fault stays.
-/// Restarting the attachment by itself is deliberately not done yet.
-#[gpui::test]
-fn a_protocol_fault_closes_the_stream_with_an_error_line(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    h.attach_showing("before");
-    let second_hello: GridOutput = serde_json::from_value(
-        serde_json::json!({"t":"hello","cols":FITTED.0,"rows":FITTED.1,"history_cap":0}),
-    )
-    .unwrap();
-    h.fake().output(second_hello);
-    settle(h.cx);
-    let line = h.status().unwrap();
-    assert_eq!(
-        line.words,
-        "Terminal stream error: grid message breaks a bound: a second hello on one attachment"
-    );
-    assert!(!line.offers_reconnect);
-    assert_eq!(h.fake().phase(), FakePhase::Closed);
-    assert!(!h.read(|owner, _| owner.is_live()));
-    assert_eq!(h.text().as_deref().map(first_line), Some("before"));
-    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_none());
-}
-
 /// The exit line's words are the old app's, for a status and for a signal. A replay that already holds the exit
 /// shows the line with the screen, in the one redraw that shows the replay, rather than a frame later.
 #[gpui::test]
@@ -1630,12 +1606,270 @@ fn detached_refused_and_closed_streams_keep_the_red_band(cx: &mut TestAppContext
     assert!(!h.card_drawn());
 }
 
-/// A message the grid model refuses ends the stream for good, and the owner says so on the red band. One that arrives
-/// during an outage's catch-up must not leave the reconnect card promising a reattach that will never come. Specified:
-/// after a dropped link and the reconnect's first message, a second hello faults the stream: the band shows the
-/// error, the card is gone, and the stream is closed.
+// ---- Protocol faults -----------------------------------------------------------------------------------------------
+
+/// The grid model's words for the fault these tests make: a second hello on one attachment.
+const FAULT_WORDS: &str = "grid message breaks a bound: a second hello on one attachment";
+
+impl Harness<'_> {
+    /// The fake's open socket sends a second hello, which the grid model refuses: a protocol fault. The attachment
+    /// must have had its hello already (a replay begun, or a live screen).
+    fn fault(&mut self) {
+        let hello: GridOutput = serde_json::from_value(
+            serde_json::json!({"t":"hello","cols":FITTED.0,"rows":FITTED.1,"history_cap":0}),
+        )
+        .unwrap();
+        self.fake().output(hello);
+        settle(self.cx);
+    }
+
+    /// The stream a restart opened attaches, begins its replay and faults in it: a peer that breaks the format on
+    /// every replay.
+    fn attach_and_fault(&mut self) {
+        let asked = self.fake().attach();
+        let replay = screen(asked.cols, asked.rows, "x", serde_json::Value::Null);
+        self.fake().output(replay[0].clone());
+        self.fault();
+    }
+
+    /// The report the card's phase line is drawn from, with the restart's attempt and wait.
+    fn recovery(&mut self) -> Option<ReconnectStatus> {
+        self.read(|owner, _| owner.reconnect_status())
+    }
+
+    /// From a live screen, fault on every replay until the restarts run out: the first fault on the live screen, then
+    /// one in each restart's replay, each restart's wait let run out in full. Ends with the stream error showing.
+    fn fault_past_the_bound(&mut self) {
+        self.fault();
+        for wait in TerminalLadder::default().retries {
+            advance(self.cx, wait);
+            assert_eq!(
+                self.fake().phase(),
+                FakePhase::Attaching,
+                "the premise: the restart opened a stream"
+            );
+            self.attach_and_fault();
+        }
+    }
+}
+
+/// The waiting report of restart `attempt` after a fault, `ms` milliseconds away, on the default ladder's six rungs.
+fn restarting(attempt: u32, ms: u64) -> Option<ReconnectStatus> {
+    Some(ReconnectStatus {
+        attempt,
+        of: 6,
+        phase: ReconnectPhase::Retrying,
+        next_attempt_in: Some(Duration::from_millis(ms)),
+    })
+}
+
+/// SPEC.md, "Terminal experience": a terminal that loses its connection "recovers by itself". A peer that breaks the
+/// grid format ends its attachment (the format's rule), and the old app treated that ending as one more transport
+/// loss, restarting the terminal with a fresh attach and a full replay; a red band with no way back but reopening the
+/// session is what this replaces. The restart must look like any other recovery: the calm card over the last good
+/// screen, never the fault's text or the red band, and the new replay replacing the screen only once complete.
+///
+/// Specified: with a live screen showing "before", a refused message closes the stream and draws the card with
+/// "Reconnecting in 1s (attempt 1 of 6)…", with no red band, no status line and none of the fault's words painted,
+/// over "before", not live. No stream opens a millisecond before the first rung's half second, and one opens at it, at
+/// the fitted size, with the card saying the attempt is under way. Through the new stream's replay the card stays over
+/// "before" with no band; once the replay completes, "after" shows live with neither card nor band.
 #[gpui::test]
-fn a_fault_during_a_reconnect_ends_the_card(cx: &mut TestAppContext) {
+fn a_protocol_fault_restarts_the_stream_and_its_replay_replaces_the_screen(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    assert!(h.read(|owner, _| owner.is_live()), "the premise: live");
+    h.fault();
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Closed,
+        "the faulted stream is closed"
+    );
+    assert!(h.card_drawn());
+    assert!(!h.banner_drawn());
+    assert_eq!(h.status(), None);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting in 1s (attempt 1 of 6)…")
+    );
+    let painted = h.painted();
+    assert!(
+        !painted
+            .iter()
+            .any(|text| text.contains("Terminal stream error") || text.contains(FAULT_WORDS)),
+        "the fault's text is not shown while recovering: {painted:?}"
+    );
+    assert_eq!(h.text().as_deref().map(first_line), Some("before"));
+    assert!(!h.read(|owner, _| owner.is_live()));
+
+    advance(h.cx, Duration::from_millis(499));
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Closed,
+        "no restart before the first rung's wait"
+    );
+    advance(h.cx, Duration::from_millis(1));
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Attaching,
+        "the restart opened a stream"
+    );
+    assert!(h.card_drawn());
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting (attempt 1 of 6)…")
+    );
+
+    let asked = h.fake().attach();
+    assert_eq!(
+        asked,
+        FakeAttach {
+            cols: FITTED.0,
+            rows: FITTED.1,
+            resize_on_open: None
+        },
+        "the restart attaches at the fitted size"
+    );
+    let replay = screen(asked.cols, asked.rows, "after", serde_json::Value::Null);
+    h.fake().output(replay[0].clone());
+    settle(h.cx);
+    assert!(
+        h.card_drawn(),
+        "the card stays through the restart's catch-up"
+    );
+    assert!(!h.banner_drawn());
+    assert_eq!(h.text().as_deref().map(first_line), Some("before"));
+
+    for message in replay.into_iter().skip(1) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert!(h.read(|owner, _| owner.is_live()));
+    assert_eq!(h.text().as_deref().map(first_line), Some("after"));
+    assert!(!h.card_drawn());
+    assert!(!h.banner_drawn());
+}
+
+/// A peer that breaks the format on every replay must neither hot-loop full replays nor leave the user watching a card
+/// that promises a reattach that never works: the restarts back off on the stream ladder's six active rungs, and past
+/// them the red band names the fault and offers Reconnect.
+///
+/// Specified: after a live screen "before", six faults in a row (the first on the live screen, the rest in each
+/// restart's replay) each wait the next rung, 0.5, 1, 2, 4, 8 and 15 s, with no restart a millisecond before it and one
+/// at it, the card counting "attempt n of 6" with no band. The seventh fault closes the stream and shows the band,
+/// "Terminal stream error: " and the model's words, with Reconnect and no card, over "before"; no stream opens by
+/// itself after that, a minute later.
+#[gpui::test]
+fn repeated_protocol_faults_back_off_and_end_in_the_red_band(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    assert!(h.read(|owner, _| owner.is_live()), "the premise: live");
+    h.fault();
+    let rungs = [500, 1_000, 2_000, 4_000, 8_000, 15_000];
+    for (attempt, ms) in (1..).zip(rungs) {
+        assert!(h.card_drawn(), "fault {attempt}: the card shows");
+        assert!(!h.banner_drawn(), "fault {attempt}: no band yet");
+        assert_eq!(h.recovery(), restarting(attempt, ms));
+        advance(h.cx, Duration::from_millis(ms - 1));
+        assert_eq!(
+            h.fake().phase(),
+            FakePhase::Closed,
+            "no restart before rung {attempt}'s wait"
+        );
+        advance(h.cx, Duration::from_millis(1));
+        assert_eq!(
+            h.fake().phase(),
+            FakePhase::Attaching,
+            "rung {attempt}'s restart opened a stream"
+        );
+        h.attach_and_fault();
+    }
+
+    assert!(h.banner_drawn());
+    assert!(!h.card_drawn());
+    let line = h.status().expect("the stream error shows");
+    assert_eq!(line.words, format!("Terminal stream error: {FAULT_WORDS}"));
+    assert!(line.offers_reconnect);
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_some());
+    assert_eq!(h.fake().phase(), FakePhase::Closed);
+    assert_eq!(h.text().as_deref().map(first_line), Some("before"));
+    advance(h.cx, Duration::from_secs(60));
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Closed,
+        "nothing restarts by itself past the bound"
+    );
+}
+
+/// The band after the restarts ran out must not be a dead end: a peer fixed since (a supervisor updated, say) is one
+/// press away, and the press starts the count over, since the user chose to try again. Specified: from the band, a
+/// click on Reconnect opens a new stream at once, with no time passing, and shows neither band nor card (an attach
+/// the user asked for, like Reconnect after a stall); its replay shows "again" live; a fault after that waits the
+/// first rung again, attempt 1 of 6.
+#[gpui::test]
+fn reconnect_after_the_stream_error_attaches_a_fresh_stream(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault_past_the_bound();
+    assert!(h.banner_drawn(), "the premise: the stream error shows");
+
+    click(h.cx, STATUS_RECONNECT_ID);
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Attaching,
+        "Reconnect opened a stream"
+    );
+    assert!(!h.banner_drawn());
+    assert!(!h.card_drawn());
+    assert_eq!(h.status(), None);
+
+    h.attach_showing("again");
+    assert!(h.read(|owner, _| owner.is_live()));
+    assert_eq!(h.text().as_deref().map(first_line), Some("again"));
+    h.fault();
+    assert_eq!(h.recovery(), restarting(1, 500));
+}
+
+/// Reconnect now promises to skip the wait the card shows, whatever made it. A restart after a fault waits on the
+/// owner's clock rather than the stream's, so the button must reach that wait too, and only once: the skipped wait
+/// must not open a second stream when it would have run out. Specified: after a fault, a click on Reconnect now
+/// opens the restart's stream with no time passing, the card then showing the attempt under way; once that stream's
+/// socket is open, the first rung's time passing opens no other stream.
+#[gpui::test]
+fn reconnect_now_skips_a_restarts_wait(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault();
+    assert_eq!(h.fake().phase(), FakePhase::Closed, "the premise: waiting");
+
+    click(h.cx, RECONNECT_NOW_ID);
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Attaching,
+        "Reconnect now opened the restart's stream"
+    );
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting (attempt 1 of 6)…")
+    );
+    h.fake().attach();
+    advance(h.cx, Duration::from_secs(1));
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Open,
+        "the skipped wait opened no second stream"
+    );
+}
+
+/// A fault in a reconnect's catch-up is one more failed attempt of the same outage: the card that was up must stay,
+/// now counting the restart, rather than giving way to the red band. Specified: after a dropped link and the
+/// reconnect's first message, a refused message closes the stream, and the card stays, with the first restart's wait
+/// and no band, over the kept screen.
+#[gpui::test]
+fn a_fault_during_a_reconnects_catch_up_restarts_it(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("screen");
     h.fake().drop_link();
@@ -1645,15 +1879,231 @@ fn a_fault_during_a_reconnect_ends_the_card(cx: &mut TestAppContext) {
     settle(h.cx);
     assert!(h.card_drawn(), "the premise: catching up after an outage");
 
-    let second_hello: GridOutput = serde_json::from_value(
-        serde_json::json!({"t":"hello","cols":asked.cols,"rows":asked.rows,"history_cap":0}),
+    h.fault();
+    assert_eq!(h.fake().phase(), FakePhase::Closed);
+    assert!(h.card_drawn());
+    assert!(!h.banner_drawn());
+    assert_eq!(h.recovery(), restarting(1, 500));
+    assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
+}
+
+/// The count must outlast a peer that replays cleanly and then faults on live output, or the restarts would loop on
+/// the first rung, a full replay every half second, forever; and it must start over once a restart has held, or a
+/// terminal that faults now and then would end on the band after six faults however far apart. Specified: a fault, a
+/// clean restart that goes live, and a fault a millisecond short of [`FAULTS_FORGOTTEN_AFTER`] later waits the second
+/// rung (attempt 2, 1 s); a clean restart that then stays live for [`FAULTS_FORGOTTEN_AFTER`], and a fault after
+/// that, waits the first rung again (attempt 1, 0.5 s).
+#[gpui::test]
+fn the_fault_count_starts_over_only_once_a_restart_has_held(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault();
+    advance(h.cx, Duration::from_millis(500));
+    h.attach_showing("one");
+    advance(h.cx, FAULTS_FORGOTTEN_AFTER - Duration::from_millis(1));
+    assert!(
+        h.read(|owner, _| owner.is_live()),
+        "the premise: the restart went live and is still live"
+    );
+    h.fault();
+    assert_eq!(h.recovery(), restarting(2, 1_000));
+
+    advance(h.cx, Duration::from_millis(1_000));
+    h.attach_showing("two");
+    advance(h.cx, FAULTS_FORGOTTEN_AFTER);
+    assert!(
+        h.read(|owner, _| owner.is_live()),
+        "the premise: still live"
+    );
+    h.fault();
+    assert_eq!(h.recovery(), restarting(1, 500));
+}
+
+/// The hold that forgets the count is armed when a restart goes live, and must not run out in the middle of the
+/// recovery a later fault starts: a peer that faults again soon after, and then on every replay, would otherwise drop
+/// back to the first rung when the hold's 15 s are up and never reach the band. Specified: a restart goes live and
+/// faults at once, then faults in every restart's replay; the fault that comes once the hold's
+/// [`FAULTS_FORGOTTEN_AFTER`] has passed still waits rung 6 (15 s), and the next one shows the band.
+#[gpui::test]
+fn a_fault_after_a_restart_went_live_keeps_climbing_past_the_hold(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault();
+    advance(h.cx, Duration::from_millis(500));
+    h.attach_showing("live");
+    assert!(
+        h.read(|owner, _| owner.is_live()),
+        "the premise: the restart went live, which arms the hold"
+    );
+    h.fault();
+    // Rungs 2 to 5 add up to the hold's 15 s, so the fourth restart's fault comes as the hold would run out.
+    for (attempt, ms) in (2..).zip([1_000, 2_000, 4_000, 8_000]) {
+        assert_eq!(h.recovery(), restarting(attempt, ms));
+        advance(h.cx, Duration::from_millis(ms));
+        h.attach_and_fault();
+    }
+    assert_eq!(
+        h.recovery(),
+        restarting(6, 15_000),
+        "the count stands past the hold's end"
+    );
+    advance(h.cx, Duration::from_secs(15));
+    h.attach_and_fault();
+    assert!(h.banner_drawn());
+}
+
+/// Nothing a faulted stream queued behind the refused message may apply: the format's rule is that nothing after it
+/// can be trusted, and the owner has already moved on to its restart. Specified: with a live screen, the stream
+/// delivers a second hello and then, in the same turn, a report that its proven link dropped (attempt 1 in flight);
+/// the card shows the restart's own first wait, not the stream's report.
+#[gpui::test]
+fn the_rest_of_a_faulted_streams_batch_is_not_applied(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    let hello: GridOutput = serde_json::from_value(
+        serde_json::json!({"t":"hello","cols":FITTED.0,"rows":FITTED.1,"history_cap":0}),
     )
     .unwrap();
-    h.fake().output(second_hello);
+    let turns = h.read(|owner, _| owner.turns);
+    h.fake().output(hello);
+    h.fake().drop_proven_link();
     settle(h.cx);
+    assert_eq!(
+        h.read(|owner, _| owner.turns),
+        turns + 1,
+        "the premise: the fault and the report after it came in one delivery turn"
+    );
+    assert_eq!(h.recovery(), restarting(1, 500));
+}
+
+/// A resize while no stream is open must wait for whatever opens the next one, or it would open a stream of its own:
+/// during a restart's wait that skips the backoff (and the restart's timer then opens a second stream over it),
+/// and under the stream error it restarts what the band says has stopped. The restart must still ask for the size the
+/// pane has by then, or the program runs at the old size until the next resize. Specified: after a fault, a smaller
+/// pane opens no stream; when the first rung's wait runs out, the restart's stream asks for the smaller fit.
+#[gpui::test]
+fn a_resize_during_a_restarts_wait_waits_for_the_restart(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault();
+    h.size.set((PANE.0 - 40., PANE.1));
+    redraw(h.cx);
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Closed,
+        "the resize opened no stream"
+    );
+    advance(h.cx, Duration::from_millis(500));
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Attaching,
+        "the premise: the restart opened a stream"
+    );
+    let asked = h.fake().attach();
+    assert_eq!((asked.cols, asked.rows), (FITTED.0 - 4, FITTED.1));
+}
+
+/// As for a restart's wait: under the stream error a resize must not open the stream that only Reconnect is meant to
+/// open. Specified: from the band, a smaller pane opens no stream and the band stays; Reconnect then attaches at the
+/// smaller fit.
+#[gpui::test]
+fn a_resize_under_the_stream_error_opens_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault_past_the_bound();
+    h.size.set((PANE.0 - 40., PANE.1));
+    redraw(h.cx);
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Closed,
+        "the resize opened no stream"
+    );
     assert!(h.banner_drawn());
-    assert!(!h.card_drawn());
-    assert_eq!(h.fake().phase(), FakePhase::Closed);
+    click(h.cx, STATUS_RECONNECT_ID);
+    let asked = h.fake().attach();
+    assert_eq!((asked.cols, asked.rows), (FITTED.0 - 4, FITTED.1));
+}
+
+/// A resize sent on the faulted stream must not stand in for the restart's own correction: the restart is a new
+/// attach, and a first screen at another size than it asked for (an attach-time resize the supervisor clamped or lost)
+/// leaves the program drawing for a grid the pane does not show unless the owner corrects it. Specified: a smaller
+/// pane sends one resize on the live stream; after a fault, the restart asks for the smaller fit, and when its replay
+/// says hello at the old size the owner sends one resize to the fit on the new stream, and a redraw sends nothing more.
+#[gpui::test]
+fn a_restarts_first_screen_at_another_size_is_resized_once(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    let smaller = (FITTED.0 - 4, FITTED.1);
+    h.size.set((PANE.0 - 40., PANE.1));
+    redraw(h.cx);
+    assert_eq!(
+        h.fake().received(),
+        [FakeTerminalRequest::Resize {
+            cols: smaller.0,
+            rows: smaller.1
+        }],
+        "the premise: the resize went out on the first stream"
+    );
+    h.fault();
+    advance(h.cx, Duration::from_millis(500));
+    let asked = h.fake().attach();
+    assert_eq!(
+        (asked.cols, asked.rows),
+        smaller,
+        "the premise: the restart asks for the fit"
+    );
+    for message in screen(FITTED.0, FITTED.1, "wide", serde_json::Value::Null) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().received(),
+        [FakeTerminalRequest::Resize {
+            cols: smaller.0,
+            rows: smaller.1
+        }]
+    );
+    redraw(h.cx);
+    assert_eq!(h.fake().received(), [], "once");
+}
+
+/// SPEC_impl.md, "One failure path: the reset": nothing started for an old connection may outlive it, and a restart's
+/// wait is the owner's own timer, which the stream's close does not end. A restart that fired after a reset would
+/// attach for a window that went inert, and every attach displaces. Specified: a reset during a restart's wait leaves
+/// the faulted stream closed and opens none when the wait would have run out; Reconnect now, asked for directly
+/// since the card is gone, opens none either.
+#[gpui::test]
+fn a_reset_during_a_restarts_wait_opens_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault();
+    assert!(h.card_drawn(), "the premise: a restart is waiting");
+    h.helm.break_channel();
+    settle(h.cx);
+    assert!(h.cx.update(|_, cx| h.connection.read(cx).session().is_none()));
+    advance(h.cx, Duration::from_secs(1));
+    let owner = h.owner.clone();
+    owner.update(h.cx, |owner, cx| owner.reconnect_now(cx));
+    settle(h.cx);
+    assert_eq!(h.fake().phase(), FakePhase::Closed, "no stream opened");
+}
+
+/// As for a restart's wait: the stream error's Reconnect must not attach once the owner has retired. Specified: from
+/// the band, after a reset, Reconnect asked for directly (the band is gone) opens no stream.
+#[gpui::test]
+fn a_reset_under_the_stream_error_leaves_reconnect_inert(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("before");
+    h.fault_past_the_bound();
+    assert!(h.banner_drawn(), "the premise: the stream error shows");
+    h.helm.break_channel();
+    settle(h.cx);
+    assert_eq!(h.status(), None);
+    let owner = h.owner.clone();
+    owner.update(h.cx, |owner, cx| owner.reconnect(cx));
+    settle(h.cx);
+    assert_eq!(h.fake().phase(), FakePhase::Closed, "no stream opened");
 }
 
 /// The phase line's words are the old card's, which users and the old e2e specs read ("attempt 1 of 6", "Retrying
