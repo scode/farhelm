@@ -8,32 +8,24 @@
 //! manager as in the app; the fake transfers hold each check's answer until the test gives it, which is how a test sees
 //! the checking state and whether leaving abandoned a check.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
-use farhelm_grid_model::GridOutput;
-use farhelm_helm_client::fake::FakeHelm;
-use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
-use farhelm_helm_client::fake::transfers::{FakeAnswer, FakeTransfer, FakeTransfers};
-use farhelm_helm_client::terminal::AttachmentLease;
+use farhelm_helm_client::fake::transfers::{FakeAnswer, FakeTransfer};
 use farhelm_helm_client::{OpenOutcome, SavedDownload};
 use farhelm_proto::grid::{GridInput, MouseEventKind};
-use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
-};
+use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
-    AppContext as _, Bounds, Context, Entity, IntoElement, Modifiers, MouseButton, MouseDownEvent,
-    MouseUpEvent, ParentElement, PlatformInput, Point, Render, Styled, TestAppContext,
-    VisualTestContext, Window, div, point, px,
+    Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Point,
+    TestAppContext, point, px,
 };
 
 use super::*;
 use crate::session;
-use crate::terminal::CellMetrics;
-use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
+use crate::terminal::attached;
+use crate::terminal::attached::tests::{FITTED, Harness, frame, mouse_mode, resizes};
 use crate::test_support::{self, advance, redraw, settle};
-use crate::{root, theme};
+use crate::theme;
 
 // ---- Pure rules ------------------------------------------------------------------------------------------------------
 
@@ -165,87 +157,35 @@ fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
 
 // ---- Harness ---------------------------------------------------------------------------------------------------------
 
-/// The window's root: the terminal in a fixed 816 by 496 pane, wired through [`root`] so its display opens as a layer.
-struct Pane {
-    /// The terminal; `None` once a test has closed it.
-    owner: Option<Entity<AttachedTerminal>>,
-    root: root::Attachment,
+/// The terminal's own test harness ([`attached::tests::harness`]: an attached owner of session `s1` in a window, its
+/// stream and its UI session's transfers the helm client's fakes), with the saves the terminal has asked for so far.
+/// Steps the terminal's harness already has (resting on a cell, a click with modifiers, the link choice) are its own.
+struct Files<'a> {
+    h: Harness<'a>,
+    /// Every save the terminal asked for so far, in order: the path, whether it asked to open the save, and the answer
+    /// the save waits on (taken by [`Files::save`]).
+    downloads: Vec<(String, bool, Option<FakeAnswer<SavedDownload>>)>,
 }
 
-impl Render for Pane {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let pane = div().w(px(816.)).h(px(496.)).children(self.owner.clone());
-        root::wrap(div().size_full().child(pane), &self.root, window, cx)
+impl<'a> Deref for Files<'a> {
+    type Target = Harness<'a>;
+    fn deref(&self) -> &Harness<'a> {
+        &self.h
     }
 }
 
-/// An attached terminal of session `s1`, drawn and checking through the fake transfers, with the helm's side of its
-/// stream and the test's side of its checks.
-struct Harness<'a> {
-    cx: &'a mut VisualTestContext,
-    /// The window's root, which a test closes the terminal through.
-    pane: Entity<Pane>,
-    owner: Entity<AttachedTerminal>,
-    stream: Rc<RefCell<Option<FakeTerminal>>>,
-    /// The size the stream attached at, once [`Harness::show`] attached it.
-    size: (u16, u16),
-    transfers: FakeTransfers,
-    /// Every save the terminal asked for so far, in order: the path, whether it asked to open the save, and the answer
-    /// the save waits on (taken by [`Harness::save`]).
-    downloads: Vec<(String, bool, Option<FakeAnswer<SavedDownload>>)>,
-    /// The UI channel's helm: it keeps the UI session the terminal was made for current, and pushes preferences.
-    helm: FakeHelm,
+impl<'a> DerefMut for Files<'a> {
+    fn deref_mut(&mut self) -> &mut Harness<'a> {
+        &mut self.h
+    }
 }
 
-/// A connected app with the terminal drawn in its own window, its UI session's transfers the fake's (served through
-/// the connection, the path the app's own take) and its preferences row empty, as a fresh helm pushes it. Its stream is
-/// opened (the pane has been measured) but not attached; [`Harness::show`] attaches it.
-fn harness(cx: &mut TestAppContext) -> Harness<'_> {
-    test_support::install(cx);
-    let (mut helm, handle, events) = FakeHelm::new();
-    let connection = cx.update(|cx| session::start(handle, events, None, cx));
-    let (transfers, served) = FakeTransfers::new();
-    cx.update(|cx| connection.update(cx, |connection, _| connection.serve_transfers(served)));
-    helm.connect(vec![CollectionState {
-        collection: Collection::Preferences,
-        meta: test_support::meta(&[PREFERENCES_KEY]),
-        entries: vec![KeyedEntry {
-            key: PREFERENCES_KEY.into(),
-            value: serde_json::json!({}),
-        }],
-    }]);
-    cx.run_until_parked();
-    let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
-    let stream: Rc<RefCell<Option<FakeTerminal>>> = Rc::default();
-    let slot = stream.clone();
-    let (pane, cx) = test_support::open_view(cx, |window, cx| {
-        let open: OpenStream = Box::new(move |attach| {
-            let (fake, handle, events) = FakeTerminal::open(&attach);
-            *slot.borrow_mut() = Some(fake);
-            (handle, events)
-        });
-        let target = TerminalTarget {
-            session: "s1".into(),
-            tab: None,
-            lease: AttachmentLease::new(),
-        };
-        let metrics = CellMetrics::new(10., 22., 16.).unwrap();
-        let owner = cx.new(|cx| AttachedTerminal::new(&session, target, metrics, open, cx));
-        Pane {
-            owner: Some(owner),
-            root: root::attach(window, cx),
-        }
-    });
-    let owner = cx.update(|_, cx| pane.read(cx).owner.clone().unwrap());
-    Harness {
-        cx,
-        pane,
-        owner,
-        stream,
-        size: (0, 0),
-        transfers,
+/// The terminal's harness, its stream opened (the pane has been measured) but not attached; [`Files::show`] attaches
+/// it.
+fn harness(cx: &mut TestAppContext) -> Files<'_> {
+    Files {
+        h: attached::tests::harness(cx),
         downloads: Vec::new(),
-        helm,
     }
 }
 
@@ -257,15 +197,6 @@ fn row(line: u64, text: &str, link: bool) -> serde_json::Value {
         serde_json::json!([0, text.len(), text, [0, -1, -1]])
     };
     serde_json::json!([line, {"w": false, "r": [run]}])
-}
-
-/// A frame committing revision `rev` of a `cols` by `rows` screen.
-fn frame(rev: u64, (cols, rows): (u16, u16)) -> GridOutput {
-    serde_json::from_value(
-        serde_json::json!({"t":"frame","rev":rev,"cols":cols,"rows":rows,
-        "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
-    )
-    .unwrap()
 }
 
 /// A ready file's answer.
@@ -290,85 +221,50 @@ const TIERS: [&str; 5] = [
     "terminal-file-status-danger",
 ];
 
-impl Harness<'_> {
+impl Files<'_> {
     /// Attach and replay a complete screen with `rows` (see [`row`]), whose hyperlink `1`, if any, goes to `link`.
+    /// The attach is the [`FITTED`] size, which [`Files::rewrite`] and the tests' layouts (a cut path's head four
+    /// columns short of the edge) count on.
     fn show(&mut self, rows: Vec<serde_json::Value>, link: Option<&str>) {
-        let asked = self
-            .stream
-            .borrow_mut()
-            .as_mut()
-            .expect("the premise: the measured terminal opened its stream")
-            .attach();
-        let size = (asked.cols, asked.rows);
-        self.size = size;
         let links = link.map_or(serde_json::json!([]), |uri| serde_json::json!([["1", uri]]));
-        let messages = [
-            serde_json::json!({"t":"hello","cols":size.0,"rows":size.1,"history_cap":0}),
-            serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
-                "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
-            serde_json::json!({"t":"rows","rows":rows,"links":links}),
-        ];
-        {
-            let mut stream = self.stream.borrow_mut();
-            let stream = stream.as_mut().unwrap();
-            for message in messages {
-                stream.output(serde_json::from_value(message).unwrap());
-            }
-            stream.output(frame(1, size));
-            stream.replay_complete();
-        }
-        settle(self.cx);
+        self.attach_rows(serde_json::json!(rows), links);
+        let asked = self
+            .opened
+            .borrow()
+            .as_ref()
+            .map(|(_, asked)| (asked.cols, asked.rows));
+        assert_eq!(
+            asked,
+            Some(FITTED),
+            "the premise: the terminal attached at the fitted size"
+        );
     }
 
     /// Live output: `rows` rewritten, committed as revision `rev`, with hyperlink `1` going to `link`.
     fn rewrite(&mut self, rows: Vec<serde_json::Value>, link: Option<&str>, rev: u64) {
         let links = link.map_or(serde_json::json!([]), |uri| serde_json::json!([["1", uri]]));
         let message = serde_json::json!({"t":"rows","rows":rows,"links":links});
-        let size = self.size;
-        {
-            let mut stream = self.stream.borrow_mut();
-            let stream = stream.as_mut().unwrap();
-            stream.output(serde_json::from_value(message).unwrap());
-            stream.output(frame(rev, size));
-        }
+        self.fake().output(serde_json::from_value(message).unwrap());
+        let frame = frame(rev, FITTED.0, FITTED.1);
+        self.fake().output(serde_json::from_value(frame).unwrap());
         settle(self.cx);
         redraw(self.cx);
     }
 
-    /// The middle of cell (`col`, `row`) in the window: the grid sits inside the pane's 8 pixels of padding, in 10 by
-    /// 22 pixel cells.
-    fn at(&mut self, col: u16, row: u16) -> Point<Pixels> {
-        let grid = test_support::frame(self.cx)
-            .into_iter()
-            .find(|node| node.element_id.as_deref() == Some("terminal-grid"))
-            .expect("the premise: the terminal's grid is drawn")
-            .bounds
-            .origin;
-        grid + point(
-            px(8. + f32::from(col) * 10. + 1.),
-            px(8. + (f32::from(row) + 0.5) * 22.),
-        )
-    }
-
-    /// Rest the pointer on `at` and let the display open (it opens after the frame that saw the hover).
-    fn rest_on(&mut self, at: Point<Pixels>) {
-        self.cx.simulate_mouse_move(at, None, Modifiers::none());
-        settle(self.cx);
-        redraw(self.cx);
-    }
-
-    /// A click at `at`, where the pointer already rests.
+    /// A plain click at `at`, where the pointer already rests, and the frame after it, in which a display a press
+    /// closed comes back.
     fn click(&mut self, at: Point<Pixels>) {
-        self.cx
-            .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
-        self.cx
-            .simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
-        settle(self.cx);
+        self.click_with(at, Modifiers::none());
+    }
+
+    /// [`Files::click`] with `modifiers` held: the terminal harness's press and release, and the frame after them.
+    fn click_with(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
+        self.h.click_with(at, modifiers);
         redraw(self.cx);
     }
 
     /// The checks the terminal started since the last call, by the path each asked about, all for session `s1`. Saves
-    /// it started meanwhile are kept in [`Harness::downloads`].
+    /// it started meanwhile are kept in [`Files::downloads`].
     fn checks(&mut self) -> Vec<(String, FakeAnswer<FileStat>)> {
         let mut checks = Vec::new();
         for transfer in self.transfers.take() {
@@ -480,50 +376,6 @@ impl Harness<'_> {
         self.cx.update(|_, cx| owner.read(cx).points_at_link(cx))
     }
 
-    /// The program turns its mouse reporting to `mode` (`click`, or `off`).
-    fn mouse_mode(&mut self, mode: &str) {
-        let state = serde_json::json!({"t":"state","mouse":mode,"focus":false,"alt_screen":false,
-            "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null});
-        self.stream
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .output(serde_json::from_value(state).unwrap());
-        settle(self.cx);
-    }
-
-    /// The Terminal settings' link choice (`intercept`, `both` or `program`), as the helm pushes it.
-    fn link_click(&mut self, mode: &str) {
-        self.helm.push(CollectionChanges {
-            collection: Collection::Preferences,
-            meta: test_support::meta(&[PREFERENCES_KEY]),
-            upsert: vec![KeyedEntry {
-                key: PREFERENCES_KEY.into(),
-                value: serde_json::json!({ "terminal_link_click": mode }),
-            }],
-            remove: Vec::new(),
-        });
-        settle(self.cx);
-    }
-
-    /// The kinds of the mouse reports the program got since the last call.
-    fn reports(&mut self) -> Vec<MouseEventKind> {
-        self.stream
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .received()
-            .into_iter()
-            .filter_map(|request| match request {
-                FakeTerminalRequest::Input {
-                    input: GridInput::Mouse { kind, .. },
-                    ..
-                } => Some(kind),
-                _ => None,
-            })
-            .collect()
-    }
-
     /// Rest on `at`, the printed path `path`, and answer its check: a ready file of `size` bytes at `path`, resolved
     /// against `/work` when relative.
     fn checked(&mut self, at: Point<Pixels>, path: &str, size: u64) {
@@ -551,7 +403,7 @@ impl Harness<'_> {
 fn a_hover_shows_checking_then_the_hosts_answer_and_a_click_is_admitted(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "see notes.txt now", false)], None);
-    let on = h.at(5, 0);
+    let on = h.at_cell(5, 0);
     h.rest_on(on);
     let answer = h.check("notes.txt");
     assert!(h.shown(), "the display shows while checking");
@@ -584,7 +436,7 @@ fn a_hover_shows_checking_then_the_hosts_answer_and_a_click_is_admitted(cx: &mut
 fn each_hover_checks_afresh_and_leaving_cancels(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "fresh.txt", false)], None);
-    let (on, off) = (h.at(2, 0), h.at(40, 5));
+    let (on, off) = (h.at_cell(2, 0), h.at_cell(40, 5));
     h.rest_on(on);
     let first = h.check("fresh.txt");
     h.rest_on(off);
@@ -610,7 +462,7 @@ fn a_relabel_withdraws_the_click_until_checked_again(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let target = "file:///work/report.txt";
     h.show(vec![row(0, "OLD-LABEL", true)], Some(target));
-    let on = h.at(3, 0);
+    let on = h.at_cell(3, 0);
     h.rest_on(on);
     let first = h.check("/work/report.txt");
     h.answer(first, ready("/work/report.txt", 17));
@@ -669,7 +521,7 @@ fn folders_unreadable_and_other_refusals_say_why_and_admit_nothing(cx: &mut Test
     rows.push(row(5, "gone.txt", false));
     h.show(rows, None);
     for (row, (name, status, size, words)) in (0u16..).zip(cases) {
-        let at = h.at(1, row);
+        let at = h.at_cell(1, row);
         h.rest_on(at);
         let answer = h.check(name);
         let mut stat = ready(&format!("/work/{name}"), size);
@@ -693,7 +545,7 @@ fn folders_unreadable_and_other_refusals_say_why_and_admit_nothing(cx: &mut Test
     );
     assert_eq!(h.tier(), Some("danger"));
 
-    let at = h.at(1, 5);
+    let at = h.at_cell(1, 5);
     h.rest_on(at);
     let answer = h.check("gone.txt");
     answer.answer(Err(TransferError::Refused {
@@ -723,7 +575,7 @@ fn folders_unreadable_and_other_refusals_say_why_and_admit_nothing(cx: &mut Test
 fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "/work/report.pdf", false)], None);
-    let on = h.at(3, 0);
+    let on = h.at_cell(3, 0);
     h.rest_on(on);
     let answer = h.check("/work/report.pdf");
     h.answer(answer, ready("/work/report.pdf", 2000));
@@ -746,7 +598,7 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
     );
     assert!(!h.shown(), "the display does not sit over the explanation");
 
-    let again = h.at(5, 0);
+    let again = h.at_cell(5, 0);
     h.rest_on(again);
     let answer = h.check("/work/report.pdf");
     h.answer(answer, ready("/work/report.pdf", 2000));
@@ -762,7 +614,7 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
 fn a_drag_across_a_checked_path_is_never_admitted(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "build/output.zip done", false)], None);
-    let on = h.at(4, 0);
+    let on = h.at_cell(4, 0);
     h.rest_on(on);
     let answer = h.check("build/output.zip");
     h.answer(answer, ready("/work/build/output.zip", 5));
@@ -882,7 +734,7 @@ fn a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_chan
         vec![row(0, "notes.txt", false), row(1, "other", false)],
         None,
     );
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
     h.rewrite(vec![row(0, "notes.txt", false)], None, 2);
     assert!(
@@ -919,16 +771,12 @@ fn a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_chan
 fn a_click_right_after_output_changed_the_path_is_judged_on_the_new_text(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
-    let size = h.size;
-    {
-        let mut stream = h.stream.borrow_mut();
-        let stream = stream.as_mut().unwrap();
-        let rows = serde_json::json!({"t":"rows","rows":[row(0, "plans.txt", false)],"links":[]});
-        stream.output(serde_json::from_value(rows).unwrap());
-        stream.output(frame(2, size));
-    }
+    let rows = serde_json::json!({"t":"rows","rows":[row(0, "plans.txt", false)],"links":[]});
+    h.fake().output(serde_json::from_value(rows).unwrap());
+    let frame = frame(2, FITTED.0, FITTED.1);
+    h.fake().output(serde_json::from_value(frame).unwrap());
     h.cx.run_until_parked();
     h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
     h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
@@ -945,7 +793,7 @@ fn a_click_right_after_output_changed_the_path_is_judged_on_the_new_text(cx: &mu
 fn a_click_before_the_answer_has_painted_is_refused(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "/work/report.pdf", false)], None);
-    let on = h.at(3, 0);
+    let on = h.at_cell(3, 0);
     h.rest_on(on);
     let pending = h.check("/work/report.pdf");
     // The answer, the press and the release in one update of the window, so no frame can come between them. Through
@@ -984,7 +832,7 @@ fn a_click_before_the_answer_has_painted_is_refused(cx: &mut TestAppContext) {
     assert_eq!(h.refusal().as_deref(), Some(FILE_REFUSAL));
     drop(pending);
 
-    let again = h.at(5, 0);
+    let again = h.at_cell(5, 0);
     h.checked(again, "/work/report.pdf", 2000);
     h.click(again);
     assert_eq!(h.admitted(), ["/work/report.pdf"]);
@@ -998,7 +846,7 @@ fn a_click_before_the_answer_has_painted_is_refused(cx: &mut TestAppContext) {
 fn an_answer_landing_between_press_and_release_leaves_the_click_silent(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.rest_on(on);
     let answer = h.check("notes.txt");
     h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
@@ -1026,14 +874,14 @@ fn the_pointing_hand_waits_for_a_ready_check_on_a_printed_path(cx: &mut TestAppC
         ],
         Some("file:///work/report.txt"),
     );
-    let printed = h.at(2, 0);
+    let printed = h.at_cell(2, 0);
     h.rest_on(printed);
     let answer = h.check("notes.txt");
     assert!(!h.pointer(), "checking");
     h.answer(answer, ready("/work/notes.txt", 10));
     assert!(h.pointer(), "ready");
 
-    let folder = h.at(2, 2);
+    let folder = h.at_cell(2, 2);
     h.rest_on(folder);
     let answer = h.check("folder.dir");
     let mut refused = ready("/work/folder.dir", 0);
@@ -1041,7 +889,7 @@ fn the_pointing_hand_waits_for_a_ready_check_on_a_printed_path(cx: &mut TestAppC
     h.answer(answer, refused);
     assert!(!h.pointer(), "refused");
 
-    let hyperlink = h.at(2, 1);
+    let hyperlink = h.at_cell(2, 1);
     h.rest_on(hyperlink);
     let _checking = h.check("/work/report.txt");
     assert!(
@@ -1061,13 +909,21 @@ fn the_pointing_hand_waits_for_a_ready_check_on_a_printed_path(cx: &mut TestAppC
 fn under_mouse_reporting_a_file_click_is_admitted_and_still_reported(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    h.mouse_mode("click");
-    let on = h.at(2, 0);
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
-    drop(h.reports());
+    drop(h.sent());
     h.click(on);
     assert_eq!(h.admitted(), ["/work/notes.txt"]);
-    let reports = h.reports();
+    let reports: Vec<MouseEventKind> = h
+        .sent()
+        .into_iter()
+        .filter_map(|(input, _)| match input {
+            GridInput::Mouse { kind, .. } => Some(kind),
+            _ => None,
+        })
+        .collect();
     assert!(
         reports.contains(&MouseEventKind::Down) && reports.contains(&MouseEventKind::Up),
         "the program heard the press and the release: {reports:?}"
@@ -1095,7 +951,7 @@ fn a_file_click_is_farhelms_whatever_the_link_choice(cx: &mut TestAppContext) {
         Some("program"),
         "the premise: clicks are left to the program"
     );
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
     h.click(on);
     assert_eq!(h.admitted(), ["/work/notes.txt"]);
@@ -1103,16 +959,7 @@ fn a_file_click_is_farhelms_whatever_the_link_choice(cx: &mut TestAppContext) {
 
 // ---- Downloads and the status line -----------------------------------------------------------------------------------
 
-impl Harness<'_> {
-    /// A click at `at`, where the pointer already rests, with `modifiers` held.
-    fn click_with(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
-        self.cx
-            .simulate_mouse_down(at, MouseButton::Left, modifiers);
-        self.cx.simulate_mouse_up(at, MouseButton::Left, modifiers);
-        settle(self.cx);
-        redraw(self.cx);
-    }
-
+impl Files<'_> {
     /// The latest save the terminal asked for: its path and whether it asked to open the save.
     fn last_save(&mut self) -> (String, bool) {
         assert!(
@@ -1124,20 +971,6 @@ impl Harness<'_> {
             .last()
             .expect("the premise: a save was asked for");
         (path.clone(), *open)
-    }
-
-    /// The sizes the terminal asked its program for since the last call.
-    fn resizes(&mut self) -> Vec<(u16, u16)> {
-        let mut stream = self.stream.borrow_mut();
-        let stream = stream.as_mut().unwrap();
-        stream
-            .received()
-            .into_iter()
-            .filter_map(|request| match request {
-                FakeTerminalRequest::Resize { cols, rows } => Some((cols, rows)),
-                _ => None,
-            })
-            .collect()
     }
 }
 
@@ -1160,7 +993,7 @@ fn saved(path: &str, open: OpenOutcome) -> SavedDownload {
 fn a_click_saves_into_downloads_and_the_line_says_where(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
     h.click(on);
     assert_eq!(h.last_save(), ("/work/notes.txt".to_owned(), false));
@@ -1196,7 +1029,7 @@ fn a_click_saves_into_downloads_and_the_line_says_where(cx: &mut TestAppContext)
 fn a_success_fades_and_a_failure_stays_until_the_next_press_or_download(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let (on, blank) = (h.at(2, 0), h.at(40, 5));
+    let (on, blank) = (h.at_cell(2, 0), h.at_cell(40, 5));
     h.checked(on, "notes.txt", 10);
     h.click(on);
     h.save(Ok(saved(
@@ -1274,7 +1107,7 @@ fn the_modifier_click_opens_only_what_the_helm_offered(cx: &mut TestAppContext) 
         vec![row(0, "notes.txt", false), row(1, "data.bin", false)],
         None,
     );
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
     let saved_to = "/home/u/Downloads/notes.txt";
     h.click_with(on, ctrl);
@@ -1296,7 +1129,7 @@ fn the_modifier_click_opens_only_what_the_helm_offered(cx: &mut TestAppContext) 
     h.click_with(on, cmd);
     assert!(!h.last_save().1, "Cmd is not the modifier off a Mac");
 
-    let other = h.at(2, 1);
+    let other = h.at_cell(2, 1);
     h.rest_on(other);
     let answer = h.check("data.bin");
     let mut unlisted = ready("/work/data.bin", 10);
@@ -1315,7 +1148,7 @@ fn the_modifier_click_opens_only_what_the_helm_offered(cx: &mut TestAppContext) 
 
     // On a Mac. The hover takes the platform when its display next changes, so the pointer leaves and comes back.
     h.cx.update(|_, cx| owner.update(cx, |owner, _| owner.set_platform(Platform::Mac)));
-    let away = h.at(40, 5);
+    let away = h.at_cell(40, 5);
     h.rest_on(away);
     h.checked(on, "notes.txt", 10);
     h.click_with(on, cmd);
@@ -1332,15 +1165,15 @@ fn the_modifier_click_opens_only_what_the_helm_offered(cx: &mut TestAppContext) 
 fn the_status_line_never_resizes_the_terminal(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
-    drop(h.resizes());
-    let before = h.at(0, 0);
+    drop(resizes(&h.opened));
+    let before = h.at_cell(0, 0);
     h.click(on);
     h.save(Err(TransferError::Lost("connection reset".into())));
     assert!(h.status().is_some(), "the premise: the line shows");
-    assert_eq!(h.resizes(), Vec::<(u16, u16)>::new());
-    assert_eq!(h.at(0, 0), before, "the grid did not move");
+    assert_eq!(resizes(&h.opened), Vec::<(u16, u16)>::new());
+    assert_eq!(h.at_cell(0, 0), before, "the grid did not move");
 }
 
 /// A TUI that breaks a long path itself still printed one file, and both halves must name it, check it once and save
@@ -1352,16 +1185,13 @@ fn the_status_line_never_resizes_the_terminal(cx: &mut TestAppContext) {
 #[gpui::test]
 fn both_halves_of_a_cut_path_check_and_save_the_whole_file(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let head = format!("{}/work/broken-", " ".repeat(61));
+    // The head ends four columns short of the edge of the fitted width ([`Files::show`] checks the attach).
+    let head = format!("{}/work/broken-", " ".repeat(usize::from(FITTED.0) - 17));
     h.show(
         vec![row(0, &head, false), row(1, "  file.txt", false)],
         None,
     );
-    assert_eq!(
-        h.size.0, 78,
-        "the premise: the head ends four columns short of the edge"
-    );
-    let (on_head, on_tail) = (h.at(66, 0), h.at(4, 1));
+    let (on_head, on_tail) = (h.at_cell(66, 0), h.at_cell(4, 1));
     h.checked(on_head, "/work/broken-file.txt", 29);
     h.rest_on(on_tail);
     assert!(h.checks().is_empty(), "the tail is the same hover");
@@ -1369,7 +1199,7 @@ fn both_halves_of_a_cut_path_check_and_save_the_whole_file(cx: &mut TestAppConte
     assert_eq!(h.last_save(), ("/work/broken-file.txt".to_owned(), false));
 }
 
-impl Harness<'_> {
+impl Files<'_> {
     /// As if the destination display the pointer rests on had run past the window's bottom edge when last drawn, so
     /// the next click on its link is refused. No frame may come before that click, or the display records itself again.
     fn stage_off_window(&mut self) {
@@ -1397,7 +1227,7 @@ impl Harness<'_> {
 fn a_save_failing_behind_a_refusal_shows_its_failure(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let on = h.at(2, 0);
+    let on = h.at_cell(2, 0);
     h.checked(on, "notes.txt", 10);
     h.click(on);
     h.stage_off_window();
@@ -1426,7 +1256,7 @@ fn a_refusal_takes_the_status_lines_place(cx: &mut TestAppContext) {
         vec![row(0, "notes.txt", false), row(1, "click here", true)],
         Some("https://example.com/page"),
     );
-    let (on, web, blank) = (h.at(2, 0), h.at(2, 1), h.at(40, 5));
+    let (on, web, blank) = (h.at_cell(2, 0), h.at_cell(2, 1), h.at_cell(40, 5));
     for refused in [on, web] {
         h.checked(on, "notes.txt", 10);
         h.click(on);
@@ -1458,7 +1288,7 @@ fn a_refusal_takes_the_status_lines_place(cx: &mut TestAppContext) {
 fn a_save_outlives_the_hover_but_not_the_terminal(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "notes.txt", false)], None);
-    let (on, away) = (h.at(2, 0), h.at(40, 5));
+    let (on, away) = (h.at_cell(2, 0), h.at_cell(40, 5));
     h.checked(on, "notes.txt", 10);
     h.click(on);
     h.rest_on(away);
@@ -1472,19 +1302,10 @@ fn a_save_outlives_the_hover_but_not_the_terminal(cx: &mut TestAppContext) {
     };
     assert!(!pending(&h.downloads), "leaving the link keeps the save");
 
-    let pane = h.pane.clone();
-    h.cx.update(|_, cx| {
-        pane.update(cx, |pane, cx| {
-            pane.owner = None;
-            cx.notify();
-        })
-    });
-    let Harness {
-        cx,
-        owner,
-        downloads,
-        ..
-    } = h;
+    // The terminal leaves its window, which stays open, and the test's own handle goes too.
+    h.close_terminal();
+    let Files { h, downloads } = h;
+    let Harness { cx, owner, .. } = h;
     drop(owner);
     redraw(cx);
     assert!(pending(&downloads), "closing the terminal abandons it");

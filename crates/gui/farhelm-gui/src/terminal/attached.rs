@@ -153,7 +153,7 @@
 //! the hidden half. A cursor the program asked to stay steady never blinks, and under reduced motion none does.
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 use std::cell::Cell;
 use std::future::Future;
