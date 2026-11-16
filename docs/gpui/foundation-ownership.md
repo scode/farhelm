@@ -64,7 +64,7 @@ conflicted across all of it.
 | Focus coordinator               | `crates/gui/farhelm-gui/src/focus.rs`, `crates/gui/farhelm-gui/src/focus_tests.rs`                                                                                                                                                                                                                                             | [none](#focus-coordinator)               | 2: `focus::apply`, `focus::track_raw` |
 | Layer manager                   | `crates/gui/farhelm-gui/src/layers.rs`, `crates/gui/farhelm-gui/src/layers_tests.rs`, `crates/gui/farhelm-gui/src/layers/`                                                                                                                                                                                                     | [none](#layer-manager)                   | 1: `layers::overlay`                  |
 | Root view wiring                | `crates/gui/farhelm-gui/src/root.rs`                                                                                                                                                                                                                                                                                           | [none](#root-view-wiring)                | none                                  |
-| Prompt                          | `crates/gui/farhelm-gui/src/prompt.rs`, `crates/gui/farhelm-gui/src/prompt_tests.rs`                                                                                                                                                                                                                                           | [none](#prompt)                          | none                                  |
+| Prompt                          | `crates/gui/farhelm-gui/src/prompt.rs`, `crates/gui/farhelm-gui/src/prompt_tests.rs`                                                                                                                                                                                                                                           | [none](#prompt)                          | 1: `prompt::when_shown`               |
 | Actions and keymap              | `crates/gui/farhelm-gui/src/actions.rs`, `crates/gui/farhelm-gui/src/actions_tests.rs`                                                                                                                                                                                                                                         | [reported](#actions-and-keymap)          | 1: `actions::install_interceptor`     |
 | Host text                       | `crates/gui/farhelm-gui/src/host_text.rs`, `crates/farhelm-proto/src/text.rs`                                                                                                                                                                                                                                                  | [from area code](#host-text)             | none                                  |
 | Cache wrapper                   | `crates/gui/farhelm-gui/src/cache.rs`                                                                                                                                                                                                                                                                                          | [none](#cache-wrapper)                   | 1: `cache::element`                   |
@@ -270,21 +270,27 @@ Lint exceptions: none.
 
 Extension points: none. A new question is a `Question` built by the feature, not a change here, with any of:
 
-- a relabelled Cancel (`Question::cancel_answer`), extra answers (`Question::alternative`), or Escape sending focus home
-  (`Question::returns_home_on_escape`);
+- a relabelled Cancel (`Question::cancel_answer`), extra answers (`Question::alternative`), Escape sending focus home
+  (`Question::returns_home_on_escape`), or every close returning focus to a named control (`Question::returns_to`);
 - an answer whose action can fail and keeps the question up with the reason, an extra one
   (`Question::fallible_alternative`, on an inline question or a centered one built with
   `Question::keeps_focus_on_empty_click`) or the confirming one (`prompt::ask_fallible`, only on such a centered
   question), settled through `prompt::Attempt`;
 - the YOLO confirmation's loud look (`Question::loud`) and its outlined permanent answer (`Tier::DangerOutline`);
-- for a centered question, a body the feature draws, built once from the frozen value as the question is asked
-  (`Question::body`), and the host dialogs' header tile, footer note and width (`Question::tile`, `Question::note`,
-  `Question::width`) where SPEC.md asks for them.
+- for a centered question, a body the feature draws, built once from the frozen value as the question is asked or
+  reworded (`Question::body`), and the host dialogs' header tile, footer note and width (`Question::tile`,
+  `Question::note`, `Question::width`) where SPEC.md asks for them, and a keyboard scroll stop for text that can outgrow
+  the dialog (`Question::scroll_stop`).
 
 It is asked centered with `prompt::ask`, beside its control with `prompt::ask_anchored`, or inside the owner's own
-surface with `prompt::ask_inline` (the owner draws the `prompt::Inline` it returns).
+surface with `prompt::ask_inline` (the owner draws the `prompt::Inline` it returns). A centered question that SPEC.md
+rewords while it is open is asked with `prompt::ask_rewordable`, whose `prompt::Open` the feature keeps and rewords in
+place (`Open::reword`).
 
-Lint exceptions: none.
+Lint exceptions: 1: GPUI's next-frame callback (`Window::on_next_frame`) in `prompt::when_shown`, which tells a reworded
+question when a frame showing its new words goes on screen, so that an answer given before then (a key GPUI handles with
+the new words drawn but not yet shown) cannot authorize them. It asks for one frame per reword and schedules nothing
+over time, which stays the ticker's (the component layer and lint rules' owner decided this on 2026-11-16).
 
 ### Actions and keymap
 

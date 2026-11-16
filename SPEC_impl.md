@@ -923,18 +923,18 @@ does.
 
 A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy plan
 button, the host remove confirmation's explanation) carries a body the feature draws. The body is a view built once, as
-the question is asked, from the frozen value, rather than something drawn afresh each frame from whatever is current, so
-what it shows is frozen with the rest of the question; its own controls also keep their state (a focus handle) across
-frames that way. The prompt still owns the answers. A control in the body is not an answer: it never closes the question
-and is not among the answers the first one wins among, and it sits in Tab's order between the question's text and its
-answers, while focus still starts where the rules above put it. The prompt cannot see inside the body, so the feature
-draws host values there through the host-text element as it would anywhere else. A centered question also takes the host
-dialogs' header tile, footer note and width, passed through to the dialog frame. The anchored and inline questions take
-none of the four: no question asked those ways needs them, the anchored look would restyle a body, and an inline
-question returns focus itself only from its answers. Those four, the loud look (inline only) and the empty-click and
-Escape-home rules (the layers only; an inline question leaves both to its owner's dialog) fail a debug build when set on
-a question asked a way that ignores them, so a question moved to another presentation fails a debug run, and so its
-tests, instead of losing one unseen.
+the question is asked (or reworded), from the frozen value, rather than something drawn afresh each frame from whatever
+is current, so what it shows is frozen with the rest of the question; its own controls also keep their state (a focus
+handle) across frames that way. The prompt still owns the answers. A control in the body is not an answer: it never
+closes the question and is not among the answers the first one wins among, and it sits in Tab's order between the
+question's text and its answers, while focus still starts where the rules above put it. The prompt cannot see inside the
+body, so the feature draws host values there through the host-text element as it would anywhere else. A centered
+question also takes the host dialogs' header tile, footer note and width, passed through to the dialog frame. The
+anchored and inline questions take none of the four: no question asked those ways needs them, the anchored look would
+restyle a body, and an inline question returns focus itself only from its answers. Those four, the loud look (inline
+only) and the empty-click and Escape-home rules (the layers only; an inline question leaves both to its owner's dialog)
+fail a debug build when set on a question asked a way that ignores them, so a question moved to another presentation
+fails a debug run, and so its tests, instead of losing one unseen.
 
 A question is centered over a veil, anchored beside the control it is about, or drawn inline inside the surface that
 owns it (the launcher's YOLO question in its body, the template editor's leave question at its foot), with the same
@@ -942,6 +942,18 @@ rules in all three. An inline question is not a layer: its owner decides where i
 it looks and answers. It takes focus on its starting answer when it opens, unless the user has moved on, and an answer
 returns focus to what held it before, inside the owner's dialog. Escape on it is Cancel and does not reach the owner's
 dialog. It draws plain, or loud as the YOLO confirmation is (decided by the migration's orchestrator on 2026-11-14).
+
+A centered question can be reworded in place while it is open, for SPEC.md's bulk Stop and Delete question, which
+rewords itself when an accepted target changes. Closing it and asking the replacement moved focus back to the starting
+answer on every listing change and could take focus out of an approval card beside the dialog. A reword replaces the
+title, the summary and lines, the body and the confirming answer's label and help together with the frozen value, so
+what is drawn and what the answers act on still match; the layer, the answers and their focus handles stay, so focus
+does not move. It does nothing once the question has closed, and nothing while an attempt is in flight, since that
+attempt was handed the old value. An answer other than Cancel that arrives after a reword and before a frame showing the
+new words is on screen does nothing: SPEC.md's "An old answer cannot authorize a replacement question". Shown, not
+drawn, because GPUI draws a dirty window before it handles a key and shows that frame only at the next frame. The same
+question returns focus on every close to a control its asker names (the marked bar's menu, not the Stop or Delete that
+asked), and gives its text a keyboard scroll stop when its rows can run past the dialog.
 
 An answer whose action can fail keeps its question open, every answer frozen, until the action reports how it went:
 success closes the question as any answer does, and failure shows the reason inside it and arms the answers again
@@ -1258,17 +1270,18 @@ each in-between size to the glyph atlas, which never evicts. The terminal scroll
 one-shot transition cannot express; it stays a recorded deviation.
 
 Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
-`BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker and the
-channel's watchdog and heartbeat, and on `with_animation` everywhere but the transition owner (`with_animations` and
-`with_spring` everywhere); by a test that an animating row redraws at most 10 times a second and not at all while the
-window is inactive; by a test that a view holding the clock redraws every 30 seconds in an inactive window under reduced
-motion and leaves no timer once it is gone; and by tests that an entrance follows CSS's `ease-out` to the element's own
-opacity, asks for no frame once it ends, starts opaque with no frame under reduced motion, and in an inactive window
-ends on time and does not play again when the window is activated; by tests that the banner's slide and the outline's
-fade run their course and end in place, and do not move under reduced motion; and by tests that the one-second clock
-redraws its holders every second, runs until its last holder goes, and wakes no view that holds only the 30-second
-clock. The wall clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's
-scheduler clock outside the ticker, or a view from reading the time without holding a clock handle.
+`BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker, the
+channel's watchdog and heartbeat, and the prompt's old-answer guard (`prompt::when_shown`, one frame per reword), and on
+`with_animation` everywhere but the transition owner (`with_animations` and `with_spring` everywhere); by a test that an
+animating row redraws at most 10 times a second and not at all while the window is inactive; by a test that a view
+holding the clock redraws every 30 seconds in an inactive window under reduced motion and leaves no timer once it is
+gone; and by tests that an entrance follows CSS's `ease-out` to the element's own opacity, asks for no frame once it
+ends, starts opaque with no frame under reduced motion, and in an inactive window ends on time and does not play again
+when the window is activated; by tests that the banner's slide and the outline's fade run their course and end in place,
+and do not move under reduced motion; and by tests that the one-second clock redraws its holders every second, runs
+until its last holder goes, and wakes no view that holds only the 30-second clock. The wall clock itself is held by
+review, not by the clock bans: no lint stops GUI code from reading GPUI's scheduler clock outside the ticker, or a view
+from reading the time without holding a clock handle.
 
 ### Clock times: local time
 
