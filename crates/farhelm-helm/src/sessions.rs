@@ -3695,6 +3695,11 @@ pub(crate) async fn rename_session(
 /// on, and the recipe leaves the recipe list once it is deleted
 /// (`crate::tensorlake::recipes::delete_recipe`).
 ///
+/// So is Settings' Create SSH key, which waits on a local `ssh-keygen` rather
+/// than on a host: a generation still running at the bound carries on, and
+/// the settings read shows the key once it is in place
+/// (`crate::tensorlake::create_ssh_key`).
+///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
 /// `do_replace_session`, the restart's, `create_session_request` and

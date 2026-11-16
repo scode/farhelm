@@ -265,13 +265,18 @@ on Tensorlake's API rather than on a host, answer within the same bound, counted
 the migration's orchestrator on 2026-11-15): the API key's Test and the list of Sandboxes not on this helm stop listing
 and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover
 sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then
-shows (see "Tensorlake account"). A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same
-bound, counted from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15): an unknown recipe,
-one a host uses and one already being deleted are refused at once from local state, before anything is cancelled; once
-its cleanup has started, a deletion still running at the bound replies that it carries on, and the recipe leaves the
-recipe list once it is deleted, or, if the cleanup fails, stays listed with the reason only in the helm's log until a
-second Delete runs the cleanup again and answers it. While the deletion runs, the recipe's save (`PUT`) and Build are
-refused with 409, so a save cannot be accepted and then lost with the row.
+shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
+bound, counted from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15, under its rule that
+every host-waiting route the GUI sends is bounded): `ssh-keygen` may run for up to its own 30 seconds, so a generation
+still running at the bound replies 504 that the creation carries on, and the settings read reports the key once it is
+written; a Create sent again meanwhile waits for that generation and answers its key. A recipe's Delete
+(`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from its handler's start (decided by
+the GPUI migration's orchestrator on 2026-11-15): an unknown recipe, one a host uses and one already being deleted are
+refused at once from local state, before anything is cancelled; once its cleanup has started, a deletion still running
+at the bound replies that it carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup
+fails, stays listed with the reason only in the helm's log until a second Delete runs the cleanup again and answers it.
+While the deletion runs, the recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then
+lost with the row.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -5850,10 +5855,12 @@ SSH key**, runs `ssh-keygen -q -t ed25519 -N "" -C farhelm-<tag>` without a shel
 beside it, sets the private key to 0600, and renames the directory into place, so a crash leaves either no key or a
 whole one; leftover temporary directories are removed at the next generation. A key directory without a readable pair is
 reported, never regenerated, and a create keeps an existing key. A key that cannot be read is a state in the settings
-reply, not a failed read; a failed create answers its reason. The registration command carries the public key line,
-quoted as one POSIX shell word, rather than the file's path, which would only mean something on the helm's machine. A
-production helm whose HTTPS client cannot be built (no CA certificates) answers every Tensorlake call with a reason that
-says so.
+reply, not a failed read; a failed create answers its reason. A create answers within the host reply bound and leaves a
+generation that is still running at the bound to finish on its own (see "The UI channel"); a create sent meanwhile waits
+for it and answers its key, and a generation that fails after that reply is only logged, leaving no key, so Create SSH
+key is offered again and generates anew. The registration command carries the public key line, quoted as one POSIX shell
+word, rather than the file's path, which would only mean something on the helm's machine. A production helm whose HTTPS
+client cannot be built (no CA certificates) answers every Tensorlake call with a reason that says so.
 
 ## Adding Tensorlake hosts
 

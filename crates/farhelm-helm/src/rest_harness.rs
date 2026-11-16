@@ -1143,6 +1143,9 @@ pub(crate) struct FleetBuilder {
     /// The shell behind the helm's snapshot builds, when a test scripts it;
     /// `None` keeps it offline.
     tensorlake_shell: Option<Arc<dyn crate::tensorlake::shell::SandboxShell>>,
+    /// What writes Farhelm's Tensorlake ssh key, when a test stands in for
+    /// `ssh-keygen`; `None` runs the real one.
+    tensorlake_keygen: Option<Arc<dyn crate::tensorlake::ssh_key::Keygen>>,
     /// What the actors ask before dialing a Tensorlake host, when a test
     /// scripts it; otherwise the manager's "cannot ask" default.
     sandboxes: Option<Arc<dyn crate::environment::EnvironmentProvider>>,
@@ -1181,6 +1184,15 @@ impl FleetBuilder {
         shell: Arc<dyn crate::tensorlake::shell::SandboxShell>,
     ) -> Self {
         self.tensorlake_shell = Some(shell);
+        self
+    }
+    /// Have `keygen` write Farhelm's Tensorlake ssh key in place of
+    /// `ssh-keygen`.
+    pub(crate) fn tensorlake_keygen(
+        mut self,
+        keygen: Arc<dyn crate::tensorlake::ssh_key::Keygen>,
+    ) -> Self {
+        self.tensorlake_keygen = Some(keygen);
         self
     }
     /// Let the actors ask `sandboxes` about Tensorlake hosts' sandboxes, so
@@ -1264,6 +1276,7 @@ impl FleetBuilder {
             approval_wait: None,
             tensorlake_api: None,
             tensorlake_shell: None,
+            tensorlake_keygen: None,
             sandboxes: None,
             podman: None,
             place_commands: None,
@@ -1406,6 +1419,9 @@ impl FleetBuilder {
         }
         if let Some(shell) = self.tensorlake_shell {
             tensorlake = tensorlake.with_shell(shell);
+        }
+        if let Some(keygen) = self.tensorlake_keygen {
+            tensorlake = tensorlake.with_keygen(keygen);
         }
         let mut providers = if let Some(observations) = self.sandboxes {
             crate::environment::Providers::with_scripted_tensorlake(

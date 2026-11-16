@@ -1485,3 +1485,187 @@ async fn a_delete_whose_lookup_stalls_fails_before_the_reply_bound() {
         "{rows:?}"
     );
 }
+
+/// A stand-in for `ssh-keygen` that stalls each generation until the test
+/// gives it a permit, then writes a pair `SshKeyStore::read` accepts, or fails
+/// if the test asked for that. It writes the files itself rather than running
+/// the real `ssh-keygen`, because these tests pause the clock, which would let
+/// `KEYGEN_TIMEOUT` fire while a real process ran.
+struct StalledKeygen {
+    /// How many generations reached it.
+    calls: std::sync::atomic::AtomicUsize,
+    /// One permit lets one stalled generation go on; permits given before a
+    /// generation stalls are kept.
+    release: tokio::sync::Semaphore,
+    /// Whether the next generation to go on fails instead of writing a pair.
+    fail_next: std::sync::atomic::AtomicBool,
+}
+
+impl StalledKeygen {
+    /// A stand-in with no permits, so its first generation stalls.
+    fn new() -> Self {
+        Self {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            release: tokio::sync::Semaphore::new(0),
+            fail_next: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl super::ssh_key::Keygen for StalledKeygen {
+    async fn generate(&self, private_key: &std::path::Path, comment: &str) -> Result<(), String> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.release
+            .acquire()
+            .await
+            .map_err(|error| error.to_string())?
+            .forget();
+        if self
+            .fail_next
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err("ssh-keygen failed: fixture failure".into());
+        }
+        let public = private_key.with_extension("pub");
+        tokio::fs::write(private_key, "fixture private key")
+            .await
+            .map_err(|error| error.to_string())?;
+        tokio::fs::write(
+            public,
+            format!("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureKey {comment}\n"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    }
+}
+
+/// How many generations reached `keygen`.
+fn generations(keygen: &StalledKeygen) -> usize {
+    keygen.calls.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A harness whose Tensorlake ssh key is written by `keygen`, with the clock
+/// paused from here on, and the first `POST /api/tensorlake/ssh-key` sent
+/// while `keygen` stalls: its reply must come at the bound, a 504 saying the
+/// creation carries on, after the generation reached the stand-in once.
+async fn stalled_create(keygen: &Arc<StalledKeygen>) -> crate::rest_harness::Harness {
+    let harness = FleetBuilder::new()
+        .await
+        .tensorlake_keygen(keygen.clone())
+        .start()
+        .await;
+    tokio::time::pause();
+    let (status, body, waited) = reply_of(spawn_call(
+        &harness,
+        request("POST", "/api/tensorlake/ssh-key", None),
+    ))
+    .await;
+    assert_eq!(
+        generations(keygen),
+        1,
+        "premise: the generation reached the stalled stand-in"
+    );
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+    assert!(
+        body.contains("its creation carries on, and Settings shows the key once it exists"),
+        "{body}"
+    );
+    assert!(
+        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
+        "the create answered after {waited:?}"
+    );
+    harness
+}
+
+/// Why: Create SSH key ran `ssh-keygen` under its own 30-second bound, which
+/// equals the GUI's watchdog, so a wedged `ssh-keygen` would have reset the
+/// whole window while every later command waited behind it. The route now
+/// answers within the host reply bound, and the generation, which the user
+/// asked for, must still finish after that reply rather than be cancelled
+/// with it.
+///
+/// Spec: with the key generation stalled and the clock paused,
+/// `POST /api/tensorlake/ssh-key` answers 504 once `HOST_REPLY_BOUND` has
+/// passed and not much later, saying the creation carries on; the settings
+/// read meanwhile answers at once, with no key; released, the first
+/// generation finishes on its own: a second create answers 200 with the
+/// stand-in's key ready and no second generation (a cancelled first one would
+/// have left the second create to generate again), and the settings read
+/// reports the same key.
+#[farhelm_testtrace::test]
+async fn creating_the_ssh_key_answers_at_the_reply_bound_and_the_generation_finishes() {
+    let keygen = Arc::new(StalledKeygen::new());
+    let harness = stalled_create(&keygen).await;
+
+    let (status, body) = call(&harness, request("GET", "/api/tensorlake", None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let during: Settings = serde_json::from_str(&body).unwrap();
+    assert_eq!(during.ssh_key, SshKeyStatus::NotCreated);
+
+    keygen.release.add_permits(1);
+    let (status, body, _) = reply_of(spawn_call(
+        &harness,
+        request("POST", "/api/tensorlake/ssh-key", None),
+    ))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let created: Settings = serde_json::from_str(&body).unwrap();
+    let SshKeyStatus::Ready { ref public_key, .. } = created.ssh_key else {
+        panic!("the key was not ready: {:?}", created.ssh_key);
+    };
+    assert!(
+        public_key.contains("AAAAC3NzaC1lZDI1NTE5AAAAIFixtureKey"),
+        "{public_key}"
+    );
+    assert_eq!(
+        generations(&keygen),
+        1,
+        "the first generation finished; the second create only read its key"
+    );
+    let (_, body) = call(&harness, request("GET", "/api/tensorlake", None)).await;
+    assert_eq!(
+        serde_json::from_str::<Settings>(&body).unwrap().ssh_key,
+        created.ssh_key
+    );
+}
+
+/// Why: a generation that fails after its 504 has nobody to tell, so what it
+/// leaves behind is the whole of its outcome: no key and no half-written key
+/// folder, so that Create SSH key works again, rather than a folder the read
+/// would report as an unreadable key that it never replaces.
+///
+/// Spec: with the stalled generation set to fail, after the create's 504 and
+/// the release, a second create generates again (the stand-in reached twice)
+/// and answers 200 with the key ready; the first, failed generation left no
+/// key behind for the second to find.
+#[farhelm_testtrace::test]
+async fn a_generation_that_fails_after_the_reply_leaves_no_key_and_create_works_again() {
+    let keygen = Arc::new(StalledKeygen::new());
+    keygen
+        .fail_next
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let harness = stalled_create(&keygen).await;
+
+    // Two permits: one lets the first generation fail, one lets the second,
+    // which the next create starts once the first has let go of the key, go on.
+    keygen.release.add_permits(2);
+    let (status, body, _) = reply_of(spawn_call(
+        &harness,
+        request("POST", "/api/tensorlake/ssh-key", None),
+    ))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        matches!(
+            serde_json::from_str::<Settings>(&body).unwrap().ssh_key,
+            SshKeyStatus::Ready { .. }
+        ),
+        "{body}"
+    );
+    assert_eq!(
+        generations(&keygen),
+        2,
+        "the failed generation left no key, so the create generated again"
+    );
+}
