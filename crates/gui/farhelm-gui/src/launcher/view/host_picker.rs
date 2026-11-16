@@ -44,6 +44,8 @@ use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::local_state;
 use crate::theme::{self, metrics};
 
+/// The room between the host picker and the Browse button beside it: the old destination row's `gap: 8px`.
+const BROWSE_GAP: f32 = 8.;
 /// How long typed letters keep adding to one name prefix before the next letter starts a new one (the old picker's
 /// one second).
 const TYPEAHEAD: Duration = Duration::from_secs(1);
@@ -326,6 +328,13 @@ impl Launcher {
                 .text_size(metrics::TEXT_MD)
                 .children(mark)
                 .child(words);
+            // Replace with holds its host but not its folder, so Browse still sits beside it.
+            let held = div()
+                .flex()
+                .items_start()
+                .gap(px(BROWSE_GAP))
+                .child(div().flex_1().min_w_0().child(held))
+                .children(self.browse_button(cx));
             return row("launcher-host-row", "Host", held, palette).into_any_element();
         }
         if self.host_picker.layer.is_some() && !self.host_list_open(window, cx) {
@@ -373,7 +382,20 @@ impl Launcher {
         .on_click(move |_, window, cx| {
             let _ = on_click.update(cx, |launcher, cx| launcher.host_clicked(window, cx));
         });
-        let control = div().relative().w_full().child(button).child(tracker);
+        let control = div()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .child(button)
+            .child(tracker);
+        // Browse sits beside the picker, as the old `.launch-composer-destination-row` held both (`browse`).
+        let control = div()
+            .flex()
+            .items_center()
+            .gap(px(BROWSE_GAP))
+            .w_full()
+            .child(control)
+            .children(self.browse_button(cx));
         row("launcher-host-row", "Host", control, palette).into_any_element()
     }
 }

@@ -31,9 +31,8 @@
 //!   capped nor narrowed by the draft; and models from past launches that the catalog does not list, after the
 //!   catalog's own, each with the agent type it ran with.
 //!
-//! NOTE: Not built yet, each with the piece that brings its data: "Browse this path" (Browse) and `gh:` repositories
-//! (managed checkouts). Their labels are parsed already, so a scoped query for them says it has no match rather than
-//! becoming a name.
+//! NOTE: Not built yet: `gh:` repositories (with the managed checkouts' search). The label is parsed already, so a
+//! `gh:` query says it has no match rather than becoming a name.
 
 use farhelm_proto::launcher::{EFFORT_ORDER, LaunchCatalogModel, compatible_efforts};
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
@@ -228,6 +227,8 @@ pub enum Row {
     Permission(SearchPermission),
     /// Use the typed path as the folder.
     UsePath(String),
+    /// Use the typed path as the folder and list the folders under it on the host (`super::view::browse`).
+    BrowsePath(String),
     /// A folder an earlier launch on this host started in, as the user typed it then.
     Folder(String),
     /// A whole earlier setup, from the chosen host's history, with the host as the row names it.
@@ -279,7 +280,7 @@ impl Row {
             Row::Model { .. } | Row::HistoryModel { .. } => Group::Models,
             Row::Effort(_) => Group::Efforts,
             Row::Permission(_) => Group::Permissions,
-            Row::UsePath(_) | Row::Folder(_) => Group::Folders,
+            Row::UsePath(_) | Row::BrowsePath(_) | Row::Folder(_) => Group::Folders,
             Row::Recent { .. } => Group::RecentSetups,
         }
     }
@@ -310,6 +311,9 @@ impl Row {
             // A saved folder reads as a typed path does, as in the old launcher.
             Row::UsePath(path) | Row::Folder(path) => sentence
                 .text("Use this path: ")
+                .mono(&HostText::from_host(path.as_str())),
+            Row::BrowsePath(path) => sentence
+                .text("Browse this path: ")
                 .mono(&HostText::from_host(path.as_str())),
             // The whole setup, as the old row's accessible name said it; the view draws it on two lines.
             // The choices are host text too: a custom model id is whatever the user typed.
@@ -352,6 +356,7 @@ impl Row {
             Row::UsePath(_) | Row::Folder(_) => {
                 "Use this folder: the session will start here".to_owned()
             }
+            Row::BrowsePath(_) => "List the folders under this path".to_owned(),
             // The setup without its "Recent setup:" lead, as the old row's tooltip said it.
             Row::Recent { entry, placement } => {
                 return sentence
@@ -375,7 +380,11 @@ impl Row {
             Row::Effort(effort) => Some(effort_word(*effort)),
             Row::Permission(permission) => Some(permission.word().to_owned()),
             Row::Host { name, .. } => Some(name.to_ascii_lowercase()),
-            Row::Name(_) | Row::UsePath(_) | Row::Folder(_) | Row::Recent { .. } => None,
+            Row::Name(_)
+            | Row::UsePath(_)
+            | Row::BrowsePath(_)
+            | Row::Folder(_)
+            | Row::Recent { .. } => None,
         }
     }
 }
@@ -595,8 +604,10 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                 .map(Row::Permission),
         );
     }
+    // A typed path offers to be used as it is, and to be browsed; typing itself never reaches the host.
     if any(Scope::Folder) && !blank_all && path_shaped(value) {
         rows.push(Row::UsePath(value.to_owned()));
+        rows.push(Row::BrowsePath(value.to_owned()));
     }
     if let Some((history, placement)) = inputs.history {
         // Saved folders, matched on the folder as typed (so a visible `<U+…>` never stands for the character it

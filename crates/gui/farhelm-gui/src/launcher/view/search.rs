@@ -273,7 +273,7 @@ impl Launcher {
             Row::Host { .. } => (Field::Host, "host"),
             // A recent setup sets the agent type too, but the old refusal named the destination, which every mode that
             // holds the agent type also holds.
-            Row::UsePath(_) | Row::Folder(_) | Row::Recent { .. } => {
+            Row::UsePath(_) | Row::BrowsePath(_) | Row::Folder(_) | Row::Recent { .. } => {
                 (Field::Destination, "destination")
             }
             Row::Name(_) => (Field::Name, "session name"),
@@ -368,6 +368,14 @@ impl Launcher {
                 self.draft.edit_folder(path);
                 self.sync_fields(window, cx);
                 self.changed(cx);
+            }
+            // The typed path as the folder, as "Use this path" makes it, and then its listing (`browse`).
+            Row::BrowsePath(path) => {
+                self.folder_picked();
+                self.draft.edit_folder(path);
+                self.sync_fields(window, cx);
+                self.changed(cx);
+                self.browse(window, cx);
             }
             // A saved folder is the host's history, and stays bound to its installation.
             Row::Folder(path) => {

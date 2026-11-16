@@ -1401,7 +1401,8 @@ fn re_picking_the_shown_host_counts_as_a_hand_pick(cx: &mut TestAppContext) {
         "the premise: New's host is a prefill"
     );
     test_support::click(cx, "launcher-folder-row");
-    keys(cx, "shift-tab");
+    // Browse sits between the folder and the host button in Tab order, as the old app's did.
+    keys(cx, "shift-tab shift-tab");
     assert!(host_focused(cx), "the premise: the host button has focus");
     // Down opens the list at the chosen host1, and Enter picks the highlighted row.
     keys(cx, "down");
@@ -1425,7 +1426,8 @@ fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
     test_support::click(cx, "launcher-folder-row");
     keys(cx, "x");
-    keys(cx, "shift-tab");
+    // Browse sits between the folder and the host button in Tab order, as the old app's did.
+    keys(cx, "shift-tab shift-tab");
     assert!(
         host_focused(cx),
         "the premise: Shift+Tab from the folder reached the host button"
@@ -1458,7 +1460,8 @@ fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
 fn typeahead_finds_a_host_and_escape_cancels(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
     test_support::click(cx, "launcher-folder-row");
-    keys(cx, "shift-tab");
+    // Browse sits between the folder and the host button in Tab order, as the old app's did.
+    keys(cx, "shift-tab shift-tab");
     assert!(host_focused(cx), "the premise: the host button has focus");
     keys(cx, "h o s t 3");
     assert!(has_node(cx, "launcher-host-list"), "typing opened the list");
@@ -1499,7 +1502,7 @@ pub(super) fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<boo
 /// Cancel and the host button are reached with Tab like every other control: the launcher owns their focus handles (it
 /// starts Restart with on Cancel and watches the host button's focus), and a handle that was not a tab stop would leave
 /// a keyboard user unable to reach them. Specified: Tab from the launch kind's tabs eventually reaches Cancel, and
-/// Shift+Tab from the folder field reaches the host button.
+/// Shift+Tab from the folder field reaches the host button, past Browse beside it.
 #[gpui::test]
 fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
@@ -1508,7 +1511,8 @@ fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
         folder_focused(cx),
         "the premise: the click focused the folder"
     );
-    keys(cx, "shift-tab");
+    // Browse sits between the folder and the host button in Tab order, as the old app's did.
+    keys(cx, "shift-tab shift-tab");
     assert!(
         host_focused(cx),
         "Shift+Tab from the folder reached the host button"
