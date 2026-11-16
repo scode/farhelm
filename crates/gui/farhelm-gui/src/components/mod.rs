@@ -177,9 +177,27 @@ impl HoverHelp {
     ///
     /// The view is drawn only by the tooltip, only while the card shows, and drawn again whenever the overlay is. Never
     /// also draw the same entity inline: two places drawing one view in a frame share its element state. Hand the same
-    /// entity every frame, so the help stays the same while the control is unchanged.
+    /// entity every frame, so the help stays the same while the control is unchanged. A view that should not live
+    /// while nothing draws it goes in through [`HoverHelp::card_with`] instead.
     pub fn card(width: Pixels, view: impl Into<AnyView>, text: impl Into<Line>) -> Self {
         HoverHelp::of(Help::card(width, view, text))
+    }
+
+    /// [`HoverHelp::card`] for a view that costs something for as long as it lives, made only when the tooltip shows:
+    /// `build` makes it then (not when the help is made or while the hover waits), the tooltip draws that one view in
+    /// every frame while it shows, and drops it when it hides or another tooltip replaces it. It is for the host
+    /// progress card, whose view holds the ticker's clock and a running step's pulse, so one per row would keep
+    /// them running while nothing draws them. It works beside the sidebar too ([`HoverHelp::beside`]).
+    ///
+    /// `build` may capture what the view shows (the host it is about): each render's help replaces the hovered
+    /// control's stored copy, so a tooltip that begins later builds from the latest render's `build`, while a re-render
+    /// never makes the view or touches a tooltip already waiting or showing.
+    pub fn card_with(
+        width: Pixels,
+        build: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
+        text: impl Into<Line>,
+    ) -> Self {
+        HoverHelp::of(Help::card_with(width, build, text))
     }
 
     /// This help, placed beside the sidebar: 6 pixels past the edge the sidebar draws ([`layers::beside_edge`]),

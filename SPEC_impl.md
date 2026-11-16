@@ -753,7 +753,12 @@ which end in the permission's caveat and the stored command), is drawn on a card
 between paragraphs and no line clamp, as the old app's `data-tooltip-paragraphs` help was; both are clipped at the
 window's height less 8 pixels. A third form, for the session row's summary card, draws a view of the caller's on a card
 of fixed width with no padding and no clamp (the old `data-kind="card"`, `min(310px, 100vw - 8px)` wide), with words of
-the caller's for assistive technology, clipped at the same height.
+the caller's for assistive technology, clipped at the same height. The view is either made with the help or, for a view
+that costs something while it lives (the host progress card will hold the ticker's clock and a running step's pulse),
+made by the tooltip when it shows, drawn as that one view while it shows, and dropped when it hides or is replaced, so a
+row nobody hovers keeps no card alive. A re-render refreshes the help a hovered control keeps, builder and all, so a
+card shown later is built for what the latest render described; it never makes the view, nor changes a tooltip already
+waiting or showing.
 
 Ordinary help sits below and right of where the pointer came to rest; anchoring it above its control, as the old app
 did, is still to come. Help a control asks to have beside the sidebar (SPEC.md's session-row hovers and host progress

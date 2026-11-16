@@ -8,7 +8,8 @@
 //!
 //! Help comes in three forms ([`Help`]: a line, paragraphs, a card holding a view) and in two placements: ordinary
 //! help at the pointer, and help a control asks to have beside the sidebar ([`Hint::beside`], placed by
-//! [`super::beside`]).
+//! [`super::beside`]). A card's view is either the caller's, made with the help, or made by the tooltip only when it
+//! shows ([`Help::card_with`]) and dropped when it goes, for a view that costs something for as long as it lives.
 //!
 //! A tooltip waits [`HOVER_DELAY`] (the old app's 300 ms) before it shows, through a ticker deadline, and shows at once
 //! when another tooltip is showing or one went away less than that long ago, so a user scanning a row of icons does
@@ -88,9 +89,10 @@ impl TooltipOwner {
 /// the short card's padding and its `max-height: calc(100vh - 8px)`, so a paragraph card taller than the window is
 /// clipped at the window, not at a line count.
 ///
-/// A third form, the card ([`Help::card`]), carries a view of the caller's own on a card of fixed width: the old
-/// session row's summary card (`data-kind="card"`, `app.css` lines 1932-1938: `width: min(310px, 100vw - 8px)`, no
-/// padding, no clamp), which shared the other forms' fill, border, radius, shadow and height cap.
+/// A third form, the card ([`Help::card`], or [`Help::card_with`] to make the view only while it shows), carries a
+/// view of the caller's own on a card of fixed width: the old session row's summary card (`data-kind="card"`,
+/// `app.css` lines 1932-1938: `width: min(310px, 100vw - 8px)`, no padding, no clamp), which shared the other forms'
+/// fill, border, radius, shadow and height cap.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Help {
     /// Short help: the app's words, or a sentence naming host values.
@@ -102,26 +104,48 @@ pub enum Help {
     Card(Card),
 }
 
-/// The card form of hover help ([`Help::card`]): a view drawn on the tooltip's card at a fixed width.
+/// The card form of hover help ([`Help::card`], [`Help::card_with`]): a view drawn on the tooltip's card at a fixed
+/// width.
 ///
-/// Two cards are the same help when they draw the same view entity at the same width with the same words: the view's
-/// own state decides what it draws, so comparing its entity is what tells a control's help apart from frame to frame
-/// ([`help_drawn`]).
+/// Two cards are the same help when they have the same width and words and the same view: the same entity for a view
+/// made with the help, and for one the tooltip makes ([`CardView::Later`]) the same builder allocation, so clones of
+/// one help are equal and two renders' help is not. The one use of equality is [`help_drawn`] deciding whether to
+/// replace a hovered control's stored help, so each render of a lazy card replaces it with that render's builder, and
+/// a tooltip that shows later builds the view that render describes (the right host, after a row changed hosts). A
+/// waiting or showing tooltip is never refreshed from it, so the view is still made only when the tooltip shows.
 #[derive(Clone)]
 pub struct Card {
     /// The card's width, kept 8 pixels inside a narrower window (the old `min(310px, 100vw - 8px)`).
     width: Pixels,
-    view: AnyView,
+    view: CardView,
     /// What the card says, as assistive technology reads it ([`Help::accessible_text`]): a line, so that a host value
     /// in it (the session's title and host, in the summary) is escaped as in every other form.
     text: Line,
 }
 
+/// What makes a lazy card's view ([`Help::card_with`]), shared by every clone of the help.
+type BuildCard = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
+
+/// Where a card's view comes from.
+#[derive(Clone)]
+enum CardView {
+    /// Made by the caller with the help ([`Help::card`]), and drawn as is.
+    Made(AnyView),
+    /// Made by `build` when the tooltip shows and kept by the showing tooltip ([`Help::shown`]), so it lives only
+    /// while the card shows. The builder's allocation is its identity ([`Card`]).
+    Later { build: BuildCard },
+}
+
 impl PartialEq for Card {
     fn eq(&self, other: &Self) -> bool {
-        self.width == other.width
-            && self.view.entity_id() == other.view.entity_id()
-            && self.text == other.text
+        let same_view = match (&self.view, &other.view) {
+            (CardView::Made(one), CardView::Made(other)) => one.entity_id() == other.entity_id(),
+            (CardView::Later { build: one }, CardView::Later { build: other }) => {
+                Rc::ptr_eq(one, other)
+            }
+            _ => false,
+        };
+        same_view && self.width == other.width && self.text == other.text
     }
 }
 
@@ -129,9 +153,13 @@ impl Eq for Card {}
 
 impl std::fmt::Debug for Card {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let view = match &self.view {
+            CardView::Made(view) => format!("{:?}", view.entity_id()),
+            CardView::Later { .. } => "built when shown".to_string(),
+        };
         f.debug_struct("Card")
             .field("width", &self.width)
-            .field("view", &self.view.entity_id())
+            .field("view", &view)
             .field("text", &self.text)
             .finish()
     }
@@ -145,9 +173,43 @@ impl Help {
     pub fn card(width: Pixels, view: impl Into<AnyView>, text: impl Into<Line>) -> Help {
         Help::Card(Card {
             width,
-            view: view.into(),
+            view: CardView::Made(view.into()),
             text: text.into(),
         })
+    }
+
+    /// [`Help::card`] whose view `build` makes only when the tooltip shows, and which the tooltip drops when it hides
+    /// or is replaced: for a view that holds something for as long as it lives (the host progress card holds the
+    /// ticker's clock and a running step's pulse), which one view per row would keep running while nothing draws it.
+    /// While the card shows, the one view it made is drawn in every frame. See [`Card`] for when two are the same help.
+    pub fn card_with(
+        width: Pixels,
+        build: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
+        text: impl Into<Line>,
+    ) -> Help {
+        Help::Card(Card {
+            width,
+            view: CardView::Later {
+                build: Rc::new(build),
+            },
+            text: text.into(),
+        })
+    }
+
+    /// This help as a showing tooltip holds it: a card whose view is made later gets it made now, once.
+    fn shown(self, window: &mut Window, cx: &mut App) -> Help {
+        match self {
+            Help::Card(Card {
+                width,
+                view: CardView::Later { build },
+                text,
+            }) => Help::Card(Card {
+                width,
+                view: CardView::Made(build(window, cx)),
+                text,
+            }),
+            help => help,
+        }
     }
 
     /// The help as one string, as assistive technology reads it: for a line, its [`Line::accessible_text`]; for
@@ -631,13 +693,16 @@ fn show_tooltip_from(
         return;
     };
     let owner_id = owner.entity_id();
+    let text = hint.help.accessible_text();
+    // Made here, when it shows, and dropped with the tooltip it belongs to.
+    let help = hint.help.shown(window, cx);
     stack.update(cx, |stack, cx| {
         stack.pending_tooltip = None;
         stack.tooltip = Some(ShownTooltip {
             owner: owner_id,
-            text: hint.help.accessible_text(),
+            text,
             at,
-            help: hint.help,
+            help,
             beside: hint.beside,
             side: Rc::new(Cell::new(TooltipSide::Pointer)),
             ring: Rc::new(Cell::new(None)),
@@ -732,6 +797,16 @@ pub(super) fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> g
             .flex_col()
             .gap(metrics::TOOLTIP_PARAGRAPH_GAP)
             .children(paragraphs.iter().cloned()),
-        Help::Card(form) => card.w(form.width.min(room)).child(form.view.clone()),
+        Help::Card(form) => {
+            let card = card.w(form.width.min(room));
+            match &form.view {
+                CardView::Made(view) => card.child(view.clone()),
+                // Never here: a showing tooltip's card was made when it showed ([`Help::shown`]).
+                CardView::Later { .. } => {
+                    debug_assert!(false, "a showing tooltip's lazy card was never made");
+                    card
+                }
+            }
+        }
     }
 }
