@@ -1,6 +1,7 @@
 //! Tests of Tunnel and open on a link card, in process against the helm client's fake: the answer sent at once when
-//! the shared tunnel consent is recorded, the terminal's tunnel warning asked first when it is not, and the terminal's
-//! tunnel list re-read once the helm took the answer.
+//! the shared tunnel consent is recorded, the terminal's tunnel warning asked first when it is not, that warning
+//! opening over an unrelated dialog and outliving it, and the terminal's tunnel list re-read once the helm took the
+//! answer.
 //!
 //! They matter because Tunnel and open widens what a remote page can reach on this Mac: the helm refuses the answer
 //! without the user's consent, so sending it before the warning was accepted would only fail, and sending it after the
@@ -28,9 +29,11 @@ use super::model::TunnelOffer;
 use super::tunnel::{Pressed, offer, tunnel_and_open};
 use crate::focus::Mark;
 use crate::host_text::HostText;
-use crate::root;
-use crate::terminal::tunnels::Tunnels;
-use crate::test_support::{self, any_open, click, meta, one_command, settle, started};
+use crate::terminal::tunnels::{self, Tunnels};
+use crate::test_support::{
+    self, any_open, click, focused, is_open, meta, one_command, settle, started,
+};
+use crate::{layers, root};
 
 // ---- Fixtures -------------------------------------------------------------------------------------------------------
 
@@ -220,7 +223,7 @@ fn without_consent_the_warning_is_asked_and_its_allow_sends_the_answer(cx: &mut 
     let (pressed, _) = press(cx, &arming);
     assert_eq!(pressed, Pressed::Asking);
     assert!(any_open(cx), "the tunnel warning is up");
-    let raised = cx.update(|window, cx| crate::layers::top_is_above_approval_region(window, cx));
+    let raised = cx.update(|window, cx| layers::top_is_above_approval_region(window, cx));
     assert!(raised, "and its box is drawn above the approval cards");
     assert!(
         helm.commands().is_empty(),
@@ -277,43 +280,87 @@ fn the_warning_goes_with_its_request(cx: &mut TestAppContext) {
     assert!(helm.commands().is_empty(), "nothing was saved or answered");
 }
 
-/// A press while the tunnel warning is already up must not stack a second, identical warning over it, and while
-/// another dialog holds focus the warning would cover what the user is in; the press is refused with a reason
-/// instead, as the card's Add host is. Specified: a press asks the warning; a second press reports
-/// [`Pressed::AnotherDialog`], whose reason names another dialog, and opens nothing more (one Cancel leaves no layer
-/// open) and sends nothing; with another dialog open, a press reports the same and opens no warning. With consent
-/// recorded the press opens nothing, so it goes out over a dialog: the answer is sent.
+/// A press while a tunnel warning is already up must not stack a second, identical warning over it, whoever asked
+/// the first: the cards stay usable beside the warning, so a second press is easy to make. The card says why in the
+/// old app's words, since a warning another opener asked answers nothing on this card. Specified: a press asks the
+/// warning; a second press reports [`Pressed::AnotherTunnelAction`], whose reason is "Another tunnel action is still
+/// waiting", opens nothing more (one Cancel leaves no layer open) and sends nothing; with Settings' warning up
+/// ([`tunnels::ask_consent`]), a press reports the same, and one Cancel again leaves nothing open.
 #[gpui::test]
-fn a_press_that_would_stack_a_warning_over_a_dialog_is_refused(cx: &mut TestAppContext) {
+fn a_press_while_a_tunnel_warning_is_up_asks_nothing_and_says_why(cx: &mut TestAppContext) {
     let (mut helm, cx, arming, _tunnels) = fixture(cx, false);
     let (pressed, _) = press(cx, &arming);
     assert_eq!(pressed, Pressed::Asking, "premise: the warning is up");
     let (again, _) = press(cx, &arming);
-    assert_eq!(again, Pressed::AnotherDialog);
-    assert!(
-        again
-            .reason()
-            .is_some_and(|words| words.starts_with("Another dialog is open.")),
-        "the card says why"
+    assert_eq!(again, Pressed::AnotherTunnelAction);
+    assert_eq!(
+        again.reason(),
+        Some("Another tunnel action is still waiting"),
+        "the card says why, in the old app's words"
     );
     click(cx, "prompt-cancel");
     assert!(!any_open(cx), "one Cancel closed the only warning");
     assert!(helm.commands().is_empty(), "nothing was sent");
 
-    let inside = cx.update(|_, cx| cx.focus_handle().tab_stop(true));
-    test_support::open_dialog(cx, vec![("dialog-control", inside.clone())], &inside);
+    let settings = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        tunnels::ask_consent(&mark, window, cx, |_, _| {})
+    });
+    settle(cx);
+    assert!(settings.is_some(), "premise: Settings' warning is up");
     let (over, _) = press(cx, &arming);
     assert_eq!(
         over,
-        Pressed::AnotherDialog,
-        "no warning over another dialog"
+        Pressed::AnotherTunnelAction,
+        "no warning over Settings' warning"
     );
-    let raised = cx.update(|window, cx| crate::layers::top_is_above_approval_region(window, cx));
-    assert!(
-        !raised,
-        "the dialog is still the top layer: no warning opened over it"
-    );
+    click(cx, "prompt-cancel");
+    assert!(!any_open(cx), "one Cancel closed the only warning");
     assert!(helm.commands().is_empty(), "nothing was sent");
+}
+
+/// The old app opened the card's warning over whatever dialog was open, and SPEC.md's "Nothing closes a dialog, menu,
+/// popup list or confirmation that it did not open" holds for the dialog's owner: closing that dialog (a bulk question
+/// whose targets went away) must not take the warning the user is reading along, as closing a layer closes the layers
+/// opened from it. On macOS a press on the card moves no focus, so focus is still in the dialog when the warning opens,
+/// and the focus rules alone would make the dialog the warning's parent; the warning's opener says it was opened from
+/// the card ([`layers::opened_from_approval_card`]). The press here comes from an update with focus left in the dialog,
+/// standing in for that click; that a real click on a card leaves focus there is the layer manager's tests'.
+///
+/// Specified: with an unrelated dialog holding focus, a press asks the warning over the dialog, which stays open; the
+/// dialog's owner closing it leaves the warning open, with nothing sent; the warning's Allow then saves the consent
+/// and sends the answer.
+#[gpui::test]
+fn the_warning_opens_over_a_dialog_and_outlives_its_close(cx: &mut TestAppContext) {
+    let (mut helm, cx, arming, _tunnels) = fixture(cx, false);
+    let inside = cx.update(|_, cx| cx.focus_handle().tab_stop(true));
+    let (dialog, _, _) =
+        test_support::open_dialog(cx, vec![("unrelated-control", inside.clone())], &inside);
+    assert!(
+        focused(cx, &inside),
+        "premise: the unrelated dialog holds focus"
+    );
+    let (pressed, _) = press(cx, &arming);
+    assert_eq!(
+        pressed,
+        Pressed::Asking,
+        "the warning is asked over the dialog"
+    );
+    assert!(is_open(cx, dialog), "premise: the dialog is still open");
+
+    cx.update(|window, cx| layers::close(dialog, window, cx));
+    settle(cx);
+    assert!(!is_open(cx, dialog), "premise: the dialog closed");
+    assert!(any_open(cx), "the warning stayed open");
+    assert!(helm.commands().is_empty(), "nothing was sent");
+
+    click(cx, "prompt-confirm");
+    let (save, body) = one_command(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(body, json!({ "tunnel_consent": true }));
+    helm.reply(save, 204, None);
+    settle(cx);
+    let (_, body) = one_command(&mut helm, Method::Post, &answer_path());
+    assert_eq!(body, json!({ "answer": "tunnel_and_open" }));
 }
 
 /// The warning closes on Allow before its consent save comes back, so a press in between would pass every other
@@ -336,7 +383,7 @@ fn a_press_while_the_consent_is_being_saved_asks_nothing(cx: &mut TestAppContext
     assert_eq!(body, json!({ "answer": "tunnel_and_open" }));
 }
 
-/// With consent recorded, Tunnel and open opens nothing, so a dialog being open does not stop it: cards stay
+/// With consent recorded, Tunnel and open opens nothing and answers at once, over a dialog as anywhere: cards stay
 /// answerable over dialogs (SPEC.md). Specified: with consent and a dialog open, the press is sent.
 #[gpui::test]
 fn with_consent_a_press_over_a_dialog_is_sent(cx: &mut TestAppContext) {

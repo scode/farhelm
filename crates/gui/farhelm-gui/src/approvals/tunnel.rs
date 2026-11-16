@@ -13,11 +13,17 @@
 //! vanished. Once the helm took the answer, the terminal's views of the asking session read their tunnels again
 //! ([`tunnels::opened_elsewhere`]), since the tunnel was opened outside the terminal.
 //!
-//! A press that would ask the warning while a dialog already holds focus, the warning itself included, is refused
-//! with a reason on the card ([`Pressed::reason`]), as the card's Add host is: a second press while the warning was up
-//! opened a second, identical warning over the first. The migration's orchestrator asked for the refusal on
-//! 2026-11-15, once the warning drew above the cards. With consent recorded the press opens nothing, so it still
-//! answers over any dialog.
+//! The warning opens over whatever dialog is open, as the old app's did: it is about the card's request, not about that
+//! dialog. So its opener says it was opened from a card ([`layers::opened_from_approval_card`]), and the dialog's owner
+//! closing the dialog (a bulk question whose targets went away) leaves the warning open, focused and above the cards.
+//! Focus alone could not say so on macOS, where a press on the card leaves focus in the dialog.
+//!
+//! A press while a tunnel warning is already up, whoever asked it (this card, another card, Settings' switch, a
+//! terminal's Cmd-click), asks nothing, since a second, identical warning would stack over the first, and the card
+//! says why in the old app's words ([`Pressed::AnotherTunnelAction`]). The press asks the layer manager whether a layer
+//! raised above the approval region is open ([`layers::above_approval_region_open`]), which assumes the tunnel warning
+//! is the only layer any opener raises there, as the layer manager's docs say today: a second kind of raised layer
+//! would also hold Tunnel and open back while it is up.
 //!
 //! Offered only in the Mac app: the platform is a value ([`offer`]), not a `cfg`, so Linux tests cover both card
 //! shapes.
@@ -52,20 +58,21 @@ pub enum Pressed {
     Asking,
     /// Nothing: the answer bar was paused, an answer to the request or a save of the preferences (an earlier warning's
     /// consent among them) was already on its way while the warning would have been asked, or the user moved on since
-    /// the press.
+    /// the press. The request keeps waiting, and the card says nothing.
     Nothing,
-    /// The warning would have been asked, but a dialog holds focus (a tunnel warning already up, or another dialog):
-    /// the card says so ([`Pressed::reason`]) and the request keeps waiting.
-    AnotherDialog,
+    /// The warning would have been asked while a tunnel warning is already up: the card says so ([`Pressed::reason`])
+    /// and the request keeps waiting.
+    AnotherTunnelAction,
 }
 
 impl Pressed {
-    /// What the card's refusal line says, in the app's words, or `None` when there is nothing to say.
+    /// What the card's refusal line says, in the app's words, or `None` when there is nothing to say. The old app's
+    /// words for a tunnel action pressed while another is still under way (`TunnelController::prepare` in `tunnels.rs`
+    /// at reference commit `24bc0580`); the terminal's `BUSY` (`terminal/tunnels.rs`) holds the same words for the
+    /// terminal's own tunnel actions, so a rewording changes both.
     pub fn reason(self) -> Option<&'static str> {
         match self {
-            Pressed::AnotherDialog => Some(
-                "Another dialog is open. Close it, then press this request's Tunnel and open again.",
-            ),
+            Pressed::AnotherTunnelAction => Some("Another tunnel action is still waiting"),
             Pressed::Sent | Pressed::Asking | Pressed::Nothing => None,
         }
     }
@@ -77,8 +84,9 @@ impl Pressed {
 /// the card's ordinary outcomes (the helm's refusal on the request's key, a late answer's notice).
 ///
 /// Cancel, Escape or closing the warning send nothing, and the request keeps waiting on its card. The warning closes
-/// by itself when the request stops waiting. A press that would ask the warning while a dialog holds focus opens
-/// nothing and reports [`Pressed::AnotherDialog`].
+/// by itself when the request stops waiting, and only then or by its own answers: it opens over any dialog, and that
+/// dialog closing leaves it open (the module docs). A press while a tunnel warning is already up asks nothing and
+/// reports [`Pressed::AnotherTunnelAction`].
 pub fn tunnel_and_open(
     approval: &PendingApproval,
     arming: &Entity<Arming>,
@@ -107,9 +115,9 @@ pub fn tunnel_and_open(
     if saving_preferences(cx) {
         return Ok(Pressed::Nothing);
     }
-    // A dialog holding focus is what the user is in; the warning would stack over it, or over itself.
-    if layers::focus_layer_open(window, cx) {
-        return Ok(Pressed::AnotherDialog);
+    // A warning already up, from any opener, is the one this press would ask again (the module docs).
+    if layers::above_approval_region_open(window, cx) {
+        return Ok(Pressed::AnotherTunnelAction);
     }
     let subject = request_subject(&id, cx);
     let asked =
@@ -126,11 +134,13 @@ pub fn tunnel_and_open(
             Ok(()) => {}
             Err(reason) => refused(reason, cx),
         });
-    Ok(if asked.is_some() {
-        Pressed::Asking
-    } else {
-        Pressed::Nothing
-    })
+    let Some(warning) = asked else {
+        return Ok(Pressed::Nothing);
+    };
+    // In the open's own update, before anything can close the dialog under it: on macOS focus is still in that dialog,
+    // which would otherwise count as the warning's parent and take it along when its owner closes it.
+    layers::opened_from_approval_card(warning, window, cx);
+    Ok(Pressed::Asking)
 }
 
 /// Send the answer, past the answer bar's pause (the caller checked it at the press), with the cards' ordinary

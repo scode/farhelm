@@ -82,6 +82,7 @@ use crate::assets;
 use crate::components::{Button, HoverHelp, Role, Tier, copy_button, with_hover_help};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
+use crate::layers;
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
@@ -152,7 +153,7 @@ pub(crate) enum Target {
         /// The control that opened Add host, which gets focus back.
         opener: FocusHandle,
         /// The add began as an agent's request: a refusal reopens Add host still marked so ([`add::Seed::from_agent`]),
-        /// so its next plan still asks.
+        /// so its next plan still asks, and the confirmation belongs to the request's card ([`confirm`]).
         from_agent: bool,
     },
     /// A registered host whose failed setup the user runs again from its row: the title names it as its row does, and
@@ -167,6 +168,17 @@ pub(crate) enum Target {
     /// A Tensorlake sandbox Add host is creating ([`confirm`]'s sandbox question): what Back and a refusal reopen Add
     /// host with.
     Sandbox(Sandbox),
+}
+
+impl Target {
+    /// [`Target::New`]'s `from_agent`: whether the add began as an agent's request. A registered host's rerun and a
+    /// sandbox never do, since only the user starts them.
+    fn is_from_agent(&self) -> bool {
+        match self {
+            Target::New { from_agent, .. } => *from_agent,
+            Target::Registered { .. } | Target::Sandbox(_) => false,
+        }
+    }
 }
 
 /// A Tensorlake sandbox's creation, as its confirmation shows it and Back or a refusal reopens Add host with it.
@@ -229,6 +241,7 @@ pub(crate) fn asks_first(cx: &App) -> bool {
 /// otherwise.
 pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     let mark = offer.mark;
+    let from_agent = offer.target.is_from_agent();
     let (name, (icon, color)) = match &offer.target {
         Target::Sandbox(sandbox) => {
             let heading = sandbox.heading();
@@ -290,7 +303,7 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
         // SPEC.md, "Opening and closing": the dialogs that share the host and Settings installer keep focus on the
         // control in use when their empty space is clicked.
         .keeps_focus_on_empty_click();
-    prompt::ask(
+    let asked = prompt::ask(
         question,
         None,
         &mark,
@@ -304,6 +317,13 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
         window,
         cx,
     );
+    // An agent's confirmation opens in the place of its Add host, which belongs to the request's card, so it does too
+    // (`layers::opened_from_approval_card`, whose contract names it). The mark keeps that contract, and takes effect
+    // once Add host can open over another dialog: until then `add::open_for_agent` refuses that, and no layer holding
+    // focus can become the confirmation's parent.
+    if from_agent && let Some(asked) = asked {
+        layers::opened_from_approval_card(asked, window, cx);
+    }
 }
 
 /// The Tensorlake sandbox's creation confirmation for `offer` (the module docs), under its sandbox's `(title,

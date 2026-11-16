@@ -477,7 +477,9 @@ list's Escape, and is not driven here); `metadata acts only on displayed eligibl
 Delete question open, but in the app a press on the bar closes it first, so the row is taken like any other);
 `Delete rewords and shrinks without gaining targets` (`a_changed_target_rewords_the_question_which_never_gains_one`,
 which also checks that the reword leaves focus where it was, `a_status_word_change_rewords_the_question_in_place`,
-`a_reword_keeps_focus_where_the_user_put_it_in_the_question`, `the_question_closes_once_no_target_is_left`, and
+`a_reword_keeps_focus_where_the_user_put_it_in_the_question`, `the_question_closes_once_no_target_is_left` (and
+`closing_the_question_leaves_a_warning_an_approval_card_opened_above_it`, which keeps the old app's closing of the bulk
+dialog alone when an approval card's tunnel warning is above it), and
 `a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks` for the rows, the full host, the managed
 checkout's line, the "Sessions affected" scroll stop and Cancel's focus on the ⋯; the hostile title's escaping is the
 host-text element's, tested there; the marked bar's Stop and Delete are in the `session-list-marked` golden);
@@ -1306,10 +1308,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   anyway and skipped only a row whose question or Rename was open: the port's row menu refuses Pin and the seen toggle
   while a request is in flight, and the bulk action follows it.
 - The bulk question's rows show the status in words in the body's ink, where the old ones drew the colored status badge.
-- A bulk question whose every target a listing proves gone closes, and closing it also closes any dialog raised above it
-  from elsewhere (an approval card's tunnel warning, say), where the old app closed the bulk dialog alone. This waits
-  for the layer manager to close one dialog without closing the layers raised above it from outside it, which has been
-  requested from its owner.
 - When a bulk question closes because every target is proven gone, focus goes to the ⋯ while the frame still draws it,
   and once the ⋯ is gone it recovers to the open session's terminal, whatever held focus when the question opened; the
   old app focused the order's title.
