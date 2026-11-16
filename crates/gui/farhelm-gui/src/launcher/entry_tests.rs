@@ -255,6 +255,9 @@ fn new_waits_for_a_pending_launch_and_then_brings_back_its_refusal(cx: &mut Test
             });
     });
     settle(cx);
+    // The launcher's reads answered first: New waits for the host's history to settle its folder.
+    let early = creates(&mut helm, cx);
+    assert!(early.is_empty(), "the premise: nothing pressed yet");
     test_support::click(cx, "launcher-launch");
     let sent = creates(&mut helm, cx);
     let [create] = &sent[..] else {

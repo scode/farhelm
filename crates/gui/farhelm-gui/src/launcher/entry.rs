@@ -42,7 +42,7 @@ use farhelm_proto::{
 };
 use gpui::{App, Entity, Window};
 
-use super::draft::{LaunchDraft, harness_label, remembered_permission};
+use super::draft::{FolderDefault, LaunchDraft, harness_label, remembered_permission};
 use super::launch;
 use super::view::yolo_question::{self, replace_owner};
 use super::view::{Launcher, Note, Shown, open, open_noted};
@@ -446,16 +446,21 @@ pub fn ask_yolo_for_replace(
 /// permission. Prefilled values are seeds, not edits: nothing is marked touched.
 fn new_draft(collections: &Collections, selected: Option<&str>) -> LaunchDraft {
     let host = open_host(collections, selected).or_else(|| local_host(collections));
-    let folder = host.map_or_else(
-        || "~".to_owned(),
-        |host| default_folder(collections, selected, host),
-    );
+    let inherited = host.and_then(|host| session_folder(collections, selected, host));
+    let pending = host.is_some() && inherited.is_none();
+    let folder = inherited.unwrap_or_else(|| "~".to_owned());
     let remembered = collections
         .get::<Preferences>(PREFERENCES_KEY)
         .and_then(|preferences| {
             remembered_permission(preferences.remembered_permissions.as_deref())
         });
-    LaunchDraft::new(host, folder, remembered)
+    let mut draft = LaunchDraft::new(host, folder, remembered);
+    // Without the open session's folder, `~` stands in until the host's history names its own default
+    // (`LaunchDraft::folder_default`).
+    if pending {
+        draft.folder_default = FolderDefault::Pending;
+    }
+    draft
 }
 
 /// The host New starts on for the open session `selected`: its host row, when that row still names the install the
@@ -484,19 +489,32 @@ pub(super) fn local_host(collections: &Collections) -> Option<i64> {
 /// and the host picker's re-seed of an untouched folder both take it, so picking another host and then the open
 /// session's again brings its folder back; so does a quick launch's template that changes the host, which re-seeds the
 /// folder the same way (`crate::templates::apply::Context::default_folder`).
+///
+/// The step between those two, the host's own default from its launch history, arrives later, from the launcher's
+/// history read (`LaunchDraft::folder_default`); until it does, `~` stands in, and Launch waits for it.
 pub(crate) fn default_folder(
     collections: &Collections,
     selected: Option<&str>,
     host: i64,
 ) -> String {
+    session_folder(collections, selected, host).unwrap_or_else(|| "~".to_owned())
+}
+
+/// The selected session `selected`'s folder when that session is on `host`'s installation: the first choice of
+/// [`default_folder`], which wins over the host's history without waiting for it.
+pub(crate) fn session_folder(
+    collections: &Collections,
+    selected: Option<&str>,
+    host: i64,
+) -> Option<String> {
     let open = selected.and_then(|key| collections.get::<SessionRow>(key));
-    let on_host = open.filter(|row| {
+    open.filter(|row| {
         collections
             .ordered::<HostView>()
             .into_iter()
             .any(|view| view.id == host && same_install(row, view))
-    });
-    on_host.map_or_else(|| "~".to_owned(), |row| row.info.cwd.clone())
+    })
+    .map(|row| row.info.cwd.clone())
 }
 
 /// Whether `host` is still the install session `row` was listed on (SPEC.md, "Host": "The comparison is by the

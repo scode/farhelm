@@ -69,6 +69,9 @@ pub const CONVERSATION_IN_CHECKOUT: &str =
 /// Why a managed checkout waits for its preview, the old launcher's words; a failed preview says this too, while its
 /// own words show beside the preview.
 pub const WAIT_FOR_PREVIEW: &str = "Wait for a current checkout preview before launching";
+/// Why New waits for the chosen host's launch history before launching into its untouched default folder, the old
+/// launcher's words: the history decides which folder that default is (`LaunchDraft::folder_default`).
+pub const FOLDER_DEFAULT_WAITING: &str = "Wait for this host's last folder before launching";
 /// Why a managed checkout cannot launch on a connected host that reports no installation identity: the helm binds every
 /// checkout preview to that identity, so none can be asked for. The old launcher's words.
 pub const UNVERIFIED_HOST: &str =
@@ -88,6 +91,9 @@ impl LaunchDraft {
         // The old order: the destination's reasons come right after the host's, before the launch kind's.
         if let Some(reason) = self.checkout_refusal(target) {
             return Some(reason.to_owned());
+        }
+        if self.folder_default_waiting() {
+            return Some(FOLDER_DEFAULT_WAITING.to_owned());
         }
         match self.tab {
             Tab::Agent => {

@@ -60,6 +60,8 @@ mod entry_tests;
 #[cfg(test)]
 mod folder_check_tests;
 #[cfg(test)]
+mod folder_default_tests;
+#[cfg(test)]
 mod folder_list_tests;
 #[cfg(test)]
 pub(crate) mod launch_tests;

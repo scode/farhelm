@@ -276,7 +276,8 @@ pub enum Prepared {
 
 /// Prepare a quick launch out of sight, from the handler of the shortcut's press: make the launcher on `draft` (New's
 /// prefill), hold it in the launch slot while it reads its model catalog, then let `finish` apply the templates to its
-/// draft against that catalog and say what happens next ([`Prepared`]). SPEC.md, "Quick launch": a shortcut "starts it
+/// draft against that catalog and say what happens next ([`Prepared`]); a launch then still waits out of sight for New's
+/// folder default or a managed checkout's preview when it needs one ([`Launcher::start_or_wait_for_folder`]). SPEC.md, "Quick launch": a shortcut "starts it
 /// directly ... without showing the launcher on success", through "exactly New's defaults and ordinary launch path".
 ///
 /// The catalog read is the launcher's own, and the template rules need it (a model-only template picks the one agent
@@ -321,6 +322,69 @@ pub fn prepare_unseen(
     true
 }
 
+/// Why a quick launch prepared out of sight opened New instead of launching into an untouched folder: the host's
+/// history could not be read, so the folder it would start in is a stand-in `~`. The old launcher's words.
+const QUICK_LAUNCH_FOLDER_UNREAD: &str = "Couldn't prepare quick launch: this host's recent setups could not be read, so its last folder is unknown; check the folder and launch";
+
+impl Launcher {
+    /// Go on with a quick launch prepared out of sight, its templates applied: wait for New's folder default first
+    /// (SPEC_impl.md, "Launch templates": "a hidden quick launch waits for it"), then wait for a managed checkout's
+    /// preview, as the old app's quick launch did (`checkout`), then start. Returns `true` while it waits out of
+    /// sight; `false` when it started or refused, or needs the user. A folder the history could not settle (a failed
+    /// read) needs the user: New is shown with the reason instead of launching into `~` (the old app's rule).
+    fn start_or_wait_for_folder(
+        &mut self,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // The launcher is never drawn, so the history is asked for, and the default settled, here; only while Launch
+        // waits for it, as the old app's quick launch did. A managed checkout's quick launch must not read it: the
+        // answer's configuration revision would make the preview it waits for stale, and it would be shown instead.
+        if self.draft.folder_default_waiting() {
+            self.follow_history(cx);
+            if self.settle_folder_default(cx) {
+                self.sync_fields(window, cx);
+            }
+        }
+        if self.draft.folder_default_waiting() && self.history_wanted(cx) {
+            self.folder_wait = Some((mark, window.window_handle()));
+            return true;
+        }
+        if self.draft.folder_default_unread() {
+            self.note = Some(Note::Refusal(
+                HostSentence::new("launcher-note-folder-unread").text(QUICK_LAUNCH_FOLDER_UNREAD),
+            ));
+            cx.notify();
+            return false;
+        }
+        self.submit_or_wait_for_preview(mark, window, cx)
+    }
+
+    /// The chosen host's history answered: a quick launch waiting out of sight for New's folder default goes on, in
+    /// its own window and after this update, since it starts the launch through the window. One that is no longer
+    /// being prepared (a reset dropped it) is left alone.
+    pub(super) fn history_settled_for_quick_launch(&mut self, cx: &mut Context<Self>) {
+        let Some((mark, window)) = self.folder_wait.take() else {
+            return;
+        };
+        let launcher = cx.entity();
+        cx.defer(move |cx| {
+            if !launch::still_preparing(&launcher, cx) {
+                return;
+            }
+            let waiting = cx.update_window(window, |_, window, cx| {
+                launcher.update(cx, |launcher, cx| {
+                    launcher.start_or_wait_for_folder(mark, window, cx)
+                })
+            });
+            if !matches!(waiting, Ok(true)) {
+                launch::reveal_prepared(launcher, window, mark, cx);
+            }
+        });
+    }
+}
+
 /// [`prepare_unseen`]'s second half, once the catalog read answered: apply, then start or show.
 fn prepared(
     launcher: Entity<Launcher>,
@@ -341,9 +405,7 @@ fn prepared(
             match next {
                 Prepared::Launch { notice } => {
                     launcher.notice = notice;
-                    // A managed checkout first waits, still out of sight, for its folder's preview, and then starts
-                    // (`checkout`), as the old app's quick launch did.
-                    launcher.submit_or_wait_for_preview(mark, window, cx)
+                    launcher.start_or_wait_for_folder(mark, window, cx)
                 }
                 Prepared::Show { note, notice } => {
                     if matches!(note, Note::Banner(_)) {
@@ -489,6 +551,10 @@ pub(crate) struct Launcher {
     /// the first time it is ([`show`]). The success path reads it to hand the new session to naming (SPEC.md, "Quick
     /// launch": only "When New was never shown"; `launch::settle`).
     pub(super) quick_launch_unseen: bool,
+    /// A quick launch prepared out of sight that waits for the chosen host's history to settle New's folder default
+    /// ([`Launcher::start_or_wait_for_folder`]), with the mark it started from and its window; it goes on when the
+    /// history answers.
+    folder_wait: Option<(Mark, AnyWindowHandle)>,
     /// What the launcher says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
     /// banner until [`Launcher::banner_expiry`] if that comes first.
     note: Option<Note>,
@@ -721,6 +787,7 @@ impl Launcher {
             layer: None,
             yolo: None,
             quick_launch_unseen: false,
+            folder_wait: None,
             note: None,
             banner_expiry: None,
             waiting_batches: Vec::new(),
@@ -2016,6 +2083,9 @@ impl Render for Launcher {
         // The launch history follows the chosen host's connection the same way (`history`), and the folder list notices
         // a close the layer manager made on its own (`folder_list`).
         self.follow_history(cx);
+        if self.settle_folder_default(cx) {
+            self.sync_fields(window, cx);
+        }
         self.follow_folder_list(window, cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();

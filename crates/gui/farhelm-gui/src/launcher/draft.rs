@@ -336,6 +336,32 @@ pub struct LaunchDraft {
     /// typing a name makes it the user's exact name. It is the draft's own record of where the name came from, so
     /// Save as template and the managed-checkout name pill read it here rather than in a parallel record.
     pub name_kind: Option<TemplateNameKind>,
+    /// Whether New's folder still waits for the chosen host's launch history to say which folder it starts in
+    /// ([`FolderDefault`]). Kept in the draft, so a permission Undo, which puts back the whole draft, puts it back too.
+    pub folder_default: FolderDefault,
+}
+
+/// Where New's folder default stands for the chosen host (SPEC.md, "Working directory": New prefills "the selected
+/// session's directory when that session is on the target host's installation, else the directory of the newest recent
+/// setup on that installation that launched into a plain folder (a fresh managed checkout does not count), else `~`").
+/// The launcher decides it once per opening and once per host change, from the first history answer for that host
+/// (`super::view::history`), so a later re-read never moves a folder the user is looking at.
+///
+/// New opens pending unless it seeded the open session's folder (`entry::new_draft`). Clone, Replace with and Restart
+/// with start settled: their folder is the source's. A Clone re-arms on a host the user
+/// chooses, as New does; Replace with and Restart with never do (Restart with "never uses or updates the per-host folder
+/// default").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FolderDefault {
+    /// Decided, or not this draft's to decide.
+    #[default]
+    Settled,
+    /// Waiting for the chosen host's history; Launch waits too while the folder is the untouched default
+    /// ([`LaunchDraft::folder_default_waiting`]).
+    Pending,
+    /// Settled on `~` because the history could not be read, so the host's last folder is unknown. A visible launcher
+    /// launches into it as any `~`; a quick launch prepared out of sight shows New instead, to let the user check it.
+    Unread,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -368,6 +394,9 @@ impl LaunchDraft {
             name: Draft::load(String::new()),
             host_chosen: false,
             name_kind: None,
+            // Settled: the caller's folder is the one it means. New's own opening, which seeds `~` until the host's
+            // history says otherwise, marks it pending (`entry::new_draft`).
+            folder_default: FolderDefault::Settled,
         }
     }
 
@@ -465,6 +494,7 @@ impl LaunchDraft {
             name: Draft::load(session.title.clone()),
             host_chosen: false,
             name_kind: None,
+            folder_default: FolderDefault::Settled,
         }
     }
 
@@ -884,6 +914,11 @@ impl LaunchDraft {
         }
         self.host = Some(host);
         self.seed_folder(default_folder);
+        // The new host's own default is decided again, from its history (a Clone's too: the host is the user's now).
+        // Replace with holds its host and Restart with its destination, so neither re-arms, whatever the caller checked.
+        if !self.holds(Field::Host) && !self.holds(Field::Destination) {
+            self.folder_default = FolderDefault::Pending;
+        }
         // What was taken on the old host says nothing about this one.
         if let Some(checkout) = &mut self.checkout {
             checkout.naming = CheckoutNameSequence::default();
@@ -895,6 +930,42 @@ impl LaunchDraft {
     /// after the host was chosen) seeds it the same way.
     pub fn seed_folder(&mut self, default_folder: String) {
         let _ = self.folder.follow(default_folder);
+    }
+
+    /// Settle a pending folder default on `folder`, the host's own default as the launcher decided it, or on `~` when
+    /// the history could not be read (`None`). It seeds the folder only while that is the untouched default of a folder
+    /// destination; either way the default is spent, so a later answer cannot move a folder the user has since typed,
+    /// picked, or kept aside behind a managed checkout (the old launcher's rule). Does nothing unless pending.
+    pub fn settle_folder_default(&mut self, folder: Option<String>) {
+        if self.folder_default != FolderDefault::Pending {
+            return;
+        }
+        self.folder_default = if folder.is_some() {
+            FolderDefault::Settled
+        } else {
+            FolderDefault::Unread
+        };
+        if self.checkout.is_none() && !self.holds(Field::Destination) {
+            self.seed_folder(folder.unwrap_or_else(|| "~".to_owned()));
+        }
+    }
+
+    /// Whether Launch waits for the folder default: it is pending, and the folder is still the untouched default of a
+    /// folder destination this draft may change. A folder the user typed or picked, or a managed checkout, does not
+    /// wait.
+    pub fn folder_default_waiting(&self) -> bool {
+        self.folder_default == FolderDefault::Pending && self.folder_is_the_default()
+    }
+
+    /// Whether the folder is the `~` a failed history read left in place of the host's default: unread, and still the
+    /// untouched default of a folder destination. A quick launch then shows New rather than launching into it.
+    pub fn folder_default_unread(&self) -> bool {
+        self.folder_default == FolderDefault::Unread && self.folder_is_the_default()
+    }
+
+    /// Whether the folder is still the default New seeded: untouched, on a folder destination this draft may change.
+    fn folder_is_the_default(&self) -> bool {
+        !self.folder.is_touched() && self.checkout.is_none() && !self.holds(Field::Destination)
     }
 
     /// The folder field's text, as typed, or a folder picked from the dropdown, Browse or search: either is the

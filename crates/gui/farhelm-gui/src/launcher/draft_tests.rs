@@ -11,7 +11,10 @@ use farhelm_proto::{
     SessionInfo, SessionLaunch,
 };
 
-use super::draft::{Field, LaunchDraft, Mode, RestartBaseline, Tab, remembered_permission};
+use super::draft::{
+    DestinationKind, Field, FolderDefault, LaunchDraft, Mode, RestartBaseline, Tab,
+    remembered_permission,
+};
 
 /// A small catalog: one Codex model with two efforts, one Claude model with one.
 fn catalog() -> Vec<LaunchCatalogModel> {
@@ -697,4 +700,116 @@ fn a_recent_setups_model_is_owned_only_when_custom() {
         Some(LaunchHarness::Codex),
         "with no catalog yet, every model counts as custom"
     );
+}
+
+// ---- New's folder default ------------------------------------------------------------------------------------------
+
+/// New as its own opening makes it without the open session's folder: `~`, waiting for the host's default
+/// (`entry::new_draft`; its tests show when New opens this way).
+fn pending_new() -> LaunchDraft {
+    let mut draft = new_draft();
+    draft.folder_default = FolderDefault::Pending;
+    draft
+}
+
+/// New's folder default is decided once: New starts waiting for it with its untouched folder, the first settlement
+/// seeds the folder and ends the wait, and a later one changes nothing. A folder the user typed waits for nothing and
+/// is kept when the default settles. A read that failed settles on `~`, marked unread. Why: SPEC.md, "Working
+/// directory": New seeds the host's last plain folder, and "a refresh of the recent setups never rewrites an open
+/// draft's folder" (old `folder_default_follows_precedence_once_per_opening_or_host_change`).
+#[test]
+fn new_waits_for_its_folder_default_once() {
+    let mut draft = pending_new();
+    assert_eq!(draft.folder_default, FolderDefault::Pending);
+    assert!(draft.folder_default_waiting());
+    draft.settle_folder_default(Some("/srv/work".into()));
+    assert_eq!(draft.folder.value(), "/srv/work");
+    assert_eq!(draft.folder_default, FolderDefault::Settled);
+    assert!(!draft.folder_default_waiting());
+    assert!(
+        !draft.folder.is_touched(),
+        "a seed is not the user's choice"
+    );
+    draft.settle_folder_default(Some("/srv/later".into()));
+    assert_eq!(
+        draft.folder.value(),
+        "/srv/work",
+        "a later answer moves nothing"
+    );
+
+    let mut typed = pending_new();
+    typed.edit_folder("/mine".into());
+    assert!(
+        !typed.folder_default_waiting(),
+        "a typed folder waits for nothing"
+    );
+    typed.settle_folder_default(Some("/srv/work".into()));
+    assert_eq!(typed.folder.value(), "/mine");
+    assert_eq!(typed.folder_default, FolderDefault::Settled);
+
+    let mut unread = pending_new();
+    unread.settle_folder_default(None);
+    assert_eq!(unread.folder.value(), "~");
+    assert_eq!(unread.folder_default, FolderDefault::Unread);
+    assert!(!unread.folder_default_waiting());
+}
+
+/// A host change makes the new host's default pending again; picking the host already chosen does not. A Clone
+/// starts settled on its source's folder and waits only once the user moves it to another host; Replace with and
+/// Restart with never wait. Why: SPEC.md, "Changing the host re-seeds a folder the user has not typed or picked", and
+/// Restart with "never uses or updates the per-host folder default" (old `folder_default_follows_precedence_...`'s
+/// Clone and source rows).
+#[test]
+fn a_host_change_rearms_the_folder_default_where_the_destination_is_free() {
+    let mut draft = pending_new();
+    draft.settle_folder_default(Some("/srv/work".into()));
+    let host = draft.host.expect("New has a host");
+    draft.choose_host(host, "~".into());
+    assert_eq!(
+        draft.folder_default,
+        FolderDefault::Settled,
+        "the same host"
+    );
+    draft.choose_host(host + 1, "~".into());
+    assert_eq!(draft.folder_default, FolderDefault::Pending);
+    assert_eq!(draft.folder.value(), "~", "the stand-in while it waits");
+
+    let source = session(agent_launch(selection(LaunchHarness::Codex), true));
+    let mut clone = LaunchDraft::clone_of(&source, Some(1));
+    assert_eq!(clone.folder_default, FolderDefault::Settled);
+    assert!(!clone.folder_default_waiting());
+    clone.choose_host(2, "~".into());
+    assert_eq!(clone.folder_default, FolderDefault::Pending);
+
+    let mut replace = LaunchDraft::replace_with("a", &source, Some(1));
+    assert_eq!(replace.folder_default, FolderDefault::Settled);
+    replace.choose_host(2, "~".into());
+    assert_eq!(
+        replace.folder_default,
+        FolderDefault::Settled,
+        "Replace with holds its host"
+    );
+    let mut resumable = source.clone();
+    resumable.restart_offer = RestartOffer::Resume;
+    let mut restart = LaunchDraft::restart_with("a", &resumable, Some(1)).expect("offered");
+    restart.choose_host(2, "~".into());
+    assert!(
+        !restart.folder_default_waiting(),
+        "Restart with holds its destination"
+    );
+}
+
+/// A managed checkout does not wait for the folder default, and a default that settles meanwhile leaves the folder
+/// kept aside behind it as it was. Why: the default is a folder's; the old launcher spent it without seeding a folder
+/// the managed checkout had put aside.
+#[test]
+fn a_managed_checkout_neither_waits_nor_is_seeded() {
+    let mut draft = pending_new();
+    let before = draft.folder.value().clone();
+    draft.choose_destination(DestinationKind::Checkout);
+    assert!(!draft.folder_default_waiting());
+    draft.settle_folder_default(Some("/srv/work".into()));
+    assert_eq!(draft.folder_default, FolderDefault::Settled);
+    draft.choose_destination(DestinationKind::Folder);
+    assert_eq!(draft.folder.value(), &before);
 }

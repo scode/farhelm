@@ -158,7 +158,8 @@ pub(super) fn preparing(launcher: Entity<Launcher>, cx: &mut App) {
         Some(Held {
             launcher,
             waiting: Waiting::Preparing,
-            // No create is out yet, so no progress pill: the preparation is one catalog read.
+            // No create is out yet, so no progress pill: the preparation is the catalog read, and then at most the
+            // host's history or a checkout preview.
             progress: None,
         }),
         cx,
