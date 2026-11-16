@@ -32,11 +32,11 @@
 //! whose focus handle is the list's for that reason.
 //!
 //! The rail's foot ([`foot`]) is pinned under its entries, which scroll above it, and holds the notices bell at its top
-//! ([`crate::rail_notices`]), Hosts under it above the Settings gear, and the `?` Help button below the gear
-//! ([`crate::help_menu`]), in the old foot's order. Hosts swaps the list's column for the Hosts panel
-//! ([`crate::hosts::HostsPanel`]) and back, keeping focus on itself; choosing All or a host returns to Sessions
-//! (SPEC.md: "All or a host avatar returns to Sessions"), and while the panel shows, the rail's chosen entry wears a
-//! quieter look so the filled Hosts control marks the view on screen. Whether the panel shows belongs to the UI
+//! ([`crate::rail_notices`]), Hosts under it above the Settings gear, the `?` Help button below the gear
+//! ([`crate::help_menu`]), and the Expand control last, in the old foot's order. Hosts swaps the list's column for the
+//! Hosts panel ([`crate::hosts::HostsPanel`]) and back, keeping focus on itself; choosing All or a host returns to
+//! Sessions (SPEC.md: "All or a host avatar returns to Sessions"), and while the panel shows, the rail's chosen entry
+//! wears a quieter look so the filled Hosts control marks the view on screen. Whether the panel shows belongs to the UI
 //! session, like the choice. The gear opens the Settings dialog ([`crate::settings::open`]) with itself as the opener,
 //! so that Escape and either close control bring focus back to it (SPEC.md: "Escape and either close control return
 //! focus to the gear").
@@ -51,40 +51,64 @@
 //! warning mark and dimming, with the state's words in its name and hover help; Hosts carries an `↑` while any avatar
 //! has an update, and its name and help count them. [`status`] draws them from what [`crate::hosts::status`] reads.
 //!
-//! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the expand toggle) for the rail's
-//! expansion; an avatar's right-click menu; and the rail's expansion to 220 pixels, with Add host's "Add host" label.
-//! The foot is sized for the four controls it holds: the old foot was 208 pixels, five 40-pixel controls, and it grows
-//! back as the last one arrives.
+//! **Expansion.** The foot's last control, named "Expand navigation rail" with » while the rail is collapsed and
+//! "Collapse navigation rail" with « and the label Collapse while it is expanded (the old `#host-rail-toggle`), widens
+//! the whole rail, its foot included, from 56 pixels to 220, and reports that state as expanded rather than open: it
+//! keeps the rail's quiet look either way ([`crate::components::Button::discloses`]). Expanded, every entry is a row as
+//! wide as the rail and one click target, its glyph or mark in the same 40-pixel icon box at the same place as in the
+//! collapsed square, so nothing a user aims at moves: All reads "All hosts", an avatar shows its host's display name with
+//! its destination smaller under it when the two differ (both cut short, the full identity staying in the avatar's
+//! name and hover help) in place of its caption, Add host reads "Add host", and the foot's controls show Notifications,
+//! Hosts, Settings, Help and Collapse beside their glyphs. Choosing, badges, rings, menus and actions work the same in
+//! both widths: they are the same controls, and an avatar's status marks are anchored to its icon box rather than to
+//! the button ([`status::icon_box`]). Whether the rail is expanded is the helm's `host_rail_open` preference, and
+//! [`expansion`] has how it is read and saved; the sidebar adds the expanded rail's extra 164 pixels to its shown width
+//! (`crate::sidebar`), so the list beside the rail keeps its width when the window has room.
+//!
+//! **An avatar's menu.** A secondary click on an avatar (a right press, or a Ctrl+click on macOS, which the platform
+//! layer turns into one), or Shift+F10 while it has focus, opens that host's actions menu beside the avatar's icon box
+//! through the host menu's entry point ([`crate::hosts::open_menu`]), the same menu as the Hosts panel row's ⋯ (SPEC.md:
+//! "Host actions open on demand from the row menu or the same menu on its rail avatar"). It never chooses the host: the
+//! old rail kept selection and the menu separate gestures so that opening a host's actions never changes which sessions
+//! the list shows. The avatar is the menu's opener, so Escape, and every dialog the menu opens, return focus to it, and
+//! it wears the open look while its menu is open (the old avatar's `aria-expanded`).
+//!
+//! NOTE: The old avatar also opened its menu with the keyboard's ContextMenu key. GPUI names no such key on either
+//! platform, so only Shift+F10 is ported; the browser behaviors survey (`docs/gpui/browser-behaviors.md`, B2) lists
+//! both.
 
+pub(crate) mod expansion;
 mod status;
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod avatar_menu_tests;
+
+use std::collections::HashMap;
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
-    div, px, svg,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
+    IntoElement, ParentElement, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    WeakEntity, Window, div, px, svg,
 };
 
 use super::SessionList;
 use super::row::short_name;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, IconButton, Role, StatusMark, Tier};
+use crate::components::{Button, HoverHelp, RAIL_ICON_BOX, Role, StatusMark, Tier, rail_entry};
 use crate::focus::{self, Mark};
 use crate::help_menu::HelpButton;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, host_mark};
 use crate::hosts::status::{HostStatus, host_status};
+use crate::layers::{self, Anchor, LayerId};
 use crate::rail_notices::NoticesButton;
 use crate::settings;
 use crate::theme::{self, Palette};
-
-/// `--host-rail-width` while the rail is collapsed, its only state so far: the rail's whole width, its right edge
-/// included. The sidebar's width holds it, so the session list beside it is this much narrower.
-const RAIL_WIDTH: Pixels = px(56.);
 
 /// `.host-rail-hover`'s padding, vertical then horizontal, and the gap between its entries.
 const RAIL_PAD: (f32, f32) = (8., 7.);
@@ -110,12 +134,37 @@ const RAIL_BUTTON: f32 = 40.;
 const FOOT_PAD_BOTTOM: f32 = 8.;
 const FOOT_PAD_X: f32 = 7.5;
 
-/// The foot's height while it holds the notices bell, Hosts, the gear and Help: four controls and the bottom padding.
-/// The old foot's 208 pixels held five controls; it grows by 40 pixels with each control that joins it.
-pub(super) const FOOT_HEIGHT: f32 = 4. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
+/// The foot's height: the old foot's 208 pixels, its five controls (the notices bell, Hosts, the gear, Help and the
+/// Expand control) and the bottom padding.
+pub(super) const FOOT_HEIGHT: f32 = 5. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
+
+/// `.host-rail-expanded`'s place and size in an expanded entry: 48 pixels from the button's left edge (8 past the icon
+/// box), as wide as the rail less 72 pixels, its name over the destination 2 pixels apart.
+const NAMES_LEFT: f32 = 48.;
+const NAMES_INSET: f32 = 72.;
+const NAMES_GAP: f32 = 2.;
+
+/// `.host-rail-expanded-name` and `.host-rail-destination`: the expanded name's size and line height, and the smaller
+/// destination's under it.
+const NAME_SIZE: f32 = 12.;
+const NAME_LINE: f32 = 16.;
+const DESTINATION_SIZE: f32 = 10.;
+const DESTINATION_LINE: f32 = 12.;
+
+/// The Expand control's names, each its hover help too, and the label the expanded rail shows beside its «. The old
+/// toggle's words (`sidebar-width.js`'s `updateLayout`).
+pub(crate) const EXPAND_NAME: &str = "Expand navigation rail";
+pub(crate) const COLLAPSE_NAME: &str = "Collapse navigation rail";
+const COLLAPSE_LABEL: &str = "Collapse";
+
+/// The Expand control's element id, the old `#host-rail-toggle`'s, which tests and the test bridge find it by.
+pub(crate) const TOGGLE_ID: &str = "host-rail-toggle";
 
 /// `SettingsIcon`'s size in the old foot's icon box.
 const SETTINGS_GLYPH: f32 = 16.;
+
+/// The old `ActionIcon`'s size: Add host's plus and Hosts' glyph, which were icon buttons' 14-pixel icons.
+const ACTION_GLYPH: f32 = 14.;
 
 /// The gear's hover help, the old app's words. The old app added ", and this app's automatic updates" when the desktop
 /// app's updater was active; this app has no updater yet, so the words stop where the old app's did without one.
@@ -166,6 +215,69 @@ impl SessionList {
             self.hosts_panel.update(cx, |panel, cx| panel.shown(cx));
             cx.notify();
         }
+    }
+
+    /// Whether the host rail is expanded as this window shows it ([`expansion::Expansion::shown`]): what the sidebar
+    /// reads to add the expanded rail's width to its own, and what the rail and its foot draw from.
+    pub(crate) fn rail_expanded(&self, cx: &App) -> bool {
+        self.rail.expansion.read(cx).shown(cx)
+    }
+
+    /// The Expand or Collapse control was pressed: save the other width ([`expansion::Expansion::toggle`]). Focus stays
+    /// where the press left it, on the control for a key or a Linux click, as the old ordinary button kept it.
+    fn toggle_rail(&mut self, cx: &mut Context<Self>) {
+        self.rail
+            .expansion
+            .update(cx, |expansion, cx| expansion.toggle(cx));
+        cx.notify();
+    }
+
+    /// The rail's state for this frame, worked out before the frame borrows the store for the rest of its drawing:
+    /// each avatar's anchor and focus handle, which are element state and need the window ([`Kept::avatars`]). Returns
+    /// the host whose menu an avatar opened, while it is still open.
+    pub(super) fn prepare_rail(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<i64> {
+        let ids: Vec<i64> = crate::session::current_store(cx)
+            .map(|store| {
+                avatar_hosts(store.read(cx).collections())
+                    .map(|host| host.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.rail.avatars = ids
+            .into_iter()
+            .map(|id| (id, AvatarParts::new(id, window, cx)))
+            .collect();
+        self.rail
+            .menu
+            .filter(|(_, layer)| layers::is_open(*layer, window, cx))
+            .map(|(host, _)| host)
+    }
+
+    /// Open host `host`'s actions menu beside its avatar, for a secondary click or Shift+F10 on the avatar (the module
+    /// docs): through the host menu's entry point, with the avatar as the opener its closing returns focus to. A menu an
+    /// avatar opened before that is still open is closed first: the layer manager closes a popover on a press outside
+    /// it but not on its own anchor, so a second right press on the same icon box would otherwise stack a second menu.
+    /// Nothing opens for an avatar the last frame did not draw.
+    fn open_avatar_menu(&mut self, host: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(parts) = self.rail.avatars.get(&host).cloned() else {
+            return;
+        };
+        if let Some((_, layer)) = self.rail.menu.take()
+            && layers::is_open(layer, window, cx)
+        {
+            layers::close(layer, window, cx);
+        }
+        // Taken in the handler, after the coordinator counted this press or key, so the menu opens for this gesture and
+        // not for one the user has since moved on from.
+        let mark = Mark::take(cx);
+        self.rail.menu =
+            crate::hosts::open_menu(host, parts.anchor, &parts.focus, &mark, window, cx)
+                .map(|layer| (host, layer));
+        cx.notify();
     }
 }
 
@@ -254,23 +366,87 @@ pub(super) struct Kept {
     /// The scrolling part's scroll state, tracked through [`focus::scroll_region`]: a fresh handle per frame would
     /// put the rail back at its top on every draw.
     scroll: ScrollHandle,
+    /// Whether the rail is expanded, and the write that changes it ([`expansion`]). An entity, so its save can reach
+    /// it when the reply arrives, and so the sidebar can read it with only `&App`.
+    expansion: Entity<expansion::Expansion>,
+    /// The Expand control's focus handle, a tab stop, kept for the window's life like Hosts' and the gear's, so that
+    /// focus stays on the control while its look and label change under it.
+    toggle_focus: FocusHandle,
+    /// Each avatar's anchor and focus handle as the last frame drew them, by host id: what a secondary click or
+    /// Shift+F10 on the avatar opens its host's menu beside and returns focus to. Rebuilt at the top of every frame
+    /// ([`SessionList::prepare_rail`]), so a host no longer drawn has none.
+    avatars: HashMap<i64, AvatarParts>,
+    /// The host whose menu an avatar opened last, with its layer; checked with the layer manager whenever it is read,
+    /// so a menu closed some other way (Escape, a press outside, a chosen command) needs no bookkeeping here.
+    menu: Option<(i64, LayerId)>,
 }
 
 impl Kept {
-    /// A new rail's state: scrolled to its top, nothing focused.
+    /// The rail's expansion, which the foot's notices bell and Help button, views of other areas, are handed when the
+    /// list makes them, and read as they draw.
+    pub(super) fn expansion(&self) -> &Entity<expansion::Expansion> {
+        &self.expansion
+    }
+
+    /// A new rail's state: scrolled to its top, nothing focused, no menu open, showing the stored expansion.
     pub(super) fn new(cx: &mut App) -> Self {
         Kept {
             add_host_focus: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
+            expansion: cx.new(|_| expansion::Expansion::new()),
+            toggle_focus: cx.focus_handle().tab_stop(true),
+            avatars: HashMap::new(),
+            menu: None,
         }
     }
 }
 
-/// The rail, for the hosts in `collections` with `chosen` pressed; its entries choose through `list`, and All tracks
-/// `all_focus`, the list's handle that removing the filter focuses. While `quiet` (the Hosts panel shows), the chosen
-/// entry wears the quieter pressed look, which leaves the filled Hosts control as the mark of the view on screen.
-/// `kept` is the rail's state across frames ([`Kept`]). Each avatar reads its host's status, and the rail its palette,
-/// through `cx`.
+/// One avatar's anchor and focus handle, element state kept for as long as the avatar is drawn in consecutive frames:
+/// the anchor is the avatar's icon box, which its menu opens beside (the old sheet: "Only the inner icon box anchors
+/// corner marks and host menus"), and the focus handle is the avatar's, which the menu returns focus to.
+#[derive(Clone)]
+struct AvatarParts {
+    anchor: Anchor,
+    focus: FocusHandle,
+}
+
+impl AvatarParts {
+    /// Host `id`'s avatar's parts, made or found again for this frame.
+    fn new(id: i64, window: &mut Window, cx: &mut App) -> Self {
+        AvatarParts {
+            anchor: Anchor::for_element(
+                SharedString::from(format!("host-rail-menu-anchor-{id}")),
+                window,
+                cx,
+            )
+            .beside(),
+            focus: focus::control_handle(
+                SharedString::from(format!("host-rail-host-{id}-focus-handle")),
+                window,
+                cx,
+            ),
+        }
+    }
+}
+
+/// How the rail draws this frame, beside the hosts it lists.
+pub(super) struct Look {
+    /// The chosen host, `None` for All.
+    pub(super) chosen: Option<i64>,
+    /// Whether the chosen entry wears the quieter pressed look, while the Hosts panel shows.
+    pub(super) quiet: bool,
+    /// Whether the rail is expanded.
+    pub(super) expanded: bool,
+    /// The host whose avatar opened the menu that is open now, if any.
+    pub(super) menu: Option<i64>,
+}
+
+/// The rail, for the hosts in `collections`, drawn as `look` says: the chosen entry pressed, in the quieter look while
+/// the Hosts panel shows (which leaves the filled Hosts control as the mark of the view on screen), at the expanded or
+/// collapsed width, and the avatar whose menu is open in the open look. Its entries choose through `list`, and All
+/// tracks `all_focus`, the list's handle that removing the filter focuses. `kept` is the rail's state across frames
+/// ([`Kept`]), its avatars' parts made for this frame already ([`SessionList::prepare_rail`]). Each avatar reads its
+/// host's status, and the rail its palette, through `cx`.
 ///
 /// It scrolls on its own when its entries overflow it, beside the list, which scrolls separately (`overflow: hidden
 /// auto`); its padding and gaps are inside the scrolling element, so a wheel over them scrolls the rail. The scrolling
@@ -279,20 +455,28 @@ impl Kept {
 /// keyboard reaching an entry outside its visible part scrolls that entry into view.
 pub(super) fn rail(
     collections: &Collections,
-    chosen: Option<i64>,
     list: &WeakEntity<SessionList>,
     all_focus: &FocusHandle,
     kept: &Kept,
-    quiet: bool,
+    look: Look,
     cx: &App,
 ) -> impl IntoElement {
     let palette = theme::palette(cx);
+    let Look {
+        chosen,
+        quiet,
+        expanded,
+        menu,
+    } = look;
     let choose = |host: Option<i64>| {
         let list = list.clone();
         move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
             let _ = list.update(cx, |list, cx| list.choose_host(host, cx));
         }
     };
+    let all_chosen = chosen.is_none();
+    // The old All showed its word in the icon box and "All hosts" beside it once expanded.
+    let all_names = expanded.then(|| names(div().child("All hosts"), None, all_chosen, palette));
     let mut entries: Vec<AnyElement> = vec![
         Button::new(
             "host-rail-all",
@@ -301,22 +485,33 @@ pub(super) fn rail(
             Role::Button,
         )
         .tier(Tier::Rail)
-        .pressed(chosen.is_none())
+        .pressed(all_chosen)
         .quiet(quiet)
         .focus(all_focus)
-        .content(div().child("All"))
+        .when(expanded, Button::rail_row)
+        .content(entry(div().child("All"), all_names))
         .on_click(choose(None))
         .into_any_element(),
     ];
     if registry_read(collections) {
         let last_read = last_read(collections);
         for host in avatar_hosts(collections) {
+            let Some(parts) = kept.avatars.get(&host.id) else {
+                // Made for every avatar host at the top of the frame, from the same store; never missing.
+                continue;
+            };
             entries.push(avatar(
                 host,
                 &host_status(host, cx),
-                last_read,
-                chosen == Some(host.id),
-                quiet,
+                AvatarLook {
+                    last_read,
+                    chosen: chosen == Some(host.id),
+                    quiet,
+                    expanded,
+                    menu_open: menu == Some(host.id),
+                },
+                parts,
+                list,
                 choose(Some(host.id)),
                 palette,
             ));
@@ -336,7 +531,8 @@ pub(super) fn rail(
                 .pressed(true)
                 .quiet(quiet)
                 .disabled(true)
-                .content(div().child("?"))
+                .when(expanded, Button::rail_row)
+                .content(rail_entry(div().child("?"), None))
                 .into_any_element(),
             );
         }
@@ -345,7 +541,7 @@ pub(super) fn rail(
     }
     // Last, whatever the registry holds or failed to: adding a host needs no host list, and the old rail drew it even
     // while the list could not be read.
-    entries.push(add_host(&kept.add_host_focus));
+    entries.push(add_host(&kept.add_host_focus, expanded, palette));
     let scrolling = div()
         .id("host-rail")
         // Tests find the rail by this; it records nothing outside test builds.
@@ -370,7 +566,7 @@ pub(super) fn rail(
                 .children(entries),
         );
     div()
-        .w(RAIL_WIDTH)
+        .w(expansion::width(expanded))
         .flex_none()
         .h_full()
         .flex()
@@ -381,15 +577,83 @@ pub(super) fn rail(
         .child(div().flex_none().h(px(FOOT_HEIGHT)))
 }
 
+/// What an entry shows: `glyph` in the rail's icon box, then, in the expanded rail, `names` beside it at the old
+/// `.host-rail-expanded`'s place, 48 pixels into the button. The icon box ends a pixel short of its 40 pixels (its -1
+/// margin), so the names sit 10 pixels after it.
+fn entry(glyph: impl IntoElement, names: Option<AnyElement>) -> AnyElement {
+    match names {
+        None => rail_entry(glyph, None),
+        Some(names) => div()
+            .flex()
+            .items_center()
+            .min_w_0()
+            .child(rail_entry(glyph, None))
+            .child(div().ml(px(NAMES_LEFT - (RAIL_ICON_BOX - 2.))).child(names))
+            .into_any_element(),
+    }
+}
+
+/// An expanded entry's names (`.host-rail-expanded`): `name` over `destination`, if any, each on one line cut short with
+/// an ellipsis, in the rail's width less 72 pixels. In the primary ink with the destination in the quiet one, except on a
+/// `pressed` entry, where both take the button's own ink (the old `color: inherit`), the inverse on the accent fill and
+/// the primary ink in the quieter look. No role: the button's name already says what they show.
+fn names(
+    name: gpui::Div,
+    destination: Option<gpui::Div>,
+    pressed: bool,
+    palette: &Palette,
+) -> AnyElement {
+    let line = |text: gpui::Div, size: f32, height: f32| {
+        text.w_full()
+            .text_size(px(size))
+            .line_height(px(height))
+            .text_left()
+            .truncate()
+    };
+    div()
+        .w(expansion::width(true) - px(NAMES_INSET))
+        .flex()
+        .flex_col()
+        .justify_center()
+        .gap(px(NAMES_GAP))
+        .when(!pressed, |names| {
+            names.text_color(theme::color(palette.fg_0))
+        })
+        .child(line(name, NAME_SIZE, NAME_LINE))
+        .when_some(destination, |names, destination| {
+            names.child(
+                line(destination, DESTINATION_SIZE, DESTINATION_LINE)
+                    .when(!pressed, |line| line.text_color(theme::color(palette.fg_1))),
+            )
+        })
+        .into_any_element()
+}
+
+/// How one avatar draws, besides its host.
+struct AvatarLook {
+    /// The registry's refresh failed, so the avatar names its state as last read.
+    last_read: bool,
+    /// The host is the chosen one: the avatar is pressed.
+    chosen: bool,
+    /// The quieter pressed look, while the Hosts panel shows.
+    quiet: bool,
+    /// The rail is expanded: the avatar is a row with the host's names in place of its caption.
+    expanded: bool,
+    /// The avatar opened the host menu that is open now: it wears the open look.
+    menu_open: bool,
+}
+
 /// One host's avatar: its mark in a rail button with the host's status (`reading`) drawn over it
-/// ([`status::icon_box`]), named by its identity and its state's words (`last_read` after a failed registry refresh),
-/// with its short name as a caption under it; `quiet` as for [`rail`].
+/// ([`status::icon_box`]), named by its identity and its state's words, with its short name as a caption under it, or
+/// expanded, its display name and destination beside the mark; `look` says how it draws. `parts` are its anchor and
+/// focus handle, the menu's place and opener, and `list` opens the menu on a secondary click or Shift+F10 (the module
+/// docs).
 fn avatar(
     host: &HostView,
     reading: &HostStatus,
-    last_read: bool,
-    chosen: bool,
-    quiet: bool,
+    look: AvatarLook,
+    parts: &AvatarParts,
+    list: &WeakEntity<SessionList>,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
     palette: &Palette,
 ) -> AnyElement {
@@ -397,52 +661,93 @@ fn avatar(
     let name = SharedString::from(format!(
         "{}: {}",
         identity(host),
-        status::state_words(host, reading, last_read)
+        status::state_words(host, reading, look.last_read)
     ));
     let mark = host_mark(host.icon, host.color, px(AVATAR_MARK), palette);
+    let icon_box = status::icon_box(
+        mark.into_any_element(),
+        host,
+        reading,
+        look.chosen,
+        look.quiet,
+        parts.anchor.track().into_any_element(),
+        palette,
+    );
+    // The old `.host-rail-expanded`: the display name, and under it the destination when it is not the name already.
+    let expanded_names = look.expanded.then(|| {
+        let destination = host
+            .destination
+            .as_deref()
+            .filter(|destination| *destination != host.name)
+            .map(|destination| host_text::element(&HostText::from_host(destination)));
+        names(
+            host_text::element(&display_name(host)),
+            destination,
+            look.chosen,
+            palette,
+        )
+    });
+    let (secondary, keyed) = (list.clone(), list.clone());
+    let button = Button::new(
+        SharedString::from(format!("host-rail-host-{id}")),
+        name.clone(),
+        HoverHelp::tooltip(name),
+        Role::Button,
+    )
+    .tier(Tier::Rail)
+    .pressed(look.chosen)
+    .quiet(look.quiet)
+    .expanded(look.menu_open)
+    .focus(&parts.focus)
+    .when(look.expanded, Button::rail_row)
+    .content(entry(icon_box, expanded_names))
+    .on_click(on_click)
+    .on_secondary_click(move |_, window, cx| {
+        let _ = secondary.update(cx, |list, cx| list.open_avatar_menu(id, window, cx));
+    })
+    // Shift+F10, the keyboard's way to a context menu, as the old avatar took it. Any other modifier is some other
+    // chord's, and a held key does not open it again.
+    .on_key_down(move |event, window, cx| {
+        let keystroke = &event.keystroke;
+        let modifiers = &keystroke.modifiers;
+        if keystroke.key == "f10"
+            && modifiers.shift
+            && !(modifiers.control || modifiers.alt || modifiers.platform || modifiers.function)
+            && !event.is_held
+        {
+            cx.stop_propagation();
+            let _ = keyed.update(cx, |list, cx| list.open_avatar_menu(id, window, cx));
+        }
+    });
     let caption = HostText::from_host(short_name(host));
     div()
         .flex()
         .flex_col()
         .flex_none()
-        .w(px(CAPTION_WIDTH))
-        .child(
-            Button::new(
-                SharedString::from(format!("host-rail-host-{id}")),
-                name.clone(),
-                HoverHelp::tooltip(name),
-                Role::Button,
+        .when(look.expanded, |entry| entry.w_full())
+        .when(!look.expanded, |entry| entry.w(px(CAPTION_WIDTH)))
+        .child(button)
+        // No role, so no node for assistive technology: the avatar's name already says what the caption shows. The
+        // expanded rail shows the names beside the mark in its place.
+        .when(!look.expanded, |entry| {
+            entry.child(
+                host_text::element(&caption)
+                    .id(SharedString::from(format!("host-rail-caption-{id}")))
+                    .w(px(CAPTION_WIDTH))
+                    .mt(px(CAPTION_GAP))
+                    .text_size(px(CAPTION_SIZE))
+                    .line_height(px(CAPTION_LINE))
+                    .text_center()
+                    .text_color(theme::color(palette.fg_1))
+                    .truncate(),
             )
-            .tier(Tier::Rail)
-            .pressed(chosen)
-            .quiet(quiet)
-            .content(status::icon_box(
-                mark.into_any_element(),
-                host,
-                reading,
-                chosen,
-                quiet,
-                palette,
-            ))
-            .on_click(on_click),
-        )
-        // No role, so no node for assistive technology: the avatar's name already says what the caption shows.
-        .child(
-            host_text::element(&caption)
-                .id(SharedString::from(format!("host-rail-caption-{id}")))
-                .w(px(CAPTION_WIDTH))
-                .mt(px(CAPTION_GAP))
-                .text_size(px(CAPTION_SIZE))
-                .line_height(px(CAPTION_LINE))
-                .text_center()
-                .text_color(theme::color(palette.fg_1))
-                .truncate(),
-        )
+        })
         .into_any_element()
 }
 
 /// The rail's "?" while the host list has never been read (`.host-rail-unavailable`): a status, not a control, in the
-/// amber of a warning, centered under the buttons, with the same words as its name and its hover help.
+/// amber of a warning, centered under the buttons, with the same words as its name and its hover help. It keeps its
+/// place in the expanded rail, which the old rail gave it no label for.
 fn unavailable(palette: &Palette) -> AnyElement {
     const WORDS: &str = "The host list could not be loaded";
     div()
@@ -462,20 +767,27 @@ fn unavailable(palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-/// The rail's Add host (`.host-rail-add`): the old Add glyph, a plus, in a rail button, which opens the Add host dialog
-/// with `handle`, its kept focus handle, as the opener. Never pressed, so always the rail's quiet ink; the module docs
-/// say why it is never disabled.
-fn add_host(handle: &FocusHandle) -> AnyElement {
+/// The rail's Add host (`.host-rail-add`): the old Add glyph, a plus, in a rail button, "Add host" beside it in the
+/// `expanded` rail, which opens the Add host dialog with `handle`, its kept focus handle, as the opener. Never pressed,
+/// so always the rail's quiet ink; the module docs say why it is never disabled.
+fn add_host(handle: &FocusHandle, expanded: bool, palette: &Palette) -> AnyElement {
     let opener = handle.clone();
-    IconButton::new(
+    let glyph = svg()
+        .path(Icon::Add.path())
+        .size(px(ACTION_GLYPH))
+        .flex_none()
+        .text_color(theme::color(palette.fg_1));
+    let names = expanded.then(|| names(div().child("Add host"), None, false, palette));
+    Button::new(
         "host-rail-add",
-        Icon::Add,
         "Add host",
         HoverHelp::tooltip(crate::hosts::add::ADD_HOST_HELP),
         Role::Button,
     )
     .tier(Tier::Rail)
     .focus(handle)
+    .when(expanded, Button::rail_row)
+    .content(entry(glyph, names))
     .on_click(move |_, window, cx| {
         // Taken in the handler, after the coordinator counted this press or key, so the dialog opens for this press and
         // not for one the user has since moved on from.
@@ -485,34 +797,43 @@ fn add_host(handle: &FocusHandle) -> AnyElement {
     .into_any_element()
 }
 
+/// The foot's controls the list keeps for the window's life: Hosts' and the gear's focus handles (Hosts keeps focus
+/// when it toggles, and Settings gives focus back to the gear when it closes), and the notices bell and the `?` Help
+/// button, views of their own areas.
+pub(super) struct FootParts<'a> {
+    pub(super) hosts_focus: &'a FocusHandle,
+    pub(super) settings_focus: &'a FocusHandle,
+    pub(super) notices: &'a Entity<NoticesButton>,
+    pub(super) help: &'a Entity<HelpButton>,
+}
+
 /// The rail's foot (`.host-rail-footer`), for the list to draw after its own column, as its last child, over the room
-/// [`rail`] leaves at its bottom: Hosts above the Settings gear above `help` (the `?` button, a view of the help menu's
-/// own that the list keeps), in the old foot's order, pinned there while the rail's entries scroll above them.
-/// `hosts_focus` and `settings_focus` are their focus handles, which the list keeps for the window's life: Hosts keeps
-/// focus when it toggles, and Settings gives focus back to the gear when it closes. Hosts is pressed and expanded while
-/// `hosts_shown`, toggles the Hosts panel through `list`, and carries the avatars' update badges ([`updates`], read
-/// through `cx` like the palette) as its `↑` and in its name and help.
+/// [`rail`] leaves at its bottom: the notices bell, Hosts, the Settings gear, the `?` button and the Expand control
+/// ([`FootParts`] and `kept`'s), in the old foot's order, pinned there while the rail's entries scroll above them, at
+/// the rail's width and, when `expanded`, each a row with its label. Hosts is pressed and expanded while `hosts_shown`,
+/// toggles the Hosts panel through `list`, and carries the avatars' update badges ([`updates`], read through `cx` like
+/// the palette) as its `↑` and in its name and help. The Expand control toggles the rail's expansion through `list`.
 ///
 /// The element places itself (absolutely, at the bottom left of the row the list draws it in), so that row must be
 /// the one that holds the rail at its left edge and fills the sidebar's height.
 pub(super) fn foot(
     list: &WeakEntity<SessionList>,
-    hosts_focus: &FocusHandle,
+    parts: FootParts,
+    kept: &Kept,
     hosts_shown: bool,
-    settings_focus: &FocusHandle,
-    notices: &Entity<NoticesButton>,
-    help: &Entity<HelpButton>,
+    expanded: bool,
     cx: &App,
 ) -> impl IntoElement {
     let palette = theme::palette(cx);
     let updates = updates(cx);
-    let list = list.clone();
-    let gear = settings_focus.clone();
+    let (hosts_list, toggle_list) = (list.clone(), list.clone());
+    let gear = parts.settings_focus.clone();
+    let label = |text: &'static str| expanded.then(|| text.into_any_element());
     div()
         .absolute()
         .left_0()
         .bottom_0()
-        .w(RAIL_WIDTH)
+        .w(expansion::width(expanded))
         .h(px(FOOT_HEIGHT))
         .flex()
         .flex_col()
@@ -523,15 +844,14 @@ pub(super) fn foot(
         .border_color(theme::color(palette.border_row))
         .bg(theme::color(palette.bg_1))
         // The notices bell first, above Hosts (SPEC.md: "at the top of the navigation rail's footer, above Hosts").
-        .child(notices.clone())
-        // An icon button draws the glyph at the old `ActionIcon`'s 14 pixels in the button's own ink, which its pressed
-        // look turns to the inverse. SPEC.md: Hosts "exposes its pressed and expanded state". GPUI's driver record has
-        // no expanded field, so no in-process test reads the expanded state back; the pressed state is tested, and the
-        // button's own `aria-expanded` wiring is the one every expanded button shares (the row menu's ⋯ among them).
+        .child(parts.notices.clone())
+        // The glyph at the old `ActionIcon`'s 14 pixels in the button's ink, which its pressed look turns to the
+        // inverse. SPEC.md: Hosts "exposes its pressed and expanded state". GPUI's driver record has no expanded field,
+        // so no in-process test reads the expanded state back; the pressed state is tested, and the button's own
+        // `aria-expanded` wiring is the one every expanded button shares (the row menu's ⋯ among them).
         .child(
-            IconButton::new(
+            Button::new(
                 "hosts-panel-toggle",
-                Icon::Hosts,
                 status::hosts_name(updates),
                 HoverHelp::tooltip(status::hosts_help(updates)),
                 Role::Button,
@@ -542,11 +862,24 @@ pub(super) fn foot(
             })
             .pressed(hosts_shown)
             .expanded(hosts_shown)
-            .focus(hosts_focus)
+            .focus(parts.hosts_focus)
+            .when(expanded, Button::rail_row)
+            .content(rail_entry(
+                svg()
+                    .path(Icon::Hosts.path())
+                    .size(px(ACTION_GLYPH))
+                    .flex_none()
+                    .text_color(theme::color(if hosts_shown {
+                        palette.on_fill
+                    } else {
+                        palette.fg_1
+                    })),
+                label("Hosts"),
+            ))
             .on_click(move |_, window, cx| {
                 // Taken in the handler, after the coordinator counted this press or key.
                 let mark = Mark::take(cx);
-                let _ = list.update(cx, |list, cx| list.toggle_hosts(&mark, window, cx));
+                let _ = hosts_list.update(cx, |list, cx| list.toggle_hosts(&mark, window, cx));
             }),
         )
         .child(
@@ -557,15 +890,17 @@ pub(super) fn foot(
                 Role::Button,
             )
             .tier(Tier::Rail)
-            .focus(settings_focus)
+            .focus(parts.settings_focus)
+            .when(expanded, Button::rail_row)
             // Never pressed, so always the rail's quiet ink.
-            .content(
+            .content(rail_entry(
                 svg()
                     .path(Icon::Settings.path())
                     .size(px(SETTINGS_GLYPH))
                     .flex_none()
                     .text_color(theme::color(palette.fg_1)),
-            )
+                label("Settings"),
+            ))
             .on_click(move |_, window, cx| {
                 // Taken in the handler, after the coordinator counted this press or key, so Settings opens for
                 // this press and not for one the user has since moved on from.
@@ -573,5 +908,22 @@ pub(super) fn foot(
                 settings::open(&gear, &mark, window, cx);
             }),
         )
-        .child(help.clone())
+        .child(parts.help.clone())
+        // Last, below Help, as the old foot placed it. It widens the rail in place rather than opening anything, so it
+        // reports its state without the open look (the module docs, "Expansion").
+        .child({
+            let name = if expanded { COLLAPSE_NAME } else { EXPAND_NAME };
+            Button::new(TOGGLE_ID, name, HoverHelp::tooltip(name), Role::Button)
+                .tier(Tier::Rail)
+                .discloses(expanded)
+                .focus(&kept.toggle_focus)
+                .when(expanded, Button::rail_row)
+                .content(rail_entry(
+                    div().child(if expanded { "«" } else { "»" }),
+                    label(COLLAPSE_LABEL),
+                ))
+                .on_click(move |_, _, cx| {
+                    let _ = toggle_list.update(cx, |list, cx| list.toggle_rail(cx));
+                })
+        })
 }

@@ -220,9 +220,12 @@ impl Render for MainView {
                                 .child(pane_tracker),
                         )
                         // Drawn last, so it takes the pointer over the pane's edge. It is placed from the sidebar's
-                        // width, which assumes the sidebar starts at this row's left edge and that the window redraws
-                        // when the width changes (`Sidebar::grip`); rail expansion must keep both true.
-                        .child(self.sidebar.update(cx, |sidebar, cx| sidebar.grip(cx))),
+                        // shown width, which assumes the sidebar starts at this row's left edge and that the window
+                        // redraws when that width changes (`Sidebar::grip`).
+                        .child(
+                            self.sidebar
+                                .update(cx, |sidebar, cx| sidebar.grip(window, cx)),
+                        ),
                 )
                 .into_any_element()
         } else {

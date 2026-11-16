@@ -14,7 +14,12 @@
 //! A button that opens something (a menu, a question) can say so with [`Button::expanded`]: assistive technology hears
 //! whether what it opens is open, and while it is the button wears the old pressed look, the accent fill with the
 //! inverse ink. A plain hover fill left behind after the pointer moves away would read as stale hover, not as "open";
-//! the old header triggers and the row menu's ⋯ followed the same rule.
+//! the old header triggers and the row menu's ⋯ followed the same rule. A button that widens or narrows a region in
+//! place rather than opening something over the page (the host rail's Expand control) reports the same state without
+//! that look ([`Button::discloses`]).
+//!
+//! A button can also answer a secondary click (a right press, which macOS also makes of a Ctrl+click) with an action of
+//! its own ([`Button::on_secondary_click`]): the host rail's avatars open their host's menu that way.
 //!
 //! A button activates on click, and on Enter or Space while it has keyboard focus (a held key does not repeat it:
 //! SPEC.md, "Repeated or composing Enter cannot answer the new question"). Focus is the focus coordinator's: an enabled
@@ -41,8 +46,9 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, Pixels, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement, Styled, Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
+    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{Handler, HoverHelp};
@@ -282,7 +288,14 @@ pub struct Button {
     side: Option<Pixels>,
     /// The part of a split button this is, if it is one ([`Button::split`]).
     split: Option<SplitPart>,
+    /// Whether an open button ([`Button::expanded`]) wears the open look; false for a disclosure
+    /// ([`Button::discloses`]).
+    open_look: bool,
+    /// Whether a [`Tier::Rail`] entry is a row as wide as the expanded rail ([`Button::rail_row`]).
+    rail_row: bool,
     on_click: Option<Handler>,
+    /// What a secondary click does ([`Button::on_secondary_click`]).
+    on_secondary: Option<SecondaryHandler>,
     /// Keys the owner takes before the button's own Enter and Space ([`Button::on_key_down`]).
     on_key: Option<KeyHandler>,
     focus: Option<FocusHandle>,
@@ -290,6 +303,9 @@ pub struct Button {
 
 /// A button owner's own key handler ([`Button::on_key_down`]).
 type KeyHandler = Rc<dyn Fn(&KeyDownEvent, &mut Window, &mut App)>;
+
+/// A button owner's secondary-click handler ([`Button::on_secondary_click`]).
+type SecondaryHandler = Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>;
 
 impl Button {
     /// A button. `id` must be stable and unique among its siblings (it keys the button's element state, the tooltip
@@ -324,7 +340,10 @@ impl Button {
             badge: None,
             side: None,
             split: None,
+            open_look: true,
+            rail_row: false,
             on_click: None,
+            on_secondary: None,
             on_key: None,
             focus: None,
         }
@@ -411,6 +430,15 @@ impl Button {
         self
     }
 
+    /// The button widens or narrows a region in place, and `expanded` says whether the region is expanded now: the
+    /// `aria-expanded` of [`Button::expanded`], without its open look, since nothing opens over the page. The host
+    /// rail's Expand control, whose old button reported `aria-expanded` and kept the rail's quiet look either way.
+    pub fn discloses(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self.open_look = false;
+        self
+    }
+
     /// The button is one of a set of choices (the host rail's entries), and `pressed` says whether it is the one in
     /// force now: `aria-pressed`, which assistive technology hears as a toggle's state, and while pressed the old
     /// `[aria-pressed="true"]` look, the accent fill with the inverse ink and an inverse focus ring drawn inside the
@@ -460,6 +488,15 @@ impl Button {
         self
     }
 
+    /// Draw a [`Tier::Rail`] entry as a row of the expanded rail (`html.host-rail-open .host-rail .btn`): as wide as the
+    /// rail's column rather than the 40-pixel square, still 40 pixels high, its content laid out from the left. The
+    /// content keeps its glyph in the rail's 40-pixel icon box ([`super::rail_entry`]), so the glyph stays where the
+    /// collapsed square had it and only the label beside it is new. Ignored in every other tier.
+    pub fn rail_row(mut self) -> Self {
+        self.rail_row = true;
+        self
+    }
+
     /// Draw the button as one part of a split button (see [`SplitPart`]). The owner lays the two parts out side by side
     /// with no gap, and each is a control of its own: its own label, hover help, focus and activation.
     pub fn split(mut self, part: SplitPart) -> Self {
@@ -500,6 +537,19 @@ impl Button {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_click = Some(Rc::new(handler));
+        self
+    }
+
+    /// What a secondary click does: a right press, which macOS's platform layer also makes of a Ctrl+left press (GPUI
+    /// turns it into a right press before any element sees it). It runs on the press, as a context menu opens, takes the
+    /// press so nothing behind the button sees it, and leaves keyboard focus where it was, as the coordinator leaves it
+    /// for every press but the primary one. A disabled or busy button ignores it. The host rail's avatars open their
+    /// host's menu this way (the old `oncontextmenu`).
+    pub fn on_secondary_click(
+        mut self,
+        handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_secondary = Some(Rc::new(handler));
         self
     }
 
@@ -579,7 +629,10 @@ impl Button {
         // After the pressed looks: a button that is both a choice in force and open (the host rail's Hosts while host
         // management shows) keeps its pressed look, as the old sheet drew it. The readout's update toggle had no open
         // look at all: it keeps the look of its text while its menu is open.
-        if self.expanded == Some(true) && !matches!(self.tier, Tier::Readout { .. }) {
+        if self.expanded == Some(true)
+            && self.open_look
+            && !matches!(self.tier, Tier::Readout { .. })
+        {
             return (
                 Some(palette.accent_fill_hover),
                 palette.accent_fill_hover,
@@ -782,9 +835,12 @@ impl RenderOnce for Button {
             _ if matches!(self.split, Some(SplitPart::Caret { .. })) => (pad_x, None),
             _ => (pad_y, None),
         };
-        // A rail entry, an appearance choice and a button given a side are squares that never give up their width.
+        // A rail entry, an appearance choice and a button given a side are squares that never give up their width; an
+        // expanded rail's row is as wide as its column instead.
+        let rail_row = self.rail_row && self.tier == Tier::Rail;
         let square = self.side.is_some()
-            || matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
+            || (self.tier == Tier::Rail && !rail_row)
+            || matches!(self.tier, Tier::IconChoice | Tier::ColorChoice);
         // `.btn.host-update-button`'s `flex: 0 0 auto`: the row's name gives way first.
         let rigid = matches!(
             self.tier,
@@ -825,6 +881,9 @@ impl RenderOnce for Button {
                 button.w(side).flex_none()
             })
             .when(rigid, |button| button.flex_none())
+            .when(rail_row, |button| {
+                button.w_full().flex_none().justify_start()
+            })
             // A chip yields its width to the row it sits in (`min-width: 0; max-width: 100%`), and its content cuts
             // the host's name short.
             .when(self.tier == Tier::Chip, |button| {
@@ -1041,6 +1100,12 @@ impl RenderOnce for Button {
         }
         if let Some(badge) = self.badge {
             button = button.child(badge);
+        }
+        if let Some(on_secondary) = self.on_secondary.clone().filter(|_| active) {
+            button = button.on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                cx.stop_propagation();
+                on_secondary(event, window, cx);
+            });
         }
         let button =
             super::with_hover_help(button, &self.id, &self.help, true, Some(&focus), window, cx);

@@ -68,6 +68,48 @@ pub(crate) fn minimum_allowance() -> Size<Pixels> {
     size(px(2. * KIT_BORDER), px(2. * KIT_BORDER) + HEIGHT)
 }
 
+/// How wide the app's content is in `window`: the window's surface less GPUI Kit's frame on each side, the shadow margin
+/// and the border it draws inside a client-decorated window ([`content_width_of`]). Content that sizes itself against
+/// the window rather than laying out inside it (the sidebar's shown width, which leaves the main pane its floor, and
+/// whether the macOS header floats) must use this, since `Window::viewport_size` counts the frame too, 42 pixels more
+/// than the content has under Mutter (found by the migration's review gate on 2026-11-15, where the expanded rail took
+/// the main pane below its floor).
+pub(crate) fn content_width(window: &Window) -> Pixels {
+    content_width_of(
+        window.viewport_size().width,
+        window.window_decorations(),
+        window.client_inset(),
+    )
+}
+
+/// [`content_width`] as a pure function of the surface's `width`, the window's `decorations` and the shadow margin GPUI
+/// Kit set as the window's client `inset` (`None` before Kit's frame first drew, when Kit's own default applies), by
+/// Kit's rule (the NOTE below): a window whose decorations are the compositor's has no frame; on a client-decorated one
+/// each side has the shadow margin and the border, except a side the window is tiled against (maximized, or snapped to
+/// that edge), where Kit draws neither. Off Linux the windows are never client-decorated, so they are all content.
+///
+/// NOTE: This mirrors `window_content_insets` (and the `client_frame_insets` it builds on) in GPUI Kit's
+/// `src/window_border.rs`, gpui-component 0.9.1, which Kit keeps `pub(crate)`. It takes the same inputs that function
+/// reads from the window (client or server decorations, each side's tiling, and the client inset Kit set), so a Kit
+/// upgrade must be checked against that function: a changed shadow, border or tiling rule there makes the sidebar give
+/// the main pane the wrong room here, and `tests.rs`'s `the_content_width_leaves_out_kits_frame_on_each_untiled_side`
+/// pins the rule as of 0.9.1.
+pub(crate) fn content_width_of(
+    width: Pixels,
+    decorations: Decorations,
+    inset: Option<Pixels>,
+) -> Pixels {
+    let Decorations::Client { tiling } = decorations else {
+        return width;
+    };
+    let side = inset.unwrap_or(px(KIT_SHADOW)) + px(KIT_BORDER);
+    let frame = [tiling.left, tiling.right]
+        .into_iter()
+        .filter(|tiled| !tiled)
+        .fold(px(0.), |frame, _| frame + side);
+    if frame > width { px(0.) } else { width - frame }
+}
+
 /// The bar for `window`, titled `title`, its Close button's hover help `close_help`; `None` where the window does not
 /// draw one ([`shows`]).
 pub(crate) fn bar(

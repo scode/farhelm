@@ -280,14 +280,17 @@ pub(crate) fn pressed(nodes: &[DriverNode], id: &str) -> bool {
     }
 }
 
-/// The rail's entries that the frame drew, top to bottom, by id.
+/// The rail's entries that the frame drew, top to bottom, by id: every control under a `host-rail-` id but the foot's
+/// Expand control, which shares the old prefix (`#host-rail-toggle`) without being an entry.
 fn rail_entries(nodes: &[DriverNode]) -> Vec<String> {
     let mut entries: Vec<_> = nodes
         .iter()
         .filter(|node| node.role.is_some())
         .filter_map(|node| {
             let id = node.element_id.as_deref()?;
-            (id.starts_with("host-rail-") && !id.starts_with("host-rail-caption"))
+            (id.starts_with("host-rail-")
+                && !id.starts_with("host-rail-caption")
+                && id != super::TOGGLE_ID)
                 .then(|| (f32::from(node.bounds.origin.y), id.to_owned()))
         })
         .collect();
@@ -837,11 +840,12 @@ fn panel_shown(cx: &mut VisualTestContext) -> bool {
 /// 8 pixels above the bottom. Specified: in a 1200 by 700 window, Hosts is a button named "Hosts", not pressed, whose
 /// hover help is "Hosts: show host management", directly above the gear, a button named "Settings" whose hover help is
 /// the old app's words without the updater clause; both are 40-pixel squares 7.5 pixels from the window's left edge,
-/// the gear's bottom 48 pixels above the window's, leaving the 40-pixel Help button and the foot's 8-pixel padding
-/// below it (the help menu's tests pin that button); the notices bell, the same square at the same inset, sits directly
-/// above Hosts at the foot's top (SPEC.md: "at the top of the navigation rail's footer, above Hosts"; the rail
-/// notices' own tests cover the bell and its panel); the rail's scrolling part ends at the foot's top, 168 pixels above
-/// the bottom, so every foot control sits wholly below every entry.
+/// the gear's bottom 88 pixels above the window's, leaving the 40-pixel Help button, the 40-pixel Expand control and the
+/// foot's 8-pixel padding below it (the help menu's tests pin Help, and `expansion/tests.rs` the Expand control); the
+/// notices bell, the same square at the same inset, sits directly above Hosts at the foot's top (SPEC.md: "at the top
+/// of the navigation rail's footer, above Hosts"; the rail notices' own tests cover the bell and its panel); the rail's
+/// scrolling part ends at the foot's top, the old foot's 208 pixels above the bottom, so every foot control sits wholly
+/// below every entry.
 #[gpui::test]
 fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot());
@@ -867,7 +871,7 @@ fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &m
         gear.top(),
         "Hosts sits directly above the gear"
     );
-    assert_eq!(gear.bottom(), px(700. - 48.));
+    assert_eq!(gear.bottom(), px(700. - 88.));
     let bell = node(&nodes, BELL)
         .expect("the notices bell is drawn")
         .bounds;
@@ -886,8 +890,8 @@ fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &m
         bell.top(),
         "the entries scroll above the foot"
     );
-    assert_eq!(hosts.top(), px(700. - 128.));
-    assert_eq!(bell.top(), px(700. - 168.));
+    assert_eq!(hosts.top(), px(700. - 168.));
+    assert_eq!(bell.top(), px(700. - 208.));
     assert_eq!(
         hover_help(cx, HOSTS).as_deref(),
         Some("Hosts: show host management")
@@ -1023,8 +1027,8 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
 /// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
 /// which leaves focus on its avatar and draws the heading's order title, Trash, Templates and New buttons, the status
 /// segments and the chip as the list's controls, Tab goes to host 2's avatar, Add host, the order title, Trash,
-/// Templates, New, the segments' chosen All (their one stop), the chip, the notices bell, Hosts, the gear, then Help;
-/// Shift+Tab from Help goes back to the gear.
+/// Templates, New, the segments' chosen All (their one stop), the chip, the notices bell, Hosts, the gear, Help, then
+/// the Expand control; Shift+Tab from it goes back to Help.
 #[gpui::test]
 fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
@@ -1052,19 +1056,20 @@ fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppCo
         HOSTS,
         GEAR,
         HELP,
+        super::TOGGLE_ID,
     ] {
         test_support::keys(cx, "tab");
         assert_eq!(focused_id(cx).as_deref(), Some(expected));
     }
     test_support::keys(cx, "shift-tab");
-    assert_eq!(focused_id(cx).as_deref(), Some(GEAR));
+    assert_eq!(focused_id(cx).as_deref(), Some(HELP));
 }
 
 /// The old spec "rail scrolling leaves settings and help reachable": a long registry makes the rail scroll, and the
 /// foot must stay where it is whatever the rail's scroll position, with no entry scrolling under it. Specified: in a
 /// 1200 by 500 window over 30 hosts, the last avatar starts below the rail's visible part; after a wheel over the rail
 /// scrolls it to its end, the last avatar lies wholly inside the rail's visible part, above Hosts, and neither foot
-/// control has moved, the gear's bottom still 48 pixels above the window's and Help's 8 pixels above it.
+/// control has moved, the gear's bottom still 88 pixels above the window's and Help's 48 pixels above it.
 #[gpui::test]
 fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppContext) {
     let many: Vec<Host> = (10..40)
@@ -1109,10 +1114,10 @@ fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppConte
         foot,
         "the foot did not move"
     );
-    assert_eq!(foot.1.bottom(), px(500. - 48.));
+    assert_eq!(foot.1.bottom(), px(500. - 88.));
     assert_eq!(
         test_support::bounds(cx, HELP).bottom(),
-        px(500. - 8.),
+        px(500. - 48.),
         "Help stays at the foot's bottom"
     );
 }

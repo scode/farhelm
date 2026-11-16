@@ -542,13 +542,15 @@ pub(crate) fn refusal_sentence(words: &HostText) -> HostSentence {
 // ---- The segments row ----------------------------------------------------------------------------------------------
 
 /// The row under the list's heading (`.session-status-filter`): the status segments, named "Session status" and drawn
-/// as the status filter's small segments, then, while a host is chosen, the chip that removes the host. The row wraps,
-/// so the chip goes below the segments when the column is too narrow for both. It is drawn whatever the listing holds,
-/// also before the first one arrives, as the old app kept it usable while a read was pending or failed.
+/// as the status filter's small segments (sized from their words while the host rail is `rail_expanded`), then, while a
+/// host is chosen, the chip that removes the host. The row wraps, so the chip goes below the segments when the column is
+/// too narrow for both. It is drawn whatever the listing holds, also before the first one arrives, as the old app kept
+/// it usable while a read was pending or failed.
 pub(crate) fn row(
     collections: &Collections,
     chosen: Query,
     list: &WeakEntity<SessionList>,
+    rail_expanded: bool,
     palette: &Palette,
 ) -> impl IntoElement {
     let choose = list.clone();
@@ -562,6 +564,9 @@ pub(crate) fn row(
             Role::RadioGroup,
         )
         .small_segments()
+        // Beside the expanded rail the list's column can be too narrow for four equal segments, so they size from their
+        // words, as the old `html.host-rail-open` rules made them.
+        .fit_words(rail_expanded)
         .chosen(Some(chosen.status))
         .on_change(move |status: &Status, _, cx| {
             let status = *status;

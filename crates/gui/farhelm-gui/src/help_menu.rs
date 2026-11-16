@@ -7,7 +7,10 @@
 //!
 //! - **A view of its own, placed by the rail.** [`HelpButton`] keeps the button's focus handle and the menu it opened,
 //!   so the session list only creates it and draws it in the rail's foot. The button wears the expanded look while its
-//!   menu is open (the old `.app-help-toggle[aria-expanded="true"]`), and a second press on it closes the menu.
+//!   menu is open (the old `.app-help-toggle[aria-expanded="true"]`), and a second press on it closes the menu. While
+//!   the host rail is expanded it is a row of the rail with "Help" beside its glyph, as every foot control is; it reads
+//!   the expansion in its own render from the entity the session list owns and hands it ([`Expansion`]), keeping no copy
+//!   of it.
 //! - **The menu is a popover beside the button.** It is drawn as the session row's menu is (the same panel, header and
 //!   items, 246 pixels wide, `Anchor::beside`), and names the `?` button as where closing returns focus, so Escape and
 //!   every item leave focus there, also on macOS, where the click that opened the menu left the button unfocused.
@@ -36,18 +39,22 @@
 //! rail's foot it sits on the window's bottom edge; and the old flyout's pointer notch toward the toggle is not drawn
 //! (the session row's menu has the same gap). The old toggle's `aria-haspopup` is not ported either, as for every menu
 //! button so far.
+//!
+//! [`Expansion`]: crate::session_list::host_rail::expansion::Expansion
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
+    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
     WeakEntity, Window, div, px, svg,
 };
 
 use crate::actions::OpenSourceNotices;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role, Tier};
+use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role, Tier, rail_entry};
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
+use crate::session_list::host_rail::expansion::Expansion;
 use crate::theme;
 
 #[cfg(test)]
@@ -241,15 +248,19 @@ pub struct HelpButton {
     /// The menu this button opened last; checked with the layer manager whenever it is read, so a menu closed some
     /// other way (Escape, a press outside, a reset) needs no bookkeeping here.
     menu: Option<LayerId>,
+    /// The host rail's expansion, the session list's, read as the button draws: expanded, the button is a row with its
+    /// "Help" label beside the glyph (SPEC.md, "Session list": expanded, "the foot controls show labels").
+    rail: Entity<Expansion>,
 }
 
 impl HelpButton {
-    /// A button with no menu open.
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    /// A button with no menu open, at the foot of the rail whose expansion is `rail`.
+    pub(crate) fn new(rail: Entity<Expansion>, cx: &mut Context<Self>) -> Self {
         HelpButton {
             focus: cx.focus_handle().tab_stop(true),
             anchor: None,
             menu: None,
+            rail,
         }
     }
 
@@ -308,6 +319,7 @@ impl Render for HelpButton {
         let anchor = Anchor::for_element("app-help-anchor", window, cx);
         self.anchor = Some(anchor.clone());
         let open = self.open_menu(window, cx).is_some();
+        let rail_expanded = self.rail.read(cx).shown(cx);
         let button = Button::new(
             BUTTON_ID,
             "Help",
@@ -317,8 +329,9 @@ impl Render for HelpButton {
         .tier(Tier::Rail)
         .expanded(open)
         .focus(&self.focus)
-        // Drawn like the gear above it, in the rail's quiet ink, which the expanded look's fill turns to the inverse.
-        .content(
+        // Drawn like the gear above it, in the rail's quiet ink, which the expanded look's fill turns to the inverse,
+        // with its "Help" label beside it while the rail is expanded.
+        .content(rail_entry(
             svg()
                 .path(Icon::Help.path())
                 .size(px(GLYPH))
@@ -328,9 +341,15 @@ impl Render for HelpButton {
                 } else {
                     palette.fg_1
                 })),
-        )
+            rail_expanded.then(|| "Help".into_any_element()),
+        ))
+        .when(rail_expanded, Button::rail_row)
         .on_click(cx.listener(|button, _, window, cx| button.toggle(window, cx)));
-        div().relative().child(button).child(anchor.track())
+        div()
+            .relative()
+            .when(rail_expanded, |wrapper| wrapper.w_full())
+            .child(button)
+            .child(anchor.track())
     }
 }
 
