@@ -52,8 +52,9 @@ ported, below
 
 Tests: 6. Covers: device sounds.
 
-ported in process, below; playback is the desktop app's platform players, which no automated test plays through; both
-were checked by hand against real playback (Deviations)
+ported in process, below; playback is the desktop app's platform players, which no automated test plays through; the
+macOS player, and the Linux player in its earlier standard-input form, were checked by hand against real playback
+(Deviations)
 
 ### `tests/notifications.spec.ts`
 
@@ -277,7 +278,7 @@ handles it.
 The golden is `keyboard-shortcuts-dialog` (Linux forms; the old overview was never captured, so SPEC.md and the old code
 are its reference).
 
-## `tests/rail-notices.spec.ts`
+## The rail notices bell and panel
 
 The bell is `rail_notices::NoticesButton`, which the session list keeps and draws at the top of the rail's foot; its
 panel draws the pushed `Notices` collection. Replacing tests, in `crates/gui/farhelm-gui/src/rail_notices/tests.rs`
@@ -307,7 +308,7 @@ unless named otherwise:
   (the sidebar's), so the case's marking half waits for them; the Trash dialog is a layer of its own, which nothing that
   hides the header's button closes.
 
-## `tests/sounds.spec.ts`
+## The status sounds
 
 The rules are `sounds::rules` (the events, the switches, the priority, the seen approval ids), the sounds
 `sounds::synth`, and the owner that observes the window and decides `sounds::StatusSounds`, which the main view keeps;
@@ -412,13 +413,21 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 - **What plays where.** The owner decides every sound and hands it, with its rendered WAV file, to the player the
   desktop binary installs (`crates/farhelm-desktop/src/sound.rs`). On macOS that is AppKit's `NSSound`, made from the
-  WAV bytes on the main thread. On Linux it is PipeWire's `pw-play`, run with the WAV on its input, best effort: without
-  PipeWire, or when `pw-play` fails, nothing plays and nothing tells the user, as the old app's Web Audio playback was
-  silent when the browser refused it. Other platforms play nothing. The old spec watched Web Audio's oscillators start;
-  no test here plays a sound: a fake player records the sounds asked for, and the Linux player's tests run a stand-in
-  for `pw-play`. Real playback was checked by hand on 2026-11-15, with a throwaway test that is not part of the suite:
-  on the test Mac, AppKit read each of the three sounds' WAV files and `NSSound`'s play reported success for each; on a
-  Linux build machine with PipeWire running, `pw-play -` read each WAV file on its input and exited zero.
+  WAV bytes on the main thread. On Linux it is PipeWire's `pw-play`, given the path of the sound's WAV file (the three
+  files are written once, into a private directory under the user's runtime directory), best effort: without PipeWire or
+  a usable runtime directory, or when `pw-play` fails, nothing plays and nothing tells the user, as the old app's Web
+  Audio playback was silent when the browser refused it. Other platforms play nothing. The old spec watched Web Audio's
+  oscillators start; no test here plays a sound: a fake player records the sounds asked for, and the Linux player's
+  tests run a stand-in for `pw-play`. Real playback was checked by hand on 2026-11-15, with a throwaway test that is not
+  part of the suite: on the test Mac, AppKit read each of the three sounds' WAV files and `NSSound`'s play reported
+  success for each; on a Linux build machine with PipeWire running, `pw-play -` read each WAV file on its input and
+  exited zero (the Linux player fed the WAV on standard input then; it has played files since 2026-11-16, checked
+  against a stand-in for `pw-play` only).
+- **On Linux a new sound cuts off the one playing.** The Linux player plays one `pw-play` at a time on a single thread,
+  and a sound asked for while another is playing stops it and starts at once, so every sound's player starts and a burst
+  ends on its last sound; the old app's Web Audio sounds overlapped. The player moved from standard input to files on
+  2026-11-16 and at first dropped a sound asked for while another played, which could silence an approval request that
+  arrived during another chime, against SPEC's "Status"; replacing the playing sound came the same day.
 - **The switches are the helm's, not the device's.** The old app kept them in the browser's local storage. Here they are
   shared helm preferences (the maintainer's decision of 2026-11-13), so every client of a helm plays by the same
   switches, Settings' help says so rather than "These choices apply only to this device", and the choices made in the

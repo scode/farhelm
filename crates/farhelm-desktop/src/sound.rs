@@ -11,12 +11,16 @@
 //!   `play` returns at once and AppKit plays the sound on its own; no thread of ours.
 //! - **Linux**: PipeWire's `pw-play`, run as a child process with the path of a file to play (`pw-play <file>`), best
 //!   effort. The three sounds never change, so the player writes them once, when it is made, into a private directory
-//!   of its own under `XDG_RUNTIME_DIR`, and removes it when it is dropped. Files rather than the WAV on the child's standard input keep each
-//!   sound to one child and nothing else: a pipe holds less than a sound, so feeding it would need a writer per sound
-//!   that a child which stops reading could hold up. Reaping a child means waiting for it, which the GUI thread must
-//!   not do, so one long-lived thread of this crate's own starts each child and waits for it; a sound asked for while
-//!   one plays is dropped, never queued. The thread kills a child still running a few seconds after it started,
-//!   because with one waiting thread a `pw-play` hung on a stalled PipeWire would otherwise silence every later sound.
+//!   of its own under `XDG_RUNTIME_DIR`, and removes it when it is dropped. Files rather than the WAV on the child's
+//!   standard input keep each sound to one child and nothing else: a pipe holds less than a sound, so feeding it would
+//!   need a writer per sound that a child which stops reading could hold up. Reaping a child means waiting for it,
+//!   which the GUI thread must not do, so one long-lived thread of this crate's own starts each child and waits for
+//!   it. A sound asked for while one plays replaces it: the thread kills and reaps the playing child and starts the
+//!   new one. Every sound starts, so an approval request's sound always starts, though a newer sound can cut it off:
+//!   there is no priority among the sounds, and a burst ends on its last sound (the orchestrator's ruling of
+//!   2026-11-16). The thread also kills a child still
+//!   running a few seconds after it started, so a `pw-play` hung on a stalled PipeWire does not run on until the next
+//!   sound comes.
 //!
 //! Playback is best effort everywhere, as the old app's Web Audio playback was: a sound that cannot play is lost,
 //! never reported to the user, never queued or retried. Failures are logged at debug level only, since a machine
@@ -83,9 +87,7 @@ mod linux {
     use std::os::unix::fs::DirBuilderExt as _;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, ExitStatus, Stdio};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc::{self, Receiver, SyncSender};
+    use std::sync::mpsc::{self, Receiver, Sender};
     use std::time::{Duration, Instant};
 
     use farhelm_gui::sounds::{Player, Sound, synth};
@@ -96,10 +98,12 @@ mod linux {
 
     /// How long a `pw-play` child may run before it is killed. The longest sound (Approval) lasts about 1.2 s; five seconds
     /// leave room for `pw-play` to connect to PipeWire on a loaded machine and still end a child that hangs (a stalled
-    /// PipeWire, say) soon enough that the sounds dropped meanwhile are a few, not the rest of the session's.
+    /// PipeWire, say) without waiting for a newer sound to replace it.
     const DEADLINE: Duration = Duration::from_secs(5);
 
-    /// How often the player's thread asks whether the child has exited. It delays only the reaping, never the sound.
+    /// How often the player's thread asks whether the child has exited or a newer sound has come. It delays the
+    /// reaping, and a sound that replaces a playing one by at most this; a sound asked for while none plays starts at
+    /// once.
     const POLL: Duration = Duration::from_millis(20);
 
     /// Plays each sound by running `program <file>` on the player's one thread (see the module docs).
@@ -112,10 +116,8 @@ mod linux {
 
     /// A working player's half on the GUI thread.
     struct Playing {
-        requests: SyncSender<Sound>,
-        /// Set by `play` when it hands the thread a sound and cleared by the thread once that sound's child is reaped,
-        /// so while it is set a sound is waiting or playing and a new one is dropped.
-        busy: Arc<AtomicBool>,
+        /// Unbounded, so `play` never blocks; the thread takes each sound within [`POLL`] of its arrival.
+        requests: Sender<Sound>,
         /// Held for its drop alone, which removes the directory: the thread reads the files by path.
         _files: SoundFiles,
     }
@@ -146,17 +148,14 @@ mod linux {
                     return PwPlay(None);
                 }
             };
-            // One place in the channel is enough: `busy` lets a sound in only while nothing is waiting or playing.
-            let (requests, received) = mpsc::sync_channel(1);
-            let busy = Arc::new(AtomicBool::new(false));
-            let (thread_busy, dir) = (busy.clone(), files.dir.clone());
+            let (requests, received) = mpsc::channel();
+            let dir = files.dir.clone();
             let started = std::thread::Builder::new()
                 .name("farhelm-sound".into())
-                .spawn(move || serve(&program, &dir, deadline, received, &thread_busy));
+                .spawn(move || serve(&program, &dir, deadline, &received));
             match started {
                 Ok(_) => PwPlay(Some(Playing {
                     requests,
-                    busy,
                     _files: files,
                 })),
                 Err(error) => {
@@ -168,17 +167,11 @@ mod linux {
     }
 
     impl Player for PwPlay {
-        /// Hand `sound` to the player's thread, or drop it while another is playing. `wav` goes unused: the file
-        /// written for `sound` holds the same bytes, since both are [`synth::wav`]'s.
+        /// Hand `sound` to the player's thread, which plays it in place of any sound still playing. `wav` goes unused:
+        /// the file written for `sound` holds the same bytes, since both are [`synth::wav`]'s.
         fn play(&self, sound: Sound, _wav: &'static [u8]) {
             let Some(playing) = &self.0 else { return };
-            if playing.busy.swap(true, Ordering::AcqRel) {
-                tracing::debug!(?sound, "a sound is already playing; this one is dropped");
-                return;
-            }
-            // The channel cannot be full while `busy` was clear, so only a thread that has ended refuses the sound.
-            // `busy` then stays set and every later sound is dropped, which is all a player without a thread can do.
-            if let Err(error) = playing.requests.try_send(sound) {
+            if let Err(error) = playing.requests.send(sound) {
                 tracing::debug!(?sound, %error, "the sound thread is gone");
             }
         }
@@ -221,27 +214,26 @@ mod linux {
         })
     }
 
-    /// The player's thread: play each sound handed over until the player is dropped, clearing `busy` after each.
-    /// A child killed at the deadline logs as ended by signal 9.
-    fn serve(
-        program: &OsStr,
-        dir: &Path,
-        deadline: Duration,
-        requests: Receiver<Sound>,
-        busy: &AtomicBool,
-    ) {
-        for sound in requests {
-            match play_file(program, &sound_path(dir, sound), deadline) {
+    /// The player's thread: play each sound handed over, in order, until the player is dropped. A sound that arrives
+    /// while one plays is the next one played, at once. A child killed at the deadline logs as ended by signal 9.
+    fn serve(program: &OsStr, dir: &Path, deadline: Duration, requests: &Receiver<Sound>) {
+        let mut next = requests.recv().ok();
+        while let Some(sound) = next {
+            let (ended, newer) = play_file(program, &sound_path(dir, sound), deadline, requests);
+            match ended {
+                Ok(_) if newer.is_some() => tracing::debug!(?sound, "replaced by a newer sound"),
                 Ok(status) if status.success() => {}
                 Ok(status) => tracing::debug!(?sound, %status, "pw-play did not play the sound"),
                 Err(error) => tracing::debug!(?sound, %error, "pw-play could not be run"),
             }
-            busy.store(false, Ordering::Release);
+            next = newer.or_else(|| requests.recv().ok());
         }
     }
 
-    /// Run `program file`, and wait for it to exit or kill it at `deadline`. Blocks until then, so it runs on the
-    /// player's own thread, never the GUI's. Once started, the child is always waited for, so no zombie is left.
+    /// Run `program file`, and wait for it to exit, for a newer sound in `requests`, or for `deadline`, killing it in
+    /// the last two cases; the newer sound, if one came, is returned beside the child's status. Blocks until then, so
+    /// it runs on the player's own thread, never the GUI's. Once started, the child is always waited for, so no zombie
+    /// is left.
     ///
     /// The child reads nothing from us and its output and errors go nowhere: `pw-play` prints nothing a user needs,
     /// and a pipe nobody reads could fill and stall it; the exit status is what the log keeps. With no pipe to it,
@@ -250,32 +242,50 @@ mod linux {
     /// NOTE: The deadline kills the child alone. A grandchild it started would be left running, which `pw-play` is not
     /// expected to do. And the bound holds only while the app runs: a `pw-play` hung on a stalled PipeWire when the app
     /// quits is left running.
-    fn play_file(program: &OsStr, file: &Path, deadline: Duration) -> io::Result<ExitStatus> {
-        let mut child = Command::new(program)
+    fn play_file(
+        program: &OsStr,
+        file: &Path,
+        deadline: Duration,
+        requests: &Receiver<Sound>,
+    ) -> (io::Result<ExitStatus>, Option<Sound>) {
+        let spawned = Command::new(program)
             .arg(file)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()?;
-        reap(&mut child, deadline)
+            .spawn();
+        match spawned {
+            Ok(mut child) => reap(&mut child, deadline, requests),
+            Err(error) => (Err(error), None),
+        }
     }
 
-    /// Wait for `child` until `deadline` has passed, then kill it and wait again.
-    fn reap(child: &mut Child, deadline: Duration) -> io::Result<ExitStatus> {
+    /// Wait for `child` until it exits, a newer sound arrives or `deadline` has passed; in the last two cases kill it
+    /// and wait again.
+    fn reap(
+        child: &mut Child,
+        deadline: Duration,
+        requests: &Receiver<Sound>,
+    ) -> (io::Result<ExitStatus>, Option<Sound>) {
         let until = Instant::now() + deadline;
-        loop {
+        let newer = loop {
             match child.try_wait() {
-                Ok(Some(status)) => return Ok(status),
-                Ok(None) if Instant::now() < until => std::thread::sleep(POLL),
+                Ok(Some(status)) => return (Ok(status), None),
+                // A dropped player's channel still hands out the sounds queued before the drop, and reads as empty
+                // once drained: its last child is then waited for as any other.
+                Ok(None) if Instant::now() < until => match requests.try_recv() {
+                    Ok(newer) => break Some(newer),
+                    Err(_) => std::thread::sleep(POLL),
+                },
                 // Past the deadline, or the child cannot be asked: end it either way, so it never runs on unwatched.
-                _ => break,
+                _ => break None,
             }
-        }
+        };
         // The kill's result is ignored: the child is not reaped yet, so its pid is still its own and the kill succeeds
         // even if the child has just exited. What can fail here is the wait after a failed `try_wait`, and that error
         // is returned.
         let _ = child.kill();
-        child.wait()
+        (child.wait(), newer)
     }
 
     #[cfg(test)]
@@ -302,10 +312,11 @@ mod linux {
 
             for (played, sound) in Sound::PRIORITY.into_iter().enumerate() {
                 player.play(sound, synth::wav(sound));
-                idle(&player);
-                let text = std::fs::read_to_string(&args).unwrap();
+                // The stand-in has written its line before the next sound can replace it.
+                let text = || std::fs::read_to_string(&args).unwrap_or_default();
+                assert!(soon(|| text().lines().count() == played + 1), "{}", text());
+                let text = text();
                 let lines: Vec<&str> = text.lines().collect();
-                assert_eq!(lines.len(), played + 1, "{lines:?}");
                 let (count, path) = lines[played].split_once(' ').unwrap();
                 assert_eq!(count, "1", "{sound:?}: {}", lines[played]);
                 let path = Path::new(path);
@@ -319,33 +330,45 @@ mod linux {
         }
 
         /// The sound owner calls `play` on the GUI thread, so `play` must hand the sound over and return, never wait
-        /// for the child; and one thread plays one sound at a time, while a sound that waited for the one before it
-        /// would play late and out of step with what it announces, so a sound asked for meanwhile is dropped.
-        /// Specified: with a stand-in that runs for a minute, `play` returns within a second and the child starts and
-        /// keeps the player busy; every further sound meanwhile starts no child, at once or after the first one ends.
+        /// for the child; and a sound asked for while another plays must still be heard (an approval request above
+        /// all), so it replaces the one playing, and a run of sounds ends on its last one. Specified: with stand-ins
+        /// that run for a minute, each of three sounds in a row returns from `play` within a second and starts a child
+        /// that plays that sound's file; once the last has started, the earlier children are gone (killed and reaped,
+        /// not zombies) and only the last one runs.
         #[farhelm_testtrace::test]
-        fn play_returns_at_once_and_drops_sounds_while_a_child_runs() {
+        fn play_returns_at_once_and_a_newer_sound_replaces_the_one_playing() {
             let dir = tempfile::tempdir().unwrap();
             let starts = dir.path().join("starts");
-            let body = format!("echo $$ >> '{}'\nexec sleep 60", starts.display());
+            let body = format!("echo $$ \"$1\" >> '{}'\nexec sleep 60", starts.display());
             let player = stand_in_player(stand_in(dir.path(), "player", &body), dir.path());
+            let own = player.0.as_ref().unwrap()._files.dir.clone();
 
-            let before = Instant::now();
-            player.play(Sound::Approval, synth::wav(Sound::Approval));
-            let took = before.elapsed();
-            assert!(took < Duration::from_secs(1), "play took {took:?}");
-            assert!(
-                soon(|| pids(&starts).len() == 1),
-                "the stand-in never started"
-            );
-            assert!(busy(&player), "still playing");
-            for sound in Sound::PRIORITY {
+            let sounds = [Sound::TurnFinished, Sound::Approval, Sound::Waiting];
+            for (played, sound) in sounds.into_iter().enumerate() {
+                let before = Instant::now();
                 player.play(sound, synth::wav(sound));
+                let took = before.elapsed();
+                assert!(took < Duration::from_secs(1), "play took {took:?}");
+                let started = soon(|| pids(&starts).len() == played + 1);
+                assert!(started, "{sound:?} never started");
+                let text = std::fs::read_to_string(&starts).unwrap();
+                let line = text.lines().nth(played).unwrap();
+                let file = sound_path(&own, sound);
+                assert!(
+                    line.ends_with(&format!(" {}", file.display())),
+                    "{sound:?}: {line}"
+                );
             }
-            // Once the player is idle nothing is waiting either: a sound let in keeps it busy until its child is
-            // reaped, so a dropped sound that had been kept would show here as a second start.
-            end_stand_ins(&starts, &player);
-            assert_eq!(pids(&starts).len(), 1, "a dropped sound never starts later");
+            let started = pids(&starts);
+            let (last, earlier) = started.split_last().unwrap();
+            for &pid in earlier {
+                assert!(
+                    soon(|| gone(pid)),
+                    "the replaced child {pid} was not reaped"
+                );
+            }
+            assert!(!gone(*last), "the last sound's child runs");
+            end_stand_in(*last);
         }
 
         /// With one thread waiting for each child, a `pw-play` hung on a stalled PipeWire would silence every later
@@ -371,32 +394,39 @@ mod linux {
                 "the stand-in never started"
             );
             let hung = pids(&starts)[0];
-            idle(&player);
+            assert!(
+                soon(|| gone(hung)),
+                "the hung stand-in {hung} was not reaped"
+            );
             let took = before.elapsed();
             assert!(took >= deadline, "ended too early: {took:?}");
-            // SAFETY: kill with signal 0 only asks whether the pid exists; no pointer is passed. A zombie still exists.
-            let exists = unsafe { libc::kill(hung, 0) } == 0;
-            assert!(!exists, "the hung stand-in {hung} was not reaped");
 
             player.play(Sound::Waiting, synth::wav(Sound::Waiting));
             assert!(
                 soon(|| pids(&starts).len() == 2),
                 "the next sound never played"
             );
-            idle(&player);
         }
 
         /// `pw-play` may well be missing (no PipeWire, a minimal desktop), and a session may have no usable runtime
-        /// directory; the sound is best effort, so either must play nothing without a panic. Specified: a sound
-        /// played through a missing program leaves the player idle again; with the runtime directory unset, relative,
-        /// or a plain file (which refuses a directory in it even to root, unlike a read-only directory), the player is
-        /// empty and a sound starts no child.
+        /// directory; the sound is best effort, so either must play nothing without a panic. Specified: starting a
+        /// missing program comes back as `NotFound` with no newer sound, which the thread logs and moves past; with
+        /// the runtime directory unset, relative, or a plain file (which refuses a directory in it even to root,
+        /// unlike a read-only directory), the player is empty and a sound starts no child.
         #[farhelm_testtrace::test]
         fn a_missing_player_or_directory_plays_nothing() {
             let dir = tempfile::tempdir().unwrap();
-            let player = stand_in_player(dir.path().join("no-such-player"), dir.path());
-            player.play(Sound::Approval, synth::wav(Sound::Approval));
-            idle(&player);
+            let missing = dir.path().join("no-such-player");
+            let (_requests, received) = mpsc::channel();
+            let (ended, newer) = play_file(
+                missing.as_os_str(),
+                &dir.path().join("x.wav"),
+                DEADLINE,
+                &received,
+            );
+            let error = ended.expect_err("nothing runs a missing program");
+            assert_eq!(error.kind(), io::ErrorKind::NotFound);
+            assert!(newer.is_none());
 
             let not_a_dir = dir.path().join("not-a-directory");
             std::fs::write(&not_a_dir, "").unwrap();
@@ -464,7 +494,7 @@ mod linux {
         }
 
         /// A player of `program` with its files in a new directory in `runtime_dir`, and a deadline no test reaches:
-        /// the tests end their stand-ins themselves ([`end_stand_ins`]), so that a loaded machine cannot make a
+        /// the tests end their stand-ins themselves ([`end_stand_in`]), so that a loaded machine cannot make a
         /// deadline fire under a "still running" assertion. The deadline itself is covered by
         /// `a_hung_child_is_killed_at_the_deadline_and_the_next_sound_plays`.
         fn stand_in_player(program: PathBuf, runtime_dir: &Path) -> PwPlay {
@@ -472,32 +502,25 @@ mod linux {
             PwPlay::new(program.into(), deadline, Some(runtime_dir.to_owned()))
         }
 
-        /// Whether `player` has a sound waiting or playing.
-        fn busy(player: &PwPlay) -> bool {
-            let playing = player.0.as_ref().expect("the player has its thread");
-            playing.busy.load(Ordering::Acquire)
+        /// Whether the process `pid` is gone: exited and reaped. A zombie still counts as there.
+        fn gone(pid: libc::pid_t) -> bool {
+            // SAFETY: kill with signal 0 only asks whether the pid exists; no pointer is passed.
+            unsafe { libc::kill(pid, 0) != 0 }
         }
 
-        /// Require `player` to become idle soon. The thread clears `busy` only after it waited for the sound's child,
-        /// so this also shows no stand-in is left running or unreaped.
-        fn idle(player: &PwPlay) {
-            assert!(soon(|| !busy(player)), "the player is still busy");
-        }
-
-        /// The pids the stand-ins wrote to `starts` as they started, one per line.
+        /// The pids the stand-ins wrote to `starts` as they started, one per line, each first on its line.
         fn pids(starts: &Path) -> Vec<libc::pid_t> {
             let text = std::fs::read_to_string(starts).unwrap_or_default();
-            text.lines().map(|line| line.parse().unwrap()).collect()
+            let first = |line: &str| line.split(' ').next().unwrap_or_default().parse().unwrap();
+            text.lines().map(first).collect()
         }
 
-        /// Kill the stand-ins whose pids are in `starts`, then require `player` to become idle. Killing by pid is safe:
-        /// the player has not waited for these children yet, so their pids cannot have been reused.
-        fn end_stand_ins(starts: &Path, player: &PwPlay) {
-            for pid in pids(starts) {
-                // SAFETY: kill takes no pointers, and `pid` is an unreaped child of this process.
-                assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0, "kill {pid}");
-            }
-            idle(player);
+        /// Kill the running stand-in `pid`, then require the player to reap it soon. Killing by pid is safe: the
+        /// player has not waited for this child yet, so its pid cannot have been reused.
+        fn end_stand_in(pid: libc::pid_t) {
+            // SAFETY: kill takes no pointers, and `pid` is an unreaped child of this process.
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0, "kill {pid}");
+            assert!(soon(|| gone(pid)), "the stand-in {pid} was not reaped");
         }
 
         /// Whether `done` holds within 30 s, asked every 20 ms. Far longer than any stand-in here needs, so that only
