@@ -188,33 +188,22 @@ pub(super) fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mu
     }
 }
 
-/// Two attached terminals whose view another client took over, each showing the red status line with the helm's
-/// reason and Take control above its kept screen (the old terminal's `.banner` with `.banner-reclaim`). The first one's
+/// Two attached terminals the helm detached as stalled viewers, each showing the red status line with the helm's
+/// reason and Reconnect above its kept screen (the old terminal's `.banner` and its button). The first one's
 /// program exited, so it also has the old app's exit line (`.grid-terminal-exit`) below its last row, in the terminal's
 /// reversed defaults; the second's program still runs. In both the program's last lines sit at the bottom of its screen,
 /// where a shell leaves them, and the status line takes room the fit leaves to the grid, so the screen is lifted by
 /// whole rows: its top rows go out of view and the last ones stay.
 ///
 /// The owners need a UI session, so the setup connects a fake helm and makes them once its snapshot arrives; each
-/// owner's opener plays its whole stream at once (attach, a replay at the fitted size, its end, the takeover), and the
+/// owner's opener plays its whole stream at once (attach, a replay at the fitted size, its end, the stall), and the
 /// settle loop draws until the picture stops changing.
 pub(super) fn terminal_status_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     attached_setup(state, cx, |keep| {
         vec![
-            taken_over_stream(Some(2), keep.clone()),
-            taken_over_stream(None, keep),
+            stalled_stream(Some(2), keep.clone()),
+            stalled_stream(None, keep),
         ]
-    });
-}
-
-/// Two attached terminals whose stream dropped and is coming back by itself, each showing the reconnect card over its
-/// kept screen (the old `.terminal-reconnecting` overlay and its `.session-unavailable-card`): the heading with its
-/// spinner on its first step, the explanation, the phase line for the first wait ("Reconnecting in 1s (attempt 1 of
-/// 6)…") and Reconnect now, on the terminal scrim. The first pane has room for the whole card; the second is too short
-/// for it, so the card is cut to the pane and scrolls, at its top.
-pub(super) fn terminal_reconnect_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
-    attached_setup(state, cx, |keep| {
-        vec![dropped_stream(keep.clone()), dropped_stream(keep)]
     });
 }
 
@@ -258,20 +247,15 @@ fn attached_setup(state: &SceneState, cx: &mut App, openers: fn(Kept) -> Vec<Ope
 }
 
 /// An opener whose fake stream replays a short session at the bottom of the fitted screen, with the program exited
-/// with status `exit` if given, and is then taken over by another client. The fake is kept in `keep`.
-fn taken_over_stream(exit: Option<i32>, keep: Kept) -> OpenStream {
+/// with status `exit` if given, and is then detached as a stalled viewer, with the helm's reason. The fake is kept in
+/// `keep`.
+fn stalled_stream(exit: Option<i32>, keep: Kept) -> OpenStream {
     replayed_stream(exit, keep, |fake| {
         fake.detach(
-            Some(farhelm_proto::DetachCode::TakenOver),
-            farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
+            Some(farhelm_proto::DetachCode::Stalled),
+            farhelm_proto::DETACH_REASON_STALLED,
         );
     })
-}
-
-/// An opener whose fake stream replays the same short session as [`taken_over_stream`]'s, with the program still
-/// running, and then loses its link, so the stream is coming back by itself. The fake is kept in `keep`.
-fn dropped_stream(keep: Kept) -> OpenStream {
-    replayed_stream(None, keep, FakeTerminal::drop_link)
 }
 
 /// An opener whose fake stream replays a short session at the bottom of the fitted screen, with the program exited
@@ -333,27 +317,6 @@ pub(super) fn terminal_file_disclosures(
     cx: &mut App,
 ) -> AnyElement {
     crate::terminal::files::golden_displays(window, cx)
-}
-
-/// The reconnect scene's terminals, one above the other: the first in a pane with room for the whole card, the second
-/// in one too short for it.
-pub(super) fn reconnect_terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
-    let panes = [(520., 180.), (420., 96.)];
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(12.))
-        .children(
-            state
-                .attached
-                .borrow()
-                .iter()
-                .zip(panes)
-                .map(|(owner, (width, height))| {
-                    div().w(px(width)).h(px(height)).child(owner.clone())
-                }),
-        )
-        .into_any_element()
 }
 
 /// A shell's last lines at the bottom of a small terminal, for the Delete scrim to lie over: enough text that the

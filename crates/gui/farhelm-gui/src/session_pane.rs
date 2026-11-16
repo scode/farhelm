@@ -54,7 +54,7 @@
 //!   keeps no copy that could outlive the request; but the helm answers a Restart while the stream still waits to
 //!   reattach, so the terminal keeps holding the card for a recovery that began under the hold until that recovery
 //!   ends or its first attempt fails ([`AttachedTerminal`](crate::terminal::attached::AttachedTerminal)'s
-//!   `recovery_held`). A takeover's or refusal's band and the exit line are not held: the decision named only the card,
+//!   `recovery_held`). A stall's or refusal's band and the exit line are not held: the decision named only the card,
 //!   and only the agent's terminal is held, since a Restart detaches no tab.
 //!
 //! The pane acts from observers (the selection, the user's choices, the connection), never from drawing: focus moves

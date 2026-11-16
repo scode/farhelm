@@ -37,7 +37,7 @@ use crate::session::Connection;
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::node;
 use crate::session_list::tests::{change, listing, listing_meta, painted, preferences, session};
-use crate::terminal::attached::AttachedTerminal;
+use crate::terminal::attached::{AttachedTerminal, STATUS_RECONNECT_ID};
 use crate::test_support::{self, click, keys, settle, terminal_focused};
 use crate::test_support::{frame, meta, started};
 use crate::{focus, local_state, root};
@@ -1249,21 +1249,22 @@ fn a_restarts_reattach_that_drops_mid_replay_shows_the_card(cx: &mut TestAppCont
     assert!(!fleet.drawn(BAND));
 }
 
-/// The Restart hold is narrower than the Delete's on purpose: a Restart does not take the terminal over, so a takeover
-/// that lands while it is pending is another client's doing, and its band and Take control are the user's only way
-/// back. Specified: with a's Restart confirmed and unanswered, a detach as taken over draws the red band with Take
-/// control.
+/// The Restart hold is narrower than the Delete's on purpose: a Restart detaches the viewer only to move it, with a
+/// detach the stream recovers from by itself, so a stall that lands while it is pending is not the Restart's doing,
+/// and its band and Reconnect are the user's only way back. Specified: with a's Restart confirmed and unanswered, a
+/// detach as stalled draws the red band with Reconnect.
 #[gpui::test]
-fn a_restart_does_not_hold_back_a_takeover(cx: &mut TestAppContext) {
+fn a_restart_does_not_hold_back_a_stall(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
     fleet.go_live(0);
     fleet.restart_open_session();
-    fleet.opened.borrow_mut()[0]
-        .0
-        .detach(Some(DetachCode::TakenOver), "another client attached");
+    fleet.opened.borrow_mut()[0].0.detach(
+        Some(DetachCode::Stalled),
+        farhelm_proto::DETACH_REASON_STALLED,
+    );
     settle(fleet.cx);
     assert!(fleet.drawn(BAND));
-    assert!(fleet.drawn("terminal-take-control"));
+    assert!(fleet.drawn(STATUS_RECONNECT_ID));
     assert!(!fleet.drawn(CARD));
 }
 
