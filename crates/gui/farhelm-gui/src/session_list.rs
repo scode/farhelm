@@ -398,6 +398,9 @@ struct Current {
     /// changes, so a retired operation store is never observed. It is here rather than behind
     /// [`session::observe_current`] because that follows the store only.
     operations: Option<Subscription>,
+    /// Whether a launch went out while nothing was open and nothing has been selected since, which holds the automatic
+    /// pick back ([`selection::hold_for_launch`]). Per UI session, so a reset picks as a freshly loaded window does.
+    kept_empty: bool,
     /// The rows' menu buttons and the layers they opened, shared with the item callback that draws the rows.
     rows: menu::SharedRows,
     /// The list's query (the rail's host and the segments' status) and the helm's answers to it. Per UI session
@@ -524,6 +527,11 @@ impl SessionList {
                 )
             })
         });
+        let launching = session::current_operations(cx).is_some_and(|operations| {
+            operations
+                .read(cx)
+                .any_in_flight(|work| matches!(work, operations::Work::Launch))
+        });
         let selected = local_state::selected(cx);
         // Read before the store is borrowed below: `delete`'s "This window's own Delete is evidence".
         let deleted_here = selected
@@ -558,14 +566,21 @@ impl SessionList {
                 || (deleted_here && collections.get::<SessionRow>(key).is_none());
             proven && !replace::in_flight(key, cx)
         });
-        let change = selection::hold_for_deletes(
-            selection::settle(
-                selected.as_deref(),
-                &listed,
-                gone,
-                selection::preferences(collections),
+        // `selection`'s "A launch keeps an empty selection empty": set by a launch seen in flight over an empty list
+        // with nothing open, spent by any selection.
+        current.kept_empty =
+            selected.is_none() && (current.kept_empty || (launching && listed.is_empty()));
+        let change = selection::hold_for_launch(
+            selection::hold_for_deletes(
+                selection::settle(
+                    selected.as_deref(),
+                    &listed,
+                    gone,
+                    selection::preferences(collections),
+                ),
+                deleting,
             ),
-            deleting,
+            current.kept_empty,
         );
         // The seen mark is for whichever session is open once the change is made, read by key: the helm carries the
         // open session in the store also while the list leaves it out (`filters`, "The query names the open session").

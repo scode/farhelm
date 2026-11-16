@@ -19,9 +19,10 @@ partly: `launcher::view_tests::a_refused_press_says_why_beside_the_main_action` 
 `launcher::view_tests::enter_on_a_harness_chip_chooses_it_and_presses_launch`,
 `launcher::view_tests::custom_opens_its_flags_editor_and_enter_there_only_chooses`,
 `launcher::view_tests::enter_on_the_commands_agent_type_and_resume_presses_launch`,
-`launcher::launch_tests::a_held_enter_in_a_field_never_launches`; the search cases ("Clone search Enter picks an
-unmatched name before a second Enter launches", "launcher search explains empty results and Enter reopens before
-picking") in
+`launcher::launch_tests::a_held_enter_in_a_field_never_launches`; "launcher shows a generic refusal after its target
+changes" in `launcher::launch_tests::a_refusal_after_the_host_moved_installation_is_generic`; the search cases ("Clone
+search Enter picks an unmatched name before a second Enter launches", "launcher search explains empty results and Enter
+reopens before picking") in
 `launcher::search_view_tests::{unmatched_text_and_enter_name_the_session, escape_closes_the_results_and_keeps_the_query, a_scoped_miss_says_why_and_enter_changes_nothing, enter_on_an_empty_box_presses_launch_and_spaces_do_not, only_a_fresh_enter_on_an_empty_box_launches}`;
 Browse in "launcher action-button Enter keeps reset browse and cancel" in
 `launcher::browse_tests::browse_lists_one_level_and_taking_a_folder_chooses_it` (by click; the listing's buttons are
@@ -204,8 +205,10 @@ pending, and bringing a refused launcher back), `launcher::launch_tests::launch_
 `launcher::launch_tests::{a_launch_that_does_not_open_reports_started, a_launch_that_opens_its_session_reports_nothing, a_slow_success_hands_the_pill_to_its_started_report}`
 (the "Started" report),
 `launcher::replace_with_tests::{the_yolo_question_of_a_replace_with_leaves_no_failure_on_the_source, replace_with_opens_its_replacement_only_where_the_source_was_open, a_refused_replace_with_comes_back_and_stays_on_the_source}`
-(line 1551's YOLO cancellation, line 1037's refusal outcome for Replace with, and line 1359 in part); line 340, line
-1037's unknown and retired outcomes, line 1617 and the Restart with cases are not yet ported
+(line 1551's YOLO cancellation, line 1037's refusal outcome for Replace with, and line 1359 in part),
+`session_pane::tests::a_first_launch_the_user_moved_on_from_selects_nothing` (line 1194, New; a quick launch is the same
+launch work); line 340, line 1037's unknown and retired outcomes, line 1617 and the Restart with cases are not yet
+ported
 
 ### `tests/yolo-guard.spec.ts`
 
@@ -337,7 +340,7 @@ launch's command, resume command and YOLO answer", "compares an older omitted pe
 and
 `launcher::restart_with_tests::{restart_with_stops_a_working_agent_with_consent, restart_with_an_idle_agent_asks_no_consent}`
 (with the changed markers); focus on Cancel, "Restart error.", the held host, the stored effort and model Enter in
-`launcher::view_tests::{restart_with_starts_on_cancel_and_says_restart_error, restart_with_shows_its_held_host_as_text, restart_with_keeps_its_stored_effort_offered, restart_with_model_enter_chooses_then_presses_restart}`;
+`launcher::view_tests::{restart_with_starts_on_cancel_and_says_restart_error, restart_with_shows_its_held_host_as_text, restart_with_keeps_its_stored_effort_offered, restart_with_model_enter_chooses_without_restarting}`;
 settling, refusal and the pending row in `launcher::restart_with_tests::restart_with_settles_as_plain_restart_does`;
 "hides guarded when it would restore the unchanged launch" in
 `launcher::restart_with_tests::restart_with_offers_guarded_only_when_it_changes_the_launch`; held keys in

@@ -59,7 +59,6 @@ fn renames(helm: &mut FakeHelm) -> Vec<FakeCommand> {
 }
 
 /// Whether the launcher's "Started" report is up: the sign that a success took the moved-on path and opened nothing.
-/// The selection alone is no evidence, since with no session before the sidebar selects the one that appears.
 fn started_report(cx: &mut VisualTestContext) -> bool {
     test_support::label(cx, "launch-started-report").is_some()
 }
