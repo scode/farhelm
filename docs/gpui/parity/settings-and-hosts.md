@@ -146,8 +146,8 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   The header's words: `the_header_says_this_device_only_where_app_is_listed`.
 - The look: the goldens `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`,
   `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`
-  (`crates/gui/farhelm-gui/src/goldens.rs`). The reference set has no `settings-app` picture: its capture drove the web
-  interface, which has no App section.
+  (`crates/gui/farhelm-gui/src/goldens/settings.rs`). The reference set has no `settings-app` picture: its capture drove
+  the web interface, which has no App section.
 
 Not ported here, and why: the persistence across a second client and reload belongs to the helm's preference route and
 the UI channel's pushes, which their own tests cover; "settings gap keeps focus ..." is the layer manager's empty-space
@@ -313,7 +313,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tests.rs`:
 - "the add dialog's cancel stays live while discovery is pending":
   `escape_and_cancel_close_the_dialog_while_a_probe_is_out`, and for a reply after the user moved on,
   `an_answer_after_the_user_moved_on_opens_nothing_and_moves_no_focus`.
-- The look: the golden `host-add-dialog` (`crates/gui/farhelm-gui/src/goldens.rs`).
+- The look: the golden `host-add-dialog` (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
 
 Replacing tests for the setup, in `crates/gui/farhelm-gui/src/hosts/setup/tests.rs`:
 
@@ -424,7 +424,7 @@ menu offers Re-run once a setup failed (`hosts::setup::rerun`). Replacing tests,
   user moved on: `a_reruns_plan_after_the_user_moved_on_opens_nothing_and_says_so`; with "Set up new hosts without
   asking" on: `with_the_preference_on_a_rerun_sets_up_without_asking`.
 - The look: the goldens `host-setup-running-hosts-panel` and `host-setup-failed-hosts-panel`
-  (`crates/gui/farhelm-gui/src/goldens.rs`), against the references of the same names.
+  (`crates/gui/farhelm-gui/src/goldens/hosts.rs`), against the references of the same names.
 
 Not ported, and why:
 
@@ -481,7 +481,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
   `each_kind_decides_its_own_offers`.
 - End to end, over the scripted backend's fake hosts: `scripts/gui-e2e-smoke.py`'s step 44 (Cancel, Remove, the
   permanent answer, and a removal without asking).
-- The look: the goldens `host-remove-confirmation` and `host-menu` (`crates/gui/farhelm-gui/src/goldens.rs`).
+- The look: the goldens `host-remove-confirmation` and `host-menu` (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
 
 Not ported here: "a retarget and a removal before the claim each submit nothing" and "removal before plan completion
 submits nothing", which test an Update's plan against a removal and come with Update; the refusal dialog's "Remove
@@ -737,7 +737,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs`:
   `an_older_rounds_reads_answering_after_a_refresh_are_dropped` (refresh rounds), and
   `failed_container_reads_show_their_reasons_and_never_none_found` (the old reader's "a failed discovery must stay an
   error").
-- The look: the golden `settings-containers` (`crates/gui/farhelm-gui/src/goldens.rs`).
+- The look: the golden `settings-containers` (`crates/gui/farhelm-gui/src/goldens/settings.rs`).
 
 The helm answers the listing and a Delete within its host reply bound (decided by the migration's orchestrator on
 2026-11-15, under its rule that every host-waiting route the GUI sends is bounded); its tests are in
@@ -774,7 +774,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
   `the_picker_is_reached_and_used_by_keyboard`.
 - The Checkouts section: the tests listed under `tests/host-checkout-folder.spec.ts` above.
 - The look: the goldens `host-menu`, `host-settings-dialog` and `host-settings-dialog-end`
-  (`crates/gui/farhelm-gui/src/goldens.rs`).
+  (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
 
 Not ported here: `modal-layout.spec.ts`'s host settings cases, whose margins and scrolling body are the shared dialog
 frame's (its own tests and goldens), and whose busy-body Tab stop has no counterpart, since no control here goes

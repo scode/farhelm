@@ -685,15 +685,15 @@ systemd or SSH substrate ran.
   migration's landing step from milestone M1 on, not in CI. The tests build temporary git repositories. Seconds, no
   network. Run them when the script or the table changes.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
-  — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens.rs`): every component, the dialog frame and
-  the layer manager's overlays (a tooltip, a popover, the prompt over its veil), the keyboard focus ring, host-supplied
-  text over its spoofing corpus, the terminal's styles and cursor shapes, and an attached terminal's status line and
-  exit line, light and dark, compared pixel for pixel with the PNGs under `crates/gui/farhelm-gui/tests/goldens/<os>/`.
-  The test is ignored in workspace runs because it needs the software renderer, which the script selects (Mesa's
-  lavapipe on Linux: the `mesa-vulkan-drivers` and `libegl-mesa0` packages). After an intended visual change, `--update`
-  rewrites the references; look at each changed PNG before keeping it. A failure leaves the new captures in
-  `gui-goldens/` beside the test binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or
-  GPUI or GPUI Kit change; CI does not run it yet.
+  — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens/`): every component, the dialog frame and the
+  layer manager's overlays (a tooltip, a popover, the prompt over its veil), the keyboard focus ring, host-supplied text
+  over its spoofing corpus, the terminal's styles and cursor shapes, and an attached terminal's status line and exit
+  line, light and dark, compared pixel for pixel with the PNGs under `crates/gui/farhelm-gui/tests/goldens/<os>/`. The
+  test is ignored in workspace runs because it needs the software renderer, which the script selects (Mesa's lavapipe on
+  Linux: the `mesa-vulkan-drivers` and `libegl-mesa0` packages). After an intended visual change, `--update` rewrites
+  the references; look at each changed PNG before keeping it. A failure leaves the new captures in `gui-goldens/` beside
+  the test binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit
+  change; CI does not run it yet.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI host text on macOS' --concurrency 'libtest default threads' -- cargo test --locked -p farhelm-gui --lib host_text::`,
   on a Mac — the host-supplied text tests, including the macOS-only
   `host_text::tests::on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated`, which shapes a sentence
