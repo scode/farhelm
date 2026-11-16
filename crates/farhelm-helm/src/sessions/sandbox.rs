@@ -6,6 +6,8 @@
 //! supervisor cannot be asked, the page offers the warned whole-environment
 //! Delete, which destroys the resource without any count. Replace's internal
 //! source removal remains a supervisor session operation that never seals.
+//! Stop and suspend chains the ordinary Stop and the host's Suspend under one
+//! reply bound ([`stop_and_suspend`]).
 
 use super::*;
 
@@ -406,39 +408,92 @@ pub(super) async fn delete_if_owned(
     Ok(Some(farhelm_proto::SessionDeleteOutcome::default()))
 }
 
-/// Stop and suspend is one helm-owned user operation. A dropped browser must
-/// not abandon the second half after it has already stopped the user's agent.
+/// `POST /api/sessions/{id}/stop-and-suspend`: the ordinary Stop of an
+/// environment session, then its host's Suspend, as one helm-owned user
+/// operation. A dropped client must not abandon the second half after the
+/// first has already stopped the user's agent, and a Stop that fails or leaves
+/// cleanup undone never suspends.
+///
+/// ## Answering within the host reply bound
+///
+/// One bound covers the Stop and the Suspend together, counted from the
+/// handler's start: the route is one command with one reply, and the GUI's
+/// ordered channel needs that reply within its watchdog, which a bound per
+/// half (up to 40 seconds) would not keep. Refusals that come first (not an
+/// environment session, an unknown session) and quick outcomes answer as
+/// before. At the bound the reply is [`stop_and_suspend_carries_on`]'s 504
+/// while both halves carry on in order on a task of their own. That reply
+/// cannot know which half is running, so it promises only the order: the
+/// environment is suspended once the agent has stopped cleanly. A partial
+/// outcome stays truthful because nothing claims more: a Stop that fails or
+/// leaves cleanup undone after the reply leaves the environment running, with
+/// the reason only in the helm's log, and the session list shows the agent's
+/// state and its host's as they are. Decided by the migration's orchestrator
+/// on 2026-11-15 together with the host's Suspend and Resume
+/// (`crate::tensorlake::lifecycle::suspend`), whose outcome likewise lands in
+/// the pushed host state.
 pub(crate) async fn stop_and_suspend(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(request): axum::Json<farhelm_proto::SessionStopRequest>,
-) -> impl IntoResponse {
-    let result = crate::run_owned(async move {
-        let key = resolve_session_ref(&state, &id).await?;
-        if !crate::hosts::registry_row(&state, key.host)
-            .await?
-            .is_session_owned()
-        {
-            return Err(invalid_request("Stop and suspend is available only for environment sessions".into()));
-        }
-        let outcome = do_stop_session(
-            &state,
-            &key,
-            request.refuse_if_tabs_open,
-            request.refuse_if_agent_running,
-        )
-        .await?;
-        if let Some(notice) = outcome.notice {
-            return Err(anyhow::Error::new(SupervisorError::helm(
-                ErrorKind::Conflict, format!("The agent stopped, but cleanup was incomplete; the environment was not suspended: {notice}"),
-            )));
-        }
-        crate::environment::lifecycle::change(&state, key.host, false).await
-            .context("The agent stopped, but the environment was not suspended")
-    })
-    .await;
-    match result {
-        Ok(()) => axum::Json(farhelm_proto::SessionStopOutcome::default()).into_response(),
-        Err(error) => http_error(error),
+) -> axum::response::Response {
+    within_host_reply_bound_saying(
+        async move {
+            match stop_then_suspend(&state, &id, request).await {
+                Ok(()) => axum::Json(farhelm_proto::SessionStopOutcome::default()).into_response(),
+                Err(error) => http_error(error),
+            }
+        },
+        stop_and_suspend_carries_on(),
+    )
+    .await
+}
+
+/// The text of the 504 [`stop_and_suspend`] answers when it is still running
+/// at the host reply bound.
+fn stop_and_suspend_carries_on() -> String {
+    format!(
+        "Stop and suspend did not finish within {} seconds; it carries on, suspending the \
+         environment only once the agent has stopped cleanly, and the session list will show the \
+         result",
+        HOST_REPLY_BOUND.as_secs()
+    )
+}
+
+/// The body of [`stop_and_suspend`], unbounded: refuse a session outside a
+/// disposable environment, Stop it, and Suspend its host only after a Stop
+/// with nothing left over.
+async fn stop_then_suspend(
+    state: &AppState,
+    id: &str,
+    request: farhelm_proto::SessionStopRequest,
+) -> anyhow::Result<()> {
+    let key = resolve_session_ref(state, id).await?;
+    if !crate::hosts::registry_row(state, key.host)
+        .await?
+        .is_session_owned()
+    {
+        return Err(invalid_request(
+            "Stop and suspend is available only for environment sessions".into(),
+        ));
     }
+    let outcome = do_stop_session(
+        state,
+        &key,
+        request.refuse_if_tabs_open,
+        request.refuse_if_agent_running,
+    )
+    .await?;
+    if let Some(notice) = outcome.notice {
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            format!(
+                "The agent stopped, but cleanup was incomplete; the environment was not suspended: \
+                 {notice}"
+            ),
+        )));
+    }
+    crate::environment::lifecycle::change(state, key.host, false)
+        .await
+        .context("The agent stopped, but the environment was not suspended")
 }

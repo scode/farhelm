@@ -3701,11 +3701,24 @@ pub(crate) async fn rename_session(
 /// the settings read shows the key once it is in place
 /// (`crate::tensorlake::create_ssh_key`).
 ///
+/// So are an environment host's Suspend and Resume and a session's Stop and
+/// suspend (`crate::tensorlake::lifecycle::suspend` and `resume`,
+/// `sandbox::stop_and_suspend`), which can wait far longer than the bound: a
+/// Tensorlake Resume up to two minutes, a container's change on its container
+/// host's commands, and Stop and suspend's Stop on the supervisor with no
+/// limit of its own (decided by the migration's orchestrator on 2026-11-15,
+/// in place of the accepted form, since their outcome already lands in the
+/// pushed host state). A change still running at the bound carries on, and
+/// the host's state in the hosts and session lists shows how it ended. Stop
+/// and suspend takes one bound over both of its halves.
+///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
-/// `do_replace_session`, the restart's, `create_session_request` and
-/// `preview_github_checkout`), such as the supervisor relay agents use or an
-/// environment's first session, keeps its own waiting behavior unchanged.
+/// `do_replace_session`, the restart's, `create_session_request`,
+/// `preview_github_checkout` and `environment::lifecycle::change_with_manager`),
+/// such as the supervisor relay agents use, an environment's first session or
+/// the automatic start of a stopped container, keeps its own waiting behavior
+/// unchanged.
 pub(crate) const HOST_REPLY_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Run `work` to completion, but answer once [`HOST_REPLY_BOUND`] passes.

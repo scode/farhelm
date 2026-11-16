@@ -256,27 +256,38 @@ orchestrator on 2026-11-15, under its rule that every host-waiting route the GUI
 asks the container hosts concurrently, so the bound applies to the slowest of them, and drops its read at the bound; a
 leftover's Delete replies that its cleanup carries on, and the list's next read shows whether the container is gone; and
 removing a host whose removal deletes its machine replies the same way, the host leaving the hosts list once its removal
-finishes, or staying listed with the reason only in the helm's log if it fails. A session's Delete of its environment,
-Suspend and Resume are not bounded yet and are bounded, or take the accepted form, when the work that ports them needs
-it. A credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts (decided
-by the migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still being
-delivered to are reported as not delivered (see "Named credential catalog"). The Tensorlake settings routes, which wait
-on Tensorlake's API rather than on a host, answer within the same bound, counted from their handler's start (decided by
-the migration's orchestrator on 2026-11-15): the API key's Test and the list of Sandboxes not on this helm stop listing
-and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover
-sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then
-shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
-bound, counted from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15, under its rule that
-every host-waiting route the GUI sends is bounded): `ssh-keygen` may run for up to its own 30 seconds, so a generation
-still running at the bound replies 504 that the creation carries on, and the settings read reports the key once it is
-written; a Create sent again meanwhile waits for that generation and answers its key. A recipe's Delete
-(`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from its handler's start (decided by
-the GPUI migration's orchestrator on 2026-11-15): an unknown recipe, one a host uses and one already being deleted are
-refused at once from local state, before anything is cancelled; once its cleanup has started, a deletion still running
-at the bound replies that it carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup
-fails, stays listed with the reason only in the helm's log until a second Delete runs the cleanup again and answers it.
-While the deletion runs, the recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then
-lost with the row.
+finishes, or staying listed with the reason only in the helm's log if it fails. An environment host's Suspend and Resume
+(`POST /api/hosts/{id}/suspend` and `/resume`) and a session's Stop and suspend
+(`POST /api/sessions/{id}/stop-and-suspend`) answer within the same bound, counted from their handler's start (decided
+by the migration's orchestrator on 2026-11-15, in place of the accepted form, because their outcome already lands in the
+pushed host state). A Tensorlake Suspend may wait 60 seconds for its sandbox and a Resume 120, and a container's change
+waits on its container host's commands, so a change still running at the bound replies 504 that it carries on. The
+change keeps the host's provisioning lock until it ends, and the host's state in the hosts and session lists then shows
+how it ended, a late failure reaching only the helm's log. Tensorlake's refusals before anything changes (a busy host, a
+host that is not an environment, no account key) are local and answer as before; a container host checks its container
+over SSH first, inside the bound. Stop and suspend is one command with one reply, so one bound covers its Stop and its
+Suspend together; its reply at the bound says only that the environment is suspended once the agent has stopped cleanly,
+which holds whichever half is still running, and a Stop that fails or leaves cleanup undone after the reply leaves the
+environment running. A session's Delete of its environment is not bounded yet and is bounded, or takes the accepted
+form, when the work that ports it needs it. A credential replacement waits the same bound, counted from its handler's
+start, for delivery to its hosts (decided by the migration's orchestrator on 2026-11-15); being already saved, it is not
+refused, and the hosts still being delivered to are reported as not delivered (see "Named credential catalog"). The
+Tensorlake settings routes, which wait on Tensorlake's API rather than on a host, answer within the same bound, counted
+from their handler's start (decided by the migration's orchestrator on 2026-11-15): the API key's Test and the list of
+Sandboxes not on this helm stop listing and answer the 502 of an unanswered Tensorlake call, the list still showing any
+unfinished cleanup, and a leftover sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup
+carries on, which that list then shows (see "Tensorlake account"). Settings' Create SSH key
+(`POST /api/tensorlake/ssh-key`) answers within the same bound, counted from its handler's start (decided by the GPUI
+migration's orchestrator on 2026-11-15, under its rule that every host-waiting route the GUI sends is bounded):
+`ssh-keygen` may run for up to its own 30 seconds, so a generation still running at the bound replies 504 that the
+creation carries on, and the settings read reports the key once it is written; a Create sent again meanwhile waits for
+that generation and answers its key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same
+bound, counted from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15): an unknown recipe,
+one a host uses and one already being deleted are refused at once from local state, before anything is cancelled; once
+its cleanup has started, a deletion still running at the bound replies that it carries on, and the recipe leaves the
+recipe list once it is deleted, or, if the cleanup fails, stays listed with the reason only in the helm's log until a
+second Delete runs the cleanup again and answers it. While the deletion runs, the recipe's save (`PUT`) and Build are
+refused with 409, so a save cannot be accepted and then lost with the row.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's

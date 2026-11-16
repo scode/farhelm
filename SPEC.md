@@ -349,11 +349,14 @@ fresh GitHub checkout, the folder is allocated once the host is ready and the se
 Only a fresh preview on the new connection can authorize that create. Farhelm does not suspend automatically.
 
 An explicit Suspend shows **Suspending…**, with a spinner and how long ago Tensorlake was asked, until Tensorlake
-confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A failed or
-timed-out request shows its error and reconnects rather than claiming the sandbox is suspended. Resume similarly shows
-**Resuming…** during the Tensorlake call, then **Connecting…** while a fresh connection is established. Neither
-transition offers a competing lifecycle action or host setup/update. Repeating Resume on an already-running, connected
-sandbox preserves its live sessions' connections.
+confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A request that
+fails before it answers shows its error and reconnects rather than claiming the sandbox is suspended. Resume similarly
+shows **Resuming…** during the Tensorlake call, then **Connecting…** while a fresh connection is established. A Suspend
+or Resume that has not finished within 20 seconds answers that it carries on, and the host keeps showing **Suspending…**
+or **Resuming…** until it ends (decided by the migration's orchestrator on 2026-11-15). A failure after that answer ends
+as it would have before it, a failed Suspend reconnecting the host and a failed Resume leaving it **Suspended**, with
+the reason only in the helm's log. Neither transition offers a competing lifecycle action or host setup/update.
+Repeating Resume on an already-running, connected sandbox preserves its live sessions' connections.
 
 The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanation below the heading and **Cancel** /
 **Suspend** in the footer. Its close control, Escape and Cancel dismiss without suspending. The sandbox name, recipe and
@@ -1564,8 +1567,10 @@ The host label is **&lt;recipe&gt; sandbox**, with the cube mark in session meta
 and a pause-marked **Suspended** badge. The row menu offers Suspend/Resume and explains that Clone creates a new
 sandbox. Plain Stop ends the chosen agent and tabs but keeps its sandbox running and billing. Its inline question says
 so and offers **Stop and suspend** as well. That action finishes ordinary Stop before requesting host Suspend; a failed
-or incomplete Stop does not suspend. The row menu always offers Stop and suspend, so it remains reachable when ordinary
-confirmations are skipped. Delete's confirmations are never skipped.
+or incomplete Stop does not suspend. If the two have not finished within 20 seconds, the answer says the action carries
+on and suspends the sandbox only once the agent has stopped cleanly; the row and its host then show how it ended. The
+row menu always offers Stop and suspend, so it remains reachable when ordinary confirmations are skipped. Delete's
+confirmations are never skipped.
 
 Agents in a sandbox session act only within their own sandbox, and agents elsewhere launch sandboxes only behind a card
 that always asks; [Agents and environments](#agents-and-environments) has the rules. The helm enforces them at the

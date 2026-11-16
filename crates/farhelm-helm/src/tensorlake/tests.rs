@@ -896,7 +896,11 @@ async fn the_fake_answers_from_its_control_files() {
 // ---------------------------------------------------------------------------
 
 /// A request through the real protected router with the harness's Host.
-fn request(method: &str, path: &str, body: Option<String>) -> Request<Body> {
+pub(in crate::tensorlake) fn request(
+    method: &str,
+    path: &str,
+    body: Option<String>,
+) -> Request<Body> {
     Request::builder()
         .method(method)
         .uri(path)
@@ -1103,7 +1107,7 @@ use tokio::time::Instant;
 /// How long past the bound a test waits for a reply before failing, so a
 /// route that lost its bound fails with a message rather than parking the
 /// test until nextest's own timeout.
-const PAST_THE_BOUND: Duration = Duration::from_secs(10);
+pub(in crate::tensorlake) const PAST_THE_BOUND: Duration = Duration::from_secs(10);
 
 /// A harness whose Tensorlake is the control-file fake, with the API key
 /// saved. The temporary directory holds the fake's control directory (the
@@ -1154,8 +1158,9 @@ fn fake_ops(root: &std::path::Path) -> Vec<String> {
 
 /// Send `request` through the real router on a task of its own, so the test
 /// can steer the fake while the route waits. The reply comes with how long it
-/// took on the tokio clock, from just before the send.
-fn spawn_call(
+/// took on the tokio clock, from just before the send. The host lifecycle
+/// tests (`hosts_tests.rs`) measure their own reply bounds with it too.
+pub(in crate::tensorlake) fn spawn_call(
     harness: &crate::rest_harness::Harness,
     request: Request<Body>,
 ) -> tokio::task::JoinHandle<(StatusCode, String, Duration)> {
@@ -1177,7 +1182,7 @@ fn spawn_call(
 
 /// Wait for a reply [`spawn_call`] started, failing once [`PAST_THE_BOUND`]
 /// has gone by after the bound without one.
-async fn reply_of(
+pub(in crate::tensorlake) async fn reply_of(
     call: tokio::task::JoinHandle<(StatusCode, String, Duration)>,
 ) -> (StatusCode, String, Duration) {
     tokio::time::timeout(HOST_REPLY_BOUND + PAST_THE_BOUND, call)
