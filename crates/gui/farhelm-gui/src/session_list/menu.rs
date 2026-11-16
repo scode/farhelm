@@ -98,6 +98,7 @@ use gpui::{
     Window, div, px,
 };
 
+use super::row_marks::HelpPlace;
 use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
@@ -111,6 +112,7 @@ use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::operations::{Command, OpKey, Work};
 use crate::prompt::{self, Question};
+use crate::theme::metrics;
 use crate::{local_state, session};
 
 /// The id prefix of a row's menu button; the rest is the session's key.
@@ -256,7 +258,10 @@ pub(super) fn menu_button(
         id,
         Icon::More,
         actions_label(title),
-        HoverHelp::tooltip(ACTIONS_HELP),
+        // Beside the sidebar, as every row hover is; the ring follows the button's corners inside its 1-pixel edge.
+        HelpPlace::Row { selected }
+            .place(HoverHelp::tooltip(ACTIONS_HELP))
+            .ring_radius(metrics::RADIUS_SM - px(1.)),
         Role::Button,
     )
     .tier(Tier::RowMenu { on_fill: selected })
@@ -865,8 +870,10 @@ pub(super) fn agent_name(row: &SessionRow) -> AgentName {
 }
 
 /// The program a command line runs, by its file name: its first word with any directory dropped (`/usr/bin/claude
-/// --resume` is `claude`). A host value: the caller escapes it.
-fn program_name(invocation: &str) -> &str {
+/// --resume` is `claude`). A host value: the caller escapes it. The summary card's agent line names a command launch by
+/// it too ([`super::summary::agent_line`]). The old app split the command line as a shell would, so a quoted program
+/// name with a space in it was one word there and is cut at the space here.
+pub(super) fn program_name(invocation: &str) -> &str {
     let program = invocation.split_whitespace().next().unwrap_or("");
     program.rsplit('/').next().unwrap_or(program)
 }

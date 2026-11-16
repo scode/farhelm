@@ -329,6 +329,23 @@
       ]
     },
     {
+      "id": "app-session-summary-card",
+      "title": "The idle Fixture 3's summary card, from resting on its title: beside the sidebar with its notch and the accent ring around the row",
+      "reference": "tooltip-session-summary",
+      "mockup": false,
+      "steps": [
+        [
+          "hover",
+          "text:Fixture 3"
+        ],
+        [
+          "wait",
+          "--text",
+          "Click to open"
+        ]
+      ]
+    },
+    {
       "id": "app-sidebar-resized",
       "title": "The sidebar widened to 446 pixels with five Right presses on its focused divider (last in its app run, since the width is stored with the helm)",
       "reference": "main-running-session",
@@ -1110,6 +1127,16 @@
       "golden": "session-list",
       "title": "The session list: every status a row draws, with the open session selected",
       "reference": "main-running-session"
+    },
+    {
+      "golden": "session-row-hover-beside",
+      "title": "An idle row's age hovered: its timestamp beside the sidebar, the notch pointing back at the age and the accent ring on it",
+      "reference": "tooltip-last-activity"
+    },
+    {
+      "golden": "session-summary-card",
+      "title": "An idle local row's summary card beside the sidebar: title, status, agent, host, managed checkout, directory, start and last-activity times, and the click hints, with the notch and the accent ring around the row",
+      "reference": "tooltip-session-summary"
     },
     {
       "golden": "session-list-selected-stale",
