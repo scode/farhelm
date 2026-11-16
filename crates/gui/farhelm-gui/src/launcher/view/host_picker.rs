@@ -44,13 +44,19 @@ use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::local_state;
 use crate::theme::{self, metrics};
 
-/// The room between the host picker and the Browse button beside it: the old destination row's `gap: 8px`.
-const BROWSE_GAP: f32 = 8.;
+/// The host button's and Browse's height, the old `height: 36px` and `min-height: 36px`
+/// (`.launch-composer-destination-row`): their content box is this less the buttons' padding and 1-pixel edges.
+const DESTINATION_CONTROL_HEIGHT: f32 = 36.;
+/// The picker's least width, the old `min-width: 12em` at the launcher's 14-pixel text. Otherwise it is as wide as the
+/// chosen host's words and never wider: the old button did not stretch across the row.
+const PICKER_MIN_WIDTH: f32 = 168.;
 /// How long typed letters keep adding to one name prefix before the next letter starts a new one (the old picker's
 /// one second).
 const TYPEAHEAD: Duration = Duration::from_secs(1);
 /// `.launcher-host-options`: `max-height: 240px; padding: 4px`, scrolling past that, its rows touching.
 const LIST_MAX_HEIGHT: f32 = 240.;
+/// The list's widest, the old `max-width: 30em` at 14-pixel text; a longer host name wraps in its row.
+const LIST_MAX_WIDTH: f32 = 420.;
 const LIST_PAD: f32 = 4.;
 /// The host mark's size in the button and the rows (`.host-mark` in the launcher), and its gap to the name.
 const MARK: f32 = 14.;
@@ -328,14 +334,9 @@ impl Launcher {
                 .text_size(metrics::TEXT_MD)
                 .children(mark)
                 .child(words);
-            // Replace with holds its host but not its folder, so Browse still sits beside it.
-            let held = div()
-                .flex()
-                .items_start()
-                .gap(px(BROWSE_GAP))
-                .child(div().flex_1().min_w_0().child(held))
-                .children(self.browse_button(cx));
-            return row("launcher-host-row", "Host", held, palette).into_any_element();
+            // Replace with holds its host but not its folder, so Browse still follows the row.
+            let host = row("launcher-host-row", "Host", held, palette);
+            return self.with_browse_below(host, cx);
         }
         if self.host_picker.layer.is_some() && !self.host_list_open(window, cx) {
             self.close_host_list(window, cx);
@@ -348,14 +349,20 @@ impl Launcher {
             Some(words) => format!("Host: {}", words.accessible_name()).into(),
             None => "Host".into(),
         };
-        let anchor = Anchor::for_element("launcher-host-anchor", window, cx).matching_width();
+        // Not matching the picker's width: the button is only as wide as the chosen host, and the list must show the
+        // other hosts' longer names (the old list's `min-width: 100%; max-width: min(30em, 80vw)`).
+        let anchor = Anchor::for_element("launcher-host-anchor", window, cx);
         let tracker = anchor.track();
         self.host_picker.anchor = Some(anchor.clone());
         let (on_key, on_click) = (cx.weak_entity(), cx.weak_entity());
+        // As wide as the button, so the chevron sits at its right end (the old `margin-left: auto`) when the minimum
+        // width leaves room beside short words.
         let content = div()
             .flex()
             .items_center()
             .gap(px(MARK_GAP))
+            .h(control_content_height())
+            .w_full()
             .min_w_0()
             .children(mark)
             .child(div().flex_1().min_w_0().children(words))
@@ -384,20 +391,40 @@ impl Launcher {
         });
         let control = div()
             .relative()
-            .flex_1()
-            .min_w_0()
+            .flex_initial()
+            .min_w(px(PICKER_MIN_WIDTH))
+            .max_w_full()
             .child(button)
             .child(tracker);
-        // Browse sits beside the picker, as the old `.launch-composer-destination-row` held both (`browse`).
-        let control = div()
-            .flex()
-            .items_center()
-            .gap(px(BROWSE_GAP))
-            .w_full()
-            .child(control)
-            .children(self.browse_button(cx));
-        row("launcher-host-row", "Host", control, palette).into_any_element()
+        // In a flex row, so the picker keeps its own width (`flex_initial`) rather than the row's.
+        let host = row(
+            "launcher-host-row",
+            "Host",
+            div().flex().child(control),
+            palette,
+        );
+        self.with_browse_below(host, cx)
     }
+
+    /// The Host row with Browse on its own line right under it, from the row's left edge, where the old launcher drew
+    /// it: its `.launch-composer-destination-row` held the Host row and Browse, and the placement row around it set it
+    /// to `display: block` (`app.css` near line 10235 at reference commit `24bc0580`), so Browse fell under the row
+    /// with no gap. Browse comes between the host and the folder in reading and Tab order, as there.
+    fn with_browse_below(&self, host: impl IntoElement, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .child(div().w_full().child(host))
+            .children(self.browse_button(cx))
+            .into_any_element()
+    }
+}
+
+/// The content height that makes a neutral button [`DESTINATION_CONTROL_HEIGHT`] tall: the old box less the
+/// button's vertical padding and its 1-pixel top and bottom edges.
+pub(super) fn control_content_height() -> gpui::Pixels {
+    px(DESTINATION_CONTROL_HEIGHT) - metrics::BUTTON_PAD.0 * 2. - px(2.)
 }
 
 /// A host's words in the list and the button, the footer's name for it ([`super::host_name_with_phase`]): its display
@@ -441,6 +468,8 @@ impl Render for HostRows {
             .flex()
             .flex_col()
             .p(px(LIST_PAD))
+            .min_w(px(PICKER_MIN_WIDTH))
+            .max_w(px(LIST_MAX_WIDTH))
             .max_h(px(LIST_MAX_HEIGHT))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)

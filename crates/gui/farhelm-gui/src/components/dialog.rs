@@ -23,9 +23,10 @@
 //! status line, a colored phase dot beside the build. It draws its own heading in their place
 //! ([`DialogFrame::heading`]), and its title, "Host settings · <name>", stays the dialog's accessible name.
 //! The session launcher's footer had two more parts (`.launch-composer-footer`): a summary of what its main action
-//! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
-//! answer has to say ([`DialogFrame::notices`]). Settings pins the recipe editor's own answers there, as a band ruled
-//! off from its Close ([`DialogFrame::notices_rule`]).
+//! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region under them for what a press of an
+//! answer has to say ([`DialogFrame::notices`], placed under the row by [`DialogFrame::notices_below`]). Settings pins
+//! the recipe editor's own answers in that region above the row, as a band ruled off from its Close
+//! ([`DialogFrame::notices_rule`]).
 //! A body whose content may hold nothing focusable can have a tab stop of its own that the keys scroll
 //! ([`DialogFrame::scroll_stop`]; `scroll_box.rs` has the full account). So can the notices region, which also scrolls
 //! on Page Up, Page Down, Home and End from a control inside it ([`DialogFrame::notices_stop`]), for a question whose
@@ -106,6 +107,7 @@ pub struct DialogFrame {
     notices: Option<AnyElement>,
     top_band: Option<AnyElement>,
     notices_rule: bool,
+    notices_below: bool,
     compact: bool,
     scroll_stop: Option<SharedString>,
     notices_stop: Option<SharedString>,
@@ -141,6 +143,7 @@ impl DialogFrame {
             notices: None,
             top_band: None,
             notices_rule: false,
+            notices_below: false,
             compact: false,
             scroll_stop: None,
             notices_stop: None,
@@ -227,11 +230,11 @@ impl DialogFrame {
         self
     }
 
-    /// A region above the answers' row for what pressing an answer has to say (the launcher's refusal beside Launch,
-    /// later its YOLO question). It is pinned with the answers rather than scrolling with the body, so a refusal is
-    /// always seen beside the action that caused it, and it scrolls on its own once taller than about a quarter of the
-    /// window (`.launch-composer-notices`), so long text never pushes the answers away. The pointer scrolls it; the
-    /// keyboard does too once [`Self::notices_stop`] is set.
+    /// A region above the answers' row (under it with [`Self::notices_below`]) for what pressing an answer has to say
+    /// (the launcher's refusal and YOLO question, under its row). It is pinned with the answers rather than scrolling
+    /// with the body, so a refusal is always seen beside the action that caused it, and it scrolls on its own once
+    /// taller than about a quarter of the window (`.launch-composer-notices`), so long text never pushes the answers
+    /// away. The pointer scrolls it; the keyboard does too once [`Self::notices_stop`] is set.
     pub fn notices(mut self, notices: impl IntoElement) -> Self {
         self.notices = Some(notices.into_any_element());
         self
@@ -244,6 +247,16 @@ impl DialogFrame {
     /// `border-top: 1px solid var(--border-dim)`) above the footer's. Without notices it draws nothing.
     pub fn notices_rule(mut self) -> Self {
         self.notices_rule = true;
+        self
+    }
+
+    /// Draw the [`Self::notices`] region under the answers' row instead of above it, where the old launcher kept its
+    /// refusal, its Replace and Restart warnings and its YOLO question (`.launch-composer-notices` followed
+    /// `.launch-composer-footer-row` in `.launch-composer-footer`'s column at reference commit `24bc0580`). The region
+    /// still scrolls on its own and is still pinned; only its side of the row changes. Not for ruled-off notices
+    /// ([`Self::notices_rule`]), whose rule separates them from a row below.
+    pub fn notices_below(mut self) -> Self {
+        self.notices_below = true;
         self
     }
 
@@ -500,7 +513,8 @@ impl RenderOnce for DialogFrame {
             // reference commit), and its ring lay two pixels inside that edge. The notices sit inside the footer's
             // padding instead, so the ring's sides reach out across it to the card's inner edge, where the body's ring
             // lies too; its top and bottom sit two pixels outside the notices, inside the footer's top padding and the
-            // gap above the answers' row, rather than over the text.
+            // gap above the answers' row (under the row, [`DialogFrame::notices_below`]: the gap below it and the
+            // footer's bottom padding), rather than over the text.
             let ring = Ring {
                 inset_x: -foot_x,
                 inset_y: px(-2.),
@@ -520,11 +534,15 @@ impl RenderOnce for DialogFrame {
             .px(foot_x)
             .bg(theme::color(palette.bg_1))
             .border_t_1()
-            .border_color(theme::color(palette.border_dim))
-            .children(notices)
-            // A footer of notices alone (Add host's recipe editor, whose answers are its notices) draws no empty
-            // row, which would leave the footer's gap below them.
-            .children(has_row.then_some(row));
+            .border_color(theme::color(palette.border_dim));
+        // A footer of notices alone (Add host's recipe editor, whose answers are its notices) draws no empty row, which
+        // would leave the footer's gap below them.
+        let row = has_row.then_some(row);
+        let footer = if self.notices_below {
+            footer.children(row).children(notices)
+        } else {
+            footer.children(notices).children(row)
+        };
 
         let card = div()
             .id(ElementId::Name(self.id.clone()))

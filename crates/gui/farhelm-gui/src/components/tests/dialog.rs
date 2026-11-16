@@ -3,8 +3,9 @@
 //! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it. Notices given a stop have
 //! it on the same rule, between the body and the answers in Tab's order, scroll through it, and scroll on Page Up, Page
 //! Down, Home and End from an answer inside them (and from nowhere else), which keeps its other keys; notices without
-//! the opt-in take no keys. A footer of notices alone draws no empty answers row. And the frame's size caps against the
-//! window's content area, as pure arithmetic since no test window reports client decorations.
+//! the opt-in take no keys. The notices sit above the answers' row unless asked to sit under it, and a footer of notices
+//! alone draws no empty answers row. And the frame's size caps against the window's content area, as pure arithmetic
+//! since no test window reports client decorations.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -695,5 +696,63 @@ fn a_footer_of_notices_alone_has_no_empty_answers_row(cx: &mut TestAppContext) {
         notices.top() - footer.top() - px(1.),
         footer.bottom() - notices.bottom(),
         "the footer's padding is even around the notices: {notices:?} in {footer:?}"
+    );
+}
+
+/// A frame with a body, one notice and one answer, its notices below the row when `below`: the bounds of its notices,
+/// its answer and its body.
+fn notices_layout(cx: &mut TestAppContext, below: bool) -> [gpui::Bounds<gpui::Pixels>; 3] {
+    let cx = open(cx, move |_, _| {
+        let frame = DialogFrame::new(
+            "frame",
+            "A dialog",
+            div().child("Body"),
+            vec![Button::new(
+                "ok",
+                "Continue",
+                HoverHelp::tooltip("Go on"),
+                Role::Button,
+            )],
+        )
+        .notices(div().child("A refusal"));
+        if below { frame.notices_below() } else { frame }.into_any_element()
+    });
+    [
+        bounds(cx, "frame-notices"),
+        bounds(cx, "ok"),
+        bounds(cx, "frame-body"),
+    ]
+}
+
+/// Why this matters: settings' recipe editor pins its own answers as notices above the dialog's row, ruled off from it
+/// (`notices_rule`), so above is the default. Specified: without `notices_below` the notices region sits above the
+/// answers' row, and the body above both.
+#[gpui::test]
+fn notices_sit_above_the_answers_by_default(cx: &mut TestAppContext) {
+    let [notices, answer, body] = notices_layout(cx, false);
+    assert!(
+        notices.bottom() <= answer.top(),
+        "above the row: {notices:?} {answer:?}"
+    );
+    assert!(
+        body.bottom() <= notices.top(),
+        "the body stays above the footer"
+    );
+}
+
+/// Why this matters: the old launcher kept what a press of its main action had to say (a refusal, the Replace warning,
+/// the YOLO question) under its pinned actions row, and the frame drew it above the row until a side-by-side check
+/// against the old app's pictures caught it. Specified: with `notices_below` the notices region sits under the answers'
+/// row, still inside the pinned footer, with the body above both.
+#[gpui::test]
+fn notices_below_sit_under_the_answers(cx: &mut TestAppContext) {
+    let [notices, answer, body] = notices_layout(cx, true);
+    assert!(
+        notices.top() >= answer.bottom(),
+        "under the row: {notices:?} {answer:?}"
+    );
+    assert!(
+        body.bottom() <= answer.top(),
+        "the body stays above the footer"
     );
 }

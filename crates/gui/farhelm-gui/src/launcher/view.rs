@@ -7,8 +7,8 @@
 //! - **The frame.** The shared dialog frame, 960 pixels wide, with the old header (the Launch tile, a title and a
 //!   summary naming the mode, and Close), a scrolling body, and a pinned footer: a summary of what Launch would start,
 //!   then Cancel, Reset choices (Agent tab), Save as template (not in Replace with) and the main action, with what a
-//!   press of it has to say pinned above them. Save as template opens its inline panel at the end of the body
-//!   (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
+//!   press of it has to say pinned under them, as the old footer's column did. Save as template opens its inline panel
+//!   at the end of the body (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
 //! - **The body**, in reading and Tab order: the composer search box ([`search`]), the recent setups while any match
 //!   ([`recents`]), the destination rows (Where, Host, a managed checkout's repository and preview, Folder, Name), the
 //!   Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not drawn, but its draft is kept
@@ -2482,7 +2482,8 @@ impl Render for Launcher {
                 on_launcher(weak.clone(), Launcher::cancel),
             );
         if let Some(notices) = notices {
-            frame = frame.notices(notices);
+            // Under the actions row: the refusal, the Replace and Restart warnings and the YOLO question follow it.
+            frame = frame.notices(notices).notices_below();
         }
         if let Some(escalation) = escalation {
             frame = frame.top_band(escalation);
