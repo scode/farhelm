@@ -6038,8 +6038,13 @@ These targets refuse remote path overrides and `new_entry`. A probe checks the s
 ensures Farhelm's SSH key exists, and freezes the recipe definition, size and generated sandbox name in a bounded,
 one-use outer plan. It makes no Tensorlake API call. `tensorlake-provisionable` returns the confirmation and the same
 step descriptions later used for progress. Confirming through the existing provision route writes the host row before
-starting billed work, then uses the ordinary host provisioning lock and fleet-wide run limit. A registry handoff failure
-rolls the new row back with `SandboxDeleted::never_created`; no create has been sent at that boundary.
+starting billed work, then uses the ordinary host provisioning lock and fleet-wide run limit. A rerun's confirmation
+(`tensorlake-host`) takes that host's lock without waiting and is refused at once while another operation (such as a
+Suspend, Resume or removal) holds it, saying to run setup again once that finishes if it is still needed: the
+confirmation holds the lock every Add host's confirmation shares, and other hosts must not wait on one host's operation
+(SPEC.md, "Waiting between operations on one host"). The refusal carries no busy marker, since its plan is already
+spent. A registry handoff failure rolls the new row back with `SandboxDeleted::never_created`; no create has been sent
+at that boundary.
 
 Ordinary setup recovery is an explicit exception to provisioning's frozen-inner-plan rule. A sandbox does not exist at
 confirmation, so its home, architecture and install paths cannot yet be inspected. The confirmation authorizes creation

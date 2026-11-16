@@ -2129,16 +2129,15 @@ async fn retains_run(service: &ProvisioningService, host: HostId) -> bool {
     runs.iter().any(|run| run.host_id == host)
 }
 
-/// Why: a setup claims its host's progress before it waits for the host's
-/// provisioning lock, so a connected GUI can already show the run as running
-/// when a refusal after that wait withdraws it. The GUI re-reads progress
-/// when the fleet feed moves or after its own channel command; a refusal
-/// reached any other way (an HTTP request, the automatic update) has no
-/// command to re-read after, so a withdrawal without a bump left a run on the
-/// GUI that never started. Spec: a setup refused as sealed after its run was
-/// visible leaves no run, and the feed has moved since the seal was noted.
+/// Why: a setup claims its host's progress before the checks that can refuse
+/// it, and the GUI re-reads progress only when the fleet feed moves or after
+/// its own channel command; a refusal reached any other way (an HTTP request,
+/// the automatic update) has no command to re-read after, so a withdrawal
+/// without a bump left a run on the GUI that never started. Spec: a setup
+/// refused as sealed after its progress claim leaves no run, and the feed has
+/// moved since the seal was noted.
 #[farhelm_testtrace::test]
-async fn a_setup_refused_after_its_run_was_visible_withdraws_it_through_the_feed() {
+async fn a_setup_refused_after_its_claim_withdraws_it_through_the_feed() {
     let f = fixture(false).await;
     let host = f.legacy_host().await;
     let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
@@ -2146,27 +2145,14 @@ async fn a_setup_refused_after_its_run_was_visible_withdraws_it_through_the_feed
     else {
         panic!("ordinary recovery offer")
     };
-    // Holding the host's provisioning lock parks the setup between its
-    // progress claim and the checks that refuse it.
-    let held = f.harness.manager.host_provision_lock(host).await;
-    let service = Arc::clone(&f.service);
-    let setup = tokio::spawn(async move { service.start_add(ProvisionRequest { probe_id }).await });
-    tokio::time::timeout(Duration::from_secs(15), async {
-        while !retains_run(&f.service, host).await {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("premise: the setup claims the host's progress before it waits for the lock");
     // Noting the seal bumps the feed itself, so the baseline is read after it:
     // only the refusal can move the feed from here.
     f.harness.manager.note_sealed(host);
     let seen = f.harness.manager.events().revision();
-    drop(held);
-    let refusal = tokio::time::timeout(Duration::from_secs(15), setup)
+    let refusal = f
+        .service
+        .start_add(ProvisionRequest { probe_id })
         .await
-        .expect("the setup ends once the lock is free")
-        .unwrap()
         .expect_err("a sealed sandbox cannot be set up again");
     assert!(
         format!("{refusal:#}").contains("being deleted"),
@@ -2180,6 +2166,99 @@ async fn a_setup_refused_after_its_run_was_visible_withdraws_it_through_the_feed
         f.harness.manager.events().revision() > seen,
         "the run's withdrawal bumps the feed, so a GUI that showed it re-reads"
     );
+}
+
+/// Why: a Suspend, Resume or removal of a sandbox holds its provisioning lock
+/// for minutes, and a setup run again waits holding the confirmations' lock
+/// every Add host's confirmation shares, so waiting would stall every other
+/// confirmation behind one host's lifecycle and keep the GUI's channel waiting
+/// on this one. The refusal carries no busy marker: that marker promises that
+/// sending the same request again after the wait can succeed, and this
+/// confirmation's plan is already spent. The refusal comes before the run's
+/// claim, so it leaves the sandbox's earlier failed setup (and the Re-run it
+/// offers) listed as it was, rather than replacing it with a claim it then
+/// withdraws. Spec: with a failed earlier setup's progress retained (the
+/// boundary under test: seeded directly, as the run that failed would leave
+/// it) and the sandbox's provisioning lock held throughout, the confirmation of
+/// its setup's plan is refused at once with 409, no busy marker, and words
+/// saying to run setup again once the other operation finishes; the earlier
+/// run, by its run id and failed status, is still the sandbox's listed
+/// progress, and no provider work started. With the lock free again, a fresh
+/// plan for the same sandbox is accepted.
+#[farhelm_testtrace::test]
+async fn a_setup_run_again_on_a_busy_sandbox_is_refused_at_once() {
+    let f = fixture(false).await;
+    let host = f.legacy_host().await;
+    let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+        f.probe(ProbeDestination::TensorlakeHost { host }).await
+    else {
+        panic!("ordinary recovery offer")
+    };
+    let earlier = farhelm_proto::provisioning::ProvisioningView {
+        host_id: host,
+        run_id: Some("earlier-setup".into()),
+        operation: Some(farhelm_proto::provisioning::ProvisioningOperation::Add),
+        status: RunStatus::Failed,
+        steps: Vec::new(),
+        message: None,
+        outcome_unknown: false,
+    };
+    f.service
+        .memory
+        .lock()
+        .await
+        .runs
+        .insert(host, earlier.clone());
+    let held = f.harness.manager.host_provision_lock(host).await;
+    // Bounded from outside: a confirmation that waited for the lock would wait for as long as this test holds it.
+    let refusal = tokio::time::timeout(
+        Duration::from_secs(15),
+        f.service.start_add(ProvisionRequest { probe_id }),
+    )
+    .await
+    .expect("the confirmation answers while the host's lock is still held")
+    .expect_err("a busy sandbox is not set up");
+    assert!(
+        format!("{refusal:#}").contains("run setup again"),
+        "{refusal:#}"
+    );
+    let response = crate::provisioning::provisioning_error(refusal);
+    assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    assert!(
+        !response
+            .headers()
+            .contains_key(farhelm_proto::http::HOST_BUSY_HEADER),
+        "no busy marker: the plan is spent, so waiting cannot make the same request succeed"
+    );
+    let listed: Vec<_> = f
+        .service
+        .runs()
+        .await
+        .runs
+        .into_iter()
+        .filter(|run| run.host_id == host)
+        .collect();
+    assert_eq!(
+        listed,
+        [earlier],
+        "the earlier failed setup is still the sandbox's progress"
+    );
+    assert!(
+        f.backend_events().is_empty(),
+        "no provider work started: {:?}",
+        f.backend_events()
+    );
+
+    drop(held);
+    let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+        f.probe(ProbeDestination::TensorlakeHost { host }).await
+    else {
+        panic!("ordinary recovery offer")
+    };
+    f.service
+        .start_add(ProvisionRequest { probe_id })
+        .await
+        .expect("with the lock free the setup starts");
 }
 
 /// Migrated image and snapshot recipes have no built snapshot, but their old
