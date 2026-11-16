@@ -29,7 +29,7 @@ use gpui_component::Root;
 use serde_json::{Value, json};
 
 use super::SessionPane;
-use super::header::{Action, TABS_SLOT};
+use super::header::{Action, Control, TABS_SLOT};
 use crate::actions::{DELETE_SESSION_CHORD, DELETE_SESSION_SHORTCUT_NAME};
 use crate::focus::Mark;
 use crate::launcher::launch_tests::{HostChange, start_host_change};
@@ -1071,7 +1071,7 @@ fn the_button_of_an_open_question_is_pressed_and_inert(cx: &mut TestAppContext) 
     assert_eq!(questions(cx), 1, "the premise: one question");
     assert_eq!(
         pressed(cx),
-        Some(Action::Replace),
+        Some(Control::Action(Action::Replace)),
         "Replace reads as pressed"
     );
     test_support::click(cx, "session-header-replace");
@@ -1917,6 +1917,113 @@ fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
     assert!(
         pill.focus.is_some(),
         "and tracks a focus handle, so Tab reaches it"
+    );
+}
+
+/// SPEC.md's 650-pixel rule holds for an environment session too, whose header carries one more control, Suspend or
+/// Resume, left of Stop, and whose pending states once widened that control until Delete was cut off (the review of
+/// 2026-11-16 measured Delete 52 of 72 pixels visible while suspending). Specified: in a 650-pixel pane with an idle
+/// session on a container host, the environment control, each of the five actions and both carets are drawn whole
+/// inside the pane on one line, and the control's width is the same, while the host is connected (Suspend), suspending,
+/// suspended (Resume) and resuming.
+#[test]
+fn an_environment_sessions_actions_stay_whole_in_a_650_pixel_pane() {
+    use super::header::ENVIRONMENT_ID;
+    use crate::session_list::environment_tests::{
+        Provider, changing, connected, environment_host, registry, suspended_at,
+    };
+    use farhelm_proto::tensorlake::LifecycleDirection;
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx =
+        HeadlessAppContext::with_platform(text_system, Arc::new(assets::Assets), || Ok(None));
+    cx.update(bootstrap::install).unwrap();
+    let (mut fake, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
+    cx.run_until_parked();
+    let mut snapshot = snapshot_of(vec![entry(&idle("a"), 0)], false);
+    snapshot.push(registry(&environment_host(
+        Provider::Container,
+        connected(),
+    )));
+    fake.connect(snapshot);
+    cx.run_until_parked();
+    let window = cx
+        .open_window(size(px(650.), px(300.)), |window, cx| {
+            let view = cx.new(|cx| {
+                let list = cx.new(SessionList::new);
+                let new = list.read(cx).new_focus().clone();
+                let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+                PaneOnly {
+                    pane,
+                    _list: list,
+                    root: root::attach(window, cx),
+                }
+            });
+            cx.new(|cx| Root::new(view, window, cx))
+        })
+        .unwrap();
+    let draw = |cx: &mut HeadlessAppContext| {
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.set_driver_enabled(true);
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+        cx.update_window(window.into(), |_, window, _| window.driver_nodes().to_vec())
+            .unwrap()
+    };
+    let mut widths = Vec::new();
+    for (name, state) in [
+        ("connected", connected()),
+        ("suspending", changing(LifecycleDirection::Suspending)),
+        ("suspended", suspended_at(0)),
+        ("resuming", changing(LifecycleDirection::Resuming)),
+    ] {
+        let host = environment_host(Provider::Container, state);
+        fake.push(CollectionChanges {
+            collection: Collection::Hosts,
+            meta: registry(&host).meta,
+            upsert: vec![registry(&host).entries.remove(1)],
+            remove: Vec::new(),
+        });
+        for command in fake.commands() {
+            fake.reply(command.id, 200, None);
+        }
+        let nodes = draw(&mut cx);
+        assert_whole_on_one_line(&nodes);
+        let control = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(ENVIRONMENT_ID))
+            .unwrap_or_else(|| panic!("the environment control is drawn ({name})"));
+        let stop = drawn_node(&nodes, Action::Stop).bounds;
+        let bounds = control.bounds;
+        assert!(
+            bounds.size.width > px(0.)
+                && control.visible_bounds == bounds
+                && bounds.origin.x >= px(0.)
+                && bounds.origin.x + bounds.size.width <= stop.origin.x,
+            "the control is whole and left of Stop ({name}): {bounds:?}, visible {:?}",
+            control.visible_bounds
+        );
+        assert_eq!(
+            bounds.origin.y, stop.origin.y,
+            "on the actions' line ({name})"
+        );
+        widths.push((name, bounds.size.width));
+    }
+    let (_, suspend) = widths[0];
+    let (_, resume) = widths[2];
+    assert_eq!(
+        widths[1].1, suspend,
+        "suspending keeps Suspend's width: {widths:?}"
+    );
+    assert_eq!(
+        widths[3].1, resume,
+        "resuming keeps Resume's width: {widths:?}"
     );
 }
 

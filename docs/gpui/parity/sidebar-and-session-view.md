@@ -432,9 +432,9 @@ step can make; meanwhile the tests above and smoke step 76 (a scripted setup fai
 Details) cover the behaviour. Not yet ported:
 `attention opens the menu header of an expanded host spanning the viewport` (Details on a host whose open row is taller
 than the panel; the reveal scrolls the toggle itself into view, which is that case's rule, but no test drives such a
-row). The rest are in Settings and hosts. Waiting for the environments work: the old list's environment rows (a stopped
-environment, a failed environment delete, a failed resume, undelivered credentials, failed tunnels, and "Deleting" as
-work in progress).
+row). The rest are in Settings and hosts. Waiting for the environment Delete's piece (milestone M3.4b), which brings
+their remedies: the old list's environment rows (a stopped environment, a failed environment delete, a failed resume,
+undelivered credentials, failed tunnels, and "Deleting" as work in progress).
 
 ### `tests/work-start-order.spec.ts`
 
@@ -495,9 +495,10 @@ it, as the old app's reservation at acceptance did), `a_stop_batch_holds_no_auto
 it while marked); and `host attention movement closes the marked menu and reopening remeasures`, which the bulk work and
 the Hosts attention list share, is crates/gui/farhelm-gui/src/session_list/attention/tests.rs
 `menus_below_close_when_the_list_moves_and_stay_through_progress`. Sandbox and recipe container rows' environment-wide
-cases wait for the environments work. No end-to-end smoke step, and no app scene of the bulk question: the bridge's
-command line (`scripts/gui-agent.py`'s `click`) sends no modifier keys, so neither can mark a row. The bridge's protocol
-does carry modifiers on a mouse-down, so a modifier option on its `click` would make both possible.
+cases wait for the environment Delete's piece (milestone M3.4b). No end-to-end smoke step, and no app scene of the bulk
+question: the bridge's command line (`scripts/gui-agent.py`'s `click`) sends no modifier keys, so neither can mark a
+row. The bridge's protocol does carry modifiers on a mouse-down, so a modifier option on its `click` would make both
+possible.
 
 ### `tests/menu-highlight.spec.ts`
 
@@ -529,16 +530,17 @@ Stop, Restart, Replace, Clone, carets or text size; Delete asks, sends one Delet
 row), `a_row_that_turns_out_retired_drops_its_terminal`,
 `an_unreachable_retired_session_shows_the_unavailable_card_alone` and
 `an_ordinary_container_session_keeps_its_terminal_and_header` (its stream, tab strip and five actions);
-crates/farhelm-proto/src/session_launch.rs `only_a_stored_container_choice_marks_a_launch_retired`. Waiting: the
-ordinary container session's Suspend and the rest of its environment controls (the environment sessions' rows). Leaving
-retired sessions out of a pin drag is crates/gui/farhelm-gui/src/session_list/pin_drag_tests.rs
-`a_retired_pin_has_no_grip_but_is_a_drop_target`, and leaving them out of the marked bar's Stop (Delete keeps them) is
-in `tests/bulk-session-actions.spec.ts`'s tests above. No screenshot scene and no smoke step: the bridge seeds sessions
-only through the helm's create, which refuses the retired launch, so no app run can show one. Recorded deviations: the
-card is a keyboard stop where focus rests, where the old card was no stop; SPEC.md, "Where focus rests", names no home
-for a retired session, so the card was made home by analogy with the other cards that stand where a terminal would be
-(the migration's orchestrator's brief of 2026-11-15); and on an unreachable host the unavailable card stands alone in
-its place.
+crates/farhelm-proto/src/session_launch.rs `only_a_stored_container_choice_marks_a_launch_retired`. The ordinary
+container session's Suspend and the rest of its environment controls are the environment sessions' (its menu's Suspend
+and Stop and suspend are in `an_ordinary_container_sessions_row_keeps_its_commands`, and "Sidebar and session view cases
+of specs listed in other areas' files" below). Leaving retired sessions out of a pin drag is
+crates/gui/farhelm-gui/src/session_list/pin_drag_tests.rs `a_retired_pin_has_no_grip_but_is_a_drop_target`, and leaving
+them out of the marked bar's Stop (Delete keeps them) is in `tests/bulk-session-actions.spec.ts`'s tests above. No
+screenshot scene and no smoke step: the bridge seeds sessions only through the helm's create, which refuses the retired
+launch, so no app run can show one. Recorded deviations: the card is a keyboard stop where focus rests, where the old
+card was no stop; SPEC.md, "Where focus rests", names no home for a retired session, so the card was made home by
+analogy with the other cards that stand where a terminal would be (the migration's orchestrator's brief of 2026-11-15);
+and on an unreachable host the unavailable card stands alone in its place.
 
 ### `tests/ui-plan-regressions.spec.ts`
 
@@ -843,9 +845,10 @@ run's only supervisor, which makes every other step's sessions stale too; the ca
 instead, which stops and restarts that run's supervisor (recorded in the PR). Not ported: the card's fixed, full-height
 layout in a short window (`.outage-viewport`), since the window's 560-pixel minimum height leaves the card's region
 several hundred pixels; the region scrolls instead. The case's "a Replace refusal shows" is the header's line, as for
-any session; the case's wheel scrolling and "the document never scrolls" are GPUI's own scrolling. Waiting: the Resume
-host button for a suspended or stopped environment (the environment sessions' port), and "reboot-*", the interrupted
-card's cases, are in `tests/terminal-restart.spec.ts`'s row through
+any session; the case's wheel scrolling and "the document never scrolls" are GPUI's own scrolling. The Resume host
+button for a suspended or stopped host is the environment sessions' (`the_suspended_card_says_so_and_resumes` and
+`the_cards_words_and_resume_follow_the_host`, under "Sidebar and session view cases of specs listed in other areas'
+files" below). "reboot-*", the interrupted card's cases, are in `tests/terminal-restart.spec.ts`'s row through
 crates/gui/farhelm-gui/src/session_pane/card_tests.rs
 
 ### `tests/terminal.spec.ts` (its stale cases)
@@ -940,6 +943,95 @@ without taking focus from an open header question by `a_reaped_tab_leaves_focus_
 Delete or Replace question keeping the keyboard while the terminal goes live by
 crates/gui/farhelm-gui/src/session_pane/tests.rs `a_delete_question_keeps_the_keyboard_while_the_terminal_goes_live` and
 `a_replace_question_keeps_the_keyboard_while_the_terminal_goes_live`.
+
+## Sidebar and session view cases of specs listed in other areas' files
+
+These specs' entries sit in [Launcher](launcher.md) (`tests/tensorlake-sandbox-sessions.spec.ts`, wholesale) and
+[Settings and hosts](settings-and-hosts.md) (`tests/podman-environments.spec.ts`); their session list and session view
+cases are this area's. Each case is listed by its title at reference commit `24bc0580`. The tests are in-process over
+the fake helm: no running-app check of an environment session is possible, since the end-to-end harness seeds no sandbox
+or container (decided by the migration's orchestrator on 2026-11-15; one real container run happens at milestone M3's
+stop). The quick switcher keeps drawing a session's host mark, not its environment's, as the old switcher did; the row
+and the details bar draw the environment's.
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: Resume restores owned controls and Stop and suspend keeps its host-wide question.
+
+partly: the card's Resume and its request, Suspend back in the header once connected, and, with skip on, the menu's Stop
+and suspend asking "Stop and suspend sandbox?" after the activity read, sending one `stop-and-suspend` and no Suspend,
+its refusal on the row. Not driven: the header's copy of that refusal, and Replace with's host (the launcher's).
+
+- crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_suspended_card_says_so_and_resumes`
+- crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_header_suspends_and_resumes_beside_stop`
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards`
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: Stop and suspend sends the guards its click saw when the listing refreshes during its activity read.
+
+ported:
+
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards`
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: an owned session's pending Resume survives switching and excludes its competing actions.
+
+partly: Delete and Clone refused while the Resume is pending and, after the 504 at the bound, while the host is pushed
+resuming; Delete enabled while suspended and again after. Switching away and back during the Resume is not driven: the
+pending state is the session's operation key and the host's pushed phase, which a switch does not touch.
+
+- crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_header_suspends_and_resumes_beside_stop`
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `a_resume_past_the_bound_stays_pending_and_a_refusal_shows`
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: owned suspended sessions keep Hosts visibility and mandatory whole-sandbox Delete.
+
+partly (its non-Delete parts): the card's explanation and "Suspended outside Farhelm, noticed at", the 30-minute
+sentence, Stop, Restart and Replace unavailable while suspended, the row's Suspended badge, and "dev sandbox". The rail
+leaving the host out is the host rail's existing rule. Waiting for milestone M3.4b: its Delete parts.
+
+- crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_suspended_card_says_so_and_resumes`
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs `the_suspended_detail_and_the_names_are_the_providers`
+- crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_header_suspends_and_resumes_beside_stop`
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `a_suspended_row_has_its_badge_and_a_stopped_container_never_does`
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `an_environment_rows_mark_and_host_name_are_its_providers`
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: a connected sandbox's Delete asks its Farhelm and reports the sandbox that stays; a sandbox destroyed elsewhere
+retires its stays count but keeps the checkout notice; a row's unasked environment Delete offers the warned
+whole-sandbox Delete; the header's unasked environment Delete reopens as the warned whole-sandbox Delete; a session of a
+sandbox being deleted shows why its actions are unavailable.
+
+not yet ported (the environment Delete, milestone M3.4b).
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: bulk Delete of a connected sandbox's sessions sends one environment Delete each.
+
+not yet ported (bulk Delete and the environment Delete).
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: a held sandbox Suspend and a launch on another host proceed side by side.
+
+not yet ported: the sidebar half (Suspend does not wait on a launch elsewhere) holds by construction, Suspend taking no
+part in the launch and registry exclusion (`Work::creates_a_session` and `changes_host_registry` are false), but no test
+drives it; the refusal while this window's launch targets the same host waits for the launcher's environment work.
+
+### `tests/podman-environments.spec.ts` (settings and hosts)
+
+Case: a connected container's Delete asks its Farhelm and reports the container that stays.
+
+not yet ported (the environment Delete, milestone M3.4b).
 
 ## Deviations from the old app
 
@@ -1229,3 +1321,30 @@ Where the port does not match the old app, and why. Each stays until the work na
   withdrawal. `crate::hosts::status`'s module docs ("Not ported") give the reasons.
 - The attention list's rows are reached by Tab, one control at a time. The old list's scroll area was a keyboard stop of
   its own (`tabindex="0"`) that scrolled with the arrow keys.
+- An environment session's Stop question draws Stop and suspend between Cancel and Confirm stop, where the old one put
+  it last: the prompt draws every extra answer between the two (`prompt.rs`). Its words and request are the old ones.
+- An environment session's refused Suspend or Resume reads "Sandbox: " before the helm's words for a container too, as
+  the old list's error slot wrote it for either provider, and so does a refused Resume host of an ordinary host on its
+  session's row and menu (the card itself shows the bare words); a refused Stop and suspend reads "Stop: ".
+- The helm answers Suspend, Resume and Stop and suspend within 20 seconds, answering work still running then with a 504
+  that says it carries on (decided by the migration's orchestrator, 2026-11-15). The port does not show that 504 as a
+  refusal: the row and header go on saying "Suspending…" or "Resuming…" from the host's pushed phase, and the commands
+  of every session on that host, Delete and Clone included, stay refused while that phase shows the change running, as
+  the old app's session claim lasted for the whole change. The old app waited for the provider itself. While the request
+  is in flight only the clicked session is held, as the old per-session claim held only its own. A container's pause and
+  unpause push the same changing phase as a sandbox's, so they show and hold the same way; but a container host checks
+  its container over SSH before that phase is pushed, and when the check alone outlasts the bound the session looks idle
+  from the 504 until the push (the helm's lifecycle lock refuses a second request meanwhile). The header's control keeps
+  its label and width while pending, with the spinner in its glyph's slot and "Suspending…" or "Resuming…" as its
+  accessible name and help, where the old button read the words.
+- At the 650-pixel floor a tunnel pill at its 154-pixel floor already overlaps the header's actions on main: measured 49
+  pixels with an ordinary session (the pill ending at x=174, the actions starting at x=125). An environment session's
+  Suspend or Resume adds its fixed width (85 or 81 pixels) to that overlap and nothing more while pending. The fix is
+  the header's compact mode (the old `header-layout.js`'s `.actions-compact`), a follow-up of this area's.
+- The unavailable card's "Resume host" has hover help, "Resume host: this session continues when its host resumes",
+  where the old button had none; every GPUI control has help. A refused Resume shows on the card, and the lines above
+  the terminal leave it out while the card shows it.
+- Not yet ported, waiting for the launcher's environment work: Suspend and Resume refused while this window's own launch
+  targets or is waking the same host (the old "A launch on this host is in progress; try again once it finishes"), and
+  Clone's environment wording ("New session in a new environment, keep this one"), which would describe a Clone the
+  launcher does not make yet. The helm's lifecycle lock refuses a collision meanwhile.

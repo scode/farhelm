@@ -299,6 +299,7 @@ pub(super) fn session_unavailable_cards(
         let band = Band::of(&row, now, zone).map(|band| band.draw(theme::palette(cx)));
         let card = draw(
             Drawn {
+                key: "a",
                 notice,
                 focus: &cx.focus_handle().tab_stop(true),
                 scroll: &gpui::ScrollHandle::new(),

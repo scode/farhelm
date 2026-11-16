@@ -6,10 +6,15 @@
 //! the GPUI app, ported from the old app's `environment_ui.rs` at the reference commit. It holds only what a GPUI
 //! surface has needed so far, starting with an agent's environment-launch approval card; the launcher's and host
 //! management's environment surfaces add their own methods here as they are ported, rather than starting a second
-//! module.
+//! module. The session list's and the session view's environment session rows, controls and suspended card take theirs
+//! from the section on a session's own environment below.
 
-use farhelm_proto::ProviderKind;
 use farhelm_proto::recipes::RecipeBase;
+use farhelm_proto::{LaunchTarget, Place, ProviderKind};
+
+use crate::assets::Icon;
+use crate::host_text::{HostSentence, HostText};
+use crate::local_time::{self, Zone};
 
 /// One provider, seen through the GUI's vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +104,225 @@ impl ProviderUi {
                 "Farhelm then adds Claude Code and Codex with their official installers and saves an image on the \
                  container host for launches there."
             }
+        }
+    }
+}
+
+// ---- A session's own environment: its marks, its lifecycle words and its suspended card -------------------------------
+//
+// The session list's and the session view's words for a session that runs in a disposable environment of its own
+// (`session_list::environment`), the old app's `ProviderUi` methods of the same names at the reference commit, word for
+// word. The wordings that only name the environment (`suspend_question` and the rest) are the same sentence for every
+// provider around its noun, as the old ones were, so they format [`ProviderUi::noun`] rather than matching.
+
+#[warn(clippy::wildcard_enum_match_arm)]
+impl ProviderUi {
+    /// What the environment is called inside a sentence: the old `noun`.
+    pub(crate) fn noun(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "sandbox",
+            ProviderKind::Podman => "container",
+        }
+    }
+
+    /// The word assistive technology reads for a session row's environment mark, in place of the host mark's `Local`
+    /// or `Remote`: the old visually hidden `locality_label`.
+    pub(crate) fn locality_label(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Sandbox",
+            ProviderKind::Podman => "Container",
+        }
+    }
+
+    /// The mark a session in this provider's environment draws where its host mark would be: the cube for a sandbox,
+    /// the shipping box for a container (SPEC.md: "a container mark distinct from the sandbox cube").
+    pub(crate) fn mark(self) -> Icon {
+        match self.0 {
+            ProviderKind::Tensorlake => Icon::EnvironmentSandbox,
+            ProviderKind::Podman => Icon::EnvironmentContainer,
+        }
+    }
+
+    /// The environment mark's hover help, the old marks' `data-tooltip`.
+    pub(crate) fn mark_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Sandbox: runs in its own disposable Tensorlake sandbox",
+            ProviderKind::Podman => {
+                "Container: runs in its own disposable container on one of your hosts"
+            }
+        }
+    }
+
+    /// What plain Stop leaves running, for an environment session's Stop help and its Stop question (SPEC.md: "Plain
+    /// Stop ends the chosen agent and tabs but keeps its sandbox running and billing").
+    pub(crate) fn stop_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "The sandbox keeps running and billing until you suspend or delete it."
+            }
+            ProviderKind::Podman => {
+                "The container keeps running until you suspend or delete it. Suspending freezes its processes; its \
+                 memory stays in use on its host."
+            }
+        }
+    }
+
+    /// Suspend's hover help, and the second half of its question: what freezing keeps and what it still costs.
+    pub(crate) fn suspend_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Freeze the sandbox; its processes continue on Resume. Only snapshot storage bills while suspended."
+            }
+            ProviderKind::Podman => {
+                "Freeze the container; its processes continue on Resume. Its memory stays in use on the container \
+                 host."
+            }
+        }
+    }
+
+    /// The suspended card's explanation: the state, not the Suspend button's instruction again, with the provider's
+    /// own cost caveat.
+    pub(crate) fn suspended_explanation(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "This session's sandbox is suspended. Its processes are preserved, including the agent's running \
+                 command, and continue when you resume it. Only snapshot storage bills while suspended."
+            }
+            ProviderKind::Podman => {
+                "This session's container is suspended. Its processes are preserved, including the agent's running \
+                 command, and continue when you resume it. Its memory stays in use on the container host."
+            }
+        }
+    }
+
+    /// The suspended card's diagnostics, appended to `line`: the provider's failed resume (`failed`, host text) first,
+    /// then who suspended it and when, from the recorded completion (`by_farhelm`, unix ms) or else the observation
+    /// (`observed`), never an inferred idle timeout. A sandbox suspended outside Farhelm adds Tensorlake's timeout for a
+    /// session's own sandbox; a container's pause completion is not recorded, so a missing one names no outside actor.
+    /// The time is the viewer's local time in `zone` ([`local_time::stamp`]), as every clock time the app shows, where
+    /// the old app wrote UTC. The old `suspended_detail` for a session-owned host; the ordinary host's wording is the
+    /// Hosts panel's.
+    pub(crate) fn suspended_detail(
+        self,
+        line: HostSentence,
+        observed: i64,
+        by_farhelm: Option<i64>,
+        failed: Option<&str>,
+        zone: Zone,
+    ) -> HostSentence {
+        let line = match failed {
+            Some(reason) => line
+                .text(match self.0 {
+                    ProviderKind::Tensorlake => "Tensorlake could not resume the sandbox: ",
+                    ProviderKind::Podman => "Resume failed: ",
+                })
+                .host(&HostText::from_host(reason))
+                .text(". "),
+            None => line,
+        };
+        let attribution = match (self.0, by_farhelm.is_some()) {
+            (ProviderKind::Tensorlake | ProviderKind::Podman, true) => "Suspended from Farhelm",
+            (ProviderKind::Tensorlake, false) => "Suspended outside Farhelm, noticed",
+            (ProviderKind::Podman, false) => "Suspension noticed",
+        };
+        let at = local_time::stamp(by_farhelm.unwrap_or(observed) / 1000, zone);
+        let line = line.text(format!("{attribution} at {at}."));
+        match (self.0, by_farhelm) {
+            (ProviderKind::Tensorlake, None) => line.text(
+                " Tensorlake suspends this sandbox after 30 minutes without a connection from Farhelm.",
+            ),
+            (ProviderKind::Tensorlake, Some(_)) | (ProviderKind::Podman, Some(_) | None) => line,
+        }
+    }
+
+    /// What starting a stopped environment does, for the card while it starts and for Resume's help on a stopped one:
+    /// it cannot promise that the old processes survived.
+    pub(crate) fn starting_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Starting the sandbox; this view reconnects when it is ready."
+            }
+            ProviderKind::Podman => {
+                "Starting the container again; its sessions return as interrupted, with Restart available."
+            }
+        }
+    }
+
+    /// Resume's hover help: the starting words for a `stopped` environment, else that preserved processes continue.
+    pub(crate) fn resume_help(self, stopped: bool) -> &'static str {
+        if stopped {
+            self.starting_help()
+        } else {
+            "Resume this environment; preserved processes continue"
+        }
+    }
+
+    /// The Suspend question's first sentence, before [`ProviderUi::suspend_help`]: Stop and suspend's (`stop`) keeps
+    /// apart the agent it ends and every other process it freezes.
+    pub(crate) fn suspend_question(self, stop: bool) -> String {
+        let noun = self.noun();
+        if stop {
+            format!(
+                "Stop this session's agent and close its terminal tabs, then suspend the whole {noun}? Every other \
+                 process freezes and continues on Resume. The stopped agent and closed tabs do not continue. "
+            )
+        } else {
+            format!(
+                "Suspend the whole {noun}? Every process in it freezes, including any other sessions, and continues \
+                 on Resume. "
+            )
+        }
+    }
+
+    /// The Suspend question's title, its accessible name: "Suspend sandbox?" or "Stop and suspend sandbox?".
+    pub(crate) fn suspend_title(self, stop: bool) -> String {
+        format!(
+            "{} {}?",
+            if stop { "Stop and suspend" } else { "Suspend" },
+            self.noun()
+        )
+    }
+
+    /// The Suspend question's Cancel help: what Cancel keeps running.
+    pub(crate) fn suspend_cancel(self, stop: bool) -> String {
+        if stop {
+            format!(
+                "Cancel: keep the agent, its terminal tabs and the {} running",
+                self.noun()
+            )
+        } else {
+            format!("Cancel: keep the {} running", self.noun())
+        }
+    }
+
+    /// The Suspend question's answer help, and Stop and suspend's: the scope includes every other session in the
+    /// environment, listed or not.
+    pub(crate) fn suspend_action(self, stop: bool) -> String {
+        if stop {
+            format!(
+                "Stop this session's agent and close its terminal tabs, then suspend the whole {}",
+                self.noun()
+            )
+        } else {
+            format!(
+                "Suspend the whole {}, freezing every process in it until Resume",
+                self.noun()
+            )
+        }
+    }
+}
+
+/// How a session's own environment is named where its host's name would be (SPEC.md: "<recipe> sandbox", and "<recipe>
+/// container on <host>"): the old `target_label`. `place_name` is the helm's name for a container's place host, and a
+/// place the helm could not name reads "host <id>". Raw host text (the recipe and the place's name are the helm's), for
+/// the caller to escape. Decided here, over the place, so shared code names no provider.
+pub(crate) fn target_label(target: &LaunchTarget, place_name: Option<&str>) -> String {
+    let noun = ProviderUi(target.provider()).noun();
+    match target.place() {
+        Place::TensorlakeAccount => format!("{} {noun}", target.recipe()),
+        Place::PodmanHost(host) => {
+            let name = place_name.map_or_else(|| format!("host {host}"), str::to_owned);
+            format!("{} {noun} on {name}", target.recipe())
         }
     }
 }

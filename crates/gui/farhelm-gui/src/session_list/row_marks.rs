@@ -14,7 +14,9 @@
 //! is the GUI's per-harness vocabulary in [`crate::harness`]; nothing here compares harnesses. Which shield a launch
 //! earns is [`crate::permission`]'s, kept apart so the agent approval cards can show the same classification. The
 //! session pane's details bar and the quick switcher's rows draw the same host mark beside the session's host
-//! ([`HostMark::of`] and [`host_mark`]), so none of them disagrees about where a session runs.
+//! ([`HostMark::of`] and [`host_mark`]), so none of them disagrees about where a session runs. A session in a disposable
+//! environment of its own draws its provider's mark in the locality slot instead ([`environment_mark`]), in its row and
+//! the details bar; the quick switcher keeps the host mark there, as the old switcher drew no environment mark.
 //!
 //! The agent mark and the shield describe the pair together, the way the old row did: one description names the
 //! agent, what the launch's permission means and the stored command, since the shield alone cannot say which of
@@ -37,6 +39,7 @@ use gpui::{InteractiveElement, IntoElement, ParentElement, SharedString, Styled,
 
 use crate::assets::Icon;
 use crate::components::{HoverHelp, Role, StatusMark};
+use crate::environment_ui::ProviderUi;
 use crate::harness;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity;
@@ -397,6 +400,72 @@ pub(crate) fn host_mark(
         mark.locality.word(),
     )
     .content(drawn.debug_selector(move || picture_selector(&selector_id, mark.icon.as_str())))
+}
+
+/// The locality slot's mark for a session in its own environment ([`super::environment`]), in place of the host mark:
+/// the provider's mark at the slot's size in `ink`, named by the provider's word (`Sandbox`, `Container`) with what
+/// that means as its hover help, shown where `place` says. Its id is the host mark's, so the slot's mark is found the
+/// same way whichever it draws. The old row drew it in place of `SessionHostIcon`, with the word visually hidden.
+pub(crate) fn environment_mark(
+    row_id: &str,
+    ui: ProviderUi,
+    ink: Token,
+    place: HelpPlace,
+) -> impl IntoElement {
+    let id = SharedString::from(format!("{row_id}{HOST_ID_SUFFIX}"));
+    let icon = ui.mark();
+    let selector_id = id.clone();
+    StatusMark::new(
+        id,
+        ui.locality_label(),
+        place.place(HoverHelp::tooltip(ui.mark_help())),
+        Role::Image,
+        ui.locality_label(),
+    )
+    .content(
+        svg()
+            .path(icon.path())
+            .size(metrics::ROW_SLOT)
+            .flex_none()
+            .text_color(theme::color(ink))
+            .debug_selector(move || picture_selector(&selector_id, icon.path())),
+    )
+}
+
+/// A suspended environment session's mark under `id` ([`super::environment`]): the pause glyph in `ink`, then
+/// "Suspended" when `worded`, named "Suspended" either way, with the old badge's hover help shown where `place` says.
+/// The row draws it where a stale row's cause would be (worded on its ended line, the glyph alone after a compact row's
+/// title) and the details bar where the age would be (worded), so the two never draw it differently. Never drawn for a
+/// stopped container: it is not suspended. A status mark: nothing to press.
+pub(crate) fn suspended_mark(
+    id: SharedString,
+    worded: bool,
+    ink: Token,
+    place: HelpPlace,
+) -> impl IntoElement {
+    use super::environment::{SUSPENDED, SUSPENDED_HELP};
+    let content = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(4.))
+        .child(cell(id.clone(), Icon::Pause, ink));
+    let content = if worded {
+        content.child(SUSPENDED)
+    } else {
+        content
+    };
+    div().flex_none().child(
+        StatusMark::new(
+            id,
+            SUSPENDED,
+            place.place(HoverHelp::tooltip(SUSPENDED_HELP)),
+            Role::Status,
+            SUSPENDED,
+        )
+        .ink(ink)
+        .content(content),
+    )
 }
 
 /// The first line's agent track (`.session-agent`): the agent mark, then the shield, each in its own 10-pixel cell, as

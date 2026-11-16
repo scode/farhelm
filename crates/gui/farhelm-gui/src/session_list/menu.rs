@@ -82,9 +82,17 @@
 //! the ordinary question, and its header's summary ends with the retired reason, as the old menu's did. Delete is then
 //! the menu's first command as well as its last: a click, Down, Up, Home and End all land on it.
 //!
-//! NOTE: The environment commands come with their area, in the old order around these (Delete stays last), with no
-//! placeholder meanwhile; the old row menu had no Restart, which the open session's header offers instead
-//! (`session_pane/header.rs`). Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
+//! **An environment session** ([`super::environment`]) gets the old menu's environment commands at the head of the
+//! Clone group: Suspend, or Resume while its environment is suspended or stopped, then Stop and suspend in the danger
+//! red while it is not. Choosing either closes the menu; Resume goes at once, and the others read the host's activity
+//! and ask beside the row's button when it says so, as any of the row's questions do. Both are unavailable while the
+//! environment changes or something is pending for it, saying so in the row. While the environment is frozen
+//! (suspended, stopped, changing or being deleted), Replace with…, Replace and Stop are unavailable, as in the old menu,
+//! and Stop's description says what plain Stop leaves running in the environment. The header's summary ends with " · "
+//! and the environment's name ("dev sandbox").
+//!
+//! NOTE: The old row menu had no Restart, which the open session's header offers instead (`session_pane/header.rs`).
+//! Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
 //! no notch for a popover; it comes with the row hovers' notch), the beside placement's own clamp (the layer manager's
 //! `Placement::Beside` docs record how it differs), the old reveal's 100 ms fade (the button appears and goes at once:
 //! a fade per row would need a ticker animation for each row in motion, which nothing else in the list holds), and its
@@ -102,6 +110,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 
+use super::environment::{self, Environment};
 use super::row_marks::HelpPlace;
 use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
@@ -539,7 +548,8 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// Whether `key`'s lifecycle commands (Rename, Clone, Replace with, Replace, Stop and Delete here, and Restart, Restart
 /// with and Clone in the open session's header) are refused now, and drawn unavailable: SPEC.md's "an open lifecycle
 /// confirmation or a pending request refuses another lifecycle action". A request of the session in flight is one
-/// ([`delete::busy`]). The other two are the inline questions, which a press elsewhere does not close: the YOLO
+/// ([`delete::busy`]), and so is its host's Suspend or Resume, with its activity read and the provider's change after it
+/// ([`environment::held`]). The other two are the inline questions, which a press elsewhere does not close: the YOLO
 /// question a Replace of the session met ([`super::replace_yolo::open`]), and the Replace question the session's
 /// interrupted card asked ([`crate::session_pane::card::asks`]), each while it is open. The row's and the header's own
 /// questions are anchored, so a press elsewhere closes them, and they refuse through their buttons, which are inert
@@ -548,6 +558,7 @@ pub(crate) fn refused(key: &str, cx: &App) -> bool {
     delete::busy(key, cx)
         || super::replace_yolo::open(key, cx)
         || crate::session_pane::card::asks(key, cx)
+        || environment::held(key, cx)
 }
 
 /// Send `command`, one of the row's own requests (a seen toggle, a pin, a move), through the operation store under
@@ -702,6 +713,12 @@ impl Render for RowMenu {
         } else {
             "Rename: give this session a new title".to_owned()
         };
+        // An environment session's own commands and freeze (the module docs), read from the registry now.
+        let environment = Environment::of(row, store.read(cx).collections());
+        let frozen = environment.is_some_and(|environment| environment.frozen());
+        let environment_items = environment
+            .map(|environment| self.environment_items(environment, cx))
+            .unwrap_or_default();
         let (list, key) = (self.list.clone(), self.key.clone());
         let rename = MenuItem::new(
             "session-menu-rename",
@@ -806,7 +823,8 @@ impl Render for RowMenu {
             REPLACE_WITH_HELP,
             "Edit settings, then swap",
             entry::open_replace_with,
-        );
+        )
+        .disabled(launcher_busy || frozen);
         let replace = lifecycle(
             "session-menu-replace",
             Icon::Replace,
@@ -815,15 +833,19 @@ impl Render for RowMenu {
             "Fresh conversation, same settings",
             LifecycleCommand::Replace,
         )
-        .disabled(busy || launch_wait.is_some());
+        .disabled(busy || launch_wait.is_some() || frozen);
         let stop = lifecycle(
             "session-menu-stop",
             Icon::Stop,
             "Stop",
             stop::MENU_HELP,
-            "Ends the agent and its processes, and closes terminal tabs",
+            environment.map_or(
+                "Ends the agent and its processes, and closes terminal tabs",
+                |environment| environment.ui.stop_help(),
+            ),
             LifecycleCommand::Stop,
-        );
+        )
+        .disabled(busy || frozen);
         let delete = lifecycle(
             "session-menu-delete",
             Icon::Trash,
@@ -848,6 +870,7 @@ impl Render for RowMenu {
                         &self.list, &self.key, row, busy, cx,
                     ))
                     .child(menu_separator(cx))
+                    .children(environment_items)
                     .child(clone)
                     .child(replace_with)
                     .child(menu_separator(cx))
@@ -858,18 +881,100 @@ impl Render for RowMenu {
             })
             .child(delete);
         panel
-            .child(MenuHeader::new(&title, summary(&self.key, row)))
+            .child(MenuHeader::new(
+                &title,
+                summary(&self.key, row, environment.map(Environment::label)),
+            ))
             .child(items)
             .children(outcome::menu_line(&self.key, cx))
     }
 }
 
+impl RowMenu {
+    /// An environment session's own commands, at the head of the Clone group (the module docs): Suspend or Resume, as
+    /// the phase reads now, with the old items' words, then Stop and suspend unless the environment is to be resumed.
+    /// Each closes the menu and goes on as [`environment::begin`] decides, a question opening beside the row's button.
+    fn environment_items(&self, environment: Environment, cx: &App) -> Vec<MenuItem> {
+        let unavailable = environment::unavailable(&self.key, environment, cx);
+        let resume = environment.resumable();
+        let stopped = environment.stopped();
+        let item = |stop: bool| {
+            let (list, key) = (self.list.clone(), self.key.clone());
+            move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+                let mark = Mark::take(cx);
+                let _ = list.update(cx, |list, cx| list.close_menu(&key, window, cx));
+                let asking = list.clone();
+                environment::begin(
+                    &key,
+                    stop,
+                    window.window_handle(),
+                    cx,
+                    move |asked, ui, window, cx| {
+                        let row = asked.key.clone();
+                        let _ = asking.update(cx, |list, cx| {
+                            list.ask_about_row(
+                                &row,
+                                || environment::question(&asked, ui),
+                                &mark,
+                                environment::confirm,
+                                window,
+                                cx,
+                            )
+                        });
+                    },
+                );
+            }
+        };
+        let toggle = if resume {
+            MenuItem::new(
+                "session-menu-resume",
+                Icon::Play,
+                "Resume",
+                HoverHelp::tooltip(environment.ui.resume_help(stopped)),
+                Role::MenuItem,
+            )
+            .description("Continue the environment's preserved processes")
+            .on_click(item(false))
+        } else {
+            MenuItem::new(
+                "session-menu-suspend",
+                Icon::Pause,
+                "Suspend",
+                HoverHelp::tooltip(environment.ui.suspend_help()),
+                Role::MenuItem,
+            )
+            .description("Freeze every process; everything continues on Resume")
+            .on_click(item(false))
+        };
+        let mut items = vec![toggle.disabled(unavailable)];
+        if !resume {
+            items.push(
+                MenuItem::new(
+                    "session-menu-stop-and-suspend",
+                    Icon::Stop,
+                    "Stop and suspend",
+                    HoverHelp::tooltip(environment.ui.suspend_action(true)),
+                    Role::MenuItem,
+                )
+                .description(
+                    "End this session's agent and tabs, then suspend the whole environment",
+                )
+                .danger()
+                .disabled(unavailable)
+                .on_click(item(true)),
+            );
+        }
+        items
+    }
+}
+
 /// The line under the session's title in the menu's header: its agent, then its status, as "Codex · Running", and for
-/// a retired containerized session the retired reason after them (`farhelm_proto::RETIRED_CONTAINER_REASON`). It may
+/// a retired containerized session the retired reason after them (`farhelm_proto::RETIRED_CONTAINER_REASON`), or for an
+/// environment session its environment's name (`environment`, raw host text: "Codex · Running · dev sandbox"). It may
 /// quote a host (a command launch's program), so it is host text. The agent is its display name for an agent Farhelm
 /// knows, and the launched program's name otherwise; a status that draws no badge leaves the agent alone, with no
 /// separator.
-fn summary(key: &str, row: &SessionRow) -> HostSentence {
+fn summary(key: &str, row: &SessionRow, environment: Option<String>) -> HostSentence {
     let mut summary = HostSentence::new(SharedString::from(format!("session-menu-summary-{key}")));
     summary = match agent_name(row) {
         AgentName::Known(agent) => summary.text(agent),
@@ -889,6 +994,9 @@ fn summary(key: &str, row: &SessionRow) -> HostSentence {
         summary = summary
             .text(" · ")
             .text(farhelm_proto::RETIRED_CONTAINER_REASON);
+    }
+    if let Some(environment) = environment {
+        summary = summary.text(" · ").host(&HostText::from_host(environment));
     }
     summary
 }

@@ -364,7 +364,10 @@ pub(crate) fn status(
         | Work::TabOpen
         | Work::TabClose
         | Work::Pin
-        | Work::MovePin => None,
+        | Work::MovePin
+        | Work::Suspend
+        | Work::Resume
+        | Work::StopAndSuspend => None,
     }
 }
 
