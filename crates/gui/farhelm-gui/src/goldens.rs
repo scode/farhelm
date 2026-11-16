@@ -4,7 +4,8 @@
 //! prompt anchored to a row's menu button), the keyboard
 //! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
 //! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
-//! the interrupted card in its place (with Restart and Replace, and with Replace alone), the open session's details bar
+//! the interrupted card in its place (with Restart and Replace, and with Replace alone), the unavailable card with the
+//! stale band above it (a host that does not answer, and one that needs an update), the open session's details bar
 //! (every status and host it draws differently, and a narrow one, and once more with a copy confirmed and its
 //! hidden-characters warning), the session list (a fleet of every status a row draws, the open row on a host the helm
 //! cannot reach, an empty fleet, a row's open menu, a row's notification list, a row's Delete question, and a pending
@@ -2037,6 +2038,79 @@ fn session_interrupted_cards(state: &SceneState, window: &mut Window, cx: &mut A
         .flex_row()
         .gap(px(12.))
         .children(cards)
+        .into_any_element()
+}
+
+/// The unavailable card the session pane draws while the open session's host cannot be reached, with the stale band
+/// above it, for a running session on a host that does not answer (the transport's error as its diagnostics) and for an
+/// exited one on a host that needs an update (the helm's remedy as its explanation), each over a box the size of a
+/// narrow window's terminal area, as the old `.session-unavailable-overlay` covered it. No terminal under either, as
+/// for a session opened that way, so each draws the terminal's ground and veil itself. Each card has a focus handle of
+/// its own, made for the frame (nothing focuses it), so no two elements track one handle.
+fn session_unavailable_cards(_: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    use crate::session_list::status::HostLookup;
+    use crate::session_pane::unavailable::{Band, Drawn, draw, notice};
+    use farhelm_proto::ui_channel::{HostStateView, SessionRow};
+    let now = crate::session_list::age::seconds(ticker::wall_now(cx));
+    let cases = [
+        (
+            session("a")
+                .title("Refactor the API client")
+                .activity(TEST_NOW - 3 * 60),
+            HostStateView::Unreachable {
+                cause: "transport-failure".into(),
+                last_error:
+                    "ssh: connect to host buildbox.example.invalid port 22: Connection refused"
+                        .into(),
+            },
+        ),
+        (
+            session("b")
+                .title("Release notes for 0.40")
+                .status(serde_json::json!({ "state": "exited", "exit_code": 0 }))
+                .annotation("stopped by user")
+                .activity(TEST_NOW - 2 * 3_600),
+            HostStateView::VersionSkew {
+                peer_protocol: 7,
+                peer_build: "0.39.0".into(),
+                our_protocol: 8,
+                our_build: "0.40.0".into(),
+                remediation: "Update the host so it runs this helm's Farhelm 0.40.0".into(),
+            },
+        ),
+    ];
+    let mut columns = Vec::new();
+    for (fixture, host_state) in cases {
+        let row: SessionRow = serde_json::from_value(fixture.stale().entry().value)
+            .unwrap_or_else(|error| panic!("a session row: {error}"));
+        let host = crate::hosts::tests::host(2, "ssh", host_state);
+        let notice = notice(&row.host_name, HostLookup::Known(&host), None, |_| None);
+        let band = Band::of(&row, now).map(|band| band.draw(theme::palette(cx)));
+        let card = draw(
+            Drawn {
+                notice,
+                focus: &cx.focus_handle().tab_stop(true),
+                scroll: &gpui::ScrollHandle::new(),
+                step: 0,
+                alone: true,
+            },
+            window,
+            cx,
+        );
+        columns.push(
+            div()
+                .w(px(500.))
+                .flex()
+                .flex_col()
+                .children(band)
+                .child(div().relative().h(px(300.)).child(card)),
+        );
+    }
+    div()
+        .flex()
+        .flex_row()
+        .gap(px(12.))
+        .children(columns)
         .into_any_element()
 }
 
@@ -4774,6 +4848,12 @@ static SCENES: &[Scene] = &[
         name: "session-interrupted-card",
         size: (1036., 324.),
         draw: session_interrupted_cards,
+        setup: no_setup,
+    },
+    Scene {
+        name: "session-unavailable",
+        size: (1036., 348.),
+        draw: session_unavailable_cards,
         setup: no_setup,
     },
     Scene {

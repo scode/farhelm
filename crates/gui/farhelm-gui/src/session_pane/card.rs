@@ -299,18 +299,22 @@ pub(crate) fn text(row: &SessionRow) -> String {
 
 // ---- Following the store ---------------------------------------------------------------------------------------------
 
-/// What tells the pane that the open session went into or out of its interrupted card, or its host into or out of
-/// reach, so it can drop or mount its terminals then: the store pushes the change (or a Restart marks the session), and
-/// nothing else the pane observes (the selection, the user's choices, the connection) moves. It also drops the restarted
-/// marks the store has caught up with ([`forget_settled`]).
+/// What tells the pane that the open session went into or out of its interrupted card, or its host into or out of reach
+/// (and so into or out of the unavailable card, `unavailable.rs`), so it can drop, mount or make inert its terminals
+/// then: the store pushes the change (or a Restart marks the session), and nothing else the pane observes (the
+/// selection, the user's choices, the connection) moves. It also drops the restarted marks the store has caught up with
+/// ([`forget_settled`]).
 ///
 /// It is built on [`session::observe_current`], which cannot serve the pane by itself: its callback gets no window,
 /// which every focus move the pane makes needs, and it calls on every pushed change, where the pane wants only these
 /// transitions. So the pane observes this entity with its window, as it observes the terminal set that follows the
-/// session's tabs, and this entity notifies only when the open session, whether it shows the card, or whether its host
-/// is reachable changes.
+/// session's tabs, and this entity notifies only when the open session, whether it shows the interrupted card, or the
+/// state of its row's host changes: reached, not reached, or no row at all. The last two are told apart because a stale
+/// row shows the unavailable card and a missing one does not, so a row that goes from one to the other changes what the
+/// pane does with its terminals although neither is reachable.
 pub(super) struct Follow {
-    last: Option<(String, bool, bool)>,
+    /// The open session, whether it shows the interrupted card, and whether its row is stale (`None` with no row).
+    last: Option<(String, bool, Option<bool>)>,
     _following: ObservingCurrent,
     _marks: Subscription,
 }
@@ -325,16 +329,16 @@ impl Follow {
         }
     }
 
-    /// Drop the settled marks, then notify if the open session, whether it shows the card, or whether its host is
-    /// reachable changed since the last check.
+    /// Drop the settled marks, then notify if the open session, whether it shows the card, or its row's host state
+    /// changed since the last check.
     fn check(&mut self, cx: &mut Context<Self>) {
         forget_settled(cx);
         let now = local_state::selected(cx).map(|key| {
             // One read of the row for both answers, so they describe the same push.
             let row = row(&key, cx);
             let card = row.as_ref().is_some_and(|row| shows_row(&key, row, cx));
-            let reachable = row.is_some_and(|row| !row.stale);
-            (key, card, reachable)
+            let stale = row.map(|row| row.stale);
+            (key, card, stale)
         });
         if now != self.last {
             self.last = now;

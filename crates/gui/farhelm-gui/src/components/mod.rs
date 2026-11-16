@@ -23,9 +23,11 @@
 //!
 //! Two of the layer's rules make a box its caller draws into a keyboard stop rather than drawing a control.
 //! [`focus_stop`] is a tab stop on a focus handle its caller owns, with a role, a name and the keyboard's ring, for a
-//! place where focus rests (the session pane's interrupted card, home while it shows), which must be able to hold focus
+//! place where focus rests (the session pane's interrupted card, home while it shows), which must be able to be home
 //! before its first frame. [`scroll_stop`] is the same stop with a handle of its own plus the scroll keys, for a region
-//! that scrolls and holds nothing focusable (`scroll_box.rs` has the full account). Neither draws hover help.
+//! that scrolls and holds nothing focusable (`scroll_box.rs` has the full account), and [`scroll_stop_on`] is that stop
+//! on a handle its caller owns, for a region that scrolls and is also where focus rests (the session pane's unavailable
+//! card). None of them draws hover help.
 
 mod banner;
 mod button;
@@ -464,7 +466,8 @@ pub(crate) struct Ring {
 /// home ([`focus::set_home`]) as it learns the card is to show, and a handle kept in the stop's element state would not
 /// exist until the card's first frame. Focus reaches it once a frame draws it, since the coordinator gives no focus to
 /// a home the frame on screen does not draw. Use [`scroll_stop`] instead for a region whose content scrolls and holds
-/// nothing focusable (SPEC.md, "Reaching everything by keyboard"), whose handle is its own.
+/// nothing focusable (SPEC.md, "Reaching everything by keyboard"), whose handle is its own, or [`scroll_stop_on`] for
+/// such a region that is also where focus rests.
 ///
 /// It makes nothing focusable but `focus` and draws nothing focusable inside the stop. Controls the caller draws inside
 /// it (the card's buttons) keep their own stops, which come after it in Tab order, since GPUI orders Tab by paint
@@ -532,6 +535,30 @@ pub(crate) fn scroll_stop(
     cx: &mut App,
 ) -> Stateful<Div> {
     let focus = focus::control_handle(ElementId::Name(format!("{id}-focus").into()), window, cx);
+    scroll_stop_on(stop, id, &focus, scroll, role, label, ring, window, cx)
+}
+
+/// [`scroll_stop`] on `focus`, a handle its caller owns, made with `.tab_stop(true)`: the same keys, ring, role and Tab
+/// reach, for a region that both scrolls and is a place where focus rests. The session pane's unavailable card is one:
+/// it holds nothing focusable and its remedy can run past a short pane, so it needs the scroll keys, and it is home
+/// while it shows, so the pane must be able to make it home before its first frame (focus reaches it on that frame),
+/// which a handle kept in the stop's element state cannot do ([`focus_stop`] says why). Everything else takes
+/// [`scroll_stop`], whose handle is its own.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one stop's parts, each drawn once; a struct would only repeat them"
+)]
+pub(crate) fn scroll_stop_on(
+    stop: Stateful<Div>,
+    id: &SharedString,
+    focus: &FocusHandle,
+    scroll: &ScrollHandle,
+    role: Role,
+    label: SharedString,
+    ring: Ring,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
     let keys = scroll.clone();
     let focused = focus.clone();
     // GPUI hands a key to every element on the focused element's path, so a control inside the stop (a link in a box)
@@ -546,7 +573,7 @@ pub(crate) fn scroll_stop(
             window.refresh();
         }
     });
-    focus_stop(stop, id, &focus, role, label, ring, window, cx)
+    focus_stop(stop, id, focus, role, label, ring, window, cx)
 }
 
 /// Let Page Up, Page Down, Home and End scroll `region`, the scrolling element whose scroll state is `scroll`, while a

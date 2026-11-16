@@ -1087,6 +1087,11 @@
       "reference": null
     },
     {
+      "golden": "session-unavailable",
+      "title": "The unavailable card over the terminal area of a session whose host cannot be reached, with the band above it holding the last-known status and age: a running session on a host that does not answer, and an exited one on a host that needs an update",
+      "reference": "session-unavailable"
+    },
+    {
       "golden": "session-details-bar",
       "title": "The open session's details bar under its terminal: running on the local host, waiting, exited with a stop annotation, interrupted, a launch failure cut short, unclassified (no badge), no host name and no managed checkout, and stale (title and host only), each with its checkout mark and copy fields, then the running one in a narrow pane",
       "reference": "main-running-session"
@@ -1742,7 +1747,7 @@
     },
     {
       "id": "session-unavailable",
-      "ported": false
+      "ported": true
     },
     {
       "id": "hosts-panel-host-unreachable",

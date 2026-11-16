@@ -360,10 +360,14 @@ pub(crate) fn bar(details: Details, copies: &Copies, pulse: u64, cx: &App) -> Di
         .bg(theme::color(palette.bg_1))
         .text_size(metrics::TEXT_MD)
         .text_color(theme::color(palette.fg_0))
-        .children(details.status.map(|status| badge(status, pulse, palette)))
+        .children(
+            details
+                .status
+                .map(|status| badge(status, STATUS_ID, false, pulse, palette)),
+        )
         .child(title(&details.title, palette))
         .children(details.host.map(|host| host_part(host, palette)))
-        .children(details.age.map(age_part))
+        .children(details.age.map(|age| age_part(age, AGE_ID)))
         .children(
             details
                 .checkout
@@ -493,11 +497,21 @@ fn warning(text: &'static str, palette: &Palette) -> Div {
 /// The status badge. A live status is the row's mark alone, which never shrinks, named by its word and helped by it
 /// (the old dot's tooltip was the badge's text). An ended status is its words in the status's color, which may shrink
 /// to an ellipsis, with the whole wording as hover help and name (`.session-details .status-badge`).
-fn badge(status: Status, pulse: u64, palette: &Palette) -> Div {
+///
+/// Drawn under `id`, its help and words keyed from it. `stale` draws a live mark as a stale row's, grey and still, for
+/// the unavailable card's band (`unavailable.rs`), which shows a stale session's last-known status with this badge;
+/// the bar itself never shows a stale session's status, and passes `false`.
+pub(crate) fn badge(
+    status: Status,
+    id: &'static str,
+    stale: bool,
+    pulse: u64,
+    palette: &Palette,
+) -> Div {
     match status {
         Status::Live(live) => div().flex_none().child(
             StatusMark::new(
-                STATUS_ID,
+                id,
                 live.word(),
                 HoverHelp::tooltip(live.word()),
                 Role::Label,
@@ -507,13 +521,13 @@ fn badge(status: Status, pulse: u64, palette: &Palette) -> Div {
                 div()
                     .flex()
                     .items_center()
-                    .child(live.mark(palette, false, false, pulse)),
+                    .child(live.mark(palette, false, stale, pulse)),
             )
             .described(false),
         ),
         Status::Ended(ended) => {
-            let label = ended.line(STATUS_ID.into()).accessible_text();
-            let help = match ended.line(format!("{STATUS_ID}-help").into()) {
+            let label = ended.line(id.into()).accessible_text();
+            let help = match ended.line(format!("{id}-help").into()) {
                 Line::App(words) => HoverHelp::tooltip(words),
                 Line::Sentence(sentence) => HoverHelp::sentence(sentence),
             };
@@ -551,7 +565,7 @@ fn badge(status: Status, pulse: u64, palette: &Palette) -> Div {
                 .py(px(1.))
                 .overflow_hidden()
                 .child(
-                    StatusMark::new(STATUS_ID, label, help, Role::Label, "")
+                    StatusMark::new(id, label, help, Role::Label, "")
                         .ink(ended.kind.color(palette, false))
                         .truncate()
                         .content(wording)
@@ -624,11 +638,12 @@ fn value(text: &HostText) -> Div {
 }
 
 /// The age: the row's relative age in the quiet foreground and the monospace face, which never shrinks, named and
-/// helped by the full stamp (`.status-time`).
-fn age_part(age: Age) -> Div {
+/// helped by the full stamp (`.status-time`). Drawn under `id`: the bar's, or the unavailable card's band's, which
+/// shows a stale session's age in the bar's place.
+pub(crate) fn age_part(age: Age, id: &'static str) -> Div {
     div().flex_none().child(
         StatusMark::new(
-            AGE_ID,
+            id,
             age.full.clone(),
             HoverHelp::tooltip(age.full),
             Role::Label,
