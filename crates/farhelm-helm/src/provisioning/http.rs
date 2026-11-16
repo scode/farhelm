@@ -105,7 +105,9 @@ pub(crate) struct HostPlanResponse {
 pub(crate) use farhelm_proto::provisioning::{ProvisioningView, RunStatus, StepStatus, StepView};
 
 /// `GET /api/provisioning`: every run this helm process retains, one per host. A host with no retained run is absent
-/// rather than listed as idle, so the list is exactly the progress there is to show.
+/// rather than listed as idle, so the list is exactly the progress there is to show. Besides the registered hosts' runs
+/// it holds the failed environment launches kept after their cleanup removed the host, under that removed host's id
+/// (`ProvisioningMemory::ended_launches`).
 ///
 /// Unlike the entries, this wrapper is not in `farhelm-proto`: the GUI decodes the [`ProvisioningView`] entries the UI
 /// channel splits out of it, never the wrapper.
@@ -132,6 +134,7 @@ impl ProgressViews for ProvisioningView {
             status: RunStatus::Completed,
             steps: Vec::new(),
             message: Some("no provisioning run has been recorded for this host".to_string()),
+            outcome_unknown: false,
         }
     }
 
@@ -155,6 +158,7 @@ impl ProgressViews for ProvisioningView {
                 })
                 .collect(),
             message: None,
+            outcome_unknown: false,
         }
     }
 }
@@ -311,7 +315,8 @@ pub(crate) async fn provisioning_state(
 }
 
 /// `GET /api/provisioning` — every host's retained run in one read, which the UI channel pushes as its
-/// host-progress collection (the per-host route stays for callers that want one host).
+/// host-progress collection (the per-host route stays for callers that want one host), including the failed
+/// environment launches kept for removed hosts ([`super::ProvisioningService::runs`]).
 pub(crate) async fn provisioning_runs(State(state): State<Arc<AppState>>) -> Response {
     axum::Json(state.provisioning.runs().await).into_response()
 }

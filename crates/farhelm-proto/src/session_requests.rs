@@ -1,6 +1,8 @@
 //! The bodies the desktop app sends to the helm's launch routes: create
-//! (`POST /api/sessions`), Restart with (`POST /api/sessions/{id}/restart`) and
-//! Replace and Replace with (`POST /api/sessions/{id}/replace`), plus the
+//! (`POST /api/sessions`), a create in a new disposable environment
+//! (`POST /api/environment-sessions`), Restart with
+//! (`POST /api/sessions/{id}/restart`) and Replace and Replace with
+//! (`POST /api/sessions/{id}/replace`), plus the
 //! launcher's reads and their replies: the folder read
 //! (`POST /api/browse-directory`), the launch history
 //! (`GET /api/launch-history`), and the managed-checkout destination's
@@ -8,7 +10,8 @@
 //! preview (`POST /api/github-checkout-preview`).
 //!
 //! The helm decodes each route into a request type of its own (`CreateReq`,
-//! `RestartReq` and `ReplaceReq` in its sessions module), which also carries
+//! `EnvironmentCreateRequest`, `RestartReq` and `ReplaceReq` in its sessions
+//! module), which also carries
 //! fields only helm-internal callers set. These are the client's half: the
 //! fields the GUI sends, built from the same launch types the helm reads
 //! ([`LaunchSelection`], [`CommandLaunch`], [`GithubCheckoutRequest`]). The
@@ -31,7 +34,10 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
 use crate::AcceptedGithubPreview;
-use crate::{CommandLaunch, GithubCheckoutRequest, GithubRepo, LaunchSelection, LaunchTarget};
+use crate::launcher::TemplateNameKind;
+use crate::{
+    CommandLaunch, GithubCheckoutRequest, GithubRepo, LaunchSelection, LaunchTarget, Place,
+};
 
 /// `POST /api/sessions`: one create.
 ///
@@ -67,6 +73,46 @@ pub struct CreateSessionBody {
     /// A fresh managed checkout of a GitHub repository, with the preview the
     /// user accepted.
     pub github_checkout: Option<GithubCheckoutRequest>,
+}
+
+/// `POST /api/environment-sessions`: a create in a new disposable environment
+/// (a sandbox or a container) that the helm makes from `recipe` at `place` for
+/// this launch alone (SPEC.md, "Sandbox sessions" and "Container sessions").
+///
+/// A route of its own, not a target on [`CreateSessionBody`]: an older helm's
+/// ordinary create ignores fields it does not know and defaults an absent host
+/// to its own, so a recipe launch sent there would run on the wrong machine
+/// instead of being refused (SPEC_impl.md, "Tensorlake sandbox sessions").
+///
+/// Only for `POST /api/environment-sessions`: the legacy
+/// `POST /api/sandbox-sessions` takes no `place` and refuses unknown fields,
+/// so it refuses this body.
+///
+/// The helm answers 202 with the launch's `{host_id, run_id}` once it has
+/// admitted it, and the outcome arrives in the pushed host progress
+/// (SPEC_impl.md, "The UI channel"). A refusal before admission (an
+/// unconfirmed billed create, a missing recipe or place) is an ordinary error
+/// reply.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EnvironmentCreateBody {
+    /// The recipe the environment is made from, by name.
+    pub recipe: String,
+    /// Where the environment is made: the Tensorlake account, or a container
+    /// host.
+    pub place: Place,
+    /// The user answered "Create a sandbox for this session?" with Create and
+    /// launch. Without it the helm refuses a place that asks before creating
+    /// (a billed sandbox), unless the Tensorlake setting "Create Tensorlake
+    /// sandboxes without asking" is on.
+    pub confirmed: bool,
+    /// Whether a template's name is a base the managed checkout numbers or an
+    /// exact name; absent for a launch that no template named.
+    pub name_kind: Option<TemplateNameKind>,
+    /// The create itself. `host` and `expected_incarnation` stay absent, since
+    /// the environment does not exist yet (the helm refuses either), and a
+    /// managed checkout carries no preview, which the helm obtains once the new
+    /// environment's Farhelm connects.
+    pub request: CreateSessionBody,
 }
 
 /// `POST /api/sessions/{id}/restart`: a plain Restart, or Restart with.

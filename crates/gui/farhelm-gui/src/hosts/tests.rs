@@ -143,6 +143,7 @@ pub(crate) fn run(
         status,
         steps: Vec::new(),
         message: None,
+        outcome_unknown: false,
     }
 }
 

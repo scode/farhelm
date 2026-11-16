@@ -23,11 +23,9 @@ pub(crate) struct SandboxCreateRequest {
     request: CreateReq,
 }
 
-/// Start one billed resource only after the user has accepted its consequence.
-/// Response headers name existing host progress immediately. The ordinary JSON
-/// body arrives when the owned setup task finishes, including after successful
-/// failure cleanup has removed that host's progress. No retained job registry is
-/// needed, and dropping this response cannot cancel the provisioning task.
+/// `POST /api/sandbox-sessions`: the legacy spelling of an environment create
+/// at the Tensorlake account. It answers exactly as
+/// [`create_environment_session`] does, accepted form included.
 pub(crate) async fn create_sandbox_session(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<SandboxCreateRequest>,
@@ -47,19 +45,43 @@ pub(crate) async fn create_sandbox_session(
 
 /// Protected admission never falls through to an older ordinary-host decoder.
 /// Provider I/O and task lifetime remain in the existing provisioning service.
+///
+/// The GUI builds this body from
+/// `farhelm_proto::session_requests::EnvironmentCreateBody`; the fields are
+/// visible to the sessions module so its client-body tests can check that the
+/// two still agree.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EnvironmentCreateRequest {
-    recipe: String,
-    place: farhelm_proto::Place,
+    pub(super) recipe: String,
+    pub(super) place: farhelm_proto::Place,
     #[serde(default)]
-    confirmed: bool,
-    name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
-    request: CreateReq,
+    pub(super) confirmed: bool,
+    pub(super) name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+    pub(super) request: CreateReq,
 }
 
-/// Admit one captured environment target and stream the existing task result.
-/// Headers identify recovery progress before the ordinary session reply is ready.
+/// `POST /api/environment-sessions`: admit one launch into a new disposable
+/// environment and answer 202 with its run, `{host_id, run_id}`, as soon as
+/// it is admitted.
+///
+/// The launch takes minutes (preparing the recipe, creating the sandbox or
+/// container, starting Farhelm in it), far longer than the UI channel lets one
+/// command hold up the commands behind it, so the route takes the accepted
+/// form (SPEC_impl.md, "The UI channel"). The outcome lands in the new
+/// environment host's run in the pushed host progress: completed, with the
+/// session already in the session listing under that host, or failed with the
+/// "Not launched." reason, which stays listed even after the launch's cleanup
+/// has removed the host (`ProvisioningService::runs`). A failed run's message
+/// is the whole text to show, its "Not launched." lead included; a failed run
+/// marked `outcome_unknown` (a panicked task) may have left its environment
+/// behind.
+///
+/// What is refused before admission is an ordinary error reply with nothing
+/// registered: an unconfirmed billed create, a body the route cannot read, a
+/// recipe or place that is missing or cannot run the launch. The launch task
+/// is the helm's, so neither its result nor its cleanup depends on the client
+/// that asked.
 pub(crate) async fn create_environment_session(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<EnvironmentCreateRequest>,
@@ -84,32 +106,15 @@ pub(crate) async fn create_environment_session(
             .await
     })
     .await;
-    let (accepted, result) = match result {
-        Ok(accepted) => accepted,
-        Err(error) => return crate::provisioning::provisioning_error(error),
-    };
-    use futures_util::StreamExt as _;
-    // A first whitespace frame flushes progress headers while leaving one
-    // valid JSON value for the client's ordinary decoder to read at the end.
-    let prefix = futures_util::stream::once(async { Ok::<_, std::io::Error>("\n".to_string()) });
-    let body = futures_util::stream::once(async move {
-        let reply = match result.await {
-            Ok(Ok(session)) => serde_json::json!({ "session": session }),
-            Ok(Err(error)) => serde_json::json!({ "error": error.to_string() }),
-            Err(_) => {
-                serde_json::json!({ "error": "The launch task ended without a result. Check Hosts for the named environment before launching again.", "uncertain": true })
-            }
-        };
-        Ok::<_, std::io::Error>(reply.to_string())
-    });
-    axum::response::Response::builder()
-        .header(axum::http::header::CONTENT_TYPE, "application/json")
-        .header("x-farhelm-environment-host", accepted.host_id.to_string())
-        .header("x-farhelm-environment-run", accepted.run_id.clone())
-        .header("x-farhelm-sandbox-host", accepted.host_id.to_string())
-        .header("x-farhelm-sandbox-run", accepted.run_id)
-        .body(axum::body::Body::from_stream(prefix.chain(body)))
-        .expect("launch headers contain only a host number and a generated UUID")
+    match result {
+        // The run publishes the launch's end, so the task's own result,
+        // which only an in-process caller (an agent's request) waits for, is
+        // not needed here; dropping it cancels nothing.
+        Ok((accepted, _result)) => {
+            (axum::http::StatusCode::ACCEPTED, axum::Json(accepted)).into_response()
+        }
+        Err(error) => crate::provisioning::provisioning_error(error),
+    }
 }
 
 /// Nothing was decided about an environment session's Delete: its

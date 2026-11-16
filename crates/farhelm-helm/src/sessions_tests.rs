@@ -12540,9 +12540,9 @@ async fn retired_container_http_mutations_dispatch_nothing() {
     responder.await.unwrap();
 }
 
-/// The GUI builds its create, Restart and Replace bodies from the shared
-/// client types in `farhelm_proto::session_requests`, while the helm decodes
-/// them into its own request types. These tests are the only thing holding
+/// The GUI builds its create, environment create, Restart and Replace bodies
+/// from the shared client types in `farhelm_proto::session_requests`, while
+/// the helm decodes them into its own request types. These tests are the only thing holding
 /// the two together: a field renamed, retyped or dropped on either side makes
 /// a serialized client body decode differently (or not at all) here, instead
 /// of a launcher silently losing a choice in the running app.
@@ -12668,6 +12668,50 @@ mod client_bodies {
         ] {
             let req: CreateReq = decode(&body);
             assert_create_decodes(&body, &req);
+        }
+    }
+
+    /// `POST /api/environment-sessions`: the launcher's create in a new
+    /// environment decodes into the helm's `EnvironmentCreateRequest` with
+    /// every value intact, its inner create included, at either kind of
+    /// place. Why: the helm's type is private and refuses unknown fields, so a
+    /// field renamed on one side would refuse every environment launch, or
+    /// lose the user's answer to the billed-sandbox question, with nothing
+    /// else to notice. Destructured without `..`, so a field added to the
+    /// client body fails to compile here until it is checked.
+    #[test]
+    fn an_environment_create_body_decodes_into_the_helms_request() {
+        use super::super::sandbox::EnvironmentCreateRequest;
+        use farhelm_proto::launcher::TemplateNameKind;
+        use farhelm_proto::session_requests::EnvironmentCreateBody;
+        for (place, confirmed, name_kind) in [
+            (
+                farhelm_proto::Place::TensorlakeAccount,
+                true,
+                Some(TemplateNameKind::Fixed),
+            ),
+            (farhelm_proto::Place::PodmanHost(4), false, None),
+        ] {
+            let body = EnvironmentCreateBody {
+                recipe: "rust".into(),
+                place,
+                confirmed,
+                name_kind,
+                request: create(None, Some(command())),
+            };
+            let req: EnvironmentCreateRequest = decode(&body);
+            let EnvironmentCreateBody {
+                recipe,
+                place,
+                confirmed,
+                name_kind,
+                request,
+            } = &body;
+            assert_eq!(&req.recipe, recipe);
+            assert_eq!(&req.place, place);
+            assert_eq!(&req.confirmed, confirmed);
+            assert_eq!(&req.name_kind, name_kind);
+            assert_create_decodes(request, &req.request);
         }
     }
 
