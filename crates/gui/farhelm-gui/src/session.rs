@@ -42,7 +42,7 @@ use farhelm_helm_client::terminal::{
 };
 use farhelm_helm_client::{
     ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, Collections,
-    CommandError, HelmConnection, HelmEndpoint, Method,
+    CommandError, HelmConnection, HelmEndpoint, Method, Transfers,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, Reply, SessionRow};
 use gpui::{
@@ -69,6 +69,9 @@ pub struct Connection {
     lost: bool,
     /// Where each new UI session's terminal streams come from.
     terminals: TerminalSource,
+    /// Where each new UI session's file transfers go (a file link's hover check, its download): the helm client's, or
+    /// `None` without one, in tests that serve no transfers.
+    transfers: Option<Transfers>,
     /// The reader of the channel's event feed.
     _pump: Task<()>,
     /// The helm client's connection, whose runtime must outlive the channel; `None` in tests, which serve a fake. The
@@ -89,6 +92,8 @@ pub struct UiSession {
     handle: ChannelHandle,
     /// Where this session's terminal streams come from: the connection's source when the snapshot made the session.
     terminals: TerminalSource,
+    /// Where this session's file transfers go: the connection's when the snapshot made the session.
+    transfers: Option<Transfers>,
     /// Set once, when a reset retires the session. Shared so that a terminal opener handed out earlier, which runs
     /// with no GPUI context to read the session through, can still see the retirement (it holds this weakly, so a
     /// dropped session counts as retired too).
@@ -139,6 +144,7 @@ pub fn start(
         Some(helm) => helm_terminals(helm),
         None => Rc::new(|_| closed_terminal()),
     };
+    let transfers = owner.as_ref().map(|helm| helm.transfers().clone());
     let connection = cx.new(|cx| {
         let weak = cx.entity().downgrade();
         let pump = cx.spawn(async move |_, cx| {
@@ -155,6 +161,7 @@ pub fn start(
             was_connected: false,
             lost: false,
             terminals,
+            transfers,
             _pump: pump,
             _owner: owner,
         }
@@ -217,11 +224,13 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
                 let connection = connection.read(cx);
                 let handle = connection.handle.clone();
                 let terminals = connection.terminals.clone();
+                let transfers = connection.transfers.clone();
                 UiSession {
                     store: cx.new(|_| HelmStore::from_snapshot(&snapshot)),
                     operations: cx.new(|_| Operations::new(handle.clone())),
                     handle,
                     terminals,
+                    transfers,
                     retired: Rc::new(Cell::new(false)),
                     pending: HashMap::new(),
                     next_pending: 0,
@@ -484,6 +493,13 @@ impl Connection {
         self.terminals = Rc::new(open);
     }
 
+    /// Send file transfers to `transfers` instead of the helm client, for UI sessions made from here on (a session
+    /// takes them when a snapshot makes it). Tests serve fake transfers through this.
+    #[cfg(test)]
+    pub(crate) fn serve_transfers(&mut self, transfers: Transfers) {
+        self.transfers = Some(transfers);
+    }
+
     /// Record the channel's new state. Returns whether this connect recovers from a break (when the connection-lost
     /// notice is due) and, when the window goes inert, the session to retire.
     fn set_state(&mut self, state: ChannelState) -> (bool, Option<Entity<UiSession>>) {
@@ -511,6 +527,15 @@ impl UiSession {
     /// Whether a reset retired this session. A retired session runs nothing and delivers nothing.
     pub fn is_retired(&self) -> bool {
         self.retired.get()
+    }
+
+    /// File transfers through this session's connection to the helm: the plain-HTTP side beside the channel, for a
+    /// terminal's file links. `None` only when the connection has no helm client (tests that serve none).
+    ///
+    /// Unlike [`UiSession::terminal_opener`], this does not stop at retirement: a transfer is an HTTP request of its
+    /// own, not part of the channel the reset replaced, and the terminals that hold it are retired with the session.
+    pub fn transfers(&self) -> Option<&Transfers> {
+        self.transfers.as_ref()
     }
 
     /// An opener for one terminal stream through this session's connection to the helm, for a terminal view's owner

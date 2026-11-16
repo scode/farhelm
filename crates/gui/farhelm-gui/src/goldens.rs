@@ -3,25 +3,26 @@
 //! a summary that names a host value, once more with a feature-drawn body, a header tile and a footer note, and the
 //! prompt anchored to a row's menu button), the keyboard
 //! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
-//! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
-//! the interrupted card in its place (with Restart and Replace, and with Replace alone), the unavailable card with the
-//! stale band above it (a host that does not answer, and one that needs an update), the open session's details bar
-//! (every status and host it draws differently, and a narrow one, and once more with a copy confirmed and its
-//! hidden-characters warning), the session list (a fleet of every status a row draws, the open row on a host the helm
-//! cannot reach, an empty fleet, a row's open menu, a row's notification list, a row's Delete question, and a pending
-//! and a refused Delete), the Rename editor, the Send feedback dialog (as it opens, and with a remembered contact), the
-//! select closed and open, the YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer,
-//! the Settings dialog at Sessions, at Appearance, at Hosts, at Recipes (empty, with recipes in each build state, with
-//! a recipe's per-place lines, and with a new recipe's editor open), at Credentials, at Terminal and at Agent trust,
-//! the Hosts panel (closed, with Details, with a host failing to connect, with a host's setup running and failed, with
-//! outdated hosts' inline Update, and with a host's Update running), the Add host dialog and the setup confirmation it
-//! leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end, the host refusal
-//! dialog for a refused Update, the version readout while an updater runs (the check button at rest, lit, warned and
-//! focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and the reinstall hover), the
-//! title bar the Linux window draws for itself (ordinary and maximized), the Open-Source Notices window over a short
-//! fixture, and the Trash button empty, full and freeing space, and the Trash dialog, alone and asking to delete
-//! everything or one host's archives, in both appearances, compared pixel for pixel. (The terminal stays dark in both
-//! appearances, so it draws identically in both pictures; only the scene's ground around it differs.)
+//! an attached terminal's exit line and status line, a terminal file link's hover display in each of its states, the
+//! scrim a pending Delete puts over the open session's terminal, the interrupted card in its place (with Restart and
+//! Replace, and with Replace alone), the unavailable card with the stale band above it (a host that does not answer,
+//! and one that needs an update), the open session's details bar (every status and host it draws differently, and a
+//! narrow one, and once more with a copy confirmed and its hidden-characters warning), the session list (a fleet of
+//! every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu, a row's
+//! notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the Send
+//! feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
+//! drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at
+//! Appearance, at Hosts, at Recipes (empty, with recipes in each build state, with a recipe's per-place lines, and with
+//! a new recipe's editor open), at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details,
+//! with a host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with
+//! a host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the
+//! host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
+//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
+//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
+//! itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty,
+//! full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
+//! appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both
+//! pictures; only the scene's ground around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -1778,6 +1779,13 @@ fn attached_terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyEle
                 .map(|owner| div().w(px(420.)).h(px(150.)).child(owner.clone())),
         )
         .into_any_element()
+}
+
+/// A file link's hover display in each of its states, stacked (`crate::terminal::files`): checking, the three size
+/// tiers, the limit refusal in red, a folder and a failed check. Drawn on their own rather than over a terminal, since
+/// a display's look does not depend on what it hovers over.
+fn terminal_file_disclosures(_: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    crate::terminal::files::golden_displays(window, cx)
 }
 
 /// A shell's last lines at the bottom of a small terminal, for the Delete scrim to lie over: enough text that the
@@ -4831,6 +4839,12 @@ static SCENES: &[Scene] = &[
         size: (444., 336.),
         draw: attached_terminals,
         setup: terminal_status_setup,
+    },
+    Scene {
+        name: "terminal-file-disclosures",
+        size: (420., 520.),
+        draw: terminal_file_disclosures,
+        setup: no_setup,
     },
     Scene {
         name: "sequence-pill",
