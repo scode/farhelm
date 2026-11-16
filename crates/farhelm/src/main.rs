@@ -2710,7 +2710,26 @@ async fn stdio_proxy(
                     )
                 })
             });
-            eprintln!("farhelm internal stdio: {error:#}");
+            // The dial names no remedy, so this path adds how to start a
+            // supervisor by hand. It is read in the helm's log and by someone
+            // running `internal stdio` by hand; a remote host's row shows the
+            // helm's own start command for exit 75, written from the host
+            // entry. `--state-dir` is always spelled out: `internal stdio` is
+            // normally reached over ssh with a state dir the remote's default
+            // would not match, and a remedy that silently drops it starts a
+            // supervisor in the wrong place. The quoting is for spaces, so the
+            // line survives a paste into a shell; `to_string_lossy` is no more
+            // lossy than the `Path::display` the dial already uses for the
+            // socket path, and this whole string is advice for a human.
+            let advice = if absent {
+                format!(
+                    "; start it with `farhelm supervisor run --state-dir {}`",
+                    shell_words::quote(&state_dir.to_string_lossy()),
+                )
+            } else {
+                String::new()
+            };
+            eprintln!("farhelm internal stdio: {error:#}{advice}");
             std::process::exit(if absent { 75 } else { 1 });
         });
     eprintln!("{}", farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER);

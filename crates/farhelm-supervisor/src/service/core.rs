@@ -16175,47 +16175,43 @@ fn sighup_is_ignored() -> bool {
     }
 }
 
-/// Connect to a running supervisor's socket (used by `internal stdio`).
-/// Fails if no supervisor is listening; this deliberately does not start
-/// one, because discovery-first (SPEC.md) means an absent supervisor is
-/// the caller's decision to make, not a side effect of dialing.
+/// Connect to a running supervisor's socket (used by `internal stdio` and by
+/// the helm's dial of its own machine). Fails if no supervisor is
+/// listening; this deliberately does not start one, because discovery-first
+/// (SPEC.md) means an absent supervisor is the caller's decision to make,
+/// not a side effect of dialing. When nothing listens, the error says so
+/// and names the socket, and leaves what to do about it to the caller:
+/// `internal stdio` adds how to start one by hand, while the helm's dial of
+/// its own machine adds nothing, since the desktop app starts that machine's
+/// supervisor when it opens (or a unit `farhelm helm setup` wrote does).
 pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
     let path = Supervisor::socket_path(state_dir);
     UnixStream::connect(&path).await.map_err(|e| {
         // `ConnectionRefused` (nothing is listening on the socket file)
         // and `NotFound` (no socket file at all) are the shapes a plain
-        // "no supervisor here" takes at this layer. Naming that directly —
-        // and the fix — is what turns a raw "Connection refused (os error
-        // 111)" into something an operator can act on without knowing
-        // this is a unix-domain-socket dial at all.
+        // "no supervisor here" takes at this layer. Naming that directly
+        // is what turns a raw "Connection refused (os error 111)" into
+        // something an operator can act on without knowing this is a
+        // unix-domain-socket dial at all.
         //
         // Linux also answers `ConnectionRefused` for a path that EXISTS
         // but is not a socket, so a stale regular file squatting the name
-        // lands in this branch too — and the remedy still holds, because
-        // `Supervisor::serve` unlinks whatever it finds at the socket path
-        // before binding. (A DIRECTORY there refuses connections the same
-        // way and is not fixed by the remedy; it is a strange enough state
-        // that the bind error the remedy then produces is the clearer
-        // place to learn about it.) Other kinds — permission denied, a
+        // lands in this branch too — and a started supervisor still fixes
+        // it, because `Supervisor::serve` unlinks whatever it finds at the
+        // socket path before binding. (A DIRECTORY there refuses
+        // connections the same way and is not fixed by starting one; it is
+        // a strange enough state that the bind error is the clearer place
+        // to learn about it.) Other kinds — permission denied, a
         // non-directory component in the path — keep the generic context:
-        // they need the raw error, not a remedy that would not apply.
-        //
-        // `--state-dir` is always spelled out: `internal stdio` is
-        // normally reached over ssh with a state dir the remote's default
-        // would not match, and a remedy that silently drops it starts a
-        // supervisor in the wrong place. The quoting is for spaces, so the
-        // line survives a paste into a shell; `to_string_lossy` is no more
-        // lossy than the `Path::display` already used for the socket path
-        // beside it, and this whole string is advice for a human.
+        // they need the raw error, not a claim that would not apply.
         let context = if matches!(
             e.kind(),
             std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
         ) {
             format!(
                 "supervisor does not appear to be running (socket {} is not accepting \
-                 connections); start it with `farhelm supervisor run --state-dir {}`",
+                 connections)",
                 path.display(),
-                shell_words::quote(&state_dir.to_string_lossy()),
             )
         } else {
             format!("connecting to supervisor socket {}", path.display())
@@ -29477,20 +29473,21 @@ exit 1
     /// "No supervisor is running here" is the single most common way this
     /// dial fails, and the raw kernel text for it ("No such file or
     /// directory", "Connection refused (os error 111)") tells an operator
-    /// nothing about unix sockets, this state dir, or what to run. Both
-    /// shapes are pinned because they arise from genuinely different
-    /// states — a host where a supervisor was never started, and one where
-    /// it died and left its socket file behind — reaching this code as
-    /// different `ErrorKind`s that a narrowed match could easily drop.
+    /// nothing about unix sockets or this socket. Both shapes are pinned
+    /// because they arise from genuinely different states — a host where a
+    /// supervisor was never started, and one where it died and left its
+    /// socket file behind — reaching this code as different `ErrorKind`s
+    /// that a narrowed match could easily drop.
     ///
-    /// `--state-dir` is asserted specifically: `internal stdio` is reached
-    /// over ssh with a state dir that is usually not the remote default,
-    /// so a remedy printed without it starts a supervisor somewhere the
-    /// caller will still not find. The io error must survive in the chain
-    /// as well — the friendly context is an addition, not a replacement
-    /// for the errno a bug report needs.
+    /// The dial names no remedy: the helm's dial of its own machine must not
+    /// tell a desktop user to start a supervisor by hand (the app starts it
+    /// when it opens), and `internal stdio` adds the hand-start command for
+    /// remote hosts itself (`crates/farhelm/tests/stdio_exit.rs` pins that).
+    /// The io error must survive in the chain as well — the friendly
+    /// context is an addition, not a replacement for the errno a bug report
+    /// needs.
     #[farhelm_testtrace::test]
-    async fn connect_names_the_socket_and_state_dir_when_nothing_listens() {
+    async fn connect_names_the_socket_and_no_remedy_when_nothing_listens() {
         let dir = tempfile::tempdir().expect("state dir");
         let socket = Supervisor::socket_path(dir.path());
 
@@ -29524,12 +29521,12 @@ exit 1
                 "must name the socket it could not reach: {rendered}"
             );
             assert!(
-                rendered.contains("farhelm supervisor run --state-dir"),
-                "must suggest starting a supervisor on THIS state dir: {rendered}"
+                rendered.contains("supervisor does not appear to be running"),
+                "must say no supervisor answers, not only name the path: {rendered}"
             );
             assert!(
-                rendered.contains(&dir.path().display().to_string()),
-                "the suggested command must name the state dir: {rendered}"
+                !rendered.contains("farhelm supervisor run"),
+                "the dial names no remedy; its callers choose one: {rendered}"
             );
             let io = err
                 .chain()
@@ -29540,15 +29537,15 @@ exit 1
     }
 
     /// A failure that is NOT "nothing is listening" must keep the generic
-    /// context and the raw error, because the remedy would be a wrong
-    /// answer: no amount of `farhelm supervisor run` fixes a path whose
-    /// parent is a regular file, and printing it would send the operator
-    /// down the wrong trail.
+    /// context and the raw error, because the "no supervisor" claim would be
+    /// a wrong answer: no started supervisor fixes a path whose parent is a
+    /// regular file, and saying none is running would send the operator down
+    /// the wrong trail.
     ///
     /// A non-directory component is used rather than the more obvious
     /// "point at a directory" — Linux answers `ConnectionRefused` for ANY
-    /// existing non-socket path, so a directory takes the remedy branch
-    /// (deliberately, see `connect`) and would not exercise this one.
+    /// existing non-socket path, so a directory takes the "no supervisor"
+    /// branch (deliberately, see `connect`) and would not exercise this one.
     #[farhelm_testtrace::test]
     async fn connect_keeps_the_generic_context_for_other_failures() {
         let dir = tempfile::tempdir().expect("state dir");
@@ -29558,8 +29555,8 @@ exit 1
         let err = connect(&not_a_dir).await.unwrap_err();
         let rendered = format!("{err:#}");
         assert!(
-            !rendered.contains("farhelm supervisor run"),
-            "an unrelated dial failure must not gain a guessed remedy: {rendered}"
+            !rendered.contains("does not appear to be running"),
+            "an unrelated dial failure must not claim no supervisor runs: {rendered}"
         );
         assert!(
             rendered.contains("connecting to supervisor socket")

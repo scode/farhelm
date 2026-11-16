@@ -35,8 +35,9 @@ serde_json.workspace = true
 # streams claimed artifacts through this shared implementation before it can
 # authorize a later remover to name them.
 sha2.workspace = true
-# Setup's copied sign-in command must preserve a chosen state directory as
-# one shell argument, using the same quoting rules as token recovery advice.
+# Setup's copied sign-in command, and `internal stdio`'s start command for an
+# absent supervisor, must preserve a chosen state directory as one shell
+# argument, using the same quoting rules as token recovery advice.
 shell-words.workspace = true
 # `farhelm helm setup` publishes each unit file through a uniquely named,
 # exclusively created staging file in the unit directory (setup.rs). A
