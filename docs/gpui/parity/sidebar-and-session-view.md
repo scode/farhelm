@@ -602,7 +602,8 @@ even when its words speak of YOLO, as "Replace: …"), `a_yolo_refused_replace_a
 `a_replace_after_the_user_moved_on_opens_its_replacement_without_focus`,
 `a_replace_after_the_user_opened_another_session_leaves_them_there`,
 `a_replace_refused_after_its_source_went_lets_the_selection_move_on`,
-`a_delete_notice_is_dropped_when_the_replacement_already_has_work_running`; scripts/gui-e2e-smoke.py
+`a_replaces_delete_notice_shows_in_the_band_while_the_replacement_has_work_running` (the reply's `delete_notice` in the
+Delete notice band, unprefixed, as the old app showed it); scripts/gui-e2e-smoke.py
 `test_34_stop_and_replace_from_the_row_menu`. The retry-key cases are dropped by design (the GUI writes no retry keys:
 SPEC_impl.md, "One failure path: the reset"); the row question's Cancel help is the old row's ("Cancel: keep this
 session as it is"); the header's Replace is crates/gui/farhelm-gui/src/session_pane/header_tests.rs
@@ -1081,11 +1082,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   tracks a focus handle so the row stays drawn while one of its controls holds focus, and the coordinator's press rule
   for such a container keeps focus in place. Harmless: it only matters when a control other than the terminal holds
   focus. A contain-only press kind would remove it (watch list).
-- The old app showed a Replace's `delete_notice` (the source's Delete reporting, say, that its checkout moved to the
-  trash) unprefixed, in a list-wide band with Dismiss, which the port does not have yet. It shows on the replacement's
-  row instead, as "Replace: <notice>" in the row's refusal style, until that session's next operation starts; it is
-  dropped when the replacement already has work of its own running by then, which no later operation would clear. The
-  orchestrator accepted this on 2026-11-14; the band, when it is ported, takes it back.
+- Not a deviation from the old app but a gap against SPEC.md that the port keeps from it: a bulk Delete of several
+  sessions whose checkouts could not be archived shows only the last of their notices in the Delete notice band, each
+  replacing the one before, where SPEC.md asks that each such outcome be visible. The sandbox and container Delete,
+  which reworks the band's text, decides whether one batch's notices are joined.
 - A Replace refused after its source was already removed (the helm's "whether the original … was removed is unknown")
   has no row to show its words on, since they belong to the source; the selection moves on as for any removal. The old
   app showed them only in the header while the source stayed selected, which it does not here once the Replace settles.

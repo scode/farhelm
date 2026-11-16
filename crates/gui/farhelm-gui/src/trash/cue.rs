@@ -30,7 +30,6 @@ use std::time::Duration;
 
 use farhelm_proto::SessionDeleteOutcome;
 use gpui::{App, BorrowAppContext as _, Context, Entity, Global, WeakEntity};
-use serde_json::Value;
 
 use super::TrashButton;
 use crate::ticker;
@@ -57,14 +56,13 @@ pub(super) fn register(button: WeakEntity<TrashButton>, cx: &mut App) {
     });
 }
 
-/// A session Delete of this window's succeeded with `reply`, the route's own answer: play the cue if the reply says the
-/// Delete archived a managed checkout. The helm sets that flag only when a checkout really moved, so a bare Delete's
-/// reply, or none, plays nothing. The session list's Delete calls this from its completion, for a success only.
-pub(crate) fn archived(reply: Option<&Value>, cx: &mut App) {
-    let archived = reply
-        .and_then(|reply| serde_json::from_value::<SessionDeleteOutcome>(reply.clone()).ok())
-        .is_some_and(|outcome| outcome.archived);
-    if !archived {
+/// A session Delete of this window's succeeded with `outcome`, the route's own answer as the Delete's completion decoded
+/// it (`None` for no reply, or one that does not read as an outcome): play the cue if it says the Delete archived a
+/// managed checkout. The helm sets that flag only when a checkout really moved, so a bare Delete's reply, or none, plays
+/// nothing. The session list's Delete calls this from its completion, for a success only, and decodes the reply once
+/// there for this and for its Delete notice band.
+pub(crate) fn archived(outcome: Option<&SessionDeleteOutcome>, cx: &mut App) {
+    if !outcome.is_some_and(|outcome| outcome.archived) {
         return;
     }
     let buttons: Vec<Entity<TrashButton>> = cx

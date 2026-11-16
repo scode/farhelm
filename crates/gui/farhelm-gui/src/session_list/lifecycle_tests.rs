@@ -21,6 +21,7 @@ use gpui::{
 use gpui_component::Root;
 use serde_json::{Value, json};
 
+use super::delete_notice;
 use super::menu_tests::{any_layer, click_at, drawn, ended, entry, label_of, push, snapshot};
 use super::outcome::PROGRESS_SHOWS_AFTER;
 use super::tests::{Fixture, change, listing_meta, open_main, painted, selected, sent, session};
@@ -696,9 +697,11 @@ fn the_helm_replaces_a_with_n(
 /// control holds focus when the reply lands, with no input since Confirm: b's menu button, focused before the question
 /// was asked (its menu opened and closed), which is where closing the question returns focus. The question is asked
 /// through the list's own Replace, as the menu's item asks it, so that its opener is that button. The reply's
-/// `delete_notice` has no list band to go to yet and the source's row is gone, so it shows on the replacement's row.
-/// Specified: focus on b's button, a's Replace asked and confirmed with Enter, focus back on b's button; the helm
-/// removes a and lists n; the reply opens n, whose terminal takes focus, and n's row shows "Replace: <notice>".
+/// `delete_notice` is the source's Delete reporting, and the source's row is gone, so it shows in the list's Delete
+/// notice band as an ordinary Delete's notice does, unprefixed, and not on the replacement's row (which once stood in
+/// for the band). Specified: focus on b's button, a's Replace asked and confirmed with Enter, focus back on b's button;
+/// the helm removes a and lists n; the reply opens n, whose terminal takes focus, the band shows the notice's words,
+/// and n's row shows no line.
 #[gpui::test]
 fn a_replace_of_the_open_session_opens_its_replacement_and_focuses_it(cx: &mut TestAppContext) {
     replace_the_open_session_from_bs_button(cx, Confirm::Enter);
@@ -774,9 +777,10 @@ fn replace_the_open_session_from_bs_button(cx: &mut TestAppContext, confirm: Con
         "the replacement's terminal took focus from b's button"
     );
     assert_eq!(
-        label_of(cx, "session-outcome-n").as_deref(),
-        Some("Replace: the checkout moved to the trash")
+        label_of(cx, delete_notice::TEXT_ID).as_deref(),
+        Some("the checkout moved to the trash")
     );
+    assert_eq!(label_of(cx, "session-outcome-n"), None);
 }
 
 /// The hold on a Replace's source ends with the Replace however it ends. A Replace can be refused after the helm already
@@ -808,13 +812,14 @@ fn a_replace_refused_after_its_source_went_lets_the_selection_move_on(cx: &mut T
     );
 }
 
-/// A Replace's `delete_notice` goes on the replacement's row, a key other than the Replace's own, where newer work can
-/// already run: the helm lists the replacement before it removes the source and answers, so the user can Stop it
-/// meanwhile. A note under that Stop would outlive it (a success does not clear the slot), breaking "shown until the
-/// next operation starts", so the notice is dropped. Specified: with a's Replace sent and n listed without tabs, n's
-/// Stop is sent; the Replace's reply carries a delete notice; once n's Stop succeeds, n's row shows no line.
+/// The helm lists the replacement before it removes the source and answers, so the user can Stop it meanwhile. When the
+/// notice went on the replacement's row it had to be dropped then (a note under that Stop would have outlived it), so
+/// the one outcome SPEC.md says is never silent went unseen. The band belongs to no session's operations, so nothing
+/// running anywhere keeps the notice out of it. Specified: with a's Replace sent and n listed without tabs, n's Stop is
+/// sent; the Replace's reply carries a delete notice, which the band shows at once; once n's Stop succeeds, the band
+/// still shows it and n's row shows no line.
 #[gpui::test]
-fn a_delete_notice_is_dropped_when_the_replacement_already_has_work_running(
+fn a_replaces_delete_notice_shows_in_the_band_while_the_replacement_has_work_running(
     cx: &mut TestAppContext,
 ) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);
@@ -833,8 +838,17 @@ fn a_delete_notice_is_dropped_when_the_replacement_already_has_work_running(
         Some("n"),
         "the premise: the reply was read and opened n (a was open and held, so only a decoded reply moves it)"
     );
+    assert_eq!(
+        label_of(cx, delete_notice::TEXT_ID).as_deref(),
+        Some("the checkout moved to the trash"),
+        "shown while n's Stop runs"
+    );
     fake.reply(stopped, 200, Some(json!({})));
     test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, delete_notice::TEXT_ID).as_deref(),
+        Some("the checkout moved to the trash")
+    );
     assert_eq!(label_of(cx, "session-outcome-n"), None);
 }
 

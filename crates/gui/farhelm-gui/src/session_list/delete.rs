@@ -26,6 +26,10 @@
 //! terminal's own notices (`session_pane.rs`), reading the same [`in_flight`] and [`progress_label`] the row does and
 //! turning its own [`Spinner`](crate::components::Spinner).
 //!
+//! A success's own report outlives the row it was about: a notice the helm's reply carries (a checkout that could not
+//! be archived, which SPEC.md says is never silent) goes to the list's Delete notice band ([`super::delete_notice`]),
+//! from [`start`]'s completion, which every Delete of this window passes through.
+//!
 //! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
 //! with nothing alive, as SPEC.md's header Delete does. A bulk Delete of the marked sessions (`super::bulk`) sends each
@@ -45,15 +49,16 @@
 use std::collections::HashSet;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
-use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
+use farhelm_proto::{DeleteGuard, SessionDeleteOutcome};
 use gpui::{
     App, BorrowAppContext as _, Context, ElementId, FontWeight, Global, InteractiveElement,
     IntoElement, ParentElement, Role, SharedString, StatefulInteractiveElement as _, Styled,
     Window, div, px,
 };
+use serde_json::Value;
 
-use super::{SessionList, menu};
+use super::{SessionList, delete_notice, menu};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
@@ -266,8 +271,12 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
 
 /// [`send_delete`] for a caller that has to know what happened: the bulk Delete (`super::bulk`), which shows a refused
 /// start on the row and moves its host's queue on when each Delete settles. Says why nothing was sent, and otherwise
-/// runs `then` once the Delete has settled, after a success was recorded as this window's own ([`deleted_here`]) and
-/// its trash cue played; a reset drops `then` with the Delete's own waiting.
+/// runs `then` once the Delete has settled, after a success was recorded as this window's own ([`deleted_here`]), its
+/// trash cue played and its notice, if the reply carried one, put in the list's Delete notice band
+/// ([`delete_notice`]); a reset drops `then` with the Delete's own waiting.
+///
+/// Every Delete this window sends goes through here, so this completion is the one place a Delete's result reaches the
+/// band: the row's, the header's, the shortcut's and the bulk Delete's alike.
 pub(super) fn start(
     key: &str,
     guard: DeleteGuard,
@@ -288,11 +297,20 @@ pub(super) fn start(
                 cx.update_default_global::<DeletedHere, _>(|here, cx| {
                     here.0.current(cx).insert(deleted);
                 });
-                crate::trash::cue::archived(reply.as_ref(), cx);
+                let outcome = decode(reply.as_ref());
+                crate::trash::cue::archived(outcome.as_ref(), cx);
+                // A checkout the host could not archive is never silent (SPEC.md, "Managed checkouts").
+                delete_notice::publish(outcome.and_then(|outcome| outcome.notice), cx);
             }
             then(cx);
         })
     })
+}
+
+/// A Delete's success `reply`, the route's own answer, read as its outcome ([`SessionDeleteOutcome`]): `None` for no
+/// reply or a body that does not read as one. Decoded once per completion, for both the trash cue and the band.
+fn decode(reply: Option<&Value>) -> Option<SessionDeleteOutcome> {
+    reply.and_then(|reply| serde_json::from_value::<SessionDeleteOutcome>(reply.clone()).ok())
 }
 
 /// The sessions this window deleted under the current UI session: every Delete it sent that the helm did (a 2xx other
