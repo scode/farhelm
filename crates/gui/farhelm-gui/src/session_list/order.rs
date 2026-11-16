@@ -8,14 +8,13 @@
 //! **The helm sorts.** The list draws the sessions in the order the helm pushes them, and the UI channel serves them in
 //! the stored order for as long as the list's own query names no sort (SPEC_impl.md, "The UI channel"; the query in
 //! [`super::filters`] never does). So choosing an order is a preference write and nothing else: a sparse `PUT
-//! /api/preferences` with `{"list_sort": <word>}`, as Settings writes a preference, saved through a [`Draft`] under
-//! the preference row's key ([`OpKey::preferences`]). The helm re-sorts the pushed list as part of that write, before
-//! its reply, and an order the helm stores any other way reaches this window the same way. Re-choosing the order in
-//! force sends nothing.
+//! /api/preferences` with `{"list_sort": <word>}`, saved under the preference row's key through
+//! [`super::queued_preference`]. The helm re-sorts the pushed list as part of that write, before its reply, and an
+//! order the helm stores any other way reaches this window the same way. Re-choosing the order shown sends nothing.
 //!
-//! **What the title says.** While the write is in flight the title names the order being saved; at every other moment
-//! it names the stored order, an unknown or missing word reading as Recently active (the helm's own default for the
-//! channel). There is no copy of the order on this side.
+//! **What the title says.** While a choice waits to be sent or its write is in flight the title names that order; at
+//! every other moment it names the stored order, an unknown or missing word reading as Recently active (the helm's own
+//! default for the channel). There is no copy of the order on this side.
 //!
 //! **A refused write is silent.** SPEC.md, "Errors and diagnostics", counts the list's order among the best-effort
 //! preferences: a failed save is logged and nothing is shown, and the choice stays in effect only until the next read
@@ -26,10 +25,8 @@
 //! any work on a key; nothing in the list draws it, and the Templates dialog, the one view that reads that key's
 //! refusal, shows only one that its own write in the same opening left.
 //!
-//! **A choice while another write is in flight is dropped.** The operation store admits one request at a time on the
-//! preference row's key, which Settings, the Templates dialog and this menu share, and the order's own draft refuses
-//! an edit while its save is in flight. Either way the choice is logged and the title keeps the order it showed, as
-//! Settings drops a click on its switches meanwhile (decided by the migration's orchestrator on 2026-11-14).
+//! **A choice while another preference write is in flight waits for it**, shown at once and sent when it settles, the
+//! newest choice winning ([`super::queued_preference`]).
 //!
 //! **The menu.** The title is a ghost button named "Sort: <order>" that reports whether its menu is open. Its menu is a
 //! popover of the layer manager below the title: the shared [`MenuHeader`] ("Session list"), then the three orders as
@@ -42,15 +39,16 @@
 //!
 //! **Compact.** The menu's last item turns the helm-wide compact preference on or off (SPEC.md, "Session list": "a menu
 //! offering those orders and **Compact**"; the rows' side is `super::row`'s "Compact rows"). It is the order's write in
-//! every way that matters: a sparse `PUT /api/preferences` with `{"compact": <bool>}`, saved through a draft of its own
-//! under the same key, shown (by the item's check and by the rows) as the choice being saved while the write is in
-//! flight and as the stored value at every other moment, an unset preference reading as off. SPEC.md, "Errors and
-//! diagnostics", names the "compact layout" among the best-effort preferences, so a refused write is logged and shows
-//! nothing, the rows and the check going back to the stored density as the order's title goes back to the stored order,
-//! for the reason given above; and a choice while another preference write is in flight is dropped the same way.
+//! every way that matters: a sparse `PUT /api/preferences` with `{"compact": <bool>}`, queued and saved apart from the
+//! order's under the same key, shown (by the item's check and by the rows) as the choice waiting or being saved and as
+//! the stored value at every other moment, an unset preference reading as off. SPEC.md, "Errors and diagnostics", names
+//! the "compact layout" among the best-effort preferences, so a refused write is logged and shows nothing, the rows and
+//! the check going back to the stored density as the order's title goes back to the stored order, for the reason given
+//! above; and a choice while another preference write is in flight waits for it the same way.
 //!
-//! The order state belongs to the UI session (`super::Current`), an entity so the drafts' saves can reach it when the
-//! reply arrives and the open menu can read it while it draws: a reset starts it over, with the helm's channel.
+//! The order state belongs to the UI session (`super::Current`), an entity so the writes' saves and their queue can
+//! reach it when the operation store changes and the open menu can read it while it draws: a reset starts it over, with
+//! the helm's channel, and drops any choice not sent yet.
 //!
 //! NOTE: Not ported yet: placing the menu beside the sidebar with a pointer notch (it opens below its anchor, the layer
 //! manager's default placement, and the layer manager draws no notch); and `aria-haspopup`, which GPUI cannot report.
@@ -68,16 +66,16 @@ use gpui::{
     Window, div, px, svg,
 };
 
+use super::queued_preference::QueuedPreference;
 use super::{SessionList, selection};
 use crate::assets::Icon;
 use crate::components::{
     Button, HoverHelp, MenuHeader, MenuItem, MenuStart, Role, home_end_keys, menu_separator,
     toggle_arrow_keys,
 };
-use crate::drafts::{self, Draft};
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
-use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::operations::{Command, Work};
 use crate::session;
 use crate::theme::{self, metrics};
 
@@ -227,38 +225,29 @@ pub(crate) fn compact_stored(collections: &Collections) -> bool {
     selection::preferences(collections).and_then(|preferences| preferences.compact) == Some(true)
 }
 
-/// The order's state in one UI session: the drafts its two writes are saved through, and the menu the title last
-/// opened.
+/// The order's state in one UI session: its two writes, each with its choice waiting or in flight, and the menu the
+/// title last opened.
 pub(crate) struct OrderState {
-    /// The order being saved while a write is in flight. Its value means nothing at any other moment: the title then
-    /// reads the store.
-    draft: Draft<Order>,
-    /// The compact choice being saved while its write is in flight, read the same way as `draft`.
-    compact: Draft<bool>,
+    /// The order waiting to be sent or being saved. While neither, the title reads the store.
+    order: QueuedPreference<Order>,
+    /// The compact choice waiting to be sent or being saved, read the same way as `order`.
+    compact: QueuedPreference<bool>,
     /// The menu the title opened, checked with the layer manager when read, so a menu closed some other way (Escape, a
     /// press outside, the title no longer drawn) needs no bookkeeping.
     menu: Option<LayerId>,
 }
 
 impl OrderState {
-    /// The order the title names and the menu checks, `stored` being the helm's: the one being saved while its write
-    /// is in flight, else the stored one (see the module docs).
+    /// The order the title names and the menu checks, `stored` being the helm's: the one waiting to be sent, else the
+    /// one being saved, else the stored one (see the module docs).
     fn shown(&self, stored: Order) -> Order {
-        if self.draft.is_saving() {
-            *self.draft.value()
-        } else {
-            stored
-        }
+        self.order.shown(stored)
     }
 
     /// Whether the rows are compact and the Compact item checked, `stored` being the helm's ([`compact_stored`]): the
-    /// choice being saved while its write is in flight, else the stored one.
+    /// choice waiting to be sent, else the one being saved, else the stored one.
     pub(crate) fn compact_shown(&self, stored: bool) -> bool {
-        if self.compact.is_saving() {
-            *self.compact.value()
-        } else {
-            stored
-        }
+        self.compact.shown(stored)
     }
 }
 
@@ -270,8 +259,8 @@ impl SessionList {
             return state.clone();
         }
         let state = cx.new(|_| OrderState {
-            draft: Draft::load(Order::Activity),
-            compact: Draft::load(false),
+            order: QueuedPreference::new(Order::Activity),
+            compact: QueuedPreference::new(false),
             menu: None,
         });
         current.order = Some(state.clone());
@@ -339,8 +328,8 @@ impl SessionList {
     }
 
     /// The user chose `order` in the menu: close the menu, which returns focus to the title, then save the order
-    /// unless it is the one shown already. A choice that cannot be saved now (another preference write in flight, or no
-    /// UI session) is logged and changes nothing, and a refused save is logged and shows nothing (the module docs).
+    /// unless it is the one shown already. A choice made while another preference write is in flight is shown at once
+    /// and sent once it settles, and a refused save is logged and shows nothing (the module docs).
     fn choose_order(&mut self, order: Order, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.order_state(cx);
         if let Some(menu) = state.read(cx).menu {
@@ -354,36 +343,21 @@ impl SessionList {
             return;
         }
         state.update(cx, |state, cx| {
-            if !state.draft.edit(order) {
-                tracing::debug!(
-                    ?order,
-                    "the list's order was not saved: its last save is in flight"
-                );
-                return;
-            }
-            let started = drafts::save(
+            QueuedPreference::choose(
                 state,
-                |state: &mut OrderState| &mut state.draft,
-                &OpKey::preferences(),
+                |state: &mut OrderState| &mut state.order,
+                order,
                 |order| command(*order),
+                "the list's order",
                 cx,
-                move |_, settled, _| {
-                    if let Outcome::Refused(refusal) = &settled.outcome {
-                        let words = &refusal.words;
-                        tracing::warn!(?order, ?words, "the helm refused the list's order");
-                    }
-                },
             );
-            if let Err(not_started) = started {
-                tracing::debug!(?order, ?not_started, "the list's order was not saved");
-            }
         });
         cx.notify();
     }
 
     /// The user chose Compact in the menu: close the menu, which returns focus to the title, then save the opposite of
-    /// the density shown. As for an order, a choice that cannot be saved now is logged and changes nothing, and a
-    /// refused save is logged and shows nothing (the module docs, "Compact").
+    /// the density shown. As for an order, a choice made while another preference write is in flight waits for it,
+    /// and a refused save is logged and shows nothing (the module docs, "Compact").
     fn choose_compact(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.order_state(cx);
         if let Some(menu) = state.read(cx).menu {
@@ -396,29 +370,14 @@ impl SessionList {
             .read(cx)
             .compact_shown(compact_stored(store.read(cx).collections()));
         state.update(cx, |state, cx| {
-            if !state.compact.edit(compact) {
-                tracing::debug!(
-                    compact,
-                    "the compact choice was not saved: its last save is in flight"
-                );
-                return;
-            }
-            let started = drafts::save(
+            QueuedPreference::choose(
                 state,
                 |state: &mut OrderState| &mut state.compact,
-                &OpKey::preferences(),
+                compact,
                 |compact| compact_command(*compact),
+                "the compact choice",
                 cx,
-                move |_, settled, _| {
-                    if let Outcome::Refused(refusal) = &settled.outcome {
-                        let words = &refusal.words;
-                        tracing::warn!(compact, ?words, "the helm refused the compact choice");
-                    }
-                },
             );
-            if let Err(not_started) = started {
-                tracing::debug!(compact, ?not_started, "the compact choice was not saved");
-            }
         });
         cx.notify();
     }
