@@ -82,6 +82,7 @@ pub(super) fn section_button(section: Section) -> &'static str {
         Section::Sessions => "settings-section-sessions",
         Section::Hosts => "settings-section-hosts",
         Section::Recipes => "settings-section-recipes",
+        Section::Tensorlake => "settings-section-tensorlake",
         Section::Containers => "settings-section-containers",
         Section::Credentials => "settings-section-credentials",
         Section::Appearance => "settings-section-appearance",
@@ -271,13 +272,12 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Recipes, Containers,
-/// Credentials, Terminal, Checkouts, Agent trust and Notifications, and App only where the desktop app's updater runs,
-/// which it does not here; listing a section with nothing behind it would offer a button that shows an empty pane. The
-/// list follows SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal,
-/// Checkouts, Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
-/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Recipes, Containers, Credentials,
-/// Terminal, Checkouts, Agent trust and Notifications buttons, in that order, Sessions pressed and the others not.
+/// SPEC.md lists every section, and App only where the desktop app's updater runs, which it does not here; listing App
+/// with nothing behind it would offer a button that shows an empty pane. The list follows SPEC.md's order ("Sessions,
+/// Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications,
+/// followed by App"), and the button of the shown section is the pressed one. Specified: the section list holds exactly
+/// the Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and
+/// Notifications buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -305,6 +305,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
             ("Recipes".to_string(), Some(Toggled::False)),
+            ("Tensorlake".to_string(), Some(Toggled::False)),
             ("Containers".to_string(), Some(Toggled::False)),
             ("Credentials".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),

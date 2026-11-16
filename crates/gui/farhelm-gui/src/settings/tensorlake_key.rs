@@ -8,14 +8,18 @@
 //!
 //! - **One account per opening, one draft per form.** SPEC.md puts the same form in Credentials and in Tensorlake, and
 //!   a save or clear in either updates both forms' saved-key metadata at once while each keeps its own unsaved key. So
-//!   what the helm acknowledged (whether a key is saved) lives in a [`TensorlakeAccount`] the Settings dialog makes once
-//!   per opening and hands to each form, and the typed key lives in the form. Only Credentials draws the form so far;
-//!   the Tensorlake section gives it its second place (its label "API key", its own storage warning and its own help
-//!   line) when it is built.
+//!   what the helm acknowledged lives in a [`TensorlakeAccount`] the Settings dialog makes once per opening and hands
+//!   to each form, and the typed key lives in the form. The account keeps the helm's whole answer, not only whether a
+//!   key is saved, because Settings → Tensorlake draws its other parts (the create-without-asking switch) from it too.
+//! - **Two places, one form.** Each form is made for its [`Place`]. In Credentials it is labelled "Tensorlake API key"
+//!   and shows no storage warning, since the overview's names this key; in Tensorlake it is labelled "API key" and
+//!   shows its own warning, worded for that one key (SPEC.md: "in Tensorlake the key form shows its own warning"). Each
+//!   place's second help line points at the other.
 //! - **Read once.** `/api/tensorlake` is helm configuration the helm does not push, so the account reads it when it is
 //!   made, and a reply reaches only that opening. Until it answers, every control is locked and the field has no
 //!   placeholder; a failed read shows the helm's reason with "Retry loading", and nothing is editable until a retry
-//!   answers (the old "a failed load seeds nothing editable").
+//!   answers (the old "a failed load seeds nothing editable"). Whatever else reads the account in that opening (the
+//!   Tensorlake section's switch) is locked the same way.
 //! - **Write-only.** The helm never returns the key. Save sends only the typed key, Clear only the clear flag, so
 //!   neither can undo a change another window made to the account's other fields. A done Save or Clear takes the helm's
 //!   answer as the account's new metadata and empties the field; a refusal keeps the typed key with the helm's words.
@@ -59,7 +63,7 @@ fn path(tail: &[&str]) -> Result<ApiPath, PathError> {
 
 /// `PUT /api/tensorlake` with `save`, which names only the field it changes. Turning it into JSON cannot fail (an
 /// optional string and two flags); if it ever did, the request would go without a body and the helm would refuse it.
-fn save_command(save: &SaveSettings) -> Result<Command, PathError> {
+pub(super) fn save_command(save: &SaveSettings) -> Result<Command, PathError> {
     Ok(Command::new(
         Work::Save,
         Method::Put,
@@ -95,12 +99,18 @@ fn test_message(result: TestResult) -> String {
 
 // ---- The account --------------------------------------------------------------------------------------------------
 
-/// What one opening of Settings knows of the helm's Tensorlake account: whether an API key is saved, as the helm last
-/// said, shared by every key form of that opening (see the module docs). Made by the dialog when a section that needs it
-/// first shows, which is when it reads the route.
+/// What one opening of Settings knows of the helm's Tensorlake account, as the helm last said it, shared by every key
+/// form of that opening and by the Tensorlake section (see the module docs). Made by the dialog when a section that
+/// needs it first shows, which is when it reads the route.
+///
+/// Every done save through `PUT /api/tensorlake` answers with the whole settings, and the account takes that answer
+/// whole. The UI channel admits one command at a time and answers them in order (SPEC_impl.md, "The UI channel"), so
+/// the read's answer and every save's reach the account in the order they were sent, and none carries an older stored
+/// value than the answer before it. That is why taking an answer whole is safe here, where the old form, whose requests
+/// could overtake each other, copied only the field its control owned.
 pub(super) struct TensorlakeAccount {
-    /// Whether a key is saved: the read's answer, then each done Save's or Clear's. `None` until the read answers.
-    key_set: Option<bool>,
+    /// The helm's settings: the read's answer, then each done save's. `None` until the read answers.
+    settings: Option<Settings>,
     /// Why the last read failed, until a read answers.
     unreadable: Option<HostText>,
 }
@@ -110,9 +120,26 @@ impl TensorlakeAccount {
     pub(super) fn new(cx: &mut Context<Self>) -> Self {
         Self::read(cx);
         TensorlakeAccount {
-            key_set: None,
+            settings: None,
             unreadable: None,
         }
+    }
+
+    /// The helm's settings as last answered; `None` until the read answers, and while it keeps failing.
+    pub(super) fn settings(&self) -> Option<&Settings> {
+        self.settings.as_ref()
+    }
+
+    /// Why the account could not be read, until a read answers.
+    fn unreadable(&self) -> Option<&HostText> {
+        self.unreadable.as_ref()
+    }
+
+    /// Read the account again after a failed read: Retry loading.
+    fn retry(&mut self, cx: &mut Context<Self>) {
+        self.unreadable = None;
+        Self::read(cx);
+        cx.notify();
     }
 
     /// Read `/api/tensorlake`, the answer going to this account if its opening is still open, under
@@ -128,7 +155,7 @@ impl TensorlakeAccount {
     fn answered(&mut self, answer: Result<Settings, HostText>, cx: &mut Context<Self>) {
         match answer {
             Ok(settings) => {
-                self.key_set = Some(settings.api_key_set);
+                self.settings = Some(settings);
                 self.unreadable = None;
             }
             Err(reason) => self.unreadable = Some(reason),
@@ -136,26 +163,78 @@ impl TensorlakeAccount {
         cx.notify();
     }
 
-    /// A done Save or Clear answered with `body`, the settings the helm now stores.
-    fn acknowledged(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
-        if let Some(Ok(settings)) = body.map(serde_json::from_value::<Settings>) {
-            self.answered(Ok(settings), cx);
+    /// A done save of the account answered with `body`, the settings the helm now stores. A body that does not decode
+    /// (the helm always answers with its settings, so this is a helm the GUI does not understand) reads the account
+    /// again: the save is done, but what it stored is unknown, and the account is otherwise read only once per opening,
+    /// so the controls would go on showing the choice from before the save until Settings is opened again.
+    pub(super) fn acknowledged(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
+        match body.map(serde_json::from_value::<Settings>) {
+            Some(Ok(settings)) => self.answered(Ok(settings), cx),
+            Some(Err(_)) | None => Self::read(cx),
         }
     }
 }
 
 // ---- The form -----------------------------------------------------------------------------------------------------
 
-/// The key form, a view of its own over the opening's [`TensorlakeAccount`]. Settings makes it with Credentials and
-/// keeps it until the dialog closes, so its typed key survives section switches and the credential editor.
+/// Where a key form is drawn, which decides its words (the module docs). Both places' forms share their element ids,
+/// which is fine because Settings draws one section at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Place {
+    /// Settings → Credentials, under the overview's storage warning, which names this key.
+    Credentials,
+    /// Settings → Tensorlake, with a storage warning of its own.
+    Tensorlake,
+}
+
+impl Place {
+    /// The field's label, which is also its accessible name: Credentials names the product to tell this key from the
+    /// named secrets around it, while the Tensorlake section's heading already names it.
+    fn label(self) -> &'static str {
+        match self {
+            Place::Credentials => "Tensorlake API key",
+            Place::Tensorlake => "API key",
+        }
+    }
+
+    /// The second help line, which points at the other place, in the old form's words.
+    fn elsewhere(self) -> &'static str {
+        match self {
+            Place::Credentials => {
+                "The same key as in Settings → Tensorlake. Changing it here changes it there."
+            }
+            Place::Tensorlake => "You can also change it in Settings → Credentials.",
+        }
+    }
+
+    /// Whether the form draws its own "Not encrypted on disk" warning: only where no other warning names the key.
+    fn warns(self) -> bool {
+        match self {
+            Place::Credentials => false,
+            Place::Tensorlake => true,
+        }
+    }
+}
+
+/// The Tensorlake section's storage warning, the old singular `StorageWarning` body.
+const STORAGE_WARNING: &str = "Farhelm stores this key in plain text in this helm's state, on the machine the helm \
+                               runs on. Anyone who can read that folder can read it. Farhelm never shows a saved \
+                               value again.";
+
+/// The key form, a view of its own over the opening's [`TensorlakeAccount`]. Settings makes one with Credentials and
+/// one with Tensorlake, and keeps each until the dialog closes, so its typed key survives section switches and the
+/// credential editor.
 pub(super) struct TensorlakeKey {
     account: Entity<TensorlakeAccount>,
+    /// Where it is drawn ([`Place`]).
+    place: Place,
     key: DraftInput,
     /// Whether Clear or Test is out; Save's own flight is the draft's.
     working: bool,
     /// How the last Save, Clear or Test went, with the typed key it applies to: the one sent, kept or tested, or the
-    /// empty field a done Save or Clear leaves. Shown while the draft still holds that key ([`TensorlakeKey::outcome`]),
-    /// so an edit makes it stale, as the old form's `oninput` cleared it; replaced by the next Save, Clear or Test.
+    /// empty field a done Save or Clear leaves. Shown while the draft still holds that key
+    /// ([`TensorlakeKey::outcome`]), so an edit makes it stale, as the old form's `oninput` cleared it; replaced by the
+    /// next Save, Clear or Test.
     outcome: Option<(Result<SharedString, HostText>, String)>,
     /// Whether the last Save or Clear sent nothing because another Settings save held the key.
     refused: Refused,
@@ -166,8 +245,10 @@ pub(super) struct TensorlakeKey {
 }
 
 impl TensorlakeKey {
+    /// The form for `place` over `account`, with an empty field.
     pub(super) fn new(
         account: Entity<TensorlakeAccount>,
+        place: Place,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -179,6 +260,7 @@ impl TensorlakeKey {
         let key = Self::key_input(window, cx);
         let form = TensorlakeKey {
             account,
+            place,
             key,
             working: false,
             outcome: None,
@@ -237,7 +319,10 @@ impl TensorlakeKey {
 
     /// Whether the helm has a key saved; `None` until the account's read answers.
     fn key_set(&self, cx: &App) -> Option<bool> {
-        self.account.read(cx).key_set
+        self.account
+            .read(cx)
+            .settings()
+            .map(|settings| settings.api_key_set)
     }
 
     /// Whether the controls take no input: before the account's read has answered, and while Save, Clear or Test is
@@ -395,12 +480,12 @@ impl Render for TensorlakeKey {
         let busy = self.working || self.key.draft().is_saving();
 
         let field = choices::labelled(
-            "Tensorlake API key",
+            self.place.label(),
             ID,
             TextInput::new(
                 ID,
                 self.key.input(),
-                "Tensorlake API key",
+                self.place.label(),
                 HoverHelp::tooltip(if key_set == Some(true) {
                     "Paste a new Tensorlake API key to replace the saved one"
                 } else {
@@ -410,7 +495,7 @@ impl Render for TensorlakeKey {
             .height(px(choices::FIELD_HEIGHT)),
         );
 
-        let unloaded = self.account.read(cx).unreadable.clone();
+        let unloaded = self.account.read(cx).unreadable().cloned();
         let retry = unloaded.is_some().then(|| {
             let account = self.account.clone();
             Button::new(
@@ -421,11 +506,7 @@ impl Render for TensorlakeKey {
             )
             .tier(Tier::Neutral)
             .on_click(move |_, _, cx| {
-                account.update(cx, |account, cx| {
-                    account.unreadable = None;
-                    TensorlakeAccount::read(cx);
-                    cx.notify();
-                });
+                account.update(cx, |account, cx| account.retry(cx));
             })
         });
 
@@ -498,16 +579,22 @@ impl Render for TensorlakeKey {
             .min_w_0()
             .children(unloaded.as_ref().map(|reason| choices::failure_outcome(format!("{ID}-load-error"), reason, cx)))
             .children(retry)
+            // Under the load failure and above the field, as the old form drew its `StorageWarning`, so the user meets
+            // it before pasting a key.
+            .children(self.place.warns().then(|| {
+                super::credentials::storage_warning(
+                    "tensorlake-key-storage-warning",
+                    STORAGE_WARNING,
+                    cx,
+                )
+            }))
             .child(field)
             .child(choices::help(
                 "Create a key in the Tensorlake dashboard, in the project you want sandboxes in. Test lists your \
                  sandboxes to check that the saved key works.",
                 cx,
             ))
-            .child(choices::help(
-                "The same key as in Settings → Tensorlake. Changing it here changes it there.",
-                cx,
-            ))
+            .child(choices::help(self.place.elsewhere(), cx))
             // `.dialog-actions`: Test, Clear and Save at the form's end, in the old order.
             .child(
                 div()

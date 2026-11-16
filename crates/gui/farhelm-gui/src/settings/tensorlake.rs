@@ -1,0 +1,287 @@
+//! Settings → Tensorlake: the helm's Tensorlake account, for hosts and sessions that are Tensorlake sandboxes.
+//!
+//! SPEC.md, "Session list" (the paragraph that starts "The **Tensorlake** section holds the helm's Tensorlake
+//! account"); SPEC_impl.md, "Tensorlake account". Ported from the old app's `TensorlakeSettings`
+//! (`tensorlake_settings.rs`) and its look from the `.tensorlake-experimental`, `.host-settings-section` and
+//! `.host-settings-section-title` rules in `app.css`, all at reference commit `24bc0580`, with the old words. Here's
+//! the TLDR of its rules:
+//!
+//! - **The warning comes first, always.** The maintainer's EXPERIMENTAL warning heads the section, above the API key
+//!   every Tensorlake user has to set up, so nobody starts without seeing it, and it is drawn whether or not the
+//!   account read answers (SPEC.md: "it shows whether or not the section's settings load"). Its words are the
+//!   maintainer's, reproduced exactly (2026-11-04); change them only on their say.
+//! - **The key form is the shared one.** The section draws its own copy of the Tensorlake API key form over the
+//!   opening's account ([`super::tensorlake_key`]), so a Save or Clear here shows in Credentials at once and each keeps
+//!   its own typed key.
+//! - **The create-without-asking switch shows only what the helm stored.** It can authorize billed sandboxes without a
+//!   question, so, as in the old section, it never shows a choice the helm has not acknowledged (SPEC.md: it "saves
+//!   only when the helm acknowledges it and shows only the stored choice"): during its save it keeps showing the
+//!   stored choice, a done save's answer becomes the account's, and a refusal leaves the stored choice with the helm's
+//!   words under the switch. It is unavailable until the account read answers, and stays so after a failed read until
+//!   Retry loading answers, since an off switch drawn then would be a guess. Its save names only its own field, under
+//!   the preference row's key like every other Settings save ([`super::agent_trust`] has the reasoning).
+//!
+//! NOTE: Not ported yet: the SSH key group (Create SSH key and the registration command with Copy) and **Sandboxes not
+//! on this helm**, which the old section drew between the key form and "Creating sandboxes". Both come with their own
+//! changes; `docs/gpui/parity/settings-and-hosts.md` tracks them.
+
+use farhelm_proto::tensorlake::SaveSettings;
+use gpui::{
+    App, Context, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Window, div, px,
+};
+
+use super::Refused;
+use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::tensorlake_key::{self, TensorlakeAccount, TensorlakeKey};
+use crate::components::{Checkbox, HoverHelp};
+use crate::drafts::{self, Draft};
+use crate::host_text::HostSentence;
+use crate::operations::{OpKey, Outcome};
+use crate::theme::{self, metrics};
+
+/// The maintainer's warning at the top of the section, word for word (see the module docs).
+pub(super) const EXPERIMENTAL_WARNING: &str = "EXPERIMENTAL: Tensorlake support is currently early and experimental. \
+                                               User experience is not yet reasonable. Expect rough edges. Things will \
+                                               change randomly between releases. Try at your own risk. You are \
+                                               responsible for making sure sandboxes are not running and billing you \
+                                               when you don't want them to.";
+
+/// The warning's accessible name, the old note's `aria-label`.
+const EXPERIMENTAL_NAME: &str = "Tensorlake support is experimental";
+
+/// The help under the warning, the old words.
+const INTRO: &str = "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them \
+                     in the Tensorlake project your API key belongs to.";
+
+/// The switch's element id; its failure line is `-error` after it.
+pub(super) const ASK_ID: &str = "tensorlake-create-without-asking";
+const ASK_ERROR_ID: &str = "tensorlake-create-without-asking-error";
+const ASK_LABEL: &str = "Create Tensorlake sandboxes without asking";
+const ASK_TOOLTIP: &str = "Skip the confirmation when adding a Tensorlake host, which creates a sandbox that bills \
+                           while it runs";
+const ASK_HELP: &str = "Adding a Tensorlake host or launching a recipe session creates a sandbox, which bills while \
+                        running, so Farhelm asks first. This skips that question. \"Set up new hosts without asking\" \
+                        under Hosts never does.";
+
+/// The note under the switch about Tensorlake's own idle suspend and the sessions' fixed timeout (SPEC.md: "on
+/// Tensorlake's Usage Credits plan Tensorlake suspends an ordinary host sandbox after 24 hours without a connection
+/// from Farhelm"), the old words.
+pub(super) const USAGE_CREDITS_NOTE: &str = "On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after \
+                                             24 hours without a connection from Farhelm, for example while this \
+                                             helm's machine is asleep. Sandbox sessions instead have a fixed \
+                                             30-minute idle timeout. Their processes and files remain until you \
+                                             explicitly delete the sandbox; Resume continues them.";
+
+/// `.tensorlake-experimental`: its padding (top and bottom, then the sides), its text size and its line (1.45 of
+/// 15 pixels), and the room under it.
+const WARNING_PAD: (f32, f32) = (14., 16.);
+const WARNING_TEXT: f32 = 15.;
+const WARNING_LINE_HEIGHT: f32 = 21.75;
+const WARNING_MARGIN: f32 = 14.;
+
+/// `.host-settings-section`'s gap, and a later section's room above its title under the rule
+/// (`.host-settings-section + .host-settings-section`).
+const PART_GAP: f32 = 14.;
+const RULE_PAD: f32 = 20.;
+/// `.host-settings-section-title`'s size.
+const TITLE_TEXT: f32 = 11.;
+
+/// The switch's request: its own field and nothing else, so it cannot undo a key another form saved.
+fn ask_save(create_without_asking: bool) -> SaveSettings {
+    SaveSettings {
+        create_without_asking: Some(create_without_asking),
+        ..SaveSettings::default()
+    }
+}
+
+/// The Tensorlake section, a view of its own that Settings makes the first time Tensorlake shows in an opening and
+/// keeps until the dialog closes, so its key form's typed key and its switch's failure survive section switches.
+pub(super) struct Tensorlake {
+    account: Entity<TensorlakeAccount>,
+    /// The section's copy of the API key form.
+    key: Entity<TensorlakeKey>,
+    /// The switch's save: whether it is in flight, and the helm's words for the last refusal. Its value is the choice
+    /// being saved, which the switch never shows (see the module docs).
+    ask: Draft<bool>,
+    /// Whether the switch's last press sent nothing because another Settings save held the key ([`Refused`]).
+    refused: Refused,
+    /// Redraws the section when the account changes: the read, a retry, or a save from either key form.
+    _account: Subscription,
+}
+
+impl Tensorlake {
+    /// The section over `account`, the opening's, with `key` as its key form.
+    pub(super) fn new(
+        account: Entity<TensorlakeAccount>,
+        key: Entity<TensorlakeKey>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let observing = cx.observe(&account, |_, _, cx| cx.notify());
+        Tensorlake {
+            account,
+            key,
+            ask: Draft::load(false),
+            refused: Refused::default(),
+            _account: observing,
+        }
+    }
+
+    /// The section's key form, for tests that read its typed key: the field is masked.
+    #[cfg(test)]
+    pub(super) fn key(&self) -> Entity<TensorlakeKey> {
+        self.key.clone()
+    }
+
+    /// The stored create-without-asking choice, as the helm last said; `None` until the account read answers.
+    fn stored(&self, cx: &App) -> Option<bool> {
+        self.account
+            .read(cx)
+            .settings()
+            .map(|settings| settings.create_without_asking)
+    }
+
+    /// The user turned the switch to `on`: save it (the module docs). Does nothing until the account is known, when
+    /// the switch is drawn unavailable. A press during the switch's own save, or while another Settings save holds the
+    /// key, sends nothing and says so under the switch.
+    fn toggle(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.stored(cx).is_none() {
+            return;
+        }
+        if !self.ask.edit(on) {
+            self.refused.refuse(ASK_ID);
+            cx.notify();
+            return;
+        }
+        let account = self.account.clone();
+        let started = drafts::save(
+            self,
+            |section: &mut Self| &mut section.ask,
+            &OpKey::preferences(),
+            |on| tensorlake_key::save_command(&ask_save(*on)),
+            cx,
+            move |_, settled, cx| {
+                if let Outcome::Done(body) = &settled.outcome {
+                    let body = body.clone();
+                    account.update(cx, |account, cx| account.acknowledged(body, cx));
+                }
+            },
+        );
+        self.refused.record(ASK_ID, &started);
+        if let Err(not_started) = started {
+            tracing::debug!(
+                on,
+                ?not_started,
+                "Tensorlake create-without-asking not saved"
+            );
+        }
+        cx.notify();
+    }
+
+    /// The maintainer's warning: the danger fill with its stronger edge and the on-fill ink, bold
+    /// (`.tensorlake-experimental`).
+    fn warning(cx: &App) -> gpui::Stateful<Div> {
+        let palette = theme::palette(cx);
+        div()
+            .id("tensorlake-experimental")
+            .debug_selector(|| "tensorlake-experimental".to_owned())
+            .role(Role::Note)
+            .aria_label(EXPERIMENTAL_NAME)
+            .mb(px(WARNING_MARGIN))
+            .py(px(WARNING_PAD.0))
+            .px(px(WARNING_PAD.1))
+            .rounded(metrics::RADIUS_LG)
+            .border_2()
+            .border_color(theme::color(palette.danger_strong))
+            .bg(theme::color(palette.danger_bg))
+            .text_color(theme::color(palette.on_fill))
+            .text_size(px(WARNING_TEXT))
+            .line_height(px(WARNING_LINE_HEIGHT))
+            .font_weight(FontWeight::BOLD)
+            .child(EXPERIMENTAL_WARNING)
+    }
+
+    /// "Creating sandboxes": its title, the switch with its help, failure and busy lines, and the Usage Credits note,
+    /// ruled off from the key form above it as the old sections were.
+    fn creating(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {
+        let palette = theme::palette(cx);
+        let stored = self.stored(cx);
+        let weak = cx.weak_entity();
+        let switch = div()
+            .text_size(px(LABEL_TEXT))
+            .line_height(px(LABEL_LINE_HEIGHT))
+            .child(
+                Checkbox::new(
+                    ASK_ID,
+                    ASK_LABEL,
+                    HoverHelp::tooltip(ASK_TOOLTIP),
+                    Role::Switch,
+                )
+                .switch()
+                .checked(stored == Some(true))
+                .disabled(stored.is_none())
+                .on_toggle(move |on, _, cx| {
+                    let _ = weak.update(cx, |section, cx| section.toggle(on, cx));
+                }),
+            );
+        // The old line was the helm's words alone, with none of the app's before them.
+        let failure = self.ask.refusal().map(|reason| {
+            choices::host_failure_line(
+                ASK_ERROR_ID,
+                HostSentence::new(ASK_ERROR_ID).host(reason),
+                cx,
+            )
+        });
+        let group = div()
+            .flex()
+            .flex_col()
+            .gap(px(GROUP_GAP))
+            .min_w_0()
+            .child(switch)
+            .child(choices::help(ASK_HELP, cx))
+            .children(failure)
+            .children(choices::busy_line(&self.refused, ASK_ID, cx));
+        div()
+            .id("tensorlake-creating")
+            .role(Role::Region)
+            .aria_label("Creating sandboxes")
+            .flex()
+            .flex_col()
+            .gap(px(PART_GAP))
+            .min_w_0()
+            .pt(px(RULE_PAD))
+            .border_t_1()
+            .border_color(theme::color(palette.border_dim))
+            .child(
+                div()
+                    .id("tensorlake-creating-heading")
+                    .role(Role::Heading)
+                    .aria_label("Creating sandboxes")
+                    .text_size(px(TITLE_TEXT))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::color(palette.fg_1))
+                    .child("Creating sandboxes"),
+            )
+            .child(group)
+            .child(choices::help(USAGE_CREDITS_NOTE, cx))
+    }
+}
+
+impl Render for Tensorlake {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("tensorlake")
+            .role(Role::Region)
+            .aria_label(SharedString::from("Tensorlake"))
+            .flex()
+            .flex_col()
+            .gap(px(PART_GAP))
+            .w_full()
+            .min_w_0()
+            .child(Self::warning(cx))
+            .child(choices::help(INTRO, cx))
+            .child(self.key.clone())
+            .child(self.creating(cx))
+    }
+}

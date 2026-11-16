@@ -1,25 +1,24 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, once more with help
 //! in paragraphs, once more beside a sidebar with its notch and ring, popover, the prompt over its veil, once more with
 //! a summary that names a host value, once more with a feature-drawn body, a header tile and a footer note, and the
-//! prompt anchored to a row's menu button), the keyboard
-//! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
-//! an attached terminal's exit line and status line, a terminal file link's hover display in each of its states, the
-//! scrim a pending Delete puts over the open session's terminal, the interrupted card in its place (with Restart and
-//! Replace, and with Replace alone), the unavailable card with the stale band above it (a host that does not answer,
-//! and one that needs an update), the open session's details bar (every status and host it draws differently, and a
-//! narrow one, and once more with a copy confirmed and its hidden-characters warning), the session list (a fleet of
-//! every status a row draws, the open row on a host the helm cannot reach, an empty fleet, two rows marked under the
-//! marked bar, a row's open menu, a row's
-//! notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the Send
-//! feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
-//! drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at
-//! Appearance, at Hosts, at Recipes (empty, with recipes in each build state, with a recipe's per-place lines, and with
-//! a new recipe's editor open), at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details,
-//! with a host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with
-//! a host's Update running), a host's progress card (whole, and previewed in a short window), the Add host dialog and
-//! the setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its
-//! end, the host refusal dialog for a refused Update, the version readout while an updater runs (the check button at
-//! rest, lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and the
+//! prompt anchored to a row's menu button), the keyboard focus ring, host-supplied text over its spoofing corpus, the
+//! notice banner, the terminal's styles and cursor shapes, an attached terminal's exit line and status line, a terminal
+//! file link's hover display in each of its states, the scrim a pending Delete puts over the open session's terminal,
+//! the interrupted card in its place (with Restart and Replace, and with Replace alone), the unavailable card with the
+//! stale band above it (a host that does not answer, and one that needs an update), the open session's details bar
+//! (every status and host it draws differently, and a narrow one, and once more with a copy confirmed and its
+//! hidden-characters warning), the session list (a fleet of every status a row draws, the open row on a host the helm
+//! cannot reach, an empty fleet, two rows marked under the marked bar, a row's open menu, a row's notification list, a
+//! row's Delete question, and a pending and a refused Delete), the Rename editor, the Send feedback dialog (as it
+//! opens, and with a remembered contact), the select closed and open, the YOLO confirmation drawn inline in a
+//! launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at Appearance, at Hosts, at
+//! Recipes (empty, with recipes in each build state, with a recipe's per-place lines, and with a new recipe's editor
+//! open), at Tensorlake, at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
+//! host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a
+//! host's Update running), a host's progress card (whole, and previewed in a short window), the Add host dialog and the
+//! setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end,
+//! the host refusal dialog for a refused Update, the version readout while an updater runs (the check button at rest,
+//! lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and the
 //! reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), the Open-Source Notices
 //! window over a short fixture, and the Trash button empty, full and freeing space, and the Trash dialog, alone and
 //! asking to delete everything or one host's archives, in both appearances, compared pixel for pixel. (The terminal
@@ -3023,16 +3022,17 @@ fn keyboard_shortcuts_dialog_setup(state: &SceneState, window: &mut Window, cx: 
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-recipes`, `settings-containers`,
-/// `settings-credentials`, `settings-terminal`, `settings-checkouts`, `settings-agent-trust`, `settings-notifications`
-/// and `settings-app`): focus on the section's first switch (on the dialog itself at Appearance, Recipes, Containers,
-/// Credentials, Terminal, Checkouts, Agent trust and Notifications), naming on because the row stores no choice for it,
-/// and automatic remote-host updates turned on so the Hosts picture shows a switch in each state. Agent trust's reads
-/// of each agent's trust, sent as it opens, are answered at once with the trust off and the hint not dismissed,
-/// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
-/// ready, Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic, Default
-/// priority, no token), Credentials' reads with an empty catalog and no Tensorlake key saved, Recipes' read of the
-/// Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog and no pushed
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-recipes`, `settings-tensorlake`,
+/// `settings-containers`, `settings-credentials`, `settings-terminal`, `settings-checkouts`, `settings-agent-trust`,
+/// `settings-notifications` and `settings-app`): focus on the section's first switch (on the dialog itself at
+/// Appearance, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications),
+/// naming on because the row stores no choice for it, and automatic remote-host updates turned on so the Hosts picture
+/// shows a switch in each state. Agent trust's reads of each agent's trust, sent as it opens, are answered at once with
+/// the trust off and the hint not dismissed, Checkouts' reads as the reference stack had them: no default folder, no
+/// post-clone command, and a checkout kept ready, Notifications' read of the ntfy settings with the helm's defaults
+/// (off, `https://ntfy.sh`, no topic, Default priority, no token), Credentials' and Tensorlake's reads of the account
+/// with no key saved and sandboxes created only after asking, Credentials' read with an empty catalog, Recipes' read of
+/// the Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog and no pushed
 /// places, and Containers' reads with the reference's three container hosts, all ready, and no leftovers; nothing else
 /// is answered, so the checks Containers then asks for stay unanswered and the rows keep the first read's state. The
 /// opener is the scene's ring handle, which stands in for the gear. The fake and the connection are kept for the
@@ -3165,8 +3165,8 @@ fn settings_scene_with(
                         { "place": { "kind": "podman_host", "host": 3 }, "name": "gpu-1", "reason": null, "refreshing": false },
                     ]),
                     "/api/container-orphans" => serde_json::json!([]),
-                    // Credentials' key form pictures no key saved, as its reference does; Recipes pictures rows that
-                    // can build, which takes a saved key.
+                    // Credentials' and Tensorlake's key forms picture no key saved, as their references do; Recipes
+                    // pictures rows that can build, which takes a saved key.
                     "/api/tensorlake" => serde_json::json!({
                         "api_key_set": section == crate::settings::Section::Recipes,
                         "create_without_asking": false,
@@ -3608,6 +3608,13 @@ fn settings_recipes_places_setup(state: &SceneState, window: &mut Window, cx: &m
         window,
         cx,
     );
+}
+
+/// Settings at Tensorlake, as in the reference: the experimental warning, the intro and the key form with no key saved,
+/// and below the fold the create-without-asking switch off. Focus starts on the dialog itself, since every control
+/// waits for the account read.
+fn settings_tensorlake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Tensorlake, window, cx);
 }
 
 /// Settings at Credentials, as in the reference: nothing saved in any list and no Tensorlake key saved. Focus starts
@@ -5270,6 +5277,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_recipes_places_setup,
+    },
+    Scene {
+        name: "settings-tensorlake",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_tensorlake_setup,
     },
     Scene {
         name: "settings-credentials",
