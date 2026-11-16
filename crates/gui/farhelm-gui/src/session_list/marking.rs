@@ -43,9 +43,11 @@
 //!
 //! NOTE: Stop and Delete join the bar with their batches (one request at a time per host, the bulk question, the
 //! selection held back for a bulk Delete), which come later in `super::bulk`. Environment (container and sandbox) rows
-//! get nothing special here: their Delete-only and environment-wide cases come with the environments work. The rule
-//! that a change of the Hosts attention list closes the marked menu comes with that list. GPUI cannot report
-//! `aria-haspopup`.
+//! get nothing special here: their Delete-only and environment-wide cases come with the environments work. GPUI cannot
+//! report `aria-haspopup`.
+//!
+//! A change of the Hosts attention list above the heading closes the marked menu, as it closes the rows' menus
+//! ([`super::attention`]).
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -609,6 +611,14 @@ impl SessionList {
             .current(cx)
             .marked_menu
             .filter(|menu| layers::is_open(*menu, window, cx))
+    }
+
+    /// Close the marked menu if it is open, which returns focus to its toggle: the Hosts attention list moved the bar
+    /// it opened from ([`super::attention`]). Reopened, it opens where the toggle is drawn then.
+    pub(super) fn close_marked_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = self.marked_menu_open(window, cx) {
+            layers::close(menu, window, cx);
+        }
     }
 
     /// The ⋯ toggle was activated: open the marked menu on its first item, or close it if it is open.

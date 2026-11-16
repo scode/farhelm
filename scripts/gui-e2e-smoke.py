@@ -22,8 +22,9 @@ other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's r
 67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings; 69, the session
 header's Replace with… and Clone; 70, the session list's Pin to top, Move up and Unpin; 71, a row's actions button
 opening its menu on Up; 72 and 73, the terminal: a reopened terminal's replay and live input, and a text size step
-reaching the program's terminal size; 75, a row's summary card on hover). The behavior itself is specified and tested
-in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
+reaching the program's terminal size; 74, a failed setup's warning on its host rail avatar; 75, a row's summary card on
+hover; 76, Details on a failed setup's attention row opening Hosts at the host). The behavior itself is specified and
+tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
 `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
 `shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
 session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match
@@ -2344,6 +2345,65 @@ class Smoke(unittest.TestCase):
         self.ok("wait", "--text", "⋯ For actions")
         self.ok("hover", "id:session-count")
         self.ok("wait", "--gone", SUMMARY_CLICK_HINT)
+
+    def test_76_details_on_a_failed_setups_attention_row_opens_hosts_at_its_toggle(self) -> None:
+        """A failure the user did not see must lead them to its diagnosis: SPEC.md, "Session list": the attention list
+        above the sessions has a row for an unacknowledged setup warning, "Setup or update needs attention", and
+        "**Details** ... opens Hosts with that host's row in view and its menu button focused", acknowledging the
+        warning as any opening of Hosts does. The old `host-updates.spec.ts` drove the attention list through a mocked
+        registry; this step uses a real failed setup instead. It adds a fake host through the helm's API with the
+        scripted backend failing its setup while Hosts is closed, as step 74 does. Specified: once the run has failed,
+        the attention list's row for the host is named "<destination>: <state words, ending in> Setup or update needs
+        attention; open Hosts for details"; its Details shows the Hosts panel with the host's menu toggle, "Host actions
+        for <destination>", focused; and with Hosts closed again the row is gone, its warning acknowledged. Update rows
+        have no step: a scripted host never connects, so it never reports an older build. The fake host is removed and
+        the backend's script emptied whatever happened."""
+        destination = f"attention-{uuid.uuid4().hex[:8]}.example"
+        gui_agent.script_hosts(
+            RUN, {"targets": {f"ssh:{destination}": {"fail_action": "install-farhelm", "message": "disk full"}}}
+        )
+        row = re.compile(
+            rf'button "{re.escape(destination)}: [^"]*Setup or update needs attention; open Hosts for details"'
+        )
+        try:
+            if HOSTS_PANEL in self.ok("snapshot"):
+                self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL not in self.ok("snapshot"), "premise: Hosts is closed")
+            probe = gui_agent.helm_request(
+                RUN,
+                "POST",
+                "/api/hosts/probe",
+                {"target": {"kind": "ssh", "destination": destination}, "new_entry": {}},
+            )
+            self.assertEqual(probe["result"], "provisionable", probe)
+            host = gui_agent.helm_request(RUN, "POST", "/api/hosts/provision", {"probe_id": probe["probe_id"]})[
+                "host_id"
+            ]
+            eventually(
+                lambda: gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning").get("status")
+                == "failed",
+                f"the scripted setup of {destination} failing",
+            )
+            eventually(lambda: row.search(self.ok("snapshot", "-i")), "the attention row naming the warning")
+
+            self.ok("click", f"id:host-attention-details-{host}")
+            eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "Details showing the Hosts panel")
+            toggle = re.compile(rf'button "Host actions for {re.escape(destination)}" \[focused\]')
+            eventually(lambda: toggle.search(self.ok("snapshot", "-i")), "the host's menu toggle focused")
+            self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL not in self.ok("snapshot"), "Sessions showing again")
+            eventually(lambda: not row.search(self.ok("snapshot", "-i")), "Details acknowledging the warning")
+        finally:
+            failing = sys.exc_info()[0] is not None
+            try:
+                gui_agent.script_hosts(RUN, {})
+                remove_host(destination)
+                if HOSTS_PANEL in self.ok("snapshot"):
+                    self.ok("click", "id:hosts-panel-toggle")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 76 left {destination} behind: {error}", file=sys.stderr)
 
 
 def seed_stamped_basic(title: str, origin: str) -> None:

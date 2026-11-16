@@ -113,6 +113,11 @@
 //! which the list draws after its column, holds Hosts, which swaps that column for the Hosts panel ([`crate::hosts`]),
 //! and the Settings gear.
 //!
+//! Above the heading, while Hosts does not show, the list's column draws the Hosts attention list ([`attention`]): one
+//! row per host with a problem, work going on or an update, whose Details opens Hosts at that host. Its rows scroll on
+//! their own, so the sessions stay reachable however many hosts need attention, and a change of what it draws closes
+//! the rows' menus and the marked menu, since it moves them.
+//!
 //! The Templates button opens the Templates dialog ([`crate::templates::open`]), which returns focus to what held it
 //! when it opened, as SPEC.md's "Opening and closing" asks. New, after it, opens the launcher through its entry point
 //! ([`open_new`], which the quick switcher's "New session named X" row and the New shortcut share): the sidebar's one
@@ -133,6 +138,7 @@
 //! home when no terminal is on screen.
 
 pub(crate) mod age;
+mod attention;
 pub(crate) mod bulk;
 pub(crate) mod delete;
 pub(crate) mod filters;
@@ -200,7 +206,7 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{Availability, Collection, CollectionMeta, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Role,
+    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Role, ScrollHandle,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, div, px,
 };
 
@@ -317,6 +323,9 @@ pub struct SessionList {
     /// What the host rail keeps across frames (Add host's focus handle, its scroll position): kept here, since the rail
     /// is rebuilt on every draw ([`host_rail::Kept`]).
     rail: host_rail::Kept,
+    /// The Hosts attention list's rows' scroll state ([`attention`]), kept for the window's life: a fresh handle per
+    /// frame would put the rows back at their top on every draw.
+    attention_scroll: ScrollHandle,
     /// The Hosts panel, drawn in place of the list's column while Hosts is pressed. One for the window's life, so the
     /// panel's Details choice survives closing and reopening it (SPEC.md: opening or closing Hosts keeps "the current
     /// ... details choice").
@@ -364,6 +373,10 @@ struct Current {
     marks: marking::Marks,
     /// The marked menu the bar's ⋯ opened, checked with the layer manager when read, as the order menu's is.
     marked_menu: Option<crate::layers::LayerId>,
+    /// The Hosts attention list's dismissal and the layout it last drew ([`attention::Memory`]). Per UI session, so a
+    /// reset shows dismissed reminders again (SPEC.md: "a reset after a lost connection shows optional reminders
+    /// again").
+    attention: attention::Memory,
 }
 
 impl SessionList {
@@ -431,6 +444,7 @@ impl SessionList {
             order_focus: cx.focus_handle().tab_stop(true),
             order_anchor: None,
             rail: host_rail::Kept::new(cx),
+            attention_scroll: ScrollHandle::new(),
             hosts_panel: cx.new(HostsPanel::new),
             moves: HashMap::new(),
             marking: marking::Kept::new(cx),
@@ -804,6 +818,9 @@ impl Render for SessionList {
             self.marked_bar(window, cx)
         };
         let title = (!hosts_shown && bar.is_none()).then(|| self.order_title(stored, window, cx));
+        // The Hosts attention list above the heading ([`attention`]), absent while the panel shows. Read on every frame
+        // all the same, since a change of what it draws closes the menus below it.
+        let attention = self.attention_frame(hosts_shown, window, cx);
         // Read before the store is borrowed too: answering it needs the app mutably.
         let new_available = launcher::entry::new_available(cx);
         let collections = store.read(cx).collections();
@@ -848,7 +865,8 @@ impl Render for SessionList {
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
                 .child(
-                    list.child(heading(bar, title, None, self, new_available, &weak, cx))
+                    list.children(attention)
+                        .child(heading(bar, title, None, self, new_available, &weak, cx))
                         .child(filter_row)
                         .children(refused)
                         .child(status_line("Loading sessions…")),
@@ -929,7 +947,8 @@ impl Render for SessionList {
         };
         body_row
             .child(
-                list.child(heading)
+                list.children(attention)
+                    .child(heading)
                     .child(filter_row)
                     .children(refused)
                     .children(truncated)

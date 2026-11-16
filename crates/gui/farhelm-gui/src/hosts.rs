@@ -47,19 +47,21 @@
 //! A remote host's Update ([`update`]) is sent the same way from the menu's Update and its rerun of a failed one, from
 //! a row's inline `↑ Update` and, for every host whose Update is available, from the heading's Update all. A refused
 //! Update plan opens the host refusal dialog ([`refusal`]) if the user has not moved on since the press. The attention
-//! list's Update rows will call [`update::start`] and [`update::start_all`] too.
+//! list's Update rows call [`update::start`] and [`update::start_all`] too.
 //!
 //! What the host rail and the attention list show about each host is [`status`], which draws nothing: the sidebar
 //! reads [`status::host_status`] (the update badge, the work going on and the setup or Update warning) and
 //! [`status::auto_updates_on`] and [`status::auto_update_failed`], redraws on [`status::observe_changes`], and calls
 //! [`update::start`] for one host's Update, [`update::start_all`] for Update all over the hosts it shows,
 //! [`status::always_update`] and [`status::retry_auto_update`]. A warning lasts until Hosts opens, so the sidebar calls
-//! [`HostsPanel::shown`] wherever it shows the panel, as it calls [`HostsPanel::hidden`] wherever it hides it.
+//! [`HostsPanel::shown`] wherever it shows the panel, as it calls [`HostsPanel::hidden`] wherever it hides it. The
+//! attention list's Details shows the panel and then asks it to bring that host's row into view with its menu toggle
+//! focused ([`HostsPanel::reveal`]).
 //!
 //! [`progress_card`] makes the progress card of a host's running setup, Update or uninstall ([`progress::card`]): the
-//! hover card SPEC.md gives the Hosts row's inline status and the attention list's working rows alike. The row's
-//! running status offers it as lazy card help beside the sidebar ([`progress::status_mark`]); the attention list's
-//! working rows are to do the same.
+//! hover card SPEC.md gives the Hosts row's inline status and the attention list's working rows alike. Both offer it as
+//! lazy card help beside the sidebar: the row's running status ([`progress::status_mark`]) and the attention list's
+//! working rows.
 //!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
@@ -133,13 +135,13 @@ use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use gpui::{
     AnyElement, App, Context, Div, EntityId, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, px,
+    IntoElement, ParentElement, Render, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
 };
 
 use crate::assets::Icon;
 use crate::components::{Button, Checkbox, HoverHelp, IconButton, StatusMark, Tier, pulse_opacity};
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
 use crate::operations::{Failure, OpKey, Work};
@@ -216,6 +218,14 @@ pub struct HostsPanel {
     /// Each drawn row's toggle, by host id, as last drawn: its anchor and its focus handle, which a press of the toggle
     /// opens the menu at ([`HostsPanel::toggle_menu`]). A row not drawn last frame has none.
     toggles: HashMap<i64, (Anchor, FocusHandle)>,
+    /// A host whose row the next frames are to bring into view with its toggle focused, and the mark of the press that
+    /// asked ([`HostsPanel::reveal`]).
+    reveal: Option<(i64, Mark)>,
+    /// The rows' scroll state, kept across frames: the row list is a focus coordinator scroll region, which is how a
+    /// focus move onto a toggle below the fold (Tab, or [`HostsPanel::reveal`]'s) scrolls it into view. Kept on the
+    /// panel, which lives as long as the window, so the list keeps its scroll position when Hosts closes and opens
+    /// again, as the old panel did: it stayed mounted, only hidden, while Sessions showed.
+    scroll: ScrollHandle,
     /// The heading's add button's focus handle, kept for the panel's life so the Add host dialog it opens can return
     /// focus to it by name when it closes.
     add_focus: FocusHandle,
@@ -257,6 +267,8 @@ impl HostsPanel {
             details: false,
             menu: None,
             toggles: HashMap::new(),
+            reveal: None,
+            scroll: ScrollHandle::new(),
             add_focus: cx.focus_handle().tab_stop(true),
             _lines: setup::observe_panel_lines(cx),
             runs: PerSession::default(),
@@ -305,6 +317,40 @@ impl HostsPanel {
     /// whether Hosts shows.
     pub fn shown(&mut self, cx: &mut App) {
         status::opened(cx);
+    }
+
+    /// Bring `host`'s row into view with its menu toggle focused, for the press that took `mark`: the attention list's
+    /// Details and its rows (SPEC.md: they open "Hosts with that host's row in view and its menu button focused"), which
+    /// call it right after showing the panel. Nothing else changes: not the Details switch, no row opens, and no menu.
+    ///
+    /// The panel draws only once shown, and a toggle's focus handle is element state, so the move waits for the frames
+    /// that draw the row: the first frame that draws its toggle after this call records where it is, and the frame after
+    /// it moves focus there through the focus coordinator ([`focus::focus_control`] with `mark`), which scrolls the row
+    /// list as far as the toggle needs. So a user who pressed or typed anything since `mark` keeps where they are. A
+    /// frame that draws no row for `host` (it left the registry) drops the reveal for good, so a later host under the
+    /// same id is never revealed for it. `_window` is unused: the move happens while the panel draws.
+    pub fn reveal(&mut self, host: i64, mark: &Mark, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reveal = Some((host, *mark));
+        cx.notify();
+    }
+
+    /// The reveal this frame makes, if any, once [`HostsPanel::toggles`] has recorded this frame's toggles; `before` is
+    /// the pending host's toggle handle as the last frame drew it. The toggle is focused only once a frame before this
+    /// one drew the same handle, since that frame's layout is where the coordinator reads how far to scroll; until then
+    /// the reveal waits one more frame, which it asks for.
+    fn take_reveal(
+        &mut self,
+        before: Option<FocusHandle>,
+        cx: &mut Context<Self>,
+    ) -> Option<(FocusHandle, Mark)> {
+        let (host, mark) = self.reveal.take()?;
+        let (_, now) = self.toggles.get(&host)?;
+        if before.as_ref() == Some(now) {
+            return Some((now.clone(), mark));
+        }
+        self.reveal = Some((host, mark));
+        cx.notify();
+        None
     }
 
     /// Fold `host`'s run `run_id`, as its Collapse does: the row closes unless something else holds it open, and the
@@ -394,7 +440,12 @@ impl Render for HostsPanel {
         render_count::record("hosts-panel", cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
+        // The pending reveal's toggle as the last frame drew it, read before this frame's replace them.
+        let before = self
+            .reveal
+            .and_then(|(host, _)| self.toggles.get(&host).map(|(_, focus)| focus.clone()));
         let mut toggles = self.toggles(window, cx);
+        let reveal = self.take_reveal(before, cx);
         let operations = session::current_operations(cx);
         let now = ticker::wall_now(cx);
         // Copied out for the frame: the rows borrow the store. A handful of entries at most, one per host with a run.
@@ -590,6 +641,10 @@ impl Render for HostsPanel {
         // The removal notice of an uninstall this window confirmed, once its host has left the list: no row is left to
         // show it under.
         let uninstalled = uninstall::notice(cx);
+        if let Some((toggle, mark)) = reveal {
+            // Made while this frame draws, so the toggle is focused in it and the row list scrolls before its layout.
+            focus::focus_control(&toggle, &mark, window, cx);
+        }
         div()
             .id("hosts-panel")
             // Tests and the bridge find the panel by this; it records nothing outside test builds.
@@ -604,7 +659,7 @@ impl Render for HostsPanel {
             .children(status)
             .children(refused)
             .children(uninstalled)
-            .child(
+            .child(focus::scroll_region(
                 div()
                     .id("host-list")
                     .role(Role::List)
@@ -613,7 +668,8 @@ impl Render for HostsPanel {
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(div().flex().flex_col().children(drawn)),
-            )
+                &self.scroll,
+            ))
     }
 }
 

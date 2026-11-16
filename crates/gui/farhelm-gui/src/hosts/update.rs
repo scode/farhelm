@@ -336,11 +336,12 @@ pub(crate) fn urgency(state: &HostStateView) -> Option<Urgency> {
     }
 }
 
-/// The inline button's hover for `state`, or `None` where it draws none ([`urgency`]): the host's build and the helm's
+/// The inline button's hover for `state`, and the attention list's Update's, as the old app gave both the same
+/// `host_update_title`; `None` where the button draws none ([`urgency`]). The host's build and the helm's
 /// (with both protocols for a skew), whether updating is optional or required, and that clicking installs the helm's
 /// version, in the old `host_update_title`'s words. Host builds are host text. A connected host's helm build is this
 /// build's, as for the Too new hover (`identity::phase::hover`).
-fn hover(state: &HostStateView) -> Option<HostSentence> {
+pub(crate) fn hover(state: &HostStateView) -> Option<HostSentence> {
     const CLICK: &str = "; click to update this host to the helm's version";
     let sentence = HostSentence::new("host-update-help").text("This host runs Farhelm ");
     match (state, urgency(state)?) {

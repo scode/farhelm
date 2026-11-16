@@ -108,6 +108,19 @@ pub enum Activity {
     Uninstall,
 }
 
+impl Activity {
+    /// The words for this work where they stand alone, the attention list's working rows' state: "Setting up",
+    /// "Updating" or "Uninstalling" (SPEC.md, "Session list"). The rail's avatar names it in the same words, lowercased
+    /// inside its sentence, so both say the same thing about one host.
+    pub fn verb(self) -> &'static str {
+        match self {
+            Activity::Setup => "Setting up",
+            Activity::Update => "Updating",
+            Activity::Uninstall => "Uninstalling",
+        }
+    }
+}
+
 /// A run's progress as the attention list's bar and step name show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Steps {
