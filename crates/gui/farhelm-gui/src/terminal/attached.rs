@@ -167,8 +167,8 @@
 //!   ([`super::drag_notice::copy_hint`], by the row's recorded agent kind); a tab runs a shell, whatever the session's
 //!   agent is, and gets the generic advice, as in the old app.
 //!
-//! NOTE: Where this notice differs from the old one is listed in `docs/gpui/parity/terminal.md`, "Deviations from the
-//! old app".
+//! NOTE: Where this notice differs from the old one is listed in the terminal's parity notes,
+//! `docs/gpui/parity/terminal.md`, "Deviations from the old app".
 //!
 //! ## Input
 //!
