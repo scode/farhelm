@@ -558,31 +558,23 @@ impl Credentials {
             );
         }
         if let Some(reason) = &self.unreadable {
-            parts.push(
-                choices::failure_outcome("credentials-load-error", reason, cx).into_any_element(),
-            );
             let weak = cx.weak_entity();
-            parts.push(
-                div()
-                    .flex()
-                    .child(
-                        Button::new(
-                            "credentials-retry",
-                            "Retry loading",
-                            HoverHelp::tooltip("Load the credential catalog again"),
-                            Role::Button,
-                        )
-                        .tier(Tier::Neutral)
-                        .on_click(move |_, _, cx| {
-                            let _ = weak.update(cx, |view, cx| {
-                                view.unreadable = None;
-                                view.read(cx);
-                                cx.notify();
-                            });
-                        }),
-                    )
-                    .into_any_element(),
+            let retry = choices::retry_loading(
+                "credentials-retry",
+                "Retry loading",
+                "Load the credential catalog again",
+                move |cx| {
+                    let _ = weak.update(cx, |view, cx| {
+                        view.unreadable = None;
+                        view.read(cx);
+                        cx.notify();
+                    });
+                },
             );
+            parts.extend(choices::failure_with_retry(
+                choices::failure_outcome("credentials-load-error", reason, cx),
+                retry,
+            ));
         }
         parts.extend(
             [0, 1, 2]

@@ -1965,3 +1965,32 @@ impl WsTestClient {
         Some((opcode, payload))
     }
 }
+
+// ---- The host reply bound -----------------------------------------------------------------------------------------
+
+/// Await a route's reply, failing the test with a message once `HOST_REPLY_BOUND` and a second have passed without
+/// one. Under a paused clock, a route that lost its bound would otherwise wait on a held host forever and hang the
+/// test until the runner kills it.
+pub(crate) async fn within_reply_bound<T>(reply: impl Future<Output = T>) -> T {
+    tokio::time::timeout(
+        crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(1),
+        reply,
+    )
+    .await
+    .expect("answered by the host reply bound")
+}
+
+/// Assert that `what` answered at `HOST_REPLY_BOUND` itself, `waited` being measured on a paused clock. The GUI's
+/// channel runs one command at a time and resets the window when one stays unanswered for 30 seconds, so a route that
+/// waits on a host must give up at the bound: neither earlier (a premature refusal) nor later. The timer wheel rounds a
+/// deadline up to its next millisecond, which is the only slack allowed. That holds only under the caller's premise:
+/// the clock is paused, and nothing on the reply's path after the bound fires waits on a timer or on I/O outside the
+/// blocking pool, since either would let auto-advance move the clock on (to a fake's next hold poll, say) before the
+/// reply is measured.
+pub(crate) fn assert_answered_at_reply_bound(waited: Duration, what: &str) {
+    let bound = crate::sessions::HOST_REPLY_BOUND;
+    assert!(
+        waited >= bound && waited <= bound + Duration::from_millis(1),
+        "{what} answered after {waited:?}"
+    );
+}

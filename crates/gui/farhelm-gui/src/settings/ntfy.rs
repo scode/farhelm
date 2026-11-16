@@ -583,25 +583,23 @@ impl Render for NtfyAlerts {
         // "Retry loading" while the read has failed, as in the old form.
         let retry = self.unreadable.is_some().then(|| {
             let weak = weak.clone();
-            Button::new(
+            choices::retry_loading(
                 "ntfy-retry",
                 "Retry loading",
-                HoverHelp::tooltip("Load the saved ntfy alert settings again"),
-                Role::Button,
+                "Load the saved ntfy alert settings again",
+                move |cx| {
+                    let _ = weak.update(cx, |alerts, cx| {
+                        alerts.unreadable = None;
+                        Self::read(alerts.window, cx);
+                        cx.notify();
+                    });
+                },
             )
-            .tier(Tier::Neutral)
-            .on_click(move |_, _, cx| {
-                let _ = weak.update(cx, |alerts, cx| {
-                    alerts.unreadable = None;
-                    Self::read(alerts.window, cx);
-                    cx.notify();
-                });
-            })
         });
         let save = Button::new(
             "ntfy-save",
             "Save",
-            HoverHelp::tooltip("Save ntfy alert settings for every window using this helm"),
+            HoverHelp::tooltip("Save ntfy alert settings for this helm"),
             Role::Button,
         )
         .tier(Tier::Primary)
@@ -665,14 +663,14 @@ impl Render for NtfyAlerts {
                     .child("ntfy alerts"),
             )
             .child(choices::help(
-                "Send a session's title and host when it waits for you. Applies to every window using this helm. \
-                 In the desktop app, keep the window open.",
+                "Send a session's title and host when it waits for you. Applies to this helm. In the desktop app, keep \
+                 the window open.",
                 cx,
             ))
             .child(self.switch(
                 "ntfy-enabled",
                 "Send ntfy alerts",
-                "Send alerts when a session waits for you; Save applies this to every window using this helm",
+                "Send alerts when a session waits for you; Save applies it to this helm",
                 form.enabled,
                 |form, on| form.enabled = on,
                 cx,

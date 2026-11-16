@@ -1253,10 +1253,7 @@ async fn test_answers_at_the_reply_bound_while_tensorlake_stalls() {
             "Tensorlake did not answer within 20 seconds"
         )
     );
-    assert!(
-        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
-        "Test answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "Test");
 }
 
 /// Why: the list of sandboxes not on this helm reads the same listing as
@@ -1290,10 +1287,7 @@ async fn the_leftover_list_answers_at_the_reply_bound_and_keeps_unfinished_clean
             "Tensorlake did not answer within 20 seconds"
         )
     );
-    assert!(
-        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
-        "the list answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the list");
 
     let id = plant_orphan(&fake).await;
     set_fake_config(
@@ -1318,10 +1312,7 @@ async fn the_leftover_list_answers_at_the_reply_bound_and_keeps_unfinished_clean
         "premise: the second listing reached the fake and was parked there"
     );
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(
-        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
-        "the list answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the list");
     let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].id, id);
@@ -1383,10 +1374,7 @@ async fn deleting_a_leftover_answers_at_the_reply_bound_and_the_cleanup_finishes
         body.contains("the cleanup carries on, and Sandboxes not on this helm shows how it ends"),
         "{body}"
     );
-    assert!(
-        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
-        "the delete answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the delete");
 
     // What the 504 promises: the list shows the cleanup running. Only the
     // snapshot listing is parked, so this read answers at once.
@@ -1576,10 +1564,7 @@ async fn stalled_create(keygen: &Arc<StalledKeygen>) -> crate::rest_harness::Har
         body.contains("its creation carries on, and Settings shows the key once it exists"),
         "{body}"
     );
-    assert!(
-        waited >= HOST_REPLY_BOUND && waited < HOST_REPLY_BOUND + Duration::from_secs(1),
-        "the create answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the create");
     harness
 }
 

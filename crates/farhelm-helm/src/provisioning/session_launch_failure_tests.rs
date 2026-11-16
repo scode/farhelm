@@ -947,18 +947,13 @@ async fn a_container_host_removal_answers_at_the_reply_bound_and_finishes_after(
     let started = tokio::time::Instant::now();
     // Bounded from outside too, so a removal that ignored its bound fails here with a message rather than waiting
     // for the held `rm` forever and hanging the test.
-    let response = tokio::time::timeout(
-        crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(1),
-        crate::hosts::remove_host(axum::extract::State(f.state()), axum::extract::Path(host)),
-    )
-    .await
-    .expect("answered by the host reply bound");
+    let response = crate::rest_harness::within_reply_bound(crate::hosts::remove_host(
+        axum::extract::State(f.state()),
+        axum::extract::Path(host),
+    ))
+    .await;
     let waited = started.elapsed();
-    assert!(
-        waited >= crate::sessions::HOST_REPLY_BOUND
-            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
-        "the removal answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the removal");
     assert!(
         f.commands.removal_sent(),
         "premise: the removal reached the held host"

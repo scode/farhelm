@@ -1,7 +1,8 @@
 //! Tests of Settings → Recipes: the row's words from a recipe's view alone (its summary and its snapshot status, ported
 //! from the old list's own unit tests), and, over the helm client's fake, the rows drawn from the pushed catalog and
-//! redrawn by its pushes, the one read a showing still sends (the account's), a catalog the helm could not read and
-//! its Retry loading, and the snapshot build with its accepted reply, its refusal and its API-key gate.
+//! redrawn by its pushes, the Tensorlake account read the section shares with the API key forms, a catalog the helm
+//! could not read and its Retry loading, and the snapshot build with its accepted reply, its refusal and its API-key
+//! gate.
 //!
 //! The dialog is opened from the gear as in the dialog's own tests (`super::tests`), whose helpers these share. Every
 //! step ends in one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
@@ -21,9 +22,10 @@ use serde_json::{Value, json};
 use super::Section;
 use super::recipe_place_tests::places_state;
 use super::recipes::{self, BuildAction, SnapshotStatus, Tone, line_texts, summary};
+use super::tensorlake_tests::press;
 use super::tests::{
-    available, drawn, label_of, open_rail, open_rail_with, open_settings, painted, section_button,
-    sent,
+    available, drawn, fill, label_of, open_rail, open_rail_with, open_settings, painted,
+    section_button, sent,
 };
 use crate::host_text::tests::painted_words;
 use crate::local_time::{self, Zone};
@@ -520,13 +522,6 @@ fn show_recipes(helm: &mut FakeHelm, cx: &mut VisualTestContext, key_set: bool) 
     answer_account(helm, cx, key_set);
 }
 
-/// Show Sessions and then Recipes again, answering the account read that brings with `key_set`.
-fn show_again(helm: &mut FakeHelm, cx: &mut VisualTestContext, key_set: bool) {
-    click(cx, section_button(Section::Sessions));
-    click(cx, section_button(Section::Recipes));
-    answer_account(helm, cx, key_set);
-}
-
 /// The window's painted text without the isolates around host values, for looking up sentences that name one.
 pub(super) fn words(cx: &mut VisualTestContext) -> String {
     painted_words(&painted(cx))
@@ -594,13 +589,12 @@ fn snapshot() -> Value {
 }
 
 /// The catalog is pushed, so the rows come from the store and a showing of the section must not read it, while whether
-/// an API key is saved is not pushed and must still be read each time it shows (a key saved elsewhere since must make
-/// Build available). SPEC.md: "The list shows each recipe's name, … base, package count, tunnel count and build
-/// status". Specified: showing Recipes sends exactly one command, `GET /api/tensorlake`, and no catalog read; the rows
-/// draw at once from the pushed catalog (one built, with when in the app's zone, pinned an hour east of UTC, its
-/// agents' versions and Rebuild; one never built, with Build) in the Recipes list, with Build unavailable and no no-key
-/// note until the account answers, and available once it says a key is saved; showing Sessions and Recipes again reads
-/// the account once more and nothing else.
+/// an API key is saved is not pushed and is read with the opening's shared Tensorlake account. SPEC.md: "The list
+/// shows each recipe's name, … base, package count, tunnel count and build status". Specified: showing Recipes sends
+/// exactly one command, `GET /api/tensorlake`, and no catalog read; the rows draw at once from the pushed catalog (one
+/// built, with when in the app's zone, pinned an hour east of UTC, its agents' versions and Rebuild; one never built,
+/// with Build) in the Recipes list, with Build unavailable and no no-key note until the account answers, and available
+/// once it says a key is saved; showing Sessions and Recipes again reads nothing.
 #[gpui::test]
 fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_with(
@@ -652,7 +646,56 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
     settle(cx);
     assert_eq!(available(cx, "recipe-build-py-data"), Some(true));
 
-    show_again(&mut helm, cx, true);
+    click(cx, section_button(Section::Sessions));
+    click(cx, section_button(Section::Recipes));
+    assert_eq!(sent(&mut helm), [], "the account is read once per opening");
+}
+
+/// Whether a key is saved is the opening's one Tensorlake account, the one the API key forms save through, so a key
+/// saved in Credentials must make Build available in Recipes without another read; the old section read the account
+/// again each time it was shown for the same effect. Specified: with Recipes shown and no key saved, Build is
+/// unavailable; showing Credentials reads only its catalog; a key saved there and answered as saved leaves Build
+/// available when Recipes is shown again, with nothing more read.
+#[gpui::test]
+fn a_key_saved_in_credentials_makes_build_available_with_no_read(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_with(cx, vec![entry("rust-dev", idle(), Value::Null)]);
+    show_recipes(&mut helm, cx, false);
+    assert_eq!(available(cx, "recipe-build-rust-dev"), Some(false));
+
+    click(cx, section_button(Section::Credentials));
+    let reads = sent(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|read| read.path.as_str()).collect();
+    assert_eq!(paths, ["/api/credentials"], "the account is not read again");
+    helm.reply(reads[0].id, 200, Some(json!([])));
+    settle(cx);
+    fill(cx, "tensorlake-key", "fictional-tensorlake-key");
+    press(cx, "tensorlake-key-save");
+    let saves = sent(&mut helm);
+    assert_eq!(
+        saves
+            .iter()
+            .map(|save| (save.method, save.path.as_str()))
+            .collect::<Vec<_>>(),
+        [(Method::Put, "/api/tensorlake")]
+    );
+    helm.reply(saves[0].id, 200, Some(account(true)));
+    settle(cx);
+    // A saved key makes Tensorlake's list of sandboxes not on this helm read, which is that section's, not Recipes'.
+    let reads = sent(&mut helm);
+    assert!(
+        reads
+            .iter()
+            .all(|read| read.path == "/api/tensorlake/orphans"),
+        "{reads:?}"
+    );
+    for read in reads {
+        helm.reply(read.id, 200, Some(json!([])));
+    }
+    settle(cx);
+
+    click(cx, section_button(Section::Recipes));
+    assert_eq!(available(cx, "recipe-build-rust-dev"), Some(true));
+    assert_eq!(sent(&mut helm), [], "Recipes reads nothing for it");
 }
 
 /// The reason the catalog is pushed: a build takes minutes, and the section must follow it while it stays shown, as
@@ -966,7 +1009,6 @@ fn hiding_recipes_lets_the_running_pulse_go(cx: &mut TestAppContext) {
     assert_eq!(ticks(cx), hidden, "nothing ticks for a section nobody sees");
 
     click(cx, section_button(Section::Recipes));
-    answer_account(&mut helm, cx, true);
     let shown = ticks(cx);
     advance(cx, std::time::Duration::from_millis(500));
     assert!(ticks(cx) > shown, "shown again, it pulses again");

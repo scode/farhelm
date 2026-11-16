@@ -176,8 +176,8 @@ linux/settings-credentials--dark.png b19c3482fa2e4b873b6ef4dea1848261b0b4775a
 linux/settings-credentials--light.png 542203e08dae1ce1d00c539afa62beb0e1d1c450
 linux/settings-hosts--dark.png 63a69b0041651542403f9db1f0bfdc7df610f72c
 linux/settings-hosts--light.png b5f658553f5307d08d3eb64513273a938e2ba12b
-linux/settings-notifications--dark.png 923410e18d55684482de21e1b60ca3946bc02919
-linux/settings-notifications--light.png b07fa763ead7f962ae3afd7208a2c512bc9b0fa5
+linux/settings-notifications--dark.png 86914898ad27ee523acb3d039eb2ce5f6d6329a8
+linux/settings-notifications--light.png 10890389659b6eca4a908596809a676fc15c04ba
 linux/settings-recipe-editor--dark.png 6820e6f6cb15a0a83d9804313398346f444a89a7
 linux/settings-recipe-editor--light.png a3494c5f7f22edac5a85dfbeb1cf63015564155c
 linux/settings-recipes--dark.png 401be0c062497a49ed245fce1d9d5f1730112eaf
