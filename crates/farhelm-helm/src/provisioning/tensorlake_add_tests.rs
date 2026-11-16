@@ -2853,3 +2853,202 @@ fn names_fit_tensorlake_grammar() {
         assert!(!result.starts_with("farhelm-sbx-"));
     }
 }
+
+/// Which way a plain Tensorlake add reaches the end of its run, for
+/// [`a_tensorlake_host_whose_setup_reads_as_ended_is_removed_at_once`].
+#[derive(Clone, Copy, Debug)]
+enum AddEnd {
+    /// Add host cloning the recipe's prepared snapshot: the run ends at the
+    /// attachment step, and the installer never runs.
+    PreparedClone,
+    /// Setup run again on a sandbox that has no prepared facts, which goes
+    /// through the inner install plan to its end.
+    InstallCompleted,
+    /// The same, with the install plan failing at its install step.
+    InstallFailed,
+}
+
+/// Why: a Tensorlake add used to publish its end (completed, or failed in its
+/// inner install plan) while its task still held the host's provisioning
+/// lock, and removal refuses at once with 409 while that lock is held. So
+/// removing, or Delete sandbox on, a host the moment it read as set up could
+/// be told the host was busy with a run that was over: the gap #3744 closed
+/// for ordinary setup and recorded as still open here. The run end gate
+/// parks the task right after it published its end, the scheduler delay that
+/// opened the gap, so the test sees the order and not a timing.
+///
+/// Spec: for each way a plain add ends (a prepared clone completing, the
+/// install plan completing, the install plan failing), once the run reads as
+/// ended, `DELETE /api/hosts/{id}` answers 200 and the host is forgotten.
+#[farhelm_testtrace::test]
+async fn a_tensorlake_host_whose_setup_reads_as_ended_is_removed_at_once() {
+    use tower::ServiceExt as _;
+    for end in [
+        AddEnd::PreparedClone,
+        AddEnd::InstallCompleted,
+        AddEnd::InstallFailed,
+    ] {
+        let mut f = fixture(false).await;
+        // Removal deletes the sandbox, so the router's own account and
+        // provider registry must be the fixture's fakes.
+        f.bind_session_launch().await;
+        let gate = Arc::new(TestBoundaryGate {
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let accepted = match end {
+            AddEnd::PreparedClone => {
+                f.seed_prepared().await;
+                *f.service.run_end_gate.lock().unwrap() = Some(Arc::clone(&gate));
+                f.add().await
+            }
+            AddEnd::InstallCompleted | AddEnd::InstallFailed => {
+                if matches!(end, AddEnd::InstallFailed) {
+                    f.backend_config(
+                        serde_json::json!({"default": {"fail_action": "install-farhelm"}}),
+                    );
+                }
+                let host = f.legacy_host().await;
+                *f.service.run_end_gate.lock().unwrap() = Some(Arc::clone(&gate));
+                f.rerun(host).await
+            }
+        };
+        let host = accepted.host_id;
+        let reached = tokio::time::timeout(Duration::from_secs(15), gate.reached.notified()).await;
+        let view = f.service.view(host).await.unwrap();
+        // A run that ended without going through `end_run` never reaches the
+        // gate; say where it stands then, so the timeout shows whether it
+        // ended some other way or is still running.
+        assert!(
+            reached.is_ok(),
+            "{end:?}: the run did not reach the run end gate; it reads {:?} ({:?})",
+            view.status,
+            view.message
+        );
+        let ended = match end {
+            AddEnd::PreparedClone | AddEnd::InstallCompleted => RunStatus::Completed,
+            AddEnd::InstallFailed => RunStatus::Failed,
+        };
+        assert_eq!(
+            (view.run_id.as_deref(), view.status),
+            (Some(accepted.run_id.as_str()), ended),
+            "{end:?}: test premise: this run's end is what a client reads ({:?})",
+            view.message
+        );
+        let row = f
+            .harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        let host_target = format!("ssh:{}", row.destination.as_deref().unwrap());
+        let installed = f
+            .backend_events()
+            .iter()
+            .any(|event| event["target"] == host_target && event["event"] == "install-farhelm");
+        assert_eq!(
+            installed,
+            !matches!(end, AddEnd::PreparedClone),
+            "{end:?}: test premise: the run took the path this case names"
+        );
+
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/hosts/{host}"))
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = tokio::time::timeout(
+            crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(5),
+            f.harness.router().oneshot(request),
+        )
+        .await
+        .expect("the removal answered within the host reply bound")
+        .unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "{end:?}: {}",
+            String::from_utf8_lossy(&body)
+        );
+        assert!(
+            f.harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.id != host),
+            "{end:?}: the removal forgot the host"
+        );
+        gate.release.notify_one();
+    }
+}
+
+/// Why: the old browser suite's "a recipe deleted during confirmation refuses
+/// without registering a host" was the only check that a creation plan offered
+/// for a recipe cannot outlive the recipe, and it went with that suite. The
+/// helm registers the new host before it checks the recipe again, so without
+/// that check (or its rollback) Create sandbox would register a host whose
+/// recipe is gone and go on to create a billed sandbox from it.
+///
+/// Spec: a recipe deleted after its creation plan was offered makes the plan's
+/// confirmation refuse, saying the recipe was deleted while confirmation was
+/// open; the registry is as it was, and nothing was created or run.
+#[farhelm_testtrace::test]
+async fn a_recipe_deleted_while_its_creation_plan_is_offered_refuses_and_registers_nothing() {
+    let f = fixture(true).await;
+    let hosts_before = f.harness.store.list_hosts().await.unwrap();
+    let ProbeResponse::TensorlakeProvisionable { probe_id, .. } = f
+        .probe(ProbeDestination::Tensorlake {
+            name: "Test host".into(),
+            recipe: "test-recipe".into(),
+        })
+        .await
+    else {
+        panic!("expected a creation plan")
+    };
+    assert!(
+        matches!(
+            f.harness
+                .store
+                .delete_tensorlake_recipe("test-recipe".into())
+                .await,
+            Ok(Ok(()))
+        ),
+        "test premise: the unbuilt recipe is deleted"
+    );
+    assert!(
+        f.model().sandboxes.is_empty(),
+        "test premise: the fixture's account starts with no sandbox"
+    );
+
+    let refusal = f
+        .service
+        .start_add(ProvisionRequest { probe_id })
+        .await
+        .expect_err("the plan's recipe is gone");
+    assert!(
+        format!("{refusal:#}").contains("the recipe was deleted while confirmation was open"),
+        "{refusal:#}"
+    );
+    let hosts_after = f.harness.store.list_hosts().await.unwrap();
+    assert_eq!(
+        hosts_after.iter().map(|row| row.id).collect::<Vec<_>>(),
+        hosts_before.iter().map(|row| row.id).collect::<Vec<_>>(),
+        "no host was registered"
+    );
+    assert!(f.model().sandboxes.is_empty(), "no sandbox was created");
+    assert!(
+        f.backend_events().is_empty(),
+        "no setup ran: {:?}",
+        f.backend_events()
+    );
+}
