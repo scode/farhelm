@@ -611,8 +611,8 @@ fn tunnel_rows_are_added_and_removed_by_row(cx: &mut TestAppContext) {
 /// SPEC.md: "Switching Settings sections hides those actions with the editor", and switching sections preserves
 /// unsaved fields. Pinned in the dialog's footer, the answers would otherwise stay under another section, where Save
 /// would save a form nobody sees. Specified: with an editor open and a name typed, showing Sessions draws neither Save
-/// nor Cancel and keeps the Close row; showing Recipes again reads the account, as every showing does, and draws the
-/// editor with its answers and the typed name.
+/// nor Cancel and keeps the Close row; showing Recipes again reads nothing and draws the editor with its answers and
+/// the typed name.
 #[gpui::test]
 fn switching_sections_hides_the_answers_and_keeps_the_open_editor(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, Vec::new());
@@ -626,7 +626,7 @@ fn switching_sections_hides_the_answers_and_keeps_the_open_editor(cx: &mut TestA
     assert!(drawn(cx, "settings-footer-close"));
 
     click(cx, section_button(Section::Recipes));
-    answer_account(&mut helm, cx, true);
+    assert_eq!(sent(&mut helm), [], "the account is read once per opening");
     assert!(drawn(cx, "recipe-editor") && drawn(cx, "recipe-save"));
     assert_eq!(draft(cx).name, "keep-me");
 }

@@ -473,17 +473,10 @@ impl Render for CheckoutField {
         if self.unreadable.is_some() {
             let weak = weak.clone();
             buttons.push(
-                Button::new(
-                    id("retry"),
-                    "Retry",
-                    HoverHelp::tooltip(words.retry_help),
-                    Role::Button,
-                )
-                .tier(Tier::Neutral)
-                .busy(saving)
-                .on_click(move |_, _, cx| {
+                choices::retry_loading(id("retry"), "Retry", words.retry_help, move |cx| {
                     let _ = weak.update(cx, |field, cx| field.retry(cx));
-                }),
+                })
+                .busy(saving),
             );
         } else {
             let save = weak.clone();

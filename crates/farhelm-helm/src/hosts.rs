@@ -300,9 +300,11 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                         }
                         view
                     }),
-                // Only a host that can hold containers has a check to show.
-                // `.ok()` keeps one row the cache cannot route to from failing
-                // the whole list.
+                // Only a host that can hold containers has a check to show, and
+                // every such host has one: `view` fails only for an SSH row with
+                // no destination, which the store's schema refuses. `.ok()` is a
+                // backstop so such a row could not fail the whole list; Settings
+                // → Containers lists exactly the hosts that carry a check.
                 container_check: registry
                     .filter(|row| row.kind.can_host_environments())
                     .and_then(|row| state.podman_places.view(row).ok())

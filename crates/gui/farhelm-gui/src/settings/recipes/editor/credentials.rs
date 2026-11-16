@@ -35,7 +35,7 @@ use gpui::{
 };
 
 use super::{Editor, Input, caption, field, label};
-use crate::components::{Button, HoverHelp, RadioGroup, RadioOption, Select, SelectOption, Tier};
+use crate::components::{HoverHelp, RadioGroup, RadioOption, Select, SelectOption};
 use crate::host_text::HostText;
 use crate::settings::choices::{self, LABEL_GAP};
 use crate::settings::recipes::draft::{AgentMode, Draft, EndpointDraft};
@@ -398,25 +398,17 @@ impl Editor {
     fn catalog_state(&self, cx: &Context<Self>) -> Vec<AnyElement> {
         if let Some(reason) = &self.choices.unreadable {
             let weak = cx.weak_entity();
-            return vec![
-                choices::failure_outcome("recipe-credentials-error", reason, cx).into_any_element(),
-                div()
-                    .flex()
-                    .child(
-                        Button::new(
-                            "recipe-credentials-retry",
-                            "Retry loading credentials",
-                            HoverHelp::tooltip("Load the named credentials again"),
-                            Role::Button,
-                        )
-                        .tier(Tier::Neutral)
-                        .disabled(self.busy())
-                        .on_click(move |_, _, cx| {
-                            let _ = weak.update(cx, |editor, cx| editor.read_credentials(cx));
-                        }),
-                    )
-                    .into_any_element(),
-            ];
+            let retry = choices::retry_loading(
+                "recipe-credentials-retry",
+                "Retry loading credentials",
+                "Load the named credentials again",
+                move |cx| {
+                    let _ = weak.update(cx, |editor, cx| editor.read_credentials(cx));
+                },
+            )
+            .disabled(self.busy());
+            let line = choices::failure_outcome("recipe-credentials-error", reason, cx);
+            return choices::failure_with_retry(line, retry).into();
         }
         if self.choices.catalog.is_none() {
             return vec![

@@ -25,7 +25,7 @@ use gpui::{
 use serde::de::DeserializeOwned;
 
 use super::Refused;
-use crate::components::{Checkbox, HoverHelp};
+use crate::components::{Button, Checkbox, HoverHelp, Tier};
 use crate::drafts::Draft;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
@@ -409,6 +409,30 @@ pub(super) fn read_route<T: DeserializeOwned + 'static>(
             cx.defer(move |cx| on_read(Err(reason), cx));
         }
     }
+}
+
+/// The button that reads a failed read again, labelled `label` (the old forms' "Retry loading", or a longer label where
+/// the section reads more than one thing) with `help` as its hover help, in the neutral tier, running `on_retry` when
+/// pressed. Every Settings form whose read can fail offers one; a form that draws the helm's reason above it on a line
+/// of its own uses [`failure_with_retry`].
+pub(super) fn retry_loading(
+    id: impl Into<SharedString>,
+    label: &'static str,
+    help: &'static str,
+    on_retry: impl Fn(&mut App) + 'static,
+) -> Button {
+    Button::new(id, label, HoverHelp::tooltip(help), Role::Button)
+        .tier(Tier::Neutral)
+        .on_click(move |_, _, cx| on_retry(cx))
+}
+
+/// A failed read's two lines: `line`, saying why (usually the helm's reason as a [`failure_outcome`]), then `retry`
+/// ([`retry_loading`]) on a row of its own, as the old forms drew them.
+pub(super) fn failure_with_retry(line: impl IntoElement, retry: Button) -> [gpui::AnyElement; 2] {
+    [
+        line.into_any_element(),
+        div().flex().child(retry).into_any_element(),
+    ]
 }
 
 /// The line under a choice after its save failed, drawn as an alert under the element id `id` so tests and the test

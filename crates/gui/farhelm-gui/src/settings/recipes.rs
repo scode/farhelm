@@ -20,12 +20,14 @@
 //!   helm could not read (`Availability::Unavailable`) keeps the rows it last pushed, says they may be out of date, and
 //!   offers Retry loading; with no rows it shows the helm's reason alone, never "No recipes yet.".
 //! - **Retry loading is any command.** The GUI has no read of its own left to repeat, but the helm re-runs every pushed
-//!   read after each command it answers, so Retry loading sends the section's one remaining read, the account's, and
-//!   the re-read after it either brings the catalog back or leaves it unavailable with the new reason.
-//! - **The account is still read.** Whether a Tensorlake API key is saved (`GET /api/tensorlake`) gates Build and is
-//!   not pushed, so the section reads it each time it is shown in an opening of the dialog, as before. Until its first
-//!   answer, Build is unavailable without the no-key note, so the rows, which draw from the store at once, never claim
-//!   for a frame that no key is saved.
+//!   read after each command it answers, so Retry loading reads the Tensorlake account again, and the re-read after it
+//!   either brings the catalog back or leaves it unavailable with the new reason.
+//! - **Whether a key is saved comes from the shared account.** Whether a Tensorlake API key is saved gates Build and is
+//!   not pushed. Settings reads it once per opening into the account Credentials and Tensorlake share
+//!   ([`super::tensorlake_key::TensorlakeAccount`]), and Recipes reads that account as it draws, so a key saved or
+//!   cleared in either form shows here at once. Until the account's read answers, Build is unavailable without the
+//!   no-key note, so the rows, which draw from the store at once, never claim for a frame that no key is saved; a
+//!   failed read counts as no key, as the old list treated a key it could not read.
 //! - **What a row says.** The name, a one-line summary (size, base, package count, tunnel count), and the recipe's
 //!   built snapshot: when it was built and with which agents, warnings when the base, the packages or a smaller disk
 //!   have moved on since, a running build's step ("step 5 of 9") with the running pulse, a failed build's step and
@@ -87,6 +89,7 @@ use gpui::{
 };
 
 use super::choices;
+use super::tensorlake_key::TensorlakeAccount;
 use crate::components::{Button, HoverHelp, Tier, pulse_opacity};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
@@ -543,10 +546,9 @@ type Source = (String, Option<i64>);
 /// The Recipes section, a view of its own that Settings makes the first time the section shows in an opening and keeps
 /// until the dialog closes (see the module docs).
 pub(super) struct Recipes {
-    /// Whether the helm has a Tensorlake API key saved, as the last account read said: `None` until one answers, and
-    /// `Some(false)` after a failed one, as the old list treated a key it could not read. Kept while a later read is
-    /// out, so showing the section again does not flicker Build.
-    api_key_set: Option<bool>,
+    /// The opening's Tensorlake account, shared with Credentials and Tensorlake, which says whether a key is saved
+    /// ([`Recipes::api_key_set`]).
+    account: Entity<TensorlakeAccount>,
     /// The running pulse, held while the section is shown, the window is active and a row shows a build or a
     /// preparation running; let go while another section shows ([`Recipes::hidden`]).
     pulse: Option<ticker::Pulsing>,
@@ -572,11 +574,16 @@ pub(super) struct Recipes {
 }
 
 impl Recipes {
-    /// The section, inside the dialog on `layer`, reading the account now and asking the helm to check every
-    /// container host once.
-    pub(super) fn new(layer: Option<LayerId>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The section, inside the dialog on `layer`, reading whether a key is saved from the opening's `account`, and
+    /// asking the helm to check every container host once.
+    pub(super) fn new(
+        layer: Option<LayerId>,
+        account: Entity<TensorlakeAccount>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let recipes = Recipes {
-            api_key_set: None,
+            account,
             pulse: None,
             clock: None,
             building: HashSet::new(),
@@ -588,27 +595,21 @@ impl Recipes {
             window: window.window_handle(),
             layer,
         };
-        recipes.read_account(cx);
-        // Once per opening, as the old section did when Settings opened (the places module docs).
-        Self::check_hosts(cx);
+        // Once per opening, as the old section did when Settings opened, check every host that can hold containers;
+        // the outcomes reach the places through the push (the places module docs). A refusal changes nothing shown
+        // here: the place keeps the reason of its last check, which says what is wrong.
+        let hosts = super::containers::container_host_ids(cx);
+        super::check_container_hosts(hosts, cx, |host, reason, _| {
+            tracing::debug!(host, ?reason, "a Podman check was not asked");
+        });
         recipes
     }
 
-    /// Read whether a Tensorlake API key is saved, which is not pushed; the dialog calls it each time it shows the
-    /// section again, and Retry loading sends it for the re-read every command brings (the module docs).
-    pub(super) fn read_account(&self, cx: &mut Context<Self>) {
-        let view = cx.weak_entity();
-        choices::read_route(
-            ApiPath::api(&["tensorlake"]),
-            "GET /api/tensorlake",
-            cx,
-            move |answer: Result<farhelm_proto::tensorlake::Settings, HostText>, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    view.api_key_set = Some(answer.is_ok_and(|settings| settings.api_key_set));
-                    cx.notify();
-                });
-            },
-        );
+    /// Whether the helm has a Tensorlake API key saved, as the opening's account says: `None` until its read answers,
+    /// and `Some(false)` while the read has failed (the module docs).
+    fn api_key_set(&self, cx: &App) -> Option<bool> {
+        let account = self.account.read(cx);
+        account.key_set().or(account.unreadable().map(|_| false))
     }
 
     /// Another section is shown in its place: let the running pulse and the clock go. The dialog keeps this view,
@@ -719,7 +720,7 @@ impl Recipes {
     /// is drawn unavailable or busy. An accepted build needs nothing more here: the helm has pushed the recipe building
     /// by the time it replies. A refusal is the store's to keep on the key, where the row shows it.
     fn build(&mut self, name: &str, cx: &mut Context<Self>) {
-        if self.api_key_set != Some(true) {
+        if self.api_key_set(cx) != Some(true) {
             return;
         }
         let Some(operations) = session::current_operations(cx) else {
@@ -811,6 +812,7 @@ impl Recipes {
             )))
             .min_w_0()
             .child(status_line(&prepared, prepared_sentence, pulse, cx));
+        let key_set = self.api_key_set(cx);
         let actions = status.action.map(|action| {
             let weak = cx.weak_entity();
             let label = format!("{} for {name}", action.label());
@@ -830,13 +832,13 @@ impl Recipes {
                     )
                     .accessible_name(label)
                     .tier(Tier::Neutral)
-                    .disabled(self.api_key_set != Some(true))
+                    .disabled(key_set != Some(true))
                     .busy(in_flight)
                     .on_click(move |_, _, cx| {
                         let _ = weak.update(cx, |section, cx| section.build(&building, cx));
                     }),
                 )
-                .children((self.api_key_set == Some(false)).then(|| {
+                .children((key_set == Some(false)).then(|| {
                     div()
                         .text_size(metrics::TEXT_SM)
                         .text_color(theme::color(palette.fg_2))
@@ -972,21 +974,14 @@ impl Recipes {
         )
         .aria_label(sentence.accessible_name())
         .child(sentence);
-        let weak = cx.weak_entity();
-        let retry = Button::new(
+        let account = self.account.clone();
+        let retry = choices::retry_loading(
             "recipes-retry",
             "Retry loading",
-            HoverHelp::tooltip("Read the recipes again"),
-            Role::Button,
-        )
-        .tier(Tier::Neutral)
-        .on_click(move |_, _, cx| {
-            let _ = weak.update(cx, |view, cx| view.read_account(cx));
-        });
-        vec![
-            line.into_any_element(),
-            div().flex().child(retry).into_any_element(),
-        ]
+            "Read the recipes again",
+            move |cx| account.update(cx, |account, cx| account.read_again(cx)),
+        );
+        choices::failure_with_retry(line, retry).into()
     }
 }
 

@@ -924,20 +924,20 @@ after a delayed probe without a fleet notice", which is Settings → Recipes' an
 `launcher` surface of the delayed-probe test, are the launcher's (new container placement, recents, quick launch) or the
 session view's (a connected container's Delete), and are listed in those areas' parity files as they are ported.
 
-Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs`:
+Replacing tests, in `crates/gui/farhelm-gui/src/settings/containers_tests.rs`:
 
 - "Containers Settings keeps failed cleanup explicit":
   `a_leftover_delete_asks_sends_its_place_and_id_and_shows_a_refusal` (the region lists the leftover, Delete asks
   "Delete container?" with its consequence and sends nothing, Cancel sends nothing, Delete container sends the place and
   canonical id, the helm's refusal shows and the row stays) and
   `a_leftover_with_a_host_row_is_deleted_through_host_removal`; the spec's Container hosts region holding "Build
-  machine" is `containers_reads_the_hosts_and_leftovers_once_then_checks_each_container_host`, which also checks that
-  each container host is checked again on showing, as the old section did on mount.
-- With no old case: `a_pushed_result_changes_the_row_with_no_request_sent`, `before_a_result_the_places_read_shows`,
-  `a_refused_check_keeps_its_reason_until_the_next_round` and `a_fleet_change_the_places_reflect_reads_them_once`
-  (following the pushed hosts collection, which stands in for the old section's polling and its re-read on fleet
-  notices), `a_refresh_drops_the_older_rounds_check_answers` and
-  `an_older_rounds_reads_answering_after_a_refresh_are_dropped` (refresh rounds), and
+  machine" is `containers_lists_the_pushed_container_hosts_reads_the_leftovers_once_and_checks_each_host`, which also
+  checks that each container host is checked again on showing, as the old section did on mount.
+- With no old case: `a_pushed_result_changes_the_row_with_no_request_sent`,
+  `a_refused_check_shows_until_its_hosts_next_result`, `a_refused_checks_line_goes_with_its_host` and
+  `a_host_added_or_moved_while_shown_is_checked_once` (following the pushed hosts collection, which stands in for the
+  old section's polling and its re-read on fleet notices), `a_refresh_drops_the_older_rounds_check_answers` and
+  `an_older_rounds_leftovers_answering_after_a_refresh_are_dropped` (refresh rounds), and
   `failed_container_reads_show_their_reasons_and_never_none_found` (the old reader's "a failed discovery must stay an
   error").
 - The look: the golden `settings-containers` (`crates/gui/farhelm-gui/src/goldens/settings.rs`).
@@ -1229,6 +1229,11 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Save is refused while another Settings save is in flight**, with the same line under the form, as Agent trust's
   switches are (above): ntfy alerts are helm configuration with no operation key of their own, so they save under the
   preference row's key.
+- **Its words say "this helm", not "every window using this helm".** The old Save tooltip, the switch's help and its
+  description said the settings applied to every window using the helm. Under SPEC_impl.md, "The seat: one UI per helm",
+  a helm now serves one window, so they read "Save ntfy alert settings for this helm", "Applies to this helm", and "Save
+  applies it to this helm". The Tensorlake API key's Save tooltip in Credentials changed the same way: "Save this API
+  key for this helm".
 - Not visible, recorded for review: the form is one draft over all its fields, saved in one request, rather than one
   `DraftInput` per text field, because `DraftInput` saves only its own field. The migration's settings-and-hosts area
   decided on 2026-11-14 to keep this exception until a second whole-form save makes it worth building into the drafts
@@ -1239,7 +1244,10 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Retry loading asks the helm to read again by sending the account read.** The old button read the catalog again. Here
   the catalog is pushed, and the GUI has no read of it left; the helm re-runs every pushed read after each command it
   answers, so Retry loading sends the section's one remaining read (`GET /api/tensorlake`), and the helm's next push
-  shows whether the catalog could be read. The visible behavior is the old one; what is sent differs.
+  shows whether the catalog could be read. The visible behavior is the old one; what is sent differs. The account read
+  is the one Tensorlake and Credentials show from in the same opening, so an API key saved in either shows in Recipes at
+  once, and Retry loading reads it again for all three. It is read once per opening, when the first of the three is
+  shown, and not again when Recipes is shown again (`a_key_saved_in_credentials_makes_build_available_with_no_read`).
 - **A refused build's words outlive Settings.** The old row kept them in the dialog and lost them when Settings closed.
   Here the build is work on the recipe's own operation key, which keeps a refusal until the next build of that recipe
   starts or the pushed state shows the recipe start building, its snapshot or one of its container places (the old row's
@@ -1318,15 +1326,26 @@ Where the port does not match the old app, and why. Each stays until the work na
 ### Containers
 
 - **The leftovers are not re-read on fleet notices.** The old section re-read **Containers not on this helm** on every
-  fleet notice, as it did the hosts. The hosts still follow the fleet here (each host's check from the pushed hosts
-  collection, and the places read again when a container host is added, removed, renamed or retargeted), but the
-  leftovers are read once per opening, on Refresh and after a done Delete, under this app's rule that what the helm does
-  not push is read once per opening. The visible case: after a Delete the helm answered at its 20-second bound, the
-  container may be gone a moment later, but its row stays until the user presses Refresh, as the reply's own words say
-  ("the list shows whether the container is gone when it is read again"); the old app cleared the row by itself.
+  fleet notice, as it did the hosts. The hosts still follow the fleet here, drawn from the pushed hosts collection with
+  each host's check, so a host added, removed or renamed shows as it is pushed with nothing read (a host added, or given
+  a new address, also gets its Podman check asked for, once per round, as the old re-read did), but the leftovers are
+  read once per opening, on Refresh and after a done Delete, under this app's rule that what the helm does not push is
+  read once per opening. The visible case: after a Delete the helm answered at its 20-second bound, the container may be
+  gone a moment later, but its row stays until the user presses Refresh, as the reply's own words say ("the list shows
+  whether the container is gone when it is read again"); the old app cleared the row by itself.
 - **The hosts show before their checks are asked for.** The old section showed nothing new until it had asked for every
-  host's check and read the hosts again; here the first read shows at once, then the checks go out, and each check's
-  result replaces the read's state for its host as the push brings it. The read answers without waiting on a host.
+  host's check and read the hosts again; here the pushed hosts show at once with their latest checks, then the checks go
+  out, and each check's result shows for its host as the push brings it. A host no check of its current address has
+  finished for reads "this host needs a Podman check", the helm's words for it, which the GUI keeps a copy of because
+  the push carries no reason for a check that never ran.
+- **A hosts list the helm cannot read shows the helm's reason.** The old section read the hosts and showed that read's
+  refusal. The hosts are pushed here, so where they would be the section shows the reason the hosts collection is
+  unavailable, and asks for no check, since the hosts it still lists may be gone; the round's checks go out once the
+  list is available again.
+- **A refused check shows until its host's next result.** The old section showed the refusal of a check in place of the
+  hosts until its next read, which the next fleet notice or poll brought. Here it shows in the same place until the push
+  brings a newer result for that host, the host leaves the pushed list, or the next Refresh; a push about another host
+  leaves it.
 - **The Delete question starts on Cancel.** The old inline question left focus on the Delete that opened it. Here it is
   the prompt's inline question, which takes focus, and starts on Cancel since deleting a container cannot be undone
   (SPEC.md, "Opening and closing").

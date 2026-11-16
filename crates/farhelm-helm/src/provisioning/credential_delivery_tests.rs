@@ -1194,13 +1194,8 @@ async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carrie
             &f.events,
         )
         .await;
-    // The timer wheel rounds a deadline up to its next millisecond.
     let waited = started.elapsed();
-    assert!(
-        waited >= crate::sessions::HOST_REPLY_BOUND
-            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
-        "the push answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the push");
     assert_eq!(
         failures,
         vec![DeliveryFailure {
