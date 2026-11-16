@@ -443,7 +443,15 @@ store only for the open session's transitions into and out of its interrupted ca
 decide whether it mounts terminals and whether they are inert under the unavailable card. The one survivor the UI keeps
 itself is the selected session, by id, if the new snapshot still has it; it lives in a small foundation of its own
 outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in
-`docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one. The window
+`docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one. A second,
+deliberate survivor is the attachment lines a terminal leaves when it goes
+(`crates/gui/farhelm-gui/src/terminal/attachments.rs`, `Carried`): the failures still on its strip, and a line for each
+upload the reset cut off, saying whether it was sent, which the session's next agent terminal shows. SPEC.md's
+"Attachments" has an attachment never disappear silently, and the terminal the lines belonged to will not come back, so
+dropping them with the UI session would lose them. They go when that agent terminal takes them, or once the current UI
+session's store proves their session gone (a complete session listing without it, checked by every terminal's
+attachments whenever the store changes, a new snapshot included), so a deleted session's lines do not stay for the life
+of the app (decided on 2026-11-15 by the area porting attachments, with the foundations owner's agreement). The window
 itself, its size included, is not part of the UI session and is untouched. The settings the old app kept per device
 (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new app, so
 they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no longer
@@ -455,11 +463,14 @@ opener or its subject says so, and one left open would keep its veil over the in
 presses meant for Take back or Retry. Work the helm accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
-reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
-command line or agents use stays (the launch idempotency keys in `crates/farhelm/src/agent_client.rs`, for example).
+reports for commands, and their tests (an upload cut off by a reset is not a command: its line above says its outcome
+cannot be told, and retrying is the user's). On the helm side only machinery that existed solely for the old GUI goes;
+idempotency the command line or agents use stays (the launch idempotency keys in `crates/farhelm/src/agent_client.rs`,
+for example).
 
 Enforced by a test of a completion queued across a reset (it must not reach the new UI session), a test that a dialog
-open at a break is closed and Take back still takes a click, and by the review gate.
+open at a break is closed and Take back still takes a click, a test that an upload a reset cut off is abandoned and
+reported in the session's new agent terminal, and by the review gate.
 
 ### The seat: one UI per helm
 
