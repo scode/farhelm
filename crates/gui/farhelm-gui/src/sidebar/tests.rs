@@ -17,9 +17,10 @@ use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    AppContext as _, DriverNode, HeadlessAppContext, Modifiers, MouseButton, MouseDownEvent,
-    MouseUpEvent, Pixels, Point, Role, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
-    point, px, size,
+    AppContext as _, Context, DriverNode, Entity, HeadlessAppContext, IntoElement, Modifiers,
+    MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, Role,
+    ScrollDelta, ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div, point,
+    px, size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
@@ -28,6 +29,7 @@ use farhelm_proto::BUILD_VERSION;
 
 use super::default_width;
 use super::header::{version_help, wordmark};
+use crate::components::{self, Button, HoverHelp};
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, session};
 use crate::test_support::{self, frame, meta, started};
@@ -627,6 +629,66 @@ fn focused_node(cx: &mut VisualTestContext) -> DriverNode {
 /// Whether the divider holds focus now, by the id of the element holding it in a fresh frame.
 fn divider_focused(window: &mut VisualTestContext) -> bool {
     test_support::focused_id(window).as_deref() == Some("sidebar-divider")
+}
+
+// ---- Help beside the sidebar ---------------------------------------------------------------------------------------
+
+/// The real main view with one button laid over the sidebar's list whose hover help asks to sit beside the sidebar. No
+/// control of the main view asks for that yet (the session rows' hovers and the host progress card will), so the test
+/// brings its own. Laying it over the column rather than inside it changes nothing that is tested: help beside the
+/// sidebar is placed against the edge the sidebar draws, wherever its control is (`layers/beside.rs`).
+struct BesideProbe {
+    main: Entity<MainView>,
+}
+
+impl Render for BesideProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let help = HoverHelp::tooltip("Probe help").beside();
+        let probe = Button::new("beside-probe", "Probe", help, components::Role::Button);
+        div()
+            .relative()
+            .size_full()
+            .child(self.main.clone())
+            .child(div().absolute().left(px(80.)).top(px(300.)).child(probe))
+    }
+}
+
+/// SPEC.md puts the session rows' help and the host progress card "just right of the sidebar", and that placement
+/// needs the sidebar to draw the edge the help sits against; without it, such help shows at the pointer. The old app
+/// measured the 6-pixel gap from outside the column's 1-pixel right border, which a tracker on the bordered column
+/// itself would miss by that pixel. Specified, in a 1200 by 800 window over the default width: help asking for beside
+/// placement, on a control over the sidebar's column, shows beside the sidebar, its card's left edge 6 pixels past the
+/// column's outer right edge.
+#[gpui::test]
+fn help_beside_the_sidebar_sits_six_pixels_past_the_columns_outer_edge(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(snapshot(None));
+    cx.run_until_parked();
+    let (_, cx) = test_support::open_view(cx, |window, cx| BesideProbe {
+        main: cx.new(|cx| MainView::new(window, cx)),
+    });
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    test_support::settle(cx);
+    let column = node(&frame(cx), "sidebar").bounds;
+    let probe = test_support::center(cx, "beside-probe");
+    assert!(
+        column.contains(&probe),
+        "premise: the control lies over the sidebar's column"
+    );
+
+    cx.simulate_mouse_move(probe, None, Modifiers::none());
+    test_support::advance(cx, layers::HOVER_DELAY);
+    test_support::redraw(cx);
+    let shown = cx.update(|window, cx| layers::shown_tooltip(window, cx));
+    let Some(shown) = shown else {
+        panic!("no tooltip shows");
+    };
+    assert_eq!(shown.text.to_string(), "Probe help");
+    assert_eq!(shown.side(), layers::TooltipSide::Beside);
+    assert_eq!(
+        test_support::bounds(cx, "tooltip-card").left(),
+        column.right() + px(6.)
+    );
 }
 
 // ---- The main pane's floor, with the real text system --------------------------------------------------------------
