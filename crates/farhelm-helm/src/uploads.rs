@@ -40,6 +40,7 @@ use crate::{AppState, SupervisorError, http_error};
 use axum::extract::{Path as AxPath, Query, State};
 use axum::response::IntoResponse;
 use farhelm_proto::ErrorKind;
+use farhelm_proto::file_transfers::UploadReply;
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -351,7 +352,7 @@ pub(crate) async fn upload_attachment(
     match upload.commit().await {
         Ok(path) => {
             info!(session_id = %id, channel, bytes = sent, "attachment upload published");
-            axum::Json(serde_json::json!({ "path": path })).into_response()
+            axum::Json(UploadReply { path }).into_response()
         }
         Err(e) => http_error(e),
     }
@@ -437,8 +438,8 @@ mod tests {
     /// `POST /api/sessions/{id}/attachments` happy path (PLAN_M4.md item
     /// 5, the pinned attachment REST contract): a body larger than one
     /// `UPLOAD_CHUNK_BYTES` streams as `BeginUpload` -> N data frames ->
-    /// `CommitUpload`, and the published path comes back verbatim under
-    /// `{"path": ...}`.
+    /// `CommitUpload`, and the published path comes back verbatim as exactly
+    /// `{"path":...}`, the bytes desktop apps of every release decode.
     ///
     /// The body is built as ONE `Body::from` buffer deliberately — a
     /// single HTTP body chunk with no relation to `UPLOAD_CHUNK_BYTES` —
@@ -532,10 +533,9 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
-            value["path"],
-            "/data/sessions/sess-1/attachments/screenshot.png"
+            std::str::from_utf8(&body).unwrap(),
+            r#"{"path":"/data/sessions/sess-1/attachments/screenshot.png"}"#
         );
 
         peer.await.unwrap();

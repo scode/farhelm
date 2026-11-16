@@ -38,11 +38,10 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 
-use farhelm_proto::DownloadFileInfo;
+use farhelm_proto::file_transfers::{DownloadReply, FileRequest, UploadReply};
 use farhelm_proto::ui_channel::ApiPath;
 use futures_util::Stream;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 
@@ -64,21 +63,10 @@ const CREDENTIAL_REFUSED: &str = "the helm did not accept this app's credential"
 // What the GUI sees
 // ---------------------------------------------------------------------------
 
-/// The helm's answer to a hover check: fresh evidence from the session's host, never cached.
-///
-/// `info` is the host's own report (resolved absolute path, size, and a typed refusal such as a folder or a file over
-/// [`farhelm_proto::DOWNLOAD_LIMIT_BYTES`]). A refusal is data here, not a [`TransferError`]: the request succeeded and
-/// the host said no.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct FileStat {
-    /// The host's display name, for the disclosure.
-    pub host: String,
-    /// Whether a modifier-click may open the saved file. `None` from a helm with no native opener (a server helm),
-    /// where opening is never offered; `Some(false)` when the file is not ready or its type is not on the list.
-    pub can_open: Option<bool>,
-    #[serde(flatten)]
-    pub info: DownloadFileInfo,
-}
+/// The helm's answer to a hover check, as the helm itself writes it (the wire type is shared, see "The routes' wire
+/// shapes" below). A refusal such as a folder or an oversized file is data here, not a [`TransferError`]: the request
+/// succeeded and the host said no.
+pub use farhelm_proto::file_transfers::FileStat;
 
 /// A completed save into Downloads: where the file is, and what came of the request to open it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -332,7 +320,7 @@ async fn run(
             reply,
         } => {
             let body = FileRequest {
-                path: &path,
+                path,
                 save_to_downloads: false,
                 open: false,
             };
@@ -350,7 +338,7 @@ async fn run(
         } => {
             // The GUI is a desktop app: it always asks for the helm's native save, never an octet body to save itself.
             let body = FileRequest {
-                path: &path,
+                path,
                 save_to_downloads: true,
                 open,
             };
@@ -390,29 +378,14 @@ async fn finish<T>(mut reply: Reply<T>, work: impl Future<Output = Result<T, Tra
 // The routes' wire shapes
 // ---------------------------------------------------------------------------
 //
-// NOTE: The helm's counterparts of these types are private to it: `FileRequest` and `FileStatBody` in
-// `crates/farhelm-helm/src/downloads.rs`, the download answer built as JSON in `download_file` there, and the upload
-// answer in `upload_attachment` in `crates/farhelm-helm/src/uploads.rs`. The client cannot depend on the helm crate, so
-// they are restated here. The real-helm test (`tests/real_helm.rs`) pins the request bodies, because the helm decodes
-// them before it refuses; the success shapes ([`FileStat`], `DownloadReply`, `UploadReply`) are pinned only by this
-// module's stub server. Moving the shared types into `farhelm-proto`, for both sides to use, is the right follow-up.
+// NOTE: The bodies are `farhelm_proto::file_transfers` types, the same ones the helm encodes and decodes, so neither
+// side restates the other's. Their literal JSON is pinned in that module and again here, by the stub server's answers
+// and the exact request bytes; the real-helm test (`tests/real_helm.rs`) checks the helm decodes the request before it
+// refuses. What stays local is the GUI's reading of an answer: a save becomes a [`SavedDownload`] with an
+// [`OpenOutcome`], and an upload answer without a path is refused.
 
-/// The body stat and download take, as the helm's `downloads.rs` reads it.
-#[derive(Serialize)]
-struct FileRequest<'a> {
-    path: &'a str,
-    save_to_downloads: bool,
-    open: bool,
-}
-
-/// The helm's answer to a save: `opened` only when the request asked to open, `open_error` only when that failed.
-#[derive(Deserialize)]
-struct DownloadReply {
-    path: String,
-    opened: Option<bool>,
-    open_error: Option<String>,
-}
-
+/// A save answer read for the GUI: `opened` is present only when the request asked to open, and `open_error` only when
+/// that open failed.
 impl From<DownloadReply> for SavedDownload {
     fn from(reply: DownloadReply) -> SavedDownload {
         let open = match reply.opened {
@@ -425,12 +398,6 @@ impl From<DownloadReply> for SavedDownload {
             open,
         }
     }
-}
-
-/// The helm's answer to an upload: the attachment's host path, as the supervisor published it.
-#[derive(Deserialize)]
-struct UploadReply {
-    path: String,
 }
 
 fn url(endpoint: &HelmEndpoint, path: &ApiPath) -> String {
@@ -455,7 +422,7 @@ async fn post_json<T: DeserializeOwned>(
     client: &reqwest::Client,
     endpoint: &HelmEndpoint,
     segments: &[&str],
-    body: &FileRequest<'_>,
+    body: &FileRequest,
 ) -> Result<T, TransferError> {
     let path = ApiPath::api(segments).map_err(invalid_path)?;
     let response = client
