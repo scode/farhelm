@@ -6,6 +6,7 @@
 //!
 //! - [`apply`]: applying one or more templates to a launcher draft, all or nothing, through the draft's own hand-edit
 //!   methods, plus the launcher snapshot that Save as template reads too. No GPUI types.
+//! - [`checkout_name`]: what the launcher's Name field says about a template's base name in a managed checkout.
 //! - [`summary`]: a template's one-line summary, which the Templates list, the quick switcher and the Cmd+J list show.
 //! - [`fields`]: the template editor's model: which fields a template sets, adding and removing them, and why a draft
 //!   cannot be saved. No GPUI types.
@@ -38,6 +39,7 @@
 
 pub mod apply;
 pub mod armed;
+pub mod checkout_name;
 pub mod dialog;
 pub mod dispatch;
 pub mod editor;
@@ -53,6 +55,8 @@ pub mod summary;
 mod apply_tests;
 #[cfg(test)]
 mod armed_tests;
+#[cfg(test)]
+mod checkout_name_tests;
 #[cfg(test)]
 mod dialog_tests;
 #[cfg(test)]
