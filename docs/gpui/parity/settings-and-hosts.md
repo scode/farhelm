@@ -1414,14 +1414,19 @@ Where the port does not match the old app, and why. Each stays until the work na
   while any other Settings save holds the preference row's key) sends nothing and says so under the switch, as every
   other Settings switch does. It still shows only the stored choice throughout, as before, so nothing on screen changes
   between the press and the helm's answer, which the embedded helm gives in milliseconds.
-- **A refused Create SSH key reads the account again, when it is answered and once more the next time Tensorlake is
-  shown.** The old section read nothing after a failed create, and its request waited for `ssh-keygen` however long that
-  took. Here the helm answers within its 20-second bound and lets a generation still running carry on, saying the key
-  shows once it exists, while the account is read once per opening and not pushed; these two reads are what make the key
-  show without reopening Settings (`a_refused_create_reads_the_account_now_and_on_the_next_showing`). The first read
-  comes right after the 20 seconds, when a generation that was still running has usually not finished, so a user who
-  stays on Tensorlake after a 504 sees the key only after showing another section and Tensorlake again, or opening
-  Settings again; it does not appear by itself. A refusal's line goes once a read shows the key.
+- **A refused Create SSH key reads the account again: when it is answered, a few times over the next half minute, and
+  once more the next time Tensorlake is shown.** The old section read nothing after a failed create, and its request
+  waited for `ssh-keygen` however long that took, so the key showed where the user pressed. Here the helm answers within
+  its 20-second bound and lets a generation still running carry on, saying the key shows once it exists, while the
+  account is read once per opening and not pushed, and nothing pushed changes when the key is written. So after a
+  refusal the section reads the account at once, then again 5, 15 and 30 seconds later while no key shows, and once more
+  on the next showing; the helm's own bounds end a generation about 10 seconds after the refusal, so the key appears
+  within seconds of being written for a user who stays on Tensorlake
+  (`a_carried_on_create_shows_the_key_where_it_was_pressed`,
+  `a_refused_create_reads_the_account_now_and_on_the_next_showing`). The re-reads stop once the key shows, after the
+  last one (`the_re_reads_after_a_carried_on_create_end_after_half_a_minute`), and when Settings closes
+  (`closing_settings_stops_the_re_reads`); they go on while another section is shown. A re-read that fails shows Retry
+  loading in the API key forms, as any failed account read does. A refusal's line goes once a read shows the key.
 - **Sandboxes not on this helm reads only when its answer can change.** The old list read on every fleet notice while
   healthy, and again after a successful Test while failed. Here it reads when the section first knows a key is saved, on
   Refresh, after a key's Save or Clear in this opening, after every answer to a Delete, and when the pushed hosts list
