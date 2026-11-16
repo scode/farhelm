@@ -13,8 +13,8 @@
 //! from the registry, the agent mark and the shield from the session's launch. Which mark and name an agent type has
 //! is the GUI's per-harness vocabulary in [`crate::harness`]; nothing here compares harnesses. Which shield a launch
 //! earns is [`crate::permission`]'s, kept apart so the agent approval cards can show the same classification. The
-//! session pane's details bar draws the same host mark beside the session's host ([`HostMark::of`] and
-//! [`host_mark`]), so the two never disagree about where a session runs.
+//! session pane's details bar and the quick switcher's rows draw the same host mark beside the session's host
+//! ([`HostMark::of`] and [`host_mark`]), so none of them disagrees about where a session runs.
 //!
 //! The agent mark and the shield describe the pair together, the way the old row did: one description names the
 //! agent, what the launch's permission means and the stored command, since the shield alone cannot say which of
@@ -278,8 +278,8 @@ pub(crate) struct HostMark {
 
 impl HostMark {
     /// The host mark of `row`'s session, drawn in `inverse` instead of the host's tint when given, or `None` when the
-    /// session's host cannot be placed ([`locality`]). The row and the session pane's details bar both draw this one
-    /// decision, so the bar never marks a session the row leaves unmarked.
+    /// session's host cannot be placed ([`locality`]). The row, the session pane's details bar and the quick
+    /// switcher's rows all draw this one decision, so neither of the others marks a session the row leaves unmarked.
     pub(crate) fn of(
         row: &SessionRow,
         collections: &Collections,
