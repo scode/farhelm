@@ -141,12 +141,14 @@ async fn replay(socket: &mut WebSocketStream<TcpStream>) {
         .unwrap();
 }
 
-/// The reconnect rules decide whether a client can steal a terminal without the user asking, so they are pinned on
-/// the wire: the first attach takes control, a reconnect after a drop uses the non-displacing route with the same
-/// lease and the latest size, a takeover notice stops the stream instead of fighting back, and only an explicit
-/// take-control displaces again.
+/// The lease is how the supervisor tells this stream's own reattach (replaced quietly) from another client's takeover,
+/// and a takeover notice is the one detach the stream must not answer by attaching again, so both are pinned on the
+/// wire: every attach (the first, a reconnect after a drop, and take-control) goes to the one terminal route with the
+/// same lease, a reconnect asks for the latest size, a takeover notice stops the stream instead of fighting back, and
+/// only an explicit take-control attaches again. Every attach is the ordinary one because the app is single-UI
+/// (SPEC_impl.md, "The seat: one UI per helm").
 #[tokio::test]
-async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
+async fn every_attach_takes_the_one_route_and_a_takeover_stops_the_stream() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let (addr, mut accepted) = server().await;
         let attach = TerminalAttach {
@@ -155,7 +157,6 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
             lease: AttachmentLease::new(),
             cols: 80,
             rows: 24,
-            take_control: true,
         };
         let lease = attach.lease.0.clone();
         let (handle, mut events) = open_terminal(
@@ -168,7 +169,7 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
             TerminalEvent::State(StreamState::Attaching)
         );
 
-        // First attach: takes control, and the session id stays one segment.
+        // First attach: the session id stays one segment.
         let mut first = accepted.recv().await.unwrap();
         assert_eq!(
             first.uri,
@@ -211,8 +212,8 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
             serde_json::json!({"type": "resize", "cols": 100, "rows": 30})
         );
 
-        // A drop reconnects through the non-displacing route, at the new size (after the ladder's first wait: this
-        // attachment never answered a ping).
+        // A drop reconnects through the same route with the same lease, at the new size (after the ladder's first
+        // wait: this attachment never answered a ping).
         drop(first);
         assert_eq!(
             next_event(&mut events).await,
@@ -225,9 +226,7 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
         let mut second = accepted.recv().await.unwrap();
         assert_eq!(
             second.uri,
-            format!(
-                "/api/sessions/host%3A1%2Fs%201/term/unowned?cols=100&rows=30&lease={lease}&tab=t1"
-            )
+            format!("/api/sessions/host%3A1%2Fs%201/term?cols=100&rows=30&lease={lease}&tab=t1")
         );
         replay(&mut second.socket).await;
         assert_eq!(
@@ -252,19 +251,16 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
             })
         );
 
-        // Only the user's take-control attaches again, through the displacing route.
+        // Only the user's take-control attaches again, through the same route with the same lease.
         handle.take_control();
         assert_eq!(
             next_event(&mut events).await,
             TerminalEvent::State(StreamState::Attaching)
         );
         let third = accepted.recv().await.unwrap();
-        assert!(
-            third
-                .uri
-                .starts_with("/api/sessions/host%3A1%2Fs%201/term?"),
-            "{}",
-            third.uri
+        assert_eq!(
+            third.uri,
+            format!("/api/sessions/host%3A1%2Fs%201/term?cols=100&rows=30&lease={lease}&tab=t1")
         );
 
         handle.close();
@@ -356,7 +352,6 @@ fn attach(session: &str) -> TerminalAttach {
         lease: AttachmentLease::new(),
         cols: 80,
         rows: 24,
-        take_control: true,
     }
 }
 
@@ -391,8 +386,7 @@ async fn until_event(events: &mut TerminalEvents, wanted: TerminalEvent) {
 /// Which detach codes stop the stream is the whole reconnect policy (SPEC.md, "Terminal experience"): a takeover, a
 /// closed tab or a stall waits for the user, because reattaching would fight another client, chase a tab that is gone,
 /// or walk back into the wedge that stalled it. `replaced` and `other` carry trouble that keeps recovering (a lost
-/// supervisor, an unreachable host), so they wait their rung and reattach without displacing anyone. Pinned per
-/// code, on the wire.
+/// supervisor, an unreachable host), so they wait their rung and reattach. Pinned per code, on the wire.
 #[tokio::test]
 async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
     tokio::time::timeout(Duration::from_secs(60), async {
@@ -423,7 +417,7 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
             if !stops {
                 let again = accepted.recv().await.unwrap();
                 assert!(
-                    again.uri.starts_with("/api/sessions/s1/term/unowned?"),
+                    again.uri.starts_with("/api/sessions/s1/term?"),
                     "{code}: {}",
                     again.uri
                 );
@@ -435,9 +429,9 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
 }
 
 /// The "Reconnect now" button must skip the wait (an hour here, so only the request can explain the prompt attach),
-/// show the attempt starting with its number kept, and still use the non-displacing route.
+/// show the attempt starting with its number kept, and attach through the one terminal route like any other attempt.
 #[tokio::test]
-async fn reconnect_now_skips_the_wait_without_displacing() {
+async fn reconnect_now_skips_the_wait() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let slow = ChannelConfig {
             terminal_ladder: ladder(&[3_600_000], 3_600_000),
@@ -457,7 +451,7 @@ async fn reconnect_now_skips_the_wait_without_displacing() {
         );
         let again = accepted.recv().await.unwrap();
         assert!(
-            again.uri.starts_with("/api/sessions/s1/term/unowned?"),
+            again.uri.starts_with("/api/sessions/s1/term?"),
             "{}",
             again.uri
         );
@@ -487,7 +481,11 @@ async fn an_unanswered_ping_reconnects_the_stream() {
             reconnecting(1, 6, ReconnectPhase::Retrying, Some(500))
         );
         let again = accepted.recv().await.unwrap();
-        assert!(again.uri.contains("/term/unowned?"), "{}", again.uri);
+        assert!(
+            again.uri.starts_with("/api/sessions/s1/term?"),
+            "{}",
+            again.uri
+        );
     })
     .await
     .expect("the stream test finished in time");
@@ -741,7 +739,11 @@ async fn only_an_attachment_that_answered_a_ping_reconnects_at_once() {
             reconnecting(1, 1, ReconnectPhase::Retrying, None)
         );
         let third = accepted.recv().await.unwrap();
-        assert!(third.uri.contains("/term/unowned?"), "{}", third.uri);
+        assert!(
+            third.uri.starts_with("/api/sessions/s1/term?"),
+            "{}",
+            third.uri
+        );
     })
     .await
     .expect("the stream test finished in time");
@@ -857,7 +859,7 @@ async fn events_read_before_a_drop_reach_a_caller_that_was_behind_and_the_stream
             );
         assert_eq!(state, reconnecting(1, 1, ReconnectPhase::Retrying, Some(10)));
         let again = accepted.recv().await.unwrap();
-        assert!(again.uri.contains("/term/unowned?"), "{}", again.uri);
+        assert!(again.uri.starts_with("/api/sessions/s1/term?"), "{}", again.uri);
         drop(first);
     })
     .await

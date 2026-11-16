@@ -464,6 +464,10 @@ back.
 Enforcing the seat is a small check when a channel is accepted. If it ever needs more than that, enforcement is deferred
 (the maintainer accepted that) while the code keeps assuming a single UI and adds nothing to cope with several.
 
+The maintainer and the migration's orchestrator decided on 2026-11-15 that the app is single-UI. So every terminal
+attach is the ordinary one, which takes the terminal from whoever holds it, and the helm serves no non-displacing
+terminal route; the supervisor keeps its non-displacing attach only for older helms.
+
 Whether a window is open, for agent approvals, is the live seat, released on disconnect and on takeover. It is not a
 count of feed subscribers: the helm's own internal subscriptions to the feed never count as windows.
 
@@ -483,9 +487,9 @@ link that answered a heartbeat reconnects at once, and an attachment starts the 
 wait and each attempt to the terminal's card as it goes: the attempt number, the six retries it counts against, the
 phase (retrying or probing) and the next attempt's delay. A 5xx answer to the attach's upgrade is retried on the ladder,
 because a helm restarting usually gives one for a moment (the orchestrator decided this on 2026-11-15); any other
-refusal waits for the user. A stream may also be opened with a first attach that does not displace another viewer, for a
-terminal the user did not ask to take, such as a tab opened by a view that may have missed a takeover while its own
-connection was down; reconnects never displace. `crates/farhelm-helm-client/src/terminal.rs` has the rules.
+refusal waits for the user. Every attach is the ordinary one under the view's lease, the first and every reconnect
+alike, because the app is single-UI ("The seat: one UI per helm"). `crates/farhelm-helm-client/src/terminal.rs` has the
+rules.
 
 ### The store, and how views redraw
 

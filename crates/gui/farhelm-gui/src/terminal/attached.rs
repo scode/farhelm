@@ -804,7 +804,7 @@ impl AttachedTerminal {
             .map(|placement| placement.lift)
     }
 
-    /// The user's Take control: attach again through the displacing route, or, parked, open at last. Only the states
+    /// The user's Take control: attach again, or, parked, open at last. Only the states
     /// that wait for it offer it.
     pub fn take_control(&mut self, cx: &mut Context<Self>) {
         if self.parked.is_some() && self.handle.is_none() {
@@ -948,7 +948,6 @@ impl AttachedTerminal {
             lease: self.target.lease.clone(),
             cols,
             rows,
-            take_control: true,
         });
         self.handle = Some(handle);
         self.pump = Some(cx.spawn(async move |owner, cx| {
