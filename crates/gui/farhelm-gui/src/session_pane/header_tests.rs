@@ -959,12 +959,12 @@ fn the_one_second_clock_goes_with_the_last_line(cx: &mut TestAppContext) {
     assert_eq!(kept(cx), Some((false, 0)), "nothing kept once it settled");
 }
 
-/// The old `session-view-claims.spec.ts`: another client deleting the open session while its header Restart question
-/// is open, or while its Restart runs, must leave navigation working, and must not leave the next session's header
-/// unavailable because of the gone session's question or request. Specified: with a's Restart question open, a complete
-/// listing pushed without a closes the question and opens b, whose header's Replace then asks; and with b's Restart sent
-/// and unanswered, a complete listing without b opens c, whose header's Replace asks too, while b's Restart is still in
-/// flight.
+/// The old `session-view-claims.spec.ts`: an agent or the command line deleting the open session while its header
+/// Restart question is open, or while its Restart runs, must leave navigation working, and must not leave the next
+/// session's header unavailable because of the gone session's question or request. Specified: with a's Restart question
+/// open, a complete listing pushed without a closes the question and opens b, whose header's Replace then asks; and
+/// with b's Restart sent and unanswered, a complete listing without b opens c, whose header's Replace asks too, while
+/// b's Restart is still in flight.
 #[gpui::test]
 fn a_session_deleted_elsewhere_leaves_the_next_sessions_header_usable(cx: &mut TestAppContext) {
     let rows = vec![
@@ -1585,7 +1585,7 @@ fn clone_says_why_it_waits_while_a_launch_is_pending(cx: &mut TestAppContext) {
 }
 
 /// SPEC.md, "Keyboard focus": a menu goes away "when the thing it is about is gone (a deleted session's open menu,
-/// say)". A caret menu is about the open session, and another client or an agent can delete that session while the
+/// say)". A caret menu is about the open session, and the command line or an agent can delete that session while the
 /// menu is open; the next session then opens under the same carets, and a menu left open would act on the wrong
 /// session or show nothing. Specified: with a's Restart caret menu open, a complete listing pushed without a opens b,
 /// and the menu is no longer drawn nor any layer open.
@@ -2031,10 +2031,9 @@ fn the_text_size_buttons_step_the_shared_size_and_the_readout_follows(cx: &mut T
     assert_eq!(readout(cx), "13");
 }
 
-/// A refused or failed write must not leave the terminals at a size the helm never stored, which every other client
-/// and the next start would disagree with: the hold ends with the helm's answer whatever it is, and the size falls back
-/// to the stored one. Specified: at a stored 16, Larger shows 17; the helm's refusal brings back 16 and nothing more is
-/// sent.
+/// A refused or failed write must not leave the terminals at a size the helm never stored, which the next start would
+/// disagree with: the hold ends with the helm's answer whatever it is, and the size falls back to the stored one.
+/// Specified: at a stored 16, Larger shows 17; the helm's refusal brings back 16 and nothing more is sent.
 #[gpui::test]
 fn a_refused_text_size_falls_back_to_the_stored_one(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, sized(Some(16)));

@@ -69,8 +69,7 @@ fn open_rows<'a>(
     )
 }
 
-/// A push of the preference row with `compact`, as the helm sends it when another client or the command line changes
-/// it.
+/// A push of the preference row with `compact`, as the helm sends it when the preference changes elsewhere.
 fn push_compact(
     fake: &mut FakeHelm,
     compact: Option<bool>,
@@ -171,10 +170,10 @@ fn compact_hides_the_last_line_and_the_ended_line_and_shortens_the_row(cx: &mut 
 }
 
 /// The preference is shared by every client (SPEC.md: "shared at the next preference seed across clients"), and a
-/// change by another client or the command line reaches the open window as it happens, so the rows must follow a push
-/// both ways without the window writing anything back. Specified: with compact on at the first snapshot, a row paints
-/// only its title and age; a push setting it off brings its last line back; a push leaving it unset keeps it off (unset
-/// is off); a push setting it on hides the line again; and none of the pushes sends anything.
+/// change made elsewhere reaches the open window as it happens, so the rows must follow a push both ways without the
+/// window writing anything back. Specified: with compact on at the first snapshot, a row paints only its title and age;
+/// a push setting it off brings its last line back; a push leaving it unset keeps it off (unset is off); a push setting
+/// it on hides the line again; and none of the pushes sends anything.
 #[gpui::test]
 fn a_pushed_change_of_the_preference_redraws_the_rows(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_rows(cx, &[quiet("a")], Some(true));

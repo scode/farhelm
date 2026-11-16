@@ -189,7 +189,7 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
 /// BOTH of the first client's channels, as one event — and leaves an
 /// unrelated session's attachment alone (PLAN_M4.md acceptance 5).
 ///
-/// SPEC.md's one-attached-client rule is per SESSION, not per terminal,
+/// SPEC.md's one-viewer-per-session rule is per SESSION, not per terminal,
 /// and only a session holding two terminals can show the difference: the
 /// takeover has to sweep the whole lease and stop exactly there. The
 /// unrelated session is the other half — a lease is never cross-session,

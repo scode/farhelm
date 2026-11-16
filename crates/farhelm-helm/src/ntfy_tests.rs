@@ -411,7 +411,7 @@ async fn changing_server_from_a_stale_form_never_forwards_the_saved_token() {
     let mut second = stand_in(Answer::Success).await;
     let harness = helm().await;
     for (index, omit) in [false, true].into_iter().enumerate() {
-        // Capture a token-free draft before another client saves a secret.
+        // Capture a token-free draft before a later save stores a secret.
         let mut stale = serde_json::to_value(save(&second.server_url, None, false)).unwrap();
         if omit {
             stale.as_object_mut().unwrap().remove("token");

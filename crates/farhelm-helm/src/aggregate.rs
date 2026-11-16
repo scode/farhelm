@@ -1362,7 +1362,7 @@ mod tests {
     /// The row builder enforces SPEC.md's "at most 10, newest first", one per
     /// sequence number, itself, because the list arrives from a supervisor as
     /// peer data, and drops every entry at or below the cleared mark so a
-    /// cleared bell stays cleared on every client.
+    /// cleared bell stays cleared.
     #[test]
     fn notification_marks_drop_cleared_entries_and_cap_the_rest() {
         let mut info = crate::rest_harness::session("s", 1);

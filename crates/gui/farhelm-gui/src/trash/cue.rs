@@ -7,8 +7,8 @@
 //!
 //! - **Only this window's confirmed archive.** The session Delete's completion hands its reply to [`archived`], and only
 //!   a reply that says a checkout was archived plays the cue. A bare Delete (no checkout), a refused or failed Delete,
-//!   and a session that only disappeared from the listing (another client's Delete) play nothing: none of them reaches
-//!   this module with that flag.
+//!   and a session that only disappeared from the listing (an agent's Delete) play nothing: none of them reaches this
+//!   module with that flag.
 //! - **The wiggle.** The can turns by the old keyframes, 0, -16, 12, -8, 4 and back to 0 degrees, over 900 ms eased
 //!   out, a step per ticker tick ([`ticker::animate`]), and then stands upright again ([`wiggle_angle`]). It plays only
 //!   while the button is drawn and the window active, and never under reduced motion, as the old one skipped a hidden

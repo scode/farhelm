@@ -9,8 +9,7 @@
 //! - **The width is a helm preference.** It is [`Preferences::sidebar_width`], the whole sidebar with the 56-pixel
 //!   collapsed rail included, shared by every client of the helm (the maintainer's decision of 2026-11-13; the old app
 //!   kept it per device and nothing carries over), and [`default_width`] while it is unset. The view keeps no copy of
-//!   it beyond the hold below: it reads the store as it draws, so a change another client makes moves this window's
-//!   sidebar too.
+//!   it beyond the hold below: it reads the store as it draws, so a change the helm pushes moves the sidebar too.
 //! - **A drag follows every move and writes once.** While the primary button is held on the divider, the sidebar takes
 //!   the pointer's width on every move (clamped to [`SIDEBAR_WIDTH_RANGE`]), and the helm hears only the width the drag
 //!   ended at, as the old script persisted "completed gestures, never every pointer sample". A drag that ends without

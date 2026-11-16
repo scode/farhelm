@@ -423,17 +423,17 @@ pub(crate) struct YoloWithoutAskingSpec {
 /// minutes-long install or update. The run's own registry writes touch other
 /// columns, so neither loses the other's write. No registry reconcile
 /// follows, because the connection actors do not read this flag; a change
-/// bumps the event feed directly instead, so other open clients re-read the
-/// host list.
+/// bumps the event feed directly instead, so the UI channel re-reads the
+/// host list and pushes the change to the window.
 pub(crate) async fn set_yolo_without_asking(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<YoloWithoutAskingSpec>,
 ) -> impl IntoResponse {
     // Save, then announce: the HTTP router owns both steps. Dropping the
-    // operation between them would leave the setting saved but
-    // every other open client showing the old one, and nothing later
-    // re-announces it (the registry reconcile does not compare this flag).
+    // operation between them would leave the setting saved but the window
+    // showing the old one, and nothing later re-announces it (the registry
+    // reconcile does not compare this flag).
     let serialized = state.manager.host_write_lock(host).await;
     let changed = match state
         .store
@@ -443,8 +443,8 @@ pub(crate) async fn set_yolo_without_asking(
         Ok(changed) => changed,
         Err(error) => return http_error(error),
     };
-    // Every other open client learns of the change through the event feed,
-    // exactly as for an alias change; an unchanged write announces nothing.
+    // The UI channel learns of the change through the event feed, exactly as
+    // for an alias change; an unchanged write announces nothing.
     if changed {
         state.manager.events().bump();
     }
@@ -469,10 +469,10 @@ pub(crate) struct AppearanceSpec {
     pub(crate) color: farhelm_proto::host_appearance::HostColor,
 }
 
-/// Save a host's chosen mark and announce it to every open client.
+/// Save a host's chosen mark and announce it to the window.
 ///
 /// The HTTP router owns the operation: a client leaving after the durable
-/// write must not cancel the feed bump and strand other clients on the old mark.
+/// write must not cancel the feed bump and strand the window on the old mark.
 /// Actors do not consume decorative identity, so no reconnect or reconcile
 /// is needed. The ordinary host write lock serializes it with removal.
 pub(crate) async fn set_appearance(
@@ -1025,8 +1025,8 @@ async fn set_alias_for(state: &AppState, host: HostId, alias: Option<&str>) -> a
 /// must also own the operation through the reconcile. The hosts list reads
 /// names from the actors' snapshots, which only the reconcile updates (and
 /// announces), so a caller dropped between the two would leave the alias
-/// saved while every client, its own after a reload included, kept showing
-/// the old name.
+/// saved while the window, even after a reconnect, kept showing the old
+/// name.
 async fn write_alias_locked(
     state: &AppState,
     host: HostId,
@@ -2614,8 +2614,8 @@ mod tests {
     /// with the host view carrying it, bumps the fleet's revision on a real
     /// change, and stays silent on a repeat of the same value.
     ///
-    /// Why: the event feed is how every other open client learns to re-read the host list;
-    /// a change that did not bump it would leave another window showing an outdated YOLO
+    /// Why: the event feed is how the UI channel learns to re-read the host list; a
+    /// change that did not bump it would leave the window showing an outdated YOLO
     /// confirmation setting.
     #[farhelm_testtrace::test]
     async fn setting_yolo_without_asking_stores_it_and_bumps_the_revision_only_on_a_real_change() {
@@ -2726,8 +2726,8 @@ mod tests {
     /// with the host view carrying it, leaves the YOLO setting alone, bumps the fleet's
     /// revision on a real change, and stays silent on a repeat of the same value.
     ///
-    /// Why: the settings dialog's switch and every other open window read the setting from
-    /// the host list, so a change that did not bump the feed would leave another window
+    /// Why: the settings dialog's switch and the rest of the window read the setting
+    /// from the host list, so a change that did not bump the feed would leave the window
     /// showing a host as asking when its agents already act unasked, or the reverse.
     #[farhelm_testtrace::test]
     async fn setting_commands_without_asking_stores_it_and_bumps_the_revision_only_on_a_real_change()
@@ -2774,7 +2774,8 @@ mod tests {
 
     /// Own-host settings writes preserve fleet-wide authority and publish real changes.
     /// A missing or misspelled value must fail rather than silently revoke a grant;
-    /// repeated saves must not wake every client when the stored value is unchanged.
+    /// repeated saves must not make the UI channel re-run its reads when the stored
+    /// value is unchanged.
     #[farhelm_testtrace::test]
     async fn own_session_permission_route_is_independent_and_requires_an_explicit_value() {
         let harness = lone_local_helm().await;
@@ -3895,7 +3896,7 @@ mod tests {
     }
 
     /// A chosen identity must be durable and announced exactly once per
-    /// change, so another client can redraw without reconnecting the host.
+    /// change, so the window can redraw without reconnecting the host.
     /// Unknown words, malformed input and absent hosts are refused without
     /// changing the mark or event revision. Local and remote rows share the
     /// route, while retaining different defaults.

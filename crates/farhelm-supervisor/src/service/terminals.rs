@@ -79,14 +79,14 @@ impl From<TerminalSelector> for TerminalId {
 /// What one live attachment is FOR: a session's terminal, not merely a
 /// session.
 ///
-/// SPEC.md caps a session's attached CLIENTS at one, never its attached
-/// terminals — a client owning a session owns all of its terminals at
-/// once, each on its own channel with its own output task and input side
-/// (PLAN_M4.md item 3). So the attachment map is keyed per (session,
-/// terminal) and the one-attachment rule is enforced above it, by lease
-/// (see the `Attach` handler). Keying by session id alone — what this was
-/// before M4 — would make a second terminal of the same session look like
-/// a takeover of the first.
+/// SPEC.md caps a session's viewers at one (one viewer per session),
+/// never its attached terminals — a view owning a session owns all of
+/// its terminals at once, each on its own channel with its own output
+/// task and input side (PLAN_M4.md item 3). So the attachment map is
+/// keyed per (session, terminal) and the one-viewer rule is enforced
+/// above it, by lease (see the `Attach` handler). Keying by session id
+/// alone — what this was before M4 — would make a second terminal of
+/// the same session look like a takeover of the first.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct AttachmentKey {
     pub(crate) session: String,
@@ -318,7 +318,7 @@ pub(crate) struct InputRoute {
 }
 
 /// Whether an existing attachment is displaced by an incoming attach —
-/// the session-scoped half of SPEC.md's one-attached-client rule
+/// the session-scoped half of SPEC.md's one-viewer-per-session rule
 /// (PLAN_M4.md item 3).
 ///
 /// A pure function rather than an inline closure so the rule can be
@@ -357,7 +357,7 @@ fn same_lease_client(incumbent: &str, requester: &str) -> bool {
 }
 
 /// The reason a client is told it lost its attachment to a DIFFERENT
-/// client (SPEC.md's one-attached-client rule, made visible).
+/// client (SPEC.md's one-viewer-per-session rule, made visible).
 ///
 /// One constant because a session-scoped takeover emits it once per
 /// terminal channel the loser held: the identical string across all of

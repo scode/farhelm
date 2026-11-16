@@ -339,13 +339,13 @@ pub const LIST_SESSIONS_CAP: usize = 500;
 /// Both ends hold to it, for different reasons. Each hint costs the helm a
 /// whole `ListSessions` round trip (an ssh round trip for a remote host, plus
 /// the supervisor's reading of every session's terminals), and each refresh
-/// that answers one raises a fleet-wide event that makes every open client
-/// re-read the list and every open session view do a live read of its own
-/// host. An honest supervisor spaces its hints this far apart to bound that
-/// during a burst. The helm enforces the same gap on its side, because
-/// supervisor messages are untrusted (SPEC.md): without it, a host that hints
-/// after every reply would drive back-to-back refreshes at round-trip rate,
-/// and with it a hostile host costs the helm no more than a busy honest one.
+/// that answers one raises a fleet-wide event on which the helm re-runs
+/// every list it pushes to the window. An honest supervisor spaces its
+/// hints this far apart to bound that during a burst. The helm enforces the
+/// same gap on its side, because supervisor messages are untrusted
+/// (SPEC.md): without it, a host that hints after every reply would drive
+/// back-to-back refreshes at round-trip rate, and with it a hostile host
+/// costs the helm no more than a busy honest one.
 ///
 /// Well under the three-second poll the hint is meant to beat. Lowering it
 /// on one side only does nothing: the slower of the two ends sets the pace.
@@ -3516,7 +3516,7 @@ pub enum ControlMsg {
         /// A client sets it on a delete it did NOT ask the user to confirm,
         /// because its own row said nothing was running, and on a confirmed
         /// delete whose prompt said nothing was alive. That row can be
-        /// stale (another client or an agent restarted the session, a
+        /// stale (the command line or an agent restarted the session, a
         /// cached status right after a relaunch), and an unconditional
         /// delete would then kill a live agent nobody agreed to stop. It is
         /// the delete counterpart of `RestartSession::stop_if_running`: the
@@ -3628,8 +3628,8 @@ pub enum ControlMsg {
     /// meeting an older supervisor that would refuse it with no way to
     /// consent. But that derivation is only a
     /// hint, not an authorization: it can be stale by the time this
-    /// message actually arrives (another client's action, or the agent
-    /// exiting or relaunching in the interim), so `stop_if_running`
+    /// message actually arrives (an agent's or the command line's action, or
+    /// the agent exiting or relaunching in the interim), so `stop_if_running`
     /// carries the user's actual consent onto the wire, and the handler
     /// rechecks liveness and the agent's activity before deciding whether
     /// it is needed — see that field's own docs for the full rationale. A
@@ -3675,8 +3675,9 @@ pub enum ControlMsg {
         /// merely promises: a client's `SessionInfo.status` is a
         /// snapshot from its last list or its own cached copy, and the
         /// agent can transition between "the user was shown a confirm
-        /// dialog" and "the request actually arrives" (another client's
-        /// action, the agent exiting or being launched in the interim).
+        /// dialog" and "the request actually arrives" (an agent's or the
+        /// command line's action, the agent exiting or being launched in the
+        /// interim).
         /// The handler rechecks liveness and reads the agent's activity at
         /// handling time and rejects with `Conflict` if the agent is live,
         /// reads working, and this flag is false; an idle, waiting, or
@@ -3830,7 +3831,7 @@ pub enum ControlMsg {
     TabClosed { req_id: u64 },
     /// Attach to one of a session's terminals. The requester picks the
     /// (connection-unique) data channel; the supervisor sends the terminal's
-    /// grid stream on it ([`grid`]): its catch-up, then live updates. SPEC.md's one-attachment
+    /// grid stream on it ([`grid`]): its catch-up, then live updates. SPEC.md's one-viewer
     /// rule is enforced per SESSION across all its terminals, grouped by
     /// `lease` (PLAN_M4.md item 3): an attach under a different lease
     /// detaches EVERY channel the previous lease held on this session,
@@ -3863,7 +3864,7 @@ pub enum ControlMsg {
         /// value to enforce the session-scoped takeover described above.
         /// Version-6 clients must mint it high-entropy and non-empty
         /// (one random id per session-view instance): grouping is by
-        /// bare equality, so a collision would fuse two clients into one
+        /// bare equality, so a collision would fuse two session views into one
         /// lease and silently bypass the visible takeover. It is a
         /// CORRECTNESS mechanism, not an authentication boundary —
         /// anything that can speak this protocol already runs as the

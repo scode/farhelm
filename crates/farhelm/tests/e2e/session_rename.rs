@@ -364,9 +364,9 @@ async fn a_renamed_title_survives_a_supervisor_restart() {
 /// Renaming a session that no longer exists is `NotFound`.
 ///
 /// The honest answer for a client whose session list is a poll behind
-/// reality — someone deleted it in another window, or on another client
-/// entirely. Inventing the row back, or reporting success against nothing,
-/// would leave the caller believing a session exists that does not.
+/// reality — an agent or the command line deleted it meanwhile. Inventing
+/// the row back, or reporting success against nothing, would leave the
+/// caller believing a session exists that does not.
 #[farhelm_testtrace::test]
 async fn renaming_a_deleted_session_is_not_found() {
     let h = harness().await;

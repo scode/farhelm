@@ -89,9 +89,9 @@ async fn raw_row(store: &HelmStore, name: &str) -> (String, String, i64) {
 /// recipe exactly as it was; an invalid name or definition is refused before
 /// anything is stored.
 ///
-/// Why: "New recipe" must never overwrite a recipe (another client may have
-/// created the same name meanwhile), and an overwrite would also silently
-/// replace the other recipe's endpoint choices.
+/// Why: "New recipe" must never overwrite a recipe (the same name may have
+/// been created meanwhile), and an overwrite would also silently replace the
+/// other recipe's endpoint choices.
 #[farhelm_testtrace::test]
 async fn create_refuses_an_existing_name_and_invalid_input() {
     let (_dir, store) = store().await;
@@ -935,7 +935,7 @@ fn create_body(name: &str, recipe: RecipeSave) -> String {
 ///
 /// Why: these are the editor's contract. "New recipe" relies on the 409 to
 /// never overwrite, and Save on an existing recipe relies on the 404 to never
-/// resurrect one another client deleted.
+/// resurrect one deleted meanwhile.
 #[farhelm_testtrace::test]
 async fn routes_create_update_and_delete_with_distinct_refusals() {
     let harness = helm().await;

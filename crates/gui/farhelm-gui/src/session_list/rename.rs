@@ -11,7 +11,7 @@
 //!
 //! - **The draft.** The field is a [`DraftInput`] seeded from the session's raw title ([`HostText::raw`]), so saving it
 //!   untouched sends back the helm's own bytes, hidden characters included. Until the user edits it, the draft follows
-//!   a rename the helm pushes (another client, an agent); once edited, a push never overwrites it (SPEC.md, "Things
+//!   a rename the helm pushes (the command line, an agent); once edited, a push never overwrites it (SPEC.md, "Things
 //!   changing underneath": "A refresh never changes what the user is typing"). It does not follow while a save is in
 //!   flight; an untouched draft whose save the helm refused takes up the current title again. The current title above
 //!   the field always follows, escaped.

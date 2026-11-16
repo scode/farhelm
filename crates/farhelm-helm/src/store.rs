@@ -1473,7 +1473,7 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub tunnel_consent: Option<Option<bool>>,
-    /// Null restores the hint; omission preserves another client's choice.
+    /// Null restores the hint; omission preserves the stored choice.
     #[serde(
         default,
         deserialize_with = "double_option_bool",
@@ -1499,7 +1499,7 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub pi_trust_hint_dismissed: Option<Option<bool>>,
-    /// Null restores unseen; omission preserves another client's dismissal.
+    /// Null restores unseen; omission preserves the stored dismissal.
     #[serde(
         default,
         deserialize_with = "double_option_bool",
@@ -1561,14 +1561,14 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub skip_session_confirmations: Option<Option<bool>>,
-    /// Null restores naming by default; omission preserves another client's choice.
+    /// Null restores naming by default; omission preserves the stored choice.
     #[serde(
         default,
         deserialize_with = "double_option_bool",
         skip_serializing_if = "Option::is_none"
     )]
     pub name_session_on_quick_launch: Option<Option<bool>>,
-    /// Null restores the off default; omission preserves another client's choice.
+    /// Null restores the off default; omission preserves the stored choice.
     #[serde(
         default,
         deserialize_with = "double_option_bool",
@@ -1582,7 +1582,7 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub open_extensions: Option<Option<String>>,
-    /// Null removes the mark; omission preserves another client's choice.
+    /// Null removes the mark; omission preserves the stored choice.
     #[serde(
         default,
         deserialize_with = "double_option",
@@ -1628,7 +1628,7 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub sidebar_width: Option<Option<u32>>,
-    /// Null restores the collapsed default; omission preserves another client's choice.
+    /// Null restores the collapsed default; omission preserves the stored choice.
     #[serde(
         default,
         deserialize_with = "double_option_bool",
@@ -5115,7 +5115,7 @@ fn claimant_of(
 
 /// Retire all shortcuts to a deleted template within its deletion transaction.
 /// Reading the current map under the write lock preserves bindings to other
-/// templates, even when another window has just replaced the whole map.
+/// templates, even when a GUI save has just replaced the whole map.
 fn clear_template_bindings(tx: &rusqlite::Transaction<'_>, name: &str) -> anyhow::Result<()> {
     let encoded: Option<String> = tx
         .query_row(
@@ -5140,8 +5140,9 @@ fn clear_template_bindings(tx: &rusqlite::Transaction<'_>, name: &str) -> anyhow
 /// The fleet shortcut state an agent's approval saw before a template write.
 ///
 /// It is checked as a unit inside the write transaction. Comparing only the
-/// destination key would miss another client's concurrent move of ⚡ or a
-/// different key, while the card's consent covers this whole snapshot.
+/// destination key would miss a concurrent move of ⚡ or a different key (a
+/// GUI save, or another template write), while the card's consent covers
+/// this whole snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TemplateBindings {
     pub(crate) quick_launch: Option<String>,
@@ -5626,8 +5627,8 @@ impl HelmStore {
 
     /// Delete the template and its quick-launch and number bindings atomically.
     ///
-    /// Clearing only matching names preserves another client's bindings to
-    /// different templates; Undo restores fields, never shortcut preferences.
+    /// Clearing only matching names preserves bindings to different
+    /// templates; Undo restores fields, never shortcut preferences.
     pub(crate) async fn delete_launch_template(&self, name: String) -> anyhow::Result<bool> {
         self.conn
             .call(
@@ -5736,19 +5737,21 @@ impl HelmStore {
     /// was, a `Some(None)` clears it, a `Some(Some(value))` replaces it.
     ///
     /// A MERGE rather than a whole-row replace, and the reason is the
-    /// preference being shared: two clients change different fields at
-    /// nearly the same time (one re-sorts, the other clicks a row), and a
-    /// whole-row write from either would reinstall its own stale copy of the
-    /// field the other just wrote. Sparse patches make the last writer win
-    /// per FIELD, which is the only order anyone can observe anyway. The
-    /// clear lets a successful feedback send forget its contact and lets test
-    /// harnesses establish a "nothing remembered" precondition.
-    /// A selection also records a visit in the same transaction: newest first,
-    /// without duplicates, capped at 32. Clearing selection clears its history;
-    /// an unrelated patch changes neither. Stale full references age out rather
-    /// than making this preference write depend on current fleet availability.
-    /// The retired `remembered_workspace_trust` field is the exception: older
-    /// clients may still send it, but no patch changes its historical column.
+    /// preference being shared: two writes change different fields at
+    /// nearly the same time (a re-sort and a row click both in flight, or
+    /// the helm's own write of a remembered choice), and a whole-row write
+    /// from either would reinstall its own stale copy of the field the
+    /// other just wrote. Sparse patches make the last writer win per FIELD,
+    /// which is the only order anyone can observe anyway. The clear lets a
+    /// successful feedback send forget its contact and lets test harnesses
+    /// establish a "nothing remembered" precondition. A selection also
+    /// records a visit in the same transaction: newest first, without
+    /// duplicates, capped at 32. Clearing selection clears its history; an
+    /// unrelated patch changes neither. Stale full references age out
+    /// rather than making this preference write depend on current fleet
+    /// availability. The retired `remembered_workspace_trust` field is the
+    /// exception: older clients may still send it, but no patch changes its
+    /// historical column.
     ///
     /// Validation (that `list_sort` is a word this helm serves) belongs to
     /// the handler, not here: the store records what it is told, exactly as
@@ -8188,10 +8191,11 @@ impl HelmStore {
     /// transaction can see both sides atomically. A refresh runs every few
     /// seconds per host and, in a settled fleet, writes back exactly what
     /// was already there; a feed that treated every committed replacement as
-    /// a change would wake every open client on that timer and be strictly
-    /// worse than the polling it replaces. The comparison is over this
-    /// host's stored payloads before and after. Other entries' rows never
-    /// participate in this host's changed-only comparison.
+    /// a change would make the UI channel re-run every pushed read on that
+    /// timer and be strictly worse than the polling it replaces. The
+    /// comparison is over this host's stored payloads before and after. Other
+    /// entries' rows never participate in this host's changed-only
+    /// comparison.
     pub async fn replace_host_sessions(
         &self,
         host: HostId,
@@ -13404,12 +13408,12 @@ mod tests {
     /// a patch leaves the stored value alone, a `null` clears it, a value
     /// replaces it, and a patch naming nothing changes nothing.
     ///
-    /// Absent-versus-null is the property worth pinning. Two clients share
-    /// this row, and the failure a whole-row write would produce — a
-    /// re-sort in one window silently un-selecting what the other window
-    /// just clicked — is invisible until someone relaunches and lands on
-    /// the wrong session; the clear, conversely, must really clear, or a
-    /// harness asking for "nothing remembered" inherits the last test's row.
+    /// Absent-versus-null is the property worth pinning. Several writes
+    /// share this row, and the failure a whole-row write would produce — a
+    /// re-sort silently un-selecting a row click still in flight — is
+    /// invisible until someone relaunches and lands on the wrong session;
+    /// the clear, conversely, must really clear, or a harness asking for
+    /// "nothing remembered" inherits the last test's row.
     #[farhelm_testtrace::test]
     async fn the_preference_row_merges_per_field_and_null_clears() {
         let (_dir, store) = fresh_store().await;
@@ -13808,8 +13812,8 @@ mod tests {
     }
 
     /// A stale browser observation must not move the shared seen stamp
-    /// backward: otherwise one client's older activity view can make every
-    /// other client see the session as unread again.
+    /// backward: otherwise an older activity view can make the session show
+    /// as unread again.
     #[farhelm_testtrace::test]
     async fn mark_seen_rejects_an_older_activity_stamp() {
         let (_dir, store) = fresh_store().await;
@@ -13849,10 +13853,10 @@ mod tests {
     }
 
     /// The notification marks are shared by every client of the helm, so a
-    /// stale or retried request must never move one backwards (a client
-    /// that read less would otherwise make every other client's bell loud
-    /// again), a clear must also count as read, and the change flag must be
-    /// exact, because the routes bump the fleet-events revision on it.
+    /// stale or retried request must never move one backwards (a request
+    /// that read less would otherwise make the bell loud again), a clear
+    /// must also count as read, and the change flag must be exact, because
+    /// the routes bump the fleet-events revision on it.
     #[farhelm_testtrace::test]
     async fn notification_marks_only_rise_and_a_clear_also_reads() {
         let (_dir, store) = fresh_store().await;
@@ -13954,7 +13958,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        // Replace notifies other clients only when this reports a copy.
+        // Replace notifies the window only when this reports a copy.
         assert!(
             store
                 .inherit_pin(&viewer_key(&store, "source"), &viewer_key(&store, "new"))
@@ -21540,11 +21544,11 @@ mod tests {
     /// writes the row set already stored reports no change.
     ///
     /// This is what stops the invalidation feed from being a per-host,
-    /// per-refresh-interval wakeup for every open client (PLAN_M6_75.md item
-    /// 5) — in a settled fleet nearly every drain writes back exactly what
-    /// was there. Both directions are asserted from ONE store, because
-    /// "reports no change" is only meaningful beside a comparable write that
-    /// does.
+    /// per-refresh-interval re-run of every read the UI channel pushes
+    /// (PLAN_M6_75.md item 5) — in a settled fleet nearly every drain
+    /// writes back exactly what was there. Both directions are asserted
+    /// from ONE store, because "reports no change" is only meaningful
+    /// beside a comparable write that does.
     #[farhelm_testtrace::test]
     async fn a_replacement_reports_a_change_only_when_a_row_actually_differs() {
         let (_dir, store) = fresh_store().await;

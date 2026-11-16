@@ -308,10 +308,11 @@ struct RefreshStep {
     ///
     /// False for every refresh that failed, was skipped, or wrote a row set
     /// identical to what was already there, which in a settled fleet is
-    /// nearly all of them: a bump per refresh would wake every client every
-    /// few seconds per host. The in-memory (identity-less) path publishes
-    /// through [`HostActor::publish_refresh`]'s value comparison instead —
-    /// its "cache" IS the published status — so this stays false there.
+    /// nearly all of them: a bump per refresh would make the UI channel
+    /// re-run every pushed read every few seconds per host. The in-memory
+    /// (identity-less) path publishes through
+    /// [`HostActor::publish_refresh`]'s value comparison instead — its
+    /// "cache" IS the published status — so this stays false there.
     cache_changed: bool,
     /// Whether this refresh's drain was thrown away because a seeded write
     /// (a create, rename, delete, or another seed; see
@@ -1029,7 +1030,7 @@ struct ActorStatus {
     /// whatever number they leave behind sits beside a state nobody reads
     /// it with. Deliberately not inside
     /// [`HostState`]: there it would reach REST and the UI, and a skewed
-    /// host's every re-probe would wake every client for a number nobody
+    /// host's every re-probe would wake the window for a number nobody
     /// shows.
     refusal_attempt: u64,
     /// The hold in force on this host, by its number, or `None`. Set and
@@ -2133,8 +2134,8 @@ impl ConnectionManager {
             retire_withdrawn(withdrawn);
             // A retirement is a state transition like any other, and one
             // the hosts panel must not have to poll for: the entry stops
-            // being routable at this instant, and every open client is
-            // showing it as connected until told otherwise.
+            // being routable at this instant, and the window is showing it as
+            // connected until told otherwise.
             events.bump();
         });
         ActorHandle {
@@ -2326,7 +2327,8 @@ impl ConnectionManager {
         // changed-only rule applied to a single-row write. A retried create
         // that re-records a byte-identical row is the case this exists for:
         // it is a successful mutation that changed nothing anyone could
-        // observe, and waking every open client for it would be noise.
+        // observe, and making the UI channel re-run every pushed read for it
+        // would be noise.
         let mut changed = false;
         match &claim.identity {
             Some(identity) => {
@@ -2432,9 +2434,9 @@ impl ConnectionManager {
         // the lock cannot see the bump without also seeing the write.
         seed_epoch.fetch_add(1, std::sync::atomic::Ordering::Release);
         // A create, a restart, or a rename that actually recorded something
-        // is exactly what the goal promises arrives in every OTHER client
-        // without a refresh — the one that made the change already has the
-        // reply in hand.
+        // is exactly what the goal promises arrives in the window without a
+        // refresh when an agent or the command line made it — the caller
+        // that made the change already has the reply in hand.
         if changed {
             self.events.bump();
         }
@@ -2718,13 +2720,14 @@ impl ConnectionManager {
     }
 
     /// Wait for this host's turn among the user's environment session
-    /// Deletes. Two windows deleting sessions of one sandbox or container
-    /// then reach its supervisor one after the other, so each is decided
-    /// there, where the count is (one "deleted", then one "sealed" for the
-    /// last two), instead of the second meeting the first's provisioning lock
-    /// and being told to try again. Anything else that takes the
-    /// provisioning lock (a setup, an update, Suspend, Resume, the
-    /// whole-environment Delete) still refuses an environment Delete at once.
+    /// Deletes. Two Deletes of sessions of one sandbox or container (the
+    /// window's and an agent's, say) then reach its supervisor one after the
+    /// other, so each is decided there, where the count is (one "deleted",
+    /// then one "sealed" for the last two), instead of the second meeting
+    /// the first's provisioning lock and being told to try again. Anything
+    /// else that takes the provisioning lock (a setup, an update, Suspend,
+    /// Resume, the whole-environment Delete) still refuses an environment
+    /// Delete at once.
     pub async fn environment_delete_turn(&self, host: HostId) -> ProvisionLockGuard {
         let turn = {
             let mut turns = self
@@ -2994,7 +2997,7 @@ impl ConnectionManager {
         retire_withdrawn(withdrawn);
         // Published against the COMMIT, not against whatever the reconnect
         // below manages to do: the purge is already visible in the merged
-        // list, and every open client is still showing the rows it deleted.
+        // list, and the window is still showing the rows it deleted.
         self.events.bump();
         // The adoption is already durable; reconnecting is how it takes
         // effect. A failure to do so is worth saying out loud but must not
@@ -4848,7 +4851,7 @@ impl HostActor {
                 // refresh already COMMITTED still has to be announced: the
                 // bump below is never reached on this path, and the exit
                 // publish usually compares equal (a retarget has already set
-                // `Connecting`), so without this other clients kept showing
+                // `Connecting`), so without this the window kept showing
                 // the pre-refresh list until some later, unrelated bump.
                 if step.cache_changed {
                     self.events.bump();
@@ -5332,10 +5335,10 @@ impl HostActor {
     /// and the comparison is by VALUE rather than by "we published
     /// something": a connected host republishes an identical
     /// `Connected { last_refresh: Ok { .. } }` every refresh tick, so a
-    /// bump per publication would wake every open client in the fleet every
-    /// three seconds per host — strictly worse than the polling the feed
-    /// replaces. What counts as a change is exactly what a client can see
-    /// through the hosts read and the merged list: the state itself
+    /// bump per publication would make the UI channel re-run every pushed
+    /// read every three seconds per host — strictly worse than the polling
+    /// the feed replaces. What counts as a change is exactly what a client
+    /// can see through the hosts read and the merged list: the state itself
     /// (including a refresh's health and its session count) and the
     /// in-memory list an identity-less host serves from. The CACHED
     /// sessions of every other host are published separately, by the write
@@ -8957,14 +8960,13 @@ mod tests {
     /// Why: supervisor messages are untrusted, and the supervisor's own
     /// spacing of its hints is only a promise. Without the helm's side of
     /// the gap, a hostile host drives back-to-back refreshes at round-trip
-    /// rate, each raising a fleet-wide feed event that makes every open
-    /// client re-read the list and every open session view re-read its own
-    /// host. The spacing asserted is a lower bound that delays only widen,
-    /// so a slow or loaded machine cannot fail it; the closing wait
-    /// shows the pacing delays hints rather than dropping them. How promptly
-    /// paced hints are answered is deliberately not asserted: a lower bound
-    /// on refreshes per second would be a timing budget a loaded machine
-    /// can miss.
+    /// rate, each raising a fleet-wide feed event on which the helm re-runs
+    /// every list it pushes to the window. The spacing asserted is a lower
+    /// bound that delays only widen, so a slow or loaded machine cannot
+    /// fail it; the closing wait shows the pacing delays hints rather than
+    /// dropping them. How promptly paced hints are answered is deliberately
+    /// not asserted: a lower bound on refreshes per second would be a
+    /// timing budget a loaded machine can miss.
     #[farhelm_testtrace::test]
     async fn a_flooding_peer_gets_at_most_one_hint_refresh_per_gap() {
         let fixture = fixture(quiet_cadence(), |store, transport| async move {

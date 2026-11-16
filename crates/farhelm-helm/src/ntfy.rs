@@ -36,7 +36,7 @@ pub(crate) struct Config {
 impl Config {
     /// Preserve an omitted secret only for the same server origin. Resolve this
     /// against stored settings inside the save operation: a stale form must not
-    /// move another client's token to a new server. Refusals use fixed messages
+    /// move a stored token to a new server. Refusals use fixed messages
     /// so a bad URL, topic or token cannot escape in an error string.
     fn saved(previous: Self, save: SaveSettings) -> Result<Self, &'static str> {
         let server =

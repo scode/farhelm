@@ -11788,7 +11788,7 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
 /// holds the host's trash gate answers 504 at the bound too, saying a cleanup
 /// is waiting for the host, and never reaches the host; when the peer then
 /// answers with the checkout accepted, the fleet feed is bumped and the host's
-/// Trash epoch advances (what makes every window's Trash read the host again);
+/// Trash epoch advances (what makes the window's Trash read the host again);
 /// and a listing after that reaches the host, so the timed-out cleanup did not
 /// keep the gate. The paused clock makes the bound exact.
 #[farhelm_testtrace::test(start_paused = true)]

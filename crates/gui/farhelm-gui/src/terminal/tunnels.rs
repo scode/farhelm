@@ -22,7 +22,7 @@
 //!   ([`Platform`]) rather than a `cfg`, so the rule is tested on Linux too.
 //! - **Consent.** The first tunnel asks the security warning ([`consent_question`]); Allow saves the shared
 //!   `tunnel_consent` preference, and only then is the tunnel opened. Whether to ask is read from the pushed
-//!   preference at the click, so a consent given or withdrawn in another client counts at once.
+//!   preference at the click, so a consent given or withdrawn in Settings counts at once.
 //! - **Opening.** `POST /api/sessions/{id}/tunnels/open` with the link as printed. The helm picks the local port, opens
 //!   the browser at `127.0.0.1:<port>` itself with the rest of the URL kept, and reuses a tunnel already open for the
 //!   same target. The GUI opens nothing. The command goes through the operation store on the session's tunnel key

@@ -415,11 +415,10 @@ fn the_listing_that_recovers_from_a_failed_read_is_recorded_silently(cx: &mut Te
 
 // ---- The switches ----------------------------------------------------------------------------------------------------
 
-/// The switches are the helm's shared preference row, so a change made in Settings or by another client arrives as a
-/// push, and the owner must play by the row as it is at each observation rather than as it was when the window opened.
-/// The choice among simultaneous events is the rules' own (`sounds::rules::tests`). Specified, with waiting stored
-/// off: `a` starting to wait plays nothing; once the helm pushes waiting on, `b` starting to wait plays the waiting
-/// sound.
+/// The switches are the helm's shared preference row, so a change made in Settings arrives as a push, and the owner
+/// must play by the row as it is at each observation rather than as it was when the window opened. The choice among
+/// simultaneous events is the rules' own (`sounds::rules::tests`). Specified, with waiting stored off: `a` starting to
+/// wait plays nothing; once the helm pushes waiting on, `b` starting to wait plays the waiting sound.
 #[gpui::test]
 fn the_switches_follow_the_pushed_preference_row(cx: &mut TestAppContext) {
     let start = [in_state("a", "running"), in_state("b", "running")];

@@ -10,11 +10,11 @@
 //!   rail draws the help menu's `?` button. Its state is held per UI session ([`PerSession`]), so a reset drops every
 //!   read, recheck and kept refusal with the session.
 //! - **The count is event-driven.** The helm pushes each host's `trash_epoch`, which it advances whenever that host's
-//!   trash changes (a delete here or in another window, a session Delete that archived a checkout). The button follows
-//!   the store ([`session::observe_current`]) and reads a connected host's trash (`POST /api/checkout-trash/list`, a
-//!   keyless read: [`operations::send`]) when it first sees the host's connection, and again whenever the epoch moves.
-//!   Ordinary pushes and idle hosts cause no read; while the registry itself cannot be read, nothing is read or
-//!   dropped.
+//!   trash changes (a trash delete here, or a session Delete that archived a checkout, from this window, the command
+//!   line or an agent). The button follows the store ([`session::observe_current`]) and reads a connected host's trash
+//!   (`POST /api/checkout-trash/list`, a keyless read: [`operations::send`]) when it first sees the host's connection,
+//!   and again whenever the epoch moves. Ordinary pushes and idle hosts cause no read; while the registry itself cannot
+//!   be read, nothing is read or dropped.
 //! - **Only hosts freeing space are rechecked.** A host whose last listing reported active removal is read again every
 //!   [`RECHECK`] ([`ticker::after`]) until a successful listing says removal ended. A failed read keeps the last
 //!   report, so an outage never looks like the space was freed (SPEC.md: "A failed read retains the last removal

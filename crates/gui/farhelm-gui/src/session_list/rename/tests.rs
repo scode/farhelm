@@ -330,9 +330,9 @@ fn typing_after_an_unrelated_push_continues_at_the_caret(cx: &mut TestAppContext
 }
 
 /// An untouched draft does not follow pushes while its save is in flight, since the value on screen must stay the one
-/// sent. If the helm then refuses, saving again must not send back a title another client has since given the session
-/// (SPEC.md: a GUI write must not undo a change an agent or the command line made). Specified: an untouched save,
-/// a pushed rename to "agent's" while it is in flight, then the helm's refusal: the field holds "agent's".
+/// sent. If the helm then refuses, saving again must not send back a title an agent or the command line has since given
+/// the session (SPEC.md: a GUI write must not undo a change an agent or the command line made). Specified: an untouched
+/// save, a pushed rename to "agent's" while it is in flight, then the helm's refusal: the field holds "agent's".
 #[gpui::test]
 fn an_untouched_draft_whose_save_is_refused_takes_up_the_current_title(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_main(cx, fleet("old"));

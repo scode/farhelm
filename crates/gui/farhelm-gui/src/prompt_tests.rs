@@ -457,8 +457,8 @@ fn escape_cancels_a_question_and_returns_focus(cx: &mut TestAppContext) {
     );
 }
 
-/// A question about a thing closes when the thing is gone (a session deleted from another window while its delete
-/// confirmation was open), and nothing is sent.
+/// A question about a thing closes when the thing is gone (a session deleted by an agent or from the command line while
+/// its delete confirmation was open), and nothing is sent.
 #[gpui::test]
 fn a_question_closes_when_its_subject_is_gone(cx: &mut TestAppContext) {
     let cx = open(cx, |_, _| div().into_any_element());

@@ -38,8 +38,8 @@
 //! filtered listing's loss of a session that the query in force does not name: a later query is in flight (the user
 //! chose a filter while the Delete was on its way), or the helm refused the query naming it (`filters`'
 //! `Choice::named`). Without it the pane would stay on the deleted session until the next reply, or the next query. A
-//! Rename editor or a question about a hidden session deleted by another client still stays open, since a layer keeps
-//! the complete-listing rule, and the helm refuses what it then sends.
+//! Rename editor or a question about a hidden session deleted by an agent or the command line still stays open, since a
+//! layer keeps the complete-listing rule, and the helm refuses what it then sends.
 
 use std::collections::HashSet;
 

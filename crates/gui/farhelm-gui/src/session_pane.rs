@@ -24,8 +24,8 @@
 //!   set, then whichever terminal the user chooses in the strip, and the agent terminal again when a chosen tab goes.
 //!   Each time, the pane tells the focus coordinator, which gives it focus only if nothing else holds it. That covers
 //!   the automatic choices: the session opened at startup, and the next session after the open one went away, from
-//!   another window or an agent included. When the user chooses a session ([`chosen`]), its terminal also takes focus,
-//!   from whatever holds it, through [`focus::choose_terminal`] with the mark of the click that chose it.
+//!   the command line or an agent included. When the user chooses a session ([`chosen`]), its terminal also takes
+//!   focus, from whatever holds it, through [`focus::choose_terminal`] with the mark of the click that chose it.
 //! - **A Delete of the open session.** From the moment its request is sent until the helm answers, the top row shows
 //!   what the row says in place of its actions ([`header`]), a scrim over the terminal says it again (stopping the
 //!   agent, stopping its terminal tabs, or deleting), and the terminal's own notices are held back

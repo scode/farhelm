@@ -52,7 +52,8 @@ pub(crate) const PROGRESS_LABEL: &str = "Stopping…";
 /// The preconditions a Stop of `row` as drawn carries, as the route's own request type, shared with the helm.
 /// `refuse_if_tabs_open` is set when the row listed no terminal tab, so a tab open by the time the supervisor acts is
 /// refused rather than closed. `refuse_if_agent_running` is set when the row showed the agent ended, so an agent alive
-/// again (restarted by another client, say) is refused rather than stopped; the name reads backwards at first glance.
+/// again (restarted by an agent or the command line, say) is refused rather than stopped; the name reads backwards at
+/// first glance.
 pub(crate) fn guard(row: &SessionRow) -> SessionStopRequest {
     SessionStopRequest {
         refuse_if_tabs_open: row.info.tabs.is_empty(),

@@ -65,10 +65,10 @@ absolutely catastrophically major mistake with huge user impact."
   edits by hand in the launcher, and nothing more: a template sets only the fields it contains, the result can be edited
   further before launching, and several templates can be applied one after another. A session records the launch that
   resulted, never which templates produced it, so editing or deleting a template cannot affect any session. Template
-  edits are last-write-wins: two clients editing the same template at once is not a case Farhelm guards, because it is
-  one user's rare action, and no optimistic-concurrency check on template writes is wanted. The same holds when a GUI
-  save lands after an agent's or the command line's edit (One GUI at a time). An agent's own template write is the one
-  exception: it is refused if the template changed while its card waited (Agent-spawned sessions).
+  edits are last-write-wins: a GUI save that lands after an agent's or the command line's edit of the same template (One
+  GUI at a time) is not a case Farhelm guards, because it is one user's rare action, and no optimistic-concurrency check
+  on template writes is wanted. An agent's own template write is the one exception: it is refused if the template
+  changed while its card waited (Agent-spawned sessions).
 
 ## Topology
 
@@ -433,9 +433,9 @@ replacement Farhelm supports today: the new helm registers the host and owns it 
 NOTE: ownership is stated, not enforced. Nothing yet stops a second helm from registering a host another helm owns, or
 from driving its sessions once it has. Enforcing it needs each host to store the identity of its owning helm, refuse
 connections from any other helm, and make taking a host over, the lost-registry case above included, an explicit user
-operation. The supervisor's one-attachment-per-session rule (Terminal experience) is about the clients of one helm and
-is unchanged: a second client attaching a session visibly detaches the first, which is a takeover between clients, not
-between helms.
+operation. The supervisor's one-viewer-per-session rule (Terminal experience) is about the views of one helm and is
+unchanged: an attach from a new view detaches the previous view's terminals in that session, which is a takeover within
+one helm, not between helms.
 
 The helm is a plain command-line process too, with the same layering as supervisors: on Linux, v1 ships user-level
 systemd units for it, so a reboot of the helm's machine brings the helm back; in the desktop app, the helm lives and
@@ -1260,12 +1260,12 @@ agent choice is independent of that destination:
   combine it with the sequence prefix. The banner expires about six seconds after application finishes, or when the user
   starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice; partial-template
   key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a whole-map shared
-  preference, replaced on write; concurrent windows may lose one map edit, and a GUI save, which re-reads the bindings
-  first, can undo an agent's or the command line's binding change that lands between that read and its write (One GUI at
-  a time). Names must be syntactically valid but need not exist at write time. Rename keeps a key, delete frees it
-  through both delete paths, and Undo never restores it. An agent may assign or clear a number key through the same
-  template verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates
-  editor does; a key can still belong to a partial template.
+  preference, replaced on write; a GUI save, which re-reads the bindings first, can undo an agent's or the command
+  line's binding change that lands between that read and its write (One GUI at a time). Names must be syntactically
+  valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths, and Undo never
+  restores it. An agent may assign or clear a number key through the same template verbs and approval card. Assigning an
+  occupied key moves it from its previous template, as the Templates editor does; a key can still belong to a partial
+  template.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X on macOS, or Ctrl+Shift+X
   on Linux, starts a sequence, except in a text field outside the launcher where it retains its normal meaning. In the
   launcher's own text fields it starts a sequence only when no text is selected; with a selection it keeps Cut. A
@@ -2331,7 +2331,7 @@ the stored Tensorlake key.
 
 **Appearance** chooses **System**, **Dark** or **Light**, with System as the default. System follows each device's
 current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The choice is a helm
-preference shared by every client of the helm, and a change reaches every open client live (the maintainer decided on
+preference shared by every client of the helm, and a change applies live in the open window (the maintainer decided on
 2026-11-13 that appearance is a helm preference rather than a per-device one; the old app's per-device choice is not
 carried over, so everyone starts at System). The resolved palette applies before application content appears, and
 changes live. The terminal keeps its dark colors in both palettes. Sessions has an off-by-default **Skip session
@@ -2399,15 +2399,15 @@ command. The installed desktop app's dialog also has an **App** section with a s
 automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
 that app installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host
 and client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy:
-every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
-order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
-that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
-and announcement dismissal and the host rail's expansion. The sound switches are among these shared preferences: the
-maintainer decided on 2026-11-13 that they are helm preferences rather than per-device ones (see Status). A client that
-asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent
-reference usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking
-is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record
-the asking session.
+the helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
+change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
+persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences, including welcome-card and announcement dismissal and the host rail's expansion. The sound switches
+are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather than
+per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
+hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
+implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
+`farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -2645,17 +2645,18 @@ session on an unreachable host shows one calm accent card naming the cause, with
 diagnostics beneath it. Its metadata — title, directory, last-known status — remains available, with last-known status
 and age in exactly one band. A terminal already open keeps its last screen and tab strip dimmed and inert beneath the
 card, clearly no longer live. A session opened while unreachable has no terminal or tab strip. When the host returns,
-retained terminals retry promptly and automatically without displacing another client. A rebooted session still shows
-its interrupted card. A dropped terminal stream between the window and the helm uses the same card with
-`Session unavailable — reconnecting` and a neutral `Reconnect now` button; recoverable drops show no red detach banner.
-Final takeover and stall decisions retain their explicit banners. Changes made from any client — creates, renames,
-stops, deletes, status transitions — appear in all other connected clients automatically; the agent-spawn behavior below
-is one instance of this general rule, not a special case.
+retained terminals retry promptly and automatically. A rebooted session still shows its interrupted card. A dropped
+terminal stream between the window and the helm uses the same card with `Session unavailable — reconnecting` and a
+neutral `Reconnect now` button; recoverable drops show no red detach banner. Stall decisions retain their explicit
+banners, and a window displaced from the seat says so in place of everything else (One GUI at a time). Changes made
+outside the window — by the command line, an agent or the sessions themselves: creates, renames, stops, deletes, status
+transitions — appear in it automatically; the agent-spawn behavior below is one instance of this general rule, not a
+special case.
 
 ### Status
 
-Each client can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when
-an agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
+Farhelm can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when an
+agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
 in-conversation questions and approvals still unverified. Such sessions can show Idle while Muse waits for an answer.
 Settings has sounds controls under **Notifications**, with one switch per event: waiting and approval default on, turn
 finished off. The switches are helm preferences, shared by every client of the helm (the maintainer decided on
@@ -2663,7 +2664,7 @@ finished off. The switches are helm preferences, shared by every client of the h
 active; the state loaded when the window starts or resets makes no sound. Status sounds follow the sidebar's current
 host selector and filters; changing that view silently records its existing statuses. New approval requests sound
 regardless of those filters, because their cards are always shown. Each observation plays only its most urgent enabled,
-non-quiet event: approval, waiting, then turn finished. Every open client makes its own sounds.
+non-quiet event: approval, waiting, then turn finished.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**
@@ -2704,9 +2705,9 @@ keep the same shapes instead of their ordinary colors: running circle, waiting t
 idle ring. Running still pulses, while a last-known report remains still. Seen state is one stored fact per session — an
 activity stamp recorded the last time some client looked at it, or nothing at all if no client ever has — kept by the
 helm and shared by every client the same way the list order and the last-selected session are (see Session list): no
-client keeps its own copy, and opening the same session from a second client sees the same colour the first one does. A
-session reads UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all;
-otherwise it reads SEEN.
+client keeps its own copy, so a window shows the same colour after a restart or reconnect as before it. A session reads
+UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all; otherwise it
+reads SEEN.
 
 Pins, seen stamps and notification read/cleared marks belong to the session on its particular host entry. They survive
 editing, retargeting or adopting that entry, but removing it and adding the host again starts those values fresh. On
@@ -2887,8 +2888,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
   with = or − and no Shift are not app shortcuts and reach a focused terminal like any other key: there is no interface
   zoom (decided 2026-11-13). On Linux this takes over Ctrl+Shift+− (Ctrl+_, undo in readline and emacs) inside the
   terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions of = and −. The size is a helm
-  preference shared by every client of the helm, 14 points until it is first changed, and a change reaches every open
-  client live (the maintainer decided on 2026-11-13 that terminal text size is a helm preference rather than a
+  preference shared by every client of the helm, 14 points until it is first changed, and a change applies live in the
+  open window (the maintainer decided on 2026-11-13 that terminal text size is a helm preference rather than a
   per-device one; the old app's per-device size is not carried over, so everyone starts at 14 points). Only the terminal
   text changes; the rest of the UI keeps its size.
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
@@ -2964,15 +2965,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   helm marks as cut at the open session's host. Under a filter, a deletion elsewhere of an open session on a host past
   its 500-session cap is not noticed through the list. Replace selects its replacement if its source is still selected
   when it finishes, and closing a terminal tab is not a session removal. Launching the app is itself the deliberate act
-  the attach semantics below key off. Opening a second client therefore takes over its chosen session exactly as
-  clicking that session there would. The attached client owns input and terminal dimensions: the PTY resizes to that
-  client, and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as
-  it would have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side
-  terminal retains, and replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly
-  marks the selected session's row whenever that session is listed, so which session the main pane is interacting with
-  is readable at a glance rather than only from the bottom bar's session name. A filter that excludes the selected
-  session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and the main pane
-  deliberately stays put (filtering the list is not deselecting).
+  the attach semantics below key off. Opening the app therefore attaches its chosen session exactly as clicking that
+  session there would, including when the new window takes the seat from one that held it (One GUI at a time). The
+  attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size sticks when
+  nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the client stayed
+  attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at
+  least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row
+  whenever that session is listed, so which session the main pane is interacting with is readable at a glance rather
+  than only from the bottom bar's session name. A filter that excludes the selected session leaves no row to mark — the
+  bottom bar's session name remains the identifier in that state, and the main pane deliberately stays put (filtering
+  the list is not deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
   (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
   terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary
@@ -3020,11 +3022,14 @@ whatever the agent renders is what you see. There is no composer, no message abs
   terminal hosts keeps them. A failure to end the server or to stop what ran there is logged and never stops the
   supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start
   a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal.
-- One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
-  first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
+- One viewer per session, enforced by the supervisor: an attach from another view (another lease) detaches every
+  terminal the previous view held in that session, and a view's own reattach of a terminal replaces its earlier
+  attachment of it. The window holding the seat is the session's only viewer (One GUI at a time), so this is how its own
+  reconnects, and a window that just took the seat, replace what was attached before; it is not a contest between
+  viewers. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
   session's work outright, and no viewer can slow one it is not attached to; no viewer slows the agent at all. The
-  terminal takes in everything the program writes whatever its viewers do, and a viewer that falls behind is sent the
+  terminal takes in everything the program writes whatever its viewer does, and a viewer that falls behind is sent the
   screen as it is when it can take more, skipping the screens in between, while every line that entered the scrollback
   meanwhile is still sent, appended. Output to a viewer pauses when a backlog builds up for it at the helm, wherever it
   is slow (sooner when the backlog is many small messages), and one that has not caught up within the stall timeout,
@@ -3033,35 +3038,34 @@ whatever the agent renders is what you see. There is no composer, no message abs
   much the link holds), and live output that falls behind slowly at about 10 KB/s (SPEC_impl.md, "Helm ↔ supervisor
   transport: system ssh + stdio protocol", has the arithmetic).
 - A viewer that stops consuming output entirely (a hung window, a machine asleep past its connection's lifetime) is
-  detached with a visible stall reason rather than honored forever, as the floors above describe — the same surface as a
-  takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
-  whatever bound it degrades to is the same replay floor above, never a silent gap. Skipped screens are no exception,
-  since the screen a viewer is sent is the program's current one and the scrollback arrives whole, and no viewer can
-  cause a gap (above): those come only from the supervisor falling behind the program. One exception, accepted
-  2026-11-04, is extreme cumulative applied resizes on a quiet terminal: they can exhaust its recovery journal without
-  triggering a save, so a later crash or an orderly stop that skips its save can lose terminal history (SPEC_impl.md,
-  "Across supervisor restarts"). This does not relax the slow-viewer or flow-control guarantees.
+  detached with a visible stall reason rather than honored forever, as the floors above describe, with reattach behaving
+  exactly as any reconnect does. Flow control never drops terminal output: whatever bound it degrades to is the same
+  replay floor above, never a silent gap. Skipped screens are no exception, since the screen a viewer is sent is the
+  program's current one and the scrollback arrives whole, and no viewer can cause a gap (above): those come only from
+  the supervisor falling behind the program. One exception, accepted 2026-11-04, is extreme cumulative applied resizes
+  on a quiet terminal: they can exhaust its recovery journal without triggering a save, so a later crash or an orderly
+  stop that skips its save can lose terminal history (SPEC_impl.md, "Across supervisor restarts"). This does not relax
+  the slow-viewer or flow-control guarantees.
 - A terminal that loses its CONNECTION recovers by itself, without the session ever being closed and reopened by hand.
   That covers the connection dropping visibly and the connection dying silently — a sleeping laptop or a timed-out
   network path leaves a terminal that looks connected and carries nothing, which is checked for rather than left for the
   user to discover by typing. Recovery follows the same two regimes as a host connection: bounded retries, then periodic
   re-probing, so a terminal whose network comes back overnight is simply there again. Which phase it is in is visible in
-  the terminal itself, along with a way to retry immediately, and a recovered terminal reattaches exactly as any client
+  the terminal itself, along with a way to retry immediately, and a recovered terminal reattaches exactly as any attach
   does — landing where the session is now, not scrolling its history past again.
-- A client displaced by a takeover keeps its snapshot and its take-control action rather than reattaching: it was
-  displaced on purpose, and a client that came back on its own would fight the one that displaced it. A viewer detached
-  for stalling keeps its reason: the wedge is why it was detached, and returning into the same wedge repeats it. Both
-  come back the way any client attaches — because someone asks.
+- A window displaced from the seat shows no terminal screen and reattaches nothing: it goes wholly inert until the user
+  takes the seat back (One GUI at a time). A viewer detached for stalling keeps its last screen, no longer live, and its
+  reason rather than reattaching: the wedge is why it was detached, and returning into the same wedge repeats it. It
+  comes back only when the user asks.
 - If Delete fails after disconnecting a viewer, automatic reconnection to a surviving terminal and remaining detached
   until the user reconnects are both explicitly acceptable. Prefer whichever is simpler to implement; neither outcome is
-  a defect or a reason to add recovery machinery. Keep the cleanup failure visible. Recovery must not restart an agent
-  or take control from another viewer, and retaining the session record does not guarantee that its terminal or
-  scrollback survived cleanup.
-- A terminal recovering on its own never TAKES the session. Recovery is unattended by definition — the client was not
-  there to be told anything while its connection was gone — so if someone else has attached meanwhile, the automatic
-  attach is refused and that client lands where it actually stands: displaced, with the same take-control action any
-  other displaced client has. Taking a session over stays a thing someone does on purpose, whether by opening it or by
-  asking for it back.
+  a defect or a reason to add recovery machinery. Keep the cleanup failure visible. Recovery must not restart an agent,
+  and retaining the session record does not guarantee that its terminal or scrollback survived cleanup.
+- A terminal recovering on its own reattaches the ordinary way: the window holding the seat is the session's only
+  viewer, so there is no one else to leave alone. One race remains. A window that was just displaced can have a terminal
+  reconnect land before the helm's notice that it was displaced, taking that terminal from the window that now holds the
+  seat. That window gets it back by attaching again, as it does when its own attachment is replaced (decided 2026-11-15;
+  until that is built, the terminal shows that it was taken over and offers Take control).
 - Selecting text copies it to the system clipboard: a plain drag when the pane has no mouse reporting active, or
   Shift-drag (Option-drag on macOS) to force a local selection when it does — the same modifier xterm itself uses to win
   a selection back from an app that has grabbed the mouse. A terminal program's own OSC 52 WRITE is honored the same
@@ -3245,7 +3249,7 @@ focused, and a question starts on its harmless answer (Cancel), never on the ris
 user is in another app has not been moved on from, so it is open when they come back.
 
 Things the user did not start never take focus and never open over what the user is doing, even while a dialog is open.
-That covers agent approvals, an agent's request to add a host, and anything else another window, an agent or a host
+That covers agent approvals, an agent's request to add a host, and anything else an agent, the command line or a host
 begins. They announce themselves and wait. The user reaches a waiting item with the pointer, or with a keyboard shortcut
 that answers it or moves focus to it. While a terminal has focus, Tab, Escape, Enter and ordinary keys keep going to its
 program. How each kind of item announces itself, and which shortcuts reach it, is not settled here.
@@ -3255,10 +3259,10 @@ program. How each kind of item announces itself, and which shortcuts reach it, i
 The selected session's terminal is home. On the main screen, with no dialog, menu or popup list open, whenever nothing
 holds focus it goes to the selected session's terminal. The cause does not matter: the user closed or deleted the
 focused control, it went away on its own (the last notice was dismissed, a shell tab exited), or Farhelm selected the
-next session after a Delete, including a Delete from another window or by an agent. The terminal never takes focus from
-a control that holds it, such as the session filter or a header button. This accepts that a key can occasionally land in
-a terminal unexpectedly, in exchange for never having to click back into it. A short delay before the terminal takes
-focus back is a possible later mitigation, not a rule.
+next session after a Delete, including a Delete from the command line or by an agent. The terminal never takes focus
+from a control that holds it, such as the session filter or a header button. This accepts that a key can occasionally
+land in a terminal unexpectedly, in exchange for never having to click back into it. A short delay before the terminal
+takes focus back is a possible later mitigation, not a rule.
 
 With no terminal on screen, focus rests on New when there are no sessions, and on a stopped session's card when the
 selected session has stopped. Enter on that card does nothing, so typing that was already under way cannot restart
@@ -3340,8 +3344,8 @@ These came out of the walkthrough and are worth keeping as acceptance cases, bec
   into the terminal meanwhile, the question would appear without focus and wait.
 - The user selects a session and, before its terminal finishes loading, types in the session filter. The filter keeps
   focus when the terminal arrives.
-- The user's session is deleted from another window while they type in it. The next session is selected and its terminal
-  takes the rest of their typing (the terminal is home).
+- The user's session is deleted from the command line or by an agent while they type in it. The next session is selected
+  and its terminal takes the rest of their typing (the terminal is home).
 - A shell tab exits on its own while the user types in it. The session's agent tab takes focus.
 - An agent asks to add a host while the user types in a terminal or fills in the launcher. A notice offers the request;
   nothing opens until the user opens it.
@@ -3804,7 +3808,7 @@ environment — any process inside the session may spawn, and that is the point.
 host, and only that host, however its launch is chosen; `farhelm agent create` and `farhelm agent clone` below reach any
 host in the fleet. Like every acting `farhelm` command, spawn needs the helm that owns the host, which asks the user
 before it is carried out (see the permission prompts below), so it is refused when no helm is connected to the host,
-`--inherit-agent` included. The helm learns of new sessions automatically; they appear in all clients without manual
+`--inherit-agent` included. The helm learns of new sessions automatically; they appear in the window without manual
 registration or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
@@ -3901,9 +3905,9 @@ host's commands-without-asking setting is on. The YOLO launch rule does not appl
 
 The card names both sessions and hosts, shows the full escaped message as labelled data, and shows the target's
 permission shield by the session list's rules, including observed permission bypass. It says when the target session is
-open in a client. Both the permission shield and that notice are snapshots and may change while the card waits. Approval
-authorizes sending even when a user is typing there: the message may mix with or follow text already in the agent's
-composer.
+open in the window. Both the permission shield and that notice are snapshots and may change while the card waits.
+Approval authorizes sending even when a user is typing there: the message may mix with or follow text already in the
+agent's composer.
 
 At handling time, the owning supervisor requires a live agent reading idle or running and a terminal with bracketed
 paste enabled. That reading is its latest status sample, so a question that appears within about one sampling interval
@@ -3924,7 +3928,7 @@ IDs are also exposed so duplicate names remain visibly distinct, but acting comm
 as an ID. Both print the new session's id on stdout and nothing else, matching spawn's contract, with the human-readable
 confirmation on stderr. The preconditions are the helm's ordinary ones: a directory that does not exist on the target is
 that supervisor's own refusal, reported verbatim rather than paraphrased on the way back, and an unreachable target is
-refused with its state named. The new session appears in every client the way any other create does.
+refused with its state named. The new session appears in the window the way any other create does.
 
 Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
 `farhelm agent create`, `clone`, `rename`, `stop`, `restart`, `delete`, `prompt` and `open-url`, and the template writes
@@ -5143,9 +5147,9 @@ Confirmed 2026-10-11: denial of service of the helm or the desktop app by a mali
 accepted outright, whether or not Farhelm could avoid it. Farhelm adds no complexity to defend against those effects.
 This does not accept a host corrupting the helm's own state or affecting other hosts' security or data. Existing
 mitigations remain: a supervisor's "sessions changed" hints make the helm refresh that host at once, and each such
-refresh makes every open client re-read, so the helm spaces the refreshes hints cause by the same minimum gap the
-supervisor promises to keep between its hints, with at most one more pending. A host that hints without pause then costs
-the helm no more than a busy honest one.
+refresh makes the helm re-run every list it pushes to the window, so the helm spaces the refreshes hints cause by the
+same minimum gap the supervisor promises to keep between its hints, with at most one more pending. A host that hints
+without pause then costs the helm no more than a busy honest one.
 
 Confirmed 2026-10-10: two examples of accepted effects from a hostile or compromised host follow. Through the bundled
 terminal library, escape sequences with huge repeat counts, link records or combining characters that pile up, and the
@@ -5190,8 +5194,8 @@ programs that agent or tab started first within these same cleanup limits.
 After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
 detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat
 either outcome alone as a bug or require additional recovery machinery to choose between them. The cleanup failure must
-remain visible; recovery must not restart an agent or take control from another viewer. A retained session record does
-not promise that cleanup preserved the terminal or its scrollback.
+remain visible; recovery must not restart an agent. A retained session record does not promise that cleanup preserved
+the terminal or its scrollback.
 
 Provisioning may enforce permissions on directories dedicated to Farhelm: its private lib directory and the supervisor
 state directory. It must preserve permissions on existing shared directories merely used to hold its executable or

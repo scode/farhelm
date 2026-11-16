@@ -147,7 +147,7 @@ fn a_wiggle_ends_when_the_window_goes_inactive(cx: &mut TestAppContext) {
 }
 
 /// Why this matters: session disappearance alone is not proof a checkout moved (the protocol's `archived` flag says
-/// so), and another client's Delete, a bare Delete and a refused one must not look like an archive here. Specified: b's
+/// so), and an agent's Delete, a bare Delete and a refused one must not look like an archive here. Specified: b's
 /// Delete answered with a bare success (an empty outcome, and no body at all) or refused (409) wiggles nothing, and
 /// neither does b's row disappearing from a pushed listing.
 #[gpui::test]

@@ -526,9 +526,9 @@ pub(crate) async fn list_recipes(State(state): State<Arc<AppState>>) -> Response
 
 /// `POST /api/tensorlake/recipes`: create a recipe. 409 when the name is
 /// taken, 400 when it or the definition is invalid. Answers with the stored
-/// recipe's view and bumps the invalidation feed so other clients re-read.
-/// Saving never starts a snapshot build: a build bills, and only the
-/// explicit Build action may start one.
+/// recipe's view and bumps the invalidation feed so the UI channel pushes
+/// the new catalog. Saving never starts a snapshot build: a build bills,
+/// and only the explicit Build action may start one.
 pub(crate) async fn create_recipe(
     State(state): State<Arc<AppState>>,
     body: Result<Json<CreateRecipe>, JsonRejection>,

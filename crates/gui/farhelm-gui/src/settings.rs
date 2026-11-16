@@ -889,7 +889,7 @@ impl SettingsDialog {
 
     /// The user chose `preference` in Appearance: save it as the preference row's `appearance` field, as a switch saves
     /// ([`SettingsDialog::save_choice`]). The palette changes only once the helm stores the choice and pushes it, like
-    /// every other client's.
+    /// any change to the preference row.
     fn choose_appearance(&mut self, preference: Preference, cx: &mut Context<Self>) {
         self.save_choice(
             appearance::ID,

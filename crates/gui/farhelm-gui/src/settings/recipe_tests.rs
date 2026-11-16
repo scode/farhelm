@@ -865,12 +865,12 @@ fn a_refused_build_shows_the_helms_words_under_its_row_until_the_next_build(
 }
 
 /// A refusal is about a build that did not start; once the pushed catalog shows the recipe building (started here or
-/// by another client since), the refusal says nothing true any more, and kept on the key it would come back under the
-/// row once that build ends. The old row's rule: a refusal stays "until the next click or a re-read shows the build
-/// running". Only a push that shows the recipe building may drop it: the helm pushes on every change it announces,
-/// most of them about something else, and the refusal must outlive those. Specified: after a refused build, a push
-/// that leaves the recipe idle keeps the refusal's line; a push of the recipe building drops it; and a push of the
-/// recipe built does not bring it back.
+/// elsewhere since), the refusal says nothing true any more, and kept on the key it would come back under the row once
+/// that build ends. The old row's rule: a refusal stays "until the next click or a re-read shows the build running".
+/// Only a push that shows the recipe building may drop it: the helm pushes on every change it announces, most of them
+/// about something else, and the refusal must outlive those. Specified: after a refused build, a push that leaves the
+/// recipe idle keeps the refusal's line; a push of the recipe building drops it; and a push of the recipe built does
+/// not bring it back.
 #[gpui::test]
 fn a_push_showing_the_build_running_drops_an_older_refusal_for_good(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_with(cx, vec![entry("rust-dev", idle(), Value::Null)]);

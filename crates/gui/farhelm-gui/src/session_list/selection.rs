@@ -15,9 +15,9 @@
 //!   had open. Two more things prove it, both with the store holding no row for it. The helm serves a query that names
 //!   it, so an available listing without it proves it gone, filtered or not, unless the helm says a host's cap cut it
 //!   away ([`absent_while_named`]; SPEC.md's exception to "Existing removal detection", decided by the maintainer on
-//!   2026-11-15): that is how a hidden open session deleted in another window or from the command line is noticed. Or
-//!   this window's own Delete of it succeeded (`delete`'s "This window's own Delete is evidence"). When it is proven
-//!   gone, the automatic choice picks the next one, never the one that just went.
+//!   2026-11-15): that is how a hidden open session deleted by an agent or from the command line is noticed. Or this
+//!   window's own Delete of it succeeded (`delete`'s "This window's own Delete is evidence"). When it is proven gone,
+//!   the automatic choice picks the next one, never the one that just went.
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.

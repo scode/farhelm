@@ -73,8 +73,8 @@ impl Render for Field {
 
 /// Why this matters: an editor keeps its draft in step with the field from the field's change events, and saves on
 /// Enter; with neither reported, the Rename editor could not mark its draft touched or submit from the keyboard
-/// (SPEC_impl.md, "Drafts"). A value the editor itself puts into the field (a rename pushed by another client) must
-/// not count as the user's edit, or following a push would mark the draft touched and stop it following.
+/// (SPEC_impl.md, "Drafts"). A value the editor itself puts into the field (a rename the helm pushes) must not count as
+/// the user's edit, or following a push would mark the draft touched and stop it following.
 ///
 /// Specification: each typed character reports one `Changed`; `set_text` reports nothing, also for a value holding a
 /// line break the field strips; Enter reports `Submitted` and nothing else, and leaves the text as it was (Kit's own
