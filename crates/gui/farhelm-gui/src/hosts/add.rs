@@ -14,10 +14,11 @@
 //!   ([`tensorlake`]), its Continue in Add's place, its main action for Enter on the dialog itself, and the header's
 //!   summary in its words; choosing SSH again brings back the SSH fields as they were and drops the sandbox's form with
 //!   its draft, as the old dialog's remount did, so choosing the sandbox again starts it afresh and reads the account
-//!   again. The choice is not drawn for an add that began as an agent's request, which asks for an SSH destination.
-//!   While Add's probe or answer is out a choice does nothing, as the old dialog's other kind was unavailable then; the
-//!   strip has no unavailable state, so its arrows still move focus to the other tab there, which chooses nothing
-//!   (recorded in `docs/gpui/parity/settings-and-hosts.md`, "Deviations").
+//!   again. The choice is not drawn for an add that began as an agent's request, which asks for an SSH destination,
+//!   nor while the sandbox's recipe editor is open. While Add's probe or answer is out a choice does nothing, as the
+//!   old dialog's other kind was unavailable then; the strip has no unavailable state, so its arrows still move focus
+//!   to the other tab there, which chooses nothing (recorded in `docs/gpui/parity/settings-and-hosts.md`,
+//!   "Deviations").
 //! - **Before the probe is sent.** Add refuses an alias the helm would refuse for its shape (the old app's
 //!   `validate_alias_draft`, in its words) and a destination that is already a host entry, naming that entry in the
 //!   helm's own words (SPEC.md: "Adding a destination that is already a host entry is refused, naming that entry,
@@ -328,14 +329,14 @@ fn open_with(
             // control in use when their empty space is clicked.
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Control(opener.clone()),
-            // An ordinary add: closing never waits, not even for a probe in flight (the module docs). An agent's add
-            // answers Deny first, and closes once the helm took it.
-            on_dismiss: agent.then(|| {
+            // An ordinary add: closing never waits, not even for a probe in flight (the module docs), unless the
+            // Tensorlake sandbox's recipe editor holds unsaved changes, which asks first. An agent's add answers Deny
+            // first, and closes once the helm took it.
+            on_dismiss: Some({
                 let dialog = dialog.downgrade();
                 let hook: layers::DismissHook = Rc::new(move |window, cx| {
-                    let handle = window.window_handle();
                     dialog
-                        .update(cx, |dialog, cx| dialog.dismissal(handle, cx))
+                        .update(cx, |dialog, cx| dialog.dismissal(window, cx))
                         .unwrap_or(Dismissal::Close)
                 });
                 hook
@@ -617,7 +618,10 @@ impl AddHostDialog {
         }
         self.body = match kind {
             Kind::Ssh => Body::Ssh,
-            Kind::Tensorlake => Body::Tensorlake(cx.new(|cx| TensorlakeForm::new(window, cx))),
+            Kind::Tensorlake => {
+                let dialog = cx.weak_entity();
+                Body::Tensorlake(cx.new(|cx| TensorlakeForm::new(dialog, window, cx)))
+            }
         };
         cx.notify();
     }
@@ -634,11 +638,24 @@ impl AddHostDialog {
             .is_some_and(|request| !request.answering(cx) && !request.waiting(cx))
     }
 
-    /// Cancel, the header's close or Escape on an agent's add: answer Deny and close once the helm took it (or the
-    /// request was already gone), keeping the dialog with the helm's reason when it refused. Nothing happens while an
-    /// answer is in flight or answers are paused, as for the card's own buttons. After an accepted Allow, or for an
-    /// ordinary add, closing is ordinary.
-    fn dismissal(&mut self, window: AnyWindowHandle, cx: &mut Context<Self>) -> Dismissal {
+    /// The Tensorlake sandbox's recipe editor, while it is open in the shown body.
+    fn recipe_editor(&self, cx: &App) -> Option<Entity<crate::settings::RecipeEditor>> {
+        match &self.body {
+            Body::Tensorlake(form) => form.read(cx).editor(),
+            Body::Ssh => None,
+        }
+    }
+
+    /// Cancel, the header's close or Escape. An open recipe editor answers first: with unsaved changes it asks its leave
+    /// question before Add host closes (the Tensorlake sandbox's module docs). Otherwise, on an agent's add, answer Deny
+    /// and close once the helm took it (or the request was already gone), keeping the dialog with the helm's reason when
+    /// it refused; nothing happens while an answer is in flight or answers are paused, as for the card's own buttons.
+    /// After an accepted Allow, or for an ordinary add, closing is ordinary.
+    fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
+        if let Some(editor) = self.recipe_editor(cx) {
+            return editor.update(cx, |editor, cx| editor.dismissal(window, cx));
+        }
+        let window = window.window_handle();
         let Some(request) = self.pending().cloned() else {
             return Dismissal::Close;
         };
@@ -968,8 +985,10 @@ impl Render for AddHostDialog {
             )
         });
         // The kind choice, above whatever the chosen kind draws. An add that began as an agent's request (its reopen
-        // after a refused setup included) asks for an SSH destination, so it has none, as in the old dialog.
-        let kinds = (!self.from_agent).then(|| {
+        // after a refused setup included) asks for an SSH destination, so it has none, as in the old dialog; and the
+        // recipe editor, while open, hides it, as the old one replaced the whole body.
+        let editor = self.recipe_editor(cx);
+        let kinds = (!self.from_agent && editor.is_none()).then(|| {
             let chooser = weak.clone();
             TabStrip::new(
                 "add-host-kind",
@@ -1036,7 +1055,13 @@ impl Render for AddHostDialog {
                 "An SSH destination this helm can reach",
             ),
         };
-        DialogFrame::new("add-host", "Add host", body, vec![cancel, main])
+        // The recipe editor's answers take the footer while it is open, as the old dialog's did.
+        let frame = match editor {
+            Some(editor) => DialogFrame::new("add-host", "Add host", body, Vec::new())
+                .notices(crate::settings::RecipeEditor::actions(&editor, cx)),
+            None => DialogFrame::new("add-host", "Add host", body, vec![cancel, main]),
+        };
+        frame
             .summary(summary)
             .tile(host_mark(
                 HostIcon::Cloud,

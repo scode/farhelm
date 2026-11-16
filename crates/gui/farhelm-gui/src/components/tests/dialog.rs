@@ -3,8 +3,8 @@
 //! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it. Notices given a stop have
 //! it on the same rule, between the body and the answers in Tab's order, scroll through it, and scroll on Page Up, Page
 //! Down, Home and End from an answer inside them (and from nowhere else), which keeps its other keys; notices without
-//! the opt-in take no keys. And the frame's size caps against the window's content area, as pure arithmetic since no
-//! test window reports client decorations.
+//! the opt-in take no keys. A footer of notices alone draws no empty answers row. And the frame's size caps against the
+//! window's content area, as pure arithmetic since no test window reports client decorations.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -664,4 +664,36 @@ fn without_a_frame_the_dialog_limits_are_the_windows() {
     assert_eq!(frame_limits(window, None, false), size(px(480.), px(720.)));
     assert_eq!(frame_limits(window, Some(px(1200.)), false).width, px(960.));
     assert_eq!(frame_limits(window, None, true).height, px(752.));
+}
+
+/// Why this matters: a dialog whose footer holds only notices (Add host's recipe editor, whose own answers are its
+/// notices) must not draw an empty answers row under them; the row's gap would leave the footer taller below the notices
+/// than above, which the old editor footer, holding its actions directly, was not.
+///
+/// Specified: a frame with notices and no answers, note or lead draws its footer with the same space above the notices
+/// as below them.
+#[gpui::test]
+fn a_footer_of_notices_alone_has_no_empty_answers_row(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        DialogFrame::new("bare", "Notices only", div().child("Body"), Vec::new())
+            .notices(div().child(Button::new(
+                "own-answer",
+                "Own answer",
+                HoverHelp::tooltip("The notices' own answer"),
+                Role::Button,
+            )))
+            .into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(600.)));
+    cx.run_until_parked();
+    check(cx);
+
+    let footer = bounds(cx, "bare-answers");
+    let notices = bounds(cx, "bare-notices");
+    // The footer's one-pixel rule along its top edge sits inside its bounds, above the padding.
+    assert_eq!(
+        notices.top() - footer.top() - px(1.),
+        footer.bottom() - notices.bottom(),
+        "the footer's padding is even around the notices: {notices:?} in {footer:?}"
+    );
 }

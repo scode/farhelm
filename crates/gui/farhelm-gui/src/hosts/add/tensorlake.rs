@@ -21,24 +21,34 @@
 //!   Recipes shows for it ([`crate::settings::recipe_summary`]). A chosen recipe that leaves the catalog stays chosen
 //!   as "<name> (unavailable)" rather than falling back to another, as the old select kept its draft. Recipe names are
 //!   the user's own words, drawn as Settings → Recipes draws them.
+//! - **New recipe… opens the recipe editor here.** The Recipe choice's last option opens Settings → Recipes' editor
+//!   ([`crate::settings::RecipeEditor`]) in place of the fields, with focus in its Name, its answers in Add host's
+//!   footer in place of Cancel and Continue (pinned there, so they never scroll away with the editor, which is taller
+//!   than the dialog), and the kind choice hidden until it closes. Its Cancel, or a done Save, brings the fields back
+//!   with focus on Recipe, and a done Save chooses the new recipe. Closing Add host while the editor holds unsaved
+//!   changes asks the editor's "Save these changes before leaving?" first, and its Save or Discard then closes Add
+//!   host. The old dialog swapped its body and footer for the editor's the same way (`in_add_host`).
 //! - **Continue is unavailable here.** Continue leads to the creation confirmation and its billing callout, which are
 //!   not drawn yet, so the button shows but cannot be pressed, and Enter in Name does nothing.
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::recipes::RecipeView;
 use farhelm_proto::tensorlake::Settings;
+use std::rc::Rc;
+
 use gpui::{
-    AnyElement, AnyWindowHandle, App, Context, FocusHandle, IntoElement, ParentElement as _,
-    Render, Role, SharedString, Styled as _, Subscription, Window, div, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, EntityId, FocusHandle,
+    IntoElement, ParentElement as _, Render, Role, SharedString, Styled as _, Subscription,
+    WeakEntity, Window, div, px,
 };
 
-use super::{BODY_GAP, FIELD_HEIGHT, field, help};
+use super::{AddHostDialog, BODY_GAP, FIELD_HEIGHT, field, help};
 use crate::components::{Button, HoverHelp, Select, SelectOption, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::session::{self, ObservingCurrent};
-use crate::settings::{self, Section};
+use crate::settings::{self, RecipeDeparted, RecipeDeparture, RecipeEditor, Section};
 use crate::theme;
 
 /// The route the account is read from, as a failed read names it.
@@ -47,6 +57,10 @@ const ACCOUNT_ROUTE: &str = "GET /api/tensorlake";
 /// What the body says when the account read could not be sent at all.
 const NOT_SENT: &str =
     "Farhelm is not connected to its helm, so the Tensorlake settings could not be read";
+
+/// The Recipe choice's option that opens the recipe editor rather than choosing a recipe. No recipe can be named this:
+/// the helm's rule allows no underscore in a recipe name (`farhelm_proto::recipes::check_recipe_name`).
+const NEW_RECIPE: &str = "__new__";
 
 /// What Continue says on hover: where it leads.
 const CONTINUE_HELP: &str =
@@ -78,16 +92,27 @@ pub(super) struct TensorlakeForm {
     /// The moment Settings closed, while the read it started is out: an answer with a key moves focus to Name through
     /// it (the module docs).
     returned: Option<Mark>,
-    /// The window the form is drawn in, where an answer moves focus.
+    /// The window the form is drawn in, where an answer moves focus and a close the editor answers for closes Add host.
     window: AnyWindowHandle,
+    /// The recipe editor, while "New recipe…" has it open in place of the fields.
+    editor: Option<Entity<RecipeEditor>>,
+    /// The Recipe choice's focus handle, where focus goes when the editor closes.
+    recipe_choice: FocusHandle,
+    /// The Add host dialog the form is drawn in: a close the editor answers for (its leave question's Save or Discard)
+    /// closes it.
+    dialog: WeakEntity<AddHostDialog>,
     _settings_closed: Subscription,
     /// Redraws the recipe choice when the pushed catalog changes.
     _store: ObservingCurrent,
 }
 
 impl TensorlakeForm {
-    /// The form for a new choice of the Tensorlake sandbox kind: empty, with the account read started.
-    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The form for a new choice of the Tensorlake sandbox kind in `dialog`: empty, with the account read started.
+    pub(super) fn new(
+        dialog: WeakEntity<AddHostDialog>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let name = DraftInput::new(
             "",
             TextInputState::new(window, cx),
@@ -112,6 +137,9 @@ impl TensorlakeForm {
             settings_open: false,
             returned: None,
             window: window.window_handle(),
+            editor: None,
+            recipe_choice: cx.focus_handle().tab_stop(true),
+            dialog,
             _settings_closed: settings_closed,
             _store: session::observe_current(cx, |_, cx| cx.notify()),
         };
@@ -171,14 +199,73 @@ impl TensorlakeForm {
         cx.notify();
     }
 
+    /// The recipe editor, while "New recipe…" has it open: Add host pins its answers and asks it before closing.
+    pub(super) fn editor(&self) -> Option<Entity<RecipeEditor>> {
+        self.editor.clone()
+    }
+
+    /// "New recipe…": open the recipe editor in place of the fields, with focus in its Name (the module docs).
+    fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mark = Mark::take(cx);
+        let form = cx.weak_entity();
+        let departed: RecipeDeparted = Rc::new(move |id, departure, saved, mark, window, cx| {
+            let _ = form.update(cx, |form, cx| {
+                form.editor_left(id, departure, saved, mark, window, cx)
+            });
+        });
+        let editor = cx.new(|cx| RecipeEditor::for_add_host(departed, window, cx));
+        let target = editor.read(cx).start(cx);
+        self.editor = Some(editor);
+        focus::focus_in_layer(&target, &mark, window, cx);
+        cx.notify();
+    }
+
+    /// The editor `id` left for `departure` (Cancel or a done Save go back, a leave question asked by closing Add host
+    /// closes it), at the press `mark`, with the recipe's name when it is saved. Nothing if `id` is no longer the open
+    /// editor, so a late reply never closes an editor opened since. Back chooses the saved recipe and puts focus on
+    /// Recipe, unless the user moved on since `mark`.
+    fn editor_left(
+        &mut self,
+        id: EntityId,
+        departure: RecipeDeparture,
+        saved: Option<String>,
+        mark: &Mark,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor.as_ref().map(Entity::entity_id) != Some(id) {
+            return;
+        }
+        self.editor = None;
+        cx.notify();
+        match departure {
+            RecipeDeparture::Back => {
+                if let Some(name) = saved {
+                    self.recipe = Some(name.into());
+                }
+                // The Recipe choice is drawn again by the next frame; the coordinator keeps the move until then.
+                let target = self.recipe_choice.clone();
+                match window {
+                    Some(window) => focus::focus_in_layer(&target, mark, window, cx),
+                    None => {
+                        let mark = *mark;
+                        let _ = self.window.update(cx, |_, window, cx| {
+                            focus::focus_in_layer(&target, &mark, window, cx)
+                        });
+                    }
+                }
+            }
+            RecipeDeparture::Close => {
+                let handle = self.window;
+                let _ = self
+                    .dialog
+                    .update(cx, |dialog, cx| dialog.close_later(None, handle, cx));
+            }
+        }
+    }
+
     /// Continue, from the button or Enter in Name: unavailable in this build (the module docs).
     pub(super) fn proceed(&mut self, _: &mut Window, _: &mut Context<Self>) {}
-
-    /// Whether Name holds focus, for the tests of where focus goes.
-    #[cfg(test)]
-    pub(super) fn name_focused(&self, window: &Window, cx: &App) -> bool {
-        self.name.input().focus_handle(cx).is_focused(window)
-    }
 
     /// The name as typed, for the tests to read back a kept draft.
     #[cfg(test)]
@@ -192,7 +279,7 @@ impl TensorlakeForm {
     }
 
     /// Continue, for Add host's footer in the place of Add.
-    pub(super) fn continue_button(&self, form: gpui::WeakEntity<Self>) -> Button {
+    pub(super) fn continue_button(&self, form: WeakEntity<Self>) -> Button {
         Button::new(
             "add-tensorlake-continue",
             "Continue",
@@ -257,11 +344,21 @@ impl TensorlakeForm {
                 )),
             )
         }))
-        .on_choose(move |value, _, cx| {
+        .options([SelectOption::new(
+            NEW_RECIPE,
+            "New recipe…",
+            HoverHelp::tooltip("New recipe…: make a recipe here, without leaving Add host"),
+        )])
+        .focus(&self.recipe_choice)
+        .on_choose(move |value, window, cx| {
             let value = value.clone();
             let _ = form.update(cx, |form, cx| {
-                form.recipe = Some(value);
-                cx.notify();
+                if value.as_ref() == NEW_RECIPE {
+                    form.open_editor(window, cx);
+                } else {
+                    form.recipe = Some(value);
+                    cx.notify();
+                }
             });
         });
         if let Some(chosen) = &self.recipe {
@@ -286,7 +383,10 @@ impl TensorlakeForm {
                 palette,
             ),
             field("Recipe", recipe, palette),
-            help("What the sandbox runs.", palette),
+            help(
+                "What the sandbox runs. New recipe… opens the editor here.",
+                palette,
+            ),
         ];
         // The summary quotes an image or snapshot name the recipe's author typed, so it is host text.
         fields.extend(summary.map(|summary| {
@@ -365,7 +465,10 @@ impl Render for TensorlakeForm {
                 ]
             }
             Account::Read(account) if !account.api_key_set => self.no_key(cx),
-            Account::Read(_) => self.fields(cx),
+            Account::Read(_) => match self.editor.clone() {
+                Some(editor) => vec![editor.into_any_element()],
+                None => self.fields(cx),
+            },
         };
         div().flex().flex_col().gap(px(BODY_GAP)).children(parts)
     }

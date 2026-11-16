@@ -87,7 +87,8 @@ const COMPACT_FOOTER_PAD: (Pixels, Pixels) = (px(8.), px(14.));
 /// A dialog's frame. The title is the accessible name. The title and the summary are each a [`Line`]: the app's own
 /// words, or a [`HostSentence`](crate::host_text::HostSentence) when they name a host value, which then is a labelled
 /// node of its own inside the dialog. The answers are drawn right-aligned in the order given, the old footer's order
-/// (Cancel first, the main action last). A frame with no answers, note, lead or notices draws no footer at all.
+/// (Cancel first, the main action last). A frame with no answers, note, lead or notices draws no footer at all, and one
+/// with notices alone draws them without an answers row.
 #[derive(IntoElement)]
 pub struct DialogFrame {
     id: SharedString,
@@ -421,10 +422,8 @@ impl RenderOnce for DialogFrame {
         // A frame with nothing for its footer to hold draws none: the Templates dialog, whose editor carries its own
         // action row inside the body (SPEC.md: "the complete editor keeps scrolling within the dialog, including its
         // editor-local action footer").
-        let has_footer = !self.answers.is_empty()
-            || self.note.is_some()
-            || self.footer_lead.is_some()
-            || self.notices.is_some();
+        let has_row = !self.answers.is_empty() || self.note.is_some() || self.footer_lead.is_some();
+        let has_footer = has_row || self.notices.is_some();
         let answers = div()
             .flex()
             .flex_wrap()
@@ -523,7 +522,9 @@ impl RenderOnce for DialogFrame {
             .border_t_1()
             .border_color(theme::color(palette.border_dim))
             .children(notices)
-            .child(row);
+            // A footer of notices alone (Add host's recipe editor, whose answers are its notices) draws no empty
+            // row, which would leave the footer's gap below them.
+            .children(has_row.then_some(row));
 
         let card = div()
             .id(ElementId::Name(self.id.clone()))
