@@ -1640,6 +1640,44 @@ fn a_click_opened_host_list_owns_the_keyboard_on_macos(cx: &mut TestAppContext) 
     );
 }
 
+/// The same promise from where New starts: on macOS a click on the host button straight from the search box (New's
+/// starting focus) opens the list and moves focus to the button. Why: a test Mac run of the shared tests on 2026-11-16
+/// failed at this click from the search box while `a_click_opened_host_list_owns_the_keyboard_on_macos`, which focuses
+/// the folder field first, passed (it did not reproduce on a later main), and the shared harness now runs those tests
+/// under Linux's click rule, so only this test keeps the Mac path from the search box checked. Specified under the
+/// macOS click rule, with focus on the search box: a click on the host button opens the list and focuses the button,
+/// and Down and Enter then pick host2.
+#[gpui::test]
+fn a_mac_click_on_the_host_button_from_the_search_box_opens_the_list_and_focuses_the_button(
+    cx: &mut TestAppContext,
+) {
+    let cx = host_picker_on(cx, "~");
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .search
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: New starts on the search box"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-host").as_deref(),
+        Some("Host: host1"),
+        "the premise: the button is drawn with the chosen host"
+    );
+    test_support::click(cx, "launcher-host");
+    assert!(
+        has_node(cx, "launcher-host-list"),
+        "the click opened the list"
+    );
+    assert!(
+        host_focused(cx),
+        "and moved focus to the button, though a Mac click focuses no button"
+    );
+    keys(cx, "down enter");
+    assert_eq!(draft(cx).host, Some(2), "the button's keys drove the list");
+}
+
 /// While the chosen host is not in the registry the helm pushed (before hosts arrive, or with none registered, which
 /// the button cannot tell apart), the button shows nothing and is named just "Host" (SPEC.md: the host's value is
 /// empty before hosts arrive), rather than naming a host that is not there. Specified with an empty hosts collection.
