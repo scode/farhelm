@@ -4,22 +4,92 @@ Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
 sections: Desktop window chrome, Installation and updates, Desktop Quit, Status.
 
-| Old spec                           | Tests | Covers                                                                   | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ---------------------------------- | ----- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/window-chrome.spec.ts`      | 6     | the macOS inset belongs to the merged top row and leaves details compact | replaced: `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs`, `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`, `desktop::tests::the_window_options_give_the_band_the_title_bar_only_on_macos` and, run on the test Mac, `desktop::tests::mac::the_real_rows_drag_from_their_background_and_leave_their_controls_and_text_alone`, `desktop::tests::mac::with_no_session_open_the_empty_panes_strip_drags`, `desktop::tests::mac::the_band_rows_are_48_high_at_the_top_and_the_app_bar_keeps_the_lights_clear`, `desktop::tests::mac::with_no_session_open_a_band_strip_covers_the_panes_top` and `desktop::tests::mac::in_a_narrow_window_the_app_bar_runs_above_both_panes`; the web-shell case is superseded (there is no web shell), and "text stays selectable" is superseded by labels no longer being selectable (decided by the maintainer on 2026-11-13); and the real-window check on the test Mac passed (2026-11-14: dragging the wordmark or the session top row's empty background moves the window, a drag that starts on the version text does not, a double-click on the band zooms and a second one restores; not covered: a Force Touch trackpad, a second display). The `app-title-band` scene, captured by the screenshot batch on the test Mac (2026-11-14, light, narrow), matches the reference `macos-window-chrome`: the inset kept clear for the traffic lights, the wordmark and version, and the 48 px top row across both panes; the batch captures the app's own drawing, so the lights themselves show only in a screen capture of the real window |
-| `tests/update-readout-css.spec.ts` | 5     | version hint brightens and turns on hover and keyboard focus             | replaced: `update_readout::view::tests::hover_and_keyboard_focus_brighten_the_version_and_turn_the_glyph`, `the_idle_version_is_a_named_check_button`, `a_visible_check_spins_the_glyph_and_shows_its_words`, `an_installed_update_keeps_focus_on_the_readout_only_if_it_had_it` (the three focus cases), `the_spinner_runs_only_while_something_spins_and_stands_still_under_reduced_motion`, and the goldens of every state, light and dark (`version-readout-check`, `version-readout-progress`, `version-readout-outcomes`, `version-readout-update-ready`, `version-readout-menu`, `version-readout-tooltip`). The hover transitions are not ported (see Deviations)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+### `tests/window-chrome.spec.ts`
+
+Tests: 6. Covers: the macOS inset belongs to the merged top row and leaves details compact.
+
+replaced: `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs`,
+`desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`,
+`desktop::tests::the_window_options_give_the_band_the_title_bar_only_on_macos` and, run on the test Mac,
+`desktop::tests::mac::the_real_rows_drag_from_their_background_and_leave_their_controls_and_text_alone`,
+`desktop::tests::mac::with_no_session_open_the_empty_panes_strip_drags`,
+`desktop::tests::mac::the_band_rows_are_48_high_at_the_top_and_the_app_bar_keeps_the_lights_clear`,
+`desktop::tests::mac::with_no_session_open_a_band_strip_covers_the_panes_top` and
+`desktop::tests::mac::in_a_narrow_window_the_app_bar_runs_above_both_panes`; the web-shell case is superseded (there is
+no web shell), and "text stays selectable" is superseded by labels no longer being selectable (decided by the maintainer
+on 2026-11-13); and the real-window check on the test Mac passed (2026-11-14: dragging the wordmark or the session top
+row's empty background moves the window, a drag that starts on the version text does not, a double-click on the band
+zooms and a second one restores; not covered: a Force Touch trackpad, a second display). The `app-title-band` scene,
+captured by the screenshot batch on the test Mac (2026-11-14, light, narrow), matches the reference
+`macos-window-chrome`: the inset kept clear for the traffic lights, the wordmark and version, and the 48 px top row
+across both panes; the batch captures the app's own drawing, so the lights themselves show only in a screen capture of
+the real window
+
+### `tests/update-readout-css.spec.ts`
+
+Tests: 5. Covers: version hint brightens and turns on hover and keyboard focus.
+
+replaced: `update_readout::view::tests::hover_and_keyboard_focus_brighten_the_version_and_turn_the_glyph`,
+`the_idle_version_is_a_named_check_button`, `a_visible_check_spins_the_glyph_and_shows_its_words`,
+`an_installed_update_keeps_focus_on_the_readout_only_if_it_had_it` (the three focus cases),
+`the_spinner_runs_only_while_something_spins_and_stands_still_under_reduced_motion`, and the goldens of every state,
+light and dark (`version-readout-check`, `version-readout-progress`, `version-readout-outcomes`,
+`version-readout-update-ready`, `version-readout-menu`, `version-readout-tooltip`). The hover transitions are not ported
+(see Deviations)
 
 ## The old native app's own tests
 
 The old desktop shell's Rust unit tests and JavaScript tests at the reference commit, which no Playwright spec covered,
 and the old native smoke test's legs (`scripts/desktop-smoke.sh`).
 
-| Old test                                                                                                                                             | Tests | Covers                                                                                                | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `crates/farhelm-ui/src/desktop/menu.rs` (`mac_menu_preserves_session_delete_chord`)                                                                  | 1     | the Mac menu is the old arrangement, with no Close Window, so Cmd+W stays the open session's Delete   | replaced: `desktop::tests::the_mac_menu_is_the_old_apps_with_no_close_window`, `desktop::tests::the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field`, `actions_tests::the_mac_menu_chords_run_their_actions_and_are_app_shortcuts_in_a_terminal` and `desktop::tests::closing_the_main_window_quits_and_closing_another_does_not`; and the real-window check on the test Mac (2026-11-14): the app menu and Edit show the old items, Cmd+Q and the window's close button each quit the app, and its local supervisor keeps running after                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `crates/farhelm-ui/src/desktop/window_state.rs`                                                                                                      | 10    | the saved frame's format and restore rules, and following the live window                             | replaced: the format and restore tests moved unchanged with their code (`window_state::tests`, in `crates/farhelm-desktop`), the following is `window_state::tests::reports_only_make_the_frame_pending_and_a_flush_writes_the_last_one` and the other `FrameKeeper` tests beside it, `desktop::tests::the_hosts_placement_is_where_the_window_opens`, `desktop::tests::following_the_window_reports_its_frame_at_once_and_on_every_change` and `desktop::tests::the_host_hears_once_that_the_window_settled_after_it_stops_changing`; the real-window check on the test Mac passed (2026-11-14: a moved and resized window reopens where it was with no growth, a zoom is saved with the ordinary frame from before it and reopens zoomed, a window reopened zoomed and left alone stays zoomed, an unzoom is saved, a frame off every display falls back; not covered: a second Mac display, Linux displays, KDE); on Linux, `scripts/gui-lifecycle.py` steps 04, 09 and 10 (the frame saved at the window's size while the app runs; a saved size back after a relaunch, written between launches since the bridge cannot resize a window on headless Mutter; and a window maximized by the title bar's Maximize saved maximized with its ordinary frame kept, reopened maximized, and once quit again still saved maximized with that frame) |
-| `crates/farhelm-ui/src/window_chrome.rs` (`press_decision_covers_buttons_reports_and_fullscreen`, `click_report_header_parsing_rejects_non_reports`) | 2     | which press on the band drags, zooms or does nothing, and the press report the JavaScript bridge sent | replaced: `desktop::tests::the_press_decision_drags_zooms_or_leaves_the_press_alone`; the report parsing is superseded, since presses reach the band through GPUI's own propagation and no report crosses a transport                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `crates/farhelm-ui/js-tests/click-detail.test.js`                                                                                                    | 20    | which presses inside a drag surface count as empty background, and when a repeat may zoom             | partly: the classification and pairing cases by `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs` and `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`; the endpoint, header and synchronous-POST cases are superseded (no JavaScript bridge); "a press over an inert descendant" waits for the terminal area's tabs (no inert band control exists yet); a positioned popover over the band is covered by the layer manager's occluding popovers, which a press never passes through; "a press inside a surface but outside its box" is GPUI's hit testing, which hands a row only presses inside it; "a replaced or disconnected spacer" is covered by pairing presses by row, not by element                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+### `crates/farhelm-ui/src/desktop/menu.rs` (`mac_menu_preserves_session_delete_chord`)
+
+Tests: 1. Covers: the Mac menu is the old arrangement, with no Close Window, so Cmd+W stays the open session's Delete.
+
+replaced: `desktop::tests::the_mac_menu_is_the_old_apps_with_no_close_window`,
+`desktop::tests::the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field`,
+`actions_tests::the_mac_menu_chords_run_their_actions_and_are_app_shortcuts_in_a_terminal` and
+`desktop::tests::closing_the_main_window_quits_and_closing_another_does_not`; and the real-window check on the test Mac
+(2026-11-14): the app menu and Edit show the old items, Cmd+Q and the window's close button each quit the app, and its
+local supervisor keeps running after
+
+### `crates/farhelm-ui/src/desktop/window_state.rs`
+
+Tests: 10. Covers: the saved frame's format and restore rules, and following the live window.
+
+replaced: the format and restore tests moved unchanged with their code (`window_state::tests`, in
+`crates/farhelm-desktop`), the following is
+`window_state::tests::reports_only_make_the_frame_pending_and_a_flush_writes_the_last_one` and the other `FrameKeeper`
+tests beside it, `desktop::tests::the_hosts_placement_is_where_the_window_opens`,
+`desktop::tests::following_the_window_reports_its_frame_at_once_and_on_every_change` and
+`desktop::tests::the_host_hears_once_that_the_window_settled_after_it_stops_changing`; the real-window check on the test
+Mac passed (2026-11-14: a moved and resized window reopens where it was with no growth, a zoom is saved with the
+ordinary frame from before it and reopens zoomed, a window reopened zoomed and left alone stays zoomed, an unzoom is
+saved, a frame off every display falls back; not covered: a second Mac display, Linux displays, KDE); on Linux,
+`scripts/gui-lifecycle.py` steps 04, 09 and 10 (the frame saved at the window's size while the app runs; a saved size
+back after a relaunch, written between launches since the bridge cannot resize a window on headless Mutter; and a window
+maximized by the title bar's Maximize saved maximized with its ordinary frame kept, reopened maximized, and once quit
+again still saved maximized with that frame)
+
+### `crates/farhelm-ui/src/window_chrome.rs` (`press_decision_covers_buttons_reports_and_fullscreen`, `click_report_header_parsing_rejects_non_reports`)
+
+Tests: 2. Covers: which press on the band drags, zooms or does nothing, and the press report the JavaScript bridge sent.
+
+replaced: `desktop::tests::the_press_decision_drags_zooms_or_leaves_the_press_alone`; the report parsing is superseded,
+since presses reach the band through GPUI's own propagation and no report crosses a transport
+
+### `crates/farhelm-ui/js-tests/click-detail.test.js`
+
+Tests: 20. Covers: which presses inside a drag surface count as empty background, and when a repeat may zoom.
+
+partly: the classification and pairing cases by
+`desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs` and
+`desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`; the endpoint, header and
+synchronous-POST cases are superseded (no JavaScript bridge); "a press over an inert descendant" waits for the terminal
+area's tabs (no inert band control exists yet); a positioned popover over the band is covered by the layer manager's
+occluding popovers, which a press never passes through; "a press inside a surface but outside its box" is GPUI's hit
+testing, which hands a row only presses inside it; "a replaced or disconnected spacer" is covered by pairing presses by
+row, not by element
 
 ### The old native smoke test's legs
 
@@ -30,28 +100,167 @@ phases are the last three. The Linux GPUI app's lifecycle check, `scripts/gui-li
 launching, quitting and relaunching; its steps are cited by number. The supervisor decisions moved unchanged with their
 unit tests (in `crates/farhelm-desktop` unless another crate is named).
 
-| Old leg                                                                                   | Tests | Covers                                                                                                                                                                                      | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| "a bootstrap failure exits 1 with a plain message, no panic"                              | 1     | a launch whose state directory is a plain file exits 1 with one `farhelm-desktop: ` line and no panic                                                                                       | replaced: `scripts/gui-lifecycle.py` step 02                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| "booting Xvfb, openbox, and the self-contained app"                                       | 1     | the embedded helm comes up and the local host connects; no browser UI at `/`, no `/api/auth/token`, the web view authenticates, no stored credential or device row                          | partly: the boot and connection by `scripts/gui-lifecycle.py` step 01 (the window draws the listing it read over its UI channel, the helm lists its local host as connected, and the app's own supervisor is recorded and running); the web view's authentication is superseded (the window reaches the helm in process with an in-memory credential); the 404s for `/` and `/api/auth/token` and the absence of stored credentials and device rows are not yet ported                                                                                                               |
-| "a second desktop launch refuses the owned state directory"                               | 1     | a second launch on an open app's state directory exits 1 and the open app keeps serving                                                                                                     | superseded: on Linux a second launch now brings the open app forward (settled by the migration's coordinator on 2026-11-13), `scripts/gui-lifecycle.py` step 05 and `second_launch::tests::a_second_launch_hands_over_only_to_a_live_app_and_carries_its_token`; the refusal stays for a launch that cannot reach the open app, `the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder`                                                                                                                                                                            |
-| "a second launch with another program refuses without stopping the open app's supervisor" | 1     | a second launch whose program differs refuses at the open app's lock before it stops anything                                                                                               | superseded the same way: a second launch forwards before it reads or decides anything about a supervisor, and step 05 checks the supervisor is the same afterwards; beside an open app that cannot be reached, the lock refuses before any supervisor decision (`the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder`)                                                                                                                                                                                                                                           |
-| "waiting for the first-boot listing request through the smoke hook"                       | 1     | the web view's first session listing asks for the default order                                                                                                                             | superseded: a hook into the web view's REST listing; the window's listing and its order are the sidebar area's                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| "waiting for the client-log marker" (both launches)                                       | 2     | the web view's console reached the helm's log                                                                                                                                               | dropped: there is no web view or JavaScript console                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| "asset handler served ... requests, 0 missing"                                            | 1     | every web asset the window loaded came from the bundle compiled into the binary                                                                                                             | dropped: the GPUI app loads no web assets; its fonts and icons are compiled in and drawn by the goldens                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| "creating two bundle-substrate sessions before the hard restart"                          | 1     | two sessions created through the helm's API, each with a live agent terminal running in a terminal host, set up for the restart leg                                                         | partly: `scripts/gui-lifecycle.py` seeds one session through the helm's API (`gui-agent.py start --sessions 1`) for steps 07 and 08; that a created session's agent runs in a terminal host is the e2e `host_creates::` selection                                                                                                                                                                                                                                                                                                                                                    |
-| "waiting for the window and nudging it to render"                                         | 1     | resizing the Xvfb window until it reported a sane size, so the web view would paint                                                                                                         | test infrastructure: a workaround for WebKitGTK under Xvfb; the bridge reports the GPUI window's size and waits for drawn text                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| "killing the app without Rust cleanup and relaunching it"                                 | 1     | after SIGKILL the supervisor survives and the relaunch reuses it, mints a new credential and refuses the old one, and keeps the sessions (their terminals alive) and the helm's preferences | partly: `scripts/gui-lifecycle.py` step 08 (SIGKILL, the same supervisor running and reused, the seeded session listed again as running, waiting or idle) and step 07 (the same after a quit, and a new credential with the old one refused with 401); that the kept session's terminal still takes input after the relaunch is not yet ported (the lifecycle check reads the helm's listing, not the terminal); the remembered selection and sort are the helm's preferences, which the sidebar area restores; the web view's re-authentication and attachment trace are superseded |
-| "rotating the token: the internal desktop credential carries on"                          | 1     | rotating the helm token neither revokes the app's credential nor re-authenticates the web view or closes its terminal socket                                                                | partly superseded: the web view's re-authentication and socket are gone; that a rotation leaves the window's in-memory credential working is not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| the eval-bridge watchdog stays silent                                                     | 1     | the web view watchdog's death message never fired during a healthy run                                                                                                                      | dropped: the watchdog watched the web view's eval bridge, which is gone                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| the close chord quits the app                                                             | 1     | Alt+F4 through the window manager closes the window and the app exits successfully, leaving the supervisor running                                                                          | partly: a click on the Linux title bar's Close quits the app the orderly way with the supervisor still running, `scripts/gui-lifecycle.py` steps 06 and 10 (steps 09 and 10 also quit by SIGTERM with the same checks), and `desktop::tests::closing_the_main_window_quits_and_closing_another_does_not` (in `crates/gui/farhelm-gui`) closes the window in process; a close the compositor asks for (Alt+F4, KWin's own Close), which reaches the app by another path than the drawn button, is not yet ported; the pending KDE check covers KWin's                                 |
-| "a launch with a replaced program replaces the app's own supervisor"                      | 1     | a program file replaced the way an install does it makes the next launch stop the app's own supervisor and start one from the new file, with sessions kept and driveable                    | partly: the decision by `the_app_replaces_only_its_own_supervisor_and_only_when_it_must`, and a replaced file counting as another program by `managed_supervisor::tests::the_same_path_with_a_replaced_file_is_a_different_program` and `a_running_supervisor_matches_after_its_program_is_replaced` (in `farhelm-supervisor`); the end-to-end replacement with a session kept and typed into is not yet ported                                                                                                                                                                      |
-| "a replacement that would fail its prerequisites stops nothing"                           | 1     | a replacement whose program folder holds `:` refuses with exit 1 while the old supervisor keeps serving and its record stays                                                                | partly: a replacement program that does not run refuses before anything is stopped (`a_replacement_refuses_a_program_that_does_not_run`), and the folder rule itself is `service::core::tests::a_colon_in_the_session_program_folder_is_refused_at_startup` (in `farhelm-supervisor`); the desktop's check runs the same `validate_session_program_path` before stopping anything, with no test of its own                                                                                                                                                                           |
-| "a launch replaces the app's own supervisor when it never answers"                        | 1     | a frozen supervisor of the app's own is given the startup wait, stopped, killed after the grace, and replaced                                                                               | replaced: `waiting_for_the_apps_own_silent_supervisor_ends_on_answer_exit_or_deadline`, `a_failed_discovery_counts_as_not_answering_only_for_the_apps_own_supervisor` and the not-answering cases of `the_app_replaces_only_its_own_supervisor_and_only_when_it_must`                                                                                                                                                                                                                                                                                                                |
-| "an answering supervisor the app did not start is reused"                                 | 1     | a hand-started supervisor on the state directory is reused, not stopped, and the app records none of its own                                                                                | replaced: `the_app_replaces_only_its_own_supervisor_and_only_when_it_must` (without the app's own record, an answering supervisor is reused); the leg's teardown of a planted terminal host was harness cleanup (test infrastructure)                                                                                                                                                                                                                                                                                                                                                |
-| the appearance leg (`DESKTOP_SMOKE_APPEARANCE=1`)                                         | 4     | a fresh and a stored launch in dark and light GTK themes paint the web view in the matching palette                                                                                         | superseded: it drove the web view's `matchMedia` from GTK themes; the GPUI app's light and dark palettes are its goldens, light and dark (`scripts/check-gui-goldens.py`)                                                                                                                                                                                                                                                                                                                                                                                                            |
-| the missing-initialize leg (`DESKTOP_SMOKE_APPEARANCE=no-initialize`)                     | 1     | a web view document that never initializes is refused within its creation deadline, and the supervisor keeps running detached                                                               | superseded: the fault was in the web view's document; a GPUI window that cannot open reports through the same pre-window refusal as a bootstrap failure (`Host::on_startup_failure`), and the supervisor is detached from the app in any case (`scripts/gui-lifecycle.py` steps 06 and 08)                                                                                                                                                                                                                                                                                           |
-| the pixel-driven create and terminal round trip (`DESKTOP_SMOKE_LEGACY_INTERACTION=1`)    | 2     | a session created through the create form, then a command typed into its terminal                                                                                                           | superseded: the bridge drives the app by its controls rather than by pixels; typing into a session's terminal is `scripts/gui-e2e-smoke.py` step 02, and the create form is the launcher area's                                                                                                                                                                                                                                                                                                                                                                                      |
+#### "a bootstrap failure exits 1 with a plain message, no panic"
+
+Tests: 1. Covers: a launch whose state directory is a plain file exits 1 with one `farhelm-desktop: ` line and no panic.
+
+replaced: `scripts/gui-lifecycle.py` step 02
+
+#### "booting Xvfb, openbox, and the self-contained app"
+
+Tests: 1. Covers: the embedded helm comes up and the local host connects; no browser UI at `/`, no `/api/auth/token`,
+the web view authenticates, no stored credential or device row.
+
+partly: the boot and connection by `scripts/gui-lifecycle.py` step 01 (the window draws the listing it read over its UI
+channel, the helm lists its local host as connected, and the app's own supervisor is recorded and running); the web
+view's authentication is superseded (the window reaches the helm in process with an in-memory credential); the 404s for
+`/` and `/api/auth/token` and the absence of stored credentials and device rows are not yet ported
+
+#### "a second desktop launch refuses the owned state directory"
+
+Tests: 1. Covers: a second launch on an open app's state directory exits 1 and the open app keeps serving.
+
+superseded: on Linux a second launch now brings the open app forward (settled by the migration's coordinator on
+2026-11-13), `scripts/gui-lifecycle.py` step 05 and
+`second_launch::tests::a_second_launch_hands_over_only_to_a_live_app_and_carries_its_token`; the refusal stays for a
+launch that cannot reach the open app, `the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder`
+
+#### "a second launch with another program refuses without stopping the open app's supervisor"
+
+Tests: 1. Covers: a second launch whose program differs refuses at the open app's lock before it stops anything.
+
+superseded the same way: a second launch forwards before it reads or decides anything about a supervisor, and step 05
+checks the supervisor is the same afterwards; beside an open app that cannot be reached, the lock refuses before any
+supervisor decision (`the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder`)
+
+#### "waiting for the first-boot listing request through the smoke hook"
+
+Tests: 1. Covers: the web view's first session listing asks for the default order.
+
+superseded: a hook into the web view's REST listing; the window's listing and its order are the sidebar area's
+
+#### "waiting for the client-log marker" (both launches)
+
+Tests: 2. Covers: the web view's console reached the helm's log.
+
+dropped: there is no web view or JavaScript console
+
+#### "asset handler served ... requests, 0 missing"
+
+Tests: 1. Covers: every web asset the window loaded came from the bundle compiled into the binary.
+
+dropped: the GPUI app loads no web assets; its fonts and icons are compiled in and drawn by the goldens
+
+#### "creating two bundle-substrate sessions before the hard restart"
+
+Tests: 1. Covers: two sessions created through the helm's API, each with a live agent terminal running in a terminal
+host, set up for the restart leg.
+
+partly: `scripts/gui-lifecycle.py` seeds one session through the helm's API (`gui-agent.py start --sessions 1`) for
+steps 07 and 08; that a created session's agent runs in a terminal host is the e2e `host_creates::` selection
+
+#### "waiting for the window and nudging it to render"
+
+Tests: 1. Covers: resizing the Xvfb window until it reported a sane size, so the web view would paint.
+
+test infrastructure: a workaround for WebKitGTK under Xvfb; the bridge reports the GPUI window's size and waits for
+drawn text
+
+#### "killing the app without Rust cleanup and relaunching it"
+
+Tests: 1. Covers: after SIGKILL the supervisor survives and the relaunch reuses it, mints a new credential and refuses
+the old one, and keeps the sessions (their terminals alive) and the helm's preferences.
+
+partly: `scripts/gui-lifecycle.py` step 08 (SIGKILL, the same supervisor running and reused, the seeded session listed
+again as running, waiting or idle) and step 07 (the same after a quit, and a new credential with the old one refused
+with 401); that the kept session's terminal still takes input after the relaunch is not yet ported (the lifecycle check
+reads the helm's listing, not the terminal); the remembered selection and sort are the helm's preferences, which the
+sidebar area restores; the web view's re-authentication and attachment trace are superseded
+
+#### "rotating the token: the internal desktop credential carries on"
+
+Tests: 1. Covers: rotating the helm token neither revokes the app's credential nor re-authenticates the web view or
+closes its terminal socket.
+
+partly superseded: the web view's re-authentication and socket are gone; that a rotation leaves the window's in-memory
+credential working is not yet ported
+
+#### the eval-bridge watchdog stays silent
+
+Tests: 1. Covers: the web view watchdog's death message never fired during a healthy run.
+
+dropped: the watchdog watched the web view's eval bridge, which is gone
+
+#### the close chord quits the app
+
+Tests: 1. Covers: Alt+F4 through the window manager closes the window and the app exits successfully, leaving the
+supervisor running.
+
+partly: a click on the Linux title bar's Close quits the app the orderly way with the supervisor still running,
+`scripts/gui-lifecycle.py` steps 06 and 10 (steps 09 and 10 also quit by SIGTERM with the same checks), and
+`desktop::tests::closing_the_main_window_quits_and_closing_another_does_not` (in `crates/gui/farhelm-gui`) closes the
+window in process; a close the compositor asks for (Alt+F4, KWin's own Close), which reaches the app by another path
+than the drawn button, is not yet ported; the pending KDE check covers KWin's
+
+#### "a launch with a replaced program replaces the app's own supervisor"
+
+Tests: 1. Covers: a program file replaced the way an install does it makes the next launch stop the app's own supervisor
+and start one from the new file, with sessions kept and driveable.
+
+partly: the decision by `the_app_replaces_only_its_own_supervisor_and_only_when_it_must`, and a replaced file counting
+as another program by `managed_supervisor::tests::the_same_path_with_a_replaced_file_is_a_different_program` and
+`a_running_supervisor_matches_after_its_program_is_replaced` (in `farhelm-supervisor`); the end-to-end replacement with
+a session kept and typed into is not yet ported
+
+#### "a replacement that would fail its prerequisites stops nothing"
+
+Tests: 1. Covers: a replacement whose program folder holds `:` refuses with exit 1 while the old supervisor keeps
+serving and its record stays.
+
+partly: a replacement program that does not run refuses before anything is stopped
+(`a_replacement_refuses_a_program_that_does_not_run`), and the folder rule itself is
+`service::core::tests::a_colon_in_the_session_program_folder_is_refused_at_startup` (in `farhelm-supervisor`); the
+desktop's check runs the same `validate_session_program_path` before stopping anything, with no test of its own
+
+#### "a launch replaces the app's own supervisor when it never answers"
+
+Tests: 1. Covers: a frozen supervisor of the app's own is given the startup wait, stopped, killed after the grace, and
+replaced.
+
+replaced: `waiting_for_the_apps_own_silent_supervisor_ends_on_answer_exit_or_deadline`,
+`a_failed_discovery_counts_as_not_answering_only_for_the_apps_own_supervisor` and the not-answering cases of
+`the_app_replaces_only_its_own_supervisor_and_only_when_it_must`
+
+#### "an answering supervisor the app did not start is reused"
+
+Tests: 1. Covers: a hand-started supervisor on the state directory is reused, not stopped, and the app records none of
+its own.
+
+replaced: `the_app_replaces_only_its_own_supervisor_and_only_when_it_must` (without the app's own record, an answering
+supervisor is reused); the leg's teardown of a planted terminal host was harness cleanup (test infrastructure)
+
+#### the appearance leg (`DESKTOP_SMOKE_APPEARANCE=1`)
+
+Tests: 4. Covers: a fresh and a stored launch in dark and light GTK themes paint the web view in the matching palette.
+
+superseded: it drove the web view's `matchMedia` from GTK themes; the GPUI app's light and dark palettes are its
+goldens, light and dark (`scripts/check-gui-goldens.py`)
+
+#### the missing-initialize leg (`DESKTOP_SMOKE_APPEARANCE=no-initialize`)
+
+Tests: 1. Covers: a web view document that never initializes is refused within its creation deadline, and the supervisor
+keeps running detached.
+
+superseded: the fault was in the web view's document; a GPUI window that cannot open reports through the same pre-window
+refusal as a bootstrap failure (`Host::on_startup_failure`), and the supervisor is detached from the app in any case
+(`scripts/gui-lifecycle.py` steps 06 and 08)
+
+#### the pixel-driven create and terminal round trip (`DESKTOP_SMOKE_LEGACY_INTERACTION=1`)
+
+Tests: 2. Covers: a session created through the create form, then a command typed into its terminal.
+
+superseded: the bridge drives the app by its controls rather than by pixels; typing into a session's terminal is
+`scripts/gui-e2e-smoke.py` step 02, and the create form is the launcher area's
 
 ## Behavior with no old test
 
