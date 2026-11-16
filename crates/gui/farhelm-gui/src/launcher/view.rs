@@ -59,7 +59,10 @@ use gpui::{
 };
 
 use super::draft::DestinationKind;
-use super::draft::{Catalog, Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
+use super::draft::{
+    Catalog, FOLDER_INSTALLATION_MOVED, Field, LaunchDraft, Mode, Tab, harness_label,
+    remembered_permission,
+};
 use super::launch::{self, Request};
 use super::request::{Target, capitalized};
 use super::words::agent_note;
@@ -2185,6 +2188,18 @@ impl Render for Launcher {
         };
         let where_row = self.where_row(palette, cx);
         let host_row = self.host_row(palette, window, cx);
+        // Under the host, as the old launcher said it there as well as beside Launch: the folder was taken on the
+        // installation this host row named before.
+        let installation_moved = self
+            .draft
+            .folder_installation_moved(&self.hosts(cx))
+            .then(|| {
+                choices::status_line(
+                    "launcher-folder-installation-note",
+                    FOLDER_INSTALLATION_MOVED.to_owned(),
+                    palette,
+                )
+            });
         let checkout_rows = self.checkout_rows(palette, window, cx);
         let destination =
             div()
@@ -2197,6 +2212,7 @@ impl Render for Launcher {
                 .children(self.host_picker.note.map(|note| {
                     choices::status_line("launcher-host-note", note.to_owned(), palette)
                 }))
+                .children(installation_moved)
                 .children(checkout_rows)
                 .child(row("launcher-folder-row", "Folder", folder, palette))
                 .children(self.folder_problem_line(palette, cx))

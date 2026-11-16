@@ -41,7 +41,7 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::{
     CommandLaunch, GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    SessionInfo, SessionLaunch, parse_github_repo,
+    SessionInfo, SessionLaunch, parse_github_repo, ui_channel::HostView,
 };
 
 use crate::drafts::Draft;
@@ -339,7 +339,40 @@ pub struct LaunchDraft {
     /// Whether New's folder still waits for the chosen host's launch history to say which folder it starts in
     /// ([`FolderDefault`]). Kept in the draft, so a permission Undo, which puts back the whole draft, puts it back too.
     pub folder_default: FolderDefault,
+    /// The installation the folder came from, when it came from one: the user took it from that installation's
+    /// history (a recent setup, a saved folder), or it is New's default decided for that installation (its last folder,
+    /// or the open session's there). `None` for a folder the user typed or chose otherwise, and for a source's own
+    /// folder. SPEC.md, "Working directory": such a folder "stays bound to the installation it came from", so a path
+    /// that exists on two installations, possibly holding different work, never quietly launches on the other. Once
+    /// the host row names another installation, a folder the user took is refused
+    /// ([`Self::folder_installation_moved`]), and one that is still the untouched default is decided again
+    /// ([`Self::redecide_moved_default`]): the user's edit mark tells the two apart.
+    pub folder_install: Option<Install>,
 }
+
+/// A host's installation as the launcher saw it: its registry row, and the installation identity the registry records
+/// for that row. A row retargeted onto another installation keeps its id and changes its identity. The recorded
+/// identity alone tells installations apart, as SPEC.md, "Host", compares them ("by the registry's recorded install
+/// identity"); a reconnect to the same installation changes neither.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Install {
+    pub host: i64,
+    pub identity: Option<String>,
+}
+
+impl Install {
+    /// `host`'s installation as the registry records it now.
+    pub fn of(host: &HostView) -> Install {
+        Install {
+            host: host.id,
+            identity: host.identity.clone(),
+        }
+    }
+}
+
+/// Why a folder the user took on one installation cannot launch once its host row names another, the old launcher's
+/// words.
+pub const FOLDER_INSTALLATION_MOVED: &str = "The remembered folder belongs to a different installation; choose the host or folder again before launching";
 
 /// Where New's folder default stands for the chosen host (SPEC.md, "Working directory": New prefills "the selected
 /// session's directory when that session is on the target host's installation, else the directory of the newest recent
@@ -397,6 +430,7 @@ impl LaunchDraft {
             // Settled: the caller's folder is the one it means. New's own opening, which seeds `~` until the host's
             // history says otherwise, marks it pending (`entry::new_draft`).
             folder_default: FolderDefault::Settled,
+            folder_install: None,
         }
     }
 
@@ -495,6 +529,7 @@ impl LaunchDraft {
             host_chosen: false,
             name_kind: None,
             folder_default: FolderDefault::Settled,
+            folder_install: None,
         }
     }
 
@@ -904,11 +939,17 @@ impl LaunchDraft {
 
     /// Choose `host` as the target. `default_folder` is the folder New would seed for it, which replaces the folder
     /// only while the user has not typed or picked one in this draft (SPEC.md, "Working directory": "Changing the host
-    /// re-seeds a folder the user has not typed or picked in that draft"). Choosing the host already chosen changes
-    /// nothing but [`Self::host_chosen`], so it cannot re-seed a Clone's folder.
+    /// re-seeds a folder the user has not typed or picked in that draft"). Choosing the host already chosen re-seeds
+    /// nothing, so it cannot re-seed a Clone's folder; it marks [`Self::host_chosen`] and ends a taken folder's tie to
+    /// its installation ([`Self::folder_install`]).
     pub fn choose_host(&mut self, host: i64, default_folder: String) {
-        // Picking the host already chosen still makes it the user's own choice, as the old picker did.
+        // Picking the host already chosen still makes it the user's own choice, as the old picker did. It also answers
+        // a refusal of a folder the user took on another installation; an untouched default keeps its installation, so
+        // a later retarget still decides it again.
         self.host_chosen = true;
+        if self.folder.is_touched() {
+            self.folder_install = None;
+        }
         if self.host == Some(host) {
             return;
         }
@@ -936,7 +977,10 @@ impl LaunchDraft {
     /// the history could not be read (`None`). It seeds the folder only while that is the untouched default of a folder
     /// destination; either way the default is spent, so a later answer cannot move a folder the user has since typed,
     /// picked, or kept aside behind a managed checkout (the old launcher's rule). Does nothing unless pending.
-    pub fn settle_folder_default(&mut self, folder: Option<String>) {
+    ///
+    /// `install` is the installation the default was decided for; a seeded folder remembers it
+    /// ([`Self::folder_install`]).
+    pub fn settle_folder_default(&mut self, folder: Option<String>, install: Install) {
         if self.folder_default != FolderDefault::Pending {
             return;
         }
@@ -945,9 +989,64 @@ impl LaunchDraft {
         } else {
             FolderDefault::Unread
         };
-        if self.checkout.is_none() && !self.holds(Field::Destination) {
+        if self.folder_is_the_default() {
             self.seed_folder(folder.unwrap_or_else(|| "~".to_owned()));
+            self.folder_install = Some(install);
         }
+    }
+
+    /// A folder the user took from `install`'s history (a recent setup, a saved folder): the folder, as any pick is,
+    /// and bound to that installation ([`Self::folder_install`]).
+    pub fn take_history_folder(&mut self, folder: String, install: Install) {
+        if self.holds(Field::Destination) {
+            return;
+        }
+        self.edit_folder(folder);
+        self.folder_install = Some(install);
+    }
+
+    /// Whether the folder is bound to an installation the chosen host's row no longer names (`hosts` is the registry
+    /// as it stands; a row that is gone names none).
+    fn folder_moved(&self, hosts: &[HostView]) -> bool {
+        let Some(bound) = &self.folder_install else {
+            return false;
+        };
+        let current = self
+            .host
+            .and_then(|id| hosts.iter().find(|host| host.id == id))
+            .map(Install::of);
+        current.as_ref() != Some(bound)
+    }
+
+    /// Whether Launch is refused because the folder the user took on one installation would launch on another
+    /// ([`FOLDER_INSTALLATION_MOVED`]). Only for a folder destination this draft may change: a managed checkout puts the
+    /// folder aside, and Restart with keeps its own.
+    pub fn folder_installation_moved(&self, hosts: &[HostView]) -> bool {
+        self.folder.is_touched()
+            && self.checkout.is_none()
+            && !self.holds(Field::Destination)
+            && self.folder_moved(hosts)
+    }
+
+    /// Whether the folder is still New's untouched default for an installation the host row no longer names, which
+    /// Launch waits on as on a pending default: it is decided again for the new installation
+    /// ([`Self::redecide_moved_default`]).
+    pub fn default_moved(&self, hosts: &[HostView]) -> bool {
+        self.folder_default != FolderDefault::Pending
+            && self.folder_is_the_default()
+            && self.folder_moved(hosts)
+    }
+
+    /// Decide New's default again when the host row it was decided for (the history's last folder, or the open
+    /// session's) now names another installation and the folder is still that untouched default: it waits for the
+    /// new installation's history, as after a host change. Returns whether it did.
+    pub fn redecide_moved_default(&mut self, hosts: &[HostView]) -> bool {
+        if !self.default_moved(hosts) {
+            return false;
+        }
+        self.folder_default = FolderDefault::Pending;
+        self.folder_install = None;
+        true
     }
 
     /// Whether Launch waits for the folder default: it is pending, and the folder is still the untouched default of a
@@ -981,6 +1080,8 @@ impl LaunchDraft {
         // launch is not a save), so every edit lands.
         let _ = self.folder.edit(text);
         self.checkout = None;
+        // Typed, or chosen without the history: the user's own, bound to nothing.
+        self.folder_install = None;
     }
 
     /// The Where row's choice: a folder, or a managed checkout. Choosing Folder brings back the folder the draft held
@@ -989,6 +1090,11 @@ impl LaunchDraft {
     pub fn choose_destination(&mut self, kind: DestinationKind) {
         if self.holds(Field::Destination) || kind == self.destination_kind() {
             return;
+        }
+        // A folder the user took gives up its installation; an untouched default keeps it, so a retarget while it is put
+        // aside behind a managed checkout still decides it again.
+        if self.folder.is_touched() {
+            self.folder_install = None;
         }
         self.checkout = match kind {
             DestinationKind::Folder => None,
@@ -1026,6 +1132,9 @@ impl LaunchDraft {
     pub fn choose_repository(&mut self, repo: GithubRepo) {
         if self.holds(Field::Destination) {
             return;
+        }
+        if self.folder.is_touched() {
+            self.folder_install = None;
         }
         let previous = self.checkout.take();
         let chosen = previous.as_ref().map_or(0, |checkout| checkout.chosen) + 1;

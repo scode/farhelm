@@ -12,7 +12,7 @@ use farhelm_proto::{
 };
 
 use super::draft::{
-    DestinationKind, Field, FolderDefault, LaunchDraft, Mode, RestartBaseline, Tab,
+    DestinationKind, Field, FolderDefault, Install, LaunchDraft, Mode, RestartBaseline, Tab,
     remembered_permission,
 };
 
@@ -704,6 +704,14 @@ fn a_recent_setups_model_is_owned_only_when_custom() {
 
 // ---- New's folder default ------------------------------------------------------------------------------------------
 
+/// The installation the folder-default tests decide for.
+fn install() -> Install {
+    Install {
+        host: 1,
+        identity: Some("identity1".into()),
+    }
+}
+
 /// New as its own opening makes it without the open session's folder: `~`, waiting for the host's default
 /// (`entry::new_draft`; its tests show when New opens this way).
 fn pending_new() -> LaunchDraft {
@@ -722,7 +730,7 @@ fn new_waits_for_its_folder_default_once() {
     let mut draft = pending_new();
     assert_eq!(draft.folder_default, FolderDefault::Pending);
     assert!(draft.folder_default_waiting());
-    draft.settle_folder_default(Some("/srv/work".into()));
+    draft.settle_folder_default(Some("/srv/work".into()), install());
     assert_eq!(draft.folder.value(), "/srv/work");
     assert_eq!(draft.folder_default, FolderDefault::Settled);
     assert!(!draft.folder_default_waiting());
@@ -730,7 +738,7 @@ fn new_waits_for_its_folder_default_once() {
         !draft.folder.is_touched(),
         "a seed is not the user's choice"
     );
-    draft.settle_folder_default(Some("/srv/later".into()));
+    draft.settle_folder_default(Some("/srv/later".into()), install());
     assert_eq!(
         draft.folder.value(),
         "/srv/work",
@@ -743,12 +751,12 @@ fn new_waits_for_its_folder_default_once() {
         !typed.folder_default_waiting(),
         "a typed folder waits for nothing"
     );
-    typed.settle_folder_default(Some("/srv/work".into()));
+    typed.settle_folder_default(Some("/srv/work".into()), install());
     assert_eq!(typed.folder.value(), "/mine");
     assert_eq!(typed.folder_default, FolderDefault::Settled);
 
     let mut unread = pending_new();
-    unread.settle_folder_default(None);
+    unread.settle_folder_default(None, install());
     assert_eq!(unread.folder.value(), "~");
     assert_eq!(unread.folder_default, FolderDefault::Unread);
     assert!(!unread.folder_default_waiting());
@@ -762,7 +770,7 @@ fn new_waits_for_its_folder_default_once() {
 #[test]
 fn a_host_change_rearms_the_folder_default_where_the_destination_is_free() {
     let mut draft = pending_new();
-    draft.settle_folder_default(Some("/srv/work".into()));
+    draft.settle_folder_default(Some("/srv/work".into()), install());
     let host = draft.host.expect("New has a host");
     draft.choose_host(host, "~".into());
     assert_eq!(
@@ -808,8 +816,93 @@ fn a_managed_checkout_neither_waits_nor_is_seeded() {
     let before = draft.folder.value().clone();
     draft.choose_destination(DestinationKind::Checkout);
     assert!(!draft.folder_default_waiting());
-    draft.settle_folder_default(Some("/srv/work".into()));
+    draft.settle_folder_default(Some("/srv/work".into()), install());
     assert_eq!(draft.folder_default, FolderDefault::Settled);
     draft.choose_destination(DestinationKind::Folder);
     assert_eq!(draft.folder.value(), &before);
+}
+
+// ---- A folder's installation ---------------------------------------------------------------------------------------
+
+/// Host row 1 recording installation `identity`, as the registry lists it.
+fn host_one(identity: &str) -> farhelm_proto::ui_channel::HostView {
+    let mut host = crate::hosts::tests::host(1, "local", crate::hosts::tests::connected());
+    host.identity = Some(identity.to_owned());
+    host
+}
+
+/// A folder taken from host 1's history while it named installation `a` refuses Launch once the row names `b`, or is
+/// gone, and an explicit choice of the host, a typed folder, or a managed checkout ends the refusal. Why: SPEC.md,
+/// "Working directory": a path on two installations can hold different work, so a folder taken on one must not launch
+/// on the other (old `remembered_destination_survives_only_same_install_reconnections` and
+/// `destination-authority.spec.ts`, "applied … retains installation authority through Launch").
+#[test]
+fn a_history_folder_stays_on_its_installation() {
+    let mut draft = new_draft();
+    draft.take_history_folder("/srv/work".into(), Install::of(&host_one("a")));
+    assert_eq!(draft.folder.value(), "/srv/work");
+    assert!(
+        !draft.folder_installation_moved(&[host_one("a")]),
+        "same install"
+    );
+    assert!(
+        draft.folder_installation_moved(&[host_one("b")]),
+        "retargeted"
+    );
+    assert!(draft.folder_installation_moved(&[]), "row gone");
+
+    let mut chosen = draft.clone();
+    chosen.choose_host(1, "~".into());
+    assert!(
+        !chosen.folder_installation_moved(&[host_one("b")]),
+        "the host chosen again"
+    );
+    let mut typed = draft.clone();
+    typed.edit_folder("/srv/work".into());
+    assert!(
+        !typed.folder_installation_moved(&[host_one("b")]),
+        "the folder typed"
+    );
+    let mut checkout = draft.clone();
+    checkout.choose_destination(DestinationKind::Checkout);
+    assert!(
+        !checkout.folder_installation_moved(&[host_one("b")]),
+        "a managed checkout"
+    );
+}
+
+/// New's default decided for installation `a` is decided again once the row names `b`, while the folder is still that
+/// untouched default, even after the same host was chosen again; a folder the user typed meanwhile is kept and not
+/// re-decided. Why: the default came from the old
+/// installation's history and says nothing about the new one (old `folder_default_step`'s target change).
+#[test]
+fn a_default_from_a_retargeted_installation_is_decided_again() {
+    let mut draft = pending_new();
+    draft.settle_folder_default(Some("/srv/work".into()), Install::of(&host_one("a")));
+    assert!(
+        !draft.redecide_moved_default(&[host_one("a")]),
+        "same install"
+    );
+    assert!(
+        !draft.folder_installation_moved(&[host_one("b")]),
+        "a default is decided again, not refused"
+    );
+    let mut typed = draft.clone();
+    typed.edit_folder("/mine".into());
+    assert!(
+        !typed.redecide_moved_default(&[host_one("b")]),
+        "a typed folder stays"
+    );
+    // Choosing the same host again, or putting the folder aside behind a managed checkout and back, keeps an untouched
+    // default's installation, so a later retarget still decides it.
+    draft.choose_host(1, "~".into());
+    draft.choose_destination(DestinationKind::Checkout);
+    draft.choose_repository(farhelm_proto::GithubRepo {
+        owner: "acme".into(),
+        name: "bar".into(),
+    });
+    draft.choose_destination(DestinationKind::Folder);
+    assert!(draft.redecide_moved_default(&[host_one("b")]));
+    assert_eq!(draft.folder_default, FolderDefault::Pending);
+    assert!(draft.folder_default_waiting());
 }
