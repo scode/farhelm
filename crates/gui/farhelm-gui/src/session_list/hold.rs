@@ -27,6 +27,9 @@
 //!   shared manual order within the slots those pins already hold, so a Move made in this window (or anywhere) shows
 //!   without waiting. Any other pin change stays in place until the hold ends, and a pin made during the hold is never
 //!   admitted as an original one, however many replies come, so it offers no Move items until then ([`super::pins`]).
+//! - **A pin drag is activity.** While a pinned row is dragged by its grip, every move the drag captures counts as
+//!   the pointer moving over the rows, wherever it is, as the old list kept hearing the moves its grip captured; the
+//!   drop is a manual move like any other ([`super::pin_drag`]).
 //! - **A different list is no hold's business.** Changing the host, the status filter or the order asks for a
 //!   different list, so a hold taken for one list ends when the list on screen answers another ([`ListId`]), including
 //!   a hold taken while the new list's reply was still on its way.
@@ -227,8 +230,9 @@ impl SessionList {
 
     /// The pointer was active over the rows: note it, restart the 5 seconds of stillness, and take the hold with the
     /// rows on screen when none is on and the listing is available (a failed or missing read is nothing to hold).
-    /// Taking the hold changes nothing on screen, so nothing is redrawn.
-    fn pointer_activity(&mut self, cx: &mut Context<Self>) {
+    /// Taking the hold changes nothing on screen, so nothing is redrawn. A pin drag calls it for every move it captures
+    /// ([`super::pin_drag`]), since it stops those moves before the rows' own listeners see them.
+    pub(super) fn pointer_activity(&mut self, cx: &mut Context<Self>) {
         let list = cx.weak_entity();
         let deadline = ticker::after(STILLNESS, cx, move |cx| {
             let _ = list.update(cx, |list, cx| {

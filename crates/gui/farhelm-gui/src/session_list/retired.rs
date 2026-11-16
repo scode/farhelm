@@ -26,9 +26,12 @@
 //!   retired session's stored metadata unchanged, even on selection.
 //! - **The open session's view** mounts no terminal and no tab strip and opens no stream, its header draws Delete
 //!   alone, and a card in the terminal's place says why (`crate::session_pane::retired`).
+//! - **No pin drag.** A retired pin's row draws no grip and no drag of it starts (`super::pin_drag`), as the old app
+//!   disabled that grip. It stays a drop target for another pin's drag, as it was in the old app and as the helm takes
+//!   it as a neighbor.
 //!
-//! NOTE: Dragging pins and the marked bar's Stop and Delete are not here, since neither exists yet. The old app refused
-//! a retired row's pin drag and left retired sessions out of bulk Stop; whoever ports those reads [`is`].
+//! NOTE: The marked bar's Stop and Delete are not here, since they do not exist yet. The old app left retired sessions
+//! out of bulk Stop; whoever ports it reads [`is`].
 
 use farhelm_proto::ui_channel::SessionRow;
 

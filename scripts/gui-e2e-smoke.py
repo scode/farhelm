@@ -23,12 +23,13 @@ other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's r
 header's Replace with… and Clone; 70, the session list's Pin to top, Move up and Unpin; 71, a row's actions button
 opening its menu on Up; 72 and 73, the terminal: a reopened terminal's replay and live input, and a text size step
 reaching the program's terminal size; 74, a failed setup's warning on its host rail avatar; 75, a row's summary card on
-hover; 76, Details on a failed setup's attention row opening Hosts at the host). The behavior itself is specified and
-tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
-`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
-`shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
-session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match
-in drawing order, which is the header's.
+hover; 76, Details on a failed setup's attention row opening Hosts at the host; 78, dragging a pin by its grip). The
+behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`,
+`approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond
+the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
+session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in
+drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -87,6 +88,7 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -2404,6 +2406,53 @@ class Smoke(unittest.TestCase):
                 if not failing:
                     raise
                 print(f"gui-e2e-smoke: step 76 left {destination} behind: {error}", file=sys.stderr)
+
+    # ---- The session list's pin drag (78), on two sessions of its own -------------------------------------------
+
+    def test_78_dragging_a_pins_grip_moves_it_in_the_helms_order(self) -> None:
+        """A drop sends the same move the menu's Move up does (`PUT .../pin-order`), and the pin order is the helm's,
+        so only the real helm shows that a drag in the real window moves a pin; the in-process tests pin the lift, the
+        drop line, the request's body and every cancellation, which the bridge's one-gesture `drag` cannot hold
+        halfway. Specified, on two basic fake-agent sessions this step creates under titles of its own and pins through
+        the helm, the first above the second: with the pointer on the list's count, off the rows (so no order hold
+        that began before the pins keeps the second from being movable), the second's grip is drawn; dragging it onto
+        the first's pin glyph, in the upper half of the first's row, makes the helm list the second above the first;
+        and both are unpinned through the helm again, so later steps meet an unpinned list."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        stamp = uuid.uuid4().hex[:8]
+        titles = [f"Drag first {stamp}", f"Drag second {stamp}"]
+        ids = []
+        for title in titles:
+            body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+            body["title"] = title
+            ids.append(gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"])
+        for title in titles:
+            self.ok("wait", "--text", title)
+
+        def pin(key: str, pinned: bool) -> None:
+            path = f"/api/sessions/{urllib.parse.quote(key, safe='')}/pin"
+            gui_agent.helm_request(RUN, "PUT", path, {"pinned": pinned})
+
+        def positions() -> list[int | None]:
+            rows = {row["id"]: row for row in gui_agent.helm_request(RUN, "GET", "/api/sessions")["sessions"]}
+            return [rows[key]["pin_position"] if rows[key]["pinned"] else None for key in ids]
+
+        def above(upper: int, lower: int) -> bool:
+            at = positions()
+            return None not in at and at[upper] < at[lower]
+
+        try:
+            for key in ids:
+                pin(key, True)
+            eventually(lambda: above(0, 1), "the helm listing both pinned, the first above the second")
+            self.ok("hover", "id:session-count")
+            self.ok("wait", f"id:session-pin-grip-{ids[1]}")
+            self.ok("drag", f"id:session-pin-grip-{ids[1]}", f"id:session-row-{ids[0]}-pin")
+            eventually(lambda: above(1, 0), "the helm listing the dragged second pin above the first")
+        finally:
+            for key in ids:
+                pin(key, False)
+        eventually(lambda: positions() == [None, None], "the helm listing both unpinned again")
 
 
 def seed_stamped_basic(title: str, origin: str) -> None:
