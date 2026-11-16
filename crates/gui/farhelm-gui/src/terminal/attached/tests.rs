@@ -5422,10 +5422,14 @@ fn a_new_attachment_hears_the_focus_state_again(cx: &mut TestAppContext) {
     let turns = h.read(|owner, _| owner.turns);
     h.fake().drop_link();
     let asked = h.fake().attach();
-    for message in screen(asked.cols, asked.rows, "again", serde_json::Value::Null) {
+    // The replay's own state message says the program is asking, as a long-running program's replay does. A separate
+    // message after it would be one event too many for one turn: the stream shows each reconnect wait and the attempt
+    // after it, so the drop, the attempt, the attachment and this replay already take a whole batch.
+    let mut replay = screen(asked.cols, asked.rows, "again", serde_json::Value::Null);
+    replay[1] = focus_mode(true);
+    for message in replay {
         h.fake().output(message);
     }
-    h.fake().output(focus_mode(true));
     h.fake().replay_complete();
     settle(h.cx);
     assert!(

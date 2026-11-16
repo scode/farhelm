@@ -15,7 +15,26 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 };
 use tokio_tungstenite::tungstenite::http::StatusCode;
 
+mod ladder;
 mod parity;
+
+/// A terminal ladder of `retries` waits, then probes every `probe`, all in milliseconds.
+fn ladder(retries: &[u64], probe: u64) -> TerminalLadder {
+    TerminalLadder {
+        retries: retries.iter().copied().map(Duration::from_millis).collect(),
+        probe_every: Duration::from_millis(probe),
+    }
+}
+
+/// The `Reconnecting` event for `attempt` on a ladder of `of` retries, waiting `ms` milliseconds (`None`: in flight).
+fn reconnecting(attempt: u32, of: u32, phase: ReconnectPhase, ms: Option<u64>) -> TerminalEvent {
+    TerminalEvent::State(StreamState::Reconnecting(ReconnectStatus {
+        attempt,
+        of,
+        phase,
+        next_attempt_in: ms.map(Duration::from_millis),
+    }))
+}
 
 /// One accepted socket and the path-and-query it was opened with.
 struct Accepted {
@@ -136,6 +155,7 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
             lease: AttachmentLease::new(),
             cols: 80,
             rows: 24,
+            take_control: true,
         };
         let lease = attach.lease.0.clone();
         let (handle, mut events) = open_terminal(
@@ -191,12 +211,16 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
             serde_json::json!({"type": "resize", "cols": 100, "rows": 30})
         );
 
-        // A drop reconnects through the non-displacing route, at the new size (after the backoff: this attachment never
-        // answered a ping).
+        // A drop reconnects through the non-displacing route, at the new size (after the ladder's first wait: this
+        // attachment never answered a ping).
         drop(first);
         assert_eq!(
             next_event(&mut events).await,
-            TerminalEvent::State(StreamState::Reconnecting)
+            reconnecting(1, 6, ReconnectPhase::Retrying, Some(500))
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 6, ReconnectPhase::Retrying, None)
         );
         let mut second = accepted.recv().await.unwrap();
         assert_eq!(
@@ -332,6 +356,7 @@ fn attach(session: &str) -> TerminalAttach {
         lease: AttachmentLease::new(),
         cols: 80,
         rows: 24,
+        take_control: true,
     }
 }
 
@@ -366,13 +391,13 @@ async fn until_event(events: &mut TerminalEvents, wanted: TerminalEvent) {
 /// Which detach codes stop the stream is the whole reconnect policy (SPEC.md, "Terminal experience"): a takeover, a
 /// closed tab or a stall waits for the user, because reattaching would fight another client, chase a tab that is gone,
 /// or walk back into the wedge that stalled it. `replaced` and `other` carry trouble that keeps recovering (a lost
-/// supervisor, an unreachable host), so they back off and reattach without displacing anyone. Pinned per code, on
-/// the wire.
+/// supervisor, an unreachable host), so they wait their rung and reattach without displacing anyone. Pinned per
+/// code, on the wire.
 #[tokio::test]
 async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let quick = ChannelConfig {
-            reconnect_initial: Duration::from_millis(10),
+            terminal_ladder: ladder(&[10], 10),
             ..ChannelConfig::default()
         };
         for (code, stops) in [
@@ -387,18 +412,14 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
             first.socket.send(Message::text(notice)).await.unwrap();
             let expected = if stops {
                 let code = serde_json::from_value(serde_json::json!(code)).unwrap();
-                StreamState::Detached {
+                TerminalEvent::State(StreamState::Detached {
                     code: Some(code),
                     reason: "why".into(),
-                }
+                })
             } else {
-                StreamState::Reconnecting
+                reconnecting(1, 1, ReconnectPhase::Retrying, Some(10))
             };
-            assert_eq!(
-                next_event(&mut events).await,
-                TerminalEvent::State(expected),
-                "{code}"
-            );
+            assert_eq!(next_event(&mut events).await, expected, "{code}");
             if !stops {
                 let again = accepted.recv().await.unwrap();
                 assert!(
@@ -413,13 +434,13 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
     .expect("the stream test finished in time");
 }
 
-/// The "Reconnect now" button must skip the backoff (the wait here is an hour, so only the request can explain the
-/// prompt attach) and must still use the non-displacing route.
+/// The "Reconnect now" button must skip the wait (an hour here, so only the request can explain the prompt attach),
+/// show the attempt starting with its number kept, and still use the non-displacing route.
 #[tokio::test]
-async fn reconnect_now_skips_the_backoff_without_displacing() {
+async fn reconnect_now_skips_the_wait_without_displacing() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let slow = ChannelConfig {
-            reconnect_initial: Duration::from_secs(3600),
+            terminal_ladder: ladder(&[3_600_000], 3_600_000),
             ..ChannelConfig::default()
         };
         let (handle, mut events, mut accepted, mut first) = attached(slow).await;
@@ -427,9 +448,13 @@ async fn reconnect_now_skips_the_backoff_without_displacing() {
         first.socket.send(Message::text(notice)).await.unwrap();
         assert_eq!(
             next_event(&mut events).await,
-            TerminalEvent::State(StreamState::Reconnecting)
+            reconnecting(1, 1, ReconnectPhase::Retrying, Some(3_600_000))
         );
         handle.reconnect_now();
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 1, ReconnectPhase::Retrying, None)
+        );
         let again = accepted.recv().await.unwrap();
         assert!(
             again.uri.starts_with("/api/sessions/s1/term/unowned?"),
@@ -459,7 +484,7 @@ async fn an_unanswered_ping_reconnects_the_stream() {
         assert_eq!(ping.as_str(), r#"{"type":"ping"}"#);
         assert_eq!(
             next_event(&mut events).await,
-            TerminalEvent::State(StreamState::Reconnecting)
+            reconnecting(1, 6, ReconnectPhase::Retrying, Some(500))
         );
         let again = accepted.recv().await.unwrap();
         assert!(again.uri.contains("/term/unowned?"), "{}", again.uri);
@@ -535,8 +560,7 @@ async fn input_before_the_attachment_is_live_is_dropped() {
 async fn input_reaches_only_the_attachment_it_was_stamped_for() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let (handle, mut events, mut accepted, first) = attached(ChannelConfig {
-            reconnect_initial: Duration::from_millis(10),
-            reconnect_max: Duration::from_millis(10),
+            terminal_ladder: ladder(&[10], 10),
             ..ChannelConfig::default()
         })
         .await;
@@ -666,21 +690,25 @@ async fn a_caller_that_falls_behind_slows_the_stream_instead_of_breaking_it() {
 
 /// An attachment that drops before ever answering a ping has not shown the link works; reconnecting at once would let
 /// a path that attaches, replays and drops loop on full replays. So only an answered ping earns the immediate
-/// reconnect. The backoff here is an hour, so a prompt attach can only come from that rule (or from reconnect-now).
+/// reconnect, which the stream shows as the first attempt in flight with no wait before it. Every wait here is an
+/// hour, so a prompt attach can only come from that rule (or from reconnect-now).
 #[tokio::test]
 async fn only_an_attachment_that_answered_a_ping_reconnects_at_once() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let config = ChannelConfig {
             ping_interval: Duration::from_millis(20),
-            reconnect_initial: Duration::from_secs(3600),
-            reconnect_max: Duration::from_secs(3600),
+            terminal_ladder: ladder(&[3_600_000], 3_600_000),
             ..ChannelConfig::default()
         };
         let (handle, mut events, mut accepted, first) = attached(config).await;
 
-        // Attached, never answered a ping: the drop waits the backoff.
+        // Attached, never answered a ping: the drop waits its rung.
         drop(first);
-        until_event(&mut events, TerminalEvent::State(StreamState::Reconnecting)).await;
+        until_event(
+            &mut events,
+            reconnecting(1, 1, ReconnectPhase::Retrying, Some(3_600_000)),
+        )
+        .await;
         // sleep-ok: an absence window; the behavior it rules out reconnects within milliseconds.
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(
@@ -688,7 +716,7 @@ async fn only_an_attachment_that_answered_a_ping_reconnects_at_once() {
             "reconnected at once without an answered ping"
         );
 
-        // The stream is alive and waiting in its backoff: reconnect-now ends the wait.
+        // The stream is alive and waiting for its next attempt: reconnect-now ends the wait.
         handle.reconnect_now();
         let mut second = accepted.recv().await.unwrap();
         replay(&mut second.socket).await;
@@ -706,8 +734,12 @@ async fn only_an_attachment_that_answered_a_ping_reconnects_at_once() {
         };
         assert_eq!(ping.as_str(), r#"{"type":"ping"}"#);
 
-        // The link proved itself, so losing it reconnects at once despite the hour-long backoff.
+        // The link proved itself, so losing it reconnects at once despite the hour-long wait.
         drop(second);
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 1, ReconnectPhase::Retrying, None)
+        );
         let third = accepted.recv().await.unwrap();
         assert!(third.uri.contains("/term/unowned?"), "{}", third.uri);
     })
@@ -716,32 +748,29 @@ async fn only_an_attachment_that_answered_a_ping_reconnects_at_once() {
 }
 
 /// A terminal that recovered must retry promptly the next time (SPEC.md: retained terminals retry promptly), so a
-/// successful attachment resets the backoff. Without the reset, each `other` detach doubles the wait from the initial
-/// 100 ms: the sixth would wait 3.2 s. With it every wait is the initial one.
+/// successful attachment starts the ladder over. The ladder's second rung is an hour, so without the reset the second
+/// `other` detach would show attempt 2 and wait it; with it every outage starts at attempt 1 and its 100 ms.
 #[tokio::test]
-async fn a_successful_attachment_resets_the_backoff() {
+async fn a_successful_attachment_starts_the_ladder_over() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let config = ChannelConfig {
-            reconnect_initial: Duration::from_millis(100),
-            reconnect_max: Duration::from_secs(3600),
+            terminal_ladder: ladder(&[100, 3_600_000], 3_600_000),
             ..ChannelConfig::default()
         };
         let (_handle, mut events, mut accepted, mut current) = attached(config).await;
         let notice = r#"{"type":"detached","reason":"host unreachable","code":"other"}"#;
-        let mut waits = Vec::new();
-        for _ in 0..6 {
+        for outage in 0..3 {
             current.socket.send(Message::text(notice)).await.unwrap();
-            let started = Instant::now();
+            assert_eq!(
+                next_event(&mut events).await,
+                reconnecting(1, 2, ReconnectPhase::Retrying, Some(100)),
+                "outage {outage}"
+            );
             let mut next = accepted.recv().await.unwrap();
-            waits.push(started.elapsed());
             replay(&mut next.socket).await;
             until_event(&mut events, TerminalEvent::ReplayComplete).await;
             current = next;
         }
-        assert!(
-            waits[5] < Duration::from_millis(1600),
-            "the backoff kept growing across successful attachments: {waits:?}"
-        );
     })
     .await
     .expect("the stream test finished in time");
@@ -770,8 +799,8 @@ async fn events_read_before_a_drop_reach_a_caller_that_was_behind_and_the_stream
         let config = ChannelConfig {
             ping_interval: Duration::from_secs(3600),
             watchdog: Duration::from_millis(300),
-            reconnect_initial: Duration::from_millis(10),
-            reconnect_max: Duration::from_millis(10),
+            terminal_ladder: ladder(&[10], 10),
+            ..ChannelConfig::default()
         };
         let (handle, mut events, mut accepted, mut first) = attached(config).await;
         // Numbered, so the events show their order and that none is missing or repeated.
@@ -826,7 +855,7 @@ async fn events_read_before_a_drop_reach_a_caller_that_was_behind_and_the_stream
                 "the premise: the socket ends because the typing stalls its write; it did not, so this host's \
                  socket buffers took all the typing",
             );
-        assert_eq!(state, TerminalEvent::State(StreamState::Reconnecting));
+        assert_eq!(state, reconnecting(1, 1, ReconnectPhase::Retrying, Some(10)));
         let again = accepted.recv().await.unwrap();
         assert!(again.uri.contains("/term/unowned?"), "{}", again.uri);
         drop(first);

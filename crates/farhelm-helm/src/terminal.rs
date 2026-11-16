@@ -433,10 +433,12 @@ pub(crate) async fn term_ws(
 ///
 /// A route of its own, served only by a helm that understands the contract
 /// — see `build_router` for why the request has to be unaskable rather
-/// than merely ignorable. Only the client's reconnect uses it, automatic or
-/// hurried by the client's reconnect-now request; opening a terminal and
-/// Take control both carry the intent to take it and go to the ordinary
-/// path.
+/// than merely ignorable. The client's reconnect uses it, automatic or
+/// hurried by the client's reconnect-now request, and so does a first
+/// attach opened without the intent to take the terminal (a tab a
+/// recovering view opens while it may have missed a takeover). Opening a
+/// terminal the user asked for and Take control both carry the intent to
+/// take it and go to the ordinary path.
 pub(crate) async fn term_ws_if_unowned(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
