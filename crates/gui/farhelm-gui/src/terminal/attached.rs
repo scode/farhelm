@@ -3233,10 +3233,9 @@ struct ShownNotice {
     generation: u64,
     /// The user's input as of the release, which the layer's open is checked against.
     mark: Mark,
-    /// Its layer once opened. `None` while the open waits for the frame that draws its anchor.
+    /// Its layer once opened. `None` while the open waits for the frame that draws its anchor; each frame until then
+    /// asks for it again, and `open_drag_notice` ignores every ask after the one that opened or dropped it.
     layer: Option<LayerId>,
-    /// Whether that open has been asked for.
-    requested: bool,
     /// Puts it away [`super::drag_notice::SHOWN_FOR`] after it was raised. It lives in the notice, so a notice put
     /// away or replaced takes its deadline with it: one that fires is always the notice shown.
     _expiry: ticker::Deadline,
@@ -3305,7 +3304,6 @@ impl AttachedTerminal {
             generation,
             mark,
             layer: None,
-            requested: false,
             _expiry: expiry,
         });
         cx.notify();
@@ -3406,8 +3404,7 @@ impl AttachedTerminal {
             .h(px(0.))
             .child(anchor.track())
             .into_any_element();
-        if !shown.requested {
-            shown.requested = true;
+        if shown.layer.is_none() {
             let generation = shown.generation;
             let owner = cx.weak_entity();
             window.defer(cx, move |window, cx| {
@@ -3424,8 +3421,8 @@ impl AttachedTerminal {
     /// while this terminal's link destination display is open, and not once the user has moved on since the release
     /// (the layer manager's rule): each way the notice is dropped rather than left pending.
     ///
-    /// The display rule is a deviation from the old app, which drew the display above the notice, and was decided by
-    /// the migration's orchestrator on 2026-11-16. Here both are popovers in stack order, so a notice opening after the
+    /// The display rule is a deviation from the old app, which drew the display above the notice, chosen in the
+    /// notice's code review on 2026-11-16. Here both are popovers in stack order, so a notice opening after the
     /// display is drawn over it; letting the pointer through, it would leave a click on the link opening a target the
     /// notice hides, and SPEC.md admits that click only while the display is not covered. The cover check is to be a
     /// hit test, which a popover that registers no hit area is invisible to, so keeping the notice off the display is

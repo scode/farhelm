@@ -164,13 +164,13 @@ impl Render for DisclosureView {
         } else {
             palette.fg_bright
         };
+        // The claimed text on its own line under its label, as a block: in a wrapping flex row it kept its whole
+        // width, so a long one ran past the panel and the window's edge instead of wrapping inside the panel.
         let claimed = self.claimed.as_ref().map(|claimed| {
-            div()
-                .flex()
-                .flex_wrap()
-                .gap(px(4.))
-                .child("Text says:")
-                .child(host_text::element(claimed))
+            div().child("Text says:").child(
+                host_text::element(claimed)
+                    .debug_selector(|| "terminal-link-disclosure-claimed".into()),
+            )
         });
         panel
             .when(mismatch, |panel| {
