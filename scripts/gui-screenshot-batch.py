@@ -87,12 +87,18 @@ MIN_MONITOR = (1600, 1200)
 LINUX_FRAME_MARGIN = 20
 LINUX_FRAME_BORDER = 1
 LINUX_FRAME = LINUX_FRAME_MARGIN + LINUX_FRAME_BORDER
-# The largest channel value a margin pixel may have and still count as black. The margin is not always pure black:
-# dialogs are sized and centered on the whole window surface, Kit's frame and the title bar included, so a dialog at
-# its height cap (New with Save as template open, at 1600x1000) reaches the surface's edge and casts its light
-# shadow into the margin, at most 6 on any channel in the captures that showed it, which an exact check left
-# uncropped. 8 keeps a little headroom. Kit's border must stay above it: a border this dark would fail the check
-# loudly (as a 21-pixel margin) rather than crop into the app.
+# The largest channel value a margin pixel may have and still count as black. It was set when the margin was not
+# always pure black: dialogs were then sized and centered on the whole window surface, Kit's frame and the title bar
+# included, so a dialog at its height cap (New with Save as template open, at 1600x1000) ended 24 pixels from the
+# surface's edge, 3 pixels inside the 21-pixel frame, and cast its light shadow into the margin, at most 6 on any
+# channel in the captures that showed it, which an exact check left uncropped. Since 2026-11-16 dialogs, hover help and
+# cards are sized within the Linux window's content area (`desktop::linux_title_bar::content_area` in the GUI crate),
+# inside Kit's frame, so that dialog at its cap keeps 24 pixels of that area above and below it. Its shadow (10 pixels
+# down, 24 blurred) can still reach past that gap; whether it still tints the margin has not been measured, so the
+# tolerance stays.
+#
+# Kit's border must stay above the tolerance: a border this dark would fail the check loudly (as a 21-pixel margin)
+# rather than crop into the app.
 LINUX_FRAME_BLACK = 8
 
 # The title bar the Linux window draws for itself under Mutter, which draws none (`linux_title_bar::HEIGHT` in the GUI
