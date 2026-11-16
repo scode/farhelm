@@ -1,6 +1,7 @@
 //! Tests of a session row's actions menu, its Rename and its Delete: the menu's placement, keys, focus and one
-//! highlight, Rename opening the editor for its row, the question and the precondition each request carries, what a
-//! pending or refused Delete shows, the selection while a Delete runs, and the Delete shortcut.
+//! highlight, how an open menu follows its button through what the helm pushes, Rename opening the editor for its row,
+//! the question and the precondition each request carries, what a pending or refused Delete shows, the selection while
+//! a Delete runs, and the Delete shortcut.
 //!
 //! Everything runs in the real main view over the helm client's fake, as the list's own tests do, and reads what the
 //! window sent from the fake and what it drew from GPUI's driver record of the frame. Controls are found by their ids:
@@ -11,16 +12,21 @@
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{
-    Collection, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
+    Availability, Collection, CollectionChanges, CollectionState, HostView, KeyedEntry,
+    PREFERENCES_KEY, Preferences,
 };
 use gpui::{
     Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point,
-    TestAppContext, VisualTestContext, px,
+    TestAppContext, VisualTestContext, px, size,
 };
 use serde_json::{Value, json};
 
-use super::tests::{Fixture, change, listing_meta, open_main, painted, selected, sent, session};
+use super::pins_tests::away;
+use super::tests::{
+    Fixture, change, listing_meta, open_main, painted, row_order, selected, sent, session,
+};
 use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
+use crate::hosts::tests::{connected, host, hosts};
 use crate::operations::OpKey;
 use crate::test_support::{focused_id, frame, meta};
 use crate::{layers, session, test_support};
@@ -244,6 +250,143 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
         cx.update(|window, cx| window.focused(cx).is_some()),
         "focus recovered rather than being left on b's button, which went with its row"
     );
+}
+
+// ---- The menu through changes underneath ---------------------------------------------------------------------------
+
+/// What one step of [`an_open_menu_follows_its_button_through_what_the_helm_pushes`] pushes while b's menu is open.
+enum Push {
+    /// The listing in this order, metadata only.
+    Order(&'static [&'static str]),
+    /// A complete listing without d, the row below b.
+    WithoutD,
+    /// The host registry in the other order. Neither host needs attention, so nothing above the rows changes.
+    HostsReversed,
+    /// The listing as one the helm could not read: the rows stay, under a line that says so.
+    Failed,
+    /// The listing read again.
+    Read,
+}
+
+/// The host registry's ids in the order the store holds them.
+fn registry(cx: &mut VisualTestContext) -> Vec<i64> {
+    cx.update(|_, cx| {
+        let Some(store) = session::current_store(cx) else {
+            return Vec::new();
+        };
+        let hosts = store.read(cx).collections().ordered::<HostView>();
+        hosts.iter().map(|host| host.id).collect()
+    })
+}
+
+/// SPEC.md, "Things changing underneath": "When the session list reorders, a focused row, or its open menu, moves with
+/// its session." The old app closed an open row menu whenever something moved its button (`popover-movement.spec.ts`,
+/// `popover-header-movement.spec.ts` and `popover-host-movement.spec.ts` at reference commit `24bc0580`, superseded by
+/// that rule). `delete_notice_tests.rs` pins content growing above the rows; this pins a reorder, which puts the row
+/// at another index of the virtualized list, another row's removal, a host registry push, and a failed listing, whose
+/// rows stay drawn where the old app replaced them. The menu is opened by its keys with the pointer off the rows: a
+/// pointer-opened menu keeps the order hold, and a reorder then moves nothing (`pins_tests.rs`
+/// `an_open_row_menu_keeps_the_hold`). Specified: with a, b, c and d listed (a open) and b's menu opened by Down on
+/// its button, each push leaves the menu open with focus on Rename and moves it by as much as b's button: a reorder to
+/// a, c, b, d moves it down; a and c swapping above b moves nothing; the order back to a, b, c, d moves it up; a
+/// complete listing without d moves nothing; the host registry reordered moves nothing; a failed listing draws
+/// "Failed to load sessions: …" above the rows and moves it down; the next listing read takes the line away and moves
+/// it back up.
+#[gpui::test]
+fn an_open_menu_follows_its_button_through_what_the_helm_pushes(cx: &mut TestAppContext) {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
+    let rows = ["a", "b", "c", "d"].map(|key| (session(key), 0));
+    let mut state = snapshot(&rows, false);
+    state.push(hosts(&[
+        host(2, "ssh", connected()),
+        host(3, "ssh", connected()),
+    ]));
+    let (mut fake, cx) = open_main(cx, state);
+    // Tall enough that the menu never meets the window's bottom edge, which would hold it there rather than beside b.
+    cx.simulate_resize(size(px(900.), px(1100.)));
+    test_support::settle(cx);
+    // The click and Escape leave focus on b's button; moving away then lets go of the hold the click took.
+    test_support::click(cx, "session-menu-b");
+    test_support::keys(cx, "escape");
+    away(cx);
+    test_support::keys(cx, "down");
+    assert!(
+        label_of(cx, "session-menu-summary-b").is_some(),
+        "the premise: b's menu is open"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+
+    let mut order: &[&str] = &["a", "b", "c", "d"];
+    for (step, push, way) in [
+        ("b moves down", Push::Order(&["a", "c", "b", "d"]), Greater),
+        ("a and c swap", Push::Order(&["c", "a", "b", "d"]), Equal),
+        ("b moves up", Push::Order(&["a", "b", "c", "d"]), Less),
+        ("d, below b, goes", Push::WithoutD, Equal),
+        ("the host registry reorders", Push::HostsReversed, Equal),
+        ("the listing fails", Push::Failed, Greater),
+        ("the listing is read again", Push::Read, Less),
+    ] {
+        let button = test_support::bounds(cx, "session-menu-b").top();
+        let menu = test_support::bounds(cx, "session-menu").top();
+        let three = listing_meta(&["a", "b", "c"], 3, false);
+        match push {
+            Push::Order(next) => {
+                order = next;
+                fake.push(change(listing_meta(next, 4, false), &[], &[]));
+            }
+            Push::WithoutD => {
+                order = &["a", "b", "c"];
+                fake.push(change(three, &[], &["d"]));
+            }
+            Push::HostsReversed => {
+                let reversed = hosts(&[host(3, "ssh", connected()), host(2, "ssh", connected())]);
+                fake.push(CollectionChanges {
+                    collection: Collection::Hosts,
+                    meta: reversed.meta,
+                    upsert: reversed.entries,
+                    remove: Vec::new(),
+                });
+            }
+            Push::Failed => {
+                let mut failed = three;
+                failed.availability = Availability::Unavailable {
+                    error: "down".into(),
+                };
+                fake.push(change(failed, &[], &[]));
+            }
+            Push::Read => fake.push(change(three, &[], &[])),
+        }
+        test_support::settle(cx);
+        assert_eq!(row_order(&frame(cx)), order, "{step}: the premise: no hold");
+        assert_eq!(
+            label_of(cx, "session-list-error").is_some(),
+            matches!(push, Push::Failed),
+            "{step}: the failure line shows over the failed listing alone"
+        );
+        if matches!(push, Push::HostsReversed) {
+            assert_eq!(registry(cx), [3, 2], "{step}: the premise");
+        }
+
+        assert!(
+            label_of(cx, "session-menu-summary-b").is_some(),
+            "{step}: b's menu is still open"
+        );
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("session-menu-rename"),
+            "{step}"
+        );
+        let moved = test_support::bounds(cx, "session-menu-b").top() - button;
+        let followed = test_support::bounds(cx, "session-menu").top() - menu;
+        assert!(
+            (followed - moved).abs() < px(1.),
+            "{step}: the menu moved {followed:?} with its button's {moved:?}"
+        );
+        // Rounded to a whole pixel, so layout rounding does not read as a move.
+        let went = moved.round().partial_cmp(&px(0.));
+        assert_eq!(went, Some(way), "{step}: b's button moved {moved:?}");
+    }
 }
 
 // ---- The menu's keys and its one highlight --------------------------------------------------------------------------
