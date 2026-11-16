@@ -2,11 +2,29 @@
 
 One file per area maps the old browser UI's Playwright specs (deleted with that UI; reference commit `24bc0580`) and the
 SPEC.md behavior they covered to their replacements in the GPUI app. Each area's port updates its own file; the
-orchestrator owns this index after M1. Every one of the 145 spec files at the reference commit is assigned to exactly
-one area, except where an area's entry names only some of a spec's cases: the row-action cases of
-`tests/terminal.spec.ts` are also listed under Sidebar and session view, `tests/host-updates.spec.ts` is split between
-Settings and hosts and Sidebar and session view, and `tests/host-picker.spec.ts` between Launcher and Sidebar and
-session view, each file saying which cases are its.
+orchestrator owns this index after M1. The reference commit has 145 Playwright spec files, each assigned to an area (a
+few split between two, below). The files hold `###` entries for 144 of them: `tests/claude-trust.spec.ts`, whose entry
+belongs in the launcher's file, is still missing. The files also hold entries for tests that were not Playwright specs:
+three of the old app's JavaScript unit-test files (`terminal-files.test.js` and `clipboard-name.test.js` in the terminal
+file, `crates/farhelm-ui/js-tests/click-detail.test.js` in the desktop file), and the old native app's tests and smoke
+legs (desktop file).
+
+A spec can have more than one entry, for two reasons, and each entry says which cases are its:
+
+- Its cases are split between two areas: `tests/host-updates.spec.ts` (Settings and hosts, Sidebar and session view),
+  `tests/host-picker.spec.ts` (Launcher, Sidebar and session view) and `tests/podman-environments.spec.ts` (Launcher,
+  Settings and hosts).
+- One area records some cases of a spec whose main entry sits elsewhere. It does that in its main list (Sidebar and
+  session view's entries for the row-action and stale cases of `tests/terminal.spec.ts`, the stale cases of
+  `tests/terminal-multihost.spec.ts` and the session-row cases of `tests/tooltip.spec.ts`, and a separate entry for the
+  row-content cases of its own `tests/sidebar.spec.ts`), in a section for other areas' specs ("Template cases of specs
+  in other areas' files", "Approval cases in other areas' specs", which gives each case its own entry, and "Launcher
+  cases of specs listed in other areas' files"), or in a later `## <spec>, partly` section that continues an entry
+  (Settings and hosts, Other dialogs).
+
+`tests/rail-notices.spec.ts` is the exception: Other dialogs and Sidebar and session view both list it whole.
+
+The area files:
 
 - [Terminal](terminal.md)
 - [Sidebar and session view](sidebar-and-session-view.md)
