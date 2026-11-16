@@ -974,7 +974,7 @@ fn a_save_in_flight_goes_on_after_the_dialog_closes(cx: &mut TestAppContext) {
 // ---- Following the helm ---------------------------------------------------------------------------------------------
 
 /// SPEC.md: a change to these preferences, "by an agent or the command line included, reaches the open window as it
-/// happens", and the help now promises other clients pick a choice up right away; and "Each switch explains the current
+/// happens", and the help now promises such a change shows right away; and "Each switch explains the current
 /// behavior". The dialog draws the row from the store rather than a copy, and a copy would only be caught by a push that
 /// comes with no save of the dialog's own, since a settling save redraws the dialog anyway. Specified: with Settings open
 /// at Hosts and both host switches off, their help says Farhelm asks; the helm pushing a row that skips both
@@ -3501,7 +3501,7 @@ fn checked_host(id: i64, refreshing: bool, result: Option<(u64, Option<&str>)>) 
 }
 
 /// The app with the hosts collection holding `listed`, as [`open_rail`] opens it otherwise.
-fn open_rail_with_hosts<'a>(
+pub(super) fn open_rail_with_hosts<'a>(
     cx: &'a mut TestAppContext,
     listed: &[HostView],
 ) -> (FakeHelm, &'a mut VisualTestContext, FocusHandle) {
@@ -3513,7 +3513,7 @@ fn open_rail_with_hosts<'a>(
 }
 
 /// The helm pushes the hosts collection as holding `listed`, as it does when a check starts or ends.
-fn push_hosts(helm: &mut FakeHelm, listed: &[HostView], cx: &mut VisualTestContext) {
+pub(super) fn push_hosts(helm: &mut FakeHelm, listed: &[HostView], cx: &mut VisualTestContext) {
     let state = crate::hosts::tests::hosts(listed);
     helm.push(CollectionChanges {
         collection: state.collection,

@@ -93,6 +93,9 @@ mod recipes;
 mod refused;
 mod tensorlake;
 mod tensorlake_key;
+#[cfg(test)]
+mod tensorlake_sandbox_tests;
+mod tensorlake_sandboxes;
 mod tensorlake_ssh_key;
 #[cfg(test)]
 mod tensorlake_tests;
@@ -1047,8 +1050,8 @@ impl SettingsDialog {
                     .child("Sounds"),
             )
             .child(choices::help(
-                "These choices apply to this helm; other open clients pick them up right away. The session open in \
-                 an active window stays quiet.",
+                "These choices apply to this helm; changes from the command line or an agent show here right away. \
+                 The session open in an active window stays quiet.",
                 cx,
             ))
             .child(self.switch(Choice::SoundWaiting, preferences, cx))
@@ -1090,7 +1093,8 @@ impl SettingsDialog {
             Section::Hosts => vec![
                 self.switch(Choice::AutoUpdateRemoteHosts, preferences, cx),
                 choices::help(
-                    "The host choices apply to every host on this helm. Other open clients pick them up right away.",
+                    "The host choices apply to every host on this helm. Changes from the command line or an agent show \
+                     here right away.",
                     cx,
                 )
                 .into_any_element(),

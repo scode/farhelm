@@ -97,6 +97,15 @@ impl HostKind {
         }
     }
 
+    /// Whether the host is one of this helm's Tensorlake sandboxes, so a host of this kind coming or going changes which
+    /// sandboxes the helm owns, and Settings → Tensorlake reads its list of Sandboxes not on this helm again.
+    pub(crate) fn is_a_tensorlake_sandbox(self) -> bool {
+        match self {
+            HostKind::Tensorlake => true,
+            HostKind::Local | HostKind::Ssh | HostKind::Podman | HostKind::Unrecognized => false,
+        }
+    }
+
     /// Whether the host can hold containers, so Settings → Containers lists it: the helm's own machine and an SSH host,
     /// the GUI's side of the helm's `can_host_environments`. A sandbox or a container cannot, and a kind this build
     /// does not know is not assumed to.
