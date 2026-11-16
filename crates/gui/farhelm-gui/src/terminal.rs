@@ -19,6 +19,7 @@
 //! replay, and what the pane says while the stream is not live.
 
 pub mod attached;
+mod attachments;
 mod disclosure;
 pub(crate) mod files;
 pub(crate) mod set;

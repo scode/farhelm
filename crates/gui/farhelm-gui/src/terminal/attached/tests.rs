@@ -5651,18 +5651,19 @@ fn input_made_for_an_earlier_attachment_is_dropped(cx: &mut TestAppContext) {
     );
 }
 
-/// Only plain text is pasted, and a clipboard read that reports a file or an image pastes nothing at all, even with
-/// text beside it: SPEC.md's "Attachments" ranks a paste's flavors files first, then images, then text, and a Finder
-/// copy on macOS carries the file's path as text too, which would otherwise be typed into the program. Turning those
-/// pastes into uploads is the attachment work's. (The vendored Wayland read never reports a file, so on Linux a copied
-/// file's text still pastes; that is the read's limit, not this rule's.)
+/// Only plain text is typed, and a clipboard read that reports a file or an image types nothing at all, even with text
+/// beside it: SPEC.md's "Attachments" ranks a paste's flavors files first, then images, then text, and a Finder copy on
+/// macOS carries the file's path as text too, which would otherwise be typed into the program. Such a paste attaches
+/// the file instead (here, with no transfers served, it fails visibly); `terminal/attachments/tests.rs` pins the
+/// attaching. (The vendored Wayland read never reports a file, so on Linux a copied file's text still pastes; that is
+/// the read's limit, not this rule's.)
 #[gpui::test]
 fn only_the_clipboards_text_is_pasted(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("screen");
     let owner = h.owner.clone();
     h.choose(&owner);
-    let file = ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+    let file = gpui::ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
         vec![std::path::PathBuf::from("/tmp/copied.png")].into(),
     ));
     h.cx.write_to_clipboard(ClipboardItem {
@@ -5675,7 +5676,7 @@ fn only_the_clipboards_text_is_pasted(cx: &mut TestAppContext) {
     h.cx.write_to_clipboard(ClipboardItem {
         entries: vec![
             file,
-            ClipboardEntry::String(gpui::ClipboardString::new("text".into())),
+            gpui::ClipboardEntry::String(gpui::ClipboardString::new("text".into())),
         ],
     });
     h.cx.dispatch_action(actions::Paste);
