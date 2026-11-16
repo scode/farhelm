@@ -3,6 +3,9 @@
 //! retry from reopening an ssh channel during an explicit lifecycle request.
 //! The held display state records intent until Tensorlake confirms the target;
 //! after Resume releases the hold, ordinary connection progress takes over.
+//!
+//! The two routes answer within the host reply bound (see [`bounded`]), while
+//! the change itself runs to its end on a task of its own.
 
 use super::api::{ApiKey, SandboxStatus, TensorlakeError};
 use crate::{AppState, manager::HostState, store::HostId};
@@ -13,22 +16,71 @@ use axum::{
 use farhelm_proto::{ErrorKind, tensorlake::LifecycleDirection};
 use std::{sync::Arc, time::Duration};
 
-/// Suspend only after every connection owned by this helm has been released.
-/// Request cancellation cannot interrupt the owned task and strand its hold.
+/// `POST /api/hosts/{id}/suspend`: suspend an environment host, only after
+/// every connection owned by this helm has been released. A 200 means the
+/// provider confirmed the suspension; past the host reply bound the reply is
+/// [`still_changing`]'s 504 instead (see [`bounded`]).
 pub(crate) async fn suspend(
     State(state): State<Arc<AppState>>,
     Path(host): Path<HostId>,
 ) -> Response {
-    answer(crate::run_owned(async move { change(&state, host, false).await }).await)
+    bounded(state, host, false).await
 }
 
-/// Resume explicitly, then let the actor establish a fresh connection. A 200
-/// means Tensorlake reports running; connection readiness follows separately.
+/// `POST /api/hosts/{id}/resume`: resume explicitly, then let the actor
+/// establish a fresh connection. A 200 means Tensorlake reports running;
+/// connection readiness follows separately. Past the host reply bound the
+/// reply is [`still_changing`]'s 504 instead (see [`bounded`]).
 pub(crate) async fn resume(
     State(state): State<Arc<AppState>>,
     Path(host): Path<HostId>,
 ) -> Response {
-    answer(crate::run_owned(async move { change(&state, host, true).await }).await)
+    bounded(state, host, true).await
+}
+
+/// Run one route's Suspend or Resume on a task of its own, answering by
+/// [`crate::sessions::HOST_REPLY_BOUND`].
+///
+/// The GUI is to send both over its UI channel, which admits one command at a time
+/// and treats a command unanswered for 30 seconds as a broken connection,
+/// while a Tensorlake Suspend may wait 60 seconds for the sandbox to settle
+/// and a Resume 120 ([`transition`]). Tensorlake's refusals that come before
+/// anything changes (a busy host, a host that is not an environment, no
+/// account key) are local and answer as before. A container host checks its
+/// container over SSH before it changes anything, inside the bound, so a slow
+/// container host can meet the bound before that check ends; the 504's words
+/// stay true then too. A change still running at the bound answers with
+/// [`still_changing`]'s 504 and carries on under its provisioning lock and
+/// connection hold, so a second click meanwhile meets the busy refusal. Its outcome lands in the host's pushed state: Suspended once
+/// confirmed, a fresh connection after a Resume, or, after a failure, the same
+/// reconnect any failed change ends in, its reason reaching only the helm's log.
+/// The migration's orchestrator decided on 2026-11-15 that these routes take
+/// this bound rather than the accepted form, because that outcome already
+/// reaches the client through the pushed host state.
+///
+/// The routes sit in the router's cancellable group, outside its ownership
+/// layer, so this task is also what keeps a dropped caller from cancelling
+/// the change partway and stranding its hold.
+async fn bounded(state: Arc<AppState>, host: HostId, resume: bool) -> Response {
+    crate::sessions::within_host_reply_bound_saying(
+        async move { answer(change(&state, host, resume).await) },
+        still_changing(if resume { "resuming" } else { "suspending" }),
+    )
+    .await
+}
+
+/// The text of the 504 a host's Suspend or Resume answers when it is still
+/// running at the host reply bound (see [`bounded`]); `doing` names the
+/// change ("suspending" or "resuming").
+///
+/// It promises only what is true whichever way the change ends: that it goes
+/// on, and where its result shows.
+fn still_changing(doing: &str) -> String {
+    format!(
+        "{doing} the host did not finish within {} seconds; it carries on, and the host's state \
+         in the hosts list and the session list will show the result",
+        crate::sessions::HOST_REPLY_BOUND.as_secs()
+    )
 }
 
 /// Preserve the standard REST error classification and body for both verbs.
