@@ -544,10 +544,10 @@ impl UiSession {
     /// The opener checks the session when it is called, not when it is handed out. If a reset or a displacement has
     /// retired the session by then, or the session is gone, it opens nothing and hands back a stream that is already
     /// closed, whose feed holds only `Closed`. So an opener kept across a reset never attaches a terminal for a window
-    /// that went inert. For a displaced window that matters beyond
-    /// tidiness: a stream's first attach displaces, so it could take the terminal from the window that now holds the
-    /// helm (SPEC_impl.md, "The seat: one UI per helm"). Retiring does not close streams opened before it; their
-    /// owners do that when they see the session retire.
+    /// that went inert. For a displaced window that matters beyond tidiness: every attach displaces, reconnects
+    /// included, so it could take the terminal from the window that now holds the helm (SPEC_impl.md, "The seat: one
+    /// UI per helm"). Retiring does not close streams opened before it; their owners do that when they see the session
+    /// retire.
     pub fn terminal_opener(&self) -> OpenStream {
         let retired = Rc::downgrade(&self.retired);
         let terminals = self.terminals.clone();
@@ -619,7 +619,6 @@ mod tests {
             lease: AttachmentLease::new(),
             cols: 80,
             rows: 24,
-            take_control: true,
         };
         let closed = Some(TerminalEvent::State(StreamState::Closed));
 

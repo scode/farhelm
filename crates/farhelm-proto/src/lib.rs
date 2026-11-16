@@ -3891,8 +3891,9 @@ pub enum ControlMsg {
         /// case, because no one pressed anything.
         ///
         /// Refused with [`ErrorKind::TakenOver`], which is what lets a
-        /// client treat the refusal as the ordinary takeover it is (the helm
-        /// relays it to the browser as [`DetachCode::TakenOver`]); the
+        /// client treat the refusal as the ordinary takeover it is (older
+        /// helms relayed it as [`DetachCode::TakenOver`]; the current helm
+        /// never sends this attach); the
         /// message, [`ATTACH_REFUSED_TAKEN_OVER`], is display text only. A refusal installs nothing: the channel this attach named
         /// stays unattached and its caller must not send on it.
         ///

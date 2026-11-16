@@ -4,10 +4,10 @@
 //! Each stream reconnects on its own, independently of the UI channel and of other streams. The rules come from how
 //! the helm and supervisor decide who holds a terminal (SPEC.md, "Terminal experience"):
 //!
-//! - The first attach takes control when [`TerminalAttach::take_control`] says so (the user opened this terminal), and
-//!   otherwise attaches without displacing anyone, like a reconnect. Every automatic reconnect attaches with the
-//!   non-displacing `/term/unowned` route, so a stream coming back after a network blip can never take a terminal
-//!   away from another client that took it meanwhile.
+//! - Every attach is the ordinary one under the stream's [`AttachmentLease`]: the first, every automatic reconnect,
+//!   "Reconnect now" and take-control alike. It takes the terminal from whoever holds it, so a stream that comes back
+//!   after a blip takes the terminal back from anyone who attached meanwhile. There is no non-displacing attach: the
+//!   app is single-UI (SPEC_impl.md, "The seat: one UI per helm").
 //! - A dropped socket, an unanswered ping, a failed attempt or a 5xx answer to the upgrade reconnects, climbing the
 //!   terminal's own [`TerminalLadder`] (0.5 to 15 s over six retries, then a probe every 30 s forever). It reconnects
 //!   at once only if the attachment had answered a ping, which shows the link worked; otherwise it waits its rung, so
@@ -25,9 +25,8 @@
 //!   lease (see [`AttachmentLease`]).
 //! - `taken_over`, `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: someone else holds the
 //!   terminal, it is gone, or this client fell behind and attaching again would walk back into the same wedge.
-//!   [`TerminalHandle::take_control`] attaches again, displacing whoever holds it.
-//! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing, without
-//!   displacing anyone.
+//!   [`TerminalHandle::take_control`] attaches again.
+//! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing.
 //!
 //! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`].
 //! A [`StreamState::Attached`] event precedes each attachment's first output, and the caller must reset its grid
@@ -98,12 +97,6 @@ pub struct TerminalAttach {
     pub lease: AttachmentLease,
     pub cols: u16,
     pub rows: u16,
-    /// Whether the stream's first attach takes the terminal from whoever holds it. True when the user opened this
-    /// terminal. False for an attach nobody asked for on purpose, such as a tab a recovering view opens while it may
-    /// have missed a takeover: that attach is refused if another client holds the session, and the stream then waits
-    /// in [`StreamState::Detached`] like any displaced one. Only the first attach reads this; reconnects never
-    /// displace and [`TerminalHandle::take_control`] always does.
-    pub take_control: bool,
 }
 
 /// One attachment of a stream, as its [`StreamState::Attached`] announced it: the stamp input carries so that it
@@ -192,8 +185,8 @@ impl TerminalHandle {
         let _ = self.requests.send(Request::TakeControl);
     }
 
-    /// Skip the current reconnect wait, retrying or probing, and attach now through the non-displacing route. The
-    /// attempt keeps its number on the ladder. Ignored in every other state: it never takes a terminal from anyone.
+    /// Skip the current reconnect wait, retrying or probing, and attach now. The attempt keeps its number on the
+    /// ladder. Ignored in every other state, where there is no wait to skip.
     pub fn reconnect_now(&self) {
         let _ = self.requests.send(Request::ReconnectNow);
     }
@@ -300,15 +293,9 @@ pub(crate) fn stream_channels(
     )
 }
 
-/// The path for one attach. `take_control` picks the displacing route.
-pub(crate) fn attach_path(
-    attach: &TerminalAttach,
-    take_control: bool,
-) -> Result<ApiPath, crate::PathError> {
-    let mut segments = vec!["sessions", attach.session.as_str(), "term"];
-    if !take_control {
-        segments.push("unowned");
-    }
+/// The path for one attach: the helm's one terminal route, with the size, lease and tab in the query.
+pub(crate) fn attach_path(attach: &TerminalAttach) -> Result<ApiPath, crate::PathError> {
+    let segments = ["sessions", attach.session.as_str(), "term"];
     let (cols, rows) = (attach.cols.to_string(), attach.rows.to_string());
     let mut query = vec![
         ("cols", cols.as_str()),
@@ -376,7 +363,6 @@ struct Stream {
 
 impl Stream {
     async fn run(mut self) {
-        let mut take_control = self.attach.take_control;
         if !self
             .emit(TerminalEvent::State(StreamState::Attaching))
             .await
@@ -384,7 +370,7 @@ impl Stream {
             return;
         }
         loop {
-            let ended = match self.connect(take_control).await {
+            let ended = match self.connect().await {
                 None => Ended::Closed,
                 Some(Ok(socket)) => self.serve(socket).await,
                 Some(Err(ConnectError::Refused { status })) if !retried_refusal(status) => {
@@ -400,7 +386,6 @@ impl Stream {
                         // (When the caller dropped its feed instead, that last emit just fails.)
                         break;
                     }
-                    take_control = true;
                     self.ladder.reset();
                     continue;
                 }
@@ -413,7 +398,6 @@ impl Stream {
                     }
                 }
             };
-            take_control = false;
             match ended {
                 Ended::Closed => break,
                 Ended::Dropped {
@@ -458,7 +442,6 @@ impl Stream {
                         // As for a refusal: a close while detached still reports `Closed`.
                         break;
                     }
-                    take_control = true;
                     self.ladder.reset();
                 }
             }
@@ -468,9 +451,9 @@ impl Stream {
 
     /// Open the socket, serving requests meanwhile. `None` when the stream was closed. A socket comes back already
     /// told the latest size, if a resize during the connect changed it from the one the query asked for.
-    async fn connect(&mut self, take_control: bool) -> Option<Result<Socket, ConnectError>> {
+    async fn connect(&mut self) -> Option<Result<Socket, ConnectError>> {
         let asked = (self.attach.cols, self.attach.rows);
-        let path = match attach_path(&self.attach, take_control) {
+        let path = match attach_path(&self.attach) {
             Ok(path) => path,
             // An empty or dot session id has no route; the helm would answer 404, so say that.
             Err(_) => return Some(Err(ConnectError::Refused { status: 404 })),

@@ -431,9 +431,13 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
 /// A NON-DISPLACING attach (`ControlMsg::Attach::if_unowned`) is refused
 /// while another lease holds the session, and refuses without touching
 /// anything — PLAN_M6.md item 7's auto-reconnect safety property, at the
-/// layer that enforces it.
+/// layer that enforces it. The current helm never sends this attach (the
+/// app is single-UI, SPEC_impl.md, "The seat: one UI per helm"); the
+/// supervisor keeps it for older helms, which sent their automatic
+/// reconnects this way, and this suite's read-only viewers use it.
 ///
-/// The failure it exists to prevent is an eviction with nobody behind it.
+/// The failure it exists to prevent, for those older helms, is an
+/// eviction with nobody behind it.
 /// A client recovering from transport loss has no socket, so a takeover
 /// that happens while it is away reaches it nowhere; its next automatic
 /// attach carries the same lease it always had, and a displacing one would
