@@ -98,6 +98,8 @@ impl crate::environment::PreparationProgress for CreationProgress<'_> {
 /// Dropping that waiter never cancels resource cleanup.
 struct SessionLaunch {
     state: Arc<crate::AppState>,
+    /// The launch's run, which its end is published on.
+    run_id: String,
     request: crate::sessions::CreateReq,
     name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     result: tokio::sync::oneshot::Sender<anyhow::Result<farhelm_proto::SessionInfo>>,
@@ -474,6 +476,7 @@ impl ProvisioningService {
         let (result, receiver) = tokio::sync::oneshot::channel();
         let launch = SessionLaunch {
             state,
+            run_id: run_id.clone(),
             request,
             name_kind,
             result,
@@ -554,7 +557,7 @@ impl ProvisioningService {
     async fn end_panicked_launch(&self, host: HostId, run_id: &str) {
         let mut memory = self.memory.lock().await;
         let Some(run) = memory
-            .launch_run_mut(host, run_id)
+            .launch_run_to_end(host, run_id)
             .filter(|run| run.status == RunStatus::Running)
         else {
             return;
@@ -568,23 +571,10 @@ impl ProvisioningService {
         run.status = RunStatus::Failed;
         run.message = Some(LAUNCH_ENDED_WITHOUT_A_RESULT.into());
         run.outcome_unknown = true;
-        let registered = memory
-            .runs
-            .get(&host)
-            .is_some_and(|own| own.run_id.as_deref() == Some(run_id));
-        // A panic after the launch kept a copy of its run, but before cleanup
-        // removed the host, leaves both; the host's own run carries the end,
-        // and a copy left running would never be evicted.
-        if registered {
-            memory
-                .ended_launches
-                .retain(|kept| !(kept.host_id == host && kept.run_id.as_deref() == Some(run_id)));
-        }
         memory.busy.remove(&host);
         drop(memory);
-        if registered {
-            self.manager.release_hold(host, true);
-        }
+        // A no-op once cleanup has removed the host: its actor is gone with it.
+        self.manager.release_hold(host, true);
         self.manager.events().bump();
     }
 
@@ -1201,23 +1191,9 @@ impl ProvisioningService {
                     ),
                 };
                 let mut memory = self.memory.lock().await;
-                let kept = memory
-                    .ended_launches
-                    .iter()
-                    .position(|run| run.host_id == host);
                 // A failed cleanup keeps the host and its own run, which then
-                // carries the failure; the copy is not needed.
-                let run = if memory.runs.contains_key(&host) {
-                    if let Some(kept) = kept {
-                        memory.ended_launches.remove(kept);
-                    }
-                    memory.runs.get_mut(&host)
-                } else if let Some(kept) = kept {
-                    memory.ended_launches.get_mut(kept)
-                } else {
-                    None
-                };
-                if let Some(run) = run {
+                // carries the failure, and the copy goes.
+                if let Some(run) = memory.launch_run_to_end(host, &launch.run_id) {
                     if let Some(step) = run.steps.get_mut(index) {
                         step.status = StepStatus::Failed;
                         step.message = Some(message.clone());

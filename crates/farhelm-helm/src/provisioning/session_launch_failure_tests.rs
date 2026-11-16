@@ -510,7 +510,7 @@ async fn a_launch_task_that_panics_ends_its_run_without_a_result() {
         matches!(state, HostState::Unreachable { last_error, .. }
             if last_error == "Farhelm is setting up this environment")
     };
-    tokio::time::timeout(
+    let state = tokio::time::timeout(
         Duration::from_secs(10),
         f.harness
             .manager
@@ -523,6 +523,13 @@ async fn a_launch_task_that_panics_ends_its_run_without_a_result() {
             f.harness.manager.state(accepted.host_id)
         )
     });
+    // A wait that ended because the host's actor went away would also
+    // pass the timeout; the hold must have been replaced by a real
+    // publication.
+    assert!(
+        state.is_some(),
+        "the host's state wait ended without a state"
+    );
     assert!(
         !f.service
             .memory
