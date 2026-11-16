@@ -1456,8 +1456,20 @@ Traps that an earlier rule already prevents get one line pointing at it.
 - **Work inside `open_window`'s builder closure is a trap.** A task spawned there updates its model without scheduling a
   frame, and a resize there doubles every `px()`. Rule: do the work after the window exists.
 - **Headless Mutter reports the window inactive forever.** `Window::is_window_active()` stays false even after Mutter
-  focuses the window, so a ticker that pauses while inactive never ticks in headless end-to-end runs. Rule: the ticker
-  takes its notion of "active" through a test override.
+  focuses the window, so two things never happen in headless end-to-end runs. A ticker that pauses while inactive never
+  ticks. And no focus or blur listener fires: `Window::draw` (`vendor/gpui-pre/src/window.rs`) hands every listener
+  registered through `Context`'s `on_focus`, `on_blur`, `on_focus_in` or `on_focus_out`, or `Window`'s `on_focus_in` or
+  `on_focus_out`, a `WindowFocusEvent` whose previous and current focus paths it empties for a frame drawn while the
+  window was inactive, so each listener sees nothing focused before or after and none matches. Focus itself still moves:
+  `FocusHandle::is_focused`, `Window::focused` and `on_focus_lost` (which `draw` runs from the unemptied paths) behave
+  as in an active window. Rule: the ticker takes its notion of "active" through a test override, which agent builds pin
+  on. Focus listeners have no such override, because the flag `draw` reads is GPUI's own, private, and set only from the
+  platform window (its state when the window opens, then its activation callback); pinning it would take a vendored GPUI
+  patch. So in a headless run a launcher field's list does not open when the field takes focus, lists and popovers that
+  close when focus leaves them do not close that way, and a tooltip shown for keyboard focus does not end when focus
+  moves on. That is the trap, not a bug: check those reactions in in-process tests, whose shared harness activates every
+  window it opens (`test_support.rs`, `activate_and_check`); GPUI's test platform opens windows inactive, so a test that
+  opens its own window without the harness meets the same trap.
 - **A `cfg(test)` branch in production code tests a program that does not ship.** Past the branch, a test exercises code
   the app never runs, so its pass says nothing about the code the branch skips. Rule (decided by the migration's
   orchestrator on 2026-11-15): pass the dependency in, so the production path reads it the same way in every build and a
