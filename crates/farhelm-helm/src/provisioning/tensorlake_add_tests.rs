@@ -129,9 +129,9 @@ impl Fixture {
         self.harness.state = Arc::new(state);
     }
 
-    /// Exercise the new protected endpoint, with ordinary command fields and
-    /// no installed-host selector. A bounded wait for headers is independent
-    /// from reading the intentionally unfinished result body.
+    /// Exercise the protected endpoint, with ordinary command fields and no
+    /// installed-host selector. The reply is bounded: an admitted launch
+    /// answers 202 at once, whatever its owned task goes on to do.
     async fn session_launch(&self, confirmed: bool) -> axum::response::Response {
         let body = serde_json::json!({
             "recipe": "test-recipe", "confirmed": confirmed,
@@ -156,8 +156,70 @@ impl Fixture {
             self.harness.router().oneshot(request),
         )
         .await
-        .expect("admission headers arrive before the held setup finishes")
+        .expect("the admission reply arrives before the held setup finishes")
         .unwrap()
+    }
+
+    /// Send the protected launch and return the run its 202 names. Once a
+    /// launch is admitted that reply is all the route answers; the outcome
+    /// arrives on the run ([`Self::launch_outcome`]).
+    async fn admitted(&self, confirmed: bool) -> (HostId, String) {
+        let response = self.session_launch(confirmed).await;
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            axum::http::StatusCode::ACCEPTED,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let host = body["host_id"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("the 202 names the launch's host: {body}"));
+        let run = body["run_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the 202 names the launch's run: {body}"));
+        (host, run.to_owned())
+    }
+
+    /// The launch run's end as the pushed host progress lists it, which is
+    /// where an accepted environment create's outcome lands, also after a
+    /// failed launch's cleanup has removed its host
+    /// ([`ProvisioningService::wait_for_run_end`]). A timeout reports the
+    /// listing and the host's state.
+    async fn launch_outcome(&self, host: HostId, run: &str) -> ProvisioningView {
+        match self
+            .service
+            .wait_for_run_end(host, run, Duration::from_secs(15))
+            .await
+        {
+            Some(view) => view,
+            None => panic!(
+                "launch run {run} never ended; listed {:?}; host state {:?}",
+                self.service.runs().await.runs,
+                self.harness.manager.state(host)
+            ),
+        }
+    }
+
+    /// `GET /api/sessions?host=<host>` through the real router, as the GUI
+    /// reads a completed launch's session.
+    async fn listed_sessions(&self, host: HostId) -> serde_json::Value {
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .uri(format!("/api/sessions?host={host}"))
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = self.harness.router().oneshot(request).await.unwrap();
+        assert!(response.status().is_success(), "{}", response.status());
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     /// A probe has no network side effects; its opaque id is the sole
@@ -504,13 +566,15 @@ async fn recipe_session_fresh_checkpoint_refuses_missing_or_unreadable_key_befor
             f.tensorlake.settings().await.unwrap().ssh_key,
             farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
         ));
-        let response = f.session_launch(true).await;
-        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
-            .await
-            .unwrap();
+        let (host, run) = f.admitted(true).await;
+        let outcome = f.launch_outcome(host, &run).await;
+        assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
         assert!(
-            String::from_utf8_lossy(&body).contains("SSH key"),
-            "{body:?}"
+            outcome
+                .message
+                .as_deref()
+                .is_some_and(|reason| reason.contains("SSH key")),
+            "{outcome:?}"
         );
         assert!(
             f.model().sandboxes.is_empty(),
@@ -535,6 +599,11 @@ async fn recipe_session_fresh_checkpoint_refuses_missing_or_unreadable_key_befor
 /// Recipe launch must refuse before billing when its software has not been
 /// built. The same fixture's ordinary Add path may build, so this distinguishes
 /// the new launch contract from merely reusing Add without a preflight.
+///
+/// These refusals (a body the route cannot accept, an unconfirmed billed
+/// create, a missing snapshot) come before admission, so they stay ordinary
+/// error replies rather than a 202 whose run fails: nothing is registered for
+/// a run to report on.
 #[farhelm_testtrace::test]
 async fn recipe_session_preflight_never_builds_a_missing_software_snapshot() {
     let mut f = fixture(true).await;
@@ -609,13 +678,7 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
             *f.service.run_end_gate.lock().unwrap() = Some(Arc::clone(&gate));
         }
         f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
-        let response = f.session_launch(true).await;
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        let host: HostId = response.headers()["x-farhelm-sandbox-host"]
-            .to_str()
-            .unwrap()
-            .parse()
-            .unwrap();
+        let (host, run) = f.admitted(true).await;
         f.wait_for_backend("wait-tensorlake-ssh").await;
         assert!(
             f.model().live_sandboxes().len() == 1,
@@ -666,17 +729,11 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
             }
         });
         f.backend_config(serde_json::json!({}));
-        let bytes = tokio::time::timeout(
-            Duration::from_secs(15),
-            axum::body::to_bytes(response.into_body(), 1 << 20),
-        )
-        .await
-        .expect("owned launch finishes while its supervisor fixture is alive")
-        .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let outcome = f.launch_outcome(host, &run).await;
         assert!(!f.service.memory.lock().await.busy.contains(&host));
         if fails {
-            let error = body["error"].as_str().unwrap();
+            assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+            let error = outcome.message.as_deref().unwrap_or_default();
             assert!(
                 error.starts_with("Not launched.")
                     && error.contains("connected create refused by fixture"),
@@ -693,19 +750,28 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
                     .any(|row| row.id == host)
             );
         } else {
+            assert_eq!(outcome.status, RunStatus::Completed, "{outcome:?}");
+            // Read right after the run was seen completed: the session is
+            // listed under the launch's host by the time its end is.
+            let sessions = f.harness.store.cached_sessions(host).await.unwrap();
             assert!(
-                body["session"]["id"]
-                    .as_str()
-                    .unwrap_or_else(|| panic!("expected a created session, got {body}"))
-                    .ends_with(":owned-child")
+                sessions.len() == 1 && sessions[0].id.ends_with("owned-child"),
+                "the created session is listed under the launch's host: {sessions:?}"
             );
+            // The read SPEC_impl names for finding the new session once the
+            // run completed: the host-filtered listing, which serves the
+            // helm's cache and holds exactly this launch's session.
+            let listing = f.listed_sessions(host).await;
+            let ids: Vec<&str> = listing["sessions"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{listing}"))
+                .iter()
+                .map(|row| row["id"].as_str().unwrap_or_default())
+                .collect();
             assert_eq!(
-                f.service.view(host).await.unwrap().status,
-                RunStatus::Completed
-            );
-            assert_eq!(
-                f.harness.store.cached_sessions(host).await.unwrap().len(),
-                1
+                ids,
+                [f.harness.session_ref(host, "owned-child")],
+                "{listing}"
             );
             assert_eq!(f.model().live_sandboxes().len(), 1);
             tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
@@ -749,13 +815,7 @@ async fn recipe_session_task_reports_settled_connection_failures_before_cleanup(
         f.seed_prepared().await;
         f.bind_session_launch().await;
         f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
-        let response = f.session_launch(true).await;
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        let host: HostId = response.headers()["x-farhelm-sandbox-host"]
-            .to_str()
-            .unwrap()
-            .parse()
-            .unwrap();
+        let (host, run) = f.admitted(true).await;
         f.wait_for_backend("wait-tensorlake-ssh").await;
         assert_eq!(f.model().live_sandboxes().len(), 1);
         assert!(
@@ -776,21 +836,9 @@ async fn recipe_session_task_reports_settled_connection_failures_before_cleanup(
             };
         });
         f.backend_config(serde_json::json!({}));
-        let bytes = tokio::time::timeout(
-            Duration::from_secs(15),
-            axum::body::to_bytes(response.into_body(), 1 << 20),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "launch never reported {phase}; host state: {:?}, live resources: {}",
-                f.harness.manager.state(host),
-                f.model().live_sandboxes().len()
-            )
-        })
-        .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        let error = body["error"].as_str().unwrap_or_else(|| panic!("{body}"));
+        let outcome = f.launch_outcome(host, &run).await;
+        assert_eq!(outcome.status, RunStatus::Failed, "{phase}: {outcome:?}");
+        let error = outcome.message.as_deref().unwrap_or_default();
         assert!(
             error.starts_with("Not launched.")
                 && error.contains(&format!("is {phase},"))
@@ -811,11 +859,13 @@ async fn recipe_session_task_reports_settled_connection_failures_before_cleanup(
     }
 }
 
-/// Admission must publish progress before setup finishes. Closing the body at
-/// that boundary loses only the reply: the owned launch still attempts cleanup.
-/// A failed cleanup instead keeps the named resource and an explicit remedy.
+/// Admission must publish progress before setup finishes, and its 202 ends the
+/// client's request there: the owned launch's cleanup runs after it. A cleanup
+/// that removes the host still leaves the "Not launched." reason on the run
+/// the 202 named, the only place it is published; a failed cleanup instead
+/// keeps the named resource and an explicit remedy on the host's own run.
 #[farhelm_testtrace::test]
-async fn recipe_session_failure_cleanup_outlives_its_client_and_retains_failed_cleanup() {
+async fn recipe_session_failure_cleanup_runs_after_the_202_and_retains_failed_cleanup() {
     for cleanup_fails in [false, true] {
         let mut f = fixture(false).await;
         f.seed_prepared().await;
@@ -831,17 +881,18 @@ async fn recipe_session_failure_cleanup_outlives_its_client_and_retains_failed_c
             )
             .unwrap();
         }
-        let response = f.session_launch(true).await;
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        let host: HostId = response.headers()["x-farhelm-sandbox-host"]
-            .to_str()
-            .unwrap()
-            .parse()
-            .unwrap();
-        let run = response.headers()["x-farhelm-sandbox-run"]
-            .to_str()
-            .unwrap();
-        assert!(uuid::Uuid::parse_str(run).is_ok());
+        let (host, run) = f.admitted(true).await;
+        assert!(uuid::Uuid::parse_str(&run).is_ok());
+        assert!(
+            f.service
+                .runs()
+                .await
+                .runs
+                .iter()
+                .any(|view| view.run_id.as_deref() == Some(run.as_str())
+                    && view.status == RunStatus::Running),
+            "the 202's run is listed running while the launch waits"
+        );
         f.wait_for_backend("wait-tensorlake-ssh").await;
         let rows = f.harness.store.list_hosts().await.unwrap();
         let row = rows.iter().find(|row| row.id == host).unwrap();
@@ -869,23 +920,12 @@ async fn recipe_session_failure_cleanup_outlives_its_client_and_retains_failed_c
                 .is_empty(),
             "no placeholder session"
         );
-        let body = if cleanup_fails {
-            Some(response.into_body())
-        } else {
-            drop(response);
-            None
-        };
         f.backend_config(serde_json::json!({"default": {"fail_action": "wait-tensorlake-ssh"}}));
+        let outcome = f.launch_outcome(host, &run).await;
+        assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+        let error = outcome.message.as_deref().unwrap_or_default();
+        assert!(error.starts_with("Not launched."), "{error}");
         if cleanup_fails {
-            let bytes = tokio::time::timeout(
-                Duration::from_secs(15),
-                axum::body::to_bytes(body.unwrap(), 1 << 20),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            let error = body["error"].as_str().unwrap();
             assert!(
                 error.contains(&sandbox) && error.contains("Hosts"),
                 "{error}"
@@ -904,21 +944,16 @@ async fn recipe_session_failure_cleanup_outlives_its_client_and_retains_failed_c
                 RunStatus::Failed
             );
         } else {
-            tokio::time::timeout(Duration::from_secs(15), async {
-                while f
-                    .harness
+            assert!(
+                !f.harness
                     .store
                     .list_hosts()
                     .await
                     .unwrap()
                     .iter()
-                    .any(|row| row.id == host)
-                {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("owned cleanup finishes after client departure");
+                    .any(|row| row.id == host),
+                "the failure is published once cleanup has removed the host"
+            );
             assert!(f.model().live_sandboxes().is_empty());
         }
     }
@@ -2852,6 +2887,137 @@ fn names_fit_tensorlake_grammar() {
         assert!(!result.ends_with('-'));
         assert!(!result.starts_with("farhelm-sbx-"));
     }
+}
+
+/// A panicked launch's end touches only its own run while that run is still
+/// running. Why: the run is the accepted environment create's only outcome, so
+/// the panic handler must neither leave a step or a kept copy "running" for
+/// good (a running copy is never evicted) nor overwrite an outcome the launch
+/// already published, or clear a busy marker a later run owns. Specified, on
+/// memory staged as the launch would leave it: a running run whose copy was
+/// kept just before cleanup ends failed with the fixed words, its running step
+/// failed with them, its pending step untouched, the copy dropped and the busy
+/// marker gone, and the run marked `outcome_unknown`; a completed run of
+/// another host keeps its outcome, its marker and its known outcome.
+#[farhelm_testtrace::test]
+async fn a_panicked_launch_ends_only_a_run_still_running() {
+    let f = fixture(false).await;
+    let step = |status: StepStatus| StepView {
+        step: "create-sandbox".into(),
+        name: "Create the environment".into(),
+        paths: vec![],
+        explanation: None,
+        status,
+        message: None,
+    };
+    let run = |host: HostId, run: &str, status: RunStatus| ProvisioningView {
+        host_id: host,
+        run_id: Some(run.into()),
+        operation: Some(ProvisioningOperation::Add),
+        status,
+        steps: vec![step(StepStatus::Running), step(StepStatus::Pending)],
+        message: None,
+        outcome_unknown: false,
+    };
+    {
+        let mut memory = f.service.memory.lock().await;
+        let mid_cleanup = run(9001, "panicked", RunStatus::Running);
+        memory.runs.insert(9001, mid_cleanup.clone());
+        memory.keep_ended_launch(mid_cleanup);
+        memory
+            .runs
+            .insert(9002, run(9002, "published", RunStatus::Completed));
+        memory.busy.extend([9001, 9002]);
+    }
+    f.service.end_panicked_launch(9001, "panicked").await;
+    f.service.end_panicked_launch(9002, "published").await;
+    let memory = f.service.memory.lock().await;
+    let ended = &memory.runs[&9001];
+    assert_eq!(ended.status, RunStatus::Failed);
+    assert_eq!(
+        ended.message.as_deref(),
+        Some(LAUNCH_ENDED_WITHOUT_A_RESULT)
+    );
+    assert!(ended.outcome_unknown);
+    assert_eq!(
+        (
+            ended.steps[0].status.clone(),
+            ended.steps[0].message.as_deref()
+        ),
+        (StepStatus::Failed, Some(LAUNCH_ENDED_WITHOUT_A_RESULT))
+    );
+    assert_eq!(ended.steps[1].status, StepStatus::Pending);
+    assert!(
+        memory.ended_launches.is_empty(),
+        "the host's own run carries the end; no running copy is left behind"
+    );
+    let published = &memory.runs[&9002];
+    assert_eq!(
+        (
+            published.status.clone(),
+            published.message.clone(),
+            published.outcome_unknown
+        ),
+        (RunStatus::Completed, None, false)
+    );
+    assert_eq!(
+        memory.busy.iter().copied().collect::<Vec<_>>(),
+        [9002],
+        "only the panicked run's marker goes"
+    );
+}
+
+/// The kept failed launches stay bounded without losing a launch still being
+/// cleaned up, and a panic after cleanup removed the host still ends the kept
+/// copy. Why: the kept copy is the only place such a launch's outcome is
+/// published, so evicting a running one, or leaving one running after a panic,
+/// would make that outcome vanish for the client waiting on it. Specified, on
+/// memory staged directly: a running copy pushed first and then seventeen
+/// ended ones leave the bound's sixteen, the running copy among them though it
+/// is the oldest, and the two oldest ended copies gone; a panicked launch with
+/// only its kept copy left (no host run) lists that copy failed with the fixed
+/// words and `outcome_unknown`.
+#[farhelm_testtrace::test]
+async fn kept_launches_evict_only_ended_runs_and_a_panic_ends_a_kept_copy() {
+    let f = fixture(false).await;
+    let run = |host: HostId, status: RunStatus| ProvisioningView {
+        host_id: host,
+        run_id: Some(format!("run-{host}")),
+        operation: Some(ProvisioningOperation::Add),
+        status,
+        steps: Vec::new(),
+        message: None,
+        outcome_unknown: false,
+    };
+    {
+        let mut memory = f.service.memory.lock().await;
+        memory.keep_ended_launch(run(100, RunStatus::Running));
+        for host in 101..=117 {
+            memory.keep_ended_launch(run(host, RunStatus::Failed));
+        }
+        let kept: Vec<HostId> = memory
+            .ended_launches
+            .iter()
+            .map(|run| run.host_id)
+            .collect();
+        let expected: Vec<HostId> = std::iter::once(100).chain(103..=117).collect();
+        assert_eq!(
+            kept, expected,
+            "the running copy stays; the two oldest ended ones go"
+        );
+    }
+    f.service.end_panicked_launch(100, "run-100").await;
+    let listed = f.service.runs().await.runs;
+    let ended = listed
+        .iter()
+        .find(|run| run.host_id == 100)
+        .unwrap_or_else(|| panic!("the kept copy is still listed: {listed:?}"));
+    assert_eq!(ended.status, RunStatus::Failed);
+    assert_eq!(
+        ended.message.as_deref(),
+        Some(LAUNCH_ENDED_WITHOUT_A_RESULT)
+    );
+    assert!(ended.outcome_unknown);
 }
 
 /// Which way a plain Tensorlake add reaches the end of its run, for

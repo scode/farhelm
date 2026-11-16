@@ -1415,6 +1415,7 @@ async fn a_provisioning_step_transition_reaches_the_connected_ui() {
                 message: None,
             }],
             message: None,
+            outcome_unknown: false,
         })
         .await;
     let addr = harness.serve().await;
@@ -2664,6 +2665,7 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
                 message: None,
             }],
             message: None,
+            outcome_unknown: false,
         })
         .await;
     let runs = served(&harness, "/api/provisioning").await;

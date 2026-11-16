@@ -1017,22 +1017,59 @@ impl Fixture {
             .send()
             .await
             .unwrap();
-        assert!(
-            response.status().is_success(),
-            "environment admission: {}",
-            response.status()
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::ACCEPTED,
+            "environment admission"
         );
-        let host = response.headers()["x-farhelm-environment-host"]
-            .to_str()
+        let accepted: Value = response.json().await.unwrap();
+        let host = accepted["host_id"]
+            .as_i64()
+            .expect("the 202 names its host");
+        let run = accepted["run_id"].as_str().expect("the 202 names its run");
+        // The 202 is the whole reply: the launch's outcome lands on that run
+        // in the host progress, with its session listed under the new host
+        // by the time the run completes (SPEC_impl.md, "The UI channel").
+        let progress = wait_for_listing_with(
+            || self.observe("/api/provisioning"),
+            SCENARIO_BUDGET.as_secs(),
+            "the real environment launch's run ends",
+            |value: &Value| {
+                value["runs"].as_array().is_some_and(|runs| {
+                    runs.iter().any(|entry| {
+                        entry["host_id"] == host
+                            && entry["run_id"] == run
+                            && entry["status"] != "running"
+                    })
+                })
+            },
+        )
+        .await;
+        let ended = progress["runs"]
+            .as_array()
             .unwrap()
-            .parse::<i64>()
+            .iter()
+            .find(|entry| entry["run_id"] == run)
             .unwrap();
-        let reply: Value = response.json().await.unwrap();
-        assert!(
-            reply["error"].is_null(),
-            "real environment launch failed: {reply}"
+        assert_eq!(
+            ended["status"], "completed",
+            "real environment launch failed: {ended}"
         );
-        let session: SessionInfo = serde_json::from_value(reply["session"].clone()).unwrap();
+        let listing = self
+            .observe(&format!("/api/sessions?host={host}"))
+            .await
+            .unwrap();
+        let row = listing["sessions"]
+            .as_array()
+            .expect("the session listing answered")
+            .iter()
+            .find(|row| row["host"] == host)
+            .unwrap_or_else(|| panic!("the launch's session is listed: {listing}"))
+            .clone();
+        let session: SessionInfo =
+            serde_json::from_value::<farhelm_proto::ui_channel::SessionRow>(row)
+                .unwrap()
+                .info;
         assert!(session.id.parse::<farhelm_proto::SessionRef>().is_ok());
         let host_view = self.connected(host).await;
         assert_eq!(host_view["kind"], "podman");

@@ -416,6 +416,127 @@ async fn cold_container_launch_success_establishes_real_task_and_session_premise
     f.commands.assert_ownership_accounted().await;
 }
 
+/// `POST /api/environment-sessions` at a container host: a 202 naming the
+/// launch's host and run while its create is still held, then a refused first
+/// session's "Not launched." reason on that run in the pushed host progress
+/// (`ProvisioningService::runs`), still listed after cleanup removed the host.
+/// Why: the Tensorlake tests cover the route at the account; this is the other
+/// place, and the failure path a client can learn only from that kept run.
+#[farhelm_testtrace::test]
+async fn the_environment_route_answers_202_and_a_refused_launch_ends_its_run() {
+    use super::super::http::RunStatus;
+    let f = Fixture::new().await;
+    f.commands.gate_session();
+    let request = serde_json::from_value(serde_json::json!({
+        "recipe": "dev", "place": {"kind": "podman_host", "host": f.place},
+        "request": {"cwd": "~", "command": {"command": "true", "yolo": false}},
+    }))
+    .unwrap();
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        crate::sessions::create_environment_session(
+            axum::extract::State(f.state()),
+            axum::Json(request),
+        ),
+    )
+    .await
+    .expect("admission answers while the launch's create is held");
+    assert_eq!(response.status(), axum::http::StatusCode::ACCEPTED);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let run = body["run_id"].as_str().expect("the 202 names its run");
+    let host = f.at_session_run().await;
+    assert_eq!(body["host_id"], host, "the 202 names the launch's host");
+    let peer = f.peer(host, true);
+    f.commands.release_session();
+    let outcome = f
+        .service
+        .wait_for_run_end(host, run, Duration::from_secs(10))
+        .await
+        .unwrap_or_else(|| panic!("the launch's run never ended: {:?}", f.commands.phases()));
+    assert_eq!(peer.await.unwrap(), 1);
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    let reason = outcome.message.as_deref().unwrap_or_default();
+    assert!(
+        reason.starts_with("Not launched.") && reason.contains("injected first session refusal"),
+        "{reason}"
+    );
+    assert!(
+        !f.store
+            .list_hosts()
+            .await
+            .unwrap()
+            .iter()
+            .any(|row| row.id == host),
+        "the failure is published once cleanup has removed the host"
+    );
+    f.commands.assert_ownership_accounted().await;
+}
+
+/// A launch task that panics still ends its run, failed with the words the
+/// streamed reply once used for a task that ended without a result and marked
+/// `outcome_unknown`, and lets go of the host's busy marker and of the hold
+/// that showed the host as being set up. Why: the run is the accepted environment
+/// create's only outcome, and without this a client waiting on it would wait
+/// for good. The panic is injected before the launch's first step, the one
+/// way a test can make that task panic.
+#[farhelm_testtrace::test]
+async fn a_launch_task_that_panics_ends_its_run_without_a_result() {
+    use super::super::http::RunStatus;
+    let f = Fixture::new().await;
+    f.service
+        .panic_session_launch
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (accepted, result) = f.start().await;
+    let outcome = f
+        .service
+        .wait_for_run_end(accepted.host_id, &accepted.run_id, Duration::from_secs(10))
+        .await
+        .expect("the panicked launch's run ends");
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    assert_eq!(
+        outcome.message.as_deref(),
+        Some(super::tensorlake_add::LAUNCH_ENDED_WITHOUT_A_RESULT),
+        "{outcome:?}"
+    );
+    assert!(outcome.outcome_unknown, "{outcome:?}");
+    // The hold's state stays published until the actor's next publication
+    // replaces it, so wait for that publication rather than read once.
+    let setting_up = |state: &HostState| {
+        matches!(state, HostState::Unreachable { last_error, .. }
+            if last_error == "Farhelm is setting up this environment")
+    };
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        f.harness
+            .manager
+            .wait_for_state(accepted.host_id, |state| !setting_up(state)),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "the host still shows the setting-up hold: {:?}",
+            f.harness.manager.state(accepted.host_id)
+        )
+    });
+    assert!(
+        !f.service
+            .memory
+            .lock()
+            .await
+            .busy
+            .contains(&accepted.host_id)
+    );
+    assert!(
+        result.await.is_err(),
+        "the task left no result for an in-process waiter"
+    );
+}
+
 /// A completed Podman refusal with confirmed absence settles the accepted
 /// launch's cleanup immediately. The durable pending row must not outlive the
 /// failure as if run's reply had been lost: that would make Delete wait for
@@ -466,8 +587,10 @@ async fn normal_launch_removes_a_definitely_refused_absent_container_without_wai
     {
         let memory = f.service.memory.lock().await;
         // Successful row cleanup forgets its host-local progress as well.
-        // The accepted task's Not launched result above carries the failure;
-        // retaining a stale run here would describe a host that no longer exists.
+        // The accepted task's Not launched result above carries the failure,
+        // and so does the run's kept copy the host progress lists
+        // (`ended_launches`); a run left here would describe a host that no
+        // longer exists.
         assert!(
             !memory.runs.contains_key(&host),
             "confirmed cleanup must forget the removed host's progress"

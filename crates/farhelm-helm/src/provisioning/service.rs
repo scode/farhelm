@@ -69,6 +69,12 @@ const MAX_PENDING_PLANS: usize = 64;
 const MAX_CONCURRENT_RUNS: usize = 4;
 const MAX_CONCURRENT_PLANS: usize = 4;
 const MAX_CONCURRENT_PROGRESS_READS: usize = 8;
+/// How many failed session launches whose environment is gone the helm keeps
+/// listing ([`ProvisioningMemory::ended_launches`]). Each is the only record
+/// of why its launch failed, and a client waiting on it reads it as soon as it
+/// is pushed, so a few suffice; the bound keeps a helm that fails launch after
+/// launch over a long uptime from keeping every one.
+const MAX_ENDED_LAUNCHES: usize = 16;
 
 /// Bounded process-local state behind plan confirmation and progress reads.
 #[derive(Default)]
@@ -82,6 +88,54 @@ pub(super) struct ProvisioningMemory {
     /// Bind failure suppression to the automatic run, so a simultaneous manual
     /// run cannot accidentally claim or clear the automatic retry boundary.
     automatic_runs: HashMap<HostId, AutomaticRun>,
+    /// Runs of failed session launches whose cleanup removed their fresh
+    /// environment, oldest first, at most [`MAX_ENDED_LAUNCHES`].
+    ///
+    /// Removing the host forgets its entry in `runs` with it, yet the run is
+    /// where an accepted environment create's outcome lands (SPEC_impl.md,
+    /// "The UI channel"), and the "Not launched." reason is nowhere else. So
+    /// the launch keeps a copy here, taken before its cleanup starts so that
+    /// the listing never goes without the run, and publishes the failure on
+    /// it. Kept apart from `runs` so that map still holds only registered
+    /// hosts; host ids are never reused, so a kept run cannot come to describe
+    /// another host. Gone with the helm process, like every run.
+    pub(super) ended_launches: VecDeque<ProvisioningView>,
+}
+
+impl ProvisioningMemory {
+    /// Keep `run` as an ended launch's, dropping the oldest ended ones past
+    /// the bound. A copy still running belongs to a launch whose cleanup has
+    /// not finished and is never dropped: that launch still has to publish its
+    /// failure on it. Those are bounded anyway, by the run slots.
+    pub(super) fn keep_ended_launch(&mut self, run: ProvisioningView) {
+        self.ended_launches.push_back(run);
+        while self.ended_launches.len() > MAX_ENDED_LAUNCHES {
+            let Some(oldest) = self
+                .ended_launches
+                .iter()
+                .position(|kept| kept.status != RunStatus::Running)
+            else {
+                break;
+            };
+            self.ended_launches.remove(oldest);
+        }
+    }
+
+    /// The run `run_id` of `host`, wherever it is kept: the host's own entry,
+    /// or the copy a failed launch kept once its host was removed.
+    pub(super) fn launch_run_mut(
+        &mut self,
+        host: HostId,
+        run_id: &str,
+    ) -> Option<&mut ProvisioningView> {
+        let is_it = |run: &ProvisioningView| run.run_id.as_deref() == Some(run_id);
+        if self.runs.get(&host).is_some_and(is_it) {
+            return self.runs.get_mut(&host);
+        }
+        self.ended_launches
+            .iter_mut()
+            .find(|run| run.host_id == host && is_it(run))
+    }
 }
 
 /// The connection at failure, which can differ from the one planning observed:
@@ -219,6 +273,12 @@ pub(crate) struct ProvisioningService {
     /// a finished run while the run still held its host's provisioning lock.
     #[cfg(test)]
     pub(super) run_end_gate: std::sync::Mutex<Option<Arc<TestBoundaryGate>>>,
+    /// Make the next session launch's task panic before its first step, so a
+    /// test can show that the launch's run still ends (see
+    /// `start_session_environment`). Nothing else can make that task panic
+    /// on purpose.
+    #[cfg(test)]
+    pub(super) panic_session_launch: std::sync::atomic::AtomicBool,
     /// Stands in for this helm's build in [`Self::helm_build`]: every test
     /// binary is a development build (`0.0.0-unreleased`), for which
     /// nothing is ever newer, so the downgrade refusal needs a release
@@ -619,6 +679,8 @@ impl ProvisioningService {
             #[cfg(test)]
             run_end_gate: std::sync::Mutex::new(None),
             #[cfg(test)]
+            panic_session_launch: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
             helm_build_override: std::sync::Mutex::new(None),
         }))
     }
@@ -651,6 +713,7 @@ impl ProvisioningService {
             registry_sync_gate: std::sync::Mutex::new(None),
             automatic_admission_gate: std::sync::Mutex::new(None),
             run_end_gate: std::sync::Mutex::new(None),
+            panic_session_launch: std::sync::atomic::AtomicBool::new(false),
             helm_build_override: std::sync::Mutex::new(None),
         })
     }
@@ -3107,6 +3170,38 @@ impl ProvisioningService {
         self.memory.lock().await.runs.insert(view.host_id, view);
     }
 
+    /// Wait up to `within` for run `run_id` of `host` to end, as the host-progress listing ([`Self::runs`]) shows
+    /// it, and return it; `None` when it has not ended by then. Woken by the fleet feed, which every run transition
+    /// bumps, rather than by polling. Matching the run id keeps an earlier run of the host from passing for it.
+    #[cfg(test)]
+    pub(crate) async fn wait_for_run_end(
+        &self,
+        host: HostId,
+        run_id: &str,
+        within: std::time::Duration,
+    ) -> Option<ProvisioningView> {
+        let mut feed = self.manager.events().subscribe();
+        tokio::time::timeout(within, async {
+            loop {
+                // Marked seen before the read, so a bump after it wakes the wait.
+                feed.mark_unchanged();
+                let ended = self.runs().await.runs.into_iter().find(|run| {
+                    run.host_id == host
+                        && run.run_id.as_deref() == Some(run_id)
+                        && run.status != RunStatus::Running
+                });
+                if let Some(run) = ended {
+                    return run;
+                }
+                feed.changed()
+                    .await
+                    .expect("the fleet feed lives as long as its manager");
+            }
+        })
+        .await
+        .ok()
+    }
+
     /// [`Self::set_step`], for tests outside this module: the real progress transition, with its feed bump.
     #[cfg(test)]
     pub(crate) async fn set_step_for_test(
@@ -3163,12 +3258,19 @@ impl ProvisioningService {
     ///
     /// Reads only the in-memory runs, so it never waits on a host; every change to them bumps the fleet feed, which
     /// is what makes a connected GUI re-read this. A host with no retained run is left out rather than listed idle.
+    /// The runs of failed session launches whose environment is gone are listed too
+    /// ([`ProvisioningMemory::ended_launches`]), under the removed host's id, since they carry those launches'
+    /// outcomes; while a launch's cleanup is still running, its host's own run is the one listed.
     ///
     /// Unlike [`Self::view`] it takes no progress-read slot. Those bound the per-host reads a feed bump can start all
     /// at once, each with a store read; this is one memory read per connected channel per bump.
     pub(crate) async fn runs(&self) -> ProvisioningRuns {
         let memory = self.memory.lock().await;
-        let mut runs: Vec<ProvisioningView> = memory.runs.values().cloned().collect();
+        let ended = memory
+            .ended_launches
+            .iter()
+            .filter(|run| !memory.runs.contains_key(&run.host_id));
+        let mut runs: Vec<ProvisioningView> = memory.runs.values().chain(ended).cloned().collect();
         runs.sort_by_key(|run| run.host_id);
         ProvisioningRuns { runs }
     }
