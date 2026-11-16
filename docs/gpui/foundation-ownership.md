@@ -131,6 +131,8 @@ conflicted across all of it.
 | Template rows                   | `crates/gui/farhelm-gui/src/templates/rows.rs`                                                                                                                                                                                                                                                                                 | [reported](#template-rows)               | none                                  |
 | Template dispatch               | `crates/gui/farhelm-gui/src/templates/dispatch.rs`                                                                                                                                                                                                                                                                             | [reported](#template-dispatch)           | none                                  |
 | Template checkout name          | `crates/gui/farhelm-gui/src/templates/checkout_name.rs`                                                                                                                                                                                                                                                                        | [reported](#template-checkout-name)      | none                                  |
+| Shortcuts overview              | `crates/gui/farhelm-gui/src/shortcuts.rs`                                                                                                                                                                                                                                                                                      | [reported](#shortcuts-overview)          | none                                  |
+| Host status                     | `crates/gui/farhelm-gui/src/hosts/status.rs`                                                                                                                                                                                                                                                                                   | [reported](#host-status)                 | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -181,7 +183,8 @@ Extension points: reported, the whole directory. An area may add, without a requ
 - or a keyboard stop for a place where focus rests, through `focus_stop` in `components/mod.rs` with a focus handle the
   area owns, a role, a label and a `Ring`, as the session pane's interrupted card is to be: the scroll stop's ring, role
   and Tab reach without its keys, so the area can make the handle home before the stop is first drawn (a region that
-  scrolls takes a `ScrollBox` or a dialog's `DialogFrame::scroll_stop` instead);
+  scrolls takes a `ScrollBox` or a dialog's `DialogFrame::scroll_stop` instead, and one that scrolls and is also where
+  focus rests, as the session pane's unavailable card is, takes `scroll_stop_on` with a handle the area owns);
 - or keyboard scrolling for a dialog's notices region that holds a question, through `DialogFrame::notices_stop` and a
   label: the region is a stop of its own whenever it holds no tab stop, as a body given `DialogFrame::scroll_stop` is,
   and Page Up, Page Down, Home and End scroll it from a control inside it (`scroll_from_controls`), as the old Trash
@@ -193,10 +196,10 @@ hover help and role rule, decided by the migration's orchestrator on 2026-11-14:
 `menu_separator.rs` (`menu_separator`) and `spinner.rs` (`Spinner` and `spinner_icon`) are three.
 
 `HoverHelp`, `with_hover_help`, `activate_on_enter_or_space`, `activate_on_click`, `enter_choice`, `on_enter_choice`,
-`focus_stop`, `scroll_stop` and `scroll_from_controls` in `components/mod.rs` are the layer's rules: a change to them is
-a request. An element that fades in as it appears is drawn through `components::entrance`, from the area's own code, and
-`components/transition.rs` (tested in `components/tests/transition.rs`), the one owner of one-shot transitions, is a
-rule too: a change to it, a new transition included, is a request.
+`focus_stop`, `scroll_stop`, `scroll_stop_on` and `scroll_from_controls` in `components/mod.rs` are the layer's rules: a
+change to them is a request. An element that fades in as it appears is drawn through `components::entrance`, from the
+area's own code, and `components/transition.rs` (tested in `components/tests/transition.rs`), the one owner of one-shot
+transitions, is a rule too: a change to it, a new transition included, is a request.
 
 Lint exceptions: 1: GPUI's `with_animation` in `components::transition::one_shot`, the one-shot transitions the ticker's
 ten ticks a second cannot draw (SPEC_impl.md, "Animation time: the ticker"; the migration's orchestrator approved this
@@ -798,10 +801,11 @@ Lint exceptions: none.
 Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it. Another area
 uses one of its items: the status sounds read which view the listing answers (`SessionList::listing_view`,
 other-dialogs), so that status changes seen while a host or status filter change is unanswered are recorded without a
-sound. They rely on the list notifying when such an answer arrives, so the sounds see the view change. The table holds
-only whole paths, so the row covers the whole session list module root and the owner's own changes to it are reported
-too; the review gate passes those that leave the shared item alone. Another area's change follows the pattern already
-there, and the review gate judges it.
+sound. They rely on the list notifying when such an answer arrives, so the sounds see the view change. The templates
+dispatcher returns the list from the Hosts panel after a quick launch from the page (`show_sessions`,
+templates-and-quick-launch). The table holds only whole paths, so the row covers the whole session list module root and
+the owner's own changes to it are reported too; the review gate passes those that leave the shared item alone. Another
+area's change follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -879,8 +883,9 @@ Extension points: reported, the whole file: owned by the templates-and-quick-lau
 search the template lists share, and shared with the launcher, whose `tl:` search lists and matches templates through it
 (`rows`, `Row`, `matches`), and with sidebar-and-session-view, whose quick switcher lists templates and acts on a pick
 through it (`template_query`, `rows`, `Row`, `pick_from_switcher`, `quick_launch_row_label`,
-`quick_launch_from_switcher`). The Cmd+J list, the other list it was built for, is not built yet. Another area's change
-follows the pattern already there, and the review gate judges it.
+`quick_launch_from_switcher`), and whose templates-only mode of that switcher, the Cmd+J list, starts the chosen
+template through it (`launch_from_list`). Another area's change follows the pattern already there, and the review gate
+judges it.
 
 Lint exceptions: none.
 
@@ -898,6 +903,25 @@ Extension points: reported, the whole file: owned by the templates-and-quick-lau
 with the launcher, whose Name field shows a template's base name as numbered if taken, and says when the base was taken
 (`template_base`, `pill`, `taken_note`). Another area's change follows the pattern already there, and the review gate
 judges it.
+
+Lint exceptions: none.
+
+### Shortcuts overview
+
+Extension points: reported, the whole file: owned by the other-dialogs area, which built it as the Keyboard shortcuts
+overview. Another area uses one of its items: the sidebar's quick switcher, in its Cmd+J mode, draws its ⚡ and
+number-key chips as the overview does (`chip`, sidebar-and-session-view). The table holds only whole paths, so the row
+covers the whole overview and the owner's own changes to it are reported too; the review gate passes those that leave
+the shared item alone. Another area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
+### Host status
+
+Extension points: reported, the whole file: owned by the settings-and-hosts area, which built it as what the host rail
+and the attention list read about each host, and shared with sidebar-and-session-view, which draws the host rail from it
+(`host_status`, `HostStatus`, `Activity`, `Urgency`, `observe_changes`). Another area's change follows the pattern
+already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -1059,3 +1083,5 @@ conflict marker.
 | Template rows          | `crates/gui/farhelm-gui/src/templates/rows.rs`          | `reported`    |
 | Template dispatch      | `crates/gui/farhelm-gui/src/templates/dispatch.rs`      | `reported`    |
 | Template checkout name | `crates/gui/farhelm-gui/src/templates/checkout_name.rs` | `reported`    |
+| Shortcuts overview     | `crates/gui/farhelm-gui/src/shortcuts.rs`               | `reported`    |
+| Host status            | `crates/gui/farhelm-gui/src/hosts/status.rs`            | `reported`    |
