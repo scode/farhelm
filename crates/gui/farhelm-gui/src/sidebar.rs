@@ -43,6 +43,13 @@
 //! the main view after the pane ([`Sidebar::grip`]), since GPUI gives the pointer to whatever is drawn last and the
 //! pane would otherwise take the 4 pixels the divider reaches over.
 //!
+//! The sidebar also draws the edge that hover help placed beside it sits against ([`layers::beside_edge`]: SPEC.md's
+//! session-row hovers and host progress card). It is drawn once per window, on a borderless box around the bordered
+//! column, the host rail and the list included: a tracker covers the box inside its element's border, and the old app
+//! measured the help's 6-pixel gap from outside the column's 1-pixel right border, so drawing it on the column itself
+//! would put help a pixel nearer than the old app did. Without it, help that asks to sit beside the sidebar shows at
+//! the pointer.
+//!
 //! NOTE: Not built here, each with its own area: the macOS title band (the 48-pixel app bar with room for the window
 //! buttons and the window drag on its empty background, the desktop-integration area's), the updater's states and
 //! actions in the version readout (the same area's), and the rail's expansion, which widens the shown sidebar by 164
@@ -68,7 +75,7 @@ use crate::session::{self, PerSession};
 use crate::session_list::SessionList;
 use crate::theme::{self, metrics};
 use crate::update_readout::view::VersionReadout;
-use crate::{operations, render_count};
+use crate::{layers, operations, render_count};
 
 /// The sidebar's width while the helm stores none: `--sidebar-width`'s default, the rail included, which the theme
 /// keeps as [`metrics::SIDEBAR_WIDTH`] (the screenshot goldens draw the session list at it too).
@@ -334,6 +341,15 @@ impl Render for Sidebar {
                 column.child(header::header(self.readout.clone(), window, cx))
             })
             .child(div().flex_1().min_h_0().child(self.session_list.clone()));
+        // The column inside a box of exactly its size with no border of its own, which records the column's outer edge
+        // for help beside the sidebar (the module docs): positioned, so the edge's tracker covers it.
+        let column = div()
+            .relative()
+            .flex()
+            .flex_none()
+            .h_full()
+            .child(column)
+            .child(layers::beside_edge(window, cx));
         // The column, then the divider's strip over the column's edge and reaching over the pane, its negative right
         // margin handing those pixels back so the pane starts at the column's edge.
         div()
