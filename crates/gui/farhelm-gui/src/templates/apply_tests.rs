@@ -14,11 +14,12 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::ui_channel::{HostStateView, HostView, SessionRow};
 use farhelm_proto::{
-    CommandLaunch, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer,
-    SessionInfo, SessionLaunch,
+    CommandLaunch, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget,
+    Place, RestartOffer, SessionInfo, SessionLaunch,
 };
 
 use super::apply::{Applied, Context, apply, install_identity, snapshot};
+use crate::hosts::offers::HostKind;
 use crate::launcher::draft::{LaunchDraft, Tab};
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -38,8 +39,11 @@ fn hosts() -> Vec<HostView> {
     let mut two = one.clone();
     two.id = 2;
     two.identity = Some("install-two".into());
-    // The premise the host tests rely on: both rows offer a usable identity.
+    // The premise the host tests rely on: both rows offer a usable identity, on a host no environment owns. The
+    // placement tests rely on both being container hosts, so each holds a container place.
     assert!(matches!(one.state, HostStateView::Connected { .. }));
+    assert!(!one.is_session_owned);
+    assert!(HostKind::of(&one).holds_containers());
     vec![one, two]
 }
 
@@ -64,11 +68,14 @@ fn default_folder(host: i64) -> String {
     format!("/home/{host}")
 }
 
-/// Everything a test applies against. Held in one place so each test can borrow a [`Context`] from it.
+/// Everything a test applies against. Held in one place so each test can borrow a [`Context`] from it. The recipe
+/// catalog lists `web` and `api`; the places a placement may name follow from the hosts (both are the helm's own kind,
+/// which can hold containers).
 struct Fixture {
     hosts: Vec<HostView>,
     catalog: Vec<LaunchCatalogModel>,
     wrappers: BTreeMap<LaunchHarness, Vec<String>>,
+    recipes: Vec<String>,
 }
 
 impl Fixture {
@@ -80,6 +87,7 @@ impl Fixture {
                 LaunchHarness::Codex,
                 vec!["env".into(), "FOO='a b'".into()],
             )]),
+            recipes: vec!["web".into(), "api".into()],
         }
     }
 
@@ -89,6 +97,7 @@ impl Fixture {
             catalog: Some(&self.catalog),
             remembered_wrappers: &self.wrappers,
             default_folder: &default_folder,
+            known_recipes: &self.recipes,
         }
     }
 
@@ -1187,4 +1196,226 @@ fn a_later_edit_after_the_switch_keeps_the_switchs_banner() {
         .expect("the switch to Pi raised the banner before the later edit");
     assert_eq!(escalation.after, Some(LaunchPermission::Yolo));
     assert_eq!(*escalation.undo, before);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Environment placements
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The target a container template of `recipe` on host `host` stores.
+fn container(recipe: &str, host: i64) -> LaunchTarget {
+    LaunchTarget::Environment {
+        recipe: recipe.into(),
+        place: Place::PodmanHost(host),
+    }
+}
+
+/// A template named `name` that places sessions at `target` and sets nothing else.
+fn placed(name: &str, target: LaunchTarget) -> LaunchTemplate {
+    template(
+        name,
+        TemplateFields {
+            target: Some(target),
+            ..TemplateFields::default()
+        },
+    )
+}
+
+/// SPEC.md, "Creation": templates "carry the recipe and place together", and applying one is the same as choosing it by
+/// hand, so a container template must land as New container does: the target set, the folder at the environment's home
+/// whatever folder the draft had, and the Host row's host kept underneath for when the user leaves the environment. The
+/// snapshot, which the fold and Save as template read, then reports the target and not that host, which the launch
+/// never uses. A container host whose Podman check has no result still counts as a known place: whether it can take a
+/// container now is the launcher's refusal, not the template's. Specified: a fresh New on host 1 in `/home/1`, given a
+/// template of `web` on host 2, whose check has no result, holds that target, `~` as its folder, and still host 1, and
+/// its snapshot names the target and no host.
+#[test]
+fn a_container_template_enters_a_new_container_at_its_home() {
+    let mut fixture = Fixture::new();
+    fixture.hosts[1].container_check = None;
+    let mut draft = LaunchDraft::new(Some(1), "/home/1".into(), None);
+    fixture
+        .apply(&mut draft, &[placed("web-box", container("web", 2))])
+        .unwrap();
+    assert_eq!(draft.target, Some(container("web", 2)));
+    assert_eq!(draft.folder.value(), "~", "the environment's home");
+    assert_eq!(
+        draft.host,
+        Some(1),
+        "the Host row's host is kept underneath"
+    );
+    let state = snapshot(&draft, &fixture.hosts);
+    assert_eq!(
+        (state.host, state.target),
+        (None, Some(container("web", 2)))
+    );
+}
+
+/// The Runs on switch ignores a press of the segment already chosen (SPEC.md: "An active segment keeps its explicit
+/// choices"), so a template for that segment must change its recipe and host as choosing them in their own fields
+/// does, or it would apply as nothing; and like those fields it must change nothing else. Specified: a
+/// draft already in a container of `web` on host 1, with a typed name, given a template of `api` on host 2, differs
+/// from before in its target alone.
+#[test]
+fn a_template_for_the_chosen_segment_changes_only_its_recipe_and_host() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    fixture
+        .apply(&mut draft, &[placed("web-box", container("web", 1))])
+        .unwrap();
+    draft.edit_name("review".into());
+    let before = draft.clone();
+    assert_eq!(
+        before.target,
+        Some(container("web", 1)),
+        "the premise: in a container"
+    );
+    fixture
+        .apply(&mut draft, &[placed("api-box", container("api", 2))])
+        .unwrap();
+    let expected = LaunchDraft {
+        target: Some(container("api", 2)),
+        ..before
+    };
+    assert_eq!(draft, expected);
+}
+
+/// Templates saved before targets existed store a recipe alone, and the proto reads it as that recipe on the Tensorlake
+/// account; such a template must keep launching where it always did. Specified: a template with only `recipe: web`
+/// leaves the draft in a new sandbox of `web`.
+#[test]
+fn a_legacy_recipe_template_becomes_a_sandbox_target() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    let legacy = template(
+        "legacy",
+        TemplateFields {
+            recipe: Some("web".into()),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[legacy]).unwrap();
+    assert_eq!(
+        draft.target,
+        Some(LaunchTarget::Environment {
+            recipe: "web".into(),
+            place: Place::TensorlakeAccount,
+        })
+    );
+}
+
+/// SPEC.md, "Creation": "Missing recipes or removed place hosts make that placement inapplicable", and a template that
+/// does not apply changes nothing; a placement on a host that is gone, or that is an environment's own, must not launch
+/// somewhere else either. Specified: a target naming the unknown recipe `gone`, one on host 7 (no such host) and one on
+/// host 2 once it is a container's own host are each refused, naming the recipe or the place, with the draft as before.
+#[test]
+fn a_missing_recipe_or_removed_place_host_is_refused_with_nothing_applied() {
+    let mut fixture = Fixture::new();
+    // An environment's own host can hold no containers, whatever else its row says.
+    fixture.hosts[1].kind = "podman".into();
+    let mut draft = new_draft();
+    let before = draft.clone();
+    for (target, words) in [
+        (
+            container("gone", 1),
+            "names a recipe that is unavailable here",
+        ),
+        (
+            container("web", 7),
+            "names a place that is unavailable here",
+        ),
+        (
+            container("web", 2),
+            "names a place that is unavailable here",
+        ),
+    ] {
+        let refusal = fixture
+            .apply(&mut draft, &[placed("box", target)])
+            .unwrap_err();
+        assert!(refusal.contains(words), "{refusal}");
+        assert_eq!(draft, before, "nothing applied");
+    }
+}
+
+/// Placement is one choice: an installed host or a new environment (SPEC.md, "Sandbox sessions": "The two choices are
+/// mutually exclusive"). A later template's host must therefore take the launch out of the environment, as picking a
+/// host by hand does, or it would launch into the environment the user stacked a host over. Specified: a batch of a
+/// container template and then a template of host 2 leaves no target and host 2 chosen.
+#[test]
+fn a_template_host_leaves_the_environment() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    let host_two = template(
+        "host-two",
+        TemplateFields {
+            host: Some("install-two".into()),
+            ..TemplateFields::default()
+        },
+    );
+    fixture
+        .apply(
+            &mut draft,
+            &[placed("web-box", container("web", 1)), host_two],
+        )
+        .unwrap();
+    assert_eq!(draft.target, None);
+    assert_eq!(draft.host, Some(2));
+}
+
+/// Restart with keeps the session where it runs (SPEC.md, "Restart with"), so a template that would move it into a new
+/// environment must be refused rather than ignored, and, as the old app did, under the host it holds. Specified: a
+/// container template in Restart with is refused naming the host as kept fixed, and the draft is as before.
+#[test]
+fn restart_with_refuses_a_placement() {
+    let fixture = Fixture::new();
+    let mut draft = restart_draft();
+    let before = draft.clone();
+    let refusal = fixture
+        .apply(&mut draft, &[placed("web-box", container("web", 1))])
+        .unwrap_err();
+    assert!(refusal.contains("its host cannot change here"), "{refusal}");
+    assert_eq!(draft, before, "nothing applied");
+}
+
+/// SPEC.md, "Sandbox sessions": "a recipe with a non-home Folder is inapplicable", and a new environment's folder is
+/// fixed to its home, so a template's other folder cannot apply there; applied in part (the replay's folder edit is
+/// ignored under a target), the template would break the all-or-nothing rule. Specified: a draft already in a container
+/// of `web`, given a template with folder `/x`, and a fresh draft given the batch of that container template and then
+/// the folder template, are each refused naming the folder, with the draft as before.
+#[test]
+fn a_template_folder_is_refused_in_a_new_environment() {
+    let fixture = Fixture::new();
+    let folder = template(
+        "folder",
+        TemplateFields {
+            destination: Some(TemplateDestination::Folder("/x".into())),
+            ..TemplateFields::default()
+        },
+    );
+    let mut draft = new_draft();
+    fixture
+        .apply(&mut draft, &[placed("web-box", container("web", 1))])
+        .unwrap();
+    let before = draft.clone();
+    assert_eq!(
+        before.target,
+        Some(container("web", 1)),
+        "the premise: in a container"
+    );
+    let refusal = fixture
+        .apply(&mut draft, std::slice::from_ref(&folder))
+        .unwrap_err();
+    assert!(refusal.contains("its folder"), "{refusal}");
+    assert_eq!(draft, before, "nothing applied");
+
+    let mut draft = new_draft();
+    let before = draft.clone();
+    let refusal = fixture
+        .apply(
+            &mut draft,
+            &[placed("web-box", container("web", 1)), folder],
+        )
+        .unwrap_err();
+    assert!(refusal.contains("its folder"), "{refusal}");
+    assert_eq!(draft, before, "nothing applied");
 }

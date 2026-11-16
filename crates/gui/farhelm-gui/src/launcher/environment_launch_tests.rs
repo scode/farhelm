@@ -36,7 +36,7 @@ const NEW_HOST: i64 = 99;
 const RUN: &str = "r1";
 
 /// The pushed catalog holding `web`.
-pub(super) fn catalog() -> CollectionState {
+pub(crate) fn catalog() -> CollectionState {
     CollectionState {
         collection: Collection::Recipes,
         meta: meta(&["web"]),
@@ -150,7 +150,7 @@ pub(super) fn window_with_more(
 }
 
 /// [`command_draft`] in a new container of `web` on host1, as New container's segment enters it.
-fn container_draft() -> LaunchDraft {
+pub(crate) fn container_draft() -> LaunchDraft {
     let mut draft = command_draft();
     draft.choose_runs_on(
         RunsOn::New(ProviderKind::Podman),
@@ -182,7 +182,7 @@ fn window(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
 
 /// Answer every command the window sent (an empty catalog for `launch-catalog`, an empty history, nothing for the rest)
 /// round after round, except those `keep` picks, which are returned unanswered.
-pub(super) fn answer_except(
+pub(crate) fn answer_except(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
     keep: impl Fn(&FakeCommand) -> bool,
