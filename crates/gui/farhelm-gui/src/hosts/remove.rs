@@ -278,6 +278,10 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
     }
     let question = question
         .tile(move |_, cx| host_mark(icon, color, px(TILE_MARK), theme::palette(cx)))
+        // SPEC.md, "Reaching everything by keyboard": the body (the destination or machine, what removing or deleting
+        // does, and a refusal's reason) is text only for every kind of host, so it always gets a stop of its own, which
+        // keyboard users can scroll before they answer. The name is the old dialog's for that region.
+        .scroll_stop("Host removal details")
         // SPEC.md, "Opening and closing": the dialogs that share the host and Settings installer keep focus on the
         // control in use when their empty space is clicked.
         .keeps_focus_on_empty_click();
