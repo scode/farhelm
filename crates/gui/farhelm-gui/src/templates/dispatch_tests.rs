@@ -365,16 +365,19 @@ fn open_new(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
 
 // ---- The page ----
 
-/// The point of quick launch is a session without the launcher: SPEC.md, "starts it directly in the desktop app when
-/// no dialog is open, without showing the launcher on success", through "exactly New's defaults and ordinary launch
-/// path", and success opens the session the user waited for. The "never shown" mark must hold until that success, since
-/// naming the session turns on it. Specified: with `go` marked, the chord sends one create of New's prefill (host1,
-/// `~`) with the template's command, opens no layer and leaves the launch marked as a quick launch never shown; a press
-/// while the create is out sends nothing more, and the sequence prefix arms nothing then (the old app refused it while a
-/// launch was pending); a create still out two seconds later shows the launcher's progress pill, as any hidden launch
-/// does (SPEC.md: "Once the request has waited about two seconds, a small pill ... shows"), since a quick launch is
-/// nothing but a launch whose launcher was never drawn; once the helm lists the new session and answers, the pill goes
-/// and the session is selected.
+/// The point of quick launch is a session without the launcher: SPEC.md, "starts it directly in the desktop app when no
+/// dialog is open, without showing the launcher on success", through "exactly New's defaults and ordinary launch path".
+/// The "never shown" mark must hold until the launch settles, since naming the session turns on it. Specified: with
+/// `go` marked, the chord sends one create of New's prefill (host1, `~`) with the template's command, opens no layer
+/// and leaves the launch marked as a quick launch never shown; a press while the create is out sends nothing more, and
+/// the sequence prefix arms nothing then (the old app refused it while a launch was pending); a create still out two
+/// seconds later shows the launcher's progress pill, as any hidden launch does (SPEC.md: "Once the request has waited
+/// about two seconds, a small pill ... shows"), since a quick launch is nothing but a launch whose launcher was never
+/// drawn; once the helm lists the new session and answers, the pill goes, and since the presses made while the create
+/// was out count as moving on (SPEC.md, "Creation": a launch opens its session only if the user "has pressed no key or
+/// pointer button anywhere in the page since their last answer to it"), nothing is selected and the "Started" report
+/// names the session. A quick launch the user waited for opening its session is
+/// `a_taken_base_name_is_numbered_and_launched_out_of_sight`.
 #[gpui::test]
 fn the_chord_launches_the_marked_template_unseen(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, Some("go"));
@@ -421,8 +424,13 @@ fn the_chord_launches_the_marked_template_unseen(cx: &mut TestAppContext) {
         "the reply took the pill down"
     );
     assert_eq!(
-        cx.update(|_, cx| local_state::selected(cx)).as_deref(),
-        Some("n")
+        cx.update(|_, cx| local_state::selected(cx)),
+        None,
+        "the user moved on, so nothing opened"
+    );
+    assert_eq!(
+        label(cx, "launch-started-report").as_deref(),
+        Some("Started “n”")
     );
 }
 

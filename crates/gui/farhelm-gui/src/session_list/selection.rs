@@ -40,6 +40,19 @@
 //!   automatically, and a selection proven gone is cleared rather than replaced ([`hold_for_deletes`]); the choice is
 //!   made once every Delete has settled. SPEC.md: "Automatic selection after Delete waits until every admitted Delete
 //!   has settled … and never opens a session that is still being deleted". A user's own click is not held back.
+//! - **A launch keeps an empty selection empty.** Once the list is empty with nothing open while a launch (New, Clone
+//!   or a quick launch) is in flight, no session opens automatically for the rest of the UI session, until something
+//!   is selected by any other path: the launch opening its session, a click, the quick switcher ([`hold_for_launch`]).
+//!   SPEC.md, "Creation": a launch the user moved on from leaves "the selected session and its remembered selection" as
+//!   they were, and over an empty fleet that is nothing. The helm pushes the new row before it answers the create, so
+//!   without the hold the first rule above would open the row before the launch could check whether the user moved
+//!   on; and holding only while the launch is in flight would open it as the reply settles. The old app retired its
+//!   startup pick the same way when a create was dispatched with nothing selected (`list/view.rs`,
+//!   `SelectionIntent::create_dispatched`), with two differences that follow SPEC.md more closely: the old app checked
+//!   only when the launch was sent, and only if nothing had been open since the window loaded, so after the last
+//!   session was deleted a launch the user moved on from still opened its row. While rows wait on a Delete's hold and
+//!   the list is not empty, nothing is set, so the successor pick follows once the Deletes settle. A reset starts a
+//!   new UI session, and with it the ordinary pick.
 //! - **A Replace keeps its own source open until it answers.** The helm removes a Replace's source before it replies,
 //!   and the reply is what opens the replacement in the source's place (SPEC.md: "A completed Replace opens its
 //!   replacement only if the source is still selected"), so while the open session's own Replace is in flight its
@@ -159,6 +172,17 @@ pub(crate) fn settle(
 pub(crate) fn hold_for_deletes(change: Change, deleting: bool) -> Change {
     match change {
         Change::Select(_) if deleting => Change::Clear,
+        change => change,
+    }
+}
+
+/// `change`, held back while `kept_empty` (a launch went out while nothing was open, and nothing has been selected
+/// since; see the module docs' "A launch keeps an empty selection empty"): an automatic choice becomes
+/// [`Change::Keep`], so nothing opens. Only an automatic choice is held; the list never sets `kept_empty` while
+/// something is selected, so keeping and clearing never meet it.
+pub(crate) fn hold_for_launch(change: Change, kept_empty: bool) -> Change {
+    match change {
+        Change::Select(_) if kept_empty => Change::Keep,
         change => change,
     }
 }

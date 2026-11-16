@@ -645,16 +645,10 @@ fn while_new_is_disabled_focus_rests_on_the_root_and_returns_to_new(cx: &mut Tes
     );
 }
 
-/// The daily path through New as home: a user's first launch over an empty fleet. Focus goes from New (home) to the
-/// window's root while New is disabled during the create, and must end on the new session's terminal, never back on
-/// New: SPEC.md, "Who may move focus", has a launch the user waited for open "with its terminal focused". This holds
-/// because the helm pushes every change a command causes before the command's reply (SPEC_impl.md), so the listing
-/// that holds the new session, and so makes the fleet non-empty and opens the session, arrives before the reply
-/// re-enables New. Specified: over an empty fleet with New focused, the launcher opened on a complete Command draft and
-/// Launch pressed send one create; once the helm pushes a listing holding b and then answers the create with b, b is
-/// selected and its terminal holds focus; New holds focus after none of these steps.
-#[gpui::test]
-fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut TestAppContext) {
+/// The opening both empty-fleet launch tests share: the main window over an empty fleet, with New home; the launcher
+/// opened on a complete Command draft (sending nothing); Launch pressed, which sends one create. Returns the fleet and
+/// that create's envelope id, to answer it by.
+fn launched_over_an_empty_fleet(cx: &mut TestAppContext) -> (Fleet<'_>, u64) {
     let mut fleet = open_main(
         cx,
         vec![
@@ -681,12 +675,40 @@ fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut
         creates_answering(&mut fleet.helm, fleet.cx, &none).is_empty(),
         "the premise: opening sends no create"
     );
-
     click(fleet.cx, "launcher-launch");
     let [create] = &creates_answering(&mut fleet.helm, fleet.cx, &none)[..] else {
         panic!("Launch sent one create");
     };
     let create = create.id;
+    (fleet, create)
+}
+
+impl Fleet<'_> {
+    /// The helm pushes the listing that holds the launched session b, as it does before it answers the create.
+    fn push_b(&mut self) {
+        let state = listing(&["b"], &[session("b")]);
+        self.helm.push(CollectionChanges {
+            collection: state.collection,
+            meta: state.meta,
+            upsert: state.entries,
+            remove: Vec::new(),
+        });
+        settle(self.cx);
+    }
+}
+
+/// The daily path through New as home: a user's first launch over an empty fleet. Focus goes from New (home) to the
+/// window's root while New is disabled during the create, and must end on the new session's terminal, never back on
+/// New: SPEC.md, "Who may move focus", has a launch the user waited for open "with its terminal focused". The helm
+/// pushes every change a command causes before the command's reply (SPEC_impl.md), so the listing holding the new
+/// session arrives first and makes the fleet non-empty, though it opens nothing (the list holds its automatic pick
+/// while a launch over an empty fleet decides, `session_list::selection`'s "A launch keeps an empty selection empty");
+/// the reply is what opens the session. Specified: over an empty fleet with New focused, the launcher opened on a
+/// complete Command draft and Launch pressed send one create; once the helm pushes a listing holding b and then answers
+/// the create with b, b is selected and its terminal holds focus; New holds focus after none of these steps.
+#[gpui::test]
+fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut TestAppContext) {
+    let (mut fleet, create) = launched_over_an_empty_fleet(cx);
     let new_focused = |fleet: &mut Fleet<'_>| {
         test_support::focused_id(fleet.cx).as_deref() == Some(crate::session_list::NEW_ID)
     };
@@ -695,14 +717,7 @@ fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut
         "after Launch, New does not hold focus"
     );
 
-    let state = listing(&["b"], &[session("b")]);
-    fleet.helm.push(CollectionChanges {
-        collection: state.collection,
-        meta: state.meta,
-        upsert: state.entries,
-        remove: Vec::new(),
-    });
-    settle(fleet.cx);
+    fleet.push_b();
     assert!(
         !new_focused(&mut fleet),
         "after the listing, New does not hold focus"
@@ -720,6 +735,36 @@ fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut
         !new_focused(&mut fleet),
         "after the reply, New does not hold focus"
     );
+}
+
+/// SPEC.md, "Creation": when a launch does not open its session because the user moved on, "the selected session and
+/// its remembered selection stay as they were, and focus, panels, menus and dialogs stay as the user left them", and
+/// the Started report shows "including when a filter or Hosts hides the new row". Over an empty fleet "as they were"
+/// is nothing selected, which the list's own rule (pick a session whenever rows exist and nothing is open) would break
+/// as soon as the helm pushes the new row, before the launch's reply can check whether the user moved on. The old app
+/// guarded exactly this race (its `nonblocking-launch.spec.ts` "New from an empty visible fleet preserves no selection
+/// after opening Hosts"). Specified: over an empty fleet, Launch sends one create and Hosts is pressed; the listing
+/// holding b selects nothing; the create's reply naming b still selects nothing, Hosts still shows and the "Started"
+/// report names b.
+#[gpui::test]
+fn a_first_launch_the_user_moved_on_from_selects_nothing(cx: &mut TestAppContext) {
+    let (mut fleet, create) = launched_over_an_empty_fleet(cx);
+    click(fleet.cx, "hosts-panel-toggle");
+    let hosts_shown = |fleet: &mut Fleet<'_>| node(&frame(fleet.cx), "hosts-panel").is_some();
+    assert!(hosts_shown(&mut fleet), "the premise: Hosts shows");
+
+    fleet.push_b();
+    assert_eq!(fleet.selected(), None, "the pushed row opened nothing");
+
+    fleet
+        .helm
+        .reply(create, 200, Some(session("b").entry().value));
+    settle(fleet.cx);
+    assert_eq!(fleet.selected(), None, "the reply opened nothing");
+    assert!(hosts_shown(&mut fleet), "Hosts still shows");
+    let report = node(&frame(fleet.cx), "launch-started-report")
+        .and_then(|node| node.label.as_ref().map(ToString::to_string));
+    assert_eq!(report.as_deref(), Some("Started “b”"));
 }
 
 impl Fleet<'_> {

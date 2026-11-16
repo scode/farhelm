@@ -67,6 +67,7 @@ use farhelm_proto::session_requests::{
 use farhelm_proto::ui_channel::{Availability, Collection, HostView, SessionList};
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
+use super::draft::Install;
 use super::pill::{self, ProgressPill, StartedReport};
 use super::view::{Launcher, show};
 use crate::focus::{self, Mark};
@@ -433,6 +434,15 @@ impl Request {
         }
     }
 
+    /// The host an ordinary create is sent to; `None` for every other request, which acts on its source's host or
+    /// creates a new one.
+    fn created_on(&self) -> Option<i64> {
+        match self {
+            Request::Create(body) => body.host,
+            Request::Environment(_) | Request::Replace { .. } | Request::Restart { .. } => None,
+        }
+    }
+
     /// The progress pill's verb (the old `LaunchAction::present`).
     fn verb(&self) -> &'static str {
         match self {
@@ -488,6 +498,7 @@ pub(super) fn start(
         key: key.clone(),
         source: request.source(),
         work: request.work(),
+        installation: request.created_on().and_then(|host| install_of(host, cx)),
     };
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
@@ -580,7 +591,32 @@ struct Sent {
     key: OpKey,
     source: Option<String>,
     work: Work,
+    /// The installation an ordinary create was sent to, as the store held it at the press; `None` for every other
+    /// request. A refusal that comes back after that host's registry row moved to another installation is not shown in
+    /// its own words ([`EARLIER_SETUP_REFUSED`], [`EARLIER_SETUP_TIMED_OUT`]).
+    installation: Option<Install>,
 }
+
+/// The installation `host`'s registry row names in the current store, if the store lists the host.
+fn install_of(host: i64, cx: &App) -> Option<Install> {
+    let store = session::current_store(cx)?;
+    store
+        .read(cx)
+        .collections()
+        .get::<HostView>(&HostView::key(host))
+        .map(Install::of)
+}
+
+/// What a refused create says when its host's registry row moved to another installation (or left the registry) while
+/// it was out, the old launcher's words. The refusal came from the earlier installation, and its own words could
+/// describe a machine the launcher no longer targets, so they are not shown beside a draft that now names another
+/// (the old app's "launcher shows a generic refusal after its target changes").
+const EARLIER_SETUP_REFUSED: &str = "A launch for an earlier setup was refused";
+
+/// What a create says instead of [`EARLIER_SETUP_REFUSED`] when the helm's host-reply bound cut it off, so it may still
+/// start: "refused" would contradict the notice saying so. These are the old launcher's words too.
+const EARLIER_SETUP_TIMED_OUT: &str =
+    "A launch for an earlier setup timed out; its outcome is unknown";
 
 /// `launcher`'s request (`sent`) settled. `mark` is the user's answer the launch counts from (the press of Launch, or the YOLO
 /// question's answer), which also reopens the launcher: the layer manager refuses a mark the user moved on from.
@@ -615,7 +651,12 @@ fn settle(
         wait_for_run(launcher, body.clone(), sent, window, mark, cx);
         return;
     }
-    let Sent { key, source, work } = sent;
+    let Sent {
+        key,
+        source,
+        work,
+        installation,
+    } = sent;
     hide_progress(window, cx);
     // The store counts from when it sent the create; `mark` from the answer that asked for it, which for a create sent
     // after the YOLO question's host write is earlier, and presses made during that write count too.
@@ -668,6 +709,19 @@ fn settle(
             // its marker, and is refused like any other.
             let may_still_start =
                 refusal.status == 504 && !refusal.has(HelmMarker::CreateUnaccepted);
+            let moved = installation
+                .as_ref()
+                .is_some_and(|sent| install_of(sent.host, cx).as_ref() != Some(sent));
+            if moved && let Some(operations) = session::current_operations(cx) {
+                operations.update(cx, |operations, cx| {
+                    let words = if may_still_start {
+                        EARLIER_SETUP_TIMED_OUT
+                    } else {
+                        EARLIER_SETUP_REFUSED
+                    };
+                    operations.note(&key, work, HostText::from_host(words), cx)
+                });
+            }
             let refused_launch = RefusedLaunch {
                 key,
                 work,
