@@ -90,6 +90,9 @@ mod recipe_place_tests;
 #[cfg(test)]
 mod recipe_tests;
 mod recipes;
+/// A recipe's one-line summary (size, base, packages, tunnels), which Add host's Tensorlake sandbox shows under its Recipe
+/// choice as Recipes shows it under the recipe's name, so one recipe never has two descriptions.
+pub(crate) use recipes::summary as recipe_summary;
 mod refused;
 mod tensorlake;
 mod tensorlake_key;
