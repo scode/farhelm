@@ -348,10 +348,17 @@ impl Launcher {
             Row::Permission(permission) => {
                 self.choose_permissions(permission.permission(), window, cx)
             }
-            Row::UsePath(path) | Row::Folder(path) => {
+            Row::UsePath(path) => {
                 // A folder taken from search is a pick, not typing: the folder list shows every recent folder again.
                 self.folder_picked();
                 self.draft.edit_folder(path);
+                self.sync_fields(window, cx);
+                self.changed(cx);
+            }
+            // A saved folder is the host's history, and stays bound to its installation.
+            Row::Folder(path) => {
+                self.folder_picked();
+                self.take_history_folder(path, cx);
                 self.sync_fields(window, cx);
                 self.changed(cx);
             }

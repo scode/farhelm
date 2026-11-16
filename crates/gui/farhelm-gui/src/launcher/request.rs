@@ -34,7 +34,10 @@ use farhelm_proto::{
     split_permission_flags, split_wrapper_prefix,
 };
 
-use super::draft::{Catalog, LaunchDraft, Mode, Restart, RestartBaseline, Tab, repo_identifier};
+use super::draft::{
+    Catalog, FOLDER_INSTALLATION_MOVED, LaunchDraft, Mode, Restart, RestartBaseline, Tab,
+    repo_identifier,
+};
 
 /// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog as the
 /// launcher read it, and a managed checkout's preview.
@@ -92,7 +95,13 @@ impl LaunchDraft {
         if let Some(reason) = self.checkout_refusal(target) {
             return Some(reason.to_owned());
         }
-        if self.folder_default_waiting() {
+        // The old order: the remembered folder's installation, then the folder default's wait.
+        if self.folder_installation_moved(target.hosts) {
+            return Some(FOLDER_INSTALLATION_MOVED.to_owned());
+        }
+        // A default for an installation the host row no longer names is about to be decided again (while drawing), so
+        // it waits as a pending one does, even in the frame before that.
+        if self.folder_default_waiting() || self.default_moved(target.hosts) {
             return Some(FOLDER_DEFAULT_WAITING.to_owned());
         }
         match self.tab {

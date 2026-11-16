@@ -246,9 +246,10 @@ impl Launcher {
     fn choose_folder(&mut self, choice: FolderChoice, window: &mut Window, cx: &mut Context<Self>) {
         self.close_folder_list(window, cx);
         self.folder_picked();
-        let folder = match choice {
-            FolderChoice::Recent(folder) => folder,
-            FolderChoice::Home => "~".to_owned(),
+        match choice {
+            // A recent folder is this host's history, and stays bound to its installation.
+            FolderChoice::Recent(folder) => self.take_history_folder(folder, cx),
+            FolderChoice::Home => self.draft.edit_folder("~".to_owned()),
             FolderChoice::LocalHome => {
                 // `folder_choices` offers Local home only where the host is not held; the guard stays so a release build
                 // could never move a held host if that ever changed.
@@ -257,10 +258,9 @@ impl Launcher {
                 if let Some(local) = local.filter(|_| !self.draft.holds(Field::Host)) {
                     self.pick_host(local, window, cx);
                 }
-                "~".to_owned()
+                self.draft.edit_folder("~".to_owned());
             }
-        };
-        self.draft.edit_folder(folder);
+        }
         self.sync_fields(window, cx);
         self.changed(cx);
     }
