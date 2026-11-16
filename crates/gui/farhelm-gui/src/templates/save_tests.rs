@@ -767,3 +767,92 @@ fn cancel_and_close_are_drawn_busy_during_the_save(cx: &mut TestAppContext) {
     helm.reply(id, 409, Some(json!("fixture template save refused")));
     settle(cx);
 }
+
+// ---- A template base in a managed checkout, and Launch during the save --------------------------------------------
+
+/// New on host 1 with a managed checkout of `acme/bar` chosen and `review` as the session name, set by a launch
+/// template as a base name, as template application sets it.
+fn checkout_base_draft() -> LaunchDraft {
+    let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
+    draft.choose_repository(farhelm_proto::parse_github_repo("acme/bar").unwrap());
+    draft.edit_name("review".into());
+    draft.set_template_name_kind(TemplateNameKind::Base);
+    draft
+}
+
+/// SPEC.md: "A template base is saved as its original text, never the numbered name displayed by the launcher" (the
+/// old github-checkouts "save as template keeps the unnumbered base"). Saving `review-2` would make every later session
+/// from the template start one number further on. Specified: with the helm having answered `review` as taken, so the
+/// Name field shows `review-2`, Save as template offers the name checked, its row showing `review`, and with the
+/// panel's default kind saves `review` as a base name (no `name_kind`), with the repository.
+#[test]
+fn save_as_template_keeps_the_unnumbered_base_after_the_name_moved_on() {
+    let mut draft = checkout_base_draft();
+    let title = draft.checkout_title();
+    assert!(
+        draft.advance_checkout_name(&title),
+        "the premise: the base name moves on"
+    );
+    assert_eq!(
+        draft.shown_name(),
+        "review-2",
+        "the premise: the field shows the numbered name"
+    );
+    let candidate = Candidate::from_draft(&draft, &hosts());
+    assert!(
+        candidate.checked.contains(&Field::Name),
+        "the name is checked"
+    );
+    assert_eq!(
+        choice_text(Field::Name, &candidate.fields).as_deref(),
+        Some("review"),
+        "its row shows the base"
+    );
+    let saved =
+        serde_json::to_value(candidate.selected(&candidate.checked, candidate.fields.name_kind))
+            .unwrap();
+    assert_eq!(saved["name"], json!("review"));
+    assert_eq!(saved.get("name_kind"), None, "a base name");
+    assert_eq!(saved["destination"], json!({"github": "acme/bar"}));
+}
+
+/// While Save as template's panel is open the launcher holds its Launch: a press is refused with "Finish or cancel
+/// saving the template before launching", since a launch beside the panel would start a session the user had not
+/// finished choosing to keep (the launcher's `TEMPLATE_PANEL_OPEN`). The old launcher marked Launch unavailable
+/// (`aria-disabled`) during the save while it kept focus, and its "save as template refusal respects launch focus"
+/// case checked that the refusal left focus there. Specified: a Codex draft with Guarded chosen, which Launch would
+/// start at once with the panel closed, with the save of `my-codex` out: a click on Launch sends nothing, says the
+/// panel's refusal, and leaves focus on Launch; the helm's refusal of the save is shown and focus is still on Launch,
+/// with no create sent.
+#[gpui::test]
+fn launch_sends_nothing_while_the_save_is_out_and_keeps_its_focus(cx: &mut TestAppContext) {
+    let mut draft = codex_draft();
+    // Guarded, so no YOLO question can be what stops the press.
+    draft.choose_permissions(Some(LaunchPermission::Guarded));
+    let (mut helm, cx) = launcher_on(cx, draft, &[]);
+    // A click focuses the button it presses, as it does on Linux; pinned so the premise holds on every platform.
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    click(cx, "launcher-save-template");
+    let (id, _) = save_as(&mut helm, "my-codex", cx);
+    click(cx, "launcher-launch");
+    assert!(helm.commands().is_empty(), "Launch sent no create");
+    assert!(
+        painted(cx).contains("Finish or cancel saving the template before launching"),
+        "the panel's refusal stopped the press: {}",
+        painted(cx)
+    );
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("launcher-launch"),
+        "focus is on Launch"
+    );
+    helm.reply(id, 409, Some(json!("fixture template save refused")));
+    settle(cx);
+    assert!(painted(cx).contains("fixture template save refused"));
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("launcher-launch"),
+        "the refusal left focus on Launch"
+    );
+    assert!(helm.commands().is_empty(), "and nothing was launched");
+}
