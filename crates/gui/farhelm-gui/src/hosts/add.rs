@@ -110,6 +110,7 @@ use crate::operations::{Command, OpKey, Outcome, Settled, Work};
 use crate::session;
 use crate::theme::{self, metrics};
 use tensorlake::TensorlakeForm;
+pub(super) use tensorlake::{ACCOUNT_ROUTE, read_plan};
 
 /// `.host-add-dialog`'s width.
 const WIDTH: f32 = 560.;

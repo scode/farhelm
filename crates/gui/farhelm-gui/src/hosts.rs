@@ -128,6 +128,8 @@ pub use settings::open_settings;
 pub(crate) use settings::start_yolo_without_asking_command;
 
 #[cfg(test)]
+mod environment_tests;
+#[cfg(test)]
 pub(crate) mod tests;
 
 use std::collections::HashMap;
@@ -1007,7 +1009,9 @@ fn identity_mark(host: &HostView, locality: Locality, palette: &Palette) -> AnyE
 /// versions and the remedy, which is then also its description, as the old status described only Too new.
 fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
     let words = phase::words(&host.state);
-    let ink = tone_ink(phase::tone(&host.state), palette);
+    // The host's tone, which turns amber for failed forwards beside a working connection ([`phase::host_tone`]).
+    let tone = phase::host_tone(host);
+    let ink = tone_ink(tone, palette);
     // `min_w_0` lets the status shrink below its words, so they are cut short rather than pushed out of the row.
     div()
         .min_w_0()
@@ -1021,7 +1025,7 @@ fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
             )
             .ink(ink)
             .described(offers::runs_newer_version(&host.state))
-            .content(phase_dot_and_words(&host.state, palette)),
+            .content(phase_dot_and_words(&host.state, tone, palette)),
         )
         .into_any_element()
 }
@@ -1029,9 +1033,10 @@ fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
 /// A phase's dot and words in its tone's ink, on one line, the words cut short when they do not fit: what a row's
 /// status and the host settings' header both show (the old `.host-status` span, which both drew). The host rail's
 /// connection dot takes its ink from the same tone ([`tone_ink`]), so the rail and the panel cannot disagree on a
-/// phase's color; change them together.
-fn phase_dot_and_words(state: &HostStateView, palette: &Palette) -> Div {
-    let ink = tone_ink(phase::tone(state), palette);
+/// phase's color; change them together. `tone` is the phase's, or the host's where the caller knows the host
+/// ([`phase::host_tone`]).
+fn phase_dot_and_words(state: &HostStateView, tone: Tone, palette: &Palette) -> Div {
+    let ink = tone_ink(tone, palette);
     div()
         .flex()
         .flex_row()

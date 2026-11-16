@@ -8,9 +8,11 @@ use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 
 use super::{
-    HostKind, Locality, Offers, Rerun, Update, adoptable, menu_offers, needs_app_supervisor, offers,
+    HostKind, Locality, Offers, Rerun, SetupRerun, Update, adoptable, menu_offers,
+    needs_app_supervisor, offers,
 };
 use crate::hosts::tests::{connected, host, local_down, run, skew};
+use farhelm_proto::ProviderKind;
 
 /// An idle SSH host's offers: everything an SSH host can be offered, all of it available.
 fn idle_ssh() -> Offers {
@@ -19,6 +21,7 @@ fn idle_ssh() -> Offers {
         rerun: None,
         update: Some(Update::Available),
         remove: Some(true),
+        delete: None,
         uninstall: Some(true),
         retry: Some(true),
         adopt: None,
@@ -135,6 +138,7 @@ fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_uninstall_and_re
             rerun: None,
             update: None,
             remove: Some(false),
+            delete: None,
             uninstall: Some(false),
             retry: Some(false),
             adopt: None,
@@ -158,6 +162,7 @@ fn a_running_run_holds_the_host_until_it_ends() {
             rerun: None,
             update: None,
             remove: Some(false),
+            delete: None,
             uninstall: Some(false),
             retry: Some(false),
             adopt: None,
@@ -237,6 +242,7 @@ fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
             rerun: None,
             update: Some(Update::Greyed),
             remove: None,
+            delete: None,
             uninstall: None,
             retry: Some(true),
             adopt: None,
@@ -314,6 +320,7 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
             rerun: None,
             update: None,
             remove: None,
+            delete: None,
             uninstall: None,
             retry: Some(true),
             adopt: None,
@@ -348,6 +355,7 @@ fn each_kind_decides_its_own_offers() {
             rerun: None,
             update: None,
             remove: None,
+            delete: None,
             uninstall: None,
             retry: Some(true),
             adopt: None,
@@ -357,11 +365,34 @@ fn each_kind_decides_its_own_offers() {
     assert!(!HostKind::Unrecognized.supports_appearance());
     assert!(!HostKind::Unrecognized.edits_destination());
     assert!(!HostKind::Unrecognized.removal_only_forgets());
-    for (kind, forgets, locality, edits_destination) in [
-        ("local", false, Locality::Local, false),
-        ("ssh", true, Locality::Remote, true),
-        ("tensorlake", false, Locality::Remote, false),
-        ("podman", false, Locality::Remote, false),
+    assert_eq!(HostKind::Unrecognized.provider(), None);
+    assert_eq!(HostKind::Unrecognized.setup_rerun(), None);
+    for (kind, forgets, provider, rerun, locality, edits_destination) in [
+        ("local", false, None, None, Locality::Local, false),
+        (
+            "ssh",
+            true,
+            None,
+            Some(SetupRerun::Ssh),
+            Locality::Remote,
+            true,
+        ),
+        (
+            "tensorlake",
+            false,
+            Some(ProviderKind::Tensorlake),
+            Some(SetupRerun::Tensorlake),
+            Locality::Remote,
+            false,
+        ),
+        (
+            "podman",
+            false,
+            Some(ProviderKind::Podman),
+            None,
+            Locality::Remote,
+            false,
+        ),
     ] {
         let view: HostView = host(3, kind, connected());
         assert_eq!(
@@ -374,6 +405,13 @@ fn each_kind_decides_its_own_offers() {
             forgets,
             "{kind}"
         );
+        assert_eq!(HostKind::of(&view).provider(), provider, "{kind}");
+        assert_eq!(
+            offers(&view, None, false).delete,
+            provider.map(|provider| (provider, true)),
+            "{kind}: the provider's Delete in Remove's place"
+        );
+        assert_eq!(HostKind::of(&view).setup_rerun(), rerun, "{kind}");
         assert_eq!(
             offers(&view, None, false).uninstall.is_some(),
             kind == "ssh",
@@ -392,12 +430,13 @@ fn each_kind_decides_its_own_offers() {
 /// Why this matters: Retry and Adopt are the remedies the phase details name ("... then press Retry", "Adopt the
 /// identity the host reports, or fix the destination"), so the menu must offer them exactly where those remedies are
 /// shown, and never Adopt where there is no identity to adopt (the old "identity-unverified-offers-no-adopt": the helm
-/// refuses that verb). Specified: Retry is offered available on an unreachable, a duplicate and a retired host, and on
-/// the local host, never on an environment being deleted or failing its deletion; Adopt is offered only for an identity
-/// mismatch, whose `adoptable` identity is the reported one, raw, and never for an unverified identity; with work in
-/// flight both stay offered but unavailable.
+/// refuses that verb), and a failed deletion's remedy is "Retry to delete it again". Specified: Retry is offered
+/// available on an unreachable, a duplicate and a retired host, on the local host, and on an environment whose deletion
+/// failed, never while a deletion is under way, when Delete sandbox is withheld too and offered again once the deletion
+/// failed; Adopt is offered only for an identity mismatch, whose `adoptable` identity is the reported one, raw, and
+/// never for an unverified identity; with work in flight both stay offered but unavailable.
 #[test]
-fn retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch() {
+fn retry_is_offered_in_every_phase_but_a_deletion_under_way_and_adopt_only_for_a_mismatch() {
     let unreachable = HostStateView::Unreachable {
         cause: "transport-failure".into(),
         last_error: "socket closed".into(),
@@ -421,10 +460,27 @@ fn retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch() 
         offers(&host(1, "local", connected()), None, false).retry,
         Some(true)
     );
-    for failure in [None, Some("the provider refused".to_owned())] {
-        let deleting = host(4, "tensorlake", HostStateView::Deleting { failure });
-        assert_eq!(offers(&deleting, None, false).retry, None);
-    }
+    let deleting = offers(
+        &host(4, "tensorlake", HostStateView::Deleting { failure: None }),
+        None,
+        false,
+    );
+    assert_eq!((deleting.retry, deleting.delete), (None, None));
+    let failed = offers(
+        &host(
+            4,
+            "tensorlake",
+            HostStateView::Deleting {
+                failure: Some("the provider refused".to_owned()),
+            },
+        ),
+        None,
+        false,
+    );
+    assert_eq!(
+        (failed.retry, failed.delete),
+        (Some(true), Some((ProviderKind::Tensorlake, true)))
+    );
 
     let mismatch = HostStateView::IdentityMismatch {
         recorded: "identity-before".into(),

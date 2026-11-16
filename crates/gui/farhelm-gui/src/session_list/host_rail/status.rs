@@ -23,8 +23,7 @@
 //! The marks are pictures. What they say is in the avatar's accessible name and hover help ([`state_words`]), and for
 //! the Hosts control in its name and help ([`hosts_name`]), so none of them is a node of its own.
 //!
-//! NOTE: Not drawn yet, each waiting for the environments piece: a changing sandbox's spinner in place of its dot, and
-//! the dot turning amber with "credentials not delivered" or "tunnels failed, retrying" in the name.
+//! NOTE: Not drawn yet, waiting for the Suspend and Resume piece: a changing sandbox's spinner in place of its dot.
 
 use farhelm_proto::ui_channel::HostView;
 use gpui::prelude::FluentBuilder as _;
@@ -59,9 +58,11 @@ const RING_INSET: f32 = 1.;
 const ICON_BOX: f32 = 40.;
 
 /// What the avatar adds to its identity, in the old rail's order: the phase's words; then the work going on, or else
-/// "update available" when the badge shows; the too-new explanation for a host running a newer Farhelm; the last-read
-/// wording after a failed registry refresh (`last_read`); and the warning's explanation. The rail joins it to the
-/// host's identity as "<identity>: <words>".
+/// "update available" when the badge shows; "credentials not delivered" for a sandbox or container whose credentials
+/// were not delivered ([`phase::credential_warning`]), and "tunnels failed, retrying" for a connected host whose
+/// forwards failed ([`phase::tunnels_failed`]), both of which also turn its dot amber; the too-new explanation for a
+/// host running a newer Farhelm; the last-read wording after a failed registry refresh (`last_read`); and the
+/// warning's explanation. The rail joins it to the host's identity as "<identity>: <words>".
 pub(super) fn state_words(host: &HostView, status: &HostStatus, last_read: bool) -> String {
     let mut words = phase::words(&host.state).to_owned();
     match (&status.live, status.update) {
@@ -72,6 +73,14 @@ pub(super) fn state_words(host: &HostView, status: &HostStatus, last_read: bool)
         }
         (None, Some(_)) => words.push_str("; update available"),
         (None, None) => {}
+    }
+    // The old rail's words for a machine's credentials or forwards failing beside its connection, part of the phase's
+    // words there, so before the explanations.
+    if phase::credential_warning(host).is_some() {
+        words.push_str("; credentials not delivered");
+    }
+    if phase::tunnels_failed(host) {
+        words.push_str("; tunnels failed, retrying");
     }
     if runs_newer_version(&host.state) {
         words.push_str("; ");
@@ -175,7 +184,7 @@ fn avatar_marks(
             )
         })
         .child(
-            corner_dot(tone_ink(phase::tone(&host.state), palette), palette)
+            corner_dot(tone_ink(phase::host_tone(host), palette), palette)
                 .debug_selector(|| format!("host-rail-dot-{id}"))
                 .right(px(CORNER_MARK_INSET)),
         )

@@ -69,8 +69,9 @@ use crate::session::{self, ObservingCurrent};
 use crate::settings::{self, RecipeDeparted, RecipeDeparture, RecipeEditor, Section};
 use crate::theme;
 
-/// The route the account is read from, as a failed read names it.
-const ACCOUNT_ROUTE: &str = "GET /api/tensorlake";
+/// The route the account is read from, as a failed read names it: here, and by a sandbox's rerun, which reads whether
+/// to ask (`crate::hosts::setup`).
+pub(in crate::hosts) const ACCOUNT_ROUTE: &str = "GET /api/tensorlake";
 
 /// What the body says when the account read could not be sent at all.
 const NOT_SENT: &str =
@@ -634,20 +635,21 @@ fn probe_command(name: &str, recipe: &str) -> Result<Command, PathError> {
     ))
 }
 
-/// A Tensorlake creation plan as the probe answered it.
-struct Plan {
+/// A Tensorlake creation plan as the probe answered it: Continue's for a new sandbox, and a sandbox's rerun's
+/// (`crate::hosts::setup::rerun`).
+pub(in crate::hosts) struct Plan {
     /// The helm's one-use id for the plan it kept.
-    probe_id: String,
+    pub(in crate::hosts) probe_id: String,
     /// The size the plan creates the sandbox with.
-    resources: RecipeSize,
+    pub(in crate::hosts) resources: RecipeSize,
     /// The helm's plan as text, which Copy plan copies.
-    confirmation: String,
-    steps: PlanSteps,
+    pub(in crate::hosts) confirmation: String,
+    pub(in crate::hosts) steps: PlanSteps,
 }
 
 /// Read a Tensorlake probe's reply: the plan, or why there is none to show. A reply of any other kind is the old app's
 /// "did not return a Tensorlake creation plan".
-fn read_plan(outcome: &Outcome) -> Result<Plan, Problem> {
+pub(in crate::hosts) fn read_plan(outcome: &Outcome) -> Result<Plan, Problem> {
     let body = match outcome {
         Outcome::Refused(refusal) => return Err(Problem::Helm(refusal.words.clone())),
         Outcome::Done(body) | Outcome::Accepted(body) => body.as_ref().unwrap_or(&Value::Null),

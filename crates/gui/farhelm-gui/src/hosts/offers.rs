@@ -17,16 +17,18 @@
 //!   local host without a supervisor offers no install.
 //! - The `confirmation_may_open` output, which made Settings on every host wait for another host's confirmation, is
 //!   dropped with the old modal queue it existed for. A host's own Settings still waits for that host's own work.
-//! - Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
+//! - Suspend and Resume come with their own piece of the port, and are not offered here.
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
-//! draws Retry ([`Offers::retry`]) and, for a mismatched identity, Adopt ([`Offers::adopt`], [`adoptable`]), then
-//! the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), the rerun of a failed Update, Update
-//! (live, greyed on the helm's own machine, or the app's own check there in the installed desktop app), Settings,
-//! Uninstall on an SSH host ([`Offers::uninstall`]), and Remove on a host whose removal only forgets it
-//! ([`Offers::remove`]); the inline Update and Update all ask the panel's own offer (`super::update::available`), which
-//! never includes the app's check.
+//! draws Retry ([`Offers::retry`]), which on a host whose machine's deletion failed deletes it again, and, for a
+//! mismatched identity, Adopt ([`Offers::adopt`], [`adoptable`]), then the rerun of a failed setup on an SSH host or a
+//! Tensorlake sandbox ([`HostKind::setup_rerun`]), the rerun of a failed Update, Update (live, greyed on the helm's own
+//! machine, or the app's own check there in the installed desktop app), Settings, Uninstall on an SSH host
+//! ([`Offers::uninstall`]), and Remove on a host whose removal only forgets it ([`Offers::remove`]) or Delete sandbox
+//! or Delete container on one whose removal deletes its machine ([`Offers::delete`]); the inline Update and Update all
+//! ask the panel's own offer (`super::update::available`), which never includes the app's check.
 
+use farhelm_proto::ProviderKind;
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
 use farhelm_proto::ui_channel::{HostStateView, HostView};
@@ -85,15 +87,27 @@ impl HostKind {
 
     /// Whether removing the host only forgets its entry, which the menu's Remove does: an SSH host, whose supervisor and
     /// sessions keep running (SPEC.md, "Topology"). Removing a Tensorlake host deletes its sandbox and removing a
-    /// container host deletes its container, so theirs is a different command with its own question (the Hosts panel's
-    /// Delete sandbox, which a later piece of the port brings); until then their menus offer no removal at all. The
-    /// helm's own machine is never removed.
+    /// container host deletes its container, so theirs is a different command with its own question
+    /// ([`HostKind::provider`], Delete sandbox or Delete container). The helm's own machine is never removed.
     pub(crate) fn removal_only_forgets(self) -> bool {
         match self {
             HostKind::Ssh => true,
             HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
                 false
             }
+        }
+    }
+
+    /// The disposable-environment provider whose machine the host is: removing the host deletes that machine, which the
+    /// menu offers as the provider's own command (Delete sandbox, Delete container) with a question that always asks,
+    /// and the GUI words the host's machine in that provider's terms (`crate::environment_ui::ProviderUi`). `None` for
+    /// a host whose removal deletes nothing, and for a kind this build does not know, which gets no command that
+    /// deletes a machine.
+    pub(crate) fn provider(self) -> Option<ProviderKind> {
+        match self {
+            HostKind::Tensorlake => Some(ProviderKind::Tensorlake),
+            HostKind::Podman => Some(ProviderKind::Podman),
+            HostKind::Local | HostKind::Ssh | HostKind::Unrecognized => None,
         }
     }
 
@@ -151,16 +165,15 @@ impl HostKind {
         }
     }
 
-    /// Whether the menu's Re-run can run the host's failed setup again: only over SSH so far, by probing its registered
-    /// destination ([`super::setup::rerun`]). The helm's own machine never runs a setup from the panel, so it has no
-    /// failed one; a Tensorlake sandbox's rerun probes through the Tensorlake route, which comes with the Tensorlake
-    /// pieces of the port; a container is set up through its environment's launch, as the old app told the user.
-    pub(crate) fn reruns_setup(self) -> bool {
+    /// How the menu's Re-run runs the host's failed setup again ([`super::setup::rerun`]), or `None` where it cannot:
+    /// an SSH host probes its registered destination, and a Tensorlake sandbox asks the helm for a creation plan for
+    /// the sandbox the host already names. The helm's own machine never runs a setup from the panel, so it has no
+    /// failed one, and a container is set up through its environment's launch, as the old app told the user.
+    pub(crate) fn setup_rerun(self) -> Option<SetupRerun> {
         match self {
-            HostKind::Ssh => true,
-            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
-                false
-            }
+            HostKind::Ssh => Some(SetupRerun::Ssh),
+            HostKind::Tensorlake => Some(SetupRerun::Tensorlake),
+            HostKind::Local | HostKind::Podman | HostKind::Unrecognized => None,
         }
     }
 
@@ -269,14 +282,18 @@ pub(crate) struct Offers {
     /// offer of its own): `Some(true)` when it can be chosen now, `Some(false)` while the host is
     /// busy with work in flight or a run.
     pub(crate) remove: Option<bool>,
+    /// The provider's command that deletes the host's machine (Delete sandbox, Delete container), offered on a host
+    /// whose removal deletes it ([`HostKind::provider`]) in every phase but a deletion under way, with whether it can
+    /// be chosen now: `false` while the host is busy. A deletion that failed offers it again beside Retry.
+    pub(crate) delete: Option<(ProviderKind, bool)>,
     /// Uninstall, which removes Farhelm from the host, offered only where the panel uninstalls
     /// ([`HostKind::uninstalls_from_panel`]): `Some(true)` when it can be chosen now, `Some(false)` while the host is
     /// busy. A failed uninstall is continued by choosing it again, so a failed run leaves it available.
     pub(crate) uninstall: Option<bool>,
     /// Retry, which asks the helm to try the host's connection again now, on every kind of host (the helm's retry does
-    /// not depend on the kind, and the old menu offered it on every row) and in every phase but an environment's
-    /// deletion, whose own retry belongs to Delete sandbox: `Some(true)` when it can be
-    /// chosen now, `Some(false)` while the host is busy.
+    /// not depend on the kind, and the old menu offered it on every row) and in every phase but a machine's deletion
+    /// under way; on a host whose machine's deletion failed it deletes the machine again instead, as the old Retry did
+    /// (`super::remedies`): `Some(true)` when it can be chosen now, `Some(false)` while the host is busy.
     pub(crate) retry: Option<bool>,
     /// Adopt, offered only while the host reports an identity other than the recorded one ([`adoptable`]):
     /// `Some(true)` when it can be chosen now, `Some(false)` while the host is busy. Which identity it adopts is the
@@ -303,6 +320,17 @@ pub(crate) fn adoptable(state: &HostStateView) -> Option<&str> {
         | HostStateView::Retired { .. }
         | HostStateView::Deleting { .. } => None,
     }
+}
+
+/// How a failed setup is run again ([`HostKind::setup_rerun`]): what the rerun's probe asks the helm, and what kind of
+/// plan comes back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SetupRerun {
+    /// Probe the host's registered SSH destination; a plan is the setup confirmation's ("Set up host").
+    Ssh,
+    /// Ask for a plan for the sandbox the host names; a plan is the sandbox's creation question ("Create Tensorlake
+    /// sandbox"), skipped by Tensorlake's own "Create Tensorlake sandboxes without asking".
+    Tensorlake,
 }
 
 /// Which failed run a rerun repeats.
@@ -373,10 +401,12 @@ impl Update {
 /// - **Settings** always, chosen only while the host is idle.
 /// - **Uninstall** for a kind the panel uninstalls, chosen only while the host is idle; after a failed uninstall too,
 ///   since choosing it again is how that run is continued.
-/// - **Remove** for a kind whose removal only forgets the host, chosen only while the host is idle.
-/// - **Retry** in every phase of every kind but an environment being deleted, and **Adopt** only for
-///   a mismatched identity, both chosen only while the host is idle. The old menu offered Retry "in every phase, like
-///   the button it replaces"; a deletion's Retry is the environment's own, which comes with Delete sandbox.
+/// - **Remove** for a kind whose removal only forgets the host, and **Delete sandbox** or **Delete container** for one
+///   whose removal deletes its machine, except while that deletion is under way, each chosen only while the host is
+///   idle.
+/// - **Retry** in every phase of every kind but a deletion under way, and **Adopt** only for a mismatched identity,
+///   both chosen only while the host is idle. The old menu offered Retry "in every phase, like the button it replaces",
+///   and on a failed deletion its Retry deleted again.
 pub(crate) fn offers(
     host: &HostView,
     progress: Option<&ProvisioningView>,
@@ -391,6 +421,9 @@ pub(crate) fn offers(
     );
     let running = run_active(progress);
     let busy = in_flight || running;
+    // A deletion under way offers nothing that touches the machine: Retry, Delete sandbox and the like come back if it
+    // fails, which the helm reports as a deletion with a failure.
+    let deleting = matches!(host.state, HostStateView::Deleting { failure: None });
     let rerun = failed_operation(progress)
         .filter(|_| provisions && !in_flight && !suspended)
         .and_then(|operation| match operation {
@@ -418,8 +451,12 @@ pub(crate) fn offers(
         rerun,
         update,
         remove: kind.removal_only_forgets().then_some(!busy),
+        delete: kind
+            .provider()
+            .filter(|_| !deleting)
+            .map(|provider| (provider, !busy)),
         uninstall: kind.uninstalls_from_panel().then_some(!busy),
-        retry: (!matches!(host.state, HostStateView::Deleting { .. })).then_some(!busy),
+        retry: (!deleting).then_some(!busy),
         adopt: adoptable(&host.state).map(|_| !busy),
     }
 }

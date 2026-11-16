@@ -317,11 +317,11 @@ fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
 }
 
 /// Why this matters: removing a Tensorlake sandbox's host deletes the sandbox, its files and its sessions (SPEC.md,
-/// "Topology": the panel calls that Delete sandbox, and it always asks); that command is not ported yet, so the menu
-/// must not offer the ordinary Remove in its place, whose question promises the host keeps running. Specified: a
-/// connected Tensorlake host's menu offers Settings and neither Remove nor Uninstall.
+/// "Topology": the panel calls that Delete sandbox, and it always asks), so the menu must not offer the ordinary Remove
+/// beside or instead of it, whose question promises the host keeps running. Specified: a connected Tensorlake host's
+/// menu offers Settings and Delete sandbox, and neither Remove nor Uninstall.
 #[gpui::test]
-fn a_sandbox_hosts_menu_offers_no_remove(cx: &mut TestAppContext) {
+fn a_sandbox_hosts_menu_offers_delete_sandbox_and_no_remove(cx: &mut TestAppContext) {
     let mut listed = reference_hosts();
     listed.push(host(4, "tensorlake", connected()));
     let (_helm, _, cx) = open_panel_in_column(cx, vec![hosts(&listed)]);
@@ -333,6 +333,7 @@ fn a_sandbox_hosts_menu_offers_no_remove(cx: &mut TestAppContext) {
         node(&nodes, "host-menu-settings").is_some(),
         "the premise: its menu opened"
     );
+    assert!(node(&nodes, "host-menu-delete").is_some());
     assert!(node(&nodes, "host-menu-remove").is_none());
     assert!(
         node(&nodes, "host-menu-uninstall").is_none(),

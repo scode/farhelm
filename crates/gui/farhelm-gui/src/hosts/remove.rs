@@ -50,8 +50,15 @@
 //! the row. And the old header drew the phase with its colored dot; the prompt's summary is a line of text, so the
 //! phase words and build are drawn in the summary's ink.
 //!
-//! A Tensorlake or container host's removal deletes its machine and is a different command (Delete sandbox), which a
-//! later piece of the port brings; the menu offers no Remove on those hosts ([`super::offers::HostKind`]).
+//! A Tensorlake or container host's removal deletes its machine. The menu offers it as the provider's own command,
+//! Delete sandbox or Delete container ([`super::offers::HostKind::provider`]), which takes the same path with the
+//! provider's words (the old `RemoveCopy::for_host`): the question "Delete sandbox · <name>", the machine's name in the
+//! body where an SSH host's destination is, then "<name> Delete the whole sandbox? Every session, … This cannot be
+//! undone." (`crate::environment_ui::ProviderUi::delete_consequence`), and the answer "Delete sandbox". It always asks,
+//! whatever "Remove hosts without asking" says, and offers no permanent answer: that preference covers forgetting an
+//! entry, and deleting a machine takes its files and sessions with it. The same `DELETE /api/hosts/{id}` goes out, and
+//! the helm answers within its reply bound, so a deletion still running then is refused with "the removal carries on",
+//! shown in the question as any refusal is, while the pushed hosts list shows how it ends.
 
 #[cfg(test)]
 mod tests;
@@ -60,6 +67,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_proto::ProviderKind;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences};
 use gpui::{
     App, AppContext as _, Context, EntityId, Global, IntoElement, ParentElement as _, Render,
@@ -72,6 +80,7 @@ use super::offers;
 use super::setup::UNDO_NOTE;
 use crate::assets;
 use crate::components::{HoverHelp, Tier};
+use crate::environment_ui::ProviderUi;
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{LayerId, Subject};
@@ -106,17 +115,21 @@ pub(super) const REMOVE_HELP: &str =
     "Remove: forget this host; its supervisor and sessions keep running";
 
 /// What the confirmation acts on, frozen when it opens: the host by registry id, its name as the question showed it,
-/// which a line about a removal that was not started names it by, and its destination, which the body shows.
+/// which a line about a removal that was not started names it by, its destination, which the body shows (for a machine
+/// Farhelm deletes, the machine's own name, which is what the user can look up), and the provider whose machine the
+/// removal deletes, if it deletes one.
 #[derive(Clone)]
 struct Removal {
     host: i64,
     name: HostText,
     destination: HostText,
+    deletes: Option<ProviderKind>,
 }
 
-/// The host menu's Remove for `host`, pressed with `mark` taken in its handler: ask the confirmation, or with "Remove
-/// hosts without asking" on, send the removal at once. Refused with the panel line's reason while a session launch is in
-/// flight; nothing happens when the window is inert or the registry no longer lists the host.
+/// The host menu's Remove (or Delete sandbox, Delete container) for `host`, pressed with `mark` taken in its handler:
+/// ask the confirmation, or with "Remove hosts without asking" on and a removal that only forgets the host, send it at
+/// once. Refused with the panel line's reason while a session launch is in flight; nothing happens when the window is
+/// inert or the registry no longer lists the host.
 pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
     let Some(view) = listed(host, cx) else {
         return;
@@ -126,7 +139,7 @@ pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
     show(cx, |lines| lines.not_started = None);
     if super::launch_in_flight(cx) {
         not_started(&removal, Refusal::LaunchInFlight, None, cx);
-    } else if asks_first(cx) {
+    } else if removal.deletes.is_some() || asks_first(cx) {
         let _ = ask(host, mark, window, cx);
     } else {
         // TODO: with the preference on, the old app showed a refusal of this removal in the short host refusal dialog
@@ -139,12 +152,34 @@ pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
 impl Removal {
     /// The removal of `view` as the registry lists it now.
     fn of(view: &HostView) -> Removal {
+        // The machine's own name for a machine Farhelm deletes (a recipe can name several), else the destination in
+        // full, since the title may shorten the name (SPEC.md: "A shortened heading retains the full destination in
+        // the body").
+        let machine = view
+            .environment
+            .as_ref()
+            .map(|environment| environment.name.as_str())
+            .or_else(|| {
+                view.tensorlake
+                    .as_ref()
+                    .map(|sandbox| sandbox.sandbox.as_str())
+            });
+        let destination = machine
+            .or(view.destination.as_deref())
+            .unwrap_or(&view.name);
         Removal {
             host: view.id,
             name: display_name(view),
-            // The destination in full, since the title may shorten the name (SPEC.md: "A shortened heading retains the
-            // full destination in the body").
-            destination: HostText::from_host(view.destination.as_deref().unwrap_or(&view.name)),
+            destination: HostText::from_host(destination),
+            deletes: offers::HostKind::of(view).provider(),
+        }
+    }
+
+    /// The command's label: "Remove", or the provider's Delete ("Delete sandbox").
+    fn label(&self) -> &'static str {
+        match self.deletes {
+            Some(provider) => ProviderUi(provider).host_delete_label(),
+            None => "Remove",
         }
     }
 }
@@ -174,22 +209,43 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
         let view = collections.get::<HostView>(&key)?.clone();
         let in_flight = session::current_operations(cx)
             .is_some_and(|operations| operations.read(cx).in_flight(&OpKey::host(&key)).is_some());
-        let enabled = offers::offers(&view, collections.get(&key), in_flight).remove == Some(true);
+        let offered = offers::offers(&view, collections.get(&key), in_flight);
+        // Each removal is enabled by its own offer: the menu offers Remove or the provider's Delete, never both.
+        let enabled = match offers::HostKind::of(&view).provider() {
+            Some(_) => offered.delete.is_some_and(|(_, enabled)| enabled),
+            None => offered.remove == Some(true),
+        };
         (view, enabled)
     };
     let removal = Removal::of(&view);
     let name = removal.name.clone();
+    let (title, help) = match removal.deletes {
+        Some(provider) => {
+            let words = ProviderUi(provider);
+            (words.host_delete_label(), words.host_delete_help())
+        }
+        None => ("Remove host", REMOVE_HELP),
+    };
     let title = HostSentence::new("host-remove-title")
-        .text("Remove host · ")
+        .text(format!("{title} · "))
         .host(&name);
     let summary = phase_summary("host-remove-summary", &view);
     let (icon, color) = (view.icon, view.color);
-    let remove = Answer::new("Remove", HoverHelp::tooltip(REMOVE_HELP), Tier::Danger);
+    let remove = Answer::new(removal.label(), HoverHelp::tooltip(help), Tier::Danger);
+    let deletes = removal.deletes.is_some();
     let mut question = Question::new(title, remove, removal)
         .summary(summary)
         .body(|removal: &Removal, _, cx| {
+            let explanation = match removal.deletes {
+                // The machine's name, then what deleting it takes with it.
+                Some(provider) => HostSentence::new("host-remove-explanation")
+                    .host(&removal.destination)
+                    .text(format!(" {}", ProviderUi(provider).delete_consequence())),
+                None => HostSentence::new("host-remove-explanation").text(EXPLANATION),
+            };
             let body = RemoveBody {
                 destination: removal.destination.clone(),
+                explanation,
             };
             cx.new(|_| body)
         })
@@ -200,8 +256,8 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
             Tier::Neutral,
         ));
     // Only beside an available Remove: with Remove unavailable it would be the one way left to remove the host. The
-    // footer note names this answer, so it goes with it.
-    if enabled {
+    // footer note names this answer, so it goes with it. Never for a machine's deletion, which always asks.
+    if enabled && !deletes {
         question = question.note(UNDO_NOTE).fallible_alternative(
             Answer::new(
                 "Remove, don't ask again",
@@ -406,6 +462,8 @@ fn stop_asking_line() -> HostSentence {
 /// about.
 struct RemoveBody {
     destination: HostText,
+    /// What removing does: forgetting the host, or for a machine Farhelm deletes, its name and what goes with it.
+    explanation: HostSentence,
 }
 
 impl Render for RemoveBody {
@@ -428,7 +486,7 @@ impl Render for RemoveBody {
                 div()
                     .line_height(px(EXPLANATION_LINE))
                     .text_color(theme::color(palette.fg_1))
-                    .child(EXPLANATION),
+                    .child(self.explanation.clone()),
             )
     }
 }
@@ -484,7 +542,7 @@ fn show(cx: &mut App, change: impl FnOnce(&mut PanelLines)) {
 fn not_started(removal: &Removal, why: Refusal, attempt: Option<Attempt>, cx: &mut App) {
     let line = |id: &'static str| {
         HostSentence::new(SharedString::from(id))
-            .text("Remove ")
+            .text(format!("{} ", removal.label()))
             .host(&removal.name)
             .text(format!(": {}", why.words()))
     };

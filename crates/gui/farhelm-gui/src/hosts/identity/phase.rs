@@ -12,12 +12,13 @@
 //! the destination are its monospace parts, as the old app's `DetailPart::MonoPeer` runs were.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
-use farhelm_proto::tensorlake::LifecycleDirection;
+use farhelm_proto::tensorlake::{LifecycleDirection, TunnelState, TunnelView};
 use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, HostView, RefreshView};
 use gpui::SharedString;
 
+use crate::environment_ui::ProviderUi;
 use crate::host_text::{HostSentence, HostText};
-use crate::hosts::offers::runs_newer_version;
+use crate::hosts::offers::{HostKind, runs_newer_version};
 use crate::local_time::{self, Zone};
 
 #[cfg(test)]
@@ -110,6 +111,61 @@ pub(crate) fn tone(state: &HostStateView) -> Tone {
     }
 }
 
+/// The tone of `host`'s phase as its row and its rail avatar show it: [`tone`], except that a host whose credentials
+/// were not delivered ([`credential_warning`]), or a connected host whose forwards failed ([`tunnels_failed`]), reads
+/// [`Tone::Advisory`] whatever its phase, as the old row and rail turned such a host amber. The words stay the phase's:
+/// delivery and forwarding are independent of the supervisor's connection, and the details say what failed.
+pub(crate) fn host_tone(host: &HostView) -> Tone {
+    if credential_warning(host).is_some() || tunnels_failed(host) {
+        return Tone::Advisory;
+    }
+    tone(&host.state)
+}
+
+/// Why the helm could not deliver a sandbox's or a container's credentials, when it could not (the old
+/// `credential_delivery_failed`, whose reason the details show): an agent there may run without the keys it needs, and
+/// delivery can fail during setup too, so this does not wait for a connection.
+pub(crate) fn credential_warning(host: &HostView) -> Option<&str> {
+    host.environment
+        .as_ref()
+        .and_then(|environment| environment.credential_warning.as_deref())
+        .or_else(|| {
+            host.tensorlake
+                .as_ref()
+                .and_then(|sandbox| sandbox.credential_warning.as_deref())
+        })
+}
+
+/// The forwards a sandbox or an environment keeps for its recipe's tunnels, with their health, where the helm reports
+/// any: the environment's when the host is one, else the sandbox's.
+fn tunnels(host: &HostView) -> Option<&TunnelView> {
+    host.environment
+        .as_ref()
+        .and_then(|environment| environment.tunnels.as_ref())
+        .or_else(|| {
+            host.tensorlake
+                .as_ref()
+                .and_then(|sandbox| sandbox.tunnels.as_ref())
+        })
+}
+
+/// Whether a connected host's forwards failed or are retrying after a failure (the old `tunnels::failed`): agents may
+/// work while their inference endpoint is unreachable, so the row and the rail show it beside a connection that is
+/// fine. Forwards still starting up, with no failure yet, claim nothing.
+pub(crate) fn tunnels_failed(host: &HostView) -> bool {
+    matches!(host.state, HostStateView::Connected { .. })
+        && tunnels(host).is_some_and(|view| {
+            matches!(
+                view.state,
+                TunnelState::Failed { .. }
+                    | TunnelState::Retrying {
+                        reason: Some(_),
+                        ..
+                    }
+            )
+        })
+}
+
 /// The hover on a phase's words: for a host running a newer Farhelm, both builds (and both protocols for a skew) and
 /// the remedy, which is updating the helm; for any other host, the words themselves. Host builds are escaped, as the
 /// screen shows host text.
@@ -174,10 +230,12 @@ pub(crate) enum Kind {
     Remedy,
 }
 
-/// The lines a row shows when its details are open, in the old order: the destination behind an alias, the evidence
-/// for the phase, and the remedy where waiting will not help. `twin` names another host by id, as the duplicate lines
-/// mention the entry that holds the same machine, or `None` when the registry does not list it. `zone` is the viewer's
-/// time zone, for the times the evidence gives.
+/// The lines a row shows when its details are open, in the old order: for a sandbox or an environment, the machine
+/// behind it (its name, recipe, container host and size), its forwards' health with one line per forward, and why its
+/// credentials were not delivered; the destination behind an alias; the evidence for the phase; and the remedy where
+/// waiting will not help. `twin` names another host by id, as the duplicate lines mention the entry that holds the
+/// same machine, or `None` when the registry does not list it. `zone` is the viewer's time zone, for the times the
+/// evidence gives.
 ///
 /// Each line is drawn under `host-detail-<host id>-<n>`, numbered from 0 in this order, which is how the panel's tests
 /// and the agent bridge find a row's lines.
@@ -190,6 +248,19 @@ pub(crate) fn detail_lines(
     let numbered =
         |n: usize| HostSentence::new(SharedString::from(format!("host-detail-{id}-{n}")));
     let mut lines = Vec::new();
+    lines.extend(machine_line(numbered(lines.len()), host).map(|line| (Kind::Evidence, line)));
+    if let Some(view) = tunnels(host) {
+        let first = lines.len();
+        lines
+            .extend(tunnel_lines(view, |n| numbered(first + n)).map(|line| (Kind::Evidence, line)));
+    }
+    // The helm's reason, which may quote the provider or the machine, so host text.
+    if let Some(reason) = credential_warning(host) {
+        let line = numbered(lines.len())
+            .text("Credentials not delivered: ")
+            .host(&pushed(reason));
+        lines.push((Kind::Evidence, line));
+    }
     // Only behind an alias: an unaliased host's name already is its destination.
     if let (Some(_), Some(destination)) = (&host.alias, &host.destination) {
         lines.push((
@@ -201,7 +272,7 @@ pub(crate) fn detail_lines(
     }
     lines.push((
         Kind::Evidence,
-        evidence(numbered(lines.len()), &host.state, &twin, zone),
+        host_evidence(numbered(lines.len()), host, &twin, zone),
     ));
     let last = remedy(numbered(lines.len()), &host.state, &twin);
     lines.extend(last.map(|line| (Kind::Remedy, line)));
@@ -221,7 +292,89 @@ pub(crate) fn connection_line(
 ) -> Option<HostSentence> {
     match host.state {
         HostStateView::Connected { .. } => None,
-        _ => Some(evidence(HostSentence::new(id), &host.state, &twin, zone)),
+        _ => Some(host_evidence(HostSentence::new(id), host, &twin, zone)),
+    }
+}
+
+/// The details line of the machine behind a sandbox or an environment (the old `host-environment-detail` and
+/// `host-tensorlake-detail`): "Sandbox: <name> · Recipe: <recipe>", with " · Container host: <host>" for a container
+/// placed on one, and the size the sandbox was created with (" · 2 CPUs · 4 GB memory"). The word that leads it is the
+/// provider's ([`ProviderUi::locality_label`]). `None` for a host with no machine of its own, or of a kind this build
+/// does not know.
+fn machine_line(line: HostSentence, host: &HostView) -> Option<HostSentence> {
+    let provider = HostKind::of(host).provider()?;
+    let (name, recipe, place) = match (&host.environment, &host.tensorlake) {
+        (Some(environment), _) => (
+            environment.name.as_str(),
+            environment.target.recipe(),
+            environment.place_name.as_deref(),
+        ),
+        (None, Some(sandbox)) => (sandbox.sandbox.as_str(), sandbox.recipe.as_str(), None),
+        (None, None) => return None,
+    };
+    let mut line = line
+        .text(format!("{}: ", ProviderUi(provider).locality_label()))
+        .host(&pushed(name))
+        .text(" · Recipe: ")
+        .host(&pushed(recipe));
+    if let Some(place) = place {
+        line = line.text(" · Container host: ").host(&pushed(place));
+    }
+    if let Some(size) = host.tensorlake.as_ref().and_then(|sandbox| sandbox.size) {
+        line = line.text(format!(
+            " · {} CPUs · {} GB memory",
+            size.cpus, size.memory_gb
+        ));
+    }
+    Some(line)
+}
+
+/// A host's forwards as details lines (the old `TunnelDetails`): their health in one sentence ("Tunnels up", "Tunnels
+/// failed: <reason>", "Tunnels failed; retrying in 4s: <reason>", "Tunnels connecting…"), then one line per forward,
+/// "127.0.0.1:<sandbox port> → <host>:<port>", each started from `line(n)`, the empty line numbered `n` from 0. The
+/// reasons and the forwards' hosts come from the recipe or from SSH, so they are host text.
+fn tunnel_lines<'a>(
+    view: &'a TunnelView,
+    line: impl Fn(usize) -> HostSentence + 'a,
+) -> impl Iterator<Item = HostSentence> + 'a {
+    let health = match &view.state {
+        TunnelState::Up => line(0).text("Tunnels up"),
+        TunnelState::Failed { reason } => line(0).text("Tunnels failed: ").host(&pushed(reason)),
+        TunnelState::Retrying {
+            reason: Some(reason),
+            delay_secs,
+        } => line(0)
+            .text(format!("Tunnels failed; retrying in {delay_secs}s: "))
+            .host(&pushed(reason)),
+        TunnelState::Retrying { reason: None, .. } => line(0).text("Tunnels connecting…"),
+    };
+    let forwards = view.tunnels.iter().enumerate().map(move |(n, tunnel)| {
+        line(n + 1)
+            .text(format!("127.0.0.1:{} → ", tunnel.sandbox_port))
+            .host(&pushed(&tunnel.host))
+            .text(format!(":{}", tunnel.port))
+    });
+    std::iter::once(health).chain(forwards)
+}
+
+/// [`evidence`] for `host`: a machine's deletion is worded for the host's provider ("Farhelm is deleting this sandbox,
+/// its files and its snapshots", or the failure and Retry, then the helm's reason), as the old row worded it; every
+/// other phase, and a host with no provider, reads as [`evidence`] says.
+fn host_evidence(
+    line: HostSentence,
+    host: &HostView,
+    twin: &impl Fn(i64) -> Option<HostText>,
+    zone: Zone,
+) -> HostSentence {
+    match (&host.state, HostKind::of(host).provider()) {
+        (HostStateView::Deleting { failure }, Some(provider)) => {
+            let line = line.text(ProviderUi(provider).deleting_detail(failure.is_some()));
+            match failure {
+                Some(reason) => line.text(": ").host(&pushed(reason)),
+                None => line,
+            }
+        }
+        _ => evidence(line, &host.state, twin, zone),
     }
 }
 
@@ -342,8 +495,8 @@ pub(crate) fn evidence(
                 line.host(&pushed(reason))
             }
         }
-        // The environment phases are worded per provider by the environment pieces of the port; until then they read
-        // as the old app worded them without a provider.
+        // A host with a provider gets its provider's words ([`host_evidence`]); these are the old app's words without
+        // one, for the unavailable session card, which words its host's phase from the state alone.
         HostStateView::Deleting { failure: None } => {
             line.text("Farhelm is deleting this host's environment")
         }
