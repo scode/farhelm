@@ -302,7 +302,8 @@ impl RenderOnce for MenuItem {
             );
         }
         // The visible description is the accessible description, so the help is the tooltip alone.
-        let item = super::with_hover_help(item, &self.id, &self.help, false, window, cx);
+        let item =
+            super::with_hover_help(item, &self.id, &self.help, false, Some(&focus), window, cx);
         let item = super::activate_on_click(
             super::activate_on_enter_or_space(
                 focus::track(item, &focus, focus::OnPress::Control),

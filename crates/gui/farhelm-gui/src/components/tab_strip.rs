@@ -255,7 +255,15 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
                             })),
                     )
                 });
-            let element = super::with_hover_help(element, &ids[index], &tab.help, true, window, cx);
+            let element = super::with_hover_help(
+                element,
+                &ids[index],
+                &tab.help,
+                true,
+                Some(&handles[index]),
+                window,
+                cx,
+            );
             let (on_key, on_click) = (strip.clone(), strip.clone());
             let mut element = focus::track(element, &handles[index], focus::OnPress::Control);
             // First, so it takes Enter before the strip's own keys do.

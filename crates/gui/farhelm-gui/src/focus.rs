@@ -1006,6 +1006,24 @@ fn record(
     });
 }
 
+/// Where the tab stop `handle` was last drawn, inside its border, as [`record`] took it while the frame was prepared:
+/// this frame's bounds once the page is prepared, which is when the layer manager places help against a focused
+/// control. `None` for a handle that is no tab stop or was never drawn.
+pub(crate) fn control_bounds(
+    handle: &FocusHandle,
+    window: &Window,
+    cx: &App,
+) -> Option<Bounds<Pixels>> {
+    let state = state(window, cx)?;
+    let control = handle.downgrade();
+    let state = state.read(cx);
+    let entry = state
+        .controls
+        .iter()
+        .find(|entry| entry.control == control)?;
+    Some(entry.bounds)
+}
+
 /// The control inside `container` that is drawn now and sits closest to where the focused control last was, or `None`
 /// when that position is not known to belong to the control that vanished.
 fn closest_control(container: &FocusHandle, window: &Window, cx: &App) -> Option<FocusHandle> {

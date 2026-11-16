@@ -552,8 +552,15 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             // A described option's visible line is its accessible description (module docs), so its help is the
             // tooltip alone; any other option's help is its description too, as every control's is.
             let describe = option.description.is_none();
-            let element =
-                super::with_hover_help(element, &ids[index], &option.help, describe, window, cx);
+            let element = super::with_hover_help(
+                element,
+                &ids[index],
+                &option.help,
+                describe,
+                Some(&handles[index]),
+                window,
+                cx,
+            );
             if !state.enabled {
                 // Not tracked, so neither Tab nor a click can focus it; a press of any mouse button is still this
                 // control's, so it does not reach the page's empty-space handler and move focus.
@@ -621,7 +628,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
         // The group's help shows over its gaps and edge, and an option's over the option: the layer manager shows the
         // innermost control's help (`with_hover_help`). It is also the group's accessible description, as every
         // control's is, except for the generic container, which takes no description (module docs).
-        let group = super::with_hover_help(group, &self.id, &self.help, named, window, cx);
+        let group = super::with_hover_help(group, &self.id, &self.help, named, None, window, cx);
         group.children(options)
     }
 }

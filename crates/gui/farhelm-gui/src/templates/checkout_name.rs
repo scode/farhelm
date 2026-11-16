@@ -63,7 +63,7 @@ pub(crate) fn pill(palette: &Palette, window: &mut Window, cx: &mut App) -> AnyE
         .text_size(px(PILL_TEXT))
         .text_color(theme::color(palette.fg_dim))
         .child("From template · numbered if taken");
-    with_hover_help(pill, &id, &help, true, window, cx).into_any_element()
+    with_hover_help(pill, &id, &help, true, None, window, cx).into_any_element()
 }
 
 /// The note under the Name field once `base` was taken: "(<base> is taken)", the base drawn as host text, since a
@@ -91,5 +91,5 @@ pub(crate) fn taken_note(
         .text_size(px(TAKEN_TEXT))
         .text_color(theme::color(palette.fg_dim))
         .child(sentence);
-    with_hover_help(note, &id, &help, true, window, cx).into_any_element()
+    with_hover_help(note, &id, &help, true, None, window, cx).into_any_element()
 }

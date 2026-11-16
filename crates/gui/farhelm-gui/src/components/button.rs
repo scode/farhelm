@@ -1042,7 +1042,8 @@ impl RenderOnce for Button {
         if let Some(badge) = self.badge {
             button = button.child(badge);
         }
-        let button = super::with_hover_help(button, &self.id, &self.help, true, window, cx);
+        let button =
+            super::with_hover_help(button, &self.id, &self.help, true, Some(&focus), window, cx);
         let button = if enabled {
             let on_press = if self.keeps_focus {
                 focus::OnPress::Keep
