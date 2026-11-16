@@ -271,6 +271,9 @@ pub struct SessionList {
     /// as where closing returns focus (on macOS a click leaves the button unfocused, so what held focus before the
     /// click is not where SPEC.md returns it).
     templates_focus: FocusHandle,
+    /// The heading's New button's focus handle, owned here so the session pane can name New as where focus rests when
+    /// there are no sessions ([`SessionList::new_focus`]).
+    new_focus: FocusHandle,
     /// The list's width when its rows were last given their height estimate; see [`SessionList::sync_rows`].
     hinted_width: Option<Pixels>,
     /// What held the window's focus when [`SessionList::reveal_focused`] last looked, so it acts once per focus move.
@@ -357,6 +360,13 @@ struct Current {
 }
 
 impl SessionList {
+    /// The heading's New button's focus handle. The session pane makes it home when there are no sessions (SPEC.md,
+    /// "Where focus rests": "focus rests on New when there are no sessions"), since with no session open there is no
+    /// terminal or card for focus to rest on. Nothing else should move focus to it.
+    pub(crate) fn new_focus(&self) -> &FocusHandle {
+        &self.new_focus
+    }
+
     /// The rail foot's `?` button, for the screenshot goldens, which open its menu without a click.
     #[cfg(test)]
     pub(crate) fn help_button(&self) -> &Entity<HelpButton> {
@@ -402,6 +412,7 @@ impl SessionList {
             entries: Rc::from([]),
             row_focus: HashMap::new(),
             templates_focus: cx.focus_handle().tab_stop(true),
+            new_focus: cx.focus_handle().tab_stop(true),
             hinted_width: None,
             focus_seen: None,
             all_focus: cx.focus_handle().tab_stop(true),
@@ -830,19 +841,10 @@ impl Render for SessionList {
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
                 .child(
-                    list.child(heading(
-                        bar,
-                        title,
-                        None,
-                        &self.trash,
-                        &self.templates_focus,
-                        new_available,
-                        &weak,
-                        cx,
-                    ))
-                    .child(filter_row)
-                    .children(refused)
-                    .child(status_line("Loading sessions…")),
+                    list.child(heading(bar, title, None, self, new_available, &weak, cx))
+                        .child(filter_row)
+                        .children(refused)
+                        .child(status_line("Loading sessions…")),
                 )
                 .child(foot);
         };
@@ -856,8 +858,7 @@ impl Render for SessionList {
                 CountLine::Count(count) => Some(count.clone()),
                 CountLine::Cut(_) => None,
             },
-            &self.trash,
-            &self.templates_focus,
+            self,
             new_available,
             &weak,
             cx,
@@ -995,21 +996,16 @@ fn draw_row(
 
 /// The list's heading band (`.session-heading`): the order's title ([`order`]), the count beside it when the list has
 /// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
-/// the heading's actions at its right edge (`.session-heading-actions`), in SPEC.md's order: Trash (`trash`, a view of
-/// its own), Templates, then New, drawn disabled unless `new_available` ([`launcher::entry::new_available`], read by
-/// the caller). While marks are shown, `bar`, the marked bar the caller drew ([`marking`]), is the band instead, and
-/// the caller draws no `title`: the bar replaces the title, the count and the actions, and Trash's view stays alive
-/// undrawn.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the band's two starts and the parts of the ordinary heading"
-)]
+/// the heading's actions at its right edge (`.session-heading-actions`), in SPEC.md's order: Trash (`owner.trash`, a
+/// view of its own), Templates, then New, drawn disabled unless `new_available` ([`launcher::entry::new_available`],
+/// read by the caller). Templates and New track the focus handles `owner` keeps for them. While marks are shown,
+/// `bar`, the marked bar the caller drew ([`marking`]), is the band instead, and the caller draws no `title`: the bar
+/// replaces the title, the count and the actions, and Trash's view stays alive undrawn.
 fn heading(
     bar: Option<AnyElement>,
     title: Option<AnyElement>,
     count: Option<String>,
-    trash: &Entity<TrashButton>,
-    templates_focus: &FocusHandle,
+    owner: &SessionList,
     new_available: bool,
     list: &WeakEntity<SessionList>,
     cx: &App,
@@ -1018,6 +1014,8 @@ fn heading(
         return bar;
     }
     let palette = theme::palette(cx);
+    let trash = &owner.trash;
+    let templates_focus = &owner.templates_focus;
     let templates = IconButton::new(
         "templates-button",
         Icon::Templates,
@@ -1050,6 +1048,7 @@ fn heading(
     .tier(Tier::Primary)
     .square(px(HEADING_ICON_SIDE))
     .disabled(!new_available)
+    .focus(&owner.new_focus)
     .on_click(move |_, window, cx| open_new(&list, None, window, cx));
     div()
         .flex()

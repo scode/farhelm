@@ -54,7 +54,10 @@
 //! With no session open, the pane shows what the old app showed then (its `.main-empty`), with the old rule for it:
 //! three honest states, not one claim. It says "No sessions — create one" only once the helm has shown that there are
 //! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
-//! when there are sessions it is blank, because the session list is about to open one.
+//! when there are sessions it is blank, because the session list is about to open one. On the same proof, and only
+//! then, the session list's New button is home (SPEC.md, "Where focus rests": "focus rests on New when there are no
+//! sessions"): the pane holds New's focus handle for that, and names it home whenever that proof holds and it has
+//! nothing mounted.
 //!
 //! - **The interrupted card.** A session whose agent a host reboot or a Farhelm update ended has no terminal left, so
 //!   the pane mounts none for it and draws the interrupted card ([`card`]) where the terminals would be, between the
@@ -167,8 +170,20 @@ pub struct SessionPane {
     /// moves on with the rows' ages and no timer of the pane's own (SPEC_impl.md, "Animation time: the ticker"). Worked
     /// out at the top of each frame like `spinner`.
     clock: Option<ticker::Clock>,
-    /// Tells the pane when the open session goes into or out of its interrupted card ([`card::Follow`]).
+    /// Tells the pane when the open session goes into or out of its interrupted card or its host into or out of reach,
+    /// and when the fleet becomes empty or stops being so ([`card::Follow`]).
     _card: Entity<card::Follow>,
+    /// The session list's New button's focus handle ([`crate::session_list::SessionList::new_focus`]), home while no
+    /// session is open and there are no sessions (SPEC.md, "Where focus rests"). It is safe as home while New is not
+    /// drawn (disabled, or hidden by the Hosts panel): the focus coordinator counts an undrawn home as none
+    /// (`focus::drawn_home`).
+    ///
+    /// NOTE: A first launch over an empty fleet ends on the new session's terminal only because the helm pushes a
+    /// create's new session before its reply: that push opens the session while New is still disabled, so New is never
+    /// a drawn home in between. A create that replies "accepted" and pushes its outcome later (the coming sandbox and
+    /// container creates) must open its session from that push. Otherwise the reply re-enables New while the fleet
+    /// still reads empty, focus rests on New, and the session's later automatic open does not take it from there.
+    new: FocusHandle,
     /// Act on a change of the selection, of the user's choice, of the connection and of the open session's card.
     _observing: Vec<Subscription>,
 }
@@ -278,16 +293,18 @@ fn terminals(
 
 impl SessionPane {
     /// The pane in `window`, which follows the selection, the user's choices and the connection from here on, and
-    /// mounts the selected session's terminal once the window's first frame exists.
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// mounts the selected session's terminal once the window's first frame exists. `new` is the session list's New
+    /// button's focus handle, home when there are no sessions.
+    pub fn new(new: FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut observing = vec![
             cx.observe_global_in::<LocalState>(window, Self::sync),
             cx.observe_global_in::<Chosen>(window, Self::sync),
         ];
         // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
-        // and on the store only for whether the open session shows its interrupted card and whether its row is stale
-        // (the unavailable card), which the card's follower reports when either changes. So it does not use `session::observe_current` itself, which would add a sync on
-        // every pushed change, and whose callback gets no window, which every focus move of `sync` needs.
+        // and on the store only for whether the open session shows its interrupted card, whether its row is stale (the
+        // unavailable card) and whether the fleet is empty (New as home), which the card's follower reports when any of
+        // them changes. So it does not use `session::observe_current` itself, which would add a sync on every pushed
+        // change, and whose callback gets no window, which every focus move of `sync` needs.
         if let Some(connection) = session::connection(cx) {
             observing.push(cx.observe_in(&connection, window, |pane, _, window, cx| {
                 pane.sync(window, cx)
@@ -306,6 +323,7 @@ impl SessionPane {
             pulse: None,
             clock: None,
             _card: follow,
+            new,
             _observing: observing,
         }
     }
@@ -313,7 +331,8 @@ impl SessionPane {
     /// Bring the pane up to date: terminals for the selected session under the current UI session (none when nothing is
     /// selected, while the window is inert, while the session shows its interrupted card, or when it opened on a host
     /// the helm cannot reach), inert exactly while the unavailable card shows over them, the shown terminal or the card
-    /// made home every time, and the user's latest choice acted on.
+    /// made home every time (New when nothing is mounted and there are no sessions), and the user's latest choice acted
+    /// on.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session =
             session::connection(cx).and_then(|connection| connection.read(cx).session().cloned());
@@ -390,9 +409,15 @@ impl SessionPane {
         // Every time, not only when the pane mounted something else: a reset drops the mounted terminals when `mounted`
         // is next reached (above) while the selection stays, so the key compares equal, and home would otherwise keep
         // naming a terminal that is gone.
-        let home = mounted
-            .as_ref()
-            .and_then(|mounted| mounted.home(card, unavailable, cx));
+        //
+        // A mounted session's home always wins (its terminal, its interrupted card or its unavailable card). With
+        // nothing mounted, New is home when the store shows there are no sessions, and nothing is otherwise: focus then
+        // rests on the root, where keys still reach Farhelm's bindings.
+        let home = match mounted.as_ref() {
+            Some(mounted) => mounted.home(card, unavailable, cx),
+            // `card::empty_fleet`, beside `card::Follow`, which notifies when it changes.
+            None => card::empty_fleet(cx).then(|| self.new.clone()),
+        };
         focus::set_home(home.as_ref(), window, cx);
         self.act_on_choice(window, cx);
     }

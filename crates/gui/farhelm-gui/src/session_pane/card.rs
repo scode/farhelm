@@ -75,7 +75,7 @@ use crate::operations::Work;
 use crate::prompt::{self, Inline};
 use crate::session::{self, ObservingCurrent};
 use crate::session_list::replace_yolo::{self, Surface};
-use crate::session_list::{menu, outcome, replace, restart};
+use crate::session_list::{self, menu, outcome, replace, restart};
 use crate::theme::{self, metrics};
 use crate::{launcher, local_state};
 
@@ -112,6 +112,17 @@ pub(crate) fn shows(key: &str, cx: &App) -> bool {
 /// then would attach to a session that is gone.
 pub(crate) fn reachable(key: &str, cx: &App) -> bool {
     row(key, cx).is_some_and(|row| !row.stale)
+}
+
+/// Whether the current UI session's store shows that there are no sessions at all ([`session_list::empty_fleet`]: an
+/// available, complete, unfiltered listing with no rows). The pane makes New home then (SPEC.md, "Where focus rests":
+/// "With no terminal on screen, focus rests on New when there are no sessions"). An unread or failed listing claims
+/// nothing, so focus does not settle on New before the helm has said the fleet is empty. It has nothing to do with the
+/// interrupted card; it is here beside [`Follow`], which has to notice the change, so the pane and its follower read
+/// the same fact.
+pub(super) fn empty_fleet(cx: &App) -> bool {
+    session::current_store(cx)
+        .is_some_and(|store| session_list::empty_fleet(store.read(cx).collections()))
 }
 
 /// The row the current UI session's store holds under `key`.
@@ -301,20 +312,24 @@ pub(crate) fn text(row: &SessionRow) -> String {
 
 /// What tells the pane that the open session went into or out of its interrupted card, or its host into or out of reach
 /// (and so into or out of the unavailable card, `unavailable.rs`), so it can drop, mount or make inert its terminals
-/// then: the store pushes the change (or a Restart marks the session), and nothing else the pane observes (the
-/// selection, the user's choices, the connection) moves. It also drops the restarted marks the store has caught up with
-/// ([`forget_settled`]).
+/// then, and that the fleet became empty or stopped being empty, so it can make New home or stop: the store pushes the
+/// change (or a Restart marks the session), and nothing else the pane observes (the selection, the user's choices, the
+/// connection) moves. It also drops the restarted marks the store has caught up with ([`forget_settled`]).
 ///
 /// It is built on [`session::observe_current`], which cannot serve the pane by itself: its callback gets no window,
 /// which every focus move the pane makes needs, and it calls on every pushed change, where the pane wants only these
 /// transitions. So the pane observes this entity with its window, as it observes the terminal set that follows the
-/// session's tabs, and this entity notifies only when the open session, whether it shows the interrupted card, or the
-/// state of its row's host changes: reached, not reached, or no row at all. The last two are told apart because a stale
-/// row shows the unavailable card and a missing one does not, so a row that goes from one to the other changes what the
-/// pane does with its terminals although neither is reachable.
+/// session's tabs, and this entity notifies only when the open session, whether it shows the interrupted card, the
+/// state of its row's host (reached, not reached, or no row at all), or whether the fleet is empty changes. The two
+/// unreached states are told apart because a stale row shows the unavailable card and a missing one does not, so a row
+/// that goes from one to the other changes what the pane does with its terminals although neither is reachable. The
+/// fleet's emptiness is followed on its own, apart from the open session, because it can change with nothing open and
+/// the selection staying as it was: a failed or cut listing, which opens nothing, coming back complete and empty.
 pub(super) struct Follow {
     /// The open session, whether it shows the interrupted card, and whether its row is stale (`None` with no row).
     last: Option<(String, bool, Option<bool>)>,
+    /// Whether the store showed an empty fleet at the last check ([`empty_fleet`]).
+    empty: bool,
     _following: ObservingCurrent,
     _marks: Subscription,
 }
@@ -324,13 +339,14 @@ impl Follow {
     pub(super) fn new(cx: &mut Context<Self>) -> Self {
         Follow {
             last: None,
+            empty: false,
             _following: session::observe_current(cx, |follow: &mut Self, cx| follow.check(cx)),
             _marks: cx.observe_global::<Restarted>(|follow, cx| follow.check(cx)),
         }
     }
 
-    /// Drop the settled marks, then notify if the open session, whether it shows the card, or its row's host state
-    /// changed since the last check.
+    /// Drop the settled marks, then notify if the open session, whether it shows the card, its row's host state, or
+    /// whether the fleet is empty changed since the last check.
     fn check(&mut self, cx: &mut Context<Self>) {
         forget_settled(cx);
         let now = local_state::selected(cx).map(|key| {
@@ -340,8 +356,10 @@ impl Follow {
             let stale = row.map(|row| row.stale);
             (key, card, stale)
         });
-        if now != self.last {
+        let empty = empty_fleet(cx);
+        if now != self.last || empty != self.empty {
             self.last = now;
+            self.empty = empty;
             cx.notify();
         }
     }
