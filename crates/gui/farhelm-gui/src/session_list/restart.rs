@@ -305,6 +305,18 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
     }
 }
 
+/// Whether `key`'s Restart is in flight in this window, from the moment its request is sent until the helm answers.
+/// Restart with runs as the same work on the same key, so it counts too.
+///
+/// The open session's pane asks it while the terminal draws, to hold back the terminal's reconnect card: a Restart
+/// relaunches the agent and the supervisor moves the viewer to the new terminal with a detach that reconnects, so the
+/// card would announce an outage the user just asked for (`session_pane.rs`).
+pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
+    session::current_operations(cx).is_some_and(|operations| {
+        operations.read(cx).in_flight(&OpKey::session(key)) == Some(Work::Restart)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::Value;

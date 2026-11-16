@@ -831,9 +831,9 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
 
     h.fake().drop_link();
     settle(h.cx);
-    assert_eq!(
-        h.status().map(|line| line.words),
-        Some("Session unavailable — reconnecting".into())
+    assert!(
+        h.read(|owner, _| owner.reconnecting()),
+        "the premise: reconnecting"
     );
     let asked = h.fake().attach();
     h.fake()
@@ -903,13 +903,13 @@ fn history(lines: usize, cols: u16) -> GridOutput {
 /// client must come back by itself: a restart is not another client taking over, so offering Take control would ask the
 /// user to fix something nobody broke (old `terminal-restart.spec.ts`, "a restarted session's terminal still shows the
 /// previous run's scrollback above the new one", whose client half this is). The old screen must give way to the new
-/// run's in one redraw, never to half a replay. What the status line says during the backoff is the reconnect
-/// display's, not checked here. Specified: with a live, focused terminal showing "screen" above 40 history lines, a
+/// run's in one redraw, never to half a replay. Specified: with a live, focused terminal showing "screen" above 40 history lines, a
 /// detach with `other` offers no Take control and keeps "screen" up; the stream reattaches by the non-displacing route,
 /// and while the new replay (a screen with "new run" on its first row and the 40 lines above it) arrives nothing is
 /// redrawn and "screen" stays; on completion the owner redraws once to show "new run" with no line of the old screen,
 /// following the bottom; the wheel then reaches the carried-over history, and a typed key is delivered to the new
-/// attachment.
+/// attachment. What the pane says during the backoff is the reconnect card's, which its own tests pin; here it is only
+/// checked to be no red band.
 #[gpui::test]
 fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
     cx: &mut TestAppContext,
@@ -928,10 +928,7 @@ fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
         .detach(Some(DetachCode::Other), "session restarted");
     settle(h.cx);
     assert_eq!(h.fake().phase(), FakePhase::Reconnecting);
-    assert!(
-        h.status().is_some_and(|line| !line.take_control),
-        "no Take control"
-    );
+    assert_eq!(h.status(), None, "no band, so no Take control");
     assert!(h.cx.debug_bounds("terminal-take-control").is_none());
     assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
 
@@ -940,7 +937,8 @@ fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
     let mut replay = first_screen(asked.cols, asked.rows, "new run");
     replay.push(history(40, asked.cols));
     let mut replay = replay.into_iter();
-    // The first message announces the attachment, which redraws the status line away; the rest is the replay proper.
+    // The first message announces the attachment, which redraws the owner (the reconnect card stays up through the
+    // catch-up); the rest is the replay proper.
     h.fake().output(replay.next().unwrap());
     settle(h.cx);
     h.reset_renders();
@@ -1303,6 +1301,301 @@ fn the_status_line_keeps_the_newest_rows_in_view(cx: &mut TestAppContext) {
         bottom <= room,
         "the last row ends at {bottom}, below the room's {room}"
     );
+}
+
+// ---- The reconnect card --------------------------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// Whether the last frame drew the reconnect card.
+    fn card_drawn(&mut self) -> bool {
+        self.cx.debug_bounds(RECONNECT_CARD_ID).is_some()
+    }
+
+    /// Whether the last frame drew the red status band.
+    fn banner_drawn(&mut self) -> bool {
+        self.cx.debug_bounds(STATUS_BANNER_ID).is_some()
+    }
+
+    /// Every line of text a fresh frame painted.
+    fn painted(&mut self) -> Vec<String> {
+        crate::session_list::tests::painted(&test_support::frame(self.cx))
+    }
+
+    /// How many Reconnect now requests the owner sent since the last call to the fake's `received`.
+    fn reconnect_nows(&mut self) -> usize {
+        self.fake()
+            .received()
+            .iter()
+            .filter(|request| **request == FakeTerminalRequest::ReconnectNow)
+            .count()
+    }
+
+    /// The hover help the layer manager shows once the pointer has rested on the element under `selector`.
+    fn hover_help(&mut self, selector: &'static str) -> Option<String> {
+        let at = test_support::center(self.cx, selector);
+        self.cx.simulate_mouse_move(at, None, Modifiers::none());
+        advance(self.cx, layers::HOVER_DELAY);
+        self.cx
+            .update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text.to_string())
+    }
+}
+
+/// SPEC.md, "Session list": a dropped terminal stream "uses the same card with `Session unavailable — reconnecting` and
+/// a neutral `Reconnect now` button; recoverable drops show no red detach banner". A drop the stream recovers from by
+/// itself is nothing the user has to fix, and the red band reads as a failure waiting for them. The card must also leave
+/// the screen and focus alone: the user may be reading the screen, and their typing belongs in the terminal once it is
+/// back. Specified: with a live, focused terminal showing "screen", a dropped link draws the card with the heading, the
+/// explanation and Reconnect now, whose hover help is the old tooltip; no red band is drawn and there is no status line;
+/// "screen" is still the shown screen, the terminal keeps focus, and a typed key is not sent.
+#[gpui::test]
+fn a_dropped_stream_shows_the_reconnect_card_over_the_kept_screen(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert!(!h.card_drawn(), "the premise: live, no card");
+
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Reconnecting,
+        "the premise: reconnecting"
+    );
+    assert!(h.card_drawn());
+    let painted = h.painted();
+    for words in [RECONNECTING_TEXT, RECONNECT_EXPLANATION, "Reconnect now"] {
+        assert_eq!(
+            painted.iter().filter(|text| *text == words).count(),
+            1,
+            "{words:?} once in {painted:?}"
+        );
+    }
+    assert!(!h.banner_drawn(), "no red band");
+    assert_eq!(h.status(), None);
+    assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
+    assert!(h.focused(&owner), "the card took no focus");
+    keys(h.cx, "x");
+    assert_eq!(h.sent(), [], "nothing is sent while reconnecting");
+    assert_eq!(
+        h.hover_help(RECONNECT_NOW_ID).as_deref(),
+        Some("Reconnect now: try to reattach this terminal right away")
+    );
+}
+
+/// Reconnect now exists so a user who knows their network is back need not sit out a backoff they can see on screen
+/// (old `terminal-reconnect.spec.ts`, "manual-reconnect-is-offered-during-the-first-rung"). It must ask the stream once
+/// per press: a second request would be harmless to the stream, but a button that sends more than it was pressed hides
+/// a bug in whatever drives it. Specified: with the link dropped, a click on Reconnect now sends exactly one
+/// ReconnectNow and nothing else; after the reconnect's socket opens and its replay arrives, the stream is no longer
+/// coming back from a drop once the replay completes, and the card is gone.
+#[gpui::test]
+fn reconnect_now_sends_one_request_per_press(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(h.fake().received(), [], "the premise: nothing sent yet");
+
+    click(h.cx, RECONNECT_NOW_ID);
+    assert_eq!(h.fake().received(), [FakeTerminalRequest::ReconnectNow]);
+
+    h.attach_showing("again");
+    assert!(!h.card_drawn());
+    assert!(!h.read(|owner, _| owner.reconnecting()));
+}
+
+/// SPEC.md, "Reaching everything by keyboard", and the component rule that every control is reachable the way buttons
+/// are: Reconnect now is a tab stop like any button, while the card around it never takes focus by itself. Tab is the
+/// program's from a focused terminal, so the button's place in Tab's order is right after the grid's area, where the
+/// controls around the terminal reach it. Specified: with the link dropped and focus resting on nothing, the button is
+/// not focused (the card took nothing); Shift+Tab from there, the last stop in the window, focuses it; Enter sends
+/// exactly one ReconnectNow.
+#[gpui::test]
+fn reconnect_now_is_reached_and_pressed_from_the_keyboard(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(h.card_drawn(), "the premise: the card shows");
+    assert_eq!(
+        test_support::focused_id(h.cx),
+        None,
+        "focus rests on nothing: the card took none"
+    );
+    h.fake().received();
+
+    keys(h.cx, "shift-tab");
+    assert_eq!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(RECONNECT_NOW_ID)
+    );
+    keys(h.cx, "enter");
+    assert_eq!(h.reconnect_nows(), 1);
+}
+
+/// The card sits over a screen that still answers the pointer: the scrim around it lets presses through, so the user
+/// can still select and copy the kept screen while the stream comes back, but a press on the card's own words must not
+/// start a selection (or, under mouse reporting, a report for the program) in the screen hidden behind them.
+/// Specified: with the link dropped and nothing selected, a drag across the card selects nothing; a drag along the top
+/// row, on the scrim beside the card, selects.
+#[gpui::test]
+fn a_drag_on_the_card_reaches_nothing_behind_it_and_the_scrim_lets_presses_through(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.attach_showing("screen line to select");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(h.card_drawn(), "the premise: the card shows");
+    let on_card = test_support::center(h.cx, RECONNECT_CARD_ID);
+    let card = h.cx.debug_bounds(RECONNECT_CARD_ID).unwrap();
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(6, 0));
+    assert!(
+        !card.contains(&from) && !card.contains(&to),
+        "the premise: the top row's start lies beside the card"
+    );
+
+    h.drag(on_card, on_card + point(px(60.), px(0.)), Modifiers::none());
+    assert_eq!(h.selection(), None, "a drag on the card selects nothing");
+    h.drag(from, to, Modifiers::none());
+    assert!(h.selection().is_some(), "a drag on the scrim selects");
+}
+
+/// An inert terminal lies under another status card (the session pane's unreachable-host card), which says what is
+/// wrong and owns the keyboard meanwhile. A reconnect card drawn there would put a second, competing message under the
+/// veil and a Reconnect now that Tab could still reach. An unreachable host very likely drops the stream as well, so
+/// this is the common case where the two meet. Specified: with the terminal inert and its link dropped, the stream is
+/// reconnecting (the premise), yet neither the card nor Reconnect now is drawn; once the terminal is no longer inert,
+/// the card shows.
+#[gpui::test]
+fn an_inert_terminal_draws_no_reconnect_card(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.cx.update(|_, cx| owner.update(cx, |owner, cx| owner.set_inert(true, cx)));
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(
+        h.read(|owner, _| owner.reconnecting()),
+        "the premise: reconnecting"
+    );
+    assert!(!h.card_drawn());
+    assert!(h.cx.debug_bounds(RECONNECT_NOW_ID).is_none());
+
+    h.cx.update(|_, cx| owner.update(cx, |owner, cx| owner.set_inert(false, cx)));
+    settle(h.cx);
+    assert!(
+        h.card_drawn(),
+        "the card shows once the terminal is usable again"
+    );
+}
+
+/// The card says the stream is coming back, so it must stay until it is back: the kept screen takes no input through
+/// the reconnect's catch-up either, and a card that went at the attach would leave a dead screen with nothing saying
+/// so. It must then go in the redraw that shows the new screen, so the terminal never sits live under it. Specified:
+/// after a dropped link, the reconnect's socket opening and the first part of its replay keep the card up over the old
+/// screen; the end of the replay shows the new screen and takes the card away, with the terminal live and nothing
+/// held over from the outage.
+#[gpui::test]
+fn the_card_stays_through_the_reconnects_catch_up_and_goes_when_it_is_live(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.attach_showing("first");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(h.card_drawn(), "the premise: the card shows");
+
+    let asked = h.fake().attach();
+    let replay = screen(asked.cols, asked.rows, "second", serde_json::Value::Null);
+    h.fake().output(replay[0].clone());
+    settle(h.cx);
+    assert!(
+        !h.read(|owner, _| owner.is_live()),
+        "the premise: catching up"
+    );
+    assert!(h.card_drawn(), "still up through the catch-up");
+    assert_eq!(h.text().as_deref().map(first_line), Some("first"));
+
+    for message in replay.into_iter().skip(1) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert!(h.read(|owner, _| owner.is_live()));
+    assert_eq!(h.text().as_deref().map(first_line), Some("second"));
+    assert!(!h.card_drawn());
+    assert!(!h.banner_drawn());
+}
+
+/// The card is for drops the stream recovers from by itself. A takeover, a refusal and a close stop the stream until
+/// the user acts (or for good), and SPEC.md keeps "explicit banners" for such decisions, so each must still show the
+/// red band and never the calm card, even when it ends an outage. Specified: a detach as taken over during an outage
+/// shows the band with Take control and no card; Take control, then a refusal, shows the band ("Connection error") and
+/// no card; closing the stream then shows "Connection closed" in the band and no card.
+#[gpui::test]
+fn detached_refused_and_closed_streams_keep_the_red_band(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(h.card_drawn(), "the premise: an outage");
+    h.fake().attach();
+    h.fake()
+        .detach(Some(DetachCode::TakenOver), "another client attached");
+    settle(h.cx);
+    assert!(h.banner_drawn());
+    assert!(h.status().is_some_and(|line| line.take_control));
+    assert!(!h.card_drawn());
+
+    click(h.cx, "terminal-take-control");
+    h.fake().phase();
+    h.fake().refuse(401);
+    settle(h.cx);
+    assert!(h.banner_drawn());
+    assert_eq!(
+        h.status().map(|line| line.words),
+        Some("Connection error".into())
+    );
+    assert!(!h.card_drawn());
+
+    h.read(|owner, _| owner.handle.clone().unwrap()).close();
+    assert_eq!(h.fake().phase(), FakePhase::Closed, "the premise: closed");
+    settle(h.cx);
+    assert_eq!(
+        h.status().map(|line| line.words),
+        Some("Connection closed".into())
+    );
+    assert!(h.banner_drawn());
+    assert!(!h.card_drawn());
+}
+
+/// A message the grid model refuses ends the stream for good, and the owner says so on the red band. One that arrives
+/// during an outage's catch-up must not leave the reconnect card promising a reattach that will never come. Specified:
+/// after a dropped link and the reconnect's first message, a second hello faults the stream: the band shows the
+/// error, the card is gone, and the stream is closed.
+#[gpui::test]
+fn a_fault_during_a_reconnect_ends_the_card(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    h.fake().drop_link();
+    let asked = h.fake().attach();
+    h.fake()
+        .output(screen(asked.cols, asked.rows, "x", serde_json::Value::Null)[0].clone());
+    settle(h.cx);
+    assert!(h.card_drawn(), "the premise: catching up after an outage");
+
+    let second_hello: GridOutput = serde_json::from_value(
+        serde_json::json!({"t":"hello","cols":asked.cols,"rows":asked.rows,"history_cap":0}),
+    )
+    .unwrap();
+    h.fake().output(second_hello);
+    settle(h.cx);
+    assert!(h.banner_drawn());
+    assert!(!h.card_drawn());
+    assert_eq!(h.fake().phase(), FakePhase::Closed);
 }
 
 // ---- Lifetime ------------------------------------------------------------------------------------------------------
