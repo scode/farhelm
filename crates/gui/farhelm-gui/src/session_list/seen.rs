@@ -7,7 +7,8 @@
 //!
 //! - **Offered on a live row.** Running, waiting or idle, never on an ended or unclassified one, which has no dot and
 //!   no seen state worth toggling. A row on an unreachable host still offers it, as in the old app: the helm keeps seen
-//!   state itself, with no host to ask, so nothing there can refuse it.
+//!   state itself, with no host to ask, so nothing there can refuse it. A retired containerized session offers neither,
+//!   live or not: it supports Delete only ([`super::retired`]), and the old app fenced its seen writes the same way.
 //! - **The label follows the row.** "Mark read" while the row has output nobody has looked at ([`status::unseen`]; a
 //!   running or waiting row can have some too), which records the row's latest activity as seen, and "Mark unread"
 //!   otherwise, which clears the stamp ([`Toggle`]). The menu and the dot read it on every draw, so an open menu
@@ -87,9 +88,10 @@ impl Toggle {
     }
 }
 
-/// The toggle `row` offers, or `None` when it offers none: only a live row does (see the module docs).
+/// The toggle `row` offers, or `None` when it offers none: only a live row that is not retired does (see the module
+/// docs).
 pub(crate) fn offered(row: &SessionRow) -> Option<Toggle> {
-    if !row.info.status.is_live() {
+    if !row.info.status.is_live() || super::retired::is(row) {
         return None;
     }
     Some(if status::unseen(row) {
@@ -133,7 +135,7 @@ pub(crate) fn send(key: &str, toggle: Toggle, cx: &mut App) {
 pub(super) fn dot(session: Listed, live: Live, selected: bool, step: u64, cx: &App) -> AnyElement {
     let row = session.row;
     let mark = live.mark(theme::palette(cx), selected, row.stale, step);
-    // A live row always offers a toggle; drawing the bare mark keeps that an assumption about the rule, not a panic.
+    // A retired row's dot is the bare mark, with no action; every other live row offers a toggle.
     let Some(toggle) = offered(row) else {
         return mark.into_any_element();
     };

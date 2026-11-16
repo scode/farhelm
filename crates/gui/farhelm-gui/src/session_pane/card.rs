@@ -79,19 +79,20 @@ use crate::session_list::{self, menu, outcome, replace, restart};
 use crate::theme::{self, metrics};
 use crate::{launcher, local_state};
 
-/// `.interrupted-card`'s `max-width: 42rem`.
-const MAX_WIDTH: f32 = 672.;
+/// `.interrupted-card`'s `max-width: 42rem`. The retired card has the same look (`super::retired`).
+pub(super) const MAX_WIDTH: f32 = 672.;
 /// `.interrupted-card`'s `padding: 2rem`.
-const PAD: f32 = 32.;
+pub(super) const PAD: f32 = 32.;
 /// `.interrupted-card`'s `gap`.
-const GAP: f32 = 12.;
+pub(super) const GAP: f32 = 12.;
 
 // ---- When the card shows, and what it says ---------------------------------------------------------------------------
 
-/// Whether `row` takes the interrupted card: its status is Interrupted and the helm reaches its host (see the module
-/// docs, "When").
+/// Whether `row` takes the interrupted card: its status is Interrupted, the helm reaches its host (see the module docs,
+/// "When"), and it is not a retired containerized session, which supports Delete only and so takes the retired card
+/// whatever its status (`super::retired`): this card's Restart and Replace would be refused.
 fn interrupted(row: &SessionRow) -> bool {
-    !row.stale && row.info.status == SessionStatus::Interrupted
+    !row.stale && row.info.status == SessionStatus::Interrupted && !session_list::retired::is(row)
 }
 
 /// Whether the open session filed under `key`, whose row the store holds as `row`, shows the interrupted card now: its
@@ -296,23 +297,26 @@ pub(crate) fn text(row: &SessionRow) -> String {
 // ---- Following the store ---------------------------------------------------------------------------------------------
 
 /// What tells the pane that the open session went into or out of its interrupted card, or its host into or out of reach
-/// (and so into or out of the unavailable card, `unavailable.rs`), so it can drop, mount or make inert its terminals
-/// then, and that the fleet became empty or stopped being empty, so it can make New home or stop: the store pushes the
-/// change (or a Restart marks the session), and nothing else the pane observes (the selection, the user's choices, the
-/// connection) moves. It also drops the restarted marks the store has caught up with ([`forget_settled`]).
+/// (and so into or out of the unavailable card, `unavailable.rs`), or that its row turned out to be a retired
+/// containerized session's (`retired.rs`), so it can drop, mount or make inert its terminals then, and that the fleet
+/// became empty or stopped being empty, so it can make New home or stop: the store pushes the change (or a Restart
+/// marks the session), and nothing else the pane observes (the selection, the user's choices, the connection) moves.
+/// It also drops the restarted marks the store has caught up with ([`forget_settled`]).
 ///
 /// It is built on [`session::observe_current`], which cannot serve the pane by itself: its callback gets no window,
 /// which every focus move the pane makes needs, and it calls on every pushed change, where the pane wants only these
 /// transitions. So the pane observes this entity with its window, as it observes the terminal set that follows the
 /// session's tabs, and this entity notifies only when the open session, whether it shows the interrupted card, the
-/// state of its row's host (reached, not reached, or no row at all), or whether the fleet is empty changes. The two
-/// unreached states are told apart because a stale row shows the unavailable card and a missing one does not, so a row
-/// that goes from one to the other changes what the pane does with its terminals although neither is reachable. The
-/// fleet's emptiness is followed on its own, apart from the open session, because it can change with nothing open and
-/// the selection staying as it was: a failed or cut listing, which opens nothing, coming back complete and empty.
+/// state of its row's host (reached, not reached, or no row at all), whether it is retired, or whether the fleet is
+/// empty changes. The two unreached states are told apart because a stale row shows the unavailable card and a missing
+/// one does not, so a row that goes from one to the other changes what the pane does with its terminals although
+/// neither is reachable. The fleet's emptiness is followed on its own, apart from the open session, because it can
+/// change with nothing open and the selection staying as it was: a failed or cut listing, which opens nothing, coming
+/// back complete and empty.
 pub(super) struct Follow {
-    /// The open session, whether it shows the interrupted card, and whether its row is stale (`None` with no row).
-    last: Option<(String, bool, Option<bool>)>,
+    /// The open session, whether it shows the interrupted card, whether its row is stale (`None` with no row), and
+    /// whether it is a retired containerized session, which never gets terminals (`super::retired`).
+    last: Option<(String, bool, Option<bool>, bool)>,
     /// Whether the store showed an empty fleet at the last check ([`empty_fleet`]).
     empty: bool,
     _following: ObservingCurrent,
@@ -338,8 +342,9 @@ impl Follow {
             // One read of the row for both answers, so they describe the same push.
             let row = row(&key, cx);
             let card = row.as_ref().is_some_and(|row| shows_row(&key, row, cx));
+            let retired = row.as_ref().is_some_and(session_list::retired::is);
             let stale = row.map(|row| row.stale);
-            (key, card, stale)
+            (key, card, stale, retired)
         });
         let empty = empty_fleet(cx);
         if now != self.last || empty != self.empty {

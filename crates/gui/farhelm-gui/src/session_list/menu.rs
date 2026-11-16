@@ -78,6 +78,10 @@
 //! While any row's menu or a question it asked is open, the list's order hold stays on ([`RowLayers::any_open`],
 //! [`super::hold`]), so the row the menu belongs to does not move away from it.
 //!
+//! **A retired containerized session** ([`super::retired`]) supports Delete only, so its menu holds Delete alone, with
+//! the ordinary question, and its header's summary ends with the retired reason, as the old menu's did. Delete is then
+//! the menu's first command as well as its last: a click, Down, Up, Home and End all land on it.
+//!
 //! NOTE: The environment commands come with their area, in the old order around these (Delete stays last), with no
 //! placeholder meanwhile; the old row menu had no Restart, which the open session's header offers instead
 //! (`session_pane/header.rs`). Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
@@ -95,7 +99,7 @@ use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, WeakEntity,
-    Window, div, px,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::row_marks::HelpPlace;
@@ -342,9 +346,17 @@ impl SessionList {
         let mark = Mark::take(cx);
         let rename_focus = cx.focus_handle().tab_stop(true);
         let delete_focus = cx.focus_handle().tab_stop(true);
+        // A retired session's menu holds Delete alone, so its first command is Delete too.
+        let retired = session::current_store(cx).is_some_and(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<SessionRow>(key)
+                .is_some_and(super::retired::is)
+        });
         let start = match start {
-            MenuStart::First => rename_focus.clone(),
-            MenuStart::Last => delete_focus.clone(),
+            MenuStart::First if !retired => rename_focus.clone(),
+            MenuStart::First | MenuStart::Last => delete_focus.clone(),
         };
         let list = cx.weak_entity();
         let view = cx.new(|_| RowMenu {
@@ -653,12 +665,7 @@ impl Render for RowMenu {
         let panel = layers::panel(cx)
             .id("session-menu")
             .debug_selector(|| "session-menu".into())
-            .w(px(PANEL_WIDTH))
-            // Home and End, the old menu's: the layer manager's menu context binds only Up and Down.
-            .on_key_down(home_end_keys(
-                self.rename_focus.clone(),
-                self.delete_focus.clone(),
-            ));
+            .w(px(PANEL_WIDTH));
         // Read before the row, which borrows the store from the context.
         let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
@@ -671,6 +678,15 @@ impl Render for RowMenu {
         };
         let title = HostText::from_host(row.info.title.as_str());
         let busy = refused(&self.key, cx);
+        // Home and End, the old menu's: the layer manager's menu context binds only Up and Down. A retired session's
+        // menu holds Delete alone, so both go there.
+        let retired = super::retired::is(row);
+        let first = if retired {
+            &self.delete_focus
+        } else {
+            &self.rename_focus
+        };
+        let panel = panel.on_key_down(home_end_keys(first.clone(), self.delete_focus.clone()));
         let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
         let rename_help = if open {
             format!("Rename: give this session a new title ({RENAME_SESSION_SHORTCUT_NAME})")
@@ -808,15 +824,15 @@ impl Render for RowMenu {
             LifecycleCommand::Delete,
         )
         .focus(&self.delete_focus);
-        panel
-            .child(MenuHeader::new(&title, summary(&self.key, row)))
-            .child(
-                div()
-                    .id("session-menu-items")
-                    .role(Role::Menu)
-                    .aria_label(actions_label(&row.info.title))
-                    .flex()
-                    .flex_col()
+        // A retired session's menu holds Delete alone (the module docs), the same item every row's menu ends with.
+        let items = div()
+            .id("session-menu-items")
+            .role(Role::Menu)
+            .aria_label(actions_label(&row.info.title))
+            .flex()
+            .flex_col()
+            .when(!retired, |items| {
+                items
                     .child(rename)
                     .children(seen_item)
                     .children(super::pins::menu_items(
@@ -830,13 +846,17 @@ impl Render for RowMenu {
                     .child(menu_separator(cx))
                     .child(stop)
                     .child(menu_separator(cx))
-                    .child(delete),
-            )
+            })
+            .child(delete);
+        panel
+            .child(MenuHeader::new(&title, summary(&self.key, row)))
+            .child(items)
             .children(outcome::menu_line(&self.key, cx))
     }
 }
 
-/// The line under the session's title in the menu's header: its agent, then its status, as "Codex · Running". It may
+/// The line under the session's title in the menu's header: its agent, then its status, as "Codex · Running", and for
+/// a retired containerized session the retired reason after them (`farhelm_proto::RETIRED_CONTAINER_REASON`). It may
 /// quote a host (a command launch's program), so it is host text. The agent is its display name for an agent Farhelm
 /// knows, and the launched program's name otherwise; a status that draws no badge leaves the agent alone, with no
 /// separator.
@@ -854,6 +874,12 @@ fn summary(key: &str, row: &SessionRow) -> HostSentence {
         .as_ref(),
     ) {
         summary = summary.text(" · ").text(word);
+    }
+    // A retired session's header says why its menu holds Delete alone, as the old one did.
+    if super::retired::is(row) {
+        summary = summary
+            .text(" · ")
+            .text(farhelm_proto::RETIRED_CONTAINER_REASON);
     }
     summary
 }

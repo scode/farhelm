@@ -87,7 +87,8 @@ use crate::{local_state, session};
 ///
 /// Returns the editor's layer, or `None` when nothing opened: the window is inert, the session has work in flight (a
 /// Delete, say: SPEC.md, "an open lifecycle confirmation or a pending request refuses another lifecycle action"), the
-/// store holds no row for the session so there is no title to start from, or the user moved on. A refusal is silent, as
+/// store holds no row for the session so there is no title to start from, the session is a retired containerized one
+/// ([`super::retired`]: Delete only), or the user moved on. A refusal is silent, as
 /// it was in the old app: the session's row already shows the work in flight.
 pub fn open(key: &str, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
     open_returning(key, mark, Mode::Ordinary(ReturnTo::Opener), window, cx)
@@ -153,11 +154,14 @@ fn open_returning(
         tracing::debug!("rename not opened: the session's YOLO question is open");
         return None;
     }
-    let stored = store
-        .read(cx)
-        .collections()
-        .get::<SessionRow>(key)
-        .map(|row| row.info.title.clone());
+    let row = store.read(cx).collections().get::<SessionRow>(key);
+    // A retired containerized session supports Delete only; its menu offers no Rename, and the shortcut must not
+    // reach one either (`super::retired`).
+    if row.is_some_and(super::retired::is) {
+        tracing::debug!("rename not opened: the session is a retired containerized session");
+        return None;
+    }
+    let stored = row.map(|row| row.info.title.clone());
     let (title, returns_to, naming) = match mode {
         Mode::Ordinary(returns_to) => (stored?, returns_to, false),
         Mode::Naming { created } => (

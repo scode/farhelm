@@ -53,7 +53,8 @@
 //! ([`super::menu`]).
 //!
 //! A pinned row draws the muted pin glyph just before its title, and its accessible name starts with "Pinned"
-//! ([`super::pins`]).
+//! ([`super::pins`]). A retired containerized session's title, and its accessible name after any "Pinned", follow
+//! "Retired container · " in every density, and its row draws no bell ([`super::retired`]).
 //!
 //! A marked row ([`super::marking`]) draws a 3-pixel marker down its leading edge, in the accent fill, or in the fill's
 //! ink on the selected row, whose accent fill it keeps; an unselected marked row is tinted as well (`marked_bg`). The
@@ -119,6 +120,10 @@ const MONO_ADVANCE_EM: f32 = 0.6;
 fn age_min_width() -> gpui::Pixels {
     metrics::TEXT_SM * (4. * MONO_ADVANCE_EM)
 }
+
+/// The gap that stands for the space closing a retired session's title prefix ([`title_element`]): about a space's
+/// advance in the row title's face and size.
+const TITLE_PREFIX_GAP: gpui::Pixels = px(4.);
 
 /// The gap between the parts of the ended line: an ended status and a stale cause beside it (`.session-detail-copy`).
 const DETAIL_GAP: gpui::Pixels = px(4.);
@@ -250,16 +255,19 @@ pub(crate) fn row(
     let cause = status::stale_cause(row, collections);
     let place = HelpPlace::Row { selected };
     // The row's accessible name is its title, escaped as the screen shows it, after "Pinned" on a pinned row as the old
-    // open button's name read its pin glyph first. Its hover help is the summary card, beside the sidebar, in either
-    // density; the card's words, which are the row's accessible description, are its status word and what a click does,
-    // and on a compact row what its hidden lines would have said.
-    let label = if row.pinned {
-        HostSentence::new(id.clone()).text("Pinned ")
-    } else {
-        HostSentence::new(id.clone())
+    // open button's name read its pin glyph first, and after the retired prefix on a retired session's row, as the old
+    // title read. Its hover help is the summary card, beside the sidebar, in either density; the card's words, which are
+    // the row's accessible description, are its status word and what a click does, and on a compact row what its hidden
+    // lines would have said.
+    let retired = super::retired::is(row);
+    let mut label = HostSentence::new(id.clone());
+    if row.pinned {
+        label = label.text("Pinned ");
     }
-    .host(&title)
-    .accessible_name();
+    if retired {
+        label = label.text(super::retired::TITLE_PREFIX);
+    }
+    let label = label.host(&title).accessible_name();
     let item_label = label.clone();
     let words: Line = if compact {
         compact_help(&id, row, cause).into()
@@ -330,14 +338,7 @@ pub(crate) fn row(
             Some(guard) => {
                 delete::progress(session.key, guard, steps.spinner, selected, cx).into_any_element()
             }
-            None => host_text::element(&title)
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(metrics::TEXT_ROW_TITLE)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::color(inks.title))
-                .into_any_element(),
+            None => title_element(&title, retired, inks),
         })
         // A compact stale row's clock, after the title, which gives way to it (`.compact-qualifier`).
         .children(
@@ -412,6 +413,41 @@ pub(crate) fn row(
         .children(replace_yolo::row_question(session.key, cx))
         .children(marked.then(|| marker(session.key, selected, palette)))
         .into_any_element()
+}
+
+/// The row's title as the first line draws it, taking the width the line leaves and truncated at its end, in the
+/// row's title ink. A retired session's title follows [`super::retired::TITLE_PREFIX`] in the same face and ink, in
+/// every density (the old app prefixed the title itself): the prefix keeps its width and the host's title, a value of
+/// its own, gives way, so the retirement stays readable however narrow the sidebar is. The two are separate text
+/// elements, since a host value is always one of its own, so the prefix's closing space is drawn as a gap between them
+/// rather than left to each shaper's handling of a run's trailing space.
+fn title_element(title: &HostText, retired: bool, inks: Inks) -> AnyElement {
+    let styled = |element: gpui::Div| {
+        element
+            .text_size(metrics::TEXT_ROW_TITLE)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::color(inks.title))
+    };
+    let host = host_text::element(title).flex_1().min_w_0().truncate();
+    if !retired {
+        return styled(host).into_any_element();
+    }
+    styled(
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_row()
+            .gap(TITLE_PREFIX_GAP),
+    )
+    .child(
+        div()
+            .flex_none()
+            .whitespace_nowrap()
+            .child(super::retired::TITLE_PREFIX.trim_end()),
+    )
+    .child(host)
+    .into_any_element()
 }
 
 /// A marked row's marker: [`MARKER_WIDTH`] down the row's whole leading edge, over everything else in it, in the
