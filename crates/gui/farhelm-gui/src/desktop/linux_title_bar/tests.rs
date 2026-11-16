@@ -2,6 +2,8 @@
 //! and the sizes that keep the app's content at its minimum. GPUI's test platform reports the compositor's decorations
 //! on every window, so the drawing tests draw the bar itself ([`super::draw`]); [`super::shows`] is tested on its own.
 //! Window commands and drags are recorded, not performed: the test platform cannot minimize, zoom or move a window.
+//! The content area the bar and Kit's frame leave is tested as a function of the window's state
+//! ([`super::content_area_in`]), since no test window can report client decorations.
 
 use gpui::{
     Decorations, FocusHandle, IntoElement as _, Modifiers, MouseButton, ParentElement as _, Pixels,
@@ -10,7 +12,8 @@ use gpui::{
 };
 
 use super::{
-    Command, Commands, HEIGHT, content_width_of, draw, minimum_allowance, opening_allowance, shows,
+    Command, Commands, HEIGHT, bar_height, content_area, content_area_in, draw, minimum_allowance,
+    opening_allowance, shows,
 };
 use crate::desktop::title_band::{self, Decisions, PressAction, Row};
 use crate::test_support;
@@ -281,13 +284,20 @@ fn a_click_on_the_bars_buttons_leaves_focus_where_it_was(cx: &mut TestAppContext
     }
 }
 
+// ---- The content area -----------------------------------------------------------------------------------------------
+
+/// A rectangle from its left, top, width and height.
+fn rect(left: f32, top: f32, width: f32, height: f32) -> gpui::Bounds<Pixels> {
+    gpui::Bounds::new(point(px(left), px(top)), size(px(width), px(height)))
+}
+
 /// The sidebar sizes itself against the window's content, and a frame counted as content gave it 42 pixels that were
 /// not there: under Mutter the expanded rail took the main pane below its 320-pixel floor (the migration's review gate,
 /// 2026-11-15). GPUI's test platform reports the compositor's decorations on every window, so the frame is pinned here
-/// as a pure rule. Specified: a window with the compositor's decorations is all content; a client-decorated one loses
-/// Kit's 20-pixel shadow and 1-pixel border on each side (a 762-pixel surface holds 720 pixels of content), or the
-/// shadow margin Kit set instead of its default; a side tiled against the screen's edge loses neither, so a maximized
-/// window is all content; and nothing goes below zero.
+/// as a pure rule, on the content area's width. Specified: a window with the compositor's decorations is all content;
+/// a client-decorated one loses Kit's 20-pixel shadow and 1-pixel border on each side (a 762-pixel surface holds 720
+/// pixels of content), or the shadow margin Kit set instead of its default; a side tiled against the screen's edge
+/// loses neither, so a maximized window is all content; and nothing goes below zero.
 #[test]
 fn the_content_width_leaves_out_kits_frame_on_each_untiled_side() {
     let tiled = |left, right| Decorations::Client {
@@ -298,25 +308,18 @@ fn the_content_width_leaves_out_kits_frame_on_each_untiled_side() {
             bottom: false,
         },
     };
+    let width = |surface: f32, decorations, inset| {
+        content_area_in(size(px(surface), px(600.)), decorations, inset, px(0.))
+            .size
+            .width
+    };
+    assert_eq!(width(762., Decorations::Server, None), px(762.));
+    assert_eq!(width(762., tiled(false, false), None), px(720.));
+    assert_eq!(width(762., tiled(false, false), Some(px(10.))), px(740.));
+    assert_eq!(width(762., tiled(true, false), None), px(741.));
     assert_eq!(
-        content_width_of(px(762.), Decorations::Server, None),
-        px(762.)
-    );
-    assert_eq!(
-        content_width_of(px(762.), tiled(false, false), None),
-        px(720.)
-    );
-    assert_eq!(
-        content_width_of(px(762.), tiled(false, false), Some(px(10.))),
-        px(740.)
-    );
-    assert_eq!(
-        content_width_of(px(762.), tiled(true, false), None),
-        px(741.)
-    );
-    assert_eq!(
-        content_width_of(
-            px(762.),
+        width(
+            762.,
             Decorations::Client {
                 tiling: Tiling::tiled()
             },
@@ -324,5 +327,111 @@ fn the_content_width_leaves_out_kits_frame_on_each_untiled_side() {
         ),
         px(762.)
     );
-    assert_eq!(content_width_of(px(30.), tiled(false, false), None), px(0.));
+    assert_eq!(width(30., tiled(false, false), None), px(0.));
+}
+
+/// Why this matters: the layer manager fits dialogs and tooltips, and the dialog frame sizes itself, into this
+/// rectangle. Were it the whole window, a tall card or a dialog at its height limit would cover the Linux window's own
+/// title bar and reach into the shadow GPUI Kit draws around the window, as a host progress card and the launcher did
+/// on 2026-11-15.
+///
+/// Specification, for the 1642 by 1076 window those reports measured, with client decorations and the bar drawn: the
+/// content area is the window less Kit's 20 px shadow margin and 1 px border on each side and the 34 px bar at the top,
+/// (21, 55, 1600 by 1000), whose center row is 555. The same holds before Kit has reported its margin (Kit's 20 px is
+/// assumed), and a margin Kit reports otherwise is used (10 px gives an 11 px frame); a zero margin still leaves the
+/// border. A surface too short for its frame and the bar holds nothing, rather than a negative height.
+#[test]
+fn the_content_area_lies_inside_kits_frame_and_below_the_bar() {
+    let viewport = size(px(1642.), px(1076.));
+    let client = Decorations::Client {
+        tiling: Tiling::default(),
+    };
+    let area = content_area_in(viewport, client, Some(px(20.)), HEIGHT);
+    assert_eq!(area, rect(21., 55., 1600., 1000.));
+    assert_eq!(area.center().y, px(555.));
+    assert_eq!(
+        content_area_in(viewport, client, None, HEIGHT),
+        area,
+        "Kit's own margin until it reports one"
+    );
+    assert_eq!(
+        content_area_in(viewport, client, Some(px(10.)), HEIGHT),
+        rect(11., 45., 1620., 1020.)
+    );
+    assert_eq!(
+        content_area_in(viewport, client, Some(px(0.)), HEIGHT),
+        rect(1., 35., 1640., 1040.)
+    );
+    assert_eq!(
+        content_area_in(size(px(1642.), px(50.)), client, None, HEIGHT).size,
+        size(px(1600.), px(0.))
+    );
+}
+
+/// Why this matters: Kit draws no shadow margin or border on a side the window is tiled against, and GPUI reports a
+/// fullscreen window, and usually a maximized one, as tiled on every side, so an area that kept the frame there would
+/// leave a 21 px gap along the screen's edge; and a fullscreen window draws no bar, so the area must not keep its room
+/// either.
+///
+/// Specification, in a 1000 by 800 window with client decorations: tiled on every side (maximized) with the bar, the
+/// content area is the whole window less the 34 px at the top; tiled only at the top and left (snapped to a corner),
+/// the frame stays on the right and bottom alone; with no bar (fullscreen, which is also tiled), it is the whole
+/// window.
+#[test]
+fn the_content_area_drops_the_frame_on_tiled_sides_and_the_bar_in_fullscreen() {
+    let viewport = size(px(1000.), px(800.));
+    let tiled = |top, right, bottom, left| Decorations::Client {
+        tiling: Tiling {
+            top,
+            right,
+            bottom,
+            left,
+        },
+    };
+    let all = tiled(true, true, true, true);
+    assert_eq!(
+        content_area_in(viewport, all, Some(px(20.)), HEIGHT),
+        rect(0., 34., 1000., 766.)
+    );
+    assert_eq!(
+        content_area_in(
+            viewport,
+            tiled(true, false, false, true),
+            Some(px(20.)),
+            HEIGHT
+        ),
+        rect(0., 34., 979., 745.)
+    );
+    assert_eq!(
+        content_area_in(viewport, all, Some(px(20.)), px(0.)),
+        rect(0., 0., 1000., 800.)
+    );
+}
+
+/// Why this matters: under a compositor that draws the decorations, and on macOS (which never reports client
+/// decorations, and whose window has the native title bar or the title band), nothing of the window is the app's
+/// chrome, so placement must stay exactly what it was before the content area existed.
+///
+/// Specification: with server decorations and no bar, the content area is the whole 1000 by 800 window; and a window
+/// on GPUI's test platform, which reports server decorations as both platforms' compositor-decorated windows do, gets
+/// its whole viewport from [`content_area`] and no bar height from [`bar_height`].
+#[gpui::test]
+fn without_client_decorations_the_content_area_is_the_whole_window(cx: &mut TestAppContext) {
+    let viewport = size(px(1000.), px(800.));
+    assert_eq!(
+        content_area_in(viewport, Decorations::Server, None, px(0.)),
+        rect(0., 0., 1000., 800.)
+    );
+    let window = test_support::open(cx, |_, _| div().size_full().into_any_element());
+    window.simulate_resize(viewport);
+    window.run_until_parked();
+    let (area, bar, viewport) = window.update(|window, _| {
+        (
+            content_area(window),
+            bar_height(window),
+            window.viewport_size(),
+        )
+    });
+    assert_eq!(area, gpui::Bounds::new(point(px(0.), px(0.)), viewport));
+    assert_eq!(bar, px(0.));
 }

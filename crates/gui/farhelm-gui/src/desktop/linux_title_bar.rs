@@ -14,6 +14,9 @@
 //! drawing them itself when the compositor declines, which it reports through `Window::window_decorations`. That answer
 //! can come after the window opens, so the views that draw the bar redraw on the window's appearance changes.
 //!
+//! The module also says which part of the window holds the app's content once Kit's frame and the bar are drawn
+//! ([`content_area`]).
+//!
 //! Its buttons act on their own window directly, not by dispatching the menu's declared Minimize and Zoom actions:
 //! those act on the active window, which headless Mutter never reports, and the notices window's bar must act on the
 //! notices window whichever window has focus. A drag from the bar, and a click on its buttons, leave keyboard focus
@@ -24,8 +27,9 @@
 //! still move and close the window.
 
 use gpui::{
-    AnyElement, App, Decorations, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    Role, SharedString, Size, StatefulInteractiveElement as _, Styled as _, Window, div, px, size,
+    AnyElement, App, Bounds, Decorations, Edges, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, Role, SharedString, Size, StatefulInteractiveElement as _,
+    Styled as _, Window, div, point, px, size,
 };
 
 use super::title_band;
@@ -68,47 +72,88 @@ pub(crate) fn minimum_allowance() -> Size<Pixels> {
     size(px(2. * KIT_BORDER), px(2. * KIT_BORDER) + HEIGHT)
 }
 
-/// How wide the app's content is in `window`: the window's surface less GPUI Kit's frame on each side, the shadow margin
-/// and the border it draws inside a client-decorated window ([`content_width_of`]). Content that sizes itself against
-/// the window rather than laying out inside it (the sidebar's shown width, which leaves the main pane its floor, and
-/// whether the macOS header floats) must use this, since `Window::viewport_size` counts the frame too, 42 pixels more
-/// than the content has under Mutter (found by the migration's review gate on 2026-11-15, where the expanded rail took
-/// the main pane below its floor).
-pub(crate) fn content_width(window: &Window) -> Pixels {
-    content_width_of(
-        window.viewport_size().width,
+// ---- Where the content sits -----------------------------------------------------------------------------------------
+
+/// The part of `window` that holds the app's content, in window coordinates: inside the frame GPUI Kit draws around a
+/// client-decorated window (its shadow margin and border) and below the bar the root view draws at its top. GPUI's
+/// `Window::viewport_size` includes both, so anything sized or placed against it could take room that is not there:
+/// a tall host progress card and a dialog at its height limit covered the bar, as settings-and-hosts and templates
+/// reported on 2026-11-15, and the expanded host rail took the main pane below its floor under Mutter, where the frame
+/// is 42 pixels wide (found by the migration's review gate the same day). The layer manager fits its dialogs and
+/// tooltips into this, and the dialog frame, the host progress card and the sidebar's shown width size themselves
+/// against it, as the old app's page was the whole of its window. Under a compositor that draws the decorations, and
+/// on macOS, it is the whole window.
+///
+/// It follows the window's state the way Kit's frame and the bar do: a maximized, fullscreen or tiled window has no
+/// shadow margin or border on its tiled sides (GPUI reports every side tiled for a fullscreen window, and usually for
+/// a maximized one), and a fullscreen one draws no bar ([`bar_height`]).
+pub(crate) fn content_area(window: &Window) -> Bounds<Pixels> {
+    content_area_in(
+        window.viewport_size(),
         window.window_decorations(),
         window.client_inset(),
+        bar_height(window),
     )
 }
 
-/// [`content_width`] as a pure function of the surface's `width`, the window's `decorations` and the shadow margin GPUI
-/// Kit set as the window's client `inset` (`None` before Kit's frame first drew, when Kit's own default applies), by
-/// Kit's rule (the NOTE below): a window whose decorations are the compositor's has no frame; on a client-decorated one
-/// each side has the shadow margin and the border, except a side the window is tiled against (maximized, or snapped to
-/// that edge), where Kit draws neither. Off Linux the windows are never client-decorated, so they are all content.
+/// The height the bar takes at the top of the root view's box: [`HEIGHT`] where the window draws it ([`shows`]), else
+/// nothing. The root view's box already sits inside Kit's frame, so this is the whole of what a box filling the root
+/// view (the dialog veil) pads by to cover [`content_area`] alone.
+pub(crate) fn bar_height(window: &Window) -> Pixels {
+    if shows(window.window_decorations(), window.is_fullscreen()) {
+        HEIGHT
+    } else {
+        px(0.)
+    }
+}
+
+/// [`content_area`] as a pure function of the surface's size `viewport`, the window's `decorations`, the shadow margin
+/// GPUI Kit set as the window's client `inset` (`None` before Kit's frame first drew, when Kit's own 20 pixels apply)
+/// and a bar `bar` tall at the top. A window whose decorations are the compositor's has no frame; on a client-decorated
+/// one each side has the shadow margin and then the border, except a side the window is tiled against (maximized, or
+/// snapped to that edge), where Kit draws neither. Off Linux the windows are never client-decorated (GPUI's macOS
+/// backend reports server decorations), which is why this reads the decorations instead of checking the platform: on
+/// macOS the area is the whole window. The area never goes below zero wide or tall: a surface narrower than its frame
+/// holds no content.
 ///
 /// NOTE: This mirrors `window_content_insets` (and the `client_frame_insets` it builds on) in GPUI Kit's
 /// `src/window_border.rs`, gpui-component 0.9.1, which Kit keeps `pub(crate)`. It takes the same inputs that function
-/// reads from the window (client or server decorations, each side's tiling, and the client inset Kit set), so a Kit
-/// upgrade must be checked against that function: a changed shadow, border or tiling rule there makes the sidebar give
-/// the main pane the wrong room here, and `tests.rs`'s `the_content_width_leaves_out_kits_frame_on_each_untiled_side`
-/// pins the rule as of 0.9.1.
-pub(crate) fn content_width_of(
-    width: Pixels,
+/// reads from the window, so a Kit upgrade must be checked against that function: a changed shadow, border or tiling
+/// rule there puts dialogs, tooltips and the sidebar's room wrong here, and `tests.rs` pins the rule as of 0.9.1
+/// (`the_content_width_leaves_out_kits_frame_on_each_untiled_side` and the content area tests after it). Kit's public
+/// `window_paddings` gives the shadow part alone, but not the border: a side it pads by nothing may be tiled (no
+/// border) or carry a zero inset (a border), so the tiling is read here in any case.
+pub(crate) fn content_area_in(
+    viewport: Size<Pixels>,
     decorations: Decorations,
     inset: Option<Pixels>,
-) -> Pixels {
-    let Decorations::Client { tiling } = decorations else {
-        return width;
+    bar: Pixels,
+) -> Bounds<Pixels> {
+    let frame = match decorations {
+        Decorations::Server => Edges::default(),
+        Decorations::Client { tiling } => {
+            let edge = inset.unwrap_or(px(KIT_SHADOW)) + px(KIT_BORDER);
+            let side = |tiled: bool| if tiled { px(0.) } else { edge };
+            Edges {
+                top: side(tiling.top),
+                right: side(tiling.right),
+                bottom: side(tiling.bottom),
+                left: side(tiling.left),
+            }
+        }
     };
-    let side = inset.unwrap_or(px(KIT_SHADOW)) + px(KIT_BORDER);
-    let frame = [tiling.left, tiling.right]
-        .into_iter()
-        .filter(|tiled| !tiled)
-        .fold(px(0.), |frame, _| frame + side);
-    if frame > width { px(0.) } else { width - frame }
+    let origin = point(frame.left, frame.top + bar);
+    let extent = size(
+        (viewport.width - frame.left - frame.right).max(px(0.)),
+        (viewport.height - frame.top - bar - frame.bottom).max(px(0.)),
+    );
+    Bounds {
+        origin,
+        size: extent,
+    }
 }
+
+// ---- The bar --------------------------------------------------------------------------------------------------------
 
 /// The bar for `window`, titled `title`, its Close button's hover help `close_help`; `None` where the window does not
 /// draw one ([`shows`]).

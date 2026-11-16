@@ -134,6 +134,7 @@ conflicted across all of it.
 | Template checkout name          | `crates/gui/farhelm-gui/src/templates/checkout_name.rs`                                                                                                                                                                                                                                                                        | [reported](#template-checkout-name)      | none                                  |
 | Shortcuts overview              | `crates/gui/farhelm-gui/src/shortcuts.rs`                                                                                                                                                                                                                                                                                      | [reported](#shortcuts-overview)          | none                                  |
 | Host status                     | `crates/gui/farhelm-gui/src/hosts/status.rs`                                                                                                                                                                                                                                                                                   | [reported](#host-status)                 | none                                  |
+| Linux title bar                 | `crates/gui/farhelm-gui/src/desktop/linux_title_bar.rs`                                                                                                                                                                                                                                                                        | [reported](#linux-title-bar)             | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -237,7 +238,8 @@ hover help (`HoverHelp::beside` in the component layer), which only SPEC.md's se
 do, and only for a control drawn inside the column that draws the edge: the help is placed against the edge wherever the
 control is, where the old app checked that the control was inside the sidebar.
 
-Lint exceptions: 1: `deferred` and `anchored` in `layers::overlay`.
+Lint exceptions: 1: `deferred` in `layers::overlay` (which may also call `anchored`, though it no longer does: help at
+the pointer is placed by the layer manager's own element).
 
 ### Root view wiring
 
@@ -938,6 +940,19 @@ already there, and the review gate judges it.
 
 Lint exceptions: none.
 
+### Linux title bar
+
+Extension points: reported, the whole file: owned by the desktop-integration-and-linux-packaging area, which built it as
+the Linux window's own title bar, drawn by the main view (`bar`, `follow_decorations`). It also carries a rule other
+owners build on: `content_area` is the part of the window that holds the app's content, inside GPUI Kit's frame and
+below the bar, and the layer manager fits its dialogs and tooltips into it (with `bar_height` for the dialog veil's
+padding), the component layer's dialog frame caps its size against it, settings-and-hosts' host progress card caps its
+height against it, and sidebar-and-session-view's sidebar keeps the main pane's floor against its width. A change to
+what `content_area` covers moves every one of those, so it is a foundation-change request, not a pattern change. Another
+area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
 ## What is not a foundation
 
 The rest of `crates/gui/farhelm-gui/src/` is area code, owned by the area that builds it and outside this table: the
@@ -1098,3 +1113,4 @@ without a conflict marker.
 | Template checkout name | `crates/gui/farhelm-gui/src/templates/checkout_name.rs` | `reported`    |
 | Shortcuts overview     | `crates/gui/farhelm-gui/src/shortcuts.rs`               | `reported`    |
 | Host status            | `crates/gui/farhelm-gui/src/hosts/status.rs`            | `reported`    |
+| Linux title bar        | `crates/gui/farhelm-gui/src/desktop/linux_title_bar.rs` | `reported`    |

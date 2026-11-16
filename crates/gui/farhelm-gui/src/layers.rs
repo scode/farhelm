@@ -33,6 +33,15 @@
 //!   control it is about (a row's Delete question, opened from the row's menu, as the old app turned the menu into the
 //!   question). An anchored layer is as wide as its content, or exactly as wide as its anchor when the anchor asks for
 //!   that ([`Anchor::matching_width`]): a select's list under its control, a floating list under its field.
+//! - **Dialogs and tooltips sit in the window's content area.** A dialog is sized and centered, and a tooltip (at the
+//!   pointer, beside the sidebar or against a focused control) is kept, inside the part of the window that holds the
+//!   page ([`crate::desktop::linux_title_bar::content_area`]), as in the old app's page: on Linux, inside the frame
+//!   GPUI Kit draws around the window and below the window's own title bar, both of which the window's reported size
+//!   includes, so a tall card or a dialog at its height limit placed against the whole window covered the bar
+//!   (settings-and-hosts and templates reported it on 2026-11-15). A dialog's veil still covers the bar, so the bar
+//!   stays inert while a dialog is open. Under a compositor's decorations and on macOS the content area is the whole
+//!   window. Popovers, the pills and the approval region are still placed against the whole window: the notices
+//!   panels cap their height by it, so moving the popover clamp alone would push a full panel off the window.
 //! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
 //!   text included: labels are no longer selectable, so the GPUI migration settled on 2026-11-13 that a click on one
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
@@ -172,7 +181,7 @@ pub use tooltip::{
     TooltipSide, focus_drawn, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed,
     shown_tooltip,
 };
-use tooltip::{Hovered, POINTER_OFFSET, tooltip_card};
+use tooltip::{Hovered, tooltip_card};
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
 
@@ -1694,7 +1703,7 @@ impl LayerStack {
 /// docs' z-order ladder, from the layers under the lowest raised one ([`above_approval_region`]) up to the tooltip.
 #[allow(
     clippy::disallowed_methods,
-    reason = "the layer manager is the one owner of deferred and anchored"
+    reason = "the layer manager is the one owner of deferred (and of anchored, should it need it again)"
 )]
 pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     let stack = stack(window, cx)?;
@@ -1779,19 +1788,25 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 } else {
                     veil
                 };
+                // The veil covers the whole root view, title bar included, so the bar stays inert; the dialog is
+                // placed below the bar, in the content area (`desktop::linux_title_bar::content_area`). The root view
+                // already sits inside Kit's frame, so the bar's height is the only padding it needs.
+                let bar = crate::desktop::linux_title_bar::bar_height(window);
                 let frame = frame.flex().justify_center();
                 match options.placement {
-                    DialogPlacement::Centered => frame.items_center().child(content),
+                    DialogPlacement::Centered => frame.items_center().pt(bar).child(content),
                     DialogPlacement::Top => {
-                        let viewport = window.viewport_size();
+                        let height = crate::desktop::linux_title_bar::content_area(window)
+                            .size
+                            .height;
                         // A column, so a view that can shrink (`flex_1` and `min_h_0`, a list that scrolls) fits the
                         // cap. A view that cannot spills past it: what it draws below the cap is outside the layer
                         // for presses and focus (an outside press there dismisses), so a top-placed view must shrink.
                         // It is not clipped at the cap: a clip there would also cut off the card's own drop shadow.
                         frame
                             .items_start()
-                            .pt((viewport.height * 0.12).min(px(80.)))
-                            .child(content.max_h(viewport.height * 0.75).flex().flex_col())
+                            .pt(bar + (height * 0.12).min(px(80.)))
+                            .child(content.max_h(height * 0.75).flex().flex_col())
                     }
                 }
                 .into_any_element()
@@ -1888,16 +1903,8 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 beside::PlacedBeside::around(shown, focus, card).into_any_element()
             }
             // Offset like a native tooltip so the pointer never covers the text. Help that asks for beside placement
-            // comes here while no sidebar edge is drawn, and says so.
-            _ => {
-                shown.side.set(TooltipSide::Pointer);
-                shown.ring.set(None);
-                gpui::anchored()
-                    .position(shown.at + POINTER_OFFSET)
-                    .snap_to_window()
-                    .child(card)
-                    .into_any_element()
-            }
+            // comes here while no sidebar edge is drawn, and says so (its side reads `Pointer`).
+            _ => beside::PlacedBeside::at_pointer(shown, card).into_any_element(),
         };
         overlay = overlay.child(gpui::deferred(placed).with_priority(tooltip_depth));
     }

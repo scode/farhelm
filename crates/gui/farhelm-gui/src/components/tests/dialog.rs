@@ -3,7 +3,8 @@
 //! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it. Notices given a stop have
 //! it on the same rule, between the body and the answers in Tab's order, scroll through it, and scroll on Page Up, Page
 //! Down, Home and End from an answer inside them (and from nowhere else), which keeps its other keys; notices without
-//! the opt-in take no keys.
+//! the opt-in take no keys. And the frame's size caps against the window's content area, as pure arithmetic since no
+//! test window reports client decorations.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -13,7 +14,9 @@ use gpui::{
     TestAppContext, VisualTestContext, div, point, px, size,
 };
 
+use crate::components::dialog::frame_limits;
 use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
+use crate::desktop::linux_title_bar::{HEIGHT, content_area_in};
 use crate::test_support::{bounds, check, click, focused_id, keys, open, redraw};
 
 use super::{each_scroll_key_scrolls, lines, role_and_name};
@@ -618,4 +621,47 @@ fn notices_without_the_opt_in_take_no_keys_from_their_answers(cx: &mut TestAppCo
         "plain notices took no keys from their answer"
     );
     assert!(!notices_stop_drawn(cx), "and have no stop");
+}
+
+// ---- The content area -----------------------------------------------------------------------------------------------
+
+/// Why this matters: on Linux the window holds GPUI Kit's frame and the window's own title bar, and a dialog capped
+/// against the whole window covered the bar at its height limit and cast its shadow into the frame (templates measured
+/// the launcher with Save as template's panel open on 2026-11-15: 24 pixels from the surface's edges). The old app
+/// capped its dialogs against its page, which is the content area here. Where the layer manager centers the frame is
+/// not checked here: no test window reports client decorations.
+///
+/// Specification, for the 1642 by 1076 window templates measured, with client decorations and the bar drawn (content
+/// area 1600 by 1000): a frame with the launcher's flat margin is at most 1000 - 2 * 24 = 952 tall and 480 wide, so at
+/// its limit it leaves 24 pixels of the content area above and below it; one without the flat margin keeps 5% of the
+/// content area's height, 50 pixels, and is at most 900 tall.
+#[test]
+fn a_dialog_at_its_height_limit_fits_the_linux_content_area() {
+    let area = content_area_in(
+        size(px(1642.), px(1076.)),
+        gpui::Decorations::Client {
+            tiling: gpui::Tiling::default(),
+        },
+        Some(px(20.)),
+        HEIGHT,
+    );
+    assert_eq!(area.size, size(px(1600.), px(1000.)), "the premise");
+    let limits = frame_limits(area.size, None, true);
+    assert_eq!(limits, size(px(480.), px(952.)));
+    assert_eq!((area.size.height - limits.height) / 2., px(24.));
+    assert_eq!(frame_limits(area.size, None, false).height, px(900.));
+}
+
+/// Why this matters: under a compositor's decorations and on macOS the content area is the whole window, so the
+/// frame's caps must be exactly what they were when they were measured against the window.
+///
+/// Specification: in a 1000 by 800 window, the ordinary frame is at most 800 - 2 * 40 = 720 tall (5% of the height
+/// above and below) and 480 wide; one asking for its own 1200-pixel width is held 20 pixels inside each side, at 960;
+/// the launcher's flat margin gives 800 - 2 * 24 = 752.
+#[test]
+fn without_a_frame_the_dialog_limits_are_the_windows() {
+    let window = size(px(1000.), px(800.));
+    assert_eq!(frame_limits(window, None, false), size(px(480.), px(720.)));
+    assert_eq!(frame_limits(window, Some(px(1200.)), false).width, px(960.));
+    assert_eq!(frame_limits(window, None, true).height, px(752.));
 }
