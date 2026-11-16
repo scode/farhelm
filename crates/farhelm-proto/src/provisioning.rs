@@ -74,8 +74,9 @@ pub struct ProvisioningView {
     pub operation: Option<ProvisioningOperation>,
     pub status: RunStatus,
     pub steps: Vec<StepView>,
-    /// The run's own words about how it ended, for a person. A failed environment launch's message is the whole text
-    /// to show, its "Not launched." lead included, so a client shows it as it is and adds no lead of its own.
+    /// The run's own words about how it ended, for a person. A failed environment launch's message is always the whole
+    /// text to show, so a client shows it as it is and adds no lead of its own: it leads with "Not launched." unless the
+    /// run is [`Self::outcome_unknown`], whose words say to check Hosts instead.
     pub message: Option<String>,
     /// Set on a failed run whose outcome the helm does not know: an environment launch whose task panicked, which may
     /// have left its environment or even its session behind. A client branches on this marker, never on the message's
