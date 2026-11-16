@@ -13,11 +13,21 @@
 //! refuses is refused here for New, Clone and Replace with too (the old app left it to the helm, which refuses the same
 //! way), and Restart with's "launch settings changed" check is a reason like the others rather than a check made only
 //! at the press. A suspended host is not launchable yet: resuming it before the create (SPEC.md, "Topology")
-//! comes with the launcher's environments work.
+//! comes with the launcher's resume-before-create work.
 //!
 //! The bodies are `farhelm_proto::session_requests`' types, built only from a draft that passes
 //! [`LaunchDraft::refusal`]. What the old app's bodies carried for its retry keys is gone: the GUI sends none
 //! (SPEC.md, "Creation").
+//!
+//! A launch into a new environment (New container, New sandbox) has no host yet: in place of the host's reasons it is
+//! checked against the pushed recipe catalog and the container host's pushed Podman check, in the old launcher's words
+//! and, among themselves, its order (`sandbox_reason` in `create_form.rs`). Together they take the host's place, first,
+//! where the old launcher checked them after the agent tab's reasons: a deliberate departure, so a draft that cannot
+//! name its environment says so before anything else. A managed checkout there needs only a chosen repository and no
+//! named conversation: the environment has no installation to verify and no folder to preview yet, and the helm takes
+//! the repository and naming intent until the new Farhelm connects (SPEC.md, "Managed checkouts": "A recipe-target
+//! environment launch is another exception"). It sends its own body to its own route
+//! ([`LaunchDraft::environment_body`]), never the ordinary create, which an older helm would run on its own machine.
 //!
 //! A managed checkout launches only with a current preview of its folder in hand (SPEC.md, "Managed checkouts":
 //! "Before Launch becomes available, the composer shows the exact host and path"), which the view reads from the helm
@@ -25,19 +35,25 @@
 //! host's checkout folder changed since. Since the GUI sends no request keys, the old app's retained attempts for an
 //! ambiguous fresh-checkout create ("Retry reconciles the original request at this path") have no counterpart here.
 
-use farhelm_proto::launcher::{LaunchCatalogModel, compatible_efforts};
-use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody, RestartSessionBody};
-use farhelm_proto::ui_channel::{HostStateView, HostView};
+use farhelm_helm_client::Collections;
+use farhelm_proto::launcher::{LaunchCatalogModel, TemplateNameKind, compatible_efforts};
+use farhelm_proto::recipes::RecipeView;
+use farhelm_proto::session_requests::{
+    CreateSessionBody, EnvironmentCreateBody, ReplaceSessionBody, RestartSessionBody,
+};
+use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use farhelm_proto::{
     AcceptedGithubPreview, CommandLaunch, DeleteGuard, GithubCheckoutRequest, LaunchPermission,
-    LaunchSelection, RETIRED_CONTAINER_REASON, SessionLaunch, check_permission_flags,
+    LaunchSelection, LaunchTarget, RETIRED_CONTAINER_REASON, SessionLaunch, check_permission_flags,
     split_permission_flags, split_wrapper_prefix,
 };
 
 use super::draft::{
-    Catalog, FOLDER_INSTALLATION_MOVED, LaunchDraft, Mode, Restart, RestartBaseline, Tab,
-    repo_identifier,
+    Catalog, ENVIRONMENT_HOME, FOLDER_INSTALLATION_MOVED, LaunchDraft, Mode, Restart,
+    RestartBaseline, Tab, repo_identifier,
 };
+use crate::environment_ui::ProviderUi;
+use crate::hosts::offers::HostKind;
 
 /// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog as the
 /// launcher read it, and a managed checkout's preview.
@@ -48,6 +64,89 @@ pub struct Target<'a> {
     /// The preview of the chosen managed checkout's folder, as current for the draft as it is now. Ignored for a
     /// folder destination.
     pub preview: Preview<'a>,
+    /// The recipe catalog as the store holds it, which a new environment's recipe is checked against. Ignored on an
+    /// existing host, for which the view copies none ([`Recipes::for_draft`]).
+    pub recipes: &'a Recipes,
+}
+
+/// The pushed recipe catalog as a launch into a new environment sees it, taken once per draw or press.
+#[derive(Clone, Debug)]
+pub enum Recipes {
+    /// The store has not installed the catalog yet.
+    Loading,
+    /// The helm could not read it, in its words.
+    Unreadable(String),
+    /// The catalog, in the helm's order.
+    Listed(Vec<RecipeView>),
+}
+
+impl Recipes {
+    /// What `draft`'s launch check needs of the catalog in `collections`: the catalog, for a new environment, and an
+    /// empty listing for an existing host, which ignores it, so a draw or press on Existing host copies no catalog.
+    pub fn for_draft(draft: &LaunchDraft, collections: &Collections) -> Recipes {
+        match draft.target {
+            Some(_) => Recipes::of(collections),
+            None => Recipes::Listed(Vec::new()),
+        }
+    }
+
+    /// The catalog as `collections` (the store's) holds it now.
+    pub fn of(collections: &Collections) -> Recipes {
+        match collections
+            .meta(Collection::Recipes)
+            .map(|meta| &meta.availability)
+        {
+            None => Recipes::Loading,
+            Some(Availability::Unavailable { error }) => Recipes::Unreadable(error.clone()),
+            Some(Availability::Available) => Recipes::Listed(
+                collections
+                    .ordered::<RecipeView>()
+                    .into_iter()
+                    .cloned()
+                    .collect(),
+            ),
+        }
+    }
+}
+
+/// Why a new environment cannot launch while the recipe catalog has not arrived, the old launcher's words.
+pub const LOADING_RECIPES: &str = "Loading recipes…";
+/// Why a new environment cannot launch before a recipe is chosen.
+pub const CHOOSE_RECIPE: &str = "Choose a recipe before launching";
+/// Why a new container cannot launch on a container host the registry no longer lists as one, the old launcher's
+/// words.
+pub const CONTAINER_HOST_UNAVAILABLE: &str = "The container host is unavailable";
+/// The helm's own words for a container host whose Podman has not been checked yet (its places read says the same).
+const NEEDS_PODMAN_CHECK: &str = "this host needs a Podman check";
+/// The helm's places read's words for a host it cannot route a check to, whose entry then carries no check at all.
+const CANNOT_RUN_CONTAINERS: &str = "this host cannot run containers";
+
+/// Why `host`, a host that can hold containers ([`is_container_host`]), cannot hold a new container now, from its
+/// pushed Podman check, or `None` when it can: the check's own reason once it has a result that failed, and the helm's
+/// "needs a Podman check" before it has one. An entry with no check is one the helm cannot route a check to, and says
+/// what the helm's places read says of it. Settings → Containers draws a host's state from the same pushed check
+/// (`settings/containers.rs`).
+pub fn container_reason(host: &HostView) -> Option<String> {
+    let Some(check) = host.container_check.as_ref() else {
+        return Some(CANNOT_RUN_CONTAINERS.to_owned());
+    };
+    match check.checked_at {
+        Some(_) if check.usable => None,
+        Some(_) => Some(
+            check
+                .reason
+                .clone()
+                .unwrap_or_else(|| NEEDS_PODMAN_CHECK.to_owned()),
+        ),
+        None => Some(NEEDS_PODMAN_CHECK.to_owned()),
+    }
+}
+
+/// Whether `host` can hold containers at all: the helm's own machine or an SSH host, never an environment's own host
+/// (SPEC.md: "an environment host cannot itself host containers"). The host kind's own answer, which Settings →
+/// Containers lists its hosts by too ([`HostKind::holds_containers`]).
+pub fn is_container_host(host: &HostView) -> bool {
+    HostKind::of(host).holds_containers()
 }
 
 /// Where a managed checkout's preview stands for the draft as it is now: the view asks the helm again whenever what a
@@ -88,7 +187,12 @@ impl LaunchDraft {
     /// since the launcher opened is refused rather than restarted with edits made against what it was (the old app's
     /// "This session's launch settings changed" check).
     pub fn refusal(&self, target: Target<'_>, live: Option<&SessionLaunch>) -> Option<String> {
-        if let Some(reason) = self.host_refusal(target.hosts) {
+        // A new environment's reasons take the host's place: it has no host yet.
+        let place = match &self.target {
+            Some(environment) => environment_refusal(environment, target),
+            None => self.host_refusal(target.hosts),
+        };
+        if let Some(reason) = place {
             return Some(reason);
         }
         // The old order: the destination's reasons come right after the host's, before the launch kind's.
@@ -206,6 +310,10 @@ impl LaunchDraft {
         }
         if self.active_conversation().is_some() {
             return Some(CONVERSATION_IN_CHECKOUT);
+        }
+        // A new environment has no installation to verify and no folder to preview yet (the module docs).
+        if self.target.is_some() {
+            return None;
         }
         let verified = self
             .host
@@ -344,13 +452,10 @@ impl LaunchDraft {
     /// reason. The YOLO confirmation is the caller's to set, after the user answers the host's question. Replace with
     /// sends this create inside [`Self::replace_body`]; sending it alone would create without deleting the source.
     pub fn create_body(&self, target: Target<'_>) -> Option<CreateSessionBody> {
-        if self.refusal(target, None).is_some() {
+        // A new environment's launch goes to its own route ([`Self::environment_body`]), never the ordinary create.
+        if self.target.is_some() || self.refusal(target, None).is_some() {
             return None;
         }
-        let (launch, command) = match self.tab {
-            Tab::Agent => (self.agent_selection(), None),
-            Tab::Command => (None, self.command_launch()),
-        };
         let host = self.host?;
         // The refusal check has found this host connected, so its connection number is a real one.
         let incarnation = target
@@ -382,9 +487,23 @@ impl LaunchDraft {
                 None,
             ),
         };
-        Some(CreateSessionBody {
-            host: Some(host),
-            expected_incarnation,
+        let mut body = self.create_request(cwd, name);
+        body.host = Some(host);
+        body.expected_incarnation = expected_incarnation;
+        body.github_checkout = github_checkout;
+        Some(body)
+    }
+
+    /// The create's launch, prompt, conversation and name as this draft holds them, starting in `cwd` with the name
+    /// `name`, and naming no host, connection or checkout: the part the ordinary create and a new environment's share.
+    fn create_request(&self, cwd: String, name: String) -> CreateSessionBody {
+        let (launch, command) = match self.tab {
+            Tab::Agent => (self.agent_selection(), None),
+            Tab::Command => (None, self.command_launch()),
+        };
+        CreateSessionBody {
+            host: None,
+            expected_incarnation: None,
             cwd,
             // A blank name asks for a generated one; any other name is sent byte for byte (old
             // `optional_create_title` at the reference commit).
@@ -394,7 +513,50 @@ impl LaunchDraft {
             prompt: self.active_prompt().map(str::to_owned),
             conversation: self.active_conversation().map(str::to_owned),
             confirm_yolo: false,
-            github_checkout,
+            github_checkout: None,
+        }
+    }
+
+    /// The create in a new environment this draft sends (`POST /api/environment-sessions`), for New and Clone with a
+    /// recipe chosen; `None` without one, or while [`Self::refusal`] names a reason. The recipe and place go beside
+    /// the create, which names no host or connection (the environment does not exist yet) and starts in the
+    /// environment's home. `confirmed`, the answer to "Create a sandbox for this session?", is the caller's to set.
+    pub fn environment_body(&self, target: Target<'_>) -> Option<EnvironmentCreateBody> {
+        let LaunchTarget::Environment { recipe, place } = self.target.clone()?;
+        if self.refusal(target, None).is_some() {
+            return None;
+        }
+        let repo = self
+            .checkout
+            .as_ref()
+            .and_then(|checkout| checkout.repo.as_ref());
+        let request = match repo {
+            // A managed checkout goes with no folder and no preview: the helm previews it once the new environment's
+            // Farhelm connects, under the name the checkout gets (the old launcher's body, `cwd` empty).
+            Some(repo) => {
+                let title = self.checkout_title();
+                let mut request = self.create_request(String::new(), title.clone());
+                request.github_checkout = Some(GithubCheckoutRequest {
+                    repo: repo_identifier(repo),
+                    title: Some(title),
+                    preview: None,
+                });
+                request
+            }
+            None => self.create_request(ENVIRONMENT_HOME.to_owned(), self.name.value().clone()),
+        };
+        // A numbered default name (a template's base, or Clone's `<title>-clone`) is the helm's to number once it can
+        // see what is taken there.
+        let name_kind = match repo.and_then(|_| self.numbered_base()) {
+            Some(_) => Some(TemplateNameKind::Base),
+            None => self.name_kind,
+        };
+        Some(EnvironmentCreateBody {
+            recipe,
+            place,
+            confirmed: false,
+            name_kind,
+            request,
         })
     }
 
@@ -451,6 +613,38 @@ impl LaunchDraft {
             with_command,
             confirm_yolo: false,
         })
+    }
+}
+
+/// A new environment's reason, if it has one, in the old launcher's order: the catalog has arrived and can be read, it
+/// lists the recipe, the provider can run it ([`ProviderUi::recipe_refusal`]), and a container's host can hold it.
+fn environment_refusal(environment: &LaunchTarget, target: Target<'_>) -> Option<String> {
+    let recipes = match target.recipes {
+        Recipes::Loading => return Some(LOADING_RECIPES.to_owned()),
+        // The read's own words, as the old launcher showed them.
+        Recipes::Unreadable(error) => return Some(error.clone()),
+        Recipes::Listed(recipes) => recipes,
+    };
+    let name = environment.recipe();
+    // Entering a segment while the catalog lists no recipe the provider can run leaves the recipe unchosen.
+    if name.is_empty() {
+        return Some(CHOOSE_RECIPE.to_owned());
+    }
+    let Some(recipe) = recipes.iter().find(|recipe| recipe.name == name) else {
+        return Some(format!("Recipe \"{name}\" is unavailable"));
+    };
+    if let Some(reason) = ProviderUi(environment.provider()).recipe_refusal(recipe) {
+        return Some(reason);
+    }
+    // A place on a container host needs that host; another place has no host of the user's to check.
+    let id = environment.place().container_host()?;
+    match target
+        .hosts
+        .iter()
+        .find(|host| host.id == id && is_container_host(host))
+    {
+        None => Some(CONTAINER_HOST_UNAVAILABLE.to_owned()),
+        Some(host) => container_reason(host),
     }
 }
 
