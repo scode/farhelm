@@ -21,7 +21,8 @@
 //!   success says nothing: the pushed list already shows the session stopped.
 //!
 //! The question, the preconditions, the command and the progress are functions of a session's row, so the open
-//! session's header (`session_pane/header.rs`) asks the same question and sends the same request.
+//! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and a bulk Stop of
+//! the marked sessions (`super::bulk`) sends each of them the request its row would, through [`start`].
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::SessionRow;
@@ -36,7 +37,7 @@ use super::{SessionList, menu};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, OpKey, Outcome, Settled, Work};
+use crate::operations::{Command, NotStarted, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::session;
 use crate::theme::{self, metrics};
@@ -185,22 +186,34 @@ pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
 /// Send `key`'s Stop with `guard` through the operation store, and keep what its reply says on the row. A session that
 /// already has a request in flight sends nothing.
 pub(crate) fn send(key: &str, guard: SessionStopRequest, cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let Ok(command) = command(key, guard) else {
-        tracing::warn!("a session key that cannot be a path segment was not stopped");
-        return;
-    };
-    let stopped = key.to_owned();
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
-            settle(&stopped, settled, cx)
-        })
-    });
-    if let Err(refused) = started {
+    if let Err(refused) = start(key, guard, |_| {}, cx) {
         tracing::debug!(?refused, "a Stop was not sent");
     }
+}
+
+/// [`send`] for a caller that has to know what happened: the bulk Stop (`super::bulk`), which shows a refused start on
+/// the row and moves its host's queue on when each Stop settles. Says why nothing was sent, and otherwise runs `then`
+/// once the Stop has settled and its row keeps what the reply said; a reset drops `then` with the Stop's own waiting.
+pub(super) fn start(
+    key: &str,
+    guard: SessionStopRequest,
+    then: impl FnOnce(&mut App) + 'static,
+    cx: &mut App,
+) -> Result<(), NotStarted> {
+    let Some(operations) = session::current_operations(cx) else {
+        return Err(NotStarted::Retired);
+    };
+    let command = command(key, guard).map_err(|error| {
+        tracing::warn!("a session key that cannot be a path segment was not stopped");
+        NotStarted::Path(error)
+    })?;
+    let stopped = key.to_owned();
+    operations.update(cx, |operations, cx| {
+        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
+            settle(&stopped, settled, cx);
+            then(cx);
+        })
+    })
 }
 
 /// `key`'s Stop settled. A refusal is the operation store's to keep; a success whose reply names cleanup the host could

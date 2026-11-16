@@ -22,6 +22,10 @@
 //!   handling until it settles. Where an area says that a start was refused because its key already has work in
 //!   flight, it gives the shared reason ([`NotStarted::BUSY_REASON`]) after a lead-in of its own ("Not saved:",
 //!   "Not started:") rather than a reason of its own, unless the line ports the old app's words, which it keeps.
+//! - A key can be held before its request is sent ([`Operations::hold`]): a bulk Stop or Delete row queued behind the
+//!   other rows of its host reads as that work in flight, so it is drawn pending and refuses every other start, with
+//!   nothing on the wire until its holder releases it and starts the request ([`Operations::release`]). A reset drops
+//!   holds with everything else.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
 //!   its [`Work`] variant, so that no other work can be superseded by accident.
@@ -76,7 +80,8 @@ use crate::host_text::HostText;
 /// supersedable, so shared code never has to guess.
 ///
 /// A [`Command`] names its own work, and [`Operations::start`] takes the work from the command it sends, so what
-/// [`Operations::in_flight`] reports always describes the request on the wire.
+/// [`Operations::in_flight`] reports always describes the request on the wire, or the work a hold reserved the key for
+/// before its request is sent ([`Operations::hold`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Work {
     /// A title change, from the Rename editor.
@@ -712,7 +717,17 @@ impl NotStarted {
 /// with it the completion, but never the helm's work.
 struct InFlight {
     work: Work,
-    _task: Task<()>,
+    /// The task waiting for the request's reply, or `None` for a hold ([`Operations::hold`]): a key held for work
+    /// that is not sent yet, with nothing to wait for. Read through [`InFlight::is_held`].
+    _task: Option<Task<()>>,
+}
+
+impl InFlight {
+    /// Whether this entry is a hold rather than a request on the wire: only a hold may be released
+    /// ([`Operations::release`]), so a release can never drop a live request's entry.
+    fn is_held(&self) -> bool {
+        self._task.is_none()
+    }
 }
 
 /// The operation store of one UI session: the work in flight on each key, and the last refusal or partial result of
@@ -762,8 +777,9 @@ impl Operations {
     /// moved-on mark is taken.
     ///
     /// Starting clears the key's previous failure (the old app's rule: a row's error stays until the retry that
-    /// supersedes it); short of a reset, the only other way it goes is [`Operations::forget`], from a feature that
-    /// showed it elsewhere.
+    /// supersedes it); short of a reset, the only other ways it goes are a hold of the key ([`Operations::hold`]),
+    /// which starts the key's new work as far as its views go, and [`Operations::forget`], from a feature that showed
+    /// it elsewhere.
     ///
     /// `on_settled` runs after the store has recorded the outcome and notified, outside the store's update, so it may
     /// read the store. It is never called for a command the reset lost.
@@ -774,12 +790,7 @@ impl Operations {
         cx: &mut Context<Operations>,
         on_settled: impl FnOnce(&Settled, &mut App) + 'static,
     ) -> Result<(), NotStarted> {
-        if self.retired {
-            return Err(NotStarted::Retired);
-        }
-        if let Some(running) = self.in_flight.get(key) {
-            return Err(NotStarted::Busy(running.work));
-        }
+        self.admit(key)?;
         let mark = Mark::take(cx);
         let Command {
             work,
@@ -801,10 +812,29 @@ impl Operations {
                 }
             });
         });
-        self.failures.remove(key);
-        self.in_flight
-            .insert(key.clone(), InFlight { work, _task: task });
+        self.in_flight.insert(
+            key.clone(),
+            InFlight {
+                work,
+                _task: Some(task),
+            },
+        );
         cx.notify();
+        Ok(())
+    }
+
+    /// The store's one admission rule, for a start ([`Operations::start`]) and a hold ([`Operations::hold`]) alike:
+    /// refused on a retired store, and while the key has work in flight or held; otherwise the key's last failure goes,
+    /// since its new work supersedes it. A future "latest wins" rule for supersedable work belongs here, so it covers
+    /// holds too.
+    fn admit(&mut self, key: &OpKey) -> Result<(), NotStarted> {
+        if self.retired {
+            return Err(NotStarted::Retired);
+        }
+        if let Some(running) = self.in_flight.get(key) {
+            return Err(NotStarted::Busy(running.work));
+        }
+        self.failures.remove(key);
         Ok(())
     }
 
@@ -878,6 +908,40 @@ impl Operations {
     /// with is recorded as usual.
     pub fn forget(&mut self, key: &OpKey, cx: &mut Context<Operations>) {
         if self.failures.remove(key).is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Hold `key` for `work` that the user accepted but that is not sent yet: a bulk Stop or Delete row queued behind
+    /// the other rows of its host (`session_list::bulk`). SPEC.md, "Session list": "Accepted queued rows remain pending
+    /// until their completions finish", and the old app reserved every admitted row at acceptance. While held, the key
+    /// reads as `work` in flight ([`Operations::in_flight`], [`Operations::any_in_flight`]), so every view draws it
+    /// pending and every other start on it is refused, but nothing is sent and nothing settles. Holding clears the
+    /// key's last failure, as a start does.
+    ///
+    /// Refused, holding nothing, whenever a start would be (the store's one admission rule, `admit`): while the key
+    /// already has work in flight or held, or the store is retired. The holder ends the hold with
+    /// [`Operations::release`] right before it starts the request it held the key for; otherwise only a reset ends it,
+    /// with everything else, so a hold never outlives its UI session.
+    pub fn hold(
+        &mut self,
+        key: &OpKey,
+        work: Work,
+        cx: &mut Context<Operations>,
+    ) -> Result<(), NotStarted> {
+        self.admit(key)?;
+        self.in_flight
+            .insert(key.clone(), InFlight { work, _task: None });
+        cx.notify();
+        Ok(())
+    }
+
+    /// End the hold [`Operations::hold`] put on `key`. Only a hold is ever released: a request started on `key` (once
+    /// the hold has given way to it, or any other) stays in flight with its completion, so a late or repeated release
+    /// cannot drop live work. Does nothing when `key` is not held.
+    pub fn release(&mut self, key: &OpKey, cx: &mut Context<Operations>) {
+        if self.in_flight.get(key).is_some_and(InFlight::is_held) {
+            self.in_flight.remove(key);
             cx.notify();
         }
     }

@@ -265,7 +265,8 @@ fn opening_a_retired_session_stamps_nothing_and_rename_opens_nothing(cx: &mut Te
 }
 
 /// The old marked bar kept a retired row out of every metadata batch ("Delete-only retired rows never enter a
-/// metadata batch"), so a Pin of the marks never wrote to one, and a bar over retired rows alone offered nothing.
+/// metadata batch"), so a Pin of the marks never wrote to one, and a bar over retired rows alone offered no metadata
+/// action (its Delete is `bulk_tests`').
 /// Specified: with ordinary b open, Ctrl-clicking retired a and ordinary c marks both ("2 marked"), and the marked
 /// menu's Pin sends only `PUT /api/sessions/c/pin`; with retired a marked alone ("1 marked"), the bar draws no ⋯, so
 /// none of Pin, Unpin, Mark read and Mark unread is offered.
