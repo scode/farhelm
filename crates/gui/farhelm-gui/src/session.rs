@@ -568,11 +568,11 @@ impl UiSession {
         self.transfers.as_ref()
     }
 
-    /// An opener for one terminal stream through this session's connection to the helm, for a terminal view's owner
-    /// to call once it knows the terminal's size.
+    /// An opener for a terminal view's streams through this session's connection to the helm: its owner calls it once
+    /// it knows the terminal's size, and again for each restart after a protocol fault, having closed the last stream.
     ///
-    /// The opener checks the session when it is called, not when it is handed out. If a reset or a displacement has
-    /// retired the session by then, or the session is gone, it opens nothing and hands back a stream that is already
+    /// The opener checks the session each time it is called, not when it is handed out. If a reset or a displacement
+    /// has retired the session by then, or the session is gone, it opens nothing and hands back a stream that is already
     /// closed, whose feed holds only `Closed`. So an opener kept across a reset never attaches a terminal for a window
     /// that went inert. For a displaced window that matters beyond tidiness: every attach displaces, reconnects
     /// included, so it could take the terminal from the window that now holds the helm (SPEC_impl.md, "The seat: one
