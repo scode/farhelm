@@ -25,18 +25,19 @@ its focus outliving a closing dialog (`layers_tests`, and end-to-end step 63); a
 dialog: prefilled and labelled, opening is not approval, Allow before any probe with the edited destination, only the
 helm's 204 accepted, a refused, unconfirmed or late Allow probing nothing, Deny on Cancel and Escape, the setup
 confirmation always asked (`approvals::host_add_tests`, golden `host-add-dialog-agent`, end-to-end step 64); Tunnel and
-open in the Mac app (`approvals::tunnel_tests`). Two cases are superseded: "a link approval opens synchronously with
-user activation" was a browser popup rule, and the window opens no link itself (the helm does, after Allow), which also
-covers "an invalid URL on a card is neither opened nor answered as allowed" on the window's side; "only the winning host
-add window probes its captured edited fields" keeps its single-window half (`approvals::host_add_tests`), the rest gone
-with one GUI per helm. Two cases hold by construction, with no test of their own: "a session without a terminal anchors
-approval below its top row" (the region anchors to the session pane's terminal box, which the pane draws whether or not
-a terminal is attached) and "a requester session title stays on one line with its full hover text" (the card truncates
-the title and gives it the whole title as hover help; the goldens show it). Driven for real on the test Mac on
-2026-11-15 against a remote host: a session there asking to open its own loopback page showed a link card, whose Tunnel
-and open asked the tunnel warning and, on Allow, opened a tunnel the Mac read the remote page through, the request
-ending and the agent told it opened. The refusal of a second press could not be driven there: the Mac's screen fits the
-window so small that the warning covers the button
+open in the Mac app, its warning opening over another dialog and staying when that dialog closes
+(`approvals::tunnel_tests`). Two cases are superseded: "a link approval opens synchronously with user activation" was a
+browser popup rule, and the window opens no link itself (the helm does, after Allow), which also covers "an invalid URL
+on a card is neither opened nor answered as allowed" on the window's side; "only the winning host add window probes its
+captured edited fields" keeps its single-window half (`approvals::host_add_tests`), the rest gone with one GUI per helm.
+Two cases hold by construction, with no test of their own: "a session without a terminal anchors approval below its top
+row" (the region anchors to the session pane's terminal box, which the pane draws whether or not a terminal is attached)
+and "a requester session title stays on one line with its full hover text" (the card truncates the title and gives it
+the whole title as hover help; the goldens show it). Driven for real on the test Mac on 2026-11-15 against a remote
+host: a session there asking to open its own loopback page showed a link card, whose Tunnel and open asked the tunnel
+warning and, on Allow, opened a tunnel the Mac read the remote page through, the request ending and the agent told it
+opened. A second press while the warning is up could not be driven there: the Mac's screen fits the window so small that
+the warning covers the button
 
 ### `tests/agent-relay.spec.ts`
 
@@ -105,7 +106,7 @@ Case: Rename wraps Close through Save while a real approval remains usable.
 
 replaced: `layers_tests`, `an_approval_card_stays_usable_over_a_dialog`
 
-### `tests/docs-shots/visual-review.spec.ts`
+### `docs-shots/visual-review.spec.ts`
 
 Case: the approval card's docs screenshot.
 
@@ -125,11 +126,13 @@ docs media
   open dialog and the request. The old app queued the open behind the current dialog, in click order, dropping one whose
   request expired, and held it while an ordinary add's setup submission was out, so that a refused setup could still
   reopen its draft. The GPUI app has no dialog that waits for the dialog slot yet; with one, this becomes the old queue.
-- Tunnel and open, when it would ask the tunnel warning (consent not yet recorded) while a dialog holds focus, the
-  warning itself included, is refused with a reason ("Another dialog is open. Close it, then press this request's Tunnel
-  and open again."). The old app refused a second press while its warning or consent save was pending ("Another tunnel
-  action is still waiting") and opened the warning over any other dialog. The migration's orchestrator asked for the
-  refusal on 2026-11-15. A press while the consent save is still out does nothing. With consent recorded the press opens
-  nothing and still answers over any dialog (`approvals::tunnel_tests`).
+- The old app held every tunnel action behind one claim, from the press through the consent save to the card's answer,
+  and a card pressed meanwhile said "Another tunnel action is still waiting". While the old warning was up its backdrop
+  covered every card, and a card's own buttons were disabled during its own action, so the old words appeared only while
+  another action was checking consent or finishing. The GPUI card says so only while a tunnel warning is up, whoever
+  asked it, the window in which the old app took no press at all: here the cards stay usable beside the warning, and a
+  press on any card, the one that asked included, gets the words. Pressed while the consent save is still out, or while
+  this request's answer is on its way, it does nothing and says nothing; pressed while another card's Tunnel and open
+  answer is out, it goes ahead (`approvals::tunnel_tests`).
 - The card's long-text boxes (commands, prompts, wrapper words) have hover help naming them, as every control in the
   GPUI app needs; the old boxes were tab stops without it.

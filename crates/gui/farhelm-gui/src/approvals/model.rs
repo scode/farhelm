@@ -524,8 +524,10 @@ pub fn facts(action: &ApprovalAction) -> Vec<Fact> {
                 *screen_yolo,
                 Detail::Plain,
             )));
+            // SPEC.md: the card "says when the target session is open in the window", the one client a helm accepts
+            // (One GUI at a time).
             if *attached {
-                facts.push(Fact::Words("client", "this session is open in a client"));
+                facts.push(Fact::Words("client", "this session is open in the window"));
             }
             facts.push(Fact::Words(
                 "delivery",

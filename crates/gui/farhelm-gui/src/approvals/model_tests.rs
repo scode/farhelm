@@ -723,7 +723,7 @@ fn a_delete_card_describes_the_authorized_liveness_scope() {
 }
 
 /// The dormant running-agent prompt card shows the whole message as one boxed host value, the target's shield by the
-/// session list's rules (observed bypass included), whether a client has it open, and how delivery can mix with
+/// session list's rules (observed bypass included), whether the window has it open, and how delivery can mix with
 /// typing; a target's permission is evidence, never a relaunch command.
 #[test]
 fn a_prompt_card_shows_the_message_the_targets_shield_and_its_caveats() {
@@ -755,7 +755,7 @@ fn a_prompt_card_shows_the_message_the_targets_shield_and_its_caveats() {
         (chips(&rows)[0].guarded, chips(&rows)[0].trust),
         (None, None)
     );
-    assert!(rows.contains(&Fact::Words("client", "this session is open in a client")));
+    assert!(rows.contains(&Fact::Words("client", "this session is open in the window")));
     assert!(rows.iter().any(
         |fact| matches!(fact, Fact::Words("delivery", words) if words.contains("interleave"))
     ));

@@ -30,7 +30,9 @@ use super::status::{self, Live};
 use super::tests::{change, listing_meta, painted, selected, session};
 use crate::components::Role;
 use crate::focus;
+use crate::layers;
 use crate::session;
+use crate::terminal::tunnels;
 use crate::test_support::{self, focused_id, frame, show_next_frame};
 
 // ---- Helpers ---------------------------------------------------------------------------------------------------------
@@ -994,6 +996,51 @@ fn the_question_closes_once_no_target_is_left(cx: &mut TestAppContext) {
         test_support::terminal_focused(cx),
         "focus is on the terminal: {:?}",
         focused_id(cx)
+    );
+}
+
+/// Why this matters: SPEC.md, "Nothing closes a dialog, menu, popup list or confirmation that it did not open". The
+/// bulk question's own close, once a listing proves every target gone, must take only the question and what was opened
+/// from it, not a dialog another owner opened above it: an approval card's tunnel warning, which a press on the card
+/// opens over any dialog. On macOS that press leaves focus in the question, so the focus rules alone would make the
+/// question the warning's parent; the card's opener marks the warning as opened from the card instead.
+///
+/// Specified: with the Delete question asking about a and b and focus on its Confirm, a tunnel warning asked from an
+/// update and marked as opened from an approval card in that update, as a card's Tunnel and open does, opens above the
+/// question; a complete listing without a or b closes the question and sends nothing, and the warning stays open.
+#[gpui::test]
+fn closing_the_question_leaves_a_warning_an_approval_card_opened_above_it(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(cx, fleet(&["c", "a", "b"]));
+    requests(&mut fake);
+    mark(cx, &["session-row-a", "session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert_eq!(question_rows(cx), ["a", "b"], "the premise");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: focus is in the question"
+    );
+    let warning = cx.update(|window, cx| {
+        let mark = focus::Mark::take(cx);
+        let warning = tunnels::ask_consent_about(None, &mark, window, cx, |_, _| {})?;
+        layers::opened_from_approval_card(warning, window, cx);
+        Some(warning)
+    });
+    test_support::settle(cx);
+    let warning = warning.expect("the premise: the warning opened");
+
+    fake.push(change(listing_meta(&["c"], 1, false), &[], &["a", "b"]));
+    test_support::settle(cx);
+    assert!(
+        !drawn(cx, "bulk-target-a"),
+        "the question closed with no target left"
+    );
+    let (sent, _) = lifecycle(fake.commands());
+    assert!(sent.is_empty(), "{:?}", paths(&sent));
+    assert!(
+        test_support::is_open(cx, warning),
+        "the warning above it stayed open"
     );
 }
 

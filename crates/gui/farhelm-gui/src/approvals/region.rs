@@ -202,8 +202,9 @@ pub struct Region {
     chosen: Option<String>,
     /// The answer bar's pause, shared with the Add host dialog an agent's host add opens.
     arming: Entity<Arming>,
-    /// Why the card's last action opened nothing (another dialog is open, the tunnel warning's consent was not saved),
-    /// shown on that request's card until the next press.
+    /// Why the card's last action came to nothing (Add host: another dialog is open, or another host change is in
+    /// progress; Tunnel and open: a tunnel warning is already up, or its consent was not saved), shown on that
+    /// request's card until the next press.
     refused: Option<(String, HostText)>,
     /// What a dialog opened from a card names as where focus returns when no control held focus at the press (a click
     /// does not focus a button on macOS). Never drawn, so closing falls back to what held focus when the dialog opened,

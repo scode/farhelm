@@ -240,7 +240,8 @@ impl NotOpened {
 
 /// Open the Add host dialog for an agent's host add request, from its card's action: prefilled with the destination
 /// and alias the agent asked for and labelled with who asked, Add answering the request's Allow and Cancel its Deny
-/// (the module docs). Focus returns to `opener`, the card's control, as [`open`] returns it to its button.
+/// (the module docs). Focus returns to `opener`, the card's control, as [`open`] returns it to its button. The dialog
+/// belongs to the card, not to any layer ([`open_with`] says why).
 ///
 /// Refused while another dialog is open, keeping that dialog and its draft (SPEC.md: "an existing draft or another
 /// modal is kept"), and while a host is being probed, set up or removed, so that an ordinary add's refused setup can
@@ -317,6 +318,11 @@ pub(crate) fn reopen_sandbox(
 
 /// Open the dialog as `start` says, unless the user moved on since `mark` or the window is inert. An agent's dialog
 /// also gets the dismiss hook that answers Deny and the subject that closes it once its request stops waiting.
+///
+/// An agent's dialog, first opened from its card or reopened after a refused setup, belongs to the request's card and
+/// to no layer ([`layers::opened_from_approval_card`], whose contract names both): another layer's close never takes
+/// it. The mark keeps that contract, and takes effect once Add host can open over another dialog. Until then
+/// [`open_for_agent`] refuses that, and no layer holding focus can become the dialog's parent anyway.
 fn open_with(
     opener: &FocusHandle,
     mark: &Mark,
@@ -377,6 +383,9 @@ fn open_with(
         cx,
     )?;
     dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
+    if dialog.read(cx).from_agent {
+        layers::opened_from_approval_card(layer, window, cx);
+    }
     #[cfg(test)]
     layers::record_opened(&dialog, cx);
     Some(layer)

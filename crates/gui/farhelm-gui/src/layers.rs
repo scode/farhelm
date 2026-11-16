@@ -1893,10 +1893,10 @@ pub fn above_approval_region(id: LayerId, window: &mut Window, cx: &mut App) {
 /// close takes it ([`close`], rule 2 of the parent rules). Every opener that a card's control calls makes this call
 /// in the same update as a successful open, before anything can close the layer under it: Tunnel and open's warning
 /// and the agent's Add host, together with every layer that add opens later in Add host's place (the setup
-/// confirmation, and Add host reopened after a refused setup), which `setup::Target::New::from_agent` marks. Those open
-/// after Add host has returned focus to its opener, which on macOS is the covered dialog's control, so the focus rules
-/// alone would make them that dialog's too. A debug build fails on an `id` that is no longer open: the call came too
-/// late, and in a release build it does nothing.
+/// confirmation, and Add host reopened after a refused setup), which `setup::confirm` and `add::open_with` mark from
+/// the add's `from_agent`. Those open after Add host has returned focus to its opener, which on macOS is the covered
+/// dialog's control, so the focus rules alone would make them that dialog's too. A debug build fails on an `id` that
+/// is no longer open: the call came too late, and in a release build it does nothing.
 ///
 /// Focus cannot say where an open came from: on macOS a press on a card's button moves no focus
 /// (`focus::CLICK_FOCUSES_CONTROLS`), so a card pressed while a dialog is open leaves focus in that dialog, which would
@@ -1917,6 +1917,16 @@ pub fn opened_from_approval_card(id: LayerId, window: &mut Window, cx: &mut App)
             layer.parent = None;
         }
     });
+}
+
+/// Whether an open layer in `window` was raised above the approval region by its opener ([`above_approval_region`]),
+/// wherever it sits in the stack. Only the raised layer itself counts, not the layers opened over it, which are drawn
+/// above the region with it but were not raised by their own openers. Today that is only SPEC.md's tunnel warning, which
+/// an approval card's Tunnel and open reads this as (`approvals::tunnel`): raising a second kind of layer would hold
+/// that press back too.
+pub fn above_approval_region_open(window: &Window, cx: &App) -> bool {
+    stack(window, cx)
+        .is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.above_region))
 }
 
 /// Whether the topmost open layer is raised above the approval region ([`above_approval_region`]): for the tests of
