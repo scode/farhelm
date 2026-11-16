@@ -1459,10 +1459,24 @@ fn escape_closes_the_suggestions_before_the_launcher(cx: &mut TestAppContext) {
 fn quick_launch_into_a_checkout(
     cx: &mut TestAppContext,
 ) -> (FakeHelm, &mut VisualTestContext, Vec<FakeCommand>) {
+    quick_launch_into_a_checkout_from(cx, false)
+}
+
+/// [`quick_launch_into_a_checkout`], from New's own prefill when `prefill` is set: with no session listed, so the
+/// prefill's folder default is the host's own and still pending, as a template shortcut's is with no session open.
+fn quick_launch_into_a_checkout_from(
+    cx: &mut TestAppContext,
+    prefill: bool,
+) -> (FakeHelm, &mut VisualTestContext, Vec<FakeCommand>) {
     use crate::session_list::tests::{listing, preferences, session};
     let (mut helm, _connection) = test_support::started(cx);
+    let sessions = if prefill {
+        listing(&[], &[])
+    } else {
+        listing(&["a"], &[session("a")])
+    };
     helm.connect(vec![
-        listing(&["a"], &[session("a")]),
+        sessions,
         super::view_tests::fixture_hosts(&[0]),
         preferences(&[], None),
     ]);
@@ -1476,7 +1490,17 @@ fn quick_launch_into_a_checkout(
             draft.choose_repository(repo("acme", "bar"));
             super::view::Prepared::Launch { notice: None }
         };
-        let draft = LaunchDraft::new(Some(1), "~".into(), None);
+        let draft = if prefill {
+            let draft = super::entry::new_prefill(cx).expect("New's prefill");
+            assert_eq!(
+                draft.folder_default,
+                super::draft::FolderDefault::Pending,
+                "the premise: the prefill's folder default is pending"
+            );
+            draft
+        } else {
+            LaunchDraft::new(Some(1), "~".into(), None)
+        };
         assert!(super::view::prepare_unseen(
             draft,
             crate::focus::Mark::take(cx),
@@ -1501,6 +1525,45 @@ fn quick_launch_into_a_checkout(
     settle(cx);
     let rest = sent(&mut helm, cx);
     (helm, cx, rest)
+}
+
+/// A repository template's quick launch from New's own prefill, whose folder default is still pending, reads no launch
+/// history: the folder does not wait for it in a managed checkout, and the answer's configuration revision would make
+/// the preview it waits for stale, so it would show New instead of starting. Specified: no history read goes out, the
+/// preview does, and its ready answer starts the one create with nothing shown.
+#[gpui::test]
+fn a_repository_quick_launch_from_news_prefill_reads_no_history(cx: &mut TestAppContext) {
+    let (mut helm, cx, sent_after) = quick_launch_into_a_checkout_from(cx, true);
+    assert!(
+        sent_after
+            .iter()
+            .all(|command| !command.path.starts_with("/api/launch-history")),
+        "no history read"
+    );
+    let [preview] = &to(&sent_after, PREVIEW)[..] else {
+        panic!("the preview goes out at once");
+    };
+    // Were a history read out, its answer, with a newer configuration revision, would come first and make the
+    // preview stale; answering it so here keeps the outcome below meaningful should one ever go out again.
+    for read in sent_after
+        .iter()
+        .filter(|command| command.path.starts_with("/api/launch-history"))
+    {
+        helm.reply(
+            read.id,
+            200,
+            Some(json!({ "launches": [], "folders": [], "checkout_config_revision": 9 })),
+        );
+    }
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 3)),
+    );
+    settle(cx);
+    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    assert_eq!(creates.len(), 1, "one create once ready");
+    assert!(!test_support::any_open(cx), "the launcher was never shown");
 }
 
 /// SPEC.md, "Managed checkouts": a template's shortcut "obtains the same exact preview and launches without showing the

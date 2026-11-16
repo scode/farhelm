@@ -9,8 +9,8 @@ use farhelm_proto::{
 
 use super::recents::{
     DraftDestination, RecentFilter, destination_label, explicit_before_permissions,
-    permission_value, ranked, selection_summary, strip, summary_before_permissions,
-    uses_guarded_default,
+    permission_value, ranked, remembered_folder, selection_summary, strip,
+    summary_before_permissions, uses_guarded_default,
 };
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -341,4 +341,38 @@ fn trust_neither_splits_nor_shows() {
     ]);
     assert_eq!(ranked(&history, &RecentFilter::default(), None).len(), 1);
     assert!(!selection_summary(&trusted).to_lowercase().contains("trust"));
+}
+
+// ---- New's folder default ------------------------------------------------------------------------------------------
+
+/// The folder a host's history makes New's default is where its newest launch into a plain folder started: a newer
+/// launch into a fresh managed checkout or a disposable environment does not count, and a history with neither, or
+/// with no launches, gives `~`. Why: SPEC.md, "Working directory" ("the directory of the newest recent setup on that
+/// installation that launched into a plain folder (a fresh managed checkout does not count), else `~`"); old
+/// `remembered_folder_is_the_newest_plain_folder_launch`.
+#[test]
+fn the_remembered_folder_is_the_newest_plain_folder_launch() {
+    let mut checkout = launch("/srv/checkouts/repo-1", selection(LaunchHarness::Codex));
+    checkout.github_repo = Some(repo("acme", "repo"));
+    let mut environment = launch("/home/sandbox", selection(LaunchHarness::Codex));
+    environment.target = Some(LaunchTarget::Environment {
+        recipe: "rust".into(),
+        place: Place::PodmanHost(4),
+    });
+    let plain = launch("/srv/remote-work", selection(LaunchHarness::Claude));
+    let older = launch("/srv/older", selection(LaunchHarness::Claude));
+    assert_eq!(
+        remembered_folder(&history(vec![
+            checkout.clone(),
+            environment.clone(),
+            plain,
+            older
+        ])),
+        "/srv/remote-work"
+    );
+    assert_eq!(
+        remembered_folder(&history(vec![checkout, environment])),
+        "~"
+    );
+    assert_eq!(remembered_folder(&history(Vec::new())), "~");
 }
