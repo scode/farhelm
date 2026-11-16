@@ -118,16 +118,24 @@
 //! The order menu also holds Compact, the helm-wide density preference: with it on, every row is one line
 //! ([`row`]'s "Compact rows"), read once per frame like the steps of the animations.
 //!
-//! NOTE: Not ported yet, each with the area that brings it: marking, dragging pins, the row menu's other commands, and
-//! the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
-//! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
-//! terminal is on screen.
+//! Shift-click and Cmd-click (Ctrl-click on Linux) on a row mark sessions without opening them ([`marking`]). The marks
+//! belong to the UI session, and every frame projects them onto the rows it shows; while any is shown, the heading's
+//! band is the marked bar ("N marked", the marked menu's ⋯ and Clear) in place of the title, the count and the
+//! heading's actions, and Escape anywhere in the list's column clears them. A bulk action's not-started line on a row
+//! is [`bulk`]'s.
+//!
+//! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, dragging pins, the row menu's other
+//! commands, and the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where
+//! focus rests"): nothing names it home; that comes with the session pane's status-card work (M2.12), which decides
+//! home when no terminal is on screen.
 
 pub(crate) mod age;
+pub(crate) mod bulk;
 pub(crate) mod delete;
 pub(crate) mod filters;
 pub(crate) mod hold;
 pub(crate) mod host_rail;
+pub(crate) mod marking;
 pub(crate) mod menu;
 pub(crate) mod order;
 pub(crate) mod outcome;
@@ -158,6 +166,9 @@ pub(crate) mod lifecycle_tests;
 mod list_tests;
 
 #[cfg(test)]
+mod marking_tests;
+
+#[cfg(test)]
 pub(crate) mod menu_tests;
 
 #[cfg(test)]
@@ -186,6 +197,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, div, px,
 };
 
+use crate::actions::Dismiss;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, Spinner, StatusMark, Tier};
 use crate::focus::Mark;
@@ -302,6 +314,9 @@ pub struct SessionList {
     /// to draw its Move up and Move down. Worked out with `entries` at the top of every frame, so the menu, drawn after
     /// the list in the same frame, names the neighbors the user sees.
     moves: HashMap<String, pins::Neighbors>,
+    /// The marked bar's focus handles and anchor, and what the last frame projected of the marks ([`marking::Kept`]):
+    /// kept here for the window's life, since the bar is rebuilt on every draw and its menu names its toggle.
+    marking: marking::Kept,
     /// Whether the pointer is inside the window, which the order hold asks when a row's menu closes
     /// ([`SessionList::after_menus`]): GPUI's own answer, `Window::is_window_hovered`, in every build. A field rather
     /// than a call so that a test can hand in another reading (`SessionList::pointer_in_window_reads`), since GPUI's test
@@ -333,6 +348,11 @@ struct Current {
     /// The order hold ([`hold`]): the order on screen while the pointer is over the rows. Per UI session, so a reset
     /// drops it with the listing it held.
     hold: hold::Hold,
+    /// The marked sessions ([`marking`]), shown or hidden. Per UI session, so a reset forgets them, as the old app's
+    /// reload did.
+    marks: marking::Marks,
+    /// The marked menu the bar's ⋯ opened, checked with the layer manager when read, as the order menu's is.
+    marked_menu: Option<crate::layers::LayerId>,
 }
 
 impl SessionList {
@@ -394,6 +414,7 @@ impl SessionList {
             rail: host_rail::Kept::new(cx),
             hosts_panel: cx.new(HostsPanel::new),
             moves: HashMap::new(),
+            marking: marking::Kept::new(cx),
             pointer_in_window: Window::is_window_hovered,
         };
         list.settle(cx);
@@ -404,6 +425,8 @@ impl SessionList {
     /// when it does not yet name the session now open ([`Self::name_open_session`]), and send the open session's seen
     /// mark when one is due. Nothing happens while the window is inert.
     fn settle(&mut self, cx: &mut Context<Self>) {
+        // A bulk action's not-started line goes once its session's next operation starts.
+        bulk::prune(cx);
         let deleting = session::current_operations(cx).is_some_and(|operations| {
             operations
                 .read(cx)
@@ -427,6 +450,11 @@ impl SessionList {
             .as_deref()
             .is_some_and(|key| current.filters.serves_named(key));
         let collections = store.read(cx).collections();
+        // A mark goes on the same evidence as a session: a listing that proves it gone, never a filtered, cut or failed
+        // one (`marking`'s "Stored and effective marks").
+        current
+            .marks
+            .prune(|key| session::listing_proves_gone(collections, key));
         let listed = selection::listed(collections);
         // Gone on a complete listing without it, on any available listing without it once the query the helm serves
         // names it and no cap cut it away, or once this window's own Delete of it succeeded and the store no longer
@@ -643,6 +671,8 @@ impl Render for SessionList {
             .id("session-list")
             .role(Role::List)
             .aria_label("Sessions")
+            // Escape inside the column clears the marks without claiming the key ([`marking`]).
+            .on_action(cx.listener(|list, _: &Dismiss, window, cx| list.escape_in_list(window, cx)))
             .flex_1()
             .min_w_0()
             .h_full()
@@ -667,10 +697,11 @@ impl Render for SessionList {
             .any_open(window, cx);
         self.after_menus(menu_open, window, cx);
         // One pass over the listing for what the frame needs from all of it: the keys in the order drawn (pins first,
-        // then as the order hold keeps them), the pins' Move neighbors and the separator, whether any row pulses or
-        // shows a spinner (a pending Delete or Stop, or a Replace that has waited long enough to say so), and whether
-        // any has an activity stamp to show an age for. Everything else is read row by row, for the rows drawn.
-        let (keys, separator, any_pulse, any_spinner, any_stamp) = {
+        // then as the order hold keeps them), the pins' Move neighbors and the separator, the marks shown and the
+        // marked menu's offers, whether any row pulses or shows a spinner (a pending Delete or Stop, or a Replace that
+        // has waited long enough to say so), and whether any has an activity stamp to show an age for. Everything else
+        // is read row by row, for the rows drawn.
+        let (keys, separator, projection, any_pulse, any_spinner, any_stamp) = {
             let collections = store.read(cx).collections();
             let list_id = self.list_id(collections, cx);
             let current = self.current.current(cx);
@@ -678,6 +709,13 @@ impl Render for SessionList {
             let listed = current
                 .hold
                 .apply(pins::pinned_first(selection::listed(collections)), list_id);
+            // Marks count only while the rows are shown and the helm could read the listing (`marking`'s "Stored and
+            // effective marks"); otherwise the frame projects nothing and keeps the stored marks.
+            let exposed = !current.hosts_shown
+                && collections
+                    .meta(Collection::Sessions)
+                    .is_some_and(|meta| meta.availability == Availability::Available);
+            let projection = exposed.then(|| marking::project(&listed, &current.marks));
             self.moves = pins::neighbors(&listed, current.hold.original_pins());
             let separator = pins::separator_after(&listed).map(str::to_owned);
             let unchanged = listed.len() == self.entries.len()
@@ -700,8 +738,16 @@ impl Render for SessionList {
             let any_stamp = listed
                 .iter()
                 .any(|session| session.row.info.effective_activity() > 0);
-            (keys, separator, any_pulse, any_spinner, any_stamp)
+            (
+                keys,
+                separator,
+                projection,
+                any_pulse,
+                any_spinner,
+                any_stamp,
+            )
         };
+        self.marks_projected(projection, window, cx);
         let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
@@ -729,10 +775,16 @@ impl Render for SessionList {
         let choice = self.current.current(cx).filters.clone();
         let hosts_shown = self.current.current(cx).hosts_shown;
         let weak = cx.weak_entity();
-        // The title before the store is borrowed for the rest of the frame: drawing it records its anchor, which needs
-        // the window's element state. No title is drawn while the Hosts panel shows.
+        // The heading's start before the store is borrowed for the rest of the frame: drawing the title or the marked
+        // bar records an anchor, which needs the window's element state. While marks are shown the bar takes the
+        // title's place (and the heading's), and neither is drawn while the Hosts panel shows.
         let stored = order::Order::stored_in(store.read(cx).collections());
-        let title = (!hosts_shown).then(|| self.order_title(stored, window, cx));
+        let bar = if hosts_shown {
+            None
+        } else {
+            self.marked_bar(window, cx)
+        };
+        let title = (!hosts_shown && bar.is_none()).then(|| self.order_title(stored, window, cx));
         // Read before the store is borrowed too: answering it needs the app mutably.
         let new_available = launcher::entry::new_available(cx);
         let collections = store.read(cx).collections();
@@ -756,7 +808,7 @@ impl Render for SessionList {
             &self.help,
             cx,
         );
-        let Some(title) = title else {
+        if hosts_shown {
             // The Hosts panel, in the column's box, which gives it the definite height it scrolls its rows in. The
             // list's column is not drawn meanwhile, so neither are its rows and controls.
             return body_row
@@ -768,7 +820,7 @@ impl Render for SessionList {
                         .child(self.hosts_panel.clone()),
                 )
                 .child(foot);
-        };
+        }
         // The heading and the segments row are drawn before the first listing too (the module docs).
         let filter_row = filters::row(collections, choice.chosen(), &weak, palette);
         let refused = choice
@@ -778,6 +830,7 @@ impl Render for SessionList {
             return body_row
                 .child(
                     list.child(heading(
+                        bar,
                         title,
                         None,
                         &self.trash,
@@ -796,6 +849,7 @@ impl Render for SessionList {
 
         let count = count_line(meta, self.entries.len());
         let heading = heading(
+            bar,
             title,
             match &count {
                 CountLine::Count(count) => Some(count.clone()),
@@ -831,6 +885,7 @@ impl Render for SessionList {
             // What the item callback needs, by value: it runs while the list lays out, after this render returns, and
             // builds only the rows it draws.
             let entries = self.entries.clone();
+            let marked = self.marking.shown();
             let weak = weak.clone();
             let rows = div()
                 .id("session-rows")
@@ -845,7 +900,10 @@ impl Render for SessionList {
                             return div().into_any_element();
                         };
                         let selected = selected.as_deref() == Some(key.as_str());
-                        let row = draw_row(&shared, &weak, key, focus, selected, steps, window, cx);
+                        let marked = marked.iter().any(|shown| shown == key);
+                        let row = draw_row(
+                            &shared, &weak, key, focus, selected, marked, steps, window, cx,
+                        );
                         if separator.as_deref() == Some(key.as_str()) {
                             // After the row's item, so the item's own border stays its bottom edge.
                             div()
@@ -887,6 +945,7 @@ fn draw_row(
     key: &str,
     focus: &FocusHandle,
     selected: bool,
+    marked: bool,
     steps: row::Steps,
     window: &mut Window,
     cx: &mut App,
@@ -911,17 +970,24 @@ fn draw_row(
     let Some(row) = collections.get::<SessionRow>(key) else {
         return div().into_any_element();
     };
-    let open = key.to_owned();
+    let (open, list) = (key.to_owned(), weak.clone());
     row::row(
         Listed { key, row },
         collections,
         selected,
+        marked,
         steps,
         menu,
         bell,
         focus,
         hover,
-        move |_, cx| selection::choose(&open, cx),
+        // A plain click opens the session and clears the marks; Shift or Cmd or Ctrl marks instead ([`marking`]).
+        move |gesture, _, cx| {
+            if gesture == marking::Gesture::Open {
+                selection::choose(&open, cx);
+            }
+            let _ = list.update(cx, |list, cx| list.row_clicked(&open, gesture, cx));
+        },
         cx,
     )
 }
@@ -930,16 +996,26 @@ fn draw_row(
 /// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
 /// the heading's actions at its right edge (`.session-heading-actions`), in SPEC.md's order: Trash (`trash`, a view of
 /// its own), Templates, then New, drawn disabled unless `new_available` ([`launcher::entry::new_available`], read by
-/// the caller).
+/// the caller). While marks are shown, `bar`, the marked bar the caller drew ([`marking`]), is the band instead, and
+/// the caller draws no `title`: the bar replaces the title, the count and the actions, and Trash's view stays alive
+/// undrawn.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the band's two starts and the parts of the ordinary heading"
+)]
 fn heading(
-    title: AnyElement,
+    bar: Option<AnyElement>,
+    title: Option<AnyElement>,
     count: Option<String>,
     trash: &Entity<TrashButton>,
     templates_focus: &FocusHandle,
     new_available: bool,
     list: &WeakEntity<SessionList>,
     cx: &App,
-) -> impl IntoElement {
+) -> AnyElement {
+    if let Some(bar) = bar {
+        return bar;
+    }
     let palette = theme::palette(cx);
     let templates = IconButton::new(
         "templates-button",
@@ -982,7 +1058,7 @@ fn heading(
         .py(metrics::LIST_HEADING_PAD.0)
         .px(metrics::LIST_HEADING_PAD.1)
         .bg(theme::color(palette.bg_2))
-        .child(title)
+        .children(title)
         .children(count.map(|count| {
             let name = format!("Sessions: {count}");
             // The old count's `aria-label` and `data-tooltip`; the name and the help are the same words, so the help is
@@ -1010,6 +1086,7 @@ fn heading(
                 .child(templates)
                 .child(new),
         )
+        .into_any_element()
 }
 
 /// The heading's New button's element id: tests and the end-to-end smoke test find it by this.

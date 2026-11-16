@@ -8,7 +8,8 @@
 //! Replace, and with Replace alone), the unavailable card with the stale band above it (a host that does not answer,
 //! and one that needs an update), the open session's details bar (every status and host it draws differently, and a
 //! narrow one, and once more with a copy confirmed and its hidden-characters warning), the session list (a fleet of
-//! every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu, a row's
+//! every status a row draws, the open row on a host the helm cannot reach, an empty fleet, two rows marked under the
+//! marked bar, a row's open menu, a row's
 //! notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the Send
 //! feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
 //! drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at
@@ -76,6 +77,7 @@ use crate::session;
 use crate::session_list::SessionList;
 use crate::session_list::filters::Status;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
+use crate::session_list::marking::Gesture;
 use crate::session_list::tests::{
     Fixture, TEST_NOW, listing, preferences, preferences_state, session,
 };
@@ -2339,6 +2341,23 @@ fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             .pinned(1),
     ];
     session_list_scene_opening(state, &rows, Some("p"), cx);
+}
+
+/// The fleet with two rows marked as a Cmd-click marks them: the open row, which keeps its accent fill under a marker
+/// in the fill's ink, and an unselected row, tinted under an accent marker. The heading's band is the marked bar, "2
+/// marked" with the marked menu's ⋯ and Clear, in place of the title, the count, Trash, Templates and New.
+fn session_list_marked_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, _, _, cx| {
+            list.update(cx, |list, cx| {
+                for key in ["a", "c"] {
+                    list.row_clicked(key, Gesture::Toggle, cx);
+                }
+            })
+        },
+        cx,
+    );
 }
 
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
@@ -5013,6 +5032,12 @@ static SCENES: &[Scene] = &[
         size: (420., 700.),
         draw: host_rail_lists,
         setup: host_rail_status_setup,
+    },
+    Scene {
+        name: "session-list-marked",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: session_list_marked_setup,
     },
     Scene {
         name: "session-row-menu",

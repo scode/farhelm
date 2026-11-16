@@ -2190,10 +2190,10 @@ hover text and accessible names explain the actions, and New remains the sidebar
 
 The open session is separate from the **marked** sessions. Shift+click on a row marks the inclusive range from the open
 session to that row in displayed order, without opening it; each range click replaces the previous marking. When the
-open session is not displayed, it marks only the clicked row. Cmd+click or Ctrl+click toggles one row on every platform,
-including the open row. Shift takes precedence when both kinds of modifier are held. A plain accepted row click opens
-that session and clears all marks. Row controls keep their own actions. The open row keeps its blue fill; a distinct
-side marker and tint identify marked rows.
+open session is not displayed, it marks only the clicked row. Cmd+click (macOS) or Ctrl+click (Linux) toggles one row's
+mark, including the open row. Shift takes precedence when both kinds of modifier are held. A plain accepted row click
+opens that session and clears all marks. Row controls keep their own actions. The open row keeps its blue fill; a
+distinct side marker and tint identify marked rows.
 
 Marks belong to the window and are not saved. Counts, offered actions and targets include only marked rows displayed
 now. Filtering or opening Hosts retains hidden marks but never counts or acts on them; failed listings expose no
