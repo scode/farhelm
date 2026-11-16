@@ -546,8 +546,8 @@ and reopening Settings; running cleanup shows **Cleaning up…**. This operation
 helm restarts. With a saved API key the section stays visible even when empty, with a small **Refresh** beside its
 heading. A read shows **Checking…**, then an empty success shows **None found · checked HH:MM** in the viewer's local
 time. A failed read shows its reason and keeps earlier rows rather than claiming an empty result. Farhelm never cleans
-it automatically. The browser-test namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never
-appear.
+it automatically. The repository's test-sandbox namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved
+prefixes never appear.
 
 For Tensorlake, every recipe supplies a built snapshot and, on first use, a prepared snapshot for new hosts or sessions.
 The UI calls these artifacts snapshots, never templates, a word reserved for launch templates. Saving a recipe never
@@ -3389,8 +3389,8 @@ title, and so do the gaps between and around controls and the band's top and bot
 main pane's half of the band is empty background too. Every such press drags, whatever input device made it. Controls,
 text in the band, and the terminal retain their own interactions. The Linux window layout retains its existing
 appearance and gains no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
-scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
-authentication errors, and build-mismatch notices also keep their content clear of native controls.
+scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup and
+authentication errors also keep their content clear of native controls.
 
 Cmd+N in the Mac desktop app opens New with the same prefill, even from a focused terminal, unless a modal is open or
 New is disabled. New's hover text names the shortcut in the Mac desktop app only; the Linux app has no such shortcut.
