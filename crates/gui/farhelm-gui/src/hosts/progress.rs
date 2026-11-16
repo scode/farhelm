@@ -28,8 +28,19 @@
 //! - **What the UI keeps** ([`Seen`]): per host, the run it last saw running, when it first saw it, and the fold. The
 //!   helm's progress carries no timestamps, so the elapsed time counts from when this UI session first saw the run
 //!   running, as the old app counted from its own first sight (a reload started it over; here a reset does). The
-//!   settings-and-hosts goal (M2.9) caps what the panel holds to the fold; the time it first saw a run is the one
-//!   other fact, because SPEC.md asks for an elapsed time measured by the client and nothing else can give one.
+//!   settings-and-hosts goal (M2.9) caps what the UI holds about a run to the fold; the time it first saw a run is
+//!   the one other fact, because SPEC.md asks for an elapsed time measured by the client and nothing else can give one.
+//! - **The progress card** ([`card`]): the hover card of a running run, which the Hosts row's inline status and the
+//!   attention list's working rows share. It draws its steps with the step list's own rows.
+//!
+//! ## Where what the UI keeps lives
+//!
+//! The [`Seen`] records live in one app global for the current UI session ([`follow_current`], [`fold_current`],
+//! [`seen_now`]), tagged with the entity id of the operation store they were made under, as [`super::status`] keeps
+//! its warnings, so a reset forgets them. A global rather than a field of the Hosts panel, because the attention list's
+//! card counts the same run's elapsed time as the Hosts row does (SPEC.md: hovering the status "opens the same card as
+//! a working host in the attention list"), and the attention list has no handle on the panel. The panel's store
+//! subscription keeps it up to date on every change of the store, whether or not Hosts shows.
 //!
 //! Time comes from the ticker, shared by every row whatever its run. The running marker and the inline dot pulse on the
 //! shared pulse ([`crate::ticker::pulse`]), which the panel holds only while its window is active and which stands
@@ -40,6 +51,7 @@
 //! run first seen mid-second turns over up to a second after its own whole second, as the ticker allows for every
 //! count.
 
+pub(crate) mod card;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -50,16 +62,18 @@ use farhelm_proto::provisioning::{
     ProvisioningOperation, ProvisioningView, RunStatus, StepStatus, StepView,
 };
 use gpui::{
-    AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Role,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px, svg,
+    AnyElement, App, EntityId, FontWeight, Global, InteractiveElement as _, IntoElement,
+    ParentElement as _, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    div, prelude::FluentBuilder as _, px, svg,
 };
 
 use crate::assets::{self, Icon};
 use crate::components::{Button, HoverHelp, StatusMark, Tier};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::operations::Work;
+use crate::session;
 use crate::theme::{self, Palette, Token, metrics};
+use crate::ticker;
 
 /// `.host-update-dot`: the inline status's dot.
 const DOT: f32 = 6.;
@@ -79,7 +93,8 @@ const LINE: f32 = 15.;
 // ---- What the UI keeps ----------------------------------------------------------------------------------------------
 
 /// What this UI session keeps about one host's run: which run, when it first saw it running, and whether the user
-/// folded it. Keyed by host id in the panel, which drops all of it on a reset.
+/// folded it. Kept by host id in the current UI session's app global ([`follow_current`], [`seen_now`]), which a reset
+/// starts over.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Seen {
     run_id: String,
@@ -121,6 +136,71 @@ pub(crate) fn fold(seen: &mut HashMap<i64, Seen>, host: i64, run_id: &str) {
     }
 }
 
+/// The [`Seen`] records of the UI session whose operation store is `store`, as an app global ([`follow_current`]).
+#[derive(Default)]
+struct Kept {
+    store: Option<EntityId>,
+    seen: HashMap<i64, Seen>,
+}
+
+impl Global for Kept {}
+
+/// The current UI session's records, by host id; empty while the window is inert, before the first follow, and right
+/// after a reset, until the panel follows the new session's store.
+pub(crate) fn seen_now(cx: &App) -> HashMap<i64, Seen> {
+    super::current_operations_id(cx)
+        .and_then(|store| {
+            cx.try_global::<Kept>()
+                .filter(|kept| kept.store == Some(store))
+        })
+        .map(|kept| kept.seen.clone())
+        .unwrap_or_default()
+}
+
+/// Change the current UI session's records with `change`, starting them over when they were made under another
+/// session, and store them only when they changed, as [`super::status`] stores its state, so the global's observers
+/// (none yet) would hear only of a change. Nothing while the window is inert.
+fn change_current(cx: &mut App, change: impl FnOnce(&mut HashMap<i64, Seen>)) {
+    let Some(store) = super::current_operations_id(cx) else {
+        return;
+    };
+    let before = cx
+        .try_global::<Kept>()
+        .filter(|kept| kept.store == Some(store))
+        .map(|kept| &kept.seen);
+    let mut seen = before.cloned().unwrap_or_default();
+    change(&mut seen);
+    if before != Some(&seen) {
+        cx.set_global(Kept {
+            store: Some(store),
+            seen,
+        });
+    }
+}
+
+/// [`follow`] the current store's host progress into the current UI session's records, at the ticker's time of day.
+/// The Hosts panel calls it on every change of the store, whether or not Hosts shows, so a run's clock starts when it
+/// is first pushed.
+pub(crate) fn follow_current(cx: &mut App) {
+    let Some(store) = session::current_store(cx) else {
+        return;
+    };
+    let now = ticker::wall_now(cx);
+    let runs: Vec<ProvisioningView> = store
+        .read(cx)
+        .collections()
+        .ordered::<ProvisioningView>()
+        .into_iter()
+        .cloned()
+        .collect();
+    change_current(cx, |seen| follow(seen, &runs, now));
+}
+
+/// [`fold`] host `host`'s run `run_id` in the current UI session's records, as its Collapse does.
+pub(crate) fn fold_current(host: i64, run_id: &str, cx: &mut App) {
+    change_current(cx, |seen| fold(seen, host, run_id));
+}
+
 // ---- Which runs show, and what they open ----------------------------------------------------------------------------
 
 /// The kinds of run a row draws, which decide its words: the helm's setup (`add`), Update and uninstall operations.
@@ -141,7 +221,8 @@ impl Run {
         }
     }
 
-    /// The verb the inline status reads out ("Setting up: 1 of 3 steps done").
+    /// The verb the inline status reads out ("Setting up: 1 of 3 steps done"), and the progress card's count starts
+    /// with.
     fn verb(self) -> &'static str {
         match self {
             Run::Setup => "Setting up",
@@ -317,9 +398,10 @@ pub(crate) fn clock(elapsed: Duration) -> String {
 
 /// Host `id`'s inline status (`.host-update-running`): drawn under `host-status-<id>` like the phase words it replaces,
 /// as a status named for its count and step and whose hover says the same at length (the step name is cut short
-/// on screen, as the old label's was; the old hover card is not ported). The dot is at `pulse`'s opacity. A setup and
-/// an uninstall draw their verb before the count; an Update does not, though its name and hover still start with it
-/// ([`Run::draws_verb`]).
+/// on screen, as the old label's was). SPEC.md gives this hover the progress card ([`card`]) instead, which waits for
+/// a form of card help that makes the card as the tooltip shows; until then the hover is that one line. The
+/// dot is at `pulse`'s opacity. A setup and an uninstall draw their verb before the count; an Update does not, though
+/// its name and hover still start with it ([`Run::draws_verb`]).
 pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palette) -> AnyElement {
     let dot = div()
         .flex_none()
@@ -495,7 +577,7 @@ pub(crate) fn run_section(
         .steps
         .iter()
         .enumerate()
-        .map(|(n, step)| step_row(id, n, step, n + 1 == count, pulse, palette));
+        .map(|(n, step)| step_row(Surface::Panel, id, n, step, n + 1 == count, pulse, palette));
     let message = run.message.as_deref().map(|message| {
         div()
             .pt(px(2.))
@@ -532,9 +614,54 @@ pub(crate) fn run_section(
         .into_any_element()
 }
 
-/// Step `n` of host `id`'s run (`.provisioning-step`): its marker on the rail that runs down to the next step unless it
-/// is the `last`, its name and its result word on one line, and its message, if any, under the name.
+/// Where a step row is drawn, which decides what it shows under its name and the ids it is drawn under. The open row's
+/// step list and the progress card draw one step the same way, marker, rail, name and result word; they differ only in
+/// the lines under the name and in how the running step's name is set, as the old panel's `.provisioning-step` and the
+/// old card's copy of it (`.host-progress-card .provisioning-step`) did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Surface {
+    /// The open row's step list ([`run_section`]): the step's message under its name, whatever its result. Ids start
+    /// `host-step-`.
+    Panel,
+    /// The progress card ([`card`]): the step's explanation under its name, and its message only for a warning or a
+    /// failure (SPEC.md: "every step with its status and explanation, ... and any degraded or failed step's reason");
+    /// the running step's name set semibold, the old `.host-progress-step-current`. Ids start `host-card-step-`.
+    Card,
+}
+
+impl Surface {
+    /// What a step row's ids start with on this surface: the two surfaces draw the same host's run in one window at
+    /// once (the card beside the open row), and tests and the agent bridge tell them apart by these.
+    fn step_ids(self) -> &'static str {
+        match self {
+            Surface::Panel => "host-step",
+            Surface::Card => "host-card-step",
+        }
+    }
+
+    /// The lines this surface draws under `step`'s name, in order: the step's explanation and its message.
+    fn lines(self, step: &StepView) -> Vec<&str> {
+        match self {
+            Surface::Panel => step.message.as_deref().into_iter().collect(),
+            Surface::Card => {
+                let reason = matches!(step.status, StepStatus::Degraded | StepStatus::Failed)
+                    .then_some(step.message.as_deref())
+                    .flatten();
+                step.explanation
+                    .as_deref()
+                    .into_iter()
+                    .chain(reason)
+                    .collect()
+            }
+        }
+    }
+}
+
+/// Step `n` of host `id`'s run (`.provisioning-step`) on `surface`: its marker on the rail that runs down to the next
+/// step unless it is the `last`, its name and its result word on one line, and the lines the surface shows under the
+/// name ([`Surface::lines`]).
 fn step_row(
+    surface: Surface,
     id: i64,
     n: usize,
     step: &StepView,
@@ -545,6 +672,7 @@ fn step_row(
     let look = look(&step.status, palette);
     let name = HostText::from_host(step.name.as_str());
     let running = step.status == StepStatus::Running;
+    let ids = surface.step_ids();
     // The running step's ring pulses on its own, over a transparent edge, so its number stays solid.
     let ring = running.then(|| {
         div()
@@ -593,26 +721,29 @@ fn step_row(
             .w(px(1.))
             .bg(theme::color(palette.border_dim))
     });
-    let message = step.message.as_deref().map(|message| {
-        let ink = match step.status {
-            StepStatus::Failed => palette.danger_strong,
-            _ => palette.fg_dim,
+    let ink = match step.status {
+        StepStatus::Failed => palette.danger_strong,
+        _ => palette.fg_dim,
+    };
+    // The panel's one line keeps its old id, `-message`; the card's lines are numbered.
+    let lines = surface.lines(step);
+    let messages = lines.iter().enumerate().map(|(k, line)| {
+        let id = match surface {
+            Surface::Panel => format!("{ids}-{id}-{n}-message"),
+            Surface::Card => format!("{ids}-{id}-{n}-line-{k}"),
         };
         div()
             .pt(px(2.))
             .pl(px(MARKER_COLUMN + STEP_GAP))
             .text_color(theme::color(ink))
-            .child(
-                HostSentence::new(SharedString::from(format!("host-step-{id}-{n}-message")))
-                    .host(&HostText::from_host(message)),
-            )
+            .child(HostSentence::new(SharedString::from(id)).host(&HostText::from_host(*line)))
     });
     let label = HostSentence::new("host-step-label")
         .host(&name)
         .text(format!(": {}", look.word))
         .accessible_name();
     div()
-        .id(SharedString::from(format!("host-step-{id}-{n}")))
+        .id(SharedString::from(format!("{ids}-{id}-{n}")))
         .role(Role::ListItem)
         .aria_label(label)
         .relative()
@@ -630,7 +761,10 @@ fn step_row(
                     host_text::element(&name)
                         .flex_1()
                         .min_w_0()
-                        .text_color(theme::color(look.name)),
+                        .text_color(theme::color(look.name))
+                        .when(running && surface == Surface::Card, |name| {
+                            name.font_weight(FontWeight::SEMIBOLD)
+                        }),
                 )
                 .child(
                     div()
@@ -639,7 +773,7 @@ fn step_row(
                         .child(look.word),
                 ),
         )
-        .children(message)
+        .children(messages)
         .into_any_element()
 }
 

@@ -15,14 +15,15 @@
 //! Appearance, at Hosts, at Recipes (empty, with recipes in each build state, with a recipe's per-place lines, and with
 //! a new recipe's editor open), at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details,
 //! with a host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with
-//! a host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the
-//! host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
-//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
-//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
-//! itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty,
-//! full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
-//! appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both
-//! pictures; only the scene's ground around it differs.)
+//! a host's Update running), a host's progress card (whole, and previewed in a short window), the Add host dialog and
+//! the setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its
+//! end, the host refusal dialog for a refused Update, the version readout while an updater runs (the check button at
+//! rest, lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and the
+//! reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), the Open-Source Notices
+//! window over a short fixture, and the Trash button empty, full and freeing space, and the Trash dialog, alone and
+//! asking to delete everything or one host's archives, in both appearances, compared pixel for pixel. (The terminal
+//! stays dark in both appearances, so it draws identically in both pictures; only the scene's ground around it
+//! differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -3967,6 +3968,101 @@ fn host_update_running_hosts_panel_setup(state: &SceneState, _: &mut Window, cx:
     );
 }
 
+/// `dev@new-box`'s setup at its third of nine steps, for the progress card scenes: the reference screens' new host and
+/// steps (`host_setup_scene`'s), the first two completed, the third running with an explanation, the host connecting at
+/// attempt 3 after `error`, and `message` as the run's own message. Motion is reduced, so the running step's ring holds
+/// still, and the test clock does not move, so the elapsed time reads "0:00".
+fn progress_card_scene(state: &SceneState, error: &str, message: Option<&str>, cx: &mut App) {
+    use crate::hosts::tests::{connecting, host, hosts, progress, reference_hosts, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus, StepStatus};
+    ticker::set_reduced_motion(true, cx);
+    let mut new_box = host(4, "ssh", connecting(3, Some(error)));
+    new_box.name = "dev@new-box".into();
+    new_box.destination = Some("dev@new-box".into());
+    let mut listed = reference_hosts();
+    listed.push(new_box);
+    let names = [
+        "Create directories",
+        "Upload the farhelm binary",
+        "Install the farhelm binary",
+        "Write the systemd user unit",
+        "Reload systemd user units",
+        "Enable and start the supervisor",
+        "Enable lingering, to start at boot",
+        "Remove the bundled tmux",
+        "Connect to the supervisor",
+    ];
+    let mut setup = run(4, ProvisioningOperation::Add, RunStatus::Running);
+    setup.steps = names
+        .into_iter()
+        .enumerate()
+        .map(|(n, name)| {
+            let status = match n {
+                0 | 1 => StepStatus::Completed,
+                2 => StepStatus::Running,
+                _ => StepStatus::Pending,
+            };
+            let mut step = crate::hosts::progress::tests::step(name, status);
+            if n == 2 {
+                step.explanation = Some(
+                    "Replaces the farhelm binary in ~/.local/bin and keeps the old one.".into(),
+                );
+            }
+            step
+        })
+        .collect();
+    setup.message = message.map(str::to_owned);
+    hosts_panel_scene_with(state, vec![hosts(&listed), progress(&[setup])], false, cx);
+}
+
+/// The progress card of `dev@new-box`'s running setup (no reference picture; compared with the old stylesheet's
+/// `.host-progress-*` rules): the host's mark and short name, "Setting up: 2 of 9 steps done" and the time, every step
+/// with the running one ringed amber and its name set semibold over its explanation, and the connection detail.
+fn host_progress_card_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    progress_card_scene(
+        state,
+        "SSH could not connect or log in to the host; SSH stderr: \"ssh: Could not resolve hostname new-box: \
+         Temporary failure in name resolution\"; cause: connection closed before hello",
+        None,
+        cx,
+    );
+}
+
+/// The same card in a 300-pixel window with a long connection error and a long run message (no reference picture):
+/// the list kept down to the running step, each diagnosis cut to its last whole lines, and "Full details in Hosts".
+fn host_progress_card_preview_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let long = "SSH failed while reconnecting. ".repeat(12) + "Final diagnosis: permission denied.";
+    progress_card_scene(state, &long, Some(&long), cx);
+}
+
+/// The width the progress card's hover help is to give it, the old 310 pixels (`.farhelm-tooltip[data-kind="card"]`).
+const PROGRESS_CARD_WIDTH: f32 = 310.;
+
+/// The progress card of host 4 inside a stand-in of the chrome the layer manager's card form of hover help draws
+/// around it (the tooltip's raised ground, border, radius and menu shadow, at [`PROGRESS_CARD_WIDTH`]), which the card
+/// fills. Made once the scene's snapshot has reached the store, which happens after the setup runs.
+fn progress_cards(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let kept = state.keep.borrow().iter().find_map(|kept| {
+        kept.downcast_ref::<Entity<crate::hosts::ProgressCard>>()
+            .cloned()
+    });
+    let card = kept.or_else(|| {
+        let card = crate::hosts::progress_card(4, cx)?;
+        state.keep.borrow_mut().push(Box::new(card.clone()));
+        Some(card)
+    });
+    div()
+        .w(px(PROGRESS_CARD_WIDTH))
+        .bg(theme::color(palette.bg_2))
+        .border_1()
+        .border_color(theme::color(palette.border))
+        .rounded(theme::metrics::RADIUS_MD)
+        .shadow(crate::layers::menu_shadow(palette))
+        .children(card)
+        .into_any_element()
+}
+
 /// The host refusal dialog for a refused Update of `build-box` below the upgrade floor (no reference: the old dialog's
 /// look is reference `host-uninstall-refusal`, the same dialog for Uninstall): "Update host · build-box", the red
 /// summary, the destination and the helm's manual remedy naming the executable, and Close with focus.
@@ -5338,6 +5434,18 @@ static SCENES: &[Scene] = &[
         size: (364., 418.),
         draw: hosts_panels,
         setup: host_update_running_hosts_panel_setup,
+    },
+    Scene {
+        name: "host-progress-card",
+        size: (360., 520.),
+        draw: progress_cards,
+        setup: host_progress_card_setup,
+    },
+    Scene {
+        name: "host-progress-card-preview",
+        size: (360., 300.),
+        draw: progress_cards,
+        setup: host_progress_card_preview_setup,
     },
     Scene {
         name: "host-update-refusal",

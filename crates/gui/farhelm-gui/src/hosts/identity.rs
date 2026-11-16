@@ -40,6 +40,23 @@ pub(crate) fn display_name(host: &HostView) -> HostText {
     named(&host.name, host.is_local())
 }
 
+/// A registered host's short name, for a surface too small for its full name (the progress card's header; the
+/// attention list's rows are to use it too): the alias, or the destination without its user and domain, or "Local" for
+/// the local host, by the protocol crate's one rule (`host_short_name`, which the old app's `Host::short_name` used
+/// too), and the registry's full name when that rule finds nothing. Host text, as [`display_name`] is.
+pub(crate) fn short_name(host: &HostView) -> HostText {
+    let short = farhelm_proto::host_name::host_short_name(
+        host.is_local(),
+        host.destination.as_deref(),
+        host.alias.as_deref(),
+    );
+    if short.is_empty() {
+        HostText::from_host(host.name.as_str())
+    } else {
+        HostText::from_host(short)
+    }
+}
+
 /// [`display_name`]'s rule applied to a name the helm sent elsewhere than in the registry: `name` is the helm's name
 /// for a host, and `is_local` whether the registry places that host on the helm's own machine. The session pane's
 /// details bar names a session's host this way, from the name the helm sent with the session (the old app's
@@ -54,8 +71,8 @@ pub(crate) fn named(name: &str, is_local: bool) -> HostText {
 }
 
 /// A host's mark: its chosen shape `icon` at `size`, tinted with its chosen `color` (the ordinary foreground for the
-/// default color). Decorative: what it stands for is in the accessible name of the control it sits in. The session
-/// list's rows and the quick switcher will draw a host's mark through this too.
+/// default color). Decorative: what it stands for is in the accessible name of the control it sits in. Every host mark
+/// in the app goes through this, the session list's rows and rail and the quick switcher included, so they cannot drift.
 pub(crate) fn host_mark(icon: HostIcon, color: HostColor, size: Pixels, palette: &Palette) -> Svg {
     svg()
         .path(glyph(icon).path())
