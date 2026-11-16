@@ -139,6 +139,11 @@ pub mod ui_channel;
 // The GUI's bodies for the helm's create, Restart and Replace routes (see the
 // module's own docs).
 pub mod session_requests;
+
+/// The JSON bodies of the helm's file stat, native save and attachment upload routes, which the helm and its GUI
+/// client both use (see the module's own docs).
+pub mod file_transfers;
+
 // The control messages beside a terminal socket's grid stream, typed once for both ends (see the module's own docs).
 pub mod terminal_socket;
 

@@ -10,10 +10,9 @@ use crate::{AppState, DownloadGuard, http_error};
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
 use axum::{Json, body::Body};
-use farhelm_proto::DownloadFileInfo;
+use farhelm_proto::file_transfers::{DownloadReply, FileRequest, FileStat};
 use farhelm_proto::open_extensions::OpenExtensions;
 use farhelm_supervisor::files::{RealFs, StagedStream};
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 
@@ -106,29 +105,10 @@ fn same_type(requested: &Path, saved: &Path) -> bool {
     }
 }
 
-/// Agent-provided path text is data, never a shell expression. Save mode is
-/// an explicit request to the desktop capability; server helms refuse it.
-#[derive(Deserialize)]
-pub(crate) struct FileRequest {
-    path: String,
-    #[serde(default)]
-    save_to_downloads: bool,
-    #[serde(default)]
-    /// Opening is meaningful only with native save; it never names a local path.
-    open: bool,
-}
-
-/// Fresh host evidence with the host's display name for the hover disclosure.
-/// Flattening preserves the protocol's typed refusal and optional size.
-#[derive(serde::Serialize)]
-struct FileStatBody {
-    host: String,
-    /// Absent on server helms: only native saves can have a local open action.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    can_open: Option<bool>,
-    #[serde(flatten)]
-    info: DownloadFileInfo,
-}
+// The routes' bodies (`FileRequest`, `FileStat`, `DownloadReply`) are `farhelm_proto::file_transfers` types, shared
+// with the GUI's helm client so the two cannot drift apart. The request's path text is agent-provided data, never a
+// shell expression; save mode is an explicit request to the desktop capability, which server helms refuse, and opening
+// is meaningful only with a native save and never names a local path.
 
 /// Resolve and inspect without moving bytes. The normal session-owner route
 /// supplies the same disconnected-host refusal as other session operations.
@@ -165,7 +145,7 @@ pub(crate) async fn stat_file(
         } else {
             None
         };
-        Ok::<_, anyhow::Error>(FileStatBody {
+        Ok::<_, anyhow::Error>(FileStat {
             host,
             can_open,
             info,
@@ -216,7 +196,11 @@ pub(crate) async fn download_file(
             Ok(path) => {
                 // Publication is already successful. An opener refusal or OS
                 // error must never tell the user that this saved file was lost.
-                let mut body = serde_json::json!({"path": path.to_string_lossy()});
+                let mut body = DownloadReply {
+                    path: path.to_string_lossy().into_owned(),
+                    opened: None,
+                    open_error: None,
+                };
                 if request.open {
                     // A preference read failure is an opening failure, not a
                     // download failure: publication has already succeeded.
@@ -237,10 +221,8 @@ pub(crate) async fn download_file(
                                 .unwrap_or_else(|error| Err(format!("file opener failed: {error}")))
                         }
                     };
-                    body["opened"] = serde_json::json!(result.is_ok());
-                    if let Err(reason) = result {
-                        body["open_error"] = serde_json::json!(reason);
-                    }
+                    body.opened = Some(result.is_ok());
+                    body.open_error = result.err();
                 }
                 Json(body).into_response()
             }
@@ -473,7 +455,7 @@ mod tests {
     use super::*;
     use crate::rest_harness::{FakeSupervisor, session, spliced_helm_listing};
     use axum::http::{Request, StatusCode};
-    use farhelm_proto::{ControlMsg, DownloadFileStatus, Frame};
+    use farhelm_proto::{ControlMsg, DownloadFileInfo, DownloadFileStatus, Frame};
     use tower::ServiceExt;
 
     /// Collision numbering must keep ordinary names and the final extension
@@ -660,6 +642,9 @@ mod tests {
 
     /// Host refusal states must stay typed and the disclosed path must come
     /// from that host, rather than from the request or the helm filesystem.
+    /// The answer's bytes are pinned exactly, as a server helm writes them
+    /// (no `can_open`, the refusal in snake_case), because desktop apps of
+    /// other releases decode them.
     #[farhelm_testtrace::test]
     async fn stat_routes_and_returns_fresh_host_evidence() {
         let (client, server) = tokio::io::duplex(65536);
@@ -691,16 +676,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body: serde_json::Value = serde_json::from_slice(
-            &axum::body::to_bytes(response.into_body(), 4096)
-                .await
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(body["path"], "/work/report.pdf");
-        assert_eq!(body["size"], 100_000_001u64);
-        assert_eq!(body["status"], "too_large");
-        assert_eq!(body["host"], "this machine");
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            r#"{"host":"this machine","path":"/work/report.pdf","size":100000001,"status":"too_large"}"#
+        );
         peer.await.unwrap();
     }
 
@@ -899,6 +881,10 @@ mod tests {
     /// Successful saves stay successful after an open refusal or OS failure.
     /// The observer sees only the completed, uniquely named private save, which
     /// proves neither request text nor the host's absolute path reaches it.
+    /// The answer's bytes are pinned exactly (`path`, then `opened`, then
+    /// `open_error` only on a refusal or failure, the order the desktop helm
+    /// has always written), because desktop apps of other releases decode
+    /// them.
     #[farhelm_testtrace::test]
     async fn native_open_uses_only_published_allowlisted_save_and_preserves_failures() {
         // The fourth case is a swap between hover and click: the user chose
@@ -970,13 +956,25 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
-            let body: serde_json::Value = serde_json::from_slice(
-                &axum::body::to_bytes(response.into_body(), 4096)
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let raw = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&raw).unwrap();
             let saved = Path::new(body["path"].as_str().unwrap());
+            // serde_json only quotes the two strings; the keys and their order are the literal.
+            let quoted = |text: &str| serde_json::to_string(text).unwrap();
+            let expected = match body["open_error"].as_str() {
+                None => format!(
+                    r#"{{"path":{},"opened":true}}"#,
+                    quoted(saved.to_str().unwrap())
+                ),
+                Some(reason) => format!(
+                    r#"{{"path":{},"opened":false,"open_error":{}}}"#,
+                    quoted(saved.to_str().unwrap()),
+                    quoted(reason)
+                ),
+            };
+            assert_eq!(std::str::from_utf8(&raw).unwrap(), expected);
             assert_eq!(std::fs::read(saved).unwrap(), b"report-body");
             assert_eq!(
                 std::fs::read(downloads.path().join(name)).unwrap(),
@@ -1074,6 +1072,9 @@ mod tests {
 
     /// Save twice without overwriting the earlier file, then fail after bytes
     /// arrive. Only successful EOF may publish, and staging must be cleaned.
+    /// A save not asked to open answers exactly `{"path":...}`, with no open
+    /// fields, because desktop apps of other releases read their absence as
+    /// "not asked".
     #[farhelm_testtrace::test]
     async fn desktop_save_uses_unique_names_and_cleans_a_failed_transfer() {
         let downloads = tempfile::tempdir().unwrap();
@@ -1099,16 +1100,16 @@ mod tests {
                 assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
             } else {
                 assert_eq!(response.status(), StatusCode::OK);
-                let body: serde_json::Value = serde_json::from_slice(
-                    &axum::body::to_bytes(response.into_body(), 4096)
-                        .await
-                        .unwrap(),
-                )
-                .unwrap();
+                let raw = axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+                let saved = body["path"].as_str().unwrap();
                 assert_eq!(
-                    std::fs::read(body["path"].as_str().unwrap()).unwrap(),
-                    b"report-body"
+                    std::str::from_utf8(&raw).unwrap(),
+                    format!(r#"{{"path":{}}}"#, serde_json::to_string(saved).unwrap())
                 );
+                assert_eq!(std::fs::read(saved).unwrap(), b"report-body");
             }
             peer.await.unwrap();
         }

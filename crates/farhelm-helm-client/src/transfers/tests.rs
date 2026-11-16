@@ -7,6 +7,7 @@
 //! `tests/real_helm.rs`. Every test is bounded, so a regression fails instead of hanging.
 
 use super::*;
+use farhelm_proto::{DownloadFileInfo, DownloadFileStatus};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -27,10 +28,6 @@ impl Received {
             let (key, value) = line.split_once(':')?;
             key.eq_ignore_ascii_case(name).then(|| value.trim())
         })
-    }
-
-    fn json(&self) -> serde_json::Value {
-        serde_json::from_slice(&self.body).unwrap()
     }
 }
 
@@ -148,7 +145,8 @@ async fn bounded<T>(work: impl Future<Output = T>) -> T {
 /// The hover check is the helm's stat route: a POST to the session's `files/stat` with the device credential and the
 /// path in a JSON body that asks for no save, answered by the host's evidence. Pinned because the old crate docs
 /// called it a GET on the channel, and because the answer's flattened shape (the host's display name and the open
-/// hint beside the protocol's path, size and status) is what the disclosure reads.
+/// hint beside the protocol's path, size and status) is what the disclosure reads. The request's bytes are pinned
+/// exactly, as this client has always written them, because helms of other releases decode them.
 #[tokio::test]
 async fn stat_posts_the_path_and_decodes_the_hosts_evidence() {
     bounded(async {
@@ -166,7 +164,7 @@ async fn stat_posts_the_path_and_decodes_the_hosts_evidence() {
                 info: DownloadFileInfo {
                     path: "/home/u/a.md".into(),
                     size: Some(12),
-                    status: farhelm_proto::DownloadFileStatus::Ready,
+                    status: DownloadFileStatus::Ready,
                 },
             }
         );
@@ -174,9 +172,28 @@ async fn stat_posts_the_path_and_decodes_the_hosts_evidence() {
         assert!(request.head.starts_with("POST /api/sessions/s1/files/stat HTTP/1.1\r\n"));
         assert_eq!(request.header("authorization"), Some("Bearer device-secret"));
         assert_eq!(
-            request.json(),
-            serde_json::json!({"path": "a.md", "save_to_downloads": false, "open": false})
+            String::from_utf8(request.body).unwrap(),
+            r#"{"path":"a.md","save_to_downloads":false,"open":false}"#
         );
+    })
+    .await;
+}
+
+/// A server helm has no native opener and leaves `can_open` out, and a host with no readable metadata sends a null
+/// size; the GUI must read both as absent rather than fail the hover, and must read each typed refusal by its
+/// snake_case spelling. Specified: that answer, written as such a helm writes it, decodes to no open hint, no size and
+/// the named refusal.
+#[tokio::test]
+async fn a_stat_answer_without_an_open_hint_or_size_decodes_as_absent() {
+    bounded(async {
+        let stub = Stub::start(Script::Answer(
+            200,
+            r#"{"host":"build-box","path":"/home/u/a.md","size":null,"status":"not_readable"}"#,
+        ))
+        .await;
+        let stat = spawn(endpoint(stub.addr)).stat("s1", "a.md").await.unwrap();
+        assert_eq!((stat.can_open, stat.info.size), (None, None));
+        assert_eq!(stat.info.status, DownloadFileStatus::NotReadable);
     })
     .await;
 }
@@ -211,8 +228,8 @@ async fn download_asks_for_the_native_save_and_reports_the_open_outcome() {
             let request = stub.request().await;
             assert!(request.head.starts_with("POST /api/sessions/s1/files/download HTTP/1.1\r\n"));
             assert_eq!(
-                request.json(),
-                serde_json::json!({"path": "a.md", "save_to_downloads": true, "open": open})
+                String::from_utf8(request.body).unwrap(),
+                format!(r#"{{"path":"a.md","save_to_downloads":true,"open":{open}}}"#)
             );
         }
     })

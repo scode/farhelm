@@ -163,7 +163,8 @@ framework for every externally supplied value.
 - `crates/farhelm-helm` — the host registry (SPEC.md's term: the helm's record of registered hosts and their SSH
   destinations), SSH transport, aggregation, axum API.
 - `crates/farhelm-proto` — wire types and protocol version, shared by both ends and by tests; also the few HTTP tokens
-  the UI branches on in the helm's replies.
+  the UI branches on in the helm's replies, and the JSON bodies of HTTP routes the GUI calls outside the UI channel
+  (`session_requests` for launches, `file_transfers` for file stat, native saves and attachment uploads).
 - `crates/farhelm-desktop` — the desktop app's process (D6): the bootstrap that embeds the helm and starts or finds the
   local supervisor, the pre-window refusal surface, the updater and the app's state files, as a library the GUI is wired
   into, and the `farhelm-desktop` binary. It is the only crate that depends on both the helm and the GUI ("Where the GUI
@@ -3036,7 +3037,9 @@ admission cap or progress timer. Session-authenticated connections remain behind
 cannot stat or read files.
 
 The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/files/download`, with a `path` field. The
-GPUI app sends both as plain HTTP through the helm client, never as UI channel commands (see "The UI channel"). Both use
+GPUI app sends both as plain HTTP through the helm client, never as UI channel commands (see "The UI channel"). Their
+JSON bodies, and the attachment upload's answer, are `farhelm_proto::file_transfers` types that the helm and the helm
+client both use, so neither restates the other's (asked for by the migration's orchestrator on 2026-11-15). Both use
 session-owner routing and the same auth-inside-desktop-CORS boundary as attachments; only OPTIONS preflight is public.
 Stat returns the host display name alongside the protocol's resolved path, size and typed status. Download reopens
 independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
