@@ -31,13 +31,13 @@
 //!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: the search's rows from launch history, repositories and
-//! templates (`crate::launcher::search` names them); recent setups and Browse; the rest of managed checkouts
-//! (`checkout` says which); the escaped display of a prompt, wrapper prefix, Custom flags,
-//! seeded model, command line or resume command holding invisible characters, with Clear wrapper prefix, Clear agent
-//! command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it
-//! overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
-//! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`.
+//! NOTE: Not built yet, each with the piece that brings it: the search's `gh:` repositories (`crate::launcher::search`
+//! says so); the rest of managed checkouts (`checkout` says which); the escaped display of a prompt, wrapper prefix,
+//! Custom flags, seeded model, command line or resume command holding invisible characters, with Clear wrapper prefix,
+//! Clear agent command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took
+//! focus once it overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
+//! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`, Browse
+//! `browse`, the recent setups strip `recents`, the escalation banner `escalation`.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -86,6 +86,7 @@ use crate::theme::{self, metrics};
 use crate::{operations, session, ticker};
 use changed::Changed;
 
+mod browse;
 mod changed;
 mod checkout;
 #[cfg(test)]
@@ -569,6 +570,8 @@ pub(crate) struct Launcher {
     escalation: Option<escalation::EscalationBanner>,
     /// How many escalation banners this launcher has shown, so each new one's motion plays afresh.
     escalation_generation: u64,
+    /// Browse's last request and answer (`browse`).
+    browse: browse::Browse,
     /// What the launcher says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
     /// banner until [`Launcher::banner_expiry`] if that comes first.
     note: Option<Note>,
@@ -803,6 +806,7 @@ impl Launcher {
             quick_launch_unseen: false,
             escalation: None,
             escalation_generation: 0,
+            browse: browse::Browse::default(),
             folder_wait: None,
             note: None,
             banner_expiry: None,
@@ -2107,6 +2111,7 @@ impl Render for Launcher {
         // The folder check follows the folder and the host's connection as drawn (`folder_check`), and a managed
         // checkout's reads follow it the same way (`checkout`).
         self.follow_folder_check(cx);
+        self.follow_browse(cx);
         self.follow_checkout(window, cx);
         // The launch history follows the chosen host's connection the same way (`history`), and the folder list notices
         // a close the layer manager made on its own (`folder_list`).
@@ -2296,6 +2301,8 @@ impl Render for Launcher {
             .children(recents)
             .child(destination)
             .child(choices)
+            // After the choices, as the old listing was (`browse`).
+            .children(self.browse_listing(palette, cx))
             .children(self.save_panel.clone());
 
         // What a press has to say: the draft's own reason after a press it refused, or the helm's words refusing the

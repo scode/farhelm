@@ -52,6 +52,8 @@ mod words;
 mod yolo;
 
 #[cfg(test)]
+mod browse_tests;
+#[cfg(test)]
 mod checkout_tests;
 #[cfg(test)]
 mod draft_tests;
