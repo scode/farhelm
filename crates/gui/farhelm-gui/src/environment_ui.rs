@@ -192,8 +192,9 @@ impl ProviderUi {
 // ---- A session's own environment: its marks, its lifecycle words and its suspended card -------------------------------
 //
 // The session list's and the session view's words for a session that runs in a disposable environment of its own
-// (`session_list::environment`), including why its actions are unavailable while that environment is being deleted:
-// the old app's `ProviderUi` methods of the same names at the reference commit, word for word. The wordings that only
+// (`session_list::environment`), including why its actions are unavailable while that environment is being deleted,
+// and the two Deletes of such a session with the band's "stays" result (`session_list::environment_delete`): the old
+// app's `ProviderUi` methods of the same names at the reference commit, word for word. The wordings that only
 // name the environment (`suspend_question` and the rest) are the same sentence for every provider around its noun, as
 // the old ones were, so they format [`ProviderUi::noun`] rather than matching.
 
@@ -270,6 +271,107 @@ impl ProviderUi {
                  the deletion"
             }
         }
+    }
+
+    /// The consequence of a Delete that asks the environment's own Farhelm (`session_list::environment_delete`'s
+    /// session lane). Nothing on this side knows whether the session is the environment's last, so it states both
+    /// outcomes, and it is never skipped, since one of them destroys the environment. The old
+    /// `session_delete_consequence`, word for word.
+    pub(crate) fn session_delete_consequence(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete this session and its checkout? A checkout another session still uses stays. If this is the \
+                 last session in its sandbox, the sandbox goes too, with every process and file in it and its \
+                 snapshots. This cannot be undone."
+            }
+            ProviderKind::Podman => {
+                "Delete this session and its checkout? A checkout another session still uses stays. If this is the \
+                 last session in its container, the container goes too, with every process and file in it. This \
+                 cannot be undone."
+            }
+        }
+    }
+
+    /// The session lane's answer. It names only the session, because only the environment's Farhelm decides whether
+    /// the environment goes too, and the consequence says when it does. The same for every provider today, but decided
+    /// per provider, as the old `session_delete_label` was.
+    pub(crate) fn session_delete_label(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake | ProviderKind::Podman => "Delete session",
+        }
+    }
+
+    /// The session lane's answer's hover help, and the row menu's and the header's Delete help while a click would ask
+    /// in that lane: the old `session_delete_help`.
+    pub(crate) fn session_delete_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete this session and its checkout; the sandbox goes too if this is its last session"
+            }
+            ProviderKind::Podman => {
+                "Delete this session and its checkout; the container goes too if this is its last session"
+            }
+        }
+    }
+
+    /// The warning of the whole-environment Delete of one session, offered when Farhelm cannot ask the environment's
+    /// own Farhelm. Its consent must cover sessions no list here shows, so it names them, and it says how to get the
+    /// narrower Delete instead. The old `whole_delete_warning`, word for word.
+    pub(crate) fn whole_delete_warning(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Farhelm cannot ask this sandbox's own Farhelm to delete just this session, so this deletes the whole \
+                 sandbox: every session, running process, file, checkout, unpushed change and snapshot in it, \
+                 including sessions Farhelm does not list because they were started while it was not connected. This \
+                 cannot be undone. Resuming or updating the sandbox first lets Farhelm delete just this session."
+            }
+            ProviderKind::Podman => {
+                "Farhelm cannot ask this container's own Farhelm to delete just this session, so this deletes the \
+                 whole container: every session, running process, file, checkout and unpushed change in it, \
+                 including sessions Farhelm does not list because they were started while it was not connected. This \
+                 cannot be undone. Resuming or updating the container first lets Farhelm delete just this session."
+            }
+        }
+    }
+
+    /// The whole-environment Delete's answer, which names the resource it destroys with the session.
+    pub(crate) fn whole_delete_label(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Delete session and sandbox",
+            ProviderKind::Podman => "Delete session and container",
+        }
+    }
+
+    /// The whole-environment Delete's answer's hover help, and the row menu's and the header's Delete help while a
+    /// click would ask in that lane: the old `whole_delete_help`.
+    pub(crate) fn whole_delete_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete this session together with its whole sandbox and everything in it"
+            }
+            ProviderKind::Podman => {
+                "Delete this session together with its whole container and everything in it"
+            }
+        }
+    }
+
+    /// What the Delete notice band says when the environment stayed: `remaining` is the count the environment's own
+    /// Farhelm reported, never one of this window's, since the list can miss sessions. The old `delete_kept`.
+    pub(crate) fn delete_kept(self, remaining: u32) -> String {
+        let noun = self.noun();
+        match remaining {
+            0 => format!("The {noun} stays: no other sessions are in it"),
+            1 => format!("The {noun} stays: 1 other session is in it"),
+            more => format!("The {noun} stays: {more} other sessions are in it"),
+        }
+    }
+
+    /// `line` with the environment's own name appended, " sandbox: <name>" or " container: <name>", as both Delete
+    /// questions name the resource apart from the session's title: the old `resource_label`. The name is the helm's,
+    /// so it goes in as host text.
+    pub(crate) fn resource_label(self, line: HostSentence, name: &str) -> HostSentence {
+        line.text(format!(" {}: ", self.noun()))
+            .host(&HostText::from_host(name))
     }
 
     /// Suspend's hover help, and the second half of its question: what freezing keeps and what it still costs.

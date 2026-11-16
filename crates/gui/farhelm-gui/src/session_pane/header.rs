@@ -70,7 +70,12 @@
 //!   and "with…" choices included, and Clone and Delete stay (both wait while a Suspend or Resume runs); Stop's help says
 //!   what plain Stop leaves running there, and its question offers Stop and suspend (`session_list::stop`). While it is
 //!   being deleted every action is unavailable, Clone and Delete included, through `session_list::menu::refused` like
-//!   any other exclusion, and Stop's, Clone's and Delete's help say why, as the old header's tooltips did.
+//!   any other exclusion, and Stop's, Clone's and Delete's help say why, as the old header's tooltips did. Its Delete,
+//!   the shortcut's included, is the environment's own (`session_list::environment_delete`): always asked, whatever
+//!   Skip session confirmations says, with Delete's help naming the lane a click asks in; and when the helm answers
+//!   that it could not ask the environment's own Farhelm, the warned whole-environment question opens here again while
+//!   this pane still shows the session (`SessionPane::ask_delete_again`). That second question is centered, since
+//!   the Delete button it would hang under is not drawn while its Delete runs.
 //! - **The YOLO question.** A Replace from the header that the source's host refuses for YOLO asks the launcher's
 //!   question below the top row, among the header's lines, rather than at the source's row
 //!   ([`crate::session_list::replace_yolo`]). It is drawn only while the source is the open session.
@@ -92,6 +97,7 @@
 //! shorter today (about 23 pixels); something taller would be clipped.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::SessionRow;
@@ -118,7 +124,9 @@ use crate::operations::Work;
 use crate::prompt::{self, Question};
 use crate::session;
 use crate::session_list::replace_yolo::{self, Surface};
-use crate::session_list::{delete, environment, menu, outcome, replace, restart, retired, stop};
+use crate::session_list::{
+    delete, environment, environment_delete, menu, outcome, replace, restart, retired, stop,
+};
 use crate::theme::{self, metrics};
 
 mod fit;
@@ -464,6 +472,9 @@ struct EnvironmentShown {
     /// Why every action is unavailable while the environment is being deleted, `None` otherwise
     /// (`environment::Environment::deleting`): Stop's, Clone's and Delete's help.
     deleting: Option<&'static str>,
+    /// What Delete's question will offer, in the lane a click would ask in now (`environment_delete::help`): how
+    /// Delete's help begins while the environment is not being deleted.
+    delete_help: &'static str,
 }
 
 impl EnvironmentShown {
@@ -478,6 +489,7 @@ impl EnvironmentShown {
             pending: environment::pending(key, shown, cx),
             unavailable: environment::unavailable(key, shown, cx),
             deleting: shown.deleting().map(|deleting| deleting.help),
+            delete_help: environment_delete::help(shown, collections),
         })
     }
 }
@@ -800,7 +812,8 @@ impl SessionPane {
                 // SPEC.md: the header's Delete "asks first in the same anchored way, even for a session that has
                 // ended", unlike the row's, which deletes a session with nothing alive unasked.
                 if let Some(ask) = delete::begin(&key, row, skipped, true, cx) {
-                    self.ask(asking, ask, delete::confirm, window, cx);
+                    let again = self.ask_delete_again(window, cx);
+                    self.ask(asking, ask, delete::confirming(Some(again)), window, cx);
                 }
             }
         }
@@ -842,9 +855,55 @@ impl SessionPane {
         );
     }
 
+    /// How an environment Delete asked from this header (its Delete button, a caret's plain choice or the Delete
+    /// shortcut) asks the whole-lane question from this header again once the helm answers "unasked"
+    /// (`session_list::environment_delete`'s "Settling"): only while this pane still shows that session, no other
+    /// question of the header is open and the session's commands are not refused. Otherwise nothing opens and the
+    /// helm's words stay on the row, as the old header handed the question back only to a view still showing it. The
+    /// question hangs under the Delete button when it was drawn in the last frame, and is centered otherwise, which is
+    /// the usual case: the button is not drawn while the first Delete runs.
+    fn ask_delete_again(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> environment_delete::AskAgain {
+        let (pane, handle) = (cx.weak_entity(), window.window_handle());
+        Rc::new(move |frozen: delete::Frozen, mark: Mark, cx: &mut App| {
+            let pane = pane.clone();
+            handle
+                .update(cx, move |_, window, cx| {
+                    pane.update(cx, |pane, cx| {
+                        let key = frozen.key.clone();
+                        if pane.open_key(cx).as_deref() != Some(key.as_str())
+                            || pane.header.open_question(window, cx).is_some()
+                        {
+                            return false;
+                        }
+                        let Some(target) = menu::actionable(&key, cx) else {
+                            return false;
+                        };
+                        let asking = Asking {
+                            control: Control::Action(Action::Delete),
+                            key: &key,
+                            mark: &mark,
+                        };
+                        pane.ask(
+                            asking,
+                            || delete::question(&target.row, frozen.clone()),
+                            delete::confirm,
+                            window,
+                            cx,
+                        )
+                    })
+                    .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        })
+    }
+
     /// Ask the question `question` builds for `asking`'s control about its session, hung under the action's button as
     /// last drawn (centered if it was not drawn), returning focus home on Escape. Nothing opens when the user has moved
-    /// on since `asking`'s mark. The question closes when the session is gone.
+    /// on since `asking`'s mark. The question closes when the session is gone. Returns whether it opened.
     fn ask<T: Clone + 'static>(
         &mut self,
         asking: Asking,
@@ -852,7 +911,7 @@ impl SessionPane {
         on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Asking { control, key, mark } = asking;
         let question = question().returns_home_on_escape();
         let subject = Subject::session(key, cx);
@@ -862,10 +921,12 @@ impl SessionPane {
             }
             None => prompt::ask(question, subject, mark, on_confirm, window, cx),
         };
-        if let Some(layer) = asked {
-            self.header.asked = Some((control, layer));
-            cx.notify();
-        }
+        let Some(layer) = asked else {
+            return false;
+        };
+        self.header.asked = Some((control, layer));
+        cx.notify();
+        true
     }
 }
 
@@ -1014,6 +1075,12 @@ fn action_button(
             }),
         ) => reason.to_owned(),
         (Action::Stop, Some(environment)) => environment.ui.stop_help().to_owned(),
+        // An environment session's Delete always asks, so its help never takes the skipped wording, as the old header's
+        // did not; it names the lane a click asks in.
+        (Action::Delete, Some(environment)) => format!(
+            "{}, after you confirm ({DELETE_SESSION_SHORTCUT_NAME})",
+            environment.delete_help
+        ),
         _ => help,
     };
     let frozen = shown

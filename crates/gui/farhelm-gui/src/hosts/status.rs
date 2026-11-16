@@ -194,7 +194,8 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         | Work::MovePin
         | Work::Suspend
         | Work::Resume
-        | Work::StopAndSuspend => return None,
+        | Work::StopAndSuspend
+        | Work::EnvironmentDelete => return None,
     };
     Some(Live {
         activity,

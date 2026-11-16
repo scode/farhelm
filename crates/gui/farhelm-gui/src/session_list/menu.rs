@@ -90,8 +90,10 @@
 //! (suspended, stopped, changing or being deleted), Replace with…, Replace and Stop are unavailable, as in the old menu,
 //! and Stop's description says what plain Stop leaves running in the environment. While it is being deleted, every
 //! command is unavailable ([`refused`]), and Clone's and Delete's description and help say why
-//! ([`Environment::deleting`]), as the old menu's descriptions did. The header's summary ends with " · " and the
-//! environment's name ("dev sandbox").
+//! ([`Environment::deleting`]), as the old menu's descriptions did. Otherwise Delete's description and help name the
+//! environment Delete a click asks for, the session's alone or the whole environment's
+//! ([`super::environment_delete::help`]). The header's summary ends with " · " and the environment's name ("dev
+//! sandbox").
 //!
 //! NOTE: The old row menu had no Restart, which the open session's header offers instead (`session_pane/header.rs`).
 //! Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
@@ -466,7 +468,9 @@ impl SessionList {
     /// and a question beside it would sit next to nothing the user can see). Either way the question closes when the session is gone, and the row's button is inert
     /// while it is open ([`Opened::Question`]). Nothing opens when the user has moved on since `mark`. `on_confirm`
     /// runs at most once, with the question's frozen value. A builder rather than a question, because a question cannot
-    /// be copied and the anchored attempt consumes the one it is given even when it opens nothing.
+    /// be copied and the anchored attempt consumes the one it is given even when it opens nothing. Returns whether the
+    /// question opened, for a caller that shows the reason elsewhere when it did not (an environment Delete's
+    /// "unasked" answer, `super::environment_delete`).
     pub(super) fn ask_about_row<T: Clone + 'static>(
         &mut self,
         key: &str,
@@ -475,7 +479,7 @@ impl SessionList {
         on_confirm: impl FnOnce(T, &mut Window, &mut App) + Clone + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let anchor = if self.row_in_view(key) {
             self.current.current(cx).rows.borrow().anchor(key)
         } else {
@@ -502,13 +506,15 @@ impl SessionList {
                 cx,
             )
         });
-        if let Some(layer) = asked {
-            self.current
-                .current(cx)
-                .rows
-                .borrow_mut()
-                .opened(key, layer, Opened::Question);
-        }
+        let Some(layer) = asked else {
+            return false;
+        };
+        self.current
+            .current(cx)
+            .rows
+            .borrow_mut()
+            .opened(key, layer, Opened::Question);
+        true
     }
 }
 
@@ -725,6 +731,13 @@ impl Render for RowMenu {
         let deleting = environment
             .and_then(Environment::deleting)
             .map(|deleting| deleting.help);
+        // Otherwise an environment session's Delete says which of its two Deletes a click asks for, as the old item's
+        // description did (`super::environment_delete::help`).
+        let delete_help = deleting.or_else(|| {
+            environment.map(|environment| {
+                super::environment_delete::help(environment, store.read(cx).collections())
+            })
+        });
         let (list, key) = (self.list.clone(), self.key.clone());
         let rename = MenuItem::new(
             "session-menu-rename",
@@ -860,8 +873,8 @@ impl Render for RowMenu {
             "session-menu-delete",
             Icon::Trash,
             "Delete",
-            deleting.unwrap_or("Delete: remove this session and its state"),
-            deleting.unwrap_or("Removes the session and its state"),
+            delete_help.unwrap_or("Delete: remove this session and its state"),
+            delete_help.unwrap_or("Removes the session and its state"),
             LifecycleCommand::Delete,
         )
         .focus(&self.delete_focus);
