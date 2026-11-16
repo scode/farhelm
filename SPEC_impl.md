@@ -6952,11 +6952,6 @@ grammar declared next to the types.
 
 ## Native app packaging
 
-NOTE: Until the GPUI cutover is finished, a release cut from main cannot build the desktop archive. The release
-workflow's build setup (`.github/dist-build-setup.yml`) still installs dx and builds the old browser UI's web bundle,
-which no longer exists, and it still exports the old release mark described below. That setup is the maintainer's to
-change. Main ships no releases in the meantime.
-
 The desktop app is `farhelm-desktop` (`crates/farhelm-desktop`), the GPUI app with the helm embedded in its process,
 released as a BARE BINARY rather than a `.app` bundle: cargo-dist builds it alongside `farhelm` and publishes it as its
 own archive, and the installer assembles the bundle. The two are one artifact pair from one workspace version: the app
@@ -7024,9 +7019,7 @@ thing: `crates/farhelm-helm/build.rs` turns it into `cfg(farhelm_release_build)`
 one included, default to downloading its host payloads from its own version's release instead of having none (see
 "Provisioning"). Before the GPUI migration the mark was the presence of `FARHELM_UI_DIST`, the path to the web bundle a
 release embedded, because a release build was exactly a build that embedded a UI; with no web bundle left, the fact got
-a name of its own. During the transition the helm accepts either name, so the order in which the desktop build's switch
-and the release workflow's switch land cannot leave a release unmarked. The old name goes once the workflow exports the
-new one.
+a name of its own, which the release workflow exports for every build job.
 
 `scripts/build-desktop-binary.sh` refuses to start without `FARHELM_RELEASE_BUILD`, before any compiling, because an
 unmarked app embeds a helm that refuses to add or update a remote host unless it is given a payload directory, and

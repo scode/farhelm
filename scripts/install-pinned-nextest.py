@@ -4,7 +4,8 @@
 Only the directory is printed to stdout, for PATH construction. Archive and executable hashes are both pinned
 (`.github/nextest-pins.json`): cached executables must still match the pin before reuse. Release callers should supply
 a fresh RUNNER_TEMP root; the default repository cache is for local use. This does not replace tools in the user's
-Cargo installation. The verification and publication rules are `pinned_tool.py`'s, shared with the pinned dx install.
+Cargo installation. The verification and publication rules are `pinned_tool.py`'s, shared with the pinned cargo-deny
+and cargo-about installs.
 """
 
 import argparse

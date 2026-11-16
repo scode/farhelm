@@ -44,9 +44,9 @@
 # - `auto-includes = false` + `include = ["LICENSE"]` (dist default:
 #   auto-includes on) — the default sweeps in whatever README/LICENSE sits
 #   beside each package, which here would ship
-#   `crates/farhelm-desktop/README.md`, a developer note about placeholder
-#   assets, as if it were user documentation. It also makes each archive's
-#   member list depend on which files happen to exist where. These archives
+#   `crates/farhelm-desktop/README.md`, a developer note about building and
+#   running the app, as if it were user documentation. It also makes each
+#   archive's member list depend on which files happen to exist where. These archives
 #   are read by machines (`install.sh` and the helm's extractor both locate
 #   the binary by basename), so a fixed member layout `sign-sums` can assert
 #   exactly is worth more than browsable extras: binary plus LICENSE, and for
@@ -56,14 +56,13 @@
 #   software. Any future package-manager integration that consumes the generic
 #   package's `binaries` list must keep the icon out of the executable directory.
 # - `precise-builds = true` (dist default: false) — NOT a preference. dist
-#   otherwise runs `cargo build --workspace`, and this workspace has a member
-#   that cannot be built for two of the three targets: `farhelm-desktop` pulls
-#   in gtk/webkit through `farhelm-ui`'s desktop feature, whose -sys crates
-#   resolve C libraries through pkg-config and fail outright when cross-
-#   compiling to musl ("pkg-config has not been configured to support
-#   cross-compilation"). It is excluded from `default-members` for the same
-#   reason, but `--workspace` does not honour that. With this on, dist builds
-#   `--package farhelm` and nothing else.
+#   otherwise runs `cargo build --workspace`, and this workspace has members
+#   that cannot be built for two of the three targets: the GPUI GUI crates
+#   and `farhelm-desktop`, which links them, need C libraries (fontconfig,
+#   xkbcommon, and GLib for the desktop's GIO) whose -sys crates resolve them
+#   through pkg-config and fail outright when cross-compiling to musl
+#   ("pkg-config has not been configured to support cross-compilation").
+#   With this on, dist builds `--package farhelm` and nothing else.
 # - `pr-run-mode = "skip"` — D19. CI is already heavy and the release workflow
 #   validates itself on the only event that matters, a tag push. Nothing about
 #   dist is exercised on a PR, which is why AGENTS.md's finishing battery has
@@ -71,8 +70,8 @@
 # - `publish-jobs = ["./sign-sums"]` (skill: `["homebrew"]`) — our own reusable
 #   workflow, which despite its name signs nothing: CI never sees a signing
 #   key (D3). It validates the published payloads (static linkage,
-#   architecture, archive shape, a release-shaped `farhelm`) and the
-#   release's complete asset inventory, rejecting any name it does not
+#   architecture, archive shape, a `farhelm` that runs its own version) and
+#   the release's complete asset inventory, rejecting any name it does not
 #   recognize, including a `SHA256SUMS` or signature, which belong on
 #   get.farhelm.io only. It is the only custom publish job, and the point
 #   where the complete inventory and the payload bytes are both in hand. The
@@ -171,8 +170,8 @@
 #   `github-custom-job-permissions` reaches custom jobs only (that is how
 #   `sign-sums` gets its read-only `contents` below); the generated jobs'
 #   permissions are hardcoded in the template. What bounds it: those jobs run
-#   this repository's own scripts, its committed lockfile, and the pinned dx —
-#   nothing a contributor cannot already influence through `ci.yml`.
+#   this repository's own scripts, its committed lockfile, and the pinned
+#   nextest — nothing a contributor cannot already influence through `ci.yml`.
 #
 # ## Accepted trust roots in the release build
 #
@@ -181,9 +180,9 @@
 # `dist build`, and that is accepted rather than an oversight:
 #
 # - Ubuntu packages installed with `sudo apt-get install` (musl-tools, the
-#   WebKit/GTK development packages, the desktop smoke's X tooling). Their
-#   maintainer scripts run as root on the runner, trusted through Ubuntu's
-#   archive signing keys alone.
+#   GPUI app's development packages, the test gate's tmux, ssh and Podman
+#   packages). Their maintainer scripts run as root on the runner, trusted
+#   through Ubuntu's archive signing keys alone.
 # - The CentOS provisioning leg in `.github/dist-build-setup.yml`
 #   (`scripts/test-provision-centos.sh`), which builds from the mutable tag
 #   `quay.io/centos/centos:stream9`, installs packages with dnf against the
@@ -202,24 +201,20 @@
 # provider's own publishing chain), so pinning only one of them would not change the trust
 # the release rests on. Pinning all of them is a possible future hardening
 # project, not a requirement today. What IS pinned by checksum stays pinned:
-# nextest and dx.
-#
-# dx and nextest are upstream release binaries, not builds from source, so
-# their digests pin the bytes their projects' own release machines produced.
-# For dx that replaced a `cargo install --locked` from crates.io, which trusted
-# the same Dioxus maintainers through crates.io instead, and cost minutes of
-# compile on every build job.
+# nextest, an upstream release binary rather than a build from source, whose
+# digests pin the bytes its project's own release machines produced.
 
 [workspace]
 # A HYBRID workspace: the cargo workspace, plus one generic (non-cargo)
-# package for the desktop shell.
+# package for the desktop app.
 #
-# The desktop binary cannot be produced by cargo alone. Its `asset!()` paths
-# are placeholders until `dx` rewrites them into the built binary AFTER the
-# link — a plain `cargo build` yields a window whose every asset request 404s
-# (see `crates/farhelm-desktop/README.md`). dist 0.32 has no post-build hook,
-# so the only way to get a dx-built binary into a dist-managed archive is to
-# declare it as a generic package whose `build-command` runs dx.
+# The desktop binary is an ordinary cargo build, but its archive is not an
+# ordinary cargo package's: it carries the app icon beside the binary, and the
+# binary is checked before it is archived. dist 0.32 has no post-build hook,
+# so the desktop archive comes from a generic package whose `build-command`
+# (`scripts/build-desktop-binary.sh`) builds the binary with cargo, checks
+# it, and stages it with the icon; `binaries` is the one way dist lets a
+# generic package put the icon in its archive.
 # `packaging/farhelm-desktop/dist.toml` is that declaration; the cargo package
 # of the same name is marked `dist = false` so exactly one of the two ships.
 members = ["cargo:.", "dist:packaging/farhelm-desktop"]
@@ -281,10 +276,10 @@ contents = "read"
 # measured on the same commit, its leg took 26:40 on `ubicloud-standard-8`
 # and 23:54 on `ubicloud-standard-16`, against a median of about 49 minutes
 # on `ubuntu-latest` over the ten releases before. Doubling again to 16
-# saved under three minutes: about ten minutes of the job keep fewer than two
+# saved under three minutes: about ten minutes of the job kept fewer than two
 # cores busy whatever the machine (tests capped at four nextest slots, the
-# smoke's sequential legs, container provisioning), so 8 is where more cores
-# stop paying.
+# since-removed desktop smoke's sequential legs, container provisioning), so 8
+# is where more cores stop paying.
 #
 # What this accepts: a tag build now needs the Ubicloud GitHub App installed
 # on the repository and Ubicloud's service up, and the Linux archives are
@@ -299,9 +294,10 @@ contents = "read"
 # image (3 vCPU M1, arm64), so releases are not built on an image GitHub is
 # retiring, as `macos-14` was in 2026. The label moves to each new macOS on
 # GitHub's schedule, not ours, and an image change has broken a tag build
-# before (the Rust 1.98.0 move behind the libLLVM step in
-# `.github/dist-build-setup.yml`): a tag build that fails right after GitHub
-# moves the label should be checked against the new image first.
+# before (the v0.4.0-rc.1 tag build on 2026-09-04, the first after the image
+# moved to Rust 1.98.0, whose rpath change broke dx's strip of the old desktop
+# binary): a tag build that fails right after GitHub moves the label should be
+# checked against the new image first.
 #
 # `global` is where dist assembles checksums, and dist also runs its plan,
 # host and announce jobs on it. It stays on GitHub: those jobs take seconds

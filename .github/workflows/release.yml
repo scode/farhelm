@@ -222,6 +222,9 @@ jobs:
           base=docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
           podman pull "$base"
           podman run --rm "$base" true
+      - name: "Install the GPUI app's build packages"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: "sudo apt-get install -y pkg-config libfontconfig-dev libxkbcommon-dev libglib2.0-dev"
       - name: "Run the test suite"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
@@ -234,13 +237,17 @@ jobs:
             --kind release --selection 'workspace doctests except farhelm-desktop' \
             --concurrency '4 doctest threads' --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4
-      - name: "Run the JS unit harness"
+      - name: "Test the desktop app"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          cd crates/farhelm-ui/js-tests
-          python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
-            --kind release --selection 'asset JavaScript unit harness' --concurrency 'node default discovery' \
-            --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run --locked -p farhelm-desktop
+          python3 scripts/record-test-run.py \
+            --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo test --locked --doc -p farhelm-desktop -- --show-output --test-threads=4
       - name: "Run the OMP reporter asset scenarios"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
@@ -284,86 +291,18 @@ jobs:
       - name: "Compile and test the window half of the Mac release"
         if: "runner.os == 'macOS'"
         run: |
+          gui=(-p farhelm-desktop -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping)
           python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'macOS desktop unit tests' --concurrency '4 nextest slots; retries 0' \
             --output-root "$RUNNER_TEMP/test-run-evidence" \
-            -- cargo nextest run -p farhelm-ui --features desktop
+            -- cargo nextest run --locked "${gui[@]}"
           python3 scripts/record-test-run.py \
             --kind release --selection 'macOS desktop doctests' --concurrency '4 doctest threads' \
             --output-root "$RUNNER_TEMP/test-run-evidence" \
-            -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
-      - name: "Install the wasm target for the web bundle"
-        run: "rustup target add wasm32-unknown-unknown"
+            -- cargo test --locked --doc "${gui[@]}" -- --show-output --test-threads=4
       - name: "Install musl build tools"
         if: "runner.os == 'Linux'"
         run: "sudo apt-get update && sudo apt-get install -y musl-tools"
-      - name: "Install the pinned Dioxus CLI"
-        run: |
-          dx_dir=$(python3 scripts/install-pinned-dx.py --output-root "$RUNNER_TEMP/dx-tools") || exit 1
-          printf '%s\n' "$dx_dir" >> "$GITHUB_PATH"
-      - name: "Let the toolchain's rust-objcopy find libLLVM on macOS"
-        if: "runner.os == 'macOS'"
-        run: |
-          sysroot=$(rustc --print sysroot)
-          for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
-            if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
-              mkdir -p "$target_dir/lib"
-              ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
-              echo "linked libLLVM.dylib into $target_dir/lib"
-            fi
-          done
-          "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
-      - name: "Build the web bundle"
-        run: |
-          rm -rf target/dx
-          (cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release)
-          (cd target/dx/farhelm-ui/release/web/public && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) \
-            > "$RUNNER_TEMP/web-bundle.sha256"
-      - name: "Install native desktop smoke dependencies"
-        if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
-          sudo apt-get purge -y xdg-desktop-portal xdg-desktop-portal-gtk
-      - name: "Test the native desktop seams"
-        if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: |
-          python3 scripts/record-test-run.py \
-            --runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' \
-            --output-root "$RUNNER_TEMP/test-run-evidence" \
-            -- cargo nextest run -p farhelm-ui --features desktop
-          python3 scripts/record-test-run.py \
-            --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
-            --output-root "$RUNNER_TEMP/test-run-evidence" \
-            -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
-      - name: "Run the native desktop smoke gate"
-        if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: |
-          python3 scripts/record-test-run.py \
-            --kind release --selection 'native desktop smoke legs' --concurrency 'sequential smoke legs' \
-            --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
-        env:
-          "CI": true
-          "DESKTOP_SMOKE_DIR": "${{ runner.temp }}/desktop-smoke"
-          "DESKTOP_SMOKE_WEB_DIST": "${{ github.workspace }}/target/dx/farhelm-ui/release/web/public"
-      - name: "Collect native desktop smoke failure evidence"
-        if: "failure() && runner.os == 'Linux' && runner.arch == 'X64'"
-        run: |
-          evidence_dir="$RUNNER_TEMP/desktop-smoke-evidence"
-          mkdir -p "$evidence_dir"
-          for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt \
-            "$RUNNER_TEMP"/desktop-smoke/pf-bogus-state.stderr; do
-            if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
-              cp -- "$evidence" "$evidence_dir/"
-            fi
-          done
-      - name: "Upload native desktop smoke failure evidence"
-        uses: "actions/upload-artifact@v4"
-        if: "failure() && runner.os == 'Linux' && runner.arch == 'X64'"
-        with:
-          "if-no-files-found": "warn"
-          "name": "desktop-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}"
-          "path": "${{ runner.temp }}/desktop-smoke-evidence"
       - name: "Collect test run failure evidence"
         if: "failure() && (runner.os == 'macOS' || (runner.os == 'Linux' && runner.arch == 'X64'))"
         run: |
@@ -399,16 +338,8 @@ jobs:
           "if-no-files-found": "warn"
           "name": "test-run-failure-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}"
           "path": "${{ runner.temp }}/test-run-failure-evidence"
-      - name: "Point the release build at the web bundle"
-        run: |
-          dist="$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public"
-          (cd "$dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) > "$RUNNER_TEMP/web-bundle.now"
-          cmp "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" || {
-            echo "the web bundle changed after it was built; refusing to embed it" >&2
-            diff "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" >&2
-            exit 1
-          }
-          echo "FARHELM_UI_DIST=$dist" >> "$GITHUB_ENV"
+      - name: "Mark the build as a release build"
+        run: "echo \"FARHELM_RELEASE_BUILD=1\" >> \"$GITHUB_ENV\""
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest

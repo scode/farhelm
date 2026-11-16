@@ -257,15 +257,23 @@ jobs:
             scripts/check-static-elf.sh "$binary" "$target"
           done
 
-      # The one check that RUNS the shipped artifact instead of inspecting it.
+      # The one check that RUNS the shipped artifact instead of inspecting it:
+      # the published binary names this release's version and starts a helm
+      # that answers on its port with that same version in its build header
+      # (`x-farhelm-build`, on every reply), on a machine that has nothing else
+      # of Farhelm.
       #
-      # `FARHELM_UI_DIST` is what compiles the web UI into the binary AND what
-      # marks the build as a release build (D12/D13). A build job that lost it
-      # still produces a perfectly valid static executable — one whose `/`
-      # answers 404 and whose provisioning defaults to `NoPayloads`. Nothing
-      # else in this pipeline can tell those two binaries apart, so this asks
-      # the artifact directly: serve the UI, or do not ship.
-      - name: Prove the published farhelm is release-shaped
+      # It no longer proves the build release-shaped (D13). That used to be
+      # visible from outside, because the web UI the helm served and the
+      # release marker came from the same variable; with the UI gone, the
+      # marker (`FARHELM_RELEASE_BUILD`, set at the end of
+      # `.github/dist-build-setup.yml`) changes only the provisioning
+      # payload default, which nothing here can observe without a release on
+      # get.farhelm.io to download from.
+      - name: Prove the published farhelm runs
+        # Bounded: a listener that accepts and never replies must fail the
+        # job, not hold it until GitHub's six-hour limit.
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           binary=$PWD/binaries/farhelm-x86_64-unknown-linux-musl
@@ -285,49 +293,37 @@ jobs:
           # the state directory for the rest of the job.
           trap 'kill "$helm" 2>/dev/null || true' EXIT
 
-          # Waits for the LISTENER, not for a particular answer: no `-f`, so a
-          # 404 counts as "up". A binary that lost its UI must reach the
-          # assertion below and fail there with a diagnosis, not time out here
-          # with a connection error.
+          # Waits for the LISTENER, not for a particular answer: no `-f`, so
+          # the helm's 404 for `/` (it serves no page) counts as up.
+          answered=no
           for _ in $(seq 1 60); do
-            if curl -s -o /dev/null "http://127.0.0.1:$port/"; then
+            if curl -s --max-time 5 -o /dev/null -D headers.txt "http://127.0.0.1:$port/"; then
+              answered=yes
               break
             fi
             sleep 1
           done
 
           if ! kill -0 "$helm" 2>/dev/null; then
-            echo "the launched helm exited before the UI request" >&2
-            cat helm.log >&2
-            exit 1
-          fi
-          status=$(curl -s -o body.html -D headers.txt -w '%{http_code}' "http://127.0.0.1:$port/")
-          if ! kill -0 "$helm" 2>/dev/null; then
-            echo "the launched helm exited during the UI request" >&2
+            echo "the launched helm exited" >&2
             cat helm.log >&2
             exit 1
           fi
           kill "$helm" 2>/dev/null || true
-          if [ "$status" != 200 ]; then
-            echo "the published binary answered / with HTTP $status, not 200" >&2
-            echo "this is what a build that lost FARHELM_UI_DIST looks like:" >&2
+          if [ "$answered" != yes ]; then
+            echo "the launched helm never answered on port $port" >&2
             cat helm.log >&2
             exit 1
           fi
-          if ! grep -iq '^content-type: *text/html' headers.txt; then
-            echo "the published binary served / as something other than text/html" >&2
-            cat headers.txt >&2
+          # The header is what tells this helm from an unrelated listener that
+          # took the selected port first.
+          stamp=$(tr -d '\r' <headers.txt | sed -n 's/^x-farhelm-build: *//Ip')
+          if [ "$stamp" != "$version" ]; then
+            echo "the answer on port $port carries build '$stamp', expected '$version'" >&2
+            cat headers.txt helm.log >&2
             exit 1
           fi
-          # dx names the bootstrap asset after the farhelm-ui Cargo target;
-          # the helm serves its embedded index verbatim. HTML alone could be
-          # an unrelated listener that acquired the selected port first.
-          if ! grep -Eq 'assets/farhelm-ui[^"[:space:]]*\.js' body.html; then
-            echo "the published binary's HTML lacks the farhelm-ui bootstrap asset" >&2
-            cat helm.log >&2
-            exit 1
-          fi
-          echo "ok: the published farhelm $version serves its embedded UI"
+          echo "ok: the published farhelm $version runs a helm"
 
       # The digests of the bytes every check above just passed, plus the
       # tag's `install.sh`, in the sorted `sha256sum` form of the signed
