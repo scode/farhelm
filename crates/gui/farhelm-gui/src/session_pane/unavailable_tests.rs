@@ -34,6 +34,7 @@ use super::unavailable::{
 };
 use crate::actions::{DELETE_SESSION_CHORD, FocusPreviousControl};
 use crate::host_text::HostText;
+use crate::hosts::tests::LOCAL_DIAL_FAILURE;
 use crate::main_view::MainView;
 use crate::render_count;
 use crate::session_list::menu_tests::{drawn, label_of, push, snapshot};
@@ -721,13 +722,13 @@ fn words_for(state: HostStateView) -> (String, String, Option<String>) {
     }))
 }
 
-/// The card's words are the only place a session on an unreachable host says why and what to do, and the old card's
-/// are pinned case for case (`hosts.rs`'s `stale_session_notice` at the reference commit), with the remedy and
-/// evidence the Hosts panel shows for the host. Specified: an unreachable host that is not answering, the local host
-/// with no supervisor (its remedy, the helm's own command, as the explanation), a version skew (the helm's remedy
-/// verbatim), a duplicate (naming its twin), a connected host whose listing is catching up, a suspended, suspending and
-/// stopped environment, an unread host list, one not read yet, and a removed host, each with its heading, explanation
-/// and diagnostics.
+/// The card's words are the only place a session on an unreachable host says why and what to do, and the old card's are
+/// pinned case for case (`hosts.rs`'s `stale_session_notice` at the reference commit), with the remedy and evidence the
+/// Hosts panel shows for the host. Specified: an unreachable host that is not answering, the local host with no
+/// supervisor (its remedy, to reopen the Farhelm app, as the explanation and the helm's dial failure as the
+/// diagnostics), a version skew (the helm's remedy verbatim), a duplicate (naming its twin), a connected host whose
+/// listing is catching up, a suspended, suspending and stopped environment, an unread host list, one not read yet, and
+/// a removed host, each with its heading, explanation and diagnostics.
 #[test]
 fn the_cards_words_name_the_cause_the_remedy_and_the_evidence() {
     assert_eq!(
@@ -740,16 +741,15 @@ fn the_cards_words_name_the_cause_the_remedy_and_the_evidence() {
     );
     let local = HostStateView::Unreachable {
         cause: LOCAL_SUPERVISOR_NOT_RUNNING.into(),
-        last_error: String::new(),
+        last_error: LOCAL_DIAL_FAILURE.into(),
     };
     assert_eq!(
         words_for(local),
         (
             WAITING.to_owned(),
-            "Start a supervisor on this machine with `farhelm supervisor run`, passing the same `--state-dir` this \
-             helm was started with if it has one"
+            "Quit Farhelm and open it again; it starts this machine's supervisor when it opens"
                 .to_owned(),
-            Some("buildbox: No supervisor is running on this machine".to_owned()),
+            Some(format!("buildbox: {LOCAL_DIAL_FAILURE}")),
         )
     );
     let connecting = HostStateView::Connecting {

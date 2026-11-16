@@ -593,7 +593,7 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
     /// panel — owns the units (D9). The panel never installs on the local
     /// row; the local row consults this only AFTER a probe found no
     /// supervisor (or to refuse an update), to choose what to tell the user:
-    /// run `farhelm helm setup`, or leave the existing unit alone.
+    /// reopen the Farhelm app, or leave the existing unit alone.
     ///
     /// `None` means one thing only: no such file. Every other outcome —
     /// an unreadable file, contents that are not UTF-8, a unit directory

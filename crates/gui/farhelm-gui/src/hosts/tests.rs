@@ -110,6 +110,16 @@ pub(crate) fn connecting(attempt: u32, error: Option<&str>) -> HostStateView {
     }
 }
 
+/// The helm's dial failure for its own machine with no supervisor running, exactly as it reaches the window. Outermost
+/// first: the host manager's stage context for the dial (`stage_failure_context`, "connecting to the local
+/// supervisor"), the helm's `classify_local_dial` context, `farhelm_supervisor::service::connect`'s context naming the
+/// socket and the hand-start command, then the operating system's error; joined the way the manager records an error
+/// (`{error:#}`) and then Debug-quoted by its `peer_text`, which is why the value carries the surrounding double quotes.
+/// It carries the hand-start command, which is why the local row keeps it on the evidence line and out of the remedy.
+pub(crate) const LOCAL_DIAL_FAILURE: &str = "\"connecting to the local supervisor: no supervisor is running on this \
+     machine: supervisor does not appear to be running (socket /srv/state/supervisor.sock is not accepting \
+     connections); start it with `farhelm supervisor run --state-dir /srv/state`: Connection refused (os error 111)\"";
+
 /// The helm's own machine with no supervisor running, the helm's dial failure reading `error`.
 pub(crate) fn local_down(error: &str) -> HostStateView {
     HostStateView::Unreachable {
@@ -1167,18 +1177,14 @@ fn a_host_choice_and_a_reset_stop_the_setup_pulse_too(cx: &mut TestAppContext) {
 // ---- The local host ------------------------------------------------------------------------------------------------
 
 /// Why this matters: on the helm's own machine the panel never installs a supervisor, and until one exists the local
-/// host must appear with what to do, "not as a phantom unreachable host" (SPEC.md, "Topology"). The helm's own words
-/// name the state directory only the helm knows. Nothing else opens this row (no run fails, nothing is refused), so it
-/// has to open itself, with the user's Details switch left off. Specified: with Details off, the local host with no
-/// supervisor is "Local (this machine)" reading "Unreachable, retrying", and its row is open with "No supervisor is
-/// running on this machine" and the helm's remedy; once the helm pushes it connected, the row closes.
+/// host must appear with what to do, "not as a phantom unreachable host" (SPEC.md, "Topology"): reopen the Farhelm app,
+/// which starts that machine's supervisor. Nothing else opens this row (no run fails, nothing is refused), so it has to
+/// open itself, with the user's Details switch left off. Specified: with Details off, the local host with no
+/// supervisor is "Local (this machine)" reading "Unreachable, retrying", and its row is open with the helm's dial
+/// failure ([`LOCAL_DIAL_FAILURE`]) and then the app's remedy; once the helm pushes it connected, the row closes.
 #[gpui::test]
 fn the_local_host_without_a_supervisor_opens_its_row_to_say_what_to_do(cx: &mut TestAppContext) {
-    let down = host(
-        1,
-        "local",
-        local_down("start it with `farhelm supervisor run --state-dir /srv/state`"),
-    );
+    let down = host(1, "local", local_down(LOCAL_DIAL_FAILURE));
     let (mut fake, _, cx) = open_panel(cx, vec![hosts(std::slice::from_ref(&down))]);
     let nodes = frame(cx);
     assert!(!details_switch(&nodes), "the premise: Details is off");
@@ -1187,8 +1193,8 @@ fn the_local_host_without_a_supervisor_opens_its_row_to_say_what_to_do(cx: &mut 
     assert_eq!(
         details(&nodes, 1),
         [
-            "No supervisor is running on this machine",
-            "The helm reports: start it with `farhelm supervisor run --state-dir /srv/state`",
+            LOCAL_DIAL_FAILURE,
+            "Quit Farhelm and open it again; it starts this machine's supervisor when it opens"
         ]
     );
 

@@ -98,11 +98,12 @@
 //! A host list never read says "Loading hosts…"; a failed first read says so in red; a failed refresh keeps the rows it
 //! had and says above them that they are the last state read. The panel never invents a host.
 //!
-//! The helm's own machine with no supervisor running reads "Unreachable, retrying" and opens its own row to say no
-//! supervisor is running there and to show the helm's own words for what to do (the command its dial failure names),
-//! so it never reads as a phantom unreachable host (SPEC.md, "Topology"). It offers no install ([`offers`]). The old
-//! app also probed the machine for the helm's `farhelm helm setup` handoff; the migration's settings-and-hosts area
-//! decided on 2026-11-14 that the row shows the pushed remedy instead, and no probe is planned.
+//! The helm's own machine with no supervisor running reads "Unreachable, retrying" and opens its own row to show the
+//! helm's dial failure as evidence and to tell the user to quit Farhelm and open it again, since the desktop app starts
+//! that machine's supervisor when it opens ([`identity::phase::remedy`]), so it never reads as a phantom unreachable
+//! host (SPEC.md, "Topology"). It offers no install ([`offers`]). The old app also probed the machine for the helm's
+//! `farhelm helm setup` handoff; the migration's settings-and-hosts area decided on 2026-11-14 that the row shows the
+//! remedy instead, and no probe is planned.
 
 pub mod add;
 pub(crate) mod identity;
@@ -420,7 +421,7 @@ pub(crate) fn disclosed(
         || progress::opens_row(progress, seen)
         || offers::failed_operation(progress).is_some()
         || refused
-        || offers::needs_local_setup(host)
+        || offers::needs_app_supervisor(host)
 }
 
 /// What one row is drawn from, borrowed from the store and the operation store for the frame being drawn, with what the
