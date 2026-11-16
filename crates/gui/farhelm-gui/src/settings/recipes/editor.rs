@@ -1,6 +1,6 @@
 //! One recipe's editor, drawn in place of the Recipes list: Back, Name, Size, the Software base cards with each base's
-//! fields and the requirements note, Ubuntu packages and Tunnels; and its answers, Cancel and Save, which Settings pins
-//! at the bottom of its dialog rather than letting them scroll with the fields.
+//! fields and the requirements note, Ubuntu packages and Tunnels; and its answers, Delete, Cancel and Save, which
+//! Settings pins at the bottom of its dialog rather than letting them scroll with the fields.
 //!
 //! SPEC.md, "Topology" (the Recipes paragraphs: "The editor replaces the list in place"; "In Settings the editor opens
 //! at its top, including Back, with field labels smaller than its section captions. Its actions and leave/delete
@@ -23,9 +23,9 @@
 //!   and says why it sent nothing; otherwise it creates (`POST /api/tensorlake/recipes`) or updates (`PUT
 //!   /api/tensorlake/recipes/<name>`) through the operation store under [`OpKey::recipe`], the key the row's build uses,
 //!   with every field read-only and Back and Cancel unavailable meanwhile, as in the old editor. A done save closes the
-//!   editor; the list already shows the change, which the helm pushed before it answered. A refused one keeps the
-//!   draft with the helm's words, shown while the draft is as it was sent, so the next edit drops them as the old
-//!   `oninput` did.
+//!   editor, or finishes the leave whose question it answered or still asks; the list already shows the change, which
+//!   the helm pushed before it answered. A refused one keeps the draft with the helm's words, shown while the draft is
+//!   as it was sent, so the next edit drops them as the old `oninput` did.
 //! - **A refusal shown here leaves the key.** The key's one refusal record is what the row draws under its build
 //!   button, so the editor forgets every refusal it shows itself ([`crate::operations::Operations::forget`]); otherwise
 //!   a refused save would come back under the row as the last build's refusal once the editor closed. A refusal that
@@ -35,12 +35,12 @@
 //!   for whichever dialog hosts the editor to place: Settings passes them to its frame's pinned notices only while
 //!   Recipes shows an open editor, so switching sections hides them, and the Close row stays as it is. Add host's
 //!   Tensorlake sandbox can host the same editor and its answers when it is built.
-//!
-//! NOTE: Not ported yet (`docs/gpui/parity/settings-and-hosts.md`): Delete with its confirmation, and the question
-//! "Save these changes before leaving?" that Back, Cancel and closing Settings ask while the draft has unsaved changes.
-//! Until then Back and Cancel leave at once, dropping the draft, and closing Settings drops it too.
+//! - **Leaving asks first, and Delete confirms.** Back, Cancel and closing the hosting dialog ask "Save these changes
+//!   before leaving?" while the form has unsaved changes, and Delete asks before it deletes; [`leaving`] has their
+//!   rules.
 
 mod credentials;
+mod leaving;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::recipes::{CreateRecipe, RecipeSave, RecipeView, check_recipe_name};
@@ -59,11 +59,13 @@ use crate::environment_ui;
 use crate::focus::Mark;
 use crate::host_text::HostText;
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
+use crate::prompt::Inline;
 use crate::session;
 use crate::settings::Refused;
 use crate::settings::choices::{self, FIELD_HEIGHT, LABEL_GAP};
 use crate::theme::{self, metrics};
 use credentials::{Agent, Choices};
+pub(in crate::settings) use leaving::Departure;
 
 /// `.recipe-editor`: the gap between the editor's parts.
 const EDITOR_GAP: f32 = 8.;
@@ -81,6 +83,8 @@ const TUNNEL_GAP: f32 = 6.;
 const PACKAGE_ROWS: usize = 4;
 /// The Save button's element id, which [`Refused`] names its busy line after (`recipe-save-busy`).
 const SAVE: &str = "recipe-save";
+/// The Delete button's element id.
+const DELETE: &str = "recipe-delete";
 
 /// The Software cards in the old order: each base's title and what it says about where it runs.
 const BASES: [(Base, &str, &str); 4] = [
@@ -254,6 +258,15 @@ pub(in crate::settings) struct Editor {
     error: Option<(HostText, Draft)>,
     /// Whether this editor's save is out.
     saving: bool,
+    /// Whether this editor's Delete is out.
+    deleting: bool,
+    /// The leave question, while it is up in the answers' place ([`leaving`]), with the departure it asks about: a
+    /// done save finishes that departure while the question is still open, unanswered.
+    leave_question: Option<(Departure, Inline<Departure>)>,
+    /// The delete confirmation, while it is up in the answers' place, frozen on the recipe's name.
+    delete_question: Option<Inline<String>>,
+    /// Where the leave question's Save goes once the save it sent is done, and the press that answered it.
+    leaving: Option<(Departure, Mark)>,
     /// Whether the last Save sent nothing because the recipe's key already had work in flight (a build, say).
     refused: Refused,
     /// Back's focus handle, where focus starts when the editor opens ([`Editor::start`]).
@@ -304,6 +317,10 @@ impl Editor {
             baseline,
             error: None,
             saving: false,
+            deleting: false,
+            leave_question: None,
+            delete_question: None,
+            leaving: None,
             refused: Refused::default(),
             back: cx.focus_handle().tab_stop(true),
         };
@@ -404,23 +421,29 @@ impl Editor {
         .chain(self.choices.inputs())
     }
 
-    /// Mark the save out or settled: every field read-only while it is out, as the old editor's `readonly: locked`,
-    /// and editable again after, except a saved recipe's name, which never is.
+    /// Mark the save out or settled, locking the form while it is out ([`Editor::lock`]).
     fn set_saving(&mut self, saving: bool, cx: &mut App) {
         self.saving = saving;
+        self.lock(cx);
+    }
+
+    /// Every field read-only while a save or a delete is out, as the old editor's `readonly: locked`, and editable
+    /// again after, except a saved recipe's name, which never is.
+    fn lock(&self, cx: &mut App) {
+        let busy = self.busy();
         for input in self.inputs() {
-            input.state.set_read_only(saving, cx);
+            input.state.set_read_only(busy, cx);
         }
         self.name
             .state
-            .set_read_only(saving || self.saved.is_some(), cx);
+            .set_read_only(busy || self.saved.is_some(), cx);
     }
 
-    /// Save (see the module docs): check, then create or update under the recipe's key. Does nothing while this
-    /// editor's save is out, when Save is drawn busy.
-    fn save(&mut self, cx: &mut Context<Self>) {
-        if self.saving {
-            return;
+    /// Save (see the module docs): check, then create or update under the recipe's key, and say whether it was sent.
+    /// Does nothing while a save or delete is out, when Save is drawn busy.
+    fn save(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.busy() {
+            return false;
         }
         let draft = self.draft(cx);
         let name = match &self.saved {
@@ -431,30 +454,28 @@ impl Editor {
             && let Err(reason) = check_recipe_name(&name)
         {
             self.fail(capitalized(reason.to_owned()), draft, cx);
-            return;
+            return false;
         }
         let recipe = match draft.to_save() {
             Ok(recipe) => recipe,
             Err(reason) => {
                 self.fail(capitalized(reason), draft, cx);
-                return;
+                return false;
             }
         };
         let command = match save_command(&name, self.saved.is_some(), recipe) {
             Ok(command) => command,
             Err(error) => {
                 tracing::debug!(?error, "recipe save not built");
-                return;
+                return false;
             }
         };
         let Some(operations) = session::current_operations(cx) else {
-            return;
+            return false;
         };
         let key = OpKey::recipe(&name);
         let mark = Mark::take(cx);
         let editor = cx.weak_entity();
-        let parent = self.parent.clone();
-        let id = cx.entity_id();
         let sent = draft;
         let forgetting = key.clone();
         let started = operations.update(cx, |operations, cx| {
@@ -462,15 +483,21 @@ impl Editor {
                 let refusal = match &settled.outcome {
                     Outcome::Refused(refusal) => refusal.words.clone(),
                     Outcome::Done(_) | Outcome::Accepted(_) => {
-                        let _ = editor.update(cx, |editor, cx| editor.set_saving(false, cx));
-                        let _ = parent
-                            .update(cx, |parent, cx| parent.close_editor(id, &mark, None, cx));
+                        let _ = editor.update(cx, |editor, cx| {
+                            editor.set_saving(false, cx);
+                            editor.saved(&mark, cx);
+                        });
                         return;
                     }
                 };
                 let shown = editor
                     .update(cx, |editor, cx| {
                         editor.set_saving(false, cx);
+                        // A refused save keeps the editor open, so a leave its question asked for does not happen. A
+                        // question still open was asked while the save was out, without Discard; it goes, and the
+                        // ordinary answers come back under the helm's words, as after any refused leave.
+                        editor.leaving = None;
+                        editor.leave_question = None;
                         editor.error = Some((refusal, sent));
                         cx.notify();
                     })
@@ -481,7 +508,9 @@ impl Editor {
                 }
             })
         });
+        let sent = started.is_ok();
         self.started(started, cx);
+        sent
     }
 
     /// Record `words` as why Save sent nothing, against `draft`, the form as it stood.
@@ -503,21 +532,9 @@ impl Editor {
         cx.notify();
     }
 
-    /// Back and Cancel: close this editor, with its draft, unless its save is out, when both are unavailable.
-    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
-            return;
-        }
-        let mark = Mark::take(cx);
-        let id = cx.entity_id();
-        let _ = self.parent.update(cx, |parent, cx| {
-            parent.close_editor(id, &mark, Some(window), cx)
-        });
-    }
-
     /// A Software card was chosen.
     fn choose_base(&mut self, base: Base, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.busy() {
             return;
         }
         self.base = base;
@@ -526,7 +543,7 @@ impl Editor {
 
     /// Add tunnel: a new empty row at the end.
     fn add_tunnel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.busy() {
             return;
         }
         let row = TunnelRow::new(self.next_tunnel, &TunnelDraft::default(), window, cx);
@@ -537,47 +554,89 @@ impl Editor {
 
     /// A row's Remove: drop the row `key` and its text.
     fn remove_tunnel(&mut self, key: u64, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.busy() {
             return;
         }
         self.tunnels.retain(|row| row.key != key);
         cx.notify();
     }
 
-    /// The editor's answers for its hosting dialog to place (the module docs): the error, the busy line, then Cancel and
-    /// Save at the right. Read from the editor as it is now, so the host draws them in the same frame as the fields.
+    /// The editor's answers for its hosting dialog to place (the module docs): the error, the busy line, then Delete
+    /// at the left and Cancel and Save at the right, or, while one is up, the leave question or the delete
+    /// confirmation in their place, as the old questions replaced the ordinary actions. Read from the editor as it is
+    /// now, so the host draws them in the same frame as the fields.
     pub(in crate::settings) fn actions(editor: &Entity<Editor>, cx: &App) -> AnyElement {
         let this = editor.read(cx);
         let weak = editor.downgrade();
-        let saving = this.saving;
-        let cancel = {
-            let weak = weak.clone();
-            Button::new(
-                "recipe-cancel",
-                "Cancel",
-                HoverHelp::tooltip("Go back to the recipe list without saving"),
-                Role::Button,
-            )
-            .tier(Tier::Neutral)
-            .disabled(saving)
-            .on_click(move |_, window, cx| {
-                let _ = weak.update(cx, |editor, cx| editor.leave(window, cx));
-            })
+        let busy = this.busy();
+        let question: Option<AnyElement> = match (&this.leave_question, &this.delete_question) {
+            (Some((_, leave)), _) if leave.is_open(cx) => Some(leave.clone().into_any_element()),
+            (_, Some(delete)) if delete.is_open(cx) => Some(delete.clone().into_any_element()),
+            _ => None,
         };
-        let save = Button::new(
-            SAVE,
-            if saving { "Saving…" } else { "Save" },
-            HoverHelp::tooltip("Save this recipe"),
-            Role::Button,
-        )
-        .accessible_name("Save")
-        .tier(Tier::Primary)
-        // The old Save was `aria-disabled` while a saved recipe had no unsaved changes, and still saved when pressed.
-        .refused(this.saved.is_some() && !this.dirty(cx))
-        // Busy, not disabled, while saving, so a pressed Save keeps focus (SPEC_impl.md, "Drafts").
-        .busy(saving)
-        .on_click(move |_, _, cx| {
-            let _ = weak.update(cx, |editor, cx| editor.save(cx));
+        let row = question.unwrap_or_else(|| {
+            let delete = this.saved.is_some().then(|| {
+                let weak = weak.clone();
+                Button::new(
+                    DELETE,
+                    "Delete",
+                    HoverHelp::tooltip("Delete this recipe"),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .disabled(this.saving)
+                .busy(this.deleting)
+                .on_click(move |_, window, cx| {
+                    let _ = weak.update(cx, |editor, cx| editor.ask_delete(window, cx));
+                })
+            });
+            let cancel = {
+                let weak = weak.clone();
+                Button::new(
+                    "recipe-cancel",
+                    "Cancel",
+                    HoverHelp::tooltip("Go back without saving; unsaved changes ask first"),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .disabled(busy)
+                .on_click(move |_, window, cx| {
+                    let _ = weak.update(cx, |editor, cx| editor.leave(window, cx));
+                })
+            };
+            let save = {
+                let weak = weak.clone();
+                Button::new(
+                    SAVE,
+                    if this.saving { "Saving…" } else { "Save" },
+                    HoverHelp::tooltip("Save this recipe"),
+                    Role::Button,
+                )
+                .accessible_name("Save")
+                .tier(Tier::Primary)
+                // The old Save was `aria-disabled` while a saved recipe had no unsaved changes, and still saved when
+                // pressed.
+                .refused(this.saved.is_some() && !this.dirty(cx))
+                // Busy, not disabled, while saving, so a pressed Save keeps focus (SPEC_impl.md, "Drafts"); disabled
+                // while a delete is out, which has the busy look on Delete.
+                .busy(this.saving)
+                .disabled(this.deleting)
+                .on_click(move |_, _, cx| {
+                    let _ = weak.update(cx, |editor, cx| {
+                        editor.save(cx);
+                    });
+                })
+            };
+            // `.recipe-editor-actions`: Delete pushed to the start (`margin-right: auto`), the rest at the end.
+            div()
+                .flex()
+                .flex_wrap()
+                .justify_end()
+                .gap(px(8.))
+                .children(delete.map(|delete| div().mr_auto().child(delete)))
+                .child(cancel)
+                .child(save)
+                .into_any_element()
         });
         div()
             .id("recipe-editor-actions")
@@ -590,15 +649,7 @@ impl Editor {
                     .map(|reason| choices::failure_outcome("recipe-editor-error", reason, cx)),
             )
             .children(choices::busy_line(&this.refused, SAVE, cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .justify_end()
-                    .gap(px(8.))
-                    .child(cancel)
-                    .child(save),
-            )
+            .child(row)
             .into_any_element()
     }
 }
@@ -654,7 +705,8 @@ impl Render for Editor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
-        let saving = self.saving;
+        // Every control is unavailable while a save or a delete is out, as the old editor's `locked`.
+        let busy = self.busy();
         let title = match &self.saved {
             Some(name) => format!("Recipe: {name}"),
             None => "New recipe".to_owned(),
@@ -665,12 +717,12 @@ impl Render for Editor {
             Button::new(
                 "recipe-back",
                 "‹ Recipes",
-                HoverHelp::tooltip("Back to the recipe list without saving"),
+                HoverHelp::tooltip("Back to the recipe list; unsaved changes ask before leaving"),
                 Role::Button,
             )
             .tier(Tier::Neutral)
             .focus(&self.back)
-            .disabled(saving)
+            .disabled(busy)
             .on_click(move |_, window, cx| {
                 let _ = weak.update(cx, |editor, cx| editor.leave(window, cx));
             })
@@ -740,7 +792,7 @@ impl Render for Editor {
                     },
                 )
                 .chosen(Some(self.base))
-                .disabled(saving)
+                .disabled(busy)
                 .on_change(move |&base, _, cx| {
                     let _ = weak.update(cx, |editor, cx| editor.choose_base(base, cx));
                 })
@@ -898,7 +950,7 @@ impl Render for Editor {
                     )
                     .accessible_name(format!("Remove tunnel {number}"))
                     .tier(Tier::Neutral)
-                    .disabled(saving)
+                    .disabled(busy)
                     .on_click(move |_, _, cx| {
                         let _ = weak.update(cx, |editor, cx| editor.remove_tunnel(key, cx));
                     }),
@@ -913,7 +965,7 @@ impl Render for Editor {
             Role::Button,
         )
         .tier(Tier::Neutral)
-        .disabled(saving)
+        .disabled(busy)
         .on_click({
             let weak = weak.clone();
             move |_, window, cx| {
