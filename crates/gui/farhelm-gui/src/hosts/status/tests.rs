@@ -790,7 +790,7 @@ fn always_update_requests_the_hosts_then_saves_and_a_failed_save_waits_for_try_a
 /// and chooses there is not shown a stale alert. Specified: after Always update's save fails, pressing the Settings
 /// switch "Update remote hosts automatically" retires the error at once, and the error stays retired when that save is
 /// refused too, Settings showing its own failure line instead; and after another failed Always update, the preference
-/// pushed on by another client and then off again leaves no error.
+/// pushed on from elsewhere and then off again leaves no error.
 #[gpui::test]
 fn a_newer_choice_in_settings_or_elsewhere_retires_the_failed_save(cx: &mut TestAppContext) {
     let (mut helm, cx) = main(cx, Preferences::default());

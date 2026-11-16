@@ -3545,12 +3545,11 @@ async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it()
 
 /// A takeover displaces a host agent's grid attachment like any other.
 ///
-/// Why: SPEC.md's one-attached-client rule holds per session; a second viewer of a host agent must
-/// take it from the first, which is told so. Spec: a grid attach under
-/// lease `a` and then one under lease `b` ends the first channel with a
-/// takeover detach, while the second catches up as usual. (A session whose
-/// tabs are hosts as well, which the takeover must displace together with
-/// the agent, needs host tabs, a later change.)
+/// Why: SPEC.md's one-viewer-per-session rule holds; a second view's attach to a host agent
+/// must take it from the first, which is told so. Spec: a grid attach under lease `a` and
+/// then one under lease `b` ends the first channel with a takeover detach, while the second
+/// catches up as usual. (A session whose tabs are hosts as well, which the takeover must
+/// displace together with the agent, needs host tabs, a later change.)
 #[farhelm_testtrace::test]
 async fn a_takeover_displaces_a_host_agents_grid_attachment() {
     let (_state, sup, _host, _test_host) = grid_fixture(SupervisorTimeouts::default()).await;

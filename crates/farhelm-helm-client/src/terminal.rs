@@ -5,9 +5,9 @@
 //! the helm and supervisor decide who holds a terminal (SPEC.md, "Terminal experience"):
 //!
 //! - Every attach is the ordinary one under the stream's [`AttachmentLease`]: the first, every automatic reconnect,
-//!   "Reconnect now" and take-control alike. It takes the terminal from whoever holds it, so a stream that comes back
-//!   after a blip takes the terminal back from anyone who attached meanwhile. There is no non-displacing attach: the
-//!   app is single-UI (SPEC_impl.md, "The seat: one UI per helm").
+//!   "Reconnect now" and take-control alike. It takes the terminal from whatever holds it. There is no non-displacing
+//!   attach: the app is single-UI (SPEC_impl.md, "The seat: one UI per helm"), so there is no other viewer to leave
+//!   alone.
 //! - A dropped socket, an unanswered ping, a failed attempt or a 5xx answer to the upgrade reconnects, climbing the
 //!   terminal's own [`TerminalLadder`] (0.5 to 15 s over six retries, then a probe every 30 s forever). It reconnects
 //!   at once only if the attachment had answered a ping, which shows the link worked; otherwise it waits its rung, so
@@ -23,9 +23,10 @@
 //!   it, so the reattach takes the terminal back. Two live streams of one lease on one terminal would therefore keep
 //!   replacing each other, each time with a full replay: a caller keeps at most one live stream per terminal per
 //!   lease (see [`AttachmentLease`]).
-//! - `taken_over`, `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: someone else holds the
-//!   terminal, it is gone, or this client fell behind and attaching again would walk back into the same wedge.
-//!   [`TerminalHandle::take_control`] attaches again.
+//! - `taken_over`, `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: an attach under another
+//!   lease took the terminal (in the single-UI app, only a just-displaced window's reconnect landing before its
+//!   Displaced notice), it is gone, or this client fell behind and attaching again would walk back into the same
+//!   wedge. [`TerminalHandle::take_control`] attaches again.
 //! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing.
 //!
 //! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`].
@@ -65,9 +66,9 @@ use farhelm_proto::ui_channel::ApiPath;
 /// usually a few lines of changes, so this is a few screens of backlog; the number is a judgment, not a measurement.
 const EVENT_QUEUE: usize = 256;
 
-/// The identity every terminal of one session view shares, so the supervisor can tell this client's own reconnect
-/// (which replaces quietly) from another client's takeover. Mint one per session view and reuse it for its agent
-/// terminal, tabs and reconnects; sharing one between clients would hide a takeover.
+/// The identity every terminal of one session view shares, so the supervisor can tell this view's own reconnect
+/// (which replaces quietly) from an attach under another lease, which it reports as a takeover. Mint one per session
+/// view and reuse it for its agent terminal, tabs and reconnects; sharing one between views would hide a takeover.
 ///
 /// Keep at most one live stream per terminal per lease: close or drop the old stream before opening another for the
 /// same terminal. The supervisor replaces a same-lease attachment instead of deferring to it, so two such streams take

@@ -699,11 +699,11 @@ impl Channel {
     /// reorder after every connect, and every reset (a new channel) would put
     /// it back in the wrong order until the query was answered. Reading it
     /// again on every re-projection is what makes a change to the preference
-    /// made elsewhere (another client, an agent, the command line) move the
-    /// open list, as SPEC.md ("Session list") asks of every shared preference:
-    /// a preference write bumps the fleet feed, and the re-projection that
-    /// follows reads the new order. The read is one more GET of a helm-local
-    /// row per re-projection.
+    /// made elsewhere (an agent, the command line) move the open list, as
+    /// SPEC.md ("Session list") asks of every shared preference: a preference
+    /// write bumps the fleet feed, and the re-projection that follows reads
+    /// the new order. The read is one more GET of a helm-local row per
+    /// re-projection.
     ///
     /// The stored word is read through the preferences route, like every
     /// other read the channel makes. A word this build does not serve (a newer

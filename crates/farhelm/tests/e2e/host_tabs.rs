@@ -262,7 +262,7 @@ fn carries_markers(pid: u32) -> bool {
 /// Why: every tab runs in a host of its own (the plan's PR 18). The size
 /// keeps a tab's first attach from repainting a torn frame (BUGS_BURNDOWN.md
 /// issue 4); the record is how Delete and a restarted supervisor find the
-/// host; and SPEC.md's one attached client per session must hold across all
+/// host; and SPEC.md's one viewer per session must hold across all
 /// of a session's terminals. Spec: opening a tab of a created host agent's
 /// session succeeds and the session lists that one tab; its runtime
 /// is not the agent's, its host is at the agent's size, and the tab's

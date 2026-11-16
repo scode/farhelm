@@ -21,7 +21,7 @@
 //!   answers (the old "a failed load seeds nothing editable"). Whatever else reads the account in that opening (the
 //!   Tensorlake section's switch) is locked the same way.
 //! - **Write-only.** The helm never returns the key. Save sends only the typed key, Clear only the clear flag, so
-//!   neither can undo a change another window made to the account's other fields. A done Save or Clear takes the helm's
+//!   neither can undo a change made meanwhile to the account's other fields. A done Save or Clear takes the helm's
 //!   answer as the account's new metadata and empties the field; a refusal keeps the typed key with the helm's words.
 //! - **Saves are the operation store's work** under [`OpKey::preferences`], as every other piece of helm configuration
 //!   in Settings saves (`super::agent_trust` has the reasoning): the account has no key of its own, and the embedded

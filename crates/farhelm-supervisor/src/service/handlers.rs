@@ -1366,9 +1366,10 @@ async fn handle_delete_session_or_seal(
     let mutation_id = session_id;
     let mutation = tokio::spawn(async move {
         let already_sealed = || Ok((farhelm_proto::SealOutcome::Sealed, None));
-        // A seal is never undone, so a repeat (a lost reply's retry, the
-        // other window's Delete) is answered at once, without waiting behind
-        // the cleanup that the environment's destruction supersedes.
+        // A seal is never undone, so a repeat (a lost reply's retry, a
+        // concurrent Delete of the other session) is answered at once,
+        // without waiting behind the cleanup that the environment's
+        // destruction supersedes.
         if mutation_sup.sealed.load(Ordering::SeqCst) {
             return (already_sealed(), None);
         }
@@ -1771,8 +1772,8 @@ async fn handle_attach(
         }
     };
 
-    // SPEC.md's one-attached-client rule, enforced across the
-    // WHOLE session (PLAN_M4.md item 3): every channel held under
+    // SPEC.md's one-viewer-per-session rule, enforced across
+    // the WHOLE session (PLAN_M4.md item 3): every channel held under
     // a different lease loses its attachment, whichever of the
     // session's terminals it was on. Running inside the same lock
     // hold as the installation below is what makes the wire
@@ -12117,11 +12118,11 @@ mod tests {
             );
         }
 
-        /// Why: two windows deleting an environment's last two sessions at
-        /// once must end with the environment sealed and nothing left, never
-        /// two "the environment stays" answers over an empty, unsealed
-        /// environment that keeps running (and billing). Spec: two
-        /// concurrent Deletes of the only two sessions answer one `Deleted
+        /// Why: two Deletes of an environment's last two sessions at once (the
+        /// window's and an agent's, say) must end with the environment sealed
+        /// and nothing left, never two "the environment stays" answers over an
+        /// empty, unsealed environment that keeps running (and billing). Spec:
+        /// two concurrent Deletes of the only two sessions answer one `Deleted
         /// { remaining: 1 }` and one `Sealed`.
         #[farhelm_testtrace::test]
         async fn two_deletes_of_the_last_two_sessions_end_with_one_deleted_and_one_sealed() {

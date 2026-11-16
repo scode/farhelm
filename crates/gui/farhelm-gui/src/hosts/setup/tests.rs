@@ -448,7 +448,7 @@ fn a_refused_permanent_answer_is_gone_after_a_reset(cx: &mut TestAppContext) {
     assert_eq!(label(cx, "hosts-stop-asking-error"), None);
 }
 
-/// Once "Set up new hosts without asking" is on, however it got there (Settings, another client), a refusal to turn it
+/// Once "Set up new hosts without asking" is on, however it got there (Settings, a host dialog), a refusal to turn it
 /// on no longer describes anything, and a line saying so would contradict the switch. Specified: after the refusal
 /// shows, the helm pushing the preference row with the switch on takes the line away.
 #[gpui::test]

@@ -24,8 +24,8 @@
 //!   everything typed, and lets the user retry or copy it. Nothing is queued or retried.
 //! - **Remembering the contact is a separate write.** Only after a successful send, a best-effort keyless
 //!   `PUT /api/preferences` writes exactly the contact sent, or clears it when Re-use was unchecked or the field was
-//!   blank ([`contact_after_success`]). It writes even when the value looks unchanged here, since another client may
-//!   have changed the helm's copy since. A failed send writes nothing.
+//!   blank ([`contact_after_success`]). It writes even when the value looks unchanged here, since the helm's copy may
+//!   have changed since. A failed send writes nothing.
 //!
 //! Agents have no way to open or send this dialog: there is no agent request or command line verb for it, and none may
 //! be added (SPEC.md: feedback sent that way would leave the machine without the user pressing Send).

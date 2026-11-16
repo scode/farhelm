@@ -15,17 +15,17 @@
 //! explicit true enables them, and committing a policy write wakes the listener.
 //!
 //! The helm holds this rather than each client, and that is the whole
-//! design: no client persists its own copy, so a browser tab and the desktop
-//! app open in the same order and on the same session, and the value
-//! survives reloads and relaunches because it lives in `helm.db` instead of
-//! in whichever client last wrote it. Every client fetches the row once
-//! after authenticating and writes a sparse patch on change; a field a
-//! patch leaves out is untouched, and an explicit `null` clears one.
-//! Selection writes also prepend that full reference to the helm-owned history;
-//! null clears both. Clients never send a history field or a second visit request.
-//! Tunnel consent is also an active-resource boundary: only true enables new
-//! listeners, and an acknowledged false/null write closes listeners and their
-//! accepted relays. That transaction survives a disconnected HTTP caller.
+//! design: no client persists its own copy, so the window opens in the same
+//! order and on the same session after a relaunch, and the value lives in
+//! `helm.db` instead of in whichever client last wrote it. The window is
+//! pushed the row over the UI channel; every writer sends a sparse patch on
+//! change; a field a patch leaves out is untouched, and an explicit `null`
+//! clears one. Selection writes also prepend that full reference to the
+//! helm-owned history; null clears both. Clients never send a history field
+//! or a second visit request. Tunnel consent is also an active-resource
+//! boundary: only true enables new listeners, and an acknowledged
+//! false/null write closes listeners and their accepted relays. That
+//! transaction survives a disconnected HTTP caller.
 //!
 //! The remembered permission is an exception to "every client writes its own
 //! choice": no shipped client ever PUTs it. It is written only by the helm
@@ -135,7 +135,7 @@ pub(crate) async fn put_preferences(
         let mut names = std::collections::BTreeSet::new();
         // A whole-map replacement has ten possible entries, each naming a
         // template. Existence is deliberately independent of this shape check:
-        // another client may delete or rename the name before the next press.
+        // the template may be deleted or renamed before the next press.
         let valid = bindings.iter().all(|(key, name)| {
             key.len() == 1
                 && key.as_bytes()[0].is_ascii_digit()
@@ -552,7 +552,7 @@ mod tests {
         serde_json::from_slice(&read_raw(harness).await).expect("the preference reply is JSON")
     }
 
-    /// Seen is a typed, shared field: omission cannot undo another client's
+    /// Seen is a typed, shared field: omission cannot undo a stored
     /// dismissal, null restores unseen, and invalid types refuse the whole patch.
     #[farhelm_testtrace::test]
     async fn welcome_seen_sparse_patch_and_type_contract() {
@@ -913,7 +913,7 @@ mod tests {
     }
 
     /// Naming is a positive nullable choice: clearing restores the client's
-    /// default, while omission must not undo another client's explicit opt-out.
+    /// default, while omission must not undo a stored explicit opt-out.
     /// Refusing non-booleans also prevents a malformed write from changing peers.
     #[farhelm_testtrace::test]
     async fn quick_launch_naming_is_a_sparse_boolean_preference() {
@@ -1247,8 +1247,8 @@ mod tests {
     /// request gets the structured 401.
     ///
     /// One test rather than five because the assertions build on one
-    /// another's state, and the sequence IS the specification: it is what a
-    /// browser tab and the desktop app do to the same row in turn.
+    /// another's state, and the sequence IS the specification: it is what
+    /// successive writes do to the same row in turn.
     #[farhelm_testtrace::test]
     async fn the_preference_routes_read_and_merge_one_shared_row() {
         let harness = rest_harness::idle_helm().await;

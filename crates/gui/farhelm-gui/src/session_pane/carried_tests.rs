@@ -335,11 +335,11 @@ fn a_quick_return_to_a_session_is_not_undone_by_the_query_it_overtook(cx: &mut T
 
 /// SPEC.md's exception to "Existing removal detection still needs a complete, unfiltered fleet reply" (decided by the
 /// maintainer on 2026-11-15): once the helm has answered a query naming the open session, it carries that session in
-/// every listing while it exists, so a filtered listing without it means someone else deleted it (another window, the
-/// command line). Before, the pane stayed on the deleted session as an unavailable pane, with no header actions and no
-/// details bar, until the user chose All. Specified, with a idle and b running, Running hiding a and listing b (1 of 2)
-/// while the helm carries a, and nothing deleted from this window: a push that removes a and carries nothing opens b,
-/// which the details bar names and whose header draws its actions, and the query is sent again as Running naming b.
+/// every listing while it exists, so a filtered listing without it means someone else deleted it (an agent, the command
+/// line). Before, the pane stayed on the deleted session as an unavailable pane, with no header actions and no details
+/// bar, until the user chose All. Specified, with a idle and b running, Running hiding a and listing b (1 of 2) while
+/// the helm carries a, and nothing deleted from this window: a push that removes a and carries nothing opens b, which
+/// the details bar names and whose header draws its actions, and the query is sent again as Running naming b.
 #[gpui::test]
 fn a_carried_session_deleted_elsewhere_moves_the_selection_on(cx: &mut TestAppContext) {
     let idle = json!({ "state": "idle" });

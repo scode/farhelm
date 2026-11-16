@@ -58,7 +58,8 @@ pub(crate) struct HostTrash {
     /// The connection the listing belongs to. A listing never outlives its connection: a new incarnation starts over.
     pub incarnation: u64,
     /// The host's `trash_epoch` when the last read was sent: a pushed epoch that differs means the host's trash changed
-    /// (a delete here or in another window, a session Delete that archived a checkout) and is read again.
+    /// (a trash delete here, or a session Delete that archived a checkout, from this window, the command line or an
+    /// agent) and is read again.
     pub epoch: u64,
     /// The last answer: the listing, or why there is none. `None` before the first answer. Shared, because every frame
     /// of the button and the dialog takes a [`Snapshot`] of it.

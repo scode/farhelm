@@ -32,9 +32,9 @@ use crate::{focus, layers, templates};
 
 /// The rail's snapshot, connected, in the real main view, with the commands the window sent on its own (remembering the
 /// open session, its seen mark) answered, so a test's next look at the fake sees only what its own steps sent. None of
-/// those may store an order: the preference row is shared, and a window that wrote the order it opened in would stamp
-/// that order into every other client's (the old `sort.spec.ts` case "the default order is never written"). The main
-/// view is returned too, to ask its list whether the order menu is open.
+/// those may store an order: the preference row is the helm's, and a window that wrote the order it opened in would
+/// store a choice nobody made (the old `sort.spec.ts` case "the default order is never written"). The main view is
+/// returned too, to ask its list whether the order menu is open.
 fn open(cx: &mut TestAppContext) -> (FakeHelm, gpui::Entity<MainView>, &mut VisualTestContext) {
     let (mut fake, _connection) = started(cx);
     fake.connect(snapshot());
@@ -342,9 +342,9 @@ fn a_refused_write_keeps_the_stored_order_and_shows_nothing(cx: &mut TestAppCont
     );
 }
 
-/// An open menu must not go on checking an order another client replaced, since the next choice is judged against
-/// what it shows. Specified: with the menu open over the stored Recently active, a push storing "title" moves the check
-/// to Title A–Z, and a push storing nothing moves it back to Recently active.
+/// An open menu must not go on checking an order a push replaced, since the next choice is judged against what it
+/// shows. Specified: with the menu open over the stored Recently active, a push storing "title" moves the check to
+/// Title A–Z, and a push storing nothing moves it back to Recently active.
 #[gpui::test]
 fn the_open_menu_follows_a_pushed_order(cx: &mut TestAppContext) {
     let (mut fake, _main, cx) = open(cx);
@@ -428,13 +428,13 @@ fn compact_is_a_checkbox_after_the_orders_checked_as_the_preference_is(cx: &mut 
     assert_eq!(checked(cx), Order::Activity);
 }
 
-/// Compact is a write of the shared preference row, like the order: sparse, so it never puts back a stale copy of a
-/// field another client changed, and shown at once while it is in flight. Turning it off must store `false` rather
-/// than leave the field as it was (the old `compact hides the second line and persists across client seeds`).
-/// Specified: choosing Compact sends exactly one command, `PUT /api/preferences` with `{"compact": true}`, closes the
-/// menu with focus on the title, and the rows are compact while the write is in flight, the reopened menu checking it;
-/// once the helm pushes the stored preference and answers, the rows stay compact; choosing Compact again sends
-/// `{"compact": false}`, and the rows show their last lines.
+/// Compact is a write of the shared preference row, like the order: sparse, so it never puts back a stale copy of any
+/// other field, and shown at once while it is in flight. Turning it off must store `false` rather than leave the field
+/// as it was (the old `compact hides the second line and persists across client seeds`). Specified: choosing Compact
+/// sends exactly one command, `PUT /api/preferences` with `{"compact": true}`, closes the menu with focus on the title,
+/// and the rows are compact while the write is in flight, the reopened menu checking it; once the helm pushes the
+/// stored preference and answers, the rows stay compact; choosing Compact again sends `{"compact": false}`, and the
+/// rows show their last lines.
 #[gpui::test]
 fn choosing_compact_sends_its_sparse_write_and_the_rows_follow_it(cx: &mut TestAppContext) {
     let (mut fake, main, cx) = open(cx);

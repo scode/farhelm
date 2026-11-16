@@ -38,8 +38,8 @@ impl Config {
     }
 
     /// Apply one save to the stored row. Resolve this against the stored row
-    /// inside the save's transaction, so two windows saving different fields
-    /// cannot undo each other.
+    /// inside the save's transaction, so two saves of different fields cannot
+    /// undo each other.
     ///
     /// A pasted key is trimmed, because a copy from a dashboard often brings
     /// a trailing newline; what remains must be visible ASCII, which every

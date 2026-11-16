@@ -33,7 +33,7 @@
 //!   hovering naming the kept data directory, Copy copying that path, and × dismissing it), which shows at the top of
 //!   the Hosts panel once the registry stops listing the host. A refused confirmation or a failed run of that uninstall
 //!   withdraws what was owed, so a host that later leaves the list some other way never shows it ([`follow`]), and a
-//!   refusal that arrives after another client removed the host takes back the notice its leaving showed.
+//!   refusal that arrives after an agent or the command line removed the host takes back the notice its leaving showed.
 //! - **During a launch.** Like every host registry change here, Uninstall and its confirmation refuse to start while a
 //!   session launch is in flight ([`super::launch_in_flight`]), saying "Uninstall <name>: not started, …" on the Hosts
 //!   panel's line.
@@ -471,8 +471,8 @@ fn owe(plan: &Plan, cx: &mut App) {
 }
 
 /// The notice owed `host` is withdrawn: its uninstall was refused or never sent. One already shown for it goes too: the
-/// host left the list some other way (another client removed it) while the confirmation was out, and the helm then
-/// refused it, so Farhelm was not removed from it.
+/// host left the list some other way (an agent or the command line removed it) while the confirmation was out, and the
+/// helm then refused it, so Farhelm was not removed from it.
 fn withdraw(host: i64, cx: &mut App) {
     change(cx, |notices| {
         notices.owed.remove(&host);

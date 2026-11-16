@@ -44,8 +44,8 @@
 //! while the pointer stays on it; a scroll that brings another control under the pointer hands the help to that one, as
 //! any hover change does. Closing on the control's own scroll container would need the layer manager to know which
 //! scrolling element holds a control, which nothing records yet. And a showing help keeps the cues it began with: a row
-//! selected elsewhere (another client) while its help shows keeps an accent ring until the next hover, where the old
-//! stylesheet recolored it at once.
+//! that becomes selected some other way (an automatic pick, say) while its help shows keeps an accent ring until the
+//! next hover, where the old stylesheet recolored it at once.
 
 use std::cell::Cell;
 use std::f32::consts::SQRT_2;

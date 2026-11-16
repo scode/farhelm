@@ -55,7 +55,7 @@ pub(crate) struct TrashRequests {
 }
 
 impl TrashRequests {
-    /// Serialize a host's reads and deletes across all clients of this helm.
+    /// Serialize a host's reads and deletes across every caller of this helm.
     pub(crate) async fn lock(&self, host: HostId) -> OwnedMutexGuard<()> {
         let gate = {
             let mut gates = self.gates.lock().expect("trash request map poisoned");
@@ -398,8 +398,8 @@ pub(crate) mod tests {
             .unwrap()
     }
 
-    /// Exact marks must stay safe when another client has removed a displayed
-    /// notice or a new failure arrives before an old panel closes.
+    /// Exact marks must stay safe when a displayed notice was removed meanwhile
+    /// or a new failure arrives before an old panel closes.
     async fn mark(harness: &rest_harness::Harness, action: &str, ids: &[i64]) {
         let response = harness
             .router()
@@ -803,7 +803,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// The real HTTP/RPC seam records notices and wakes other clients after an
+    /// The real HTTP/RPC seam records notices and wakes the window after an
     /// accepted Delete, with only that host's epoch changing. A storage failure
     /// preserves actual checkout evidence and carries a visible error instead
     /// of disguising it as an empty list.

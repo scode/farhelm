@@ -466,7 +466,16 @@ Enforcing the seat is a small check when a channel is accepted. If it ever needs
 
 The maintainer and the migration's orchestrator decided on 2026-11-15 that the app is single-UI. So every terminal
 attach is the ordinary one, which takes the terminal from whoever holds it, and the helm serves no non-displacing
-terminal route; the supervisor keeps its non-displacing attach only for older helms.
+terminal route; the supervisor keeps its non-displacing attach only for older helms. Code must not add handling for
+several UIs, or for several viewers of one session through one helm: the window holding the seat is the only UI and the
+only viewer (SPEC.md, "One GUI at a time"), and a displaced window keeps no terminal screen. The one way a terminal can
+still be taken from the window holding the seat is a race: a window that was just displaced can have a terminal
+reconnect land before its Displaced notice. The migration's orchestrator decided on 2026-11-15 that the window holding
+the seat then reattaches through the same path as for a replaced attachment, with no state, flag or branch of its own
+for the case; until that change lands, the terminal waits for Take control instead. The supervisor's lease sweep stays
+all the same: it serves several helm connections (older helms among them) and lets a view's agent terminal and tabs
+share one lease, and when a window that takes the seat opens a session whose terminals the displaced window has not
+closed yet, it is what detaches them; none of that is support for several UIs.
 
 Whether a window is open, for agent approvals, is the live seat, released on disconnect and on takeover. It is not a
 count of feed subscribers: the helm's own internal subscriptions to the feed never count as windows.
@@ -3590,18 +3599,18 @@ measurement, but an old read generation cannot overwrite this client's deletion 
 prevents an older poll from replacing a newer measurement or completed removal, without invalidating unrelated hosts'
 reads. A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace
 that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only
-its change invalidates an idle host's Trash reader, so another client's cleanup starts the existing removal poll even
-after the initiator closes. Ordinary fleet events and fallback ticks do not themselves read Trash. Changes through
-another helm are noticed on reconnect, app load or dialog open. The page's existing feed/fallback owner requests shared
-notice reads too, with an explicit initial read and the existing SurfaceReader retry/coalescing policy. No additional
-timer or channel is mounted. Per-host read children are keyed by host and connection incarnation, retaining independent
-demand and retry lifetimes. An explicit delivery counter and the host epoch preserve pending causes across reactive
-batching; registry uncertainty retains the owner without dispatching RPCs, and a recovered registry supplies unattended
-news. Each attempt samples current measurement mode and mutation generation. A discarded pre-mutation reply is not an
-answer unless a replacement actually satisfies that demand. Host-list refresh failures are disclosed rather than treated
-as proof of current reachability. Unknown host counts stay unknown; the global cleanup requires successful, settled
-listings from every reachable host, and refuses a host above the protocol's 10,000-ID batch limit rather than silently
-omitting it.
+its change invalidates an idle host's Trash reader, so a cleanup the window did not start, such as a session Delete from
+the command line or an agent that archived a checkout, still starts the existing removal poll. Ordinary fleet events and
+fallback ticks do not themselves read Trash. Changes through another helm are noticed on reconnect, app load or dialog
+open. The page's existing feed/fallback owner requests shared notice reads too, with an explicit initial read and the
+existing SurfaceReader retry/coalescing policy. No additional timer or channel is mounted. Per-host read children are
+keyed by host and connection incarnation, retaining independent demand and retry lifetimes. An explicit delivery counter
+and the host epoch preserve pending causes across reactive batching; registry uncertainty retains the owner without
+dispatching RPCs, and a recovered registry supplies unattended news. Each attempt samples current measurement mode and
+mutation generation. A discarded pre-mutation reply is not an answer unless a replacement actually satisfies that
+demand. Host-list refresh failures are disclosed rather than treated as proof of current reachability. Unknown host
+counts stay unknown; the global cleanup requires successful, settled listings from every reachable host, and refuses a
+host above the protocol's 10,000-ID batch limit rather than silently omitting it.
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
@@ -4632,8 +4641,8 @@ false disables it, so upgraded helms have the same default as fresh ones. Null r
 preserves the stored choice. Older helms refuse this schema.
 
 Helm schema 59 adds nullable `preferences.color_terminal_frames`. Unset and false leave terminal frames uncolored on
-fresh and upgraded helms. A null restores the off default, and an omitted key preserves another client's choice. Older
-helms refuse this schema.
+fresh and upgraded helms. A null restores the off default, and an omitted key preserves the stored choice. Older helms
+refuse this schema.
 
 Helm schema 60 adds `preferences.remembered_wrapper_prefixes` as an empty JSON map on upgrade. Each accepted user agent
 launch replaces or clears its own agent type's entry in the same transaction that records the launch; a launch without a
@@ -5468,10 +5477,10 @@ values are separate from shared preferences and the Tensorlake account singleton
 
 Protected `GET/POST /api/credentials` and `PUT/DELETE /api/credentials/{name}` distinguish creation (409 on a collision)
 from replacement (404 after deletion). Read queries select metadata alone. Save acknowledgements read that metadata
-inside the same immediate transaction as the write, so another window's replacement cannot change the acknowledged
-revision. JSON decoder and database diagnostics never enter responses or logs. Secret-bearing request types have no
-Debug implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex accepts only a JSON object of at most 64
-KiB, preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
+inside the same immediate transaction as the write, so a concurrent replacement cannot change the acknowledged revision.
+JSON decoder and database diagnostics never enter responses or logs. Secret-bearing request types have no Debug
+implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex accepts only a JSON object of at most 64 KiB,
+preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
 
 Credential metadata includes the names of recipes referring to it. The same reference query protects deletion inside its
 immediate transaction. Both recipe create and update check existence and the required endpoint-token, Claude-login,
@@ -5849,7 +5858,7 @@ and the create-without-asking choice; like ntfy's row it is outside the queued s
 `api_key_set`, never the key. A save names only the fields its control owns: an absent or blank `api_key` keeps the
 stored key, a non-blank one is trimmed and replaces it (visible ASCII, at most 4096 bytes), `clear_api_key` removes it,
 asking for both is refused, and an absent `create_without_asking` keeps the stored choice. The save is resolved against
-the stored row inside one database operation, so two windows saving different fields cannot undo each other. Refusals,
+the stored row inside one database operation, so two saves of different fields cannot undo each other. Refusals,
 malformed JSON included, use fixed messages. POST `/api/tensorlake/test` lists every page of sandboxes with the stored
 key and answers the count, a 400 without a key, or a 502 with the classified failure. It stops listing at the UI
 channel's host reply bound, 20 seconds after the request arrived (the stored key's read counts against it, but nothing
@@ -6475,9 +6484,9 @@ system the app was built for (macOS or Linux). The helm validates the submission
 forwards that type as JSON: it adds nothing, trims nothing, and stores nothing. Forwarding through the helm rather than
 posting from the app gives one place where the feedback connection lives. After a successful send the dialog separately
 remembers or clears the contact through the shared preferences row, with a preference write of its own that nothing
-retries; each new dialog starts from the contact in the preferences the helm pushes, so a contact remembered in one
-window seeds the next dialog in every window. The feedback route still stores nothing. Preference validation uses the
-same contact cap and never includes the contact in a refusal or log.
+retries; each new dialog starts from the contact in the preferences the helm pushes, so a contact remembered once seeds
+every later dialog. The feedback route still stores nothing. Preference validation uses the same contact cap and never
+includes the contact in a refusal or log.
 
 The request type and its caps live in `farhelm-proto`, shared by the UI and the helm, so both enforce the same numbers:
 a message of at most 4,000 characters that is not empty or whitespace-only, a contact of at most 200 characters,
@@ -8853,8 +8862,8 @@ recovery returns to the chosen control after its save. The panel submits only th
 and reads the other word from the live hosts snapshot at handler entry. A successful appearance write installs its known
 pair behind the existing read-generation barrier before releasing the write token; an older in-flight GET cannot restore
 the preceding pair, and the next explicit choice cannot undo it while the refresh is pending. The ordinary refresh still
-supplies connection facts and subsequent changes from other clients. A sidebar-surface preview shows the icon without
-changing a session.
+supplies connection facts and later changes an agent or the command line makes. A sidebar-surface preview shows the icon
+without changing a session.
 
 The quick switcher reuses ListView's existing hosts signal for marks, while retaining its independent fleet session
 listing. The launcher reduces the same host snapshot to `HostOption` display facts, including identity words. Its host

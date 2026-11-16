@@ -34,9 +34,10 @@
 //! `list_sessions` is served entirely from what the helm has already
 //! recorded — helm.db plus the manager's memory — so a slow or flapping
 //! host cannot slow a list poll down. The cost is that a session created
-//! by ANOTHER client appears only after its host's next refresh. Sessions
-//! created through this helm do not pay it: `record_session` seeds them at
-//! create time, which is also what makes them routable immediately.
+//! without going through this helm appears only after its host's next
+//! refresh. Sessions created through this helm do not pay it:
+//! `record_session` seeds them at create time, which is also what makes
+//! them routable immediately.
 //!
 //! ## Mutations write back what the host just said
 //!
@@ -693,7 +694,7 @@ pub(crate) async fn delete_checkout_trash(
             }
             match client.delete_checkout_trash(req.ids).await {
                 Ok(deleted) => {
-                    // Acceptance is enough to make other clients re-read this host;
+                    // Acceptance is enough to make the window re-read this host;
                     // it is never evidence that the underlying files are gone.
                     if !deleted.removed.is_empty() {
                         state.trash_requests.changed(claim.host);
@@ -881,11 +882,11 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
 /// slow a list poll down.
 ///
 /// One consequence is worth stating rather than discovering: a session
-/// created on ANOTHER client appears here only after its host's next
-/// refresh, so this list trails such a create by up to one refresh
-/// interval. A session created through this helm is recorded by the create
-/// itself, and is routable immediately either way — routing does not go
-/// through this handler.
+/// created without going through this helm appears here only after its
+/// host's next refresh, so this list trails such a create by up to one
+/// refresh interval. A session created through this helm is recorded by the
+/// create itself, and is routable immediately either way — routing does not
+/// go through this handler.
 pub(crate) async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ListQuery>,
@@ -4020,7 +4021,7 @@ async fn delete_session_teardown(
 
 /// Finish local bookkeeping only after the supervisor confirms teardown.
 /// These tables are best effort: a stale row must not hide a real deletion
-/// from other clients. Replace uses the same tail after inheriting its pin.
+/// from the window. Replace uses the same tail after inheriting its pin.
 /// Tunnel cancellation is awaited before cache forgetting, under the creation
 /// gate, so successful teardown cannot leave a newly published listener behind.
 async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim, id: &str) {
@@ -4078,9 +4079,8 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
 ///
 /// Same bare `{}` success body as `stop_session`/`delete_session`: nothing
 /// about the write needs echoing back, since the events bump this handler
-/// issues on a real change is what brings every client's next list read
-/// (including the caller's own) up to date — no optimistic client-side
-/// state is needed here.
+/// issues on a real change is what brings the window's next list read up to
+/// date — no optimistic client-side state is needed here.
 ///
 /// The body is [`farhelm_proto::SessionSeenRequest`], the type the GUI sends
 /// too; its key is required, so `{}` is refused (a 422) rather than read as a
@@ -4091,7 +4091,7 @@ pub(crate) async fn mark_seen(
     axum::Json(req): axum::Json<farhelm_proto::SessionSeenRequest>,
 ) -> impl IntoResponse {
     // Router ownership keeps the store write and its event together, so a
-    // cancelled caller cannot hide the change from other open clients.
+    // cancelled caller cannot hide the change from the window.
     let key = match resolve_session_ref(&state, &id).await {
         Ok(key) => key,
         Err(error) => return http_error(error),

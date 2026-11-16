@@ -2159,7 +2159,7 @@ fn a_reset_closes_a_dialog_over_a_popover_that_never_takes_focus(cx: &mut TestAp
 
 // ---- Layers: a session as a subject ----------------------------------------------------------------------------------
 
-/// Why this matters: a Delete question about a session must close when that session is deleted from another window or
+/// Why this matters: a Delete question about a session must close when that session is deleted from the command line or
 /// by an agent (SPEC.md: a layer goes away "when the thing it is about is gone"), but a session missing from one pushed
 /// listing is not always gone: the helm cuts long lists at its cap, a filter hides rows, and a failed read lists
 /// nothing. A question that closed on those would vanish under the user's pointer on a passing read error. The rule is

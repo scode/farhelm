@@ -1,7 +1,7 @@
 //! Drafts: what the user typed into an editor over pushed state, kept apart from what the helm pushes.
 //!
 //! SPEC_impl.md, "Drafts". An editor opens on a value from the store (a session's title, a template's fields, a
-//! preference) and the helm keeps pushing changes while it is open: another client renames the session, an agent
+//! preference) and the helm keeps pushing changes while it is open: the command line renames the session, an agent
 //! edits the template. A [`Draft`] records whether
 //! the user touched its field. Until they do, it follows pushed changes; once they have, a pushed change never
 //! overwrites what they typed. The old app got there by freezing the seed when the editor opened (`rename.rs` at
@@ -298,9 +298,8 @@ mod tests {
     use super::*;
 
     /// The rule the module exists for: a pushed change never overwrites a field the user touched, or the title
-    /// someone is halfway through typing vanishes when another client renames the session. Specified: an untouched
-    /// draft follows a push; once edited it keeps its value through later pushes, even an edit back to the pushed
-    /// spelling.
+    /// someone is halfway through typing vanishes when an agent renames the session. Specified: an untouched draft
+    /// follows a push; once edited it keeps its value through later pushes, even an edit back to the pushed spelling.
     #[test]
     fn a_pushed_change_never_overwrites_a_touched_field() {
         let mut draft = Draft::load("loaded".to_owned());

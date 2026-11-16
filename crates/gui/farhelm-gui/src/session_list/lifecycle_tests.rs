@@ -177,7 +177,7 @@ fn texts(cx: &mut VisualTestContext) -> Vec<String> {
 
 /// SPEC.md, "Lifecycle operations": Stop asks only "With tabs open", and the old row never asked just because the agent
 /// was alive; and the request carries what the click showed, so that the supervisor refuses a tab the user did not see
-/// or an agent another client restarted ("Confirmed 2026-10-01"). Specified: a running row and an ended row without
+/// or an agent the command line restarted ("Confirmed 2026-10-01"). Specified: a running row and an ended row without
 /// tabs stop on the click, asking nothing; a running row with one tab asks "Stop the agent and close 1 terminal tab?"
 /// with its title quoted, focus on Confirm and Cancel's help "Cancel: keep the agent and terminal tabs running" (the
 /// old row's); an ended row with two tabs asks "Close 2 terminal tabs?"; the four Stops carry, in order, no tabs shown

@@ -1248,10 +1248,10 @@ async fn dismissing_an_announcement_outside_the_channel_moves_it_to_history_on_t
     assert!(queue.history.iter().any(|entry| entry.id == "news-1"));
 }
 
-/// A template saved outside the channel (another client's HTTP write) reaches
-/// an idle connected UI through the feed bump, keyed by the template's name.
-/// With the channel idle, nothing but the bump in `templates::store_template`
-/// (shared with the agent relay's writes) can deliver it.
+/// A template saved outside the channel (an HTTP write) reaches an idle
+/// connected UI through the feed bump, keyed by the template's name. With the
+/// channel idle, nothing but the bump in `templates::store_template` (shared
+/// with the agent relay's writes) can deliver it.
 #[farhelm_testtrace::test]
 async fn a_template_saved_outside_the_channel_reaches_an_idle_connected_ui() {
     let mut harness = rest_harness::idle_helm().await;
@@ -2361,8 +2361,8 @@ async fn three_orders_helm() -> (rest_harness::Harness, std::net::SocketAddr, Th
     (harness, addr, orders)
 }
 
-/// Store `list_sort` through the preferences route, as another client or the
-/// command line would: the route's write is what bumps the fleet feed.
+/// Store `list_sort` through the preferences route, as any HTTP caller
+/// would: the route's write is what bumps the fleet feed.
 async fn store_list_sort(harness: &rest_harness::Harness, word: &str) {
     let request = Request::builder()
         .method("PUT")

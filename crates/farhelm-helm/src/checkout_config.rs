@@ -87,7 +87,7 @@ pub(crate) struct ClaudeTrustBody {
     enabled: bool,
 }
 
-/// The band needs the persisted opt-out even when another client changed it.
+/// The band needs the persisted opt-out even when it changed elsewhere.
 #[derive(serde::Serialize)]
 struct ClaudeTrustState {
     enabled: bool,

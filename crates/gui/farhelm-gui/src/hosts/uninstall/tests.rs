@@ -303,7 +303,7 @@ fn the_menus_uninstall_plans_asks_runs_and_leaves_a_notice(cx: &mut TestAppConte
 /// SPEC.md: "Nothing changes until the user confirms", and closing a question returns focus to where it was. The old
 /// case dismissed the plan by Cancel and by the header's ×, sending nothing either way. Specified: Cancel closes the
 /// confirmation, sends nothing, owes no notice, and returns focus to `build-box`'s menu toggle; the host is still
-/// listed, and the registry dropping it later (another client's Remove, say) shows no notice.
+/// listed, and the registry dropping it later (a Remove from the command line, say) shows no notice.
 #[gpui::test]
 fn cancel_sends_nothing_and_owes_no_notice(cx: &mut TestAppContext) {
     let (mut helm, cx) = panel(cx);
@@ -458,11 +458,12 @@ fn a_refused_confirmation_opens_the_refusal_and_withdraws_the_notice(cx: &mut Te
     );
 }
 
-/// The old "confirmed uninstall refusal survives a vanished host row": another client can remove the host while the
-/// confirmation is out, and the helm then refuses it. The refusal still belongs to the host the user confirmed, and
-/// since Farhelm was not removed from it, no notice may say it was, although the host did leave the list. Specified:
-/// with the confirmation out, the registry drops `build-box` (the notice it owed shows for now); the helm's refusal then
-/// opens the refusal dialog naming `build-box` and its destination from the frozen plan, and the notice goes.
+/// The old "confirmed uninstall refusal survives a vanished host row": an agent or the command line can remove the
+/// host while the confirmation is out, and the helm then refuses it. The refusal still belongs to the host the user
+/// confirmed, and since Farhelm was not removed from it, no notice may say it was, although the host did leave the
+/// list. Specified: with the confirmation out, the registry drops `build-box` (the notice it owed shows for now); the
+/// helm's refusal then opens the refusal dialog naming `build-box` and its destination from the frozen plan, and the
+/// notice goes.
 #[gpui::test]
 fn a_refusal_after_the_host_vanished_still_opens_and_takes_the_notice_back(
     cx: &mut TestAppContext,
@@ -559,8 +560,8 @@ fn a_failed_run_withdraws_the_notice_and_uninstall_continues_it(cx: &mut TestApp
 }
 
 /// The withdrawal half of the rule above on its own: a host whose uninstall failed and that then leaves the list some
-/// other way (another client's Remove) did not have Farhelm removed, so no notice may claim it was. Specified: after a
-/// failed run, the registry dropping the host shows no notice.
+/// other way (a Remove from the command line) did not have Farhelm removed, so no notice may claim it was. Specified:
+/// after a failed run, the registry dropping the host shows no notice.
 #[gpui::test]
 fn a_host_gone_after_a_failed_run_shows_no_notice(cx: &mut TestAppContext) {
     let (mut helm, cx) = panel(cx);

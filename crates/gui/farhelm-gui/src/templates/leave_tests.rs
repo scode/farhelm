@@ -376,7 +376,7 @@ fn a_refused_delete_is_reported_and_keeps_the_editor(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "templates-undo-notice"));
 }
 
-/// The editor keeps a template another client deleted, and its Delete must not send a deletion with no copy to undo.
+/// The editor keeps a template an agent deleted, and its Delete must not send a deletion with no copy to undo.
 /// Specified: with `codex-deep` open and then deleted elsewhere, Delete sends nothing and says the template is no
 /// longer stored.
 #[gpui::test]

@@ -421,7 +421,7 @@ mod tests {
     }
 
     /// Clients may dismiss only what they displayed. A newer queued entry
-    /// survives, and the same route exposes shared history to another client.
+    /// survives, and the same route exposes shared history to a later window.
     #[farhelm_testtrace::test]
     async fn announcement_routes_expose_display_content_and_dismiss_named_ids() {
         let harness = rest_harness::idle_helm().await;
