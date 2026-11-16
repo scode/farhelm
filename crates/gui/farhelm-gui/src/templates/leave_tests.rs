@@ -569,3 +569,41 @@ fn delete_waits_for_a_bolt_write_in_flight(cx: &mut TestAppContext) {
         painted(cx)
     );
 }
+
+/// The old "older template name deletion warns before permanently deleting": whether Delete can be undone depends on
+/// the template as stored, which is what Undo would save back, never on the draft. A repaired draft that offered Undo
+/// would promise a restore the helm refuses. Specified: a command template whose stored session name holds an emoji
+/// joiner, its name field removed, added again and typed clean, still shows "Delete permanently", whose help says undo
+/// is not available; deleting it sends the deletion and shows no Undo notice.
+#[gpui::test]
+fn a_repaired_draft_of_a_template_failing_save_rules_still_deletes_permanently(
+    cx: &mut TestAppContext,
+) {
+    let mut list = templates();
+    list[2].fields.name = Some("joined \u{1F469}\u{200D}\u{1F4BB}".into());
+    let (mut helm, cx) = open_header(cx, &list, None);
+    open_editor(&mut helm, "template-open-webbuilder", cx);
+    click(cx, "templates-remove-name");
+    click(cx, "templates-add");
+    click(cx, "templates-add-name");
+    click(cx, "templates-session-name");
+    settle(cx);
+    cx.simulate_input("repaired draft");
+    settle(cx);
+    assert_eq!(
+        draft(cx).fields.name.as_deref(),
+        Some("repaired draft"),
+        "the premise: the draft's name is clean"
+    );
+    assert!(
+        painted(cx).contains("Delete permanently"),
+        "{}",
+        painted(cx)
+    );
+    let help = crate::session_list::host_rail::tests::hover_help(cx, "templates-delete")
+        .expect("the premise: Delete's help is showing");
+    assert!(help.contains("undo is not available"), "{help}");
+    let remaining: Vec<LaunchTemplate> = list[..2].to_vec();
+    delete_open(&mut helm, "webbuilder", &remaining, cx);
+    assert!(!drawn(cx, "templates-undo-notice"), "no Undo is offered");
+}
