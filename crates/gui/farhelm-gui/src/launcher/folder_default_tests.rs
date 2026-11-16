@@ -1,15 +1,19 @@
 //! Tests of New's folder default in the real main view over the helm client's fake: New without an open session starts
 //! in `~` and waits for the chosen host's launch history to name the folder its newest plain-folder launch started in,
 //! Launch waits for it meanwhile, a failed read settles on `~`, and a quick launch prepared out of sight waits for it
-//! too, or shows New when the history could not be read. The draft's own rules (once per opening or host change, a
-//! typed folder kept, Clone and the held modes) are `draft_tests`'.
+//! too, or shows New when the history could not be read. A folder from a host's history, or New's default there,
+//! stays bound to the installation it came from: once the host row names another, Launch refuses a folder the user
+//! took, and an untouched default is decided again for the new one. The draft's own rules (once per opening or host
+//! change, a typed folder kept, Clone and the held modes) are `draft_tests`'.
 //!
 //! SPEC.md, "Working directory"; SPEC_impl.md, "Launch templates" (the hidden quick launch). Ported from the old
 //! `e2e/tests/destination-authority.spec.ts` ("the launcher's folder follows each host's last launch until the user
-//! types one"), `quick-launch.spec.ts` ("quick launch shows New when the host's recent setups cannot be read") and
-//! `podman-environments.spec.ts`'s held-read wait, at reference commit `24bc0580`.
+//! types one", "applied … retains installation authority through Launch"), `quick-launch.spec.ts` ("quick launch shows
+//! New when the host's recent setups cannot be read") and `podman-environments.spec.ts`'s held-read wait, at reference
+//! commit `24bc0580`.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::ui_channel::CollectionChanges;
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
@@ -359,4 +363,231 @@ fn a_quick_launch_without_the_hosts_history_shows_new(cx: &mut TestAppContext) {
         answer(&mut helm, cx, None).is_empty(),
         "and nothing was launched"
     );
+}
+
+// ---- A folder's installation ---------------------------------------------------------------------------------------
+
+/// The refusal of a folder taken on an installation the host row no longer names, the old launcher's words.
+const MOVED: &str = "The remembered folder belongs to a different installation; choose the host or folder again before launching";
+
+/// Push the registry's hosts at `positions` (host-list fixture rows) with host `key`'s row on a new connection, and,
+/// when `retarget` is set, retargeted onto another installation (a new recorded identity), as the helm pushes either.
+fn push_host(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    positions: &[usize],
+    key: &str,
+    retarget: bool,
+) {
+    let mut state = super::view_tests::fixture_hosts(positions);
+    let entry = state
+        .entries
+        .iter_mut()
+        .find(|entry| entry.key == key)
+        .expect("the premise: the host is in the fixture");
+    if retarget {
+        entry.value["identity"] = json!("replacement-install");
+    }
+    let incarnation = entry.value["incarnation"].as_u64().unwrap_or_default();
+    entry.value["incarnation"] = json!(incarnation + 1);
+    helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+}
+
+/// Edit the open launcher's draft directly, and let it draw.
+fn edit_draft(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
+    cx.update(|_, cx| {
+        let launcher = cx
+            .try_global::<super::view_tests::Opened>()
+            .and_then(|opened| opened.0.upgrade())
+            .expect("a launcher is open");
+        launcher.update(cx, |launcher, cx| {
+            edit(&mut launcher.draft);
+            cx.notify();
+        });
+    });
+    settle(cx);
+}
+
+/// A launcher on a draft like New's, on host1 in `/tmp`, where the strip offers its setups, whose history holds the two recent setups (Codex in
+/// `/tmp` first) and the saved folder `/srv/saved`. The folder starts untouched and bound to nothing, so only taking a
+/// folder from the history binds it.
+fn new_with_history(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
+    let mut history = super::recents_view_tests::two_setups();
+    history["folders"] = json!([{
+        "host": 1,
+        "canonical_cwd": "/srv/saved",
+        "canonical_proven": true,
+        "display_cwd": "/srv/saved",
+        "created_at": 1,
+        "creation_seq": null,
+    }]);
+    let (mut helm, cx) = super::view_tests::launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "/tmp".into(), None),
+        super::view_tests::fixture_hosts(&[0]),
+    );
+    super::recents_view_tests::answer_history(&mut helm, cx, &history);
+    (helm, cx)
+}
+
+/// Take a folder from host1's history one way, retarget host1's row onto another installation, and press Launch:
+/// it is refused, beside Launch and under the host, and nothing is sent. Returns the folder taken.
+fn refused_after_retarget(
+    cx: &mut TestAppContext,
+    take: impl FnOnce(&mut VisualTestContext),
+) -> (FakeHelm, &mut VisualTestContext, String) {
+    let (mut helm, cx) = new_with_history(cx);
+    take(cx);
+    let taken = draft(cx);
+    assert!(
+        taken.folder.is_touched() && taken.folder_install.is_some(),
+        "the premise: a folder taken from the history, bound to its installation"
+    );
+    let folder = taken.folder.value().clone();
+    push_host(&mut helm, cx, &[0], "1", true);
+    assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(shown_refusal(cx), Some(format!("Not launched. {MOVED}")));
+    assert_eq!(
+        name_of(cx, "launcher-folder-installation-note").as_deref(),
+        Some(MOVED),
+        "said under the host too"
+    );
+    assert!(answer(&mut helm, cx, None).is_empty(), "nothing was sent");
+    (helm, cx, folder)
+}
+
+/// A recent setup's folder taken while host1 named its first installation refuses Launch once the row is retargeted
+/// onto another, and choosing the host again ends the refusal: Launch then goes out to that folder. Why: SPEC.md,
+/// "Working directory": a path on two installations may hold different work, and the helm refuses only a missing one
+/// (old `destination-authority.spec.ts`, "applied {ordinary recent|search recent|saved folder} retains installation
+/// authority through Launch").
+#[gpui::test]
+fn a_recent_setups_folder_refuses_launch_on_a_retargeted_host(cx: &mut TestAppContext) {
+    let (mut helm, cx, folder) =
+        refused_after_retarget(cx, |cx| test_support::click(cx, "launcher-recent-0"));
+    assert_eq!(folder, "/tmp");
+    // The draft edit the host picker makes (`LaunchDraft::choose_host`), made directly.
+    edit_draft(cx, |draft| draft.choose_host(1, "~".into()));
+    assert_eq!(name_of(cx, "launcher-folder-installation-note"), None);
+    test_support::click(cx, "launcher-launch");
+    let creates = answer(&mut helm, cx, None);
+    let [create] = &creates[..] else {
+        panic!(
+            "one create once the host is chosen again, not {}",
+            creates.len()
+        );
+    };
+    assert_eq!(create.body.as_ref().unwrap()["cwd"], json!("/tmp"));
+}
+
+/// A saved folder taken from the search box is bound to its installation as a recent setup's is. Why: the same rule
+/// for every history pick (the old spec's "saved folder" case).
+#[gpui::test]
+fn a_saved_folder_from_search_refuses_launch_on_a_retargeted_host(cx: &mut TestAppContext) {
+    let (_helm, _cx, folder) = refused_after_retarget(cx, |cx| {
+        test_support::click(cx, "launcher-search-row");
+        cx.simulate_input("folder:saved");
+        settle(cx);
+        test_support::keys(cx, "enter");
+    });
+    assert_eq!(folder, "/srv/saved");
+}
+
+/// A recent folder taken from the folder field's list is bound to its installation as a recent setup's is. Why: the
+/// same rule for every history pick.
+#[gpui::test]
+fn a_recent_folder_from_the_folder_list_refuses_launch_on_a_retargeted_host(
+    cx: &mut TestAppContext,
+) {
+    let (_helm, _cx, folder) = refused_after_retarget(cx, |cx| {
+        test_support::click(cx, "launcher-folder-row");
+        assert_eq!(
+            name_of(cx, "launcher-folder-0").as_deref(),
+            Some("/srv/saved"),
+            "the premise: the list offers the saved folder first"
+        );
+        test_support::click(cx, "launcher-folder-0");
+    });
+    assert_eq!(folder, "/srv/saved");
+}
+
+/// A reconnect to the same installation (a new connection, the same recorded identity) keeps a taken folder: Launch
+/// goes out to it. Why: only another installation may hold different work; refusing on every reconnect would make the
+/// rule a nuisance (the old spec's control step).
+#[gpui::test]
+fn a_reconnect_to_the_same_installation_keeps_the_folder(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_with_history(cx);
+    test_support::click(cx, "launcher-recent-0");
+    assert!(
+        draft(cx).folder_install.is_some(),
+        "the premise: a bound folder"
+    );
+    push_host(&mut helm, cx, &[0], "1", false);
+    assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    assert_eq!(name_of(cx, "launcher-folder-installation-note"), None);
+    test_support::click(cx, "launcher-launch");
+    let creates = answer(&mut helm, cx, None);
+    let [create] = &creates[..] else {
+        panic!("one create, not {}", creates.len());
+    };
+    assert_eq!(create.body.as_ref().unwrap()["cwd"], json!("/tmp"));
+}
+
+/// New's default from host1's history is decided again once the row is retargeted onto another installation: Launch
+/// waits for the new installation's history, whose answer moves the untouched folder to its own last folder. Why: the
+/// old installation's history says nothing about the new one (SPEC.md, "Working directory").
+#[gpui::test]
+fn a_default_is_decided_again_on_a_retargeted_host(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_without_a_session(cx);
+    assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    assert_eq!(draft(cx).folder.value(), "/srv/remote-work", "the premise");
+    push_host(&mut helm, cx, &[0, 4, 8, 10], "1", true);
+    assert_eq!(draft(cx).folder_default, FolderDefault::Pending);
+    let mut replacement = remote_history();
+    replacement["launches"][1]["cwd"] = json!("/srv/replacement");
+    assert!(answer(&mut helm, cx, Some(&replacement)).is_empty());
+    assert_eq!(draft(cx).folder.value(), "/srv/replacement");
+    assert_eq!(draft(cx).folder_default, FolderDefault::Settled);
+}
+
+/// The folder New took from the open session, untouched, is decided again too once that session's host row is
+/// retargeted: from the new installation's history, since the session is on the old one. Why: it is New's default,
+/// not a folder the user chose (the old launcher re-armed it on any change of target).
+#[gpui::test]
+fn an_inherited_folder_is_decided_again_on_a_retargeted_host(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(cx.update(open_new), "the premise: New opened");
+    settle(cx);
+    let opened = draft(cx);
+    assert_eq!(
+        opened.host,
+        Some(9),
+        "the premise: beside session a on host9"
+    );
+    assert!(
+        !opened.folder.is_touched() && opened.folder_install.is_some(),
+        "the premise: session a's folder, untouched, bound to host9's installation"
+    );
+    let inherited = opened.folder.value().clone();
+    assert_ne!(
+        inherited, "/srv/remote-work",
+        "the premise: a folder the history would change"
+    );
+    assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    push_host(&mut helm, cx, &[0, 4, 8, 10], "9", true);
+    assert_eq!(draft(cx).folder_default, FolderDefault::Pending);
+    assert_eq!(
+        name_of(cx, "launcher-folder-installation-note"),
+        None,
+        "an untouched folder is decided again, not refused"
+    );
+    assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    assert_eq!(draft(cx).folder.value(), "/srv/remote-work");
 }

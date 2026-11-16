@@ -169,7 +169,7 @@ impl Launcher {
         match &entry.github_repo {
             Some(repo) => self.draft.choose_repository(repo.clone()),
             None => {
-                self.draft.edit_folder(entry.cwd.clone());
+                self.take_history_folder(entry.cwd.clone(), cx);
                 self.folder_picked();
             }
         }

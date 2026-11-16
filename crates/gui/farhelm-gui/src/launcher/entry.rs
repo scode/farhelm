@@ -42,7 +42,7 @@ use farhelm_proto::{
 };
 use gpui::{App, Entity, Window};
 
-use super::draft::{FolderDefault, LaunchDraft, harness_label, remembered_permission};
+use super::draft::{FolderDefault, Install, LaunchDraft, harness_label, remembered_permission};
 use super::launch;
 use super::view::yolo_question::{self, replace_owner};
 use super::view::{Launcher, Note, Shown, open, open_noted};
@@ -456,9 +456,16 @@ fn new_draft(collections: &Collections, selected: Option<&str>) -> LaunchDraft {
         });
     let mut draft = LaunchDraft::new(host, folder, remembered);
     // Without the open session's folder, `~` stands in until the host's history names its own default
-    // (`LaunchDraft::folder_default`).
+    // (`LaunchDraft::folder_default`). The open session's folder is New's default for the installation it is on.
     if pending {
         draft.folder_default = FolderDefault::Pending;
+    } else if let Some(view) = host.and_then(|id| {
+        collections
+            .ordered::<HostView>()
+            .into_iter()
+            .find(|view| view.id == id)
+    }) {
+        draft.folder_install = Some(Install::of(view));
     }
     draft
 }

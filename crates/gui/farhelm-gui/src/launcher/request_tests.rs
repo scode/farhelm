@@ -117,6 +117,41 @@ fn refusals_name_the_first_thing_to_fix() {
     assert_eq!(draft.refusal(target(&hosts, None), None), None);
 }
 
+/// A folder that is still New's default for an installation the host row no longer names waits, as a pending default
+/// does, even before the launcher decides it again while drawing; a folder the user took from that installation's
+/// history is refused instead. Why: in the frame between the registry's push and the next draw, a press must not send
+/// the old installation's last folder to the new one (SPEC.md, "Working directory").
+#[test]
+fn a_folder_from_a_retargeted_installation_never_launches() {
+    let hosts = hosts();
+    let mut retargeted = hosts.clone();
+    retargeted[0].identity = Some("replacement-install".into());
+    let mut draft = draft();
+    draft.choose_tab(Tab::Command);
+    draft.edit_command("true".into());
+    draft.choose_command_yolo(false);
+    draft.folder_default = super::draft::FolderDefault::Pending;
+    draft.settle_folder_default(
+        Some("/srv/work".into()),
+        super::draft::Install::of(&hosts[0]),
+    );
+    assert_eq!(
+        draft.refusal(target(&hosts, None), None),
+        None,
+        "the premise"
+    );
+    assert_eq!(
+        draft.refusal(target(&retargeted, None), None).as_deref(),
+        Some(super::request::FOLDER_DEFAULT_WAITING)
+    );
+    let mut taken = draft.clone();
+    taken.take_history_folder("/srv/work".into(), super::draft::Install::of(&hosts[0]));
+    assert_eq!(
+        taken.refusal(target(&retargeted, None), None).as_deref(),
+        Some(super::draft::FOLDER_INSTALLATION_MOVED)
+    );
+}
+
 /// The Command tab asks for a command and for the YOLO answer, which has no default (SPEC.md, "Command launch": "a
 /// required YOLO assertion"); a placeholder the shared command rule refuses is refused here too, capitalized. A command
 /// left on the Command tab does not refuse an agent launch.

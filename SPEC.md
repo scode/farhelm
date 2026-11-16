@@ -989,7 +989,14 @@ agent choice is independent of that destination:
   launched into a plain folder (a fresh managed checkout does not count), else `~`, which each host expands to its own
   home. Changing the host re-seeds a folder the user has not typed or picked in that draft; a refresh of the recent
   setups never rewrites an open draft's folder. A remembered folder that no longer exists is used anyway, and the create
-  is refused as for any missing folder. A directory picker/completer against the target host's filesystem is provided.
+  is refused as for any missing folder. A folder the user took from a host's history (a recent setup, a saved folder),
+  and New's folder from the open session or the history, stays bound to the installation it came from. Once that host
+  row names another installation, a folder the user took is refused at Launch with "The remembered folder belongs to a
+  different installation; choose the host or folder again before launching", said under the host too, until the user
+  chooses the host or a folder again; New's folder, while untouched, is decided again for the new installation instead.
+  A path that exists on both installations may hold different work, and the helm refuses only a missing one (the
+  migration's orchestrator decided this on 2026-11-15, porting the old app's rule). A directory picker/completer against
+  the target host's filesystem is provided.
 - Title: optional; auto-generated when omitted. Renameable later. A title is a single-line label, so a title you supply
   is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
   character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did
