@@ -44,10 +44,13 @@ non-zero when any capture failed or any app run did not start or did not stop cl
   itself under Mutter, and crops the frame and that bar off, and the label's size is the app's. A capture without that
   frame (a GPUI Kit release that changed it, say) is shown uncropped with a "capture failed" note rather than cropped
   blindly. A Mac capture is not cropped (Kit draws no margin there).
-- Foundation goldens (`crates/gui/farhelm-gui/tests/goldens/`), next to the reference scene they relate to. They are
-  copied from the tree, so every platform's goldens are shown wherever the batch runs, each labelled with its platform
-  (only Linux has goldens so far); only a golden that no platform has is a failed capture.
-  `scripts/check-gui-goldens.py` is what proves them current.
+- Foundation goldens, next to the reference scene they relate to: every reference picture the golden manifest
+  (`crates/gui/farhelm-gui/tests/goldens.txt`) names. The pictures are not in the repository, so `capture` copies them
+  from the directory `FARHELM_GOLDENS_DIR` names when it is set (fetched elsewhere and copied over, on a machine that
+  cannot reach the storage repository), and otherwise fetches them first with `scripts/gui-goldens.py fetch`. They are
+  copies, so every platform's goldens are shown wherever the batch runs, each labelled with its platform (only Linux has
+  goldens so far); a golden the manifest names for no platform, and a picture the manifest names that the directory
+  lacks, are failed captures. `scripts/check-gui-goldens.py` is what proves them current.
 - A capture this batch did not make says "not captured in this batch", and a failed one says "capture failed" with the
   reason; neither is "not yet ported", which only the scene list's own state decides.
 - A mockup is labelled MOCKUP and never counts as evidence that something is built.
@@ -71,9 +74,9 @@ seed, of every app run whose scenes name none), `reference_scenes` (each referen
 before the screenshot, and, for a scene that needs another app run than `app_start`'s, its own `start` options) and
 `foundation_goldens`. When an area ports a scene, it adds the app scene that shows it and marks the reference scene
 ported once that scene's subject is complete. Both `capture` and `page` refuse a list that is not well formed (duplicate
-ids, a reference to an unlisted scene, malformed steps or variants, `start` options the batch sets itself, a committed
-golden missing from the list or a listed one missing from the tree), and the page flags any reference scene the list
-forgot.
+ids, a reference to an unlisted scene, malformed steps or variants, `start` options the batch sets itself, a golden the
+golden manifest names but the list lacks, or a listed one the manifest does not name), and the page flags any reference
+scene the list forgot.
 
 The scenes that share start options share one app run per variant and run in list order, so each scene's steps begin
 where the one before it left the app (the Delete scene closes the menu the row-menu scene opened, the rename scene

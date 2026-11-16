@@ -33,9 +33,16 @@
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
 //! They render with the bundled fonts only and the platform's headless renderer (software Vulkan on Linux), so the same
 //! tree gives the same pixels from run to run; a different renderer version can still move antialiased edges, which is
-//! why references are per platform and rewritten deliberately. References live under `tests/goldens/<os>/`. They are
-//! ignored in ordinary test runs because they need that renderer selected; run them with `scripts/check-gui-goldens.py`
-//! (`--update` rewrites the references after an intended change).
+//! why references are per platform and rewritten deliberately. They are ignored in ordinary test runs because they
+//! need that renderer selected; run them with `scripts/check-gui-goldens.py`.
+//!
+//! The reference pictures are not in this repository (`scripts/gui-goldens.py` says why and where they are). Main
+//! keeps the manifest `tests/goldens.txt`, one line per picture with its git blob id, and that script fetches the
+//! pictures it names and publishes new ones. The test itself knows nothing of that: it reads the references from the
+//! directory `FARHELM_GOLDENS_DIR` names, and fails rather than skips when the variable is unset or a picture is
+//! missing. After an intended visual change, `scripts/check-gui-goldens.py --update` runs it with
+//! `FARHELM_UPDATE_GOLDENS` naming a directory for the captures instead, and `scripts/gui-goldens.py publish` pushes
+//! them and rewrites the manifest's lines, which the change's PR then carries ([`GoldenRun`]).
 //!
 //! The scene functions live in one file per area beside this one (`foundations.rs`, `session_list.rs` and so on), which
 //! marks the ones `SCENES` names `pub(super)` for this file's glob imports; this file keeps the shared harness, the
@@ -70,7 +77,7 @@ use gpui::{
 };
 use gpui_component::Root;
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 // The scene functions `SCENES` names, the only items the area files make `pub(super)`.
@@ -1127,23 +1134,53 @@ fn settle(
     anyhow::bail!("{name} never settled: {MAX_SETTLE_FRAMES} frames, no two in a row the same")
 }
 
+/// What a golden run does, read from the two variables `scripts/check-gui-goldens.py` sets. The references are not in
+/// the tree (the module docs say why), so there is no default to fall back on: a run with neither variable fails.
+enum GoldenRun {
+    /// `FARHELM_GOLDENS_DIR`: compare every capture with `<dir>/<os>/<scene>--<appearance>.png`, the layout
+    /// `scripts/gui-goldens.py fetch` writes. A missing file is a failure like a differing one, never a skip.
+    Compare(PathBuf),
+    /// `FARHELM_UPDATE_GOLDENS`: write every capture to `<dir>/<os>/` and compare nothing, then write
+    /// `<dir>/<os>.complete` holding the number of captures, which `scripts/gui-goldens.py publish` requires before it
+    /// takes the directory: a run that stopped partway would otherwise drop every scene it never reached.
+    Update(PathBuf),
+}
+
+impl GoldenRun {
+    /// The run the environment asks for. Both variables hold absolute paths, as `scripts/check-gui-goldens.py` sets
+    /// them, since the test runs in the crate's directory rather than wherever the caller stood.
+    fn from_env() -> anyhow::Result<Self> {
+        if let Some(captures) = std::env::var_os("FARHELM_UPDATE_GOLDENS") {
+            return Ok(Self::Update(captures.into()));
+        }
+        let references = std::env::var_os("FARHELM_GOLDENS_DIR").ok_or_else(|| {
+            anyhow::anyhow!(
+                "FARHELM_GOLDENS_DIR is unset, and the references are not in the tree: run \
+                 scripts/check-gui-goldens.py, which fetches them"
+            )
+        })?;
+        Ok(Self::Compare(references.into()))
+    }
+}
+
 /// Every scene in both appearances matches its reference exactly. Run through `scripts/check-gui-goldens.py`, which
-/// selects the headless renderer; `FARHELM_UPDATE_GOLDENS=1` (set by that script's `--update`) rewrites references.
+/// selects the headless renderer and fetches the references; its `--update` sets `FARHELM_UPDATE_GOLDENS` instead,
+/// for captures to publish ([`GoldenRun`]).
 #[test]
 #[ignore = "needs the headless renderer selected; run scripts/check-gui-goldens.py"]
 fn component_goldens() -> anyhow::Result<()> {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let references = manifest.join("tests/goldens").join(std::env::consts::OS);
+    let run = GoldenRun::from_env()?;
+    let os = std::env::consts::OS;
     // Captures go beside the test binary, inside the build directory, so a failure leaves the new picture to compare.
     let captures = std::env::current_exe()?
         .parent()
         .map(|deps| deps.join("gui-goldens"))
         .ok_or_else(|| anyhow::anyhow!("the test binary has no directory"))?;
-    let update = std::env::var_os("FARHELM_UPDATE_GOLDENS").is_some_and(|value| value == "1");
     std::fs::create_dir_all(&captures)?;
-    if update {
-        std::fs::create_dir_all(&references)?;
+    if let GoldenRun::Update(dir) = &run {
+        std::fs::create_dir_all(dir.join(os))?;
     }
+    let mut written = 0;
     let mut failures = Vec::new();
     for scene in SCENES {
         for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
@@ -1195,11 +1232,15 @@ fn component_goldens() -> anyhow::Result<()> {
             })?;
             let screenshot = settle(&mut cx, window.into(), &name)?;
             screenshot.save(captures.join(&name))?;
+            let references = match &run {
+                GoldenRun::Update(dir) => {
+                    screenshot.save(dir.join(os).join(&name))?;
+                    written += 1;
+                    continue;
+                }
+                GoldenRun::Compare(dir) => dir.join(os),
+            };
             let reference = references.join(&name);
-            if update {
-                screenshot.save(&reference)?;
-                continue;
-            }
             match image::open(&reference).map(|expected| expected.into_rgba8()) {
                 Ok(expected) if expected == screenshot => {}
                 Ok(_) => failures.push(format!(
@@ -1209,6 +1250,9 @@ fn component_goldens() -> anyhow::Result<()> {
                 Err(error) => failures.push(format!("{}: {error}", reference.display())),
             }
         }
+    }
+    if let GoldenRun::Update(dir) = &run {
+        std::fs::write(dir.join(format!("{os}.complete")), format!("{written}\n"))?;
     }
     anyhow::ensure!(
         failures.is_empty(),
