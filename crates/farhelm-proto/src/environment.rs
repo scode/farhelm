@@ -158,16 +158,6 @@ impl RecipePlaceView {
     }
 }
 
-/// Cached availability is safe to display while background probes settle.
-/// Executable paths, proxy values and login coordinates stay private.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EnvironmentPlaceView {
-    pub place: Place,
-    pub name: String,
-    pub reason: Option<String>,
-    pub refreshing: bool,
-}
-
 /// Owned-resource presentation and fresh Clone intent share one target.
 /// Connection hooks project their health independently of reachability.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

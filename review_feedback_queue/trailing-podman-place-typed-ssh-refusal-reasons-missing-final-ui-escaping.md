@@ -22,6 +22,12 @@ superseded for this esta
 
 ## Details
 
+Narrowed when `GET /api/environment-places` was removed: the second sink below, the old launcher's Container host option
+label built from `EnvironmentPlaceView.reason`, no longer has a producer, since that route and its view type are gone.
+What remains is the first route, the typed refusal reason reaching a recipe place's status through
+`RecipePlaceView.reason` (`GET /api/recipe-places`, now the pushed recipe places collection), and wherever the current
+GUI draws it. The records below are kept as they were reviewed and still describe both sinks.
+
 Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
 search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
 proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes

@@ -335,8 +335,11 @@ pub(crate) trait EnvironmentProvider: Send + Sync {
         name: &str,
         deletion: &crate::tensorlake::build::DeleteGuard,
     ) -> anyhow::Result<()>;
-    /// Read cached place availability and local account state only. Opening a
-    /// launcher must not synchronously fan out probes to every ordinary host.
+    /// Read cached place availability and local account state only, never
+    /// contacting a host. The recipe places read calls it, and the UI channel
+    /// re-runs that read after every fleet bump, so it must start no Podman
+    /// check. Adding a host from a recipe and an agent's launch request call it
+    /// too, to admit a place before their own fresh check.
     async fn places(&self) -> anyhow::Result<Vec<EnvironmentPlace>>;
 
     /// Session launches may prepare a built Tensorlake source but may never
