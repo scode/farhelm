@@ -21,13 +21,15 @@
 //!   Retry loading answers, since an off switch drawn then would be a guess. Its save names only its own field, under
 //!   the preference row's key like every other Settings save ([`super::agent_trust`] has the reasoning).
 //!
-//! NOTE: Not ported yet: the SSH key group (Create SSH key and the registration command with Copy) and **Sandboxes not
-//! on this helm**, which the old section drew between the key form and "Creating sandboxes". Both come with their own
-//! changes; `docs/gpui/parity/settings-and-hosts.md` tracks them.
+//! - **The SSH key group is a view of its own** ([`super::tensorlake_ssh_key`]), under the key form, over the same
+//!   account.
+//!
+//! NOTE: Not ported yet: **Sandboxes not on this helm**, which the old section drew between the SSH key group and
+//! "Creating sandboxes". It comes with its own change; `docs/gpui/parity/settings-and-hosts.md` tracks it.
 
 use farhelm_proto::tensorlake::SaveSettings;
 use gpui::{
-    App, Context, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Context, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
     Subscription, Window, div, px,
 };
@@ -35,6 +37,7 @@ use gpui::{
 use super::Refused;
 use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use super::tensorlake_key::{self, TensorlakeAccount, TensorlakeKey};
+use super::tensorlake_ssh_key::SshKey;
 use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::{self, Draft};
 use crate::host_text::HostSentence;
@@ -102,6 +105,8 @@ pub(super) struct Tensorlake {
     account: Entity<TensorlakeAccount>,
     /// The section's copy of the API key form.
     key: Entity<TensorlakeKey>,
+    /// The SSH key group, under the key form.
+    ssh_key: Entity<SshKey>,
     /// The switch's save: whether it is in flight, and the helm's words for the last refusal. Its value is the choice
     /// being saved, which the switch never shows (see the module docs).
     ask: Draft<bool>,
@@ -112,20 +117,30 @@ pub(super) struct Tensorlake {
 }
 
 impl Tensorlake {
-    /// The section over `account`, the opening's, with `key` as its key form.
+    /// The section over `account`, the opening's, with `key` as its key form, drawn in `window`.
     pub(super) fn new(
         account: Entity<TensorlakeAccount>,
         key: Entity<TensorlakeKey>,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let observing = cx.observe(&account, |_, _, cx| cx.notify());
+        let ssh_key = cx.new(|cx| SshKey::new(account.clone(), window, cx));
         Tensorlake {
             account,
             key,
+            ssh_key,
             ask: Draft::load(false),
             refused: Refused::default(),
             _account: observing,
         }
+    }
+
+    /// Settings shows the section again in this opening: the SSH key group may read the account again
+    /// ([`SshKey::shown_again`]).
+    pub(super) fn shown_again(&mut self, cx: &mut Context<Self>) {
+        self.ssh_key
+            .update(cx, |ssh_key, cx| ssh_key.shown_again(cx));
     }
 
     /// The section's key form, for tests that read its typed key: the field is masked.
@@ -282,6 +297,7 @@ impl Render for Tensorlake {
             .child(Self::warning(cx))
             .child(choices::help(INTRO, cx))
             .child(self.key.clone())
+            .child(self.ssh_key.clone())
             .child(self.creating(cx))
     }
 }

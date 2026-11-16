@@ -1,6 +1,6 @@
 //! Tests of Settings → Tensorlake over the helm client's fake: the EXPERIMENTAL warning and its place, the account read
-//! and its failure, the section's copy of the Tensorlake API key form beside Credentials' copy, and the
-//! create-without-asking switch.
+//! and its failure, the section's copy of the Tensorlake API key form beside Credentials' copy, the SSH key group, and
+//! the create-without-asking switch.
 //!
 //! The dialog is opened from the gear as in the dialog's own tests (`super::tests`), whose helpers these share. Every
 //! step ends in one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
@@ -14,11 +14,12 @@ use serde_json::{Value, json};
 use super::Section;
 use super::tensorlake::{ASK_ID, EXPERIMENTAL_WARNING, USAGE_CREDITS_NOTE};
 use super::tests::{
-    Opened, available, drawn, fill, label_of, open_rail, open_settings, painted, preference_work,
-    reach, section_button, sent, switch_on,
+    Opened, available, drawn, fill, into_view, label_of, open_rail, open_settings, painted,
+    preference_work, reach, section_button, sent, switch_on,
 };
 use crate::operations::Work;
-use crate::test_support::{bounds, click, frame, keys, settle};
+use crate::test_support::{advance, bounds, click, focused_id, frame, keys, settle};
+use std::time::Duration;
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -26,6 +27,37 @@ use crate::test_support::{bounds, click, frame, keys, settle};
 fn account(key_set: bool, create_without_asking: bool) -> Value {
     json!({ "api_key_set": key_set, "create_without_asking": create_without_asking, "helm_tag": "fixture",
             "ssh_key": { "state": "not_created" } })
+}
+
+/// [`account`] with no key saved and the switch off, and `ssh_key` as the SSH key's state.
+fn account_with_ssh_key(ssh_key: Value) -> Value {
+    json!({ "api_key_set": false, "create_without_asking": false, "helm_tag": "fixture", "ssh_key": ssh_key })
+}
+
+/// A ready key's state, with its registration command as the helm words it.
+fn ready_ssh_key() -> Value {
+    json!({ "state": "ready", "public_key": "ssh-ed25519 AAAAFixture farhelm-fixture",
+            "public_key_path": "/state/tensorlake/ssh-key/id_ed25519.pub", "name": "farhelm-fixture",
+            "register_command": REGISTER_COMMAND })
+}
+
+/// The registration command [`ready_ssh_key`] carries.
+const REGISTER_COMMAND: &str =
+    "tl sbx ssh keys add --name farhelm-fixture 'ssh-ed25519 AAAAFixture farhelm-fixture'";
+
+/// Show `section` by its button the way a user does, scrolling the dialog's body back to the button first: the
+/// section list scrolls with the body, so after Tab took focus far down the section the button is out of view.
+fn show_section(cx: &mut VisualTestContext, section: Section) {
+    into_view(cx, section_button(section));
+    click(cx, section_button(section));
+}
+
+/// Whether the window paints [`REGISTER_COMMAND`]. The well wraps the command wherever its width ends, so it is compared
+/// with the painted lines' spaces taken out.
+fn shows_command(cx: &mut VisualTestContext) -> bool {
+    painted(cx)
+        .replace(' ', "")
+        .contains(&REGISTER_COMMAND.replace(' ', ""))
 }
 
 /// Open Settings and show Tensorlake, checking that showing it sends exactly one read, of the account, which is
@@ -318,4 +350,300 @@ fn a_done_save_whose_answer_does_not_decode_reads_the_account_again(cx: &mut Tes
     helm.reply(reads[0].id, 200, Some(account(false, true)));
     settle(cx);
     assert_eq!(switch_on(cx, ASK_ID), Some(true));
+}
+
+// ---- The SSH key group ---------------------------------------------------------------------------------------------
+
+/// SPEC.md: "Until Farhelm's own Tensorlake SSH key ... exists, the section offers **Create SSH key**; opening Settings
+/// never creates it. Once it exists, the section shows the one-time command ... with a **Copy** button." The key is a
+/// credential the helm keeps unencrypted, so only the user's press may make it, and the command is the user's one way
+/// to register it, so what Copy puts on the clipboard must be exactly the helm's command. Specified: with no key,
+/// showing the section sends only the account read and the group says the helm has no key yet, with Create SSH key;
+/// its press sends `POST /api/tensorlake/ssh-key` with no body; the done answer, the settings with a ready key, takes
+/// Create SSH key away, shows the registration command and moves focus to Copy, so a second Space copies and leaves
+/// the create-without-asking switch off (the control the focus coordinator's recovery would otherwise pick); Copy puts
+/// the command on the clipboard byte for byte and shows "Command copied" for exactly 1.5 seconds; and a copy while
+/// it shows restarts the 1.5 seconds.
+#[gpui::test]
+fn create_ssh_key_shows_the_registration_command_and_copy_copies_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(
+        read.id,
+        200,
+        Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+    );
+    settle(cx);
+    assert!(painted(cx).contains("This helm has no SSH key for Tensorlake yet."));
+
+    press(cx, "tensorlake-ssh-key-create");
+    let sent_now = sent(&mut helm);
+    assert_eq!(sent_now.len(), 1, "one command: {sent_now:?}");
+    assert_eq!(
+        (
+            sent_now[0].method,
+            sent_now[0].path.as_str(),
+            sent_now[0].body.clone()
+        ),
+        (Method::Post, "/api/tensorlake/ssh-key", None)
+    );
+    helm.reply(
+        sent_now[0].id,
+        200,
+        Some(account_with_ssh_key(ready_ssh_key())),
+    );
+    settle(cx);
+    assert!(!drawn(cx, "tensorlake-ssh-key-create"));
+    assert!(shows_command(cx), "{}", painted(cx));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("tensorlake-ssh-key-copy"),
+        "a done create moves focus to Copy"
+    );
+
+    assert_eq!(
+        cx.read_from_clipboard(),
+        None,
+        "the premise: nothing copied yet"
+    );
+    assert_eq!(
+        switch_on(cx, ASK_ID),
+        Some(false),
+        "the premise: the switch starts off"
+    );
+    keys(cx, "space");
+    assert_eq!(
+        switch_on(cx, ASK_ID),
+        Some(false),
+        "the second Space did not reach the switch"
+    );
+    assert_eq!(
+        cx.read_from_clipboard()
+            .and_then(|item| item.text())
+            .as_deref(),
+        Some(REGISTER_COMMAND)
+    );
+    assert_eq!(
+        label_of(cx, "tensorlake-ssh-key-copied").as_deref(),
+        Some("Command copied")
+    );
+    advance(cx, Duration::from_millis(1499));
+    assert!(drawn(cx, "tensorlake-ssh-key-copied"), "still at 1499 ms");
+    advance(cx, Duration::from_millis(1));
+    assert!(!drawn(cx, "tensorlake-ssh-key-copied"), "gone at 1500 ms");
+
+    keys(cx, "space");
+    advance(cx, Duration::from_millis(1000));
+    keys(cx, "space");
+    advance(cx, Duration::from_millis(1000));
+    assert!(
+        drawn(cx, "tensorlake-ssh-key-copied"),
+        "the second copy restarted the 1.5 seconds"
+    );
+    advance(cx, Duration::from_millis(500));
+    assert!(!drawn(cx, "tensorlake-ssh-key-copied"));
+}
+
+/// The helm answers Create SSH key within its host reply bound and lets a generation still running then carry on,
+/// saying the key shows once it exists; the account is read once per opening and not pushed, so without reading it
+/// again the key would never show in this opening. Specified: a Create SSH key refused with a 504 shows the helm's
+/// words and reads the account once; answered with no key yet, the group still offers Create SSH key with the words
+/// under it; showing another section and Tensorlake again reads the account once more, and its ready key shows the
+/// command and takes the refusal's words away; showing Tensorlake a third time reads nothing. A user who stays on
+/// Tensorlake sees the key only on the next showing (the parity file's deviation).
+#[gpui::test]
+fn a_refused_create_reads_the_account_now_and_on_the_next_showing(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(
+        read.id,
+        200,
+        Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+    );
+    settle(cx);
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(&mut helm);
+    assert_eq!(create.len(), 1, "one command: {create:?}");
+    let words = "Farhelm's SSH key was not ready within 20 seconds; its creation carries on, and Settings shows the \
+                 key once it exists";
+    helm.reply(create[0].id, 504, Some(json!(words)));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-ssh-key-error").as_deref(),
+        Some(words)
+    );
+    let reads = sent(&mut helm);
+    assert_eq!(
+        reads
+            .iter()
+            .map(|read| read.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/api/tensorlake"],
+        "the refusal reads the account once"
+    );
+    helm.reply(
+        reads[0].id,
+        200,
+        Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+    );
+    settle(cx);
+    assert!(drawn(cx, "tensorlake-ssh-key-create"));
+
+    show_section(cx, Section::Sessions);
+    assert_eq!(sent(&mut helm), [], "the premise: Sessions reads nothing");
+    show_section(cx, Section::Tensorlake);
+    let reads = sent(&mut helm);
+    assert_eq!(
+        reads
+            .iter()
+            .map(|read| read.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/api/tensorlake"],
+        "showing Tensorlake again reads the account once more"
+    );
+    helm.reply(
+        reads[0].id,
+        200,
+        Some(account_with_ssh_key(ready_ssh_key())),
+    );
+    settle(cx);
+    assert!(shows_command(cx));
+    assert!(
+        !drawn(cx, "tensorlake-ssh-key-error"),
+        "the key took the refusal's words away"
+    );
+
+    show_section(cx, Section::Sessions);
+    show_section(cx, Section::Tensorlake);
+    assert_eq!(sent(&mut helm), [], "a third showing reads nothing");
+}
+
+/// A refusal asks for a read on the next showing, but once a later Create SSH key is done the key is known and that
+/// read would only ask the helm again for nothing. Specified: after a refused create and its read finding no key, a
+/// second Create SSH key answered done shows the command, takes the refusal's words away and moves focus to Copy, and
+/// showing another section and Tensorlake again reads nothing.
+#[gpui::test]
+fn a_done_create_after_a_refusal_drops_the_read_on_the_next_showing(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    let not_created = account_with_ssh_key(json!({ "state": "not_created" }));
+    helm.reply(read.id, 200, Some(not_created.clone()));
+    settle(cx);
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(&mut helm);
+    helm.reply(create[0].id, 500, Some(json!("ssh-keygen failed: fixture")));
+    settle(cx);
+    let reads = sent(&mut helm);
+    assert_eq!(reads.len(), 1, "the refusal reads the account: {reads:?}");
+    helm.reply(reads[0].id, 200, Some(not_created));
+    settle(cx);
+    assert!(drawn(cx, "tensorlake-ssh-key-error"));
+
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(&mut helm);
+    assert_eq!(create.len(), 1, "{create:?}");
+    helm.reply(
+        create[0].id,
+        200,
+        Some(account_with_ssh_key(ready_ssh_key())),
+    );
+    settle(cx);
+    assert!(shows_command(cx));
+    assert!(!drawn(cx, "tensorlake-ssh-key-error"));
+    assert_eq!(focused_id(cx).as_deref(), Some("tensorlake-ssh-key-copy"));
+    show_section(cx, Section::Sessions);
+    show_section(cx, Section::Tensorlake);
+    assert_eq!(sent(&mut helm), [], "the key is known: nothing to read");
+}
+
+/// A key folder the helm cannot read is a state of the settings, not a failed read (SPEC_impl.md, "Tensorlake
+/// account"), and Create SSH key must not be offered over it: the helm never replaces a key the user may have
+/// registered. Specified: with the key unavailable, the group says Farhelm has no usable SSH key for Tensorlake with
+/// the helm's reason, and draws neither Create SSH key nor a command.
+#[gpui::test]
+fn an_unavailable_key_shows_the_helms_reason_and_offers_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(
+        read.id,
+        200,
+        Some(account_with_ssh_key(
+            json!({ "state": "unavailable", "reason": "the key folder is unreadable" }),
+        )),
+    );
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-ssh-key-unavailable").as_deref(),
+        Some("Farhelm has no usable SSH key for Tensorlake: the key folder is unreadable")
+    );
+    assert!(!drawn(cx, "tensorlake-ssh-key-create"));
+    assert!(!drawn(cx, "tensorlake-ssh-key-copy"));
+}
+
+/// The key can appear by a read rather than by the done answer: a refused create whose generation finished anyway is
+/// found by the read the refusal sends. Create then vanishes under focus just as after a done answer, and the focus
+/// coordinator's recovery would put focus on the switch that creates sandboxes without asking. Specified: a Create SSH
+/// key refused and its read answered with a ready key shows the command and moves focus to Copy.
+#[gpui::test]
+fn a_key_found_by_the_read_after_a_refusal_moves_focus_to_copy(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(
+        read.id,
+        200,
+        Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+    );
+    settle(cx);
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(&mut helm);
+    assert_eq!(create.len(), 1, "{create:?}");
+    helm.reply(
+        create[0].id,
+        504,
+        Some(json!("Farhelm's SSH key was not ready within 20 seconds")),
+    );
+    settle(cx);
+    let reads = sent(&mut helm);
+    assert_eq!(reads.len(), 1, "the refusal reads the account: {reads:?}");
+    helm.reply(
+        reads[0].id,
+        200,
+        Some(account_with_ssh_key(ready_ssh_key())),
+    );
+    settle(cx);
+    assert!(shows_command(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("tensorlake-ssh-key-copy"));
+}
+
+/// A result must not move focus once the user has moved on since the action (SPEC.md, "Who may move focus"): a user
+/// who tabbed away while the key was being made is working elsewhere. Specified: Create SSH key pressed, then Tab
+/// before the done answer, leaves focus where Tab put it when the answer shows the command.
+#[gpui::test]
+fn a_done_create_after_the_user_moved_on_moves_no_focus(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(
+        read.id,
+        200,
+        Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+    );
+    settle(cx);
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(&mut helm);
+    assert_eq!(create.len(), 1, "{create:?}");
+    keys(cx, "tab");
+    let moved_to = focused_id(cx);
+    assert_ne!(
+        moved_to.as_deref(),
+        Some("tensorlake-ssh-key-create"),
+        "the premise: Tab moved focus on"
+    );
+    helm.reply(
+        create[0].id,
+        200,
+        Some(account_with_ssh_key(ready_ssh_key())),
+    );
+    settle(cx);
+    assert!(shows_command(cx));
+    assert_eq!(focused_id(cx), moved_to, "focus stays where Tab put it");
 }

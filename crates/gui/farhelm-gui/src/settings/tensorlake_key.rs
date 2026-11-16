@@ -53,8 +53,8 @@ const ROUTE: &str = "/api/tensorlake";
 /// `tensorlake-key-save`, `-test` and `-clear`, its lines `tensorlake-key-outcome`, `-working` and `-busy`.
 const ID: &str = "tensorlake-key";
 
-/// `/api/tensorlake`, or with `tail` a route under it (Test's `test`).
-fn path(tail: &[&str]) -> Result<ApiPath, PathError> {
+/// `/api/tensorlake`, or with `tail` a route under it (Test's `test`, Create SSH key's `ssh-key`).
+pub(super) fn path(tail: &[&str]) -> Result<ApiPath, PathError> {
     let segments: Vec<&str> = std::iter::once("tensorlake")
         .chain(tail.iter().copied())
         .collect();
@@ -135,8 +135,10 @@ impl TensorlakeAccount {
         self.unreadable.as_ref()
     }
 
-    /// Read the account again after a failed read: Retry loading.
-    fn retry(&mut self, cx: &mut Context<Self>) {
+    /// Read the account again: Retry loading after a failed read, and the SSH key group after a Create SSH key the helm
+    /// did not answer as done, whose key may still be on its way ([`super::tensorlake_ssh_key`]). Until the read answers,
+    /// what the account showed stays shown.
+    pub(super) fn read_again(&mut self, cx: &mut Context<Self>) {
         self.unreadable = None;
         Self::read(cx);
         cx.notify();
@@ -506,7 +508,7 @@ impl Render for TensorlakeKey {
             )
             .tier(Tier::Neutral)
             .on_click(move |_, _, cx| {
-                account.update(cx, |account, cx| account.retry(cx));
+                account.update(cx, |account, cx| account.read_again(cx));
             })
         });
 

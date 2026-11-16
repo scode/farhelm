@@ -234,19 +234,24 @@ in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherw
 
 Settings → Tensorlake draws the EXPERIMENTAL warning, the intro, its own copy of the Tensorlake API key form (labelled
 "API key", with its own "Not encrypted on disk" warning) and "Creating sandboxes" with the create-without-asking switch
-and the Usage Credits note. The SSH key group (Create SSH key, the registration command and Copy) and **Sandboxes not on
-this helm** come in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/tensorlake_tests.rs` unless
-named otherwise:
+and the Usage Credits note, and between them the SSH key group: Create SSH key until the key exists, then the
+registration command with Copy and "Command copied", or the helm's reason when its key cannot be read. **Sandboxes not
+on this helm** comes in a later change. Replacing tests, in `crates/gui/farhelm-gui/src/settings/tensorlake_tests.rs`
+unless named otherwise:
 
 - "Tensorlake settings save a write-only key, test the saved key and clear it": partly. Save, Test and Clear with the
   write-only placeholders, the request bodies and Test using the saved key are the shared form's, tested in Credentials
   (`the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata` in
   `crates/gui/farhelm-gui/src/settings/credential_tests.rs`); the Tensorlake copy's label, warning and help, and a save
-  in one form showing in the other, are `a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key`.
-  Waiting for their changes: the SSH key group (its creation on request, the registration command and Copy) and the
-  discovery cases (a rejected key's failure, a successful Test resuming failed discovery, Clear hiding the list). Not
-  ported: the 390-pixel width (the window's minimum is above it); the key never appearing in a reply is the helm route's
-  own, covered by its tests.
+  in one form showing in the other, are `a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key`. The
+  SSH key group: the key created only on request, then the registration command, copied byte for byte with "Command
+  copied" for 1.5 seconds, `create_ssh_key_shows_the_registration_command_and_copy_copies_it`; a key the helm cannot
+  read, `an_unavailable_key_shows_the_helms_reason_and_offers_nothing`. Its look, which the reference screens do not
+  reach, is in the screenshot batch's app scenes `app-settings-tensorlake-ssh-key`, `-command` and `-copied`. That the
+  command names the helm's tag and carries the public key's text is the helm's, covered by its tests. Waiting for their
+  change: the discovery cases (a rejected key's failure, a successful Test resuming failed discovery, Clear hiding the
+  list). Not ported: the 390-pixel width (the window's minimum is above it); the key never appearing in a reply is the
+  helm route's own, covered by its tests.
 - "sandbox refresh shows pending, empty, failure and recovery feedback": waits for **Sandboxes not on this helm**.
 - "sandbox discovery ignores replies superseded by key replacement or clear": waits for **Sandboxes not on this helm**.
 - "Tensorlake's create-without-asking switch shows only the stored choice":
@@ -1134,6 +1139,18 @@ Where the port does not match the old app, and why. Each stays until the work na
   while any other Settings save holds the preference row's key) sends nothing and says so under the switch, as every
   other Settings switch does. It still shows only the stored choice throughout, as before, so nothing on screen changes
   between the press and the helm's answer, which the embedded helm gives in milliseconds.
+- **A refused Create SSH key reads the account again, when it is answered and once more the next time Tensorlake is
+  shown.** The old section read nothing after a failed create, and its request waited for `ssh-keygen` however long that
+  took. Here the helm answers within its 20-second bound and lets a generation still running carry on, saying the key
+  shows once it exists, while the account is read once per opening and not pushed; these two reads are what make the key
+  show without reopening Settings (`a_refused_create_reads_the_account_now_and_on_the_next_showing`). The first read
+  comes right after the 20 seconds, when a generation that was still running has usually not finished, so a user who
+  stays on Tensorlake after a 504 sees the key only after showing another section and Tensorlake again, or opening
+  Settings again; it does not appear by itself. A refusal's line goes once a read shows the key.
+- **A done Create SSH key moves focus to Copy.** The old button was replaced by the command and focus was left to the
+  browser. Here the focus coordinator's recovery would put it on the next control, the switch that creates sandboxes
+  without asking, so it moves to Copy, the control that takes the button's place
+  (`create_ssh_key_shows_the_registration_command_and_copy_copies_it`).
 
 ### Add host
 

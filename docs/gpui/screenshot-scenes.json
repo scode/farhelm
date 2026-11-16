@@ -930,6 +930,103 @@
           "1000"
         ]
       ]
+    },
+    {
+      "id": "app-settings-tensorlake-ssh-key",
+      "title": "Settings at Tensorlake on a helm with no Tensorlake SSH key yet, scrolled to the SSH key group: its help, the no-key line and Create SSH key",
+      "reference": "settings-tensorlake",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "0"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "The trash is empty on reachable hosts."
+        ],
+        [
+          "click",
+          "id:app-settings-toggle"
+        ],
+        [
+          "wait",
+          "--text",
+          "For every host on this helm"
+        ],
+        [
+          "click",
+          "id:settings-section-tensorlake"
+        ],
+        [
+          "wait",
+          "--text",
+          "No key saved"
+        ],
+        [
+          "scrollintoview",
+          "id:tensorlake-ssh-key-create"
+        ],
+        [
+          "wait",
+          "--idle"
+        ]
+      ]
+    },
+    {
+      "id": "app-settings-tensorlake-ssh-key-command",
+      "title": "The same group after Create SSH key, which runs the app's own helm's ssh-keygen in the run's state: the registration command in its well with Copy beside it",
+      "reference": "settings-tensorlake",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "0"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:tensorlake-ssh-key-create"
+        ],
+        [
+          "wait",
+          "--text",
+          "tl sbx ssh keys add"
+        ],
+        [
+          "scrollintoview",
+          "id:tensorlake-ssh-key-copy"
+        ],
+        [
+          "wait",
+          "--idle"
+        ]
+      ]
+    },
+    {
+      "id": "app-settings-tensorlake-ssh-key-copied",
+      "title": "The registration command just copied: Command copied under it, for its 1.5 seconds",
+      "reference": "settings-tensorlake",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "0"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:tensorlake-ssh-key-copy"
+        ],
+        [
+          "wait",
+          "--text",
+          "Command copied"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
