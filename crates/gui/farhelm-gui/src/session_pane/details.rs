@@ -17,7 +17,9 @@
 //!   local host under the registry's own name reads `Local (this machine)`, and a session that names no host shows none
 //!   rather than an invented one. A session in its own environment names it as its row does ("dev sandbox"), with its
 //!   provider's mark for the host mark (`session_list::environment`), and while that environment is suspended the bar
-//!   says "Suspended" with the pause glyph where the age would be, as the old bar did.
+//!   says "Suspended" with the pause glyph where the age would be, as the old bar did. While it is being deleted, the
+//!   bar shows the host's phase words there instead ("Deleting…" or "Deleting failed"), helped by why the session's
+//!   actions are unavailable, as the row does, and no age, as the old bar's `if … else if` chain drew one of the three.
 //! - **What a status cannot claim, it leaves out.** An unclassified session has no badge but keeps its age (SPEC.md,
 //!   "Status": a session nothing has classified "shows no status and still shows its age"). A stale session (its host is
 //!   not connected) has neither: its last-known status and age belong in the stale band, a later piece, and SPEC.md says
@@ -79,7 +81,7 @@ use crate::layers;
 use crate::local_time::Zone;
 use crate::session_list::abbreviate_home;
 use crate::session_list::age::{self, Age};
-use crate::session_list::environment::Environment;
+use crate::session_list::environment::{Deleting, Environment};
 use crate::session_list::row_marks::{self, HelpPlace, HostMark, Locality};
 use crate::session_list::status::{self, EndedWords, Live};
 use crate::theme::{self, Palette, metrics};
@@ -100,6 +102,8 @@ pub(crate) const HOST_NAME_ID: &str = "session-details-host-name";
 pub(crate) const AGE_ID: &str = "session-details-age";
 /// The suspended environment's mark's id, in the age's place.
 pub(crate) const SUSPENDED_ID: &str = "session-details-suspended";
+/// The being-deleted environment's mark's id, in the age's place.
+pub(crate) const DELETING_ID: &str = "session-details-deleting";
 /// The managed-checkout mark's id.
 pub(crate) const CHECKOUT_ID: &str = "session-details-checkout";
 /// The directory's copy field's id.
@@ -160,6 +164,9 @@ pub(crate) struct Details {
     /// Whether the session's own environment is suspended, so the bar says so where the age would be, as the old bar
     /// did (`session_list::environment`).
     pub(crate) suspended: bool,
+    /// What the bar says where the age would be while the session's own environment is being deleted, `None` otherwise
+    /// (`session_list::environment::Environment::deleting`); the age is left out then.
+    pub(crate) deleting: Option<Deleting>,
     /// The managed checkout, or `None` for a session without one.
     pub(crate) checkout: Option<Checkout>,
     /// The working directory's copy field.
@@ -249,7 +256,8 @@ impl Details {
                 ),
             }
         });
-        let age = if row.stale {
+        let deleting = environment.and_then(Environment::deleting);
+        let age = if row.stale || deleting.is_some() {
             None
         } else {
             age::of(row.info.effective_activity(), now, zone)
@@ -269,6 +277,7 @@ impl Details {
             host,
             age,
             suspended: environment.is_some_and(|environment| environment.suspended()),
+            deleting,
             checkout,
             directory: CopyValue::new(directory_label(cwd), cwd),
             command: CopyValue::new(row.info.invocation.clone(), &row.info.invocation),
@@ -397,6 +406,15 @@ pub(crate) fn bar(details: Details, copies: &Copies, pulse: u64, cx: &App) -> Di
         // A suspended environment says so where the age would be (left out while stale anyway), as the old bar did.
         .children(details.suspended.then(|| {
             row_marks::suspended_mark(SUSPENDED_ID.into(), true, palette.fg_1, HelpPlace::Ordinary)
+        }))
+        // So does an environment being deleted, with why the session's actions are unavailable.
+        .children(details.deleting.map(|deleting| {
+            row_marks::deleting_mark(
+                DELETING_ID.into(),
+                deleting,
+                palette.fg_1,
+                HelpPlace::Ordinary,
+            )
         }))
         .children(
             details

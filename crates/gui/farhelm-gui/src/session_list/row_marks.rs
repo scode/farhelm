@@ -468,6 +468,29 @@ pub(crate) fn suspended_mark(
     )
 }
 
+/// A session's mark under `id` while its environment is being deleted ([`super::environment::Deleting`]): the host's
+/// phase words ("Deleting…", "Deleting failed") in `ink`, named by them, with the provider's reason why every action is
+/// unavailable as the hover help, shown where `place` says. The old `.status-badge.environment-deleting`, words alone
+/// with no glyph. The row draws it in place of its stale cause on the ended line and the details bar in the age's
+/// place, as [`suspended_mark`] is drawn, so the two never draw it differently. A status mark: nothing to press.
+pub(crate) fn deleting_mark(
+    id: SharedString,
+    deleting: super::environment::Deleting,
+    ink: Token,
+    place: HelpPlace,
+) -> impl IntoElement {
+    div().flex_none().child(
+        StatusMark::new(
+            id,
+            deleting.label,
+            place.place(HoverHelp::tooltip(deleting.help)),
+            Role::Status,
+            deleting.label,
+        )
+        .ink(ink),
+    )
+}
+
 /// The first line's agent track (`.session-agent`): the agent mark, then the shield, each in its own 10-pixel cell, as
 /// one status mark named by the pair's description and helped by it, shown where `place` says. As wide as its two
 /// cells, so every row's track lines up.

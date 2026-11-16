@@ -17,6 +17,17 @@
 //!   replaces Suspend while the environment is suspended or stopped and not waiting for its place
 //!   ([`Environment::resumable`]); and nothing is offered while it changes ([`Environment::changing`]) or is being
 //!   deleted. Only Suspended draws the badge: a stopped container is never labelled Suspended.
+//! - **Being deleted refuses everything** ([`Environment::deleting`]). While the helm pushes the host as Deleting (its
+//!   Farhelm sealed it and the helm is destroying it, or a whole-environment Delete runs), or as Deleting failed until
+//!   a Retry in Hosts, every command of each of its sessions is refused, Delete and Clone included: nothing can reach a
+//!   sealed supervisor, and the destruction under way is the only way forward (SPEC.md, "Sandbox sessions": "its
+//!   sessions show as being deleted with their actions unavailable"). The refusal goes through [`held`], so the row
+//!   menu, the header, the Delete shortcut and bulk admission all refuse through `super::menu::refused` as for any
+//!   other hold. In place of the stale cause the row and the details bar show the host's phase words ("Deleting…" or
+//!   "Deleting failed", the Hosts panel's) with the provider's reason as their help, and the row menu's Clone and
+//!   Delete and the header's Stop, Clone and Delete give that reason ([`Environment::deleting`]), as does the line a
+//!   bulk action leaves on such a session, which it leaves out of its question and its batch ([`deleting_reason`]):
+//!   the old `being_deleted` and `deleting_reason`.
 //! - **The verb is frozen at the click** ([`Asked`]): Suspend, Resume or Stop and suspend, and Stop's two preconditions
 //!   as the clicked row showed them. The activity read and the question can outlast the click, and an answer given
 //!   after the phase changed (another viewer resumed it, say) still sends the captured verb, never a toggle of the new
@@ -58,7 +69,10 @@
 //! is in progress; try again once it finishes"), since the launcher exposes no predicate for its pending target yet;
 //! meanwhile the helm's lifecycle lock refuses a collision as busy. And Clone's environment wording ("New session in a
 //! new environment, keep this one"), which would describe a Clone into a fresh environment the launcher does not make
-//! yet. The environment Delete, its being-deleted badge and the bulk parts come with the environment Delete's piece.
+//! yet. The environment Delete and the bulk parts come with the environment Delete's piece.
+//!
+//! NOTE: A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while Hosts offers no
+//! Retry yet: it comes with settings-and-hosts' Delete sandbox. Nothing here offers Retry, as the old row did not.
 
 use std::collections::HashSet;
 
@@ -73,6 +87,7 @@ use super::menu;
 use super::status::HostLookup;
 use crate::components::{HoverHelp, Tier};
 use crate::environment_ui::{ProviderUi, target_label};
+use crate::hosts::identity::phase;
 use crate::operations::{self, Command, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::session::{self, PerSession};
@@ -195,6 +210,44 @@ impl<'a> Environment<'a> {
                 | HostStateView::Deleting { .. }
         )
     }
+
+    /// What its sessions show while the environment is being deleted (the module docs' "Being deleted" rule), `None`
+    /// in every other phase: the old `being_deleted`, which a failed deletion keeps until a Retry succeeds.
+    pub(crate) fn deleting(self) -> Option<Deleting> {
+        let HostStateView::Deleting { failure } = &self.host.state else {
+            return None;
+        };
+        Some(Deleting {
+            label: phase::words(&self.host.state),
+            help: self.ui.session_deleting_help(failure.is_some()),
+        })
+    }
+}
+
+/// What a session shows in place of its stale cause while its environment is being deleted ([`Environment::deleting`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Deleting {
+    /// The host's phase words, "Deleting…" or "Deleting failed": the Hosts panel's (`hosts::identity::phase::words`),
+    /// so the row and the panel never name the phase differently, as the old badge took the panel's label.
+    pub(crate) label: &'static str,
+    /// Why every action of the session is unavailable, in the provider's words
+    /// ([`ProviderUi::session_deleting_help`]): the badge's help, and the reason the refused controls give.
+    pub(crate) help: &'static str,
+}
+
+/// Why `key`'s commands are refused because its environment is being deleted ([`Deleting::help`]), or `None` for a
+/// session whose environment is not, or that is no environment session: [`Environment::deleting`] for a caller that
+/// has only the key (bulk's skipped-row line and its leaving such a session out). Read from the current UI session's
+/// store now, as [`held`] reads it.
+pub(crate) fn deleting_reason(key: &str, cx: &App) -> Option<&'static str> {
+    of_key(key, cx)?.deleting().map(|deleting| deleting.help)
+}
+
+/// The environment of the session the current UI session's store holds under `key`, or `None` for a key with no row
+/// and a session that is not an environment session ([`Environment::of`]).
+fn of_key<'a>(key: &str, cx: &'a App) -> Option<Environment<'a>> {
+    let collections = session::current_store(cx)?.read(cx).collections();
+    Environment::of(collections.get::<SessionRow>(key)?, collections)
 }
 
 /// Whether one listed session's status leaves a Suspend to ask first: a stale status or an unknown or running one says
@@ -259,33 +312,24 @@ pub(crate) fn pending(key: &str, environment: Environment, cx: &App) -> Option<P
 /// [`pending`] for the row the current UI session's store holds under `key`, with its environment looked up; `None`
 /// for a session that is not an environment session. What the list's and the header's spinners ask.
 pub(crate) fn pending_of(key: &str, cx: &App) -> Option<Pending> {
-    let store = session::current_store(cx)?;
-    let collections = store.read(cx).collections();
-    let row = collections.get::<SessionRow>(key)?;
-    pending(key, Environment::of(row, collections)?, cx)
+    pending(key, of_key(key, cx)?, cx)
 }
 
 /// Whether `key`'s lifecycle commands are held by its environment beyond its own request in flight (the module docs'
-/// fourth and fifth rules): its activity read is out, or its environment's pushed phase shows the provider's change
-/// still running, which holds every session on that host whichever session asked. `super::menu::refused` reads it
-/// beside the session's own request, so every surface that refuses on a pending request refuses on this too.
+/// "Being deleted" rule and its rules on the request and the bound): its activity read is out, or its environment's
+/// pushed phase shows the provider's change still running or the environment being deleted, either of which holds
+/// every session on that host whichever session asked. `super::menu::refused` reads it beside the session's own
+/// request, so every surface that refuses on a pending request refuses on this too.
 pub(super) fn held(key: &str, cx: &App) -> bool {
     if reading(key, cx) {
         return true;
     }
-    let Some(store) = session::current_store(cx) else {
-        return false;
-    };
-    let collections = store.read(cx).collections();
-    collections
-        .get::<SessionRow>(key)
-        .and_then(|row| Environment::of(row, collections))
-        .is_some_and(|environment| {
-            matches!(
-                environment.host.state,
-                HostStateView::TensorlakeChanging { .. }
-            )
-        })
+    of_key(key, cx).is_some_and(|environment| {
+        matches!(
+            environment.host.state,
+            HostStateView::TensorlakeChanging { .. } | HostStateView::Deleting { .. }
+        )
+    })
 }
 
 /// Whether `key`'s environment control is unavailable now: the session's commands are refused ([`menu::refused`]), or
