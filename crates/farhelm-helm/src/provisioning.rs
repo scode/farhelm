@@ -11015,9 +11015,10 @@ mod tests {
     }
 
     /// With nothing answering on the helm's own machine, the panel stops
-    /// offering to install a supervisor and hands the operator to
-    /// `farhelm helm setup` instead (D1) — on the ADD path AFTER discovery
-    /// has found nothing, and on the UPDATE path before any probe at all.
+    /// offering to install a supervisor and tells the user to reopen the
+    /// Farhelm app, which starts that machine's supervisor when it opens (D1)
+    /// — on the ADD path AFTER discovery has found nothing, and on the UPDATE
+    /// path before any probe at all.
     /// This is what an ordinary first-time helm machine sees, so the
     /// wording is asserted whole.
     ///
@@ -11026,7 +11027,7 @@ mod tests {
     /// name. A unit whose command cannot be parsed does NOT — see the
     /// unclassifiable case below.
     #[farhelm_testtrace::test]
-    async fn an_absent_local_supervisor_is_answered_with_run_setup_here() {
+    async fn an_absent_local_supervisor_is_answered_with_reopen_the_app() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
         let other = root.path().join("other-farhelm");
@@ -11058,8 +11059,8 @@ mod tests {
             };
             assert_eq!(
                 reason,
-                "this is the helm's own machine; run farhelm helm setup here instead of \
-                 provisioning from the panel"
+                "this is the helm's own machine: the Farhelm app starts its supervisor here when \
+                 it opens; quit Farhelm and open it again to start it"
             );
             // Discovery ran first: this answer reports what the probe
             // found, and a supervisor that ANSWERS is registered instead.
@@ -11223,8 +11224,8 @@ mod tests {
             .expect_err("UPDATE must not install a supervisor on the helm's own machine");
         assert_eq!(
             error.to_string(),
-            "this is the helm's own machine; run farhelm helm setup here instead of provisioning \
-             from the panel"
+            "this is the helm's own machine: the Farhelm app starts its supervisor here when it \
+             opens; quit Farhelm and open it again to start it"
         );
         // Refused before probing: the transport is never touched, and no
         // plan is retained for a later confirmation to execute.
@@ -13306,7 +13307,7 @@ mod tests {
         // The two transports enter through different actions now. ADD is
         // the SSH path; the local row has no ADD any more (D1: the panel
         // never installs a supervisor on the helm's own machine, and an
-        // absent one is answered with "run farhelm helm setup here"), so
+        // absent one is answered with "quit Farhelm and open it again"), so
         // the local case enters through the UPDATE action the panel still
         // offers on that row. UPDATE converges the same install from
         // nothing, which is what keeps the direct-local executor — file

@@ -435,9 +435,9 @@ Not ported, and why:
   geometry": the layer manager anchors a menu to its element, which a growing row above moves along with it, so there is
   no measured position to retire.
 - "a failed local ADD keeps its rerun action in the local setup state" and the local row's automatic setup: the helm
-  never sets up its own machine (its local probe answers with the `farhelm helm setup` handoff, SPEC.md "Topology":
-  "What the panel does NOT do on the helm's own machine is install one"), so the local host has no setup run to show or
-  rerun.
+  never sets up its own machine (its local probe answers that the Farhelm app starts that machine's supervisor when it
+  opens, SPEC.md "Topology": "What the panel does NOT do on the helm's own machine is install one"), so the local host
+  has no setup run to show or rerun.
 - The reference scenes `host-setup-running` and `host-setup-failed` show the attention list and the rail's avatar, which
   are the sidebar's (host status on the rail is its M3), not this area's.
 
@@ -1456,14 +1456,20 @@ Where the port does not match the old app, and why. Each stays until the work na
   phase's style). The row's actions toggle is the old stylesheet's: always visible, in the quiet ink (the old
   `.host-row-menu` had no `opacity: 0` rule at rest, whatever its comments said), not a deviation.
 - The helm's own machine with no supervisor opens its own row, whatever the Details switch says, for as long as no
-  supervisor runs there, and shows "No supervisor is running on this machine" with the helm's remedy from its pushed
-  state ("The helm reports: ..." and the `farhelm supervisor run` command its dial failure names), so it never reads as
-  a phantom unreachable host (SPEC.md, "Topology"). The old app instead probed the machine once per down transition and
-  showed the probe's `farhelm helm setup` handoff, turning the global Details switch on to do it. The probe and its
-  handoff are not ported, and none is planned (decided by the migration's settings-and-hosts area on 2026-11-14); the
-  switch is left to the user (SPEC.md: no run writes it). The old menu's "Set up automatically" is not ported either:
-  the panel never installs a supervisor on the helm's own machine (SPEC.md, "Topology"; settled for the port by the
-  migration's orchestrator on 2026-11-14).
+  supervisor runs there, and shows the helm's dial failure as its evidence and "Quit Farhelm and open it again; it
+  starts this machine's supervisor when it opens" as its remedy, so it never reads as a phantom unreachable host
+  (SPEC.md, "Topology"); the unavailable-session card shows the same remedy, with the dial failure as its diagnostics.
+  The old app showed the helm's dial failure as the remedy whenever there was one, and its own words only when there was
+  none. Its evidence line was always the fixed "No supervisor is running on this machine"; that sentence now shows only
+  when the helm gives no detail, and otherwise the evidence line is the helm's dial failure. The remedy is now always
+  the app's sentence alone because the helm's detail is dial advice for a hand-started helm (start
+  `farhelm supervisor run` with the right state directory), which is wrong for the desktop app's own machine: the app
+  starts that supervisor itself whenever it opens and none answers (decided by the migration's orchestrator on
+  2026-11-16). The old app also probed the machine once per down transition and showed the probe's `farhelm helm setup`
+  handoff, turning the global Details switch on to do it. The probe and its handoff are not ported, and none is planned
+  (decided by the migration's settings-and-hosts area on 2026-11-14); the switch is left to the user (SPEC.md: no run
+  writes it). The old menu's "Set up automatically" is not ported either: the panel never installs a supervisor on the
+  helm's own machine (SPEC.md, "Topology"; settled for the port by the migration's orchestrator on 2026-11-14).
 - A row also opens while the last work on its host was refused, with the helm's words under it, until the next work on
   that host starts; the old app opened it only for provisioning errors, and showed other refusals under the row closed.
   Both kinds of refusal now go through the one operation key a host has.

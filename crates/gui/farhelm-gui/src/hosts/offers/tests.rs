@@ -8,7 +8,7 @@ use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 
 use super::{
-    HostKind, Locality, Offers, Rerun, Update, adoptable, menu_offers, needs_local_setup, offers,
+    HostKind, Locality, Offers, Rerun, Update, adoptable, menu_offers, needs_app_supervisor, offers,
 };
 use crate::hosts::tests::{connected, host, local_down, run, skew};
 
@@ -298,15 +298,15 @@ fn in_the_desktop_app_the_local_hosts_update_checks_for_a_release() {
     assert_eq!(menu_offers(&ssh, None, false, true), idle_ssh());
 }
 
-/// Why this matters: on the helm's own machine the panel never installs a supervisor; `farhelm helm setup` does
-/// (SPEC.md, "Topology"), and the migration's orchestrator settled on 2026-11-14 that this row offers no install. The
-/// old menu's "Set up automatically" is not ported. Specified: the local host with no supervisor running needs local
-/// setup and is offered Settings alone (no Update, greyed or not, no rerun, no Remove); a local host unreachable for
+/// Why this matters: on the helm's own machine the panel never installs a supervisor; the desktop app starts it when it
+/// opens (SPEC.md, "Topology"), and the migration's orchestrator settled on 2026-11-14 that this row offers no install.
+/// The old menu's "Set up automatically" is not ported. Specified: the local host with no supervisor running needs the
+/// app's supervisor and is offered Settings alone (no Update, greyed or not, no rerun, no Remove); a local host unreachable for
 /// another reason, and an SSH host with the local cause, do not need it.
 #[test]
 fn the_local_host_without_a_supervisor_offers_no_install() {
     let down = host(1, "local", local_down(""));
-    assert!(needs_local_setup(&down));
+    assert!(needs_app_supervisor(&down));
     assert_eq!(
         offers(&down, None, false),
         Offers {
@@ -323,8 +323,8 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
         cause: "transport-failure".into(),
         last_error: "socket closed".into(),
     };
-    assert!(!needs_local_setup(&host(1, "local", transport)));
-    assert!(!needs_local_setup(&host(2, "ssh", local_down(""))));
+    assert!(!needs_app_supervisor(&host(1, "local", transport)));
+    assert!(!needs_app_supervisor(&host(2, "ssh", local_down(""))));
 }
 
 /// Why this matters: a host kind a newer helm adds must not be offered verbs this build cannot vouch for, and each

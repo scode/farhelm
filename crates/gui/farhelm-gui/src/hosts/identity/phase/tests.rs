@@ -9,7 +9,7 @@ use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, RefreshView};
 
 use super::{Kind, Tone, detail_lines, hover, tone, words};
 use crate::host_text::HostText;
-use crate::hosts::tests::{connected, connecting, host, local_down, skew};
+use crate::hosts::tests::{LOCAL_DIAL_FAILURE, connected, connecting, host, local_down, skew};
 
 /// The detail lines of `state` on an unaliased SSH host, each as (its kind, its accessible name).
 fn lines_of(state: HostStateView) -> Vec<(Kind, String)> {
@@ -275,17 +275,14 @@ fn a_connecting_hosts_detail_says_how_far_its_attempt_got() {
     }
 }
 
-/// Why this matters: the helm's own machine with no supervisor is fixed by a command on that machine, and only the
-/// helm knows the state directory it must name; the old app printed the helm's dial failure as the remedy (and its own
-/// words only when the helm said nothing), keeping the detail line to what happened. Specified: the detail says no
-/// supervisor is running; the remedy is "The helm reports: " and the helm's words, or the app's fallback when they are
-/// blank; another unreachable host shows the helm's error, or "The host did not answer", and no remedy.
+/// Why this matters: the desktop app starts the supervisor of the helm's own machine whenever it opens and none
+/// answers, so reopening it is what fixes a missing one there. Specified: with the helm giving no detail (which it
+/// never does in practice), the local host's evidence says no supervisor is running and its remedy is the app's
+/// sentence; another unreachable host shows the helm's error, or "The host did not answer", and no remedy.
 #[test]
-fn the_local_hosts_missing_supervisor_shows_the_helms_remedy() {
+fn the_local_hosts_missing_supervisor_says_to_reopen_the_app() {
     assert_eq!(
-        lines_of(local_down(
-            "start it with `farhelm supervisor run --state-dir /srv/state`"
-        )),
+        lines_of(local_down("  ")),
         [
             (
                 Kind::Evidence,
@@ -293,19 +290,10 @@ fn the_local_hosts_missing_supervisor_shows_the_helms_remedy() {
             ),
             (
                 Kind::Remedy,
-                "The helm reports: start it with `farhelm supervisor run --state-dir /srv/state`"
+                "Quit Farhelm and open it again; it starts this machine's supervisor when it opens"
                     .to_owned()
             ),
         ]
-    );
-    assert_eq!(
-        lines_of(local_down("  "))
-            .last()
-            .map(|(_, line)| line.as_str()),
-        Some(
-            "Start a supervisor on this machine with `farhelm supervisor run`, passing the same `--state-dir` this \
-             helm was started with if it has one"
-        )
     );
     let unreachable = |error: &str| HostStateView::Unreachable {
         cause: "transport-failure".into(),
@@ -318,6 +306,26 @@ fn the_local_hosts_missing_supervisor_shows_the_helms_remedy() {
     assert_eq!(
         lines_of(unreachable("")),
         [(Kind::Evidence, "The host did not answer".to_owned())]
+    );
+}
+
+/// Why this matters: the helm's dial failure for its own machine always carries hand-start advice ("start it with
+/// `farhelm supervisor run`"), written for a hand-started helm and wrong for the desktop app's own machine, so it must
+/// never join the remedy; it stays only as the evidence of what happened. Specified: with the helm's real dial failure
+/// ([`LOCAL_DIAL_FAILURE`]), the local host's evidence is that failure verbatim and its remedy is the app's sentence
+/// alone.
+#[test]
+fn the_local_remedy_is_the_apps_sentence_alone_and_the_helms_detail_stays_evidence() {
+    assert_eq!(
+        lines_of(local_down(LOCAL_DIAL_FAILURE)),
+        [
+            (Kind::Evidence, LOCAL_DIAL_FAILURE.to_owned()),
+            (
+                Kind::Remedy,
+                "Quit Farhelm and open it again; it starts this machine's supervisor when it opens"
+                    .to_owned()
+            ),
+        ]
     );
 }
 

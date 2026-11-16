@@ -38,12 +38,12 @@ use std::time::Duration;
 /// What the hosts panel says about the helm's own machine when nothing
 /// there is already somebody's supervisor.
 ///
-/// The local row stopped installing supervisors in the distribution plan's
-/// D1: a helm machine's units are `farhelm helm setup`'s to write, and the
-/// panel's job is to say so rather than to build a second, differently
-/// shaped installation beside it.
-const LOCAL_SETUP_HANDOFF: &str = "this is the helm's own machine; run farhelm helm setup here instead of provisioning from \
-     the panel";
+/// The panel never installs a supervisor on the helm's own machine. The
+/// desktop app starts this machine's supervisor itself whenever it opens and
+/// none answers (`farhelm-desktop`'s `spawn`), so the remedy for a missing one
+/// is to reopen the app, not an install from the panel beside it.
+const LOCAL_SETUP_HANDOFF: &str = "this is the helm's own machine: the Farhelm app starts its supervisor here when it \
+     opens; quit Farhelm and open it again to start it";
 
 /// What the hosts panel says when uninstall is chosen for the helm's own
 /// machine. The panel never removes Farhelm there: `farhelm uninstall` does,
@@ -803,7 +803,8 @@ impl ProvisioningService {
     ///   driven with `systemctl --user restart`, while the second is its
     ///   author's to manage and is only reported as off limits.
     /// - Anything else — no unit, or one running some OTHER farhelm — is
-    ///   the ordinary first-run answer: run setup here.
+    ///   the ordinary first-run answer: tell the user to reopen the
+    ///   Farhelm app.
     ///
     /// Resolution is by canonical path on both sides, so a symlinked
     /// `~/.local/bin/farhelm` and the binary it points at are recognized
@@ -1034,9 +1035,9 @@ impl ProvisioningService {
             ProbeObservation::Absent => {
                 // Nothing answered on the helm's OWN machine, so the next
                 // step would have been to install one — which is exactly
-                // what the panel no longer does here. Hand the operator to
-                // `farhelm helm setup`, naming whoever already owns the
-                // supervisor unit if anybody does.
+                // what the panel no longer does here. Tell the user to reopen
+                // the Farhelm app, naming whoever already owns the supervisor
+                // unit if anybody does.
                 if matches!(target.transport, ProvisioningTarget::Local) {
                     return Ok(ProbeResponse::Manual {
                         reason: self.local_handoff_reason().await?,
