@@ -205,23 +205,23 @@ pub(crate) struct Frozen {
 fn question(key: &str) -> Question<Frozen> {
     Question::new(
         "Restart confirmation",
-        Answer {
-            label: "Confirm restart".into(),
-            help: HoverHelp::tooltip(
+        Answer::new(
+            "Confirm restart",
+            HoverHelp::tooltip(
                 "Confirm restart: stop the running agent, then resume its conversation",
             ),
-            tier: Tier::Danger,
-        },
+            Tier::Danger,
+        ),
         Frozen {
             key: key.to_owned(),
         },
     )
     .line(CONSEQUENCE)
-    .cancel_answer(Answer {
-        label: "Cancel".into(),
-        help: HoverHelp::tooltip("Cancel: leave the agent running"),
-        tier: Tier::Neutral,
-    })
+    .cancel_answer(Answer::new(
+        "Cancel",
+        HoverHelp::tooltip("Cancel: leave the agent running"),
+        Tier::Neutral,
+    ))
     .keeps_focus_on_empty_click()
 }
 

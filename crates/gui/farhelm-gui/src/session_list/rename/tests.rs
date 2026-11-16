@@ -2,16 +2,15 @@
 //! what Save sends and what becomes of the reply, what a listing without the session does to it, and where focus goes.
 //!
 //! The editor is opened the way the user opens it, with the shortcut while the open session's terminal holds focus;
-//! the tests reach the open editor through [`Opened`], which only test builds record. Every step ends in one of the
-//! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//! the tests reach the open editor through [`layers::last_opened`] (test builds only). Every step ends in
+//! one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Availability, CollectionChanges, CollectionState, ListCounts};
 use gpui::{
-    ClipboardItem, DriverNode, Entity, Global, Modifiers, TestAppContext, VisualTestContext,
-    WeakEntity, point, px,
+    ClipboardItem, DriverNode, Entity, Modifiers, TestAppContext, VisualTestContext, point, px,
 };
 use serde_json::{Value, json};
 
@@ -24,11 +23,6 @@ use crate::session;
 use crate::session_list::tests::{Fixture, listing, preferences, session};
 use crate::test_support::started;
 use crate::test_support::{self, any_open, frame, keys, settle, terminal_focused};
-
-/// The editor [`super::open`] opened last, recorded in test builds only, so a test can read its draft and field.
-pub(super) struct Opened(pub(super) WeakEntity<RenameEditor>);
-
-impl Global for Opened {}
 
 /// The Rename shortcut on this platform (SPEC.md, "Desktop window chrome").
 const RENAME: &str = RENAME_SESSION_CHORD;
@@ -115,10 +109,7 @@ fn one_rename(helm: &mut FakeHelm) -> (u64, Value) {
 
 /// The editor opened last, which must still be open.
 fn editor(cx: &mut VisualTestContext) -> Entity<RenameEditor> {
-    let editor = cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-    });
+    let editor = cx.update(|_, cx| layers::last_opened::<RenameEditor>(cx));
     editor.expect("the premise: an editor is open")
 }
 

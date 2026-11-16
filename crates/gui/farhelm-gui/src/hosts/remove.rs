@@ -184,11 +184,7 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
         .host(&name);
     let summary = phase_summary("host-remove-summary", &view);
     let (icon, color) = (view.icon, view.color);
-    let remove = Answer {
-        label: "Remove".into(),
-        help: HoverHelp::tooltip(REMOVE_HELP),
-        tier: Tier::Danger,
-    };
+    let remove = Answer::new("Remove", HoverHelp::tooltip(REMOVE_HELP), Tier::Danger);
     let mut question = Question::new(title, remove, removal)
         .summary(summary)
         .body(|removal: &Removal, _, cx| {
@@ -198,20 +194,20 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
             cx.new(|_| body)
         })
         .confirm_enabled(enabled)
-        .cancel_answer(Answer {
-            label: "Cancel".into(),
-            help: HoverHelp::tooltip("Cancel: keep this host"),
-            tier: Tier::Neutral,
-        });
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Cancel: keep this host"),
+            Tier::Neutral,
+        ));
     // Only beside an available Remove: with Remove unavailable it would be the one way left to remove the host. The
     // footer note names this answer, so it goes with it.
     if enabled {
         question = question.note(UNDO_NOTE).fallible_alternative(
-            Answer {
-                label: "Remove, don't ask again".into(),
-                help: HoverHelp::tooltip("Remove it, and remove hosts without asking from now on"),
-                tier: Tier::DangerOutline,
-            },
+            Answer::new(
+                "Remove, don't ask again",
+                HoverHelp::tooltip("Remove it, and remove hosts without asking from now on"),
+                Tier::DangerOutline,
+            ),
             |removal, attempt, _, cx| {
                 // The preference follows the removal it answers once that is sent: a removal refused before it was
                 // sent changes nothing, and one the helm then refuses leaves the preference on (the module docs). A

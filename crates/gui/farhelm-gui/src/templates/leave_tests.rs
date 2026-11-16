@@ -13,12 +13,12 @@ use farhelm_proto::ui_channel::{Availability, CollectionChanges};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
-use super::dialog::Opened;
 use super::dialog_tests::{open_header, painted, push, template, templates_state};
 use super::editor::DeleteKind;
 use super::editor_tests::{
     draft, drawn, name_focused, one, open_editor, push_preferences, renamed, templates,
 };
+use crate::layers;
 use crate::test_support::{self, advance, any_open, click, frame, keys, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -260,7 +260,9 @@ fn undo_lasts_ten_seconds_a_later_delete_replaces_it_and_closing_ends_it(cx: &mu
     click(cx, "template-open-kindless");
     delete_open(&mut helm, "kindless", &[], cx);
     assert!(drawn(cx, "templates-undo-notice"), "the premise");
-    let closed = cx.update(|_, cx| cx.global::<Opened>().0.clone());
+    let closed = cx.update(|_, cx| {
+        layers::last_opened_weak::<super::dialog::TemplatesDialog>(cx).expect("a dialog was opened")
+    });
     keys(cx, "escape");
     assert!(!any_open(cx));
     assert!(closed.upgrade().is_none(), "the closed dialog is gone");
@@ -351,7 +353,8 @@ fn the_label_the_user_saw_decides_the_undo(cx: &mut TestAppContext) {
             click(cx, "template-open-webbuilder");
         }
         cx.update(|window, cx| {
-            let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+            let dialog = layers::last_opened::<super::dialog::TemplatesDialog>(cx)
+                .expect("a dialog is open");
             dialog.update(cx, |dialog, cx| dialog.delete_editor(kind, window, cx));
         });
         let (id, _) = one(&mut helm, Method::Delete, &format!("/api/templates/{name}"));
@@ -529,7 +532,8 @@ fn a_bolt_write_waits_for_a_delete_in_flight(cx: &mut TestAppContext) {
     click(cx, "templates-delete");
     one(&mut helm, Method::Delete, "/api/templates/codex-deep");
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        let dialog =
+            layers::last_opened::<super::dialog::TemplatesDialog>(cx).expect("a dialog is open");
         dialog.update(cx, |dialog, cx| dialog.toggle_mark("webbuilder", false, cx));
     });
     settle(cx);

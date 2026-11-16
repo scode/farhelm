@@ -19,7 +19,8 @@ use super::draft::{DestinationKind, LaunchDraft, Mode, Tab};
 use super::request::{
     CONVERSATION_IN_CHECKOUT, Preview, SELECT_REPOSITORY, Target, UNVERIFIED_HOST, WAIT_FOR_PREVIEW,
 };
-use super::view_tests::{Opened, answer_catalog, draft, launcher_on, name_of, read, shown_refusal};
+use super::view_tests::{answer_catalog, draft, launcher_on, name_of, read, shown_refusal};
+use crate::layers;
 use crate::test_support::{self, settle};
 
 fn repo(owner: &str, name: &str) -> GithubRepo {
@@ -371,10 +372,8 @@ fn preview_reply(cwd: &str, basename: &str, revision: i64) -> Value {
 /// Edit the open launcher's draft as `edit` does, then let it redraw.
 fn edit(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             edit(&mut launcher.draft);
             cx.notify();
@@ -719,10 +718,7 @@ fn what_a_preview_answers_for_asks_again_and_late_answers_never_apply(cx: &mut T
     assert_eq!(checkout_folder(cx), "/work/bar-fix");
 
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|o| o.0.upgrade())
-            .unwrap();
+        let launcher = layers::last_opened::<super::view::Launcher>(cx).unwrap();
         launcher.update(cx, |launcher, cx| {
             launcher.observe_checkout_config_revision(5, cx)
         });
@@ -1388,10 +1384,8 @@ fn closing_the_launcher_cancels_the_guarded_answers_waiting_launch(cx: &mut Test
 fn another_preview_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppContext) {
     let (mut helm, cx, preview) = guarded_waiting(cx);
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             launcher.observe_checkout_config_revision(9, cx)
         });

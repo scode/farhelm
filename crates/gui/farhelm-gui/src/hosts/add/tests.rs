@@ -4,9 +4,9 @@
 //!
 //! The dialog is opened the way the host rail's Add host will open it: a button in a root view of the test's own,
 //! whose click takes a mark and calls [`super::open`] with its own focus handle. The tests reach the open dialog
-//! through [`Opened`], which only test builds record. Every step ends in one of the shared harness's step helpers, so
-//! the focus and layer invariants are checked after each. Typed text avoids `-` and spaces, which GPUI's simulated
-//! input reads as keystroke syntax rather than characters.
+//! through [`layers::last_opened`] (test builds only). Every step ends in one of the shared harness's step
+//! helpers, so the focus and layer invariants are checked after each. Typed text avoids `-` and spaces, which GPUI's
+//! simulated input reads as keystroke syntax rather than characters.
 //!
 //! The helpers are shared with the setup tests (`hosts/setup/tests.rs`), which go on from a probe's plan; the root
 //! view draws the Hosts panel beside Add host for them, since a setup refused after the user moved on shows there.
@@ -15,8 +15,8 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{CollectionState, HostView};
 use gpui::{
-    AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render,
-    Styled as _, TestAppContext, VisualTestContext, WeakEntity, Window, div, px, size,
+    AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, VisualTestContext, Window, div, px, size,
 };
 use serde_json::{Value, json};
 
@@ -26,17 +26,12 @@ use crate::drafts::DraftInput;
 use crate::focus::{self, Mark};
 use crate::hosts::HostsPanel;
 use crate::hosts::tests::{aliased, connected, host, hosts, nothing_in_flight, start_work};
+use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
     self, any_open, click, focused, focused_id, keys, label, one_command, settle, started,
 };
 use crate::{root, session};
-
-/// The dialog [`super::open`] opened last, recorded in test builds only, so a test (or a golden scene) can reach its
-/// fields and its key.
-pub(crate) struct Opened(pub(crate) WeakEntity<AddHostDialog>);
-
-impl Global for Opened {}
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -137,7 +132,7 @@ pub(crate) fn one_probe(helm: &mut FakeHelm) -> (u64, Value) {
 /// The open dialog's destination field as it reads now; panics if no dialog was opened.
 pub(crate) fn destination(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        let dialog = layers::last_opened::<AddHostDialog>(cx).expect("a dialog is open");
         dialog.read(cx).destination.input().text(cx).to_string()
     })
 }
@@ -145,7 +140,7 @@ pub(crate) fn destination(cx: &mut VisualTestContext) -> String {
 /// The open dialog's alias field as it reads now; panics if no dialog was opened.
 pub(crate) fn alias(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        let dialog = layers::last_opened::<AddHostDialog>(cx).expect("a dialog is open");
         dialog.read(cx).alias.input().text(cx).to_string()
     })
 }
@@ -153,7 +148,7 @@ pub(crate) fn alias(cx: &mut VisualTestContext) -> String {
 /// The open dialog's host-add key, which its probe runs under and its setup continues under.
 pub(crate) fn dialog_key(cx: &mut VisualTestContext) -> crate::operations::OpKey {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        let dialog = layers::last_opened::<AddHostDialog>(cx).expect("a dialog is open");
         dialog.read(cx).key.clone()
     })
 }
@@ -161,7 +156,10 @@ pub(crate) fn dialog_key(cx: &mut VisualTestContext) -> crate::operations::OpKey
 /// The work in flight on the open dialog's key.
 pub(crate) fn probe_work(cx: &mut VisualTestContext) -> Option<Work> {
     cx.update(|_, cx| {
-        let key = cx.global::<Opened>().0.upgrade()?.read(cx).key.clone();
+        let key = layers::last_opened::<AddHostDialog>(cx)?
+            .read(cx)
+            .key
+            .clone();
         session::current_operations(cx)?.read(cx).in_flight(&key)
     })
 }
@@ -174,7 +172,7 @@ pub(crate) fn alias_focused(cx: &mut VisualTestContext) -> bool {
 /// Whether the open dialog's field that `field` picks holds focus.
 fn field_focused(cx: &mut VisualTestContext, field: fn(&AddHostDialog) -> &DraftInput) -> bool {
     cx.update(|window, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        let dialog = layers::last_opened::<AddHostDialog>(cx).expect("a dialog is open");
         field(dialog.read(cx))
             .input()
             .focus_handle(cx)
@@ -672,7 +670,7 @@ fn the_ssh_help_link_shows_the_drafts_commands_and_closing_returns_to_the_draft(
 /// The SSH help link's focus handle in the open Add host dialog, which closing SSH help returns focus to.
 fn ssh_help_link(cx: &mut VisualTestContext) -> FocusHandle {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        let dialog = layers::last_opened::<AddHostDialog>(cx).expect("a dialog is open");
         dialog.read(cx).ssh_help.clone()
     })
 }

@@ -13,6 +13,7 @@ use serde_json::json;
 use super::draft::LaunchDraft;
 use super::view::{recent_folders_for_tests as recent_folders, tail_label_for_tests as tail_label};
 use super::view_tests::{draft, fixture_hosts, launcher_with_hosts, name_of, read, shown_refusal};
+use crate::layers;
 use crate::test_support::{self, keys, settle};
 
 // ---- The rules -----------------------------------------------------------------------------------------------------
@@ -384,16 +385,12 @@ fn escape_and_tab_close_the_list_first(cx: &mut TestAppContext) {
     keys(cx, "escape");
     assert!(!list_shown(cx), "Escape closes the list");
     assert!(
-        cx.update(|_, cx| cx
-            .try_global::<super::view_tests::Opened>()
-            .is_some_and(|opened| opened.0.upgrade().is_some())),
+        cx.update(|_, cx| layers::last_opened::<super::view::Launcher>(cx).is_some()),
         "and leaves the launcher open"
     );
     keys(cx, "escape");
     assert!(
-        cx.update(|_, cx| cx
-            .try_global::<super::view_tests::Opened>()
-            .is_none_or(|opened| opened.0.upgrade().is_none())),
+        cx.update(|_, cx| layers::last_opened::<super::view::Launcher>(cx).is_none()),
         "a second Escape closes the launcher"
     );
 }

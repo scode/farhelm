@@ -264,7 +264,7 @@ fn open_dialog(
         dialog.show(section, window, cx);
     });
     #[cfg(test)]
-    cx.set_global(tests::Opened(dialog.downgrade()));
+    layers::record_opened(&dialog, cx);
     Some((layer, dialog))
 }
 
@@ -337,10 +337,7 @@ pub(crate) fn auto_update_command()
 /// decided for this machine's platform, and a test of that same platform would pass without testing anything.
 #[cfg(test)]
 pub(crate) fn decide_tunnels_for_opened(platform: Platform, cx: &mut App) {
-    match cx
-        .try_global::<tests::Opened>()
-        .and_then(|opened| opened.0.upgrade())
-    {
+    match layers::last_opened::<SettingsDialog>(cx) {
         Some(dialog) => dialog.update(cx, |dialog, cx| dialog.decide_tunnels_for(platform, cx)),
         None => panic!("no Settings dialog is open to decide its tunnel switch for"),
     }
@@ -351,9 +348,7 @@ pub(crate) fn decide_tunnels_for_opened(platform: Platform, cx: &mut App) {
 /// the list instead.
 #[cfg(test)]
 pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
-    let recipes = cx
-        .try_global::<tests::Opened>()
-        .and_then(|opened| opened.0.upgrade())
+    let recipes = layers::last_opened::<SettingsDialog>(cx)
         .and_then(|dialog| dialog.read(cx).recipes.clone());
     match recipes {
         Some(recipes) => recipes.update(cx, |recipes, cx| recipes.open_editor(None, window, cx)),

@@ -425,11 +425,11 @@ pub(crate) fn open_menu(
 pub(crate) fn question(name: &str) -> Question<String> {
     Question::new(
         "Delete it?",
-        Answer {
-            label: "Delete".into(),
-            help: HoverHelp::tooltip("Delete it for good"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Delete",
+            HoverHelp::tooltip("Delete it for good"),
+            Tier::Danger,
+        ),
         name.to_string(),
     )
     .summary(name.to_string())

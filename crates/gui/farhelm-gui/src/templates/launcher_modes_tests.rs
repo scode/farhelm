@@ -27,6 +27,7 @@ use crate::actions::SEQUENCE_PREFIX_CHORD;
 use crate::launcher::draft::Mode;
 use crate::launcher::entry::{open_clone, open_replace_with};
 use crate::launcher::view_tests::{draft, fixture_hosts, search_focused, search_text};
+use crate::layers;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences_state, session};
 use crate::test_support::{self, any_open, keys, settle, started};
@@ -280,10 +281,7 @@ fn a_number_key_does_nothing_while_a_dialog_is_open_over_the_launcher(cx: &mut T
     settle(cx);
     assert!(opened.is_some(), "the premise: Templates opened over Clone");
     let templates_open = |cx: &mut VisualTestContext| {
-        cx.update(|_, cx| {
-            cx.try_global::<super::dialog::Opened>()
-                .is_some_and(|opened| opened.0.upgrade().is_some())
-        })
+        cx.update(|_, cx| layers::last_opened::<super::dialog::TemplatesDialog>(cx).is_some())
     };
     assert!(templates_open(cx), "the premise: the dialog is open");
     number_key(cx, 2);

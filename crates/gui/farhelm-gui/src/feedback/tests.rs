@@ -7,8 +7,8 @@
 //! takes a mark and calls [`super::open`] with its own focus handle (the Help menu's own tests open it from the real
 //! menu). The helm is the helm client's fake, which replies to `POST /api/feedback` as each test says, so nothing
 //! reaches a network; the helm's own forwarding is covered by its tests against a stand-in endpoint. The tests reach
-//! the open dialog through [`Opened`], which only test builds record. Every step ends in one of the shared harness's
-//! step helpers, so the focus and layer invariants are checked after each.
+//! the open dialog through [`layers::last_opened`] (test builds only). Every step ends in one of the
+//! shared harness's step helpers, so the focus and layer invariants are checked after each.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
@@ -18,8 +18,8 @@ use farhelm_proto::feedback::{
 };
 use farhelm_proto::ui_channel::{CollectionChanges, Preferences};
 use gpui::{
-    Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render, Styled as _,
-    TestAppContext, Toggled, VisualTestContext, WeakEntity, Window, div, px, size,
+    Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render, Styled as _,
+    TestAppContext, Toggled, VisualTestContext, Window, div, px, size,
 };
 use serde_json::{Value, json};
 
@@ -35,11 +35,6 @@ use crate::session_list::tests::preferences_state;
 use crate::test_support::{
     self, any_open, click, focused, focused_id, frame, keys, label, one_command, settle, started,
 };
-
-/// The dialog [`super::open`] opened last, recorded in test builds only, so a test can read its fields.
-pub(super) struct Opened(pub(super) WeakEntity<FeedbackDialog>);
-
-impl Global for Opened {}
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -130,10 +125,7 @@ fn open_dialog(cx: &mut VisualTestContext) {
 
 /// The dialog opened last, which must still be open.
 fn dialog(cx: &mut VisualTestContext) -> Entity<FeedbackDialog> {
-    let dialog = cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-    });
+    let dialog = cx.update(|_, cx| layers::last_opened::<FeedbackDialog>(cx));
     dialog.expect("the premise: a dialog is open")
 }
 

@@ -966,11 +966,11 @@ pub(super) fn prompt_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     let mark = Mark::take(cx);
     let question = Question::new(
         "Delete session?",
-        Answer {
-            label: "Delete".into(),
-            help: HoverHelp::tooltip("Delete the session"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Delete",
+            HoverHelp::tooltip("Delete the session"),
+            Tier::Danger,
+        ),
         "api-refactor".to_string(),
     )
     .summary("api-refactor, on this machine")
@@ -986,11 +986,11 @@ pub(super) fn prompt_host_text_setup(_: &SceneState, window: &mut Window, cx: &m
     let title = HostText::from_host("invoice\u{202E}fdp.exe");
     let question = Question::new(
         "Delete session?",
-        Answer {
-            label: "Delete".into(),
-            help: HoverHelp::tooltip("Delete the session"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Delete",
+            HoverHelp::tooltip("Delete the session"),
+            Tier::Danger,
+        ),
         "invoice".to_string(),
     )
     .summary(
@@ -1056,10 +1056,8 @@ impl Render for PlaceholderBody {
 /// Set up, focus on Set up.
 pub(super) fn prompt_body_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     let mark = Mark::take(cx);
-    let answer = |label: &'static str, help: &'static str, tier: Tier| Answer {
-        label: label.into(),
-        help: HoverHelp::tooltip(help),
-        tier,
+    let answer = |label: &'static str, help: &'static str, tier: Tier| {
+        Answer::new(label, HoverHelp::tooltip(help), tier)
     };
     let question = Question::new(
         "Set up host",
@@ -1135,11 +1133,11 @@ pub(super) fn anchored_prompt_setup(state: &SceneState, window: &mut Window, cx:
     let title = HostText::from_host("migrate auth tokens");
     let question = Question::new(
         "Delete confirmation",
-        Answer {
-            label: "Confirm delete".into(),
-            help: HoverHelp::tooltip("Delete this session and its state now"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Confirm delete",
+            HoverHelp::tooltip("Delete this session and its state now"),
+            Tier::Danger,
+        ),
         "s1".to_string(),
     )
     .line("Still running \u{2014} deleting kills the agent:")
@@ -1177,10 +1175,8 @@ pub(super) fn inline_prompt(state: &SceneState, _: &mut Window, cx: &mut App) ->
 pub(super) fn inline_prompt_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let mark = Mark::take(cx);
     let host = HostText::from_host("Local (this machine)");
-    let answer = |label: &'static str, help: &'static str, tier: Tier| Answer {
-        label: label.into(),
-        help: HoverHelp::tooltip(help),
-        tier,
+    let answer = |label: &'static str, help: &'static str, tier: Tier| {
+        Answer::new(label, HoverHelp::tooltip(help), tier)
     };
     let question = Question::new(
         "Confirm YOLO launch",

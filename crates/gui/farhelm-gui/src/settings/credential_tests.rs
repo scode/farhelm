@@ -14,9 +14,10 @@ use serde_json::{Value, json};
 use super::Section;
 use super::credentials::Editor;
 use super::tests::{
-    Opened, SELECT_ALL, available, drawn, fill, label_of, open_rail, open_settings, painted, reach,
+    SELECT_ALL, available, drawn, fill, label_of, open_rail, open_settings, painted, reach,
     section_button, sent,
 };
+use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{click, focused_id, keys, settle};
@@ -107,7 +108,7 @@ fn editor_start_focused(cx: &mut VisualTestContext) -> bool {
 /// The open credential editor.
 fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx).expect("Settings is open");
         let credentials = dialog
             .read(cx)
             .credentials
@@ -120,7 +121,7 @@ fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
 /// The key the Tensorlake API key form's draft holds. The field is masked, so what it paints cannot show it.
 fn key_typed(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx).expect("Settings is open");
         let credentials = dialog
             .read(cx)
             .credentials
