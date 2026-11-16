@@ -46,7 +46,7 @@ pub(crate) struct ProbeRequest {
     /// host entry (see `crate::store::NewHostEntry`): an existing entry for
     /// the destination is then refused instead of set up again, and the new
     /// entry gets the alias. Every other caller of this request (a host
-    /// row's "set up again", update confirmation, a browser tab from before
+    /// row's "set up again", update confirmation, an old browser page from before
     /// this field existed) leaves it out and keeps the converging behavior.
     #[serde(default)]
     pub(super) new_entry: Option<NewEntryRequest>,

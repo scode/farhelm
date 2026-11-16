@@ -404,8 +404,8 @@ fn no_key_store() -> SshKeyStatus {
 /// An existing key as the UI shows it, with its registration command.
 ///
 /// The command carries the public key's text rather than its file's path,
-/// which `tl sbx ssh keys add` accepts too: the browser showing Settings is
-/// often on another machine than the helm, and a path would only mean
+/// which `tl sbx ssh keys add` accepts too: the old browser client often showed Settings
+/// on another machine than the helm, and a path would only mean
 /// something on the helm's machine. The key line is quoted as one shell word.
 fn ready(key: ssh_key::SshKey, tag: &str) -> SshKeyStatus {
     let name = key_name(tag);

@@ -136,7 +136,7 @@ impl GithubRepo {
 
 /// Why [`parse_github_repo`] refused an identifier.
 ///
-/// The variants exist so callers (the REST edge answering the browser, the
+/// The variants exist so callers (the REST edge answering the client, the
 /// supervisor re-validating on arrival) can give an actionable answer for
 /// each failure class without parsing error prose. Characters rejected by
 /// the per-component alphabets — whitespace, control characters, `%`
@@ -439,13 +439,13 @@ fn slugify(value: &str) -> String {
 pub struct GithubCheckoutIntent {
     /// The validated repository to clone.
     pub repo: GithubRepo,
-    /// The preview binding the browser was shown and the user launched
+    /// The preview binding the client was shown and the user launched
     /// with; the supervisor re-verifies it before allocating.
     pub preview: CheckoutPreviewBinding,
 }
 
 /// The preview binding a fresh-checkout create carries: the exact
-/// directory the browser showed, bound to the helm configuration revision
+/// directory the client showed, bound to the helm configuration revision
 /// it was computed under.
 ///
 /// This is a precondition, not a reservation — nothing on the filesystem
@@ -461,7 +461,7 @@ pub struct CheckoutPreviewBinding {
     /// The proposed directory basename under that root.
     pub basename: String,
     /// The absolute session working directory that would result
-    /// (`canonical_root/basename`), as the browser displayed it.
+    /// (`canonical_root/basename`), as the client displayed it.
     pub cwd: String,
     /// The helm checkout-configuration revision the preview was computed
     /// under. Opaque to the client: compared, never interpreted.
@@ -533,7 +533,7 @@ pub struct WorkingCopyInfo {
 }
 
 /// The REST-fresh create request shape for a GitHub checkout, mirroring
-/// what the browser sends: the repository text exactly as typed, the optional
+/// what the client sends: the repository text exactly as typed, the optional
 /// title, and the preview the user accepted.
 ///
 /// `repo` is deliberately the RAW `owner/repo` text, not a validated

@@ -647,7 +647,7 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
 /// makes this type meaningful as a long-lived identity rather than a mere
 /// row position: without it, SQLite may recycle a plain `INTEGER PRIMARY
 /// KEY` after a delete, and a recycled id handed to whatever keys off it
-/// later (a connection actor, a REST reference a browser tab is still
+/// later (a connection actor, a REST reference a client is still
 /// holding) would silently start describing a DIFFERENT host. Removing and
 /// re-registering the same destination is exactly PLAN_M6.md's supported
 /// path (SPEC.md's remove-merely-forgets contract), so this collision is
@@ -1259,7 +1259,7 @@ pub struct CachedSlice {
 /// [`crate::aggregate`] — two sources, one answer. A filter defined in
 /// either one alone would have to be re-implemented in the other, and the
 /// failure mode of a disagreement is silent: a session that matches on one
-/// side and not on the other is simply missing from the page, with the
+/// side and not on the other is simply missing from the list, with the
 /// count still claiming it. So the predicate is defined once, here, and
 /// BOTH sources call [`Self::matches`].
 ///
@@ -3439,8 +3439,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
     }
     if version == 17 {
         // Compactness is a boolean presentation preference, but it belongs
-        // in the same shared row as sort and selection so a browser and the
-        // desktop client seed the same layout after their next read.
+        // in the same shared row as sort and selection so every client
+        // seeds the same layout after its next read.
         tx.execute_batch(
             "ALTER TABLE preferences ADD COLUMN compact INTEGER CHECK (compact IN (0, 1)); \
              PRAGMA user_version = 18;",
@@ -13811,7 +13811,7 @@ mod tests {
         );
     }
 
-    /// A stale browser observation must not move the shared seen stamp
+    /// A stale client observation must not move the shared seen stamp
     /// backward: otherwise an older activity view can make the session show
     /// as unread again.
     #[farhelm_testtrace::test]

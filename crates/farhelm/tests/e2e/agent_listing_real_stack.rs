@@ -31,7 +31,7 @@
 //! given — both the two read-only listings (`hosts`/`sessions`) and, in
 //! this file's second test, the three lifecycle verbs
 //! (`rename`/`stop`), each verified against the real,
-//! post-mutation state a browser's own REST call would see.
+//! post-mutation state the desktop app's own REST call would see.
 //!
 //! # Why no terminal is opened on the asking session
 //!
@@ -295,7 +295,8 @@ async fn await_cli_approval(
 /// The real host-add CLI waits through both relay hops and reports the
 /// user's edited destination as accepted, never installed. Deny is a
 /// nonzero declined result. Approval itself does not contact/install a host;
-/// the ordinary GUI continuation is covered by the browser provisioning test.
+/// the ordinary GUI continuation is covered by the desktop app's end-to-end
+/// smoke (its `farhelm agent host add` card step).
 #[farhelm_testtrace::test]
 async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -770,7 +771,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// Spec: the shipped `farhelm agent rename/stop`, run against the
 /// real stack, each produce the UI-visible effect `GET /api/sessions`
 /// reports — a real rename and a real process kill —
-/// through the exact assembly a browser's own REST call would use.
+/// through the exact assembly the desktop app's own REST call would use.
 ///
 /// This is the lifecycle counterpart to
 /// [`the_shipped_agent_commands_are_answered_by_the_real_helm`], and

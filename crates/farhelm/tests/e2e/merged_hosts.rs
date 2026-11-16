@@ -126,7 +126,7 @@ async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> ser
 /// its host and sessions on both hosts operable.
 ///
 /// This is M6's first acceptance criterion reduced to what one test can
-/// prove without a browser: a host registered through the helm's API joins
+/// prove without the desktop app: a host registered through the helm's API joins
 /// the reserved local one, both hosts connect over their genuinely different
 /// transports, creates route to the host the body names, the list is one
 /// order across both, and a lifecycle operation reaches the right

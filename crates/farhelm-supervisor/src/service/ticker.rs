@@ -224,8 +224,8 @@ const SAMPLE_TAIL_BUDGET: usize = 16;
 /// most ONCE per host refresh that found anything different, however many
 /// sessions moved. So the wake is per refresh, not per session: without
 /// this quantum, a host with even one busy agent would wake every
-/// connected UI client on every drain — a browser re-render every few
-/// seconds for as long as anyone is working. A minute means an otherwise
+/// connected UI client on every drain, every few seconds for as long as
+/// anyone is working. A minute means an otherwise
 /// settled fleet goes back to waking on real changes.
 ///
 /// A minute is also all the resolution the consumer needs: this exists to

@@ -114,7 +114,8 @@ fn write_links(out: &mut Vec<u8>, links: &[Link]) {
     }
 }
 
-/// Prefix a complete row body for the browser's later lazy indexing.
+/// Prefix a complete row body with its length, which let the old browser
+/// client index history lazily.
 /// The optional underline preserves absent versus explicitly default,
 /// while foreground and background omit their default representation.
 fn write_row(out: &mut Vec<u8>, row: &Row) {
@@ -200,7 +201,8 @@ impl<'a> Reader<'a> {
     }
 
     /// All counters must survive JavaScript's integer representation
-    /// exactly, including an empty history append's first line.
+    /// exactly (the old browser client's bound, [`GRID_MAX_LINE_NUMBER`]),
+    /// including an empty history append's first line.
     fn counter(&mut self) -> Result<u64, GridError> {
         let value = u64::from_le_bytes(self.array()?);
         if value > GRID_MAX_LINE_NUMBER {

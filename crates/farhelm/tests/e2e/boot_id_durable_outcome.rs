@@ -325,10 +325,12 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         .await
         .expect_err("an interrupted session has no terminal to attach to")
         .to_string();
-    // The refusal is what a browser paints when it opens the session, so
-    // its wording is part of the contract: it names the reboot and the way
-    // forward, and never claims to know that the agent ended BEFORE the
-    // restart — the ordering SPEC.md's "interrupted" exists to leave open.
+    // The helm relays the refusal verbatim as the `detached` reason (the old
+    // browser client painted it when it opened the session; the desktop app
+    // shows its interrupted card and only logs this text), so its wording is
+    // part of the contract: it names the reboot and the way forward, and
+    // never claims to know that the agent ended BEFORE the restart — the
+    // ordering SPEC.md's "interrupted" exists to leave open.
     // The way forward is worded per the session's restart offer, and this
     // plain-shell session cannot resume anything, so what it is promised is
     // Replace starting it over — never a resume it would not get.

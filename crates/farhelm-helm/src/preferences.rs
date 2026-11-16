@@ -733,7 +733,7 @@ mod tests {
         );
     }
 
-    /// The helm, rather than only the settings page, validates the opening
+    /// The helm, rather than only the client's Settings, validates the opening
     /// policy. A refused list must leave every field in that sparse patch
     /// unchanged; clearing the list is different from restoring its default.
     #[farhelm_testtrace::test]

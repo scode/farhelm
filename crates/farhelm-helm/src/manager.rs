@@ -1732,7 +1732,7 @@ impl ConnectionManager {
     ///
     /// Handed out as the `Arc` rather than as a borrow because a subscriber
     /// outlives the request that created it: the socket task holds this for
-    /// as long as a browser stays connected.
+    /// as long as a client stays connected.
     pub fn events(&self) -> &Arc<FleetEvents> {
         &self.events
     }
@@ -2475,7 +2475,7 @@ impl ConnectionManager {
     /// from what the helm has recorded, so a delete that recorded nothing
     /// leaves the row listed until the owning host's next refresh — and a
     /// client that deletes and immediately re-creates then sees BOTH, which
-    /// is indistinguishable from a duplicate and is exactly how the browser
+    /// is indistinguishable from a duplicate and is exactly how the old browser
     /// suite found this.
     ///
     /// Same claim discipline, same lock, same epoch bump as a seed: the
@@ -11490,14 +11490,15 @@ mod tests {
         assert_eq!(ids, vec!["kept"], "the previous cache must survive intact");
     }
 
-    /// Why: a list refresh used to check only an id's length and
-    /// uniqueness, while a create's reply also refused empty and
-    /// control-character ids, and neither refused `.` or `..`, which the
-    /// browser's percent-encoding cannot keep from resolving as a dot
-    /// segment. Spec: a listing that contains any id breaking
-    /// `session_cache::session_id_problem`'s rule is a refused refresh,
-    /// naming the problem, and the host's previous cache survives intact
-    /// (dropping just the bad row would read that session as ended).
+    /// Why: a list refresh used to check only an id's length and uniqueness,
+    /// while a create's reply also refused empty and control-character ids,
+    /// and neither refused `.` or `..`, which the old browser client's
+    /// percent-encoding could not keep from resolving as a dot segment (the
+    /// desktop app's `ApiPath` refuses them outright). Spec: a listing that
+    /// contains any id breaking `session_cache::session_id_problem`'s rule is
+    /// a refused refresh, naming the problem, and the host's previous cache
+    /// survives intact (dropping just the bad row would read that session as
+    /// ended).
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_refresh_listing_an_unusable_session_id_keeps_the_previous_cache() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {

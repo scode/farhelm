@@ -1788,7 +1788,7 @@ async fn handle_attach(
     //
     // Nothing here touches the losers' input routes: those are
     // connection-local, and a connection that swept away its own
-    // earlier channels (a browser reload attaching under a new
+    // earlier channels (a client reattaching under a new
     // lease) simply carries stale routes until their next frame,
     // which the input arm drops on the same two-part ownership
     // check that has always guarded it. A stale route can never
@@ -2006,10 +2006,11 @@ async fn handle_resize(
     // Same trust boundary as input, and the same two-part check
     // as the Data arm: `same_channel` identifies the owning
     // connection, and the channel id tells apart clients
-    // multiplexed over ONE connection — every browser tab rides
-    // the helm's single supervisor connection, so a
-    // connection-level check alone would let a tab that just
-    // lost a takeover reflow the winner's terminal.
+    // multiplexed over ONE connection — every attachment of the
+    // helm's clients rides the helm's single supervisor
+    // connection, so a connection-level check alone would let a
+    // client that just lost a takeover reflow the winner's
+    // terminal.
     //
     // The check and the resize run UNDER one hold of the
     // attachments lock. Checking ownership and then resizing after
@@ -2810,7 +2811,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         // scan, and proposes the deterministic name. NOTHING is created:
         // preview is a precondition, not a reservation. The claim context
         // in the reply is a placeholder the HELM overwrites with its
-        // authoritative (host id, incarnation) before the browser sees it —
+        // authoritative (host id, incarnation) before the client sees it —
         // the incarnation is a helm-side fact this process cannot know.
         ControlMsg::GithubCheckoutPreview {
             req_id,

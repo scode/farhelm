@@ -207,7 +207,7 @@ fn the_keypad_types_its_characters_in_either_keypad_mode() {
 
 /// The viewer's platform changes some keys' bytes, and the encoder takes it
 /// from each `key` message's `mac` field: off a Mac, Alt is Meta (ESC plus
-/// the key); on a Mac, Option is left to the browser, and Ctrl+Option+Shift
+/// the key); on a Mac, Option is left to the client, and Ctrl+Option+Shift
 /// with `_` is plain Ctrl+_. One encoder serves both, since the field is per
 /// message.
 #[test]
@@ -248,7 +248,7 @@ fn alt_is_meta_only_off_a_mac() {
     assert_eq!(encode_on(true, underscore()), b"\x1f");
 }
 
-/// Text (typed characters the browser resolved, composition results) is
+/// Text (typed characters the client resolved, composition results) is
 /// written exactly as sent, as UTF-8, control characters included.
 #[test]
 fn text_is_written_as_is() {
@@ -339,9 +339,10 @@ fn an_end_of_paste_marker_split_across_parts_is_still_removed_whole() {
     assert_eq!(part("x\x1b\x1b[2", true), b"[20x[2");
 }
 
-/// The page checks a paste for emptiness before sanitizing it, so a
-/// paste of nothing but ESC still writes the two markers (around nothing);
-/// the emptiness check must stay on the text as sent.
+/// The old browser client checked a paste for emptiness before sanitizing
+/// it, and the encoder keeps that order, so a paste of nothing but ESC still
+/// writes the two markers (around nothing); the emptiness check must stay on
+/// the text as sent.
 #[test]
 fn a_paste_that_sanitizes_to_nothing_still_writes_its_markers() {
     let bracketed = Modes {
@@ -377,7 +378,7 @@ fn paste_open_spans_the_first_part_to_the_last() {
 
 /// Pasted text must not be able to end the bracketed paste around it and
 /// have what follows run as typed commands: every ESC is dropped, an
-/// end-of-paste marker whole, as Farhelm's page does.
+/// end-of-paste marker whole, as the old browser client's sanitizer did.
 #[test]
 fn pasted_text_cannot_close_the_bracketed_paste() {
     let bracketed = Modes {

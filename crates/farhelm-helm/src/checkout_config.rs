@@ -2,18 +2,18 @@
 //! root) and WHAT runs after cloning (an optional post-clone shell command),
 //! plus the `farhelm helm checkout-config` CLI that edits it.
 //! Global prepared-checkout and agent-trust switches are frozen for each create;
-//! their dedicated browser routes do not change destination-preview revisions.
+//! their dedicated client routes do not change destination-preview revisions.
 //!
 //! The shape is a global setting with optional per-host overrides, stored in
 //! helm.db (tables introduced in schema 27 — see
 //! [`crate::store::CHECKOUT_CONFIG_SCHEMA`] for their current shape). Preview
 //! and create consume the same resolved snapshot.
-//! The running helm observes CLI writes and invalidates browser readers; this
+//! The running helm observes CLI writes and invalidates client readers; this
 //! module deliberately touches no host, creates no directories, and never
 //! runs the configured hook.
-//! Dedicated authenticated browser routes expose the all-hosts root and
+//! Dedicated authenticated client routes expose the all-hosts root and
 //! post-clone command, and each host's own root alongside its global default.
-//! Per-host post-clone overrides remain outside browser replies.
+//! Per-host post-clone overrides remain outside client replies.
 //!
 //! ## Inheritance semantics (binding)
 //!
@@ -996,7 +996,7 @@ pub(crate) async fn put_checkout_root(
 
 /// The host editor needs the stored override and the default separately:
 /// an inherited folder stays an empty draft even when the default is set.
-/// Hook configuration must never become part of this browser reply.
+/// Hook configuration must never become part of this client reply.
 #[derive(serde::Serialize)]
 struct HostCheckoutRootState {
     root: Option<String>,
@@ -1131,7 +1131,7 @@ pub(crate) async fn watch_revision(
 }
 
 /// Advance only after a successful database read and notify only on a change.
-/// The caller establishes its baseline before serving browsers, closing the
+/// The caller establishes its baseline before serving clients, closing the
 /// startup gap in which a preview could otherwise precede the first observation.
 async fn publish_revision_change(
     store: &HelmStore,
@@ -1587,7 +1587,7 @@ fn validate_root_path(path: &str) -> anyhow::Result<()> {
 }
 
 /// Validate before a write so HTTP can distinguish a user's refused value
-/// from database failures, while CLI and browser setters keep one contract.
+/// from database failures, while CLI and client setters keep one contract.
 fn validate_root(root: &str) -> anyhow::Result<()> {
     validate_root_path(root)?;
     if root.len() > MAX_ROOT_BYTES {
@@ -1801,7 +1801,7 @@ mod root_route_tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    /// Exercise authentication, extraction and the registered browser route,
+    /// Exercise authentication, extraction and the registered client route,
     /// rather than passing an already-decoded value straight to its handler.
     fn request(method: &str, body: serde_json::Value) -> Request<Body> {
         Request::builder()
@@ -1828,7 +1828,7 @@ mod root_route_tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
-    /// The browser sees the global folder only, even when a host overrides it
+    /// The client sees the global folder only, even when a host overrides it
     /// and both scopes hold executable hook text. A snapshot serialization
     /// would leak these values; exact reply equality rules that mechanism out.
     #[farhelm_testtrace::test]
@@ -2019,7 +2019,7 @@ mod root_route_tests {
 
     /// Authentication and exact request grammar protect the configuration
     /// write. Missing root cannot accidentally clear it, and extra private
-    /// fields cannot be accepted as ignored browser configuration.
+    /// fields cannot be accepted as ignored client configuration.
     #[farhelm_testtrace::test]
     async fn route_requires_authentication_and_explicit_root() {
         let harness = rest_harness::idle_helm().await;
@@ -2621,7 +2621,7 @@ mod tests {
     }
 
     /// CLI writes use a separate database connection. Only committed revision
-    /// changes may invalidate browsers; failed reads must leave the observation
+    /// changes may invalidate clients; failed reads must leave the observation
     /// pending so a later successful read can still publish it.
     #[tokio::test]
     async fn checkout_revision_feed_observes_external_changes_and_preserves_failed_reads() {

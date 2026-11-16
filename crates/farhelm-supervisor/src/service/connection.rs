@@ -1525,11 +1525,12 @@ fn detach_naturally(
 /// halves matter, because channel ids are unique only within a
 /// connection, so `same_channel` is what identifies the owning
 /// connection and the channel id is what tells apart clients multiplexed
-/// over one connection (every browser tab rides the helm's single
-/// supervisor connection). The check and the state change run under one
-/// lock hold for the same reason too, though the stakes are lower here
-/// than for input or resize: the worst a stale pause could do is silence
-/// a terminal the sender no longer owns until its real owner resumes it.
+/// over one connection (every attachment of the helm's clients rides the
+/// helm's single supervisor connection). The check and the state change
+/// run under one lock hold for the same reason too, though the stakes are
+/// lower here than for input or resize: the worst a stale pause could do
+/// is silence a terminal the sender no longer owns until its real owner
+/// resumes it.
 ///
 /// The lookup is by channel rather than by session id because
 /// `PauseOutput` carries no session id — unlike `Resize`, whose session id

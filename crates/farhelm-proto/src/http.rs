@@ -6,8 +6,8 @@
 //! error body, a header, a code in an error envelope, one label in the host
 //! list. Each one used to be spelled separately in both crates with nothing
 //! tying the two together: the helm's tests pinned its side, the UI's unit tests pinned its
-//! own copy, and the browser suite that would notice a mismatch is not part of
-//! CI. A rename on one side would therefore have compiled, passed, and quietly
+//! own copy, and the browser suite that would have noticed a mismatch was not
+//! part of CI. A rename on one side would therefore have compiled, passed, and quietly
 //! switched the UI's decision to its fallback. Defining them once here makes
 //! that rename a single edit.
 //!

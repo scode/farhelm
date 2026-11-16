@@ -19,7 +19,7 @@ name that boundary; waiting for readiness must not remove the behavior it exists
   a small readiness question. Centralize legitimate polling and observation delays; explain justified test-body sleeps
   with `// sleep-ok: <why>`.
 - Establish pointer and focus state before input when the test depends on them. Wait for the intended focus handoff
-  rather than relying on earlier browser activity or timing.
+  rather than relying on earlier activity or timing.
 - Do not write, or accept in review, a test that modifies the environment variables of the process running it. Make the
   code under test take the value by dependency injection instead. Code comments across the repository cite this rule;
   until 2026-10 it lived only in the maintainer's own global instructions, so agents without them never saw it.

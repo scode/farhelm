@@ -526,11 +526,11 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
 
 /// The composer reads its release-owned catalog and its successful-create
 /// suggestions through HTTP, rather than deriving either from a session list
-/// or browser-owned command rules.
+/// or client-owned command rules.
 ///
 /// This test keeps both routes on the real router. It proves the catalog is
 /// available without a create request and that history is scoped through the
-/// connected host identity before it becomes browser-visible.
+/// connected host identity before it becomes client-visible.
 #[farhelm_testtrace::test]
 async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
     let harness = rest_harness::idle_helm().await;
@@ -625,7 +625,7 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
 /// bypasses both the handler and the `CreateReq` struct's
 /// `#[serde(default)]` cols/rows fields entirely. That left the 80x24
 /// default — the size an agent's first output wraps to before any
-/// browser has attached and reported a real size — pinned nowhere.
+/// client has attached and reported a real size — pinned nowhere.
 /// This test closes that gap: it omits cols/rows/title from the
 /// request body, asserts the peer received exactly the defaults, and
 /// checks the JSON reply shape a caller actually depends on.
@@ -765,7 +765,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
 /// outcome, and nothing reaches the supervisor; the same create with `confirm_yolo` is
 /// dispatched; once the host allows YOLO without asking a YOLO create needs no override.
 ///
-/// Why: the header is the browser's only cue to show the confirmation (it is
+/// Why: the header is the client's only cue to show the confirmation (it is
 /// never read from text a supervisor could write), the unaccepted outcome is
 /// what lets the confirmed retry be a new request, and "nothing dispatched"
 /// is the whole point of refusing.
@@ -1121,7 +1121,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
 /// `HelmStore::record_create_history` directly: the write lives at the same
 /// instrumentation point as `launch_history`'s own recording
 /// (`sessions::do_create_session`), and what this test pins is that an
-/// ordinary browser-facing request reaches it — `store.rs`'s own
+/// ordinary client-facing request reaches it — `store.rs`'s own
 /// preference tests already cover the store function in isolation.
 #[farhelm_testtrace::test]
 async fn a_successful_structured_launch_remembers_its_permissions_choice() {
@@ -1774,7 +1774,7 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
     }
 }
 
-/// A completed delete that left a checkout in place reaches the browser as
+/// A completed delete that left a checkout in place reaches the client as
 /// a `notice` in the success body.
 ///
 /// Why it matters: SPEC.md "Managed checkouts" makes archiving never
@@ -1831,7 +1831,7 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
     peer.await.unwrap();
 }
 
-/// Why this matters: the browser's unconfirmed delete, and a confirmed one
+/// Why this matters: the desktop app's unconfirmed delete, and a confirmed one
 /// whose prompt promised less than what is alive by the time it lands, rely
 /// on the supervisor refusing, which only works if the helm forwards the
 /// precondition instead of dropping it. Spec: `?only_if_nothing_alive=true`
@@ -2994,7 +2994,7 @@ async fn spliced_replace_harness(
 /// deletes the source.
 ///
 /// Why it matters: axum drops a handler's future when the client goes away (a
-/// reload, a closed tab, the client's own request timeout on a slow create),
+/// dropped connection, the client's own request timeout on a slow create),
 /// and a replace is a create followed by a delete. Run on the request's task,
 /// a drop between the two left the new session created and the source never
 /// deleted, usually with no error anywhere (SPEC_impl.md "Who owns an
@@ -5148,10 +5148,11 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
 /// a wrapper — which is the whole reason `SessionRow` flattens
 /// `SessionInfo` instead of embedding it.
 ///
-/// Asserted on raw JSON rather than a decoded type, because the UI
-/// decodes JSON: a serialization change that a round trip through the
-/// same Rust types would hide is exactly what would break the list in
-/// the browser.
+/// Asserted on raw JSON rather than a decoded type, because the old
+/// browser UI decoded JSON, not proto types: a serialization change that a
+/// round trip through the same Rust types would hide is exactly what would
+/// have broken the list in that client. The desktop app decodes the same
+/// Rust type (`ui_channel::SessionRow`).
 #[farhelm_testtrace::test]
 async fn list_sessions_returns_the_merged_listing_object_shape() {
     let harness =
@@ -5268,7 +5269,7 @@ async fn each_listing_row_carries_its_own_hosts_identity() {
 /// JSON shape exhaustively (order, nesting, everything); what the helm
 /// still owes is exactly one HTTP-boundary check that THIS route does
 /// not drop or mangle the field on its way from the supervisor's
-/// `ListSessions` reply to the JSON body a browser decodes — this
+/// `ListSessions` reply to the JSON body a client decodes — this
 /// replaces an earlier version of the same check aimed at the bulk
 /// LISTING route, which no session view reads tabs from.
 #[farhelm_testtrace::test]
@@ -5370,16 +5371,18 @@ async fn get_session_carries_the_hosts_alias() {
 /// variant no earlier milestone had, and the stop annotation is a
 /// field nothing used to populate. Neither is invented, renamed, or
 /// dropped here — the supervisor is authoritative (SPEC.md), and this
-/// pins that the JSON the browser receives says exactly what the
+/// pins that the JSON the client receives says exactly what the
 /// supervisor said.
 ///
 /// Asserted on the raw JSON rather than a decoded `SessionInfo`,
-/// because the UI decodes JSON, not proto types: a serialization
-/// change that a round trip through the same Rust types would hide is
-/// precisely what would break the badge in the browser.
+/// because the old browser UI decoded JSON, not proto types: a
+/// serialization change that a round trip through the same Rust types
+/// would hide is precisely what would have broken the badge in that
+/// client. The desktop app decodes the same Rust type
+/// (`ui_channel::SessionRow`).
 ///
 /// As of PLAN_M6.md item 5 the claim is stronger than it was: these
-/// rows now reach the browser by way of helm.db's session cache, so
+/// rows now reach the client by way of helm.db's session cache, so
 /// they survive a serialize/store/deserialize round trip on the way.
 /// A status variant or annotation field that failed to persist would
 /// fail here too, which is exactly the coverage a durable cache of
@@ -6185,7 +6188,7 @@ async fn restart_with_an_invalid_selection_is_a_400_and_never_reaches_the_superv
     peer.await.unwrap();
 }
 
-/// A stale-offer refusal must reach the browser as a 409 carrying the
+/// A stale-offer refusal must reach the client as a 409 carrying the
 /// supervisor's own prose — that message names the CURRENT offer, and
 /// re-presenting it is the client's prescribed response (the wire
 /// vocabulary's staleness contract). A route that flattened it to a
@@ -8099,7 +8102,7 @@ async fn folder_checks_do_not_list_or_refine_history() {
 /// the ordinary `detached` notice, rather than closing bare.
 ///
 /// SPEC.md wants "no terminal to show and no pretense of one", and a
-/// silent close is exactly a pretense the browser would blame on the
+/// silent close is exactly a pretense the client would blame on the
 /// network. Riding the existing notice shape is also what lets the UI
 /// render this without a new message type.
 #[farhelm_testtrace::test]
@@ -9186,9 +9189,9 @@ async fn an_identity_less_entry_can_list_the_same_suffix_as_a_cached_entry() {
 /// helm already knew.
 ///
 /// This is the lost-restart-reply case, reduced to the fact that
-/// produced it. The browser suite's `a restart whose response is lost
-/// still recovers the terminal` restarts a LIVE session with the reply
-/// dropped on the client side, then reads the list and expects `alive`.
+/// produced it. The removed browser suite's `a restart whose response is lost
+/// still recovers the terminal` restarted a LIVE session with the reply
+/// dropped on the client side, then read the list and expected `alive`.
 /// The restart itself really happened — the supervisor relaunched, and
 /// the helm received and recorded the reply — but that reply carries
 /// `SessionStatus::Unknown` BY CONTRACT: at the instant it is built the
@@ -9296,7 +9299,7 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
 /// and the list therefore goes on saying `exited` after a restart that
 /// succeeded. A user watching that sees their own successful action
 /// look like a failed one, for as long as the cadence says — which is
-/// exactly what the browser suite caught, on one engine and not the
+/// exactly what the old browser suite caught, on one engine and not the
 /// other, because a one-shot assertion races the interval.
 ///
 /// The harness refreshes once an HOUR and this test never advances the

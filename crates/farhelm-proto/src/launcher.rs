@@ -1,9 +1,9 @@
-//! The launcher's rules that both the browser and the helm apply: the model
+//! The launcher's rules that both the desktop app and the helm apply: the model
 //! catalog's row type, how picking an agent type reconciles the choices made
 //! for another one, and launch templates (SPEC.md, Launch templates).
 //!
 //! These live in the wire crate rather than in either side because they must
-//! agree exactly. The browser applies a template through the launcher's own
+//! agree exactly. The desktop app applies a template through the launcher's own
 //! setters; the helm applies the same template for `farhelm agent create
 //! --template` and for spawn's template resolution. A template that applied
 //! one way in the GUI and another way from the CLI would make "applying a

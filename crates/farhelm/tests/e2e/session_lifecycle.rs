@@ -447,11 +447,13 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
 ///
 /// Both halves are asserted because either alone is a different bug. The
 /// refusal must be a CONFLICT carrying the takeover wording — that exact
-/// string is what lets a browser render the refusal as the takeover it is
-/// rather than as a mysterious error. And the incumbent must still be
-/// LIVE afterwards: a refusal that swept first and refused second would
-/// leave the winner detached by an attach that was itself rejected, which
-/// is strictly worse than the displacement it was meant to prevent.
+/// string is what let the old browser client latch the refusal as the
+/// takeover it is rather than show a mysterious error (the current helm
+/// never makes this attach; the supervisor keeps it for older helms). And
+/// the incumbent must still be LIVE afterwards: a refusal that swept first
+/// and refused second would leave the winner detached by an attach that was
+/// itself rejected, which is strictly worse than the displacement it was
+/// meant to prevent.
 #[farhelm_testtrace::test]
 async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session() {
     let h = harness().await;
@@ -1557,9 +1559,9 @@ async fn resize_from_a_kicked_connection_is_ignored() {
 /// A resize from a stale CHANNEL on the still-attached connection must
 /// be dropped — the channel-id half of the Resize check.
 ///
-/// Within one connection (one helm, two browser tabs), a takeover
+/// Within one connection (one helm, two clients), a takeover
 /// assigns the session a new channel; `same_channel` passes for the old
-/// tab's in-flight resize, and only the channel-id comparison rejects
+/// client's in-flight resize, and only the channel-id comparison rejects
 /// it. Delete that comparison and this fails. The sibling test above
 /// pins the connection-identity half.
 #[farhelm_testtrace::test]
@@ -3350,8 +3352,8 @@ async fn delete_removes_session_terminal_and_row() {
     );
 }
 
-/// Why this matters: the browser deletes a session whose row says its
-/// agent ended without asking first, and that row can be stale (another
+/// Why this matters: the desktop app can delete a session whose row says
+/// its agent ended without asking first, and that row can be stale (another
 /// client or an agent restarted it, or a cached status right after a
 /// relaunch), so an unconditional delete could kill a live agent nobody
 /// agreed to stop. Spec (`DeleteSession::only_if_nothing_alive`): with the
