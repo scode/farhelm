@@ -84,6 +84,10 @@
 //! The Lock, the Credentials section's glyph, is the old app's `ActionGlyph::Lock`, in the 14-unit action box with the
 //! 1.2 stroke.
 //!
+//! The Key, the Tensorlake section's glyph, is the old app's `ActionGlyph::Key`, in the same box and stroke. The old
+//! app chose a key rather than a cloud because the cloud is the remote hosts' default mark and the section is about the
+//! account; it is Farhelm's own drawing, not Tensorlake's logo.
+//!
 //! The Clipboard is a new drawing, in the 14-unit action box with the 1.2 stroke: the old details bar's copy fields
 //! wrote the clipboard emoji (U+1F4CB) in text, which the bundled faces do not have and which would take the system's
 //! color emoji rather than the field's ink.
@@ -314,6 +318,9 @@ pub enum Icon {
     Adopt,
     /// A padlock: the Settings dialog's Credentials section (the old app's `ActionGlyph::Lock`).
     Lock,
+    /// A key: the Settings dialog's Tensorlake section, which holds the account's API key (the old app's
+    /// `ActionGlyph::Key`).
+    Key,
     /// A clipboard: the details bar's copy fields show it under the pointer and keyboard focus (the old clipboard
     /// emoji).
     Clipboard,
@@ -427,6 +434,7 @@ impl Icon {
         Icon::Uninstall,
         Icon::Adopt,
         Icon::Lock,
+        Icon::Key,
         Icon::Clipboard,
         Icon::EndedStopped,
         Icon::EndedExited,
@@ -524,6 +532,7 @@ impl Icon {
             Icon::Uninstall => "icons/uninstall.svg",
             Icon::Adopt => "icons/adopt.svg",
             Icon::Lock => "icons/lock.svg",
+            Icon::Key => "icons/key.svg",
             Icon::Clipboard => "icons/clipboard.svg",
             Icon::EndedStopped => "icons/ended-stopped.svg",
             Icon::EndedExited => "icons/ended-exited.svg",
@@ -641,6 +650,7 @@ impl Assets {
             "icons/uninstall.svg" => Some(include_bytes!("../assets/icons/uninstall.svg")),
             "icons/adopt.svg" => Some(include_bytes!("../assets/icons/adopt.svg")),
             "icons/lock.svg" => Some(include_bytes!("../assets/icons/lock.svg")),
+            "icons/key.svg" => Some(include_bytes!("../assets/icons/key.svg")),
             "icons/bell-filled.svg" => Some(include_bytes!("../assets/icons/bell-filled.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

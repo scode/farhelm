@@ -611,8 +611,13 @@ impl Render for Credentials {
 
 /// The danger-tinted "Not encrypted on disk" callout (`.credential-storage-warning`): its title in the danger ink over
 /// `body`, on the dim danger fill with a 4-pixel danger edge on its left. Each of the overview and the editor draws one
-/// (SPEC.md: "each show one prominent danger-tinted Not encrypted on disk warning").
-fn storage_warning(id: &'static str, body: &'static str, cx: &App) -> gpui::Stateful<Div> {
+/// (SPEC.md: "each show one prominent danger-tinted Not encrypted on disk warning"), and so does the Tensorlake API key
+/// form where Settings → Tensorlake draws it, worded for that one key (`super::tensorlake_key`).
+pub(super) fn storage_warning(
+    id: &'static str,
+    body: &'static str,
+    cx: &App,
+) -> gpui::Stateful<Div> {
     let palette = theme::palette(cx);
     div()
         .id(id)
