@@ -1227,6 +1227,14 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
 /// a host that asks first, and answered "Start guarded session instead": the moment the guarded launch waits for its
 /// new preview. Returns that preview's command, unanswered, once it is checked that no create went out with it.
 fn guarded_waiting(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
+    guarded_waiting_named(cx, None)
+}
+
+/// [`guarded_waiting`], with the session named by a launch template's base name `base`, if given.
+fn guarded_waiting_named<'a>(
+    cx: &'a mut TestAppContext,
+    base: Option<&str>,
+) -> (FakeHelm, &'a mut VisualTestContext, FakeCommand) {
     let mut draft = LaunchDraft::new(
         Some(1),
         "~".into(),
@@ -1235,6 +1243,10 @@ fn guarded_waiting(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext
     let _ = draft.choose_harness(farhelm_proto::LaunchHarness::Codex, None, None);
     draft.choose_permissions(Some(farhelm_proto::LaunchPermission::Yolo));
     draft.choose_repository(repo("acme", "bar"));
+    if let Some(base) = base {
+        draft.edit_name(base.into());
+        draft.set_template_name_kind(farhelm_proto::launcher::TemplateNameKind::Base);
+    }
     let (mut helm, cx) = launcher_on(cx, draft);
     let first = answer_catalog_keeping(&mut helm, cx);
     answer_preview_in(
@@ -1297,6 +1309,37 @@ fn the_guarded_answer_waits_for_the_new_preview_then_launches_once(cx: &mut Test
     assert_eq!(
         body["github_checkout"]["preview"]["cwd"],
         json!("/work/bar-1")
+    );
+}
+
+/// SPEC.md: Launch "never submits automatically or silently chooses another directory". A hidden quick launch follows
+/// its own base name's numbering, but the guarded answer's wait is in a launcher the user sees, whose name changing is
+/// for the user to look at before pressing Launch again. Specified: a guarded wait on a template base name `review`,
+/// whose new preview is answered taken and the next candidate's ready, sends no create.
+#[gpui::test]
+fn a_guarded_wait_does_not_follow_a_taken_base_name(cx: &mut TestAppContext) {
+    let (mut helm, cx, preview) = guarded_waiting_named(cx, Some("review"));
+    assert_eq!(
+        preview.body.as_ref().unwrap()["title"],
+        json!("review"),
+        "the premise: the guarded wait previews the base name"
+    );
+    helm.reply(preview.id, 409, Some(json!(TAKEN)));
+    settle(cx);
+    let asked = answer_preview(
+        &mut helm,
+        cx,
+        200,
+        preview_reply("/work/bar-review-2", "bar-review-2", 3),
+    );
+    assert_eq!(
+        asked["title"],
+        json!("review-2"),
+        "the premise: the name moved on"
+    );
+    assert!(
+        to(&sent(&mut helm, cx), "/api/sessions").is_empty(),
+        "no create"
     );
 }
 

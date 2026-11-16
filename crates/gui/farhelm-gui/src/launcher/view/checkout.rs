@@ -34,7 +34,8 @@
 //!   numbered default (Clone's `<title>-clone`, a template's base name) whose preview the helm refuses as taken moves on
 //!   to its next candidate ([`LaunchDraft::advance_checkout_name`]), which is previewed in turn. The supervisor says
 //!   "taken" in fixed words, which this matches, as the folder check matches the folder words: matching only proposes
-//!   another name, which still takes the user's press of Launch.
+//!   another name, which still takes the user's press of Launch; a quick launch never shown follows its own base name's
+//!   numbering instead (the last bullet).
 //! - **A lost race.** A create the helm proves it never accepted (another create took the previewed folder, or the
 //!   preview went stale) comes back with "nothing was accepted" after the helm's words, and a new preview is asked for;
 //!   nothing is sent again until the user presses Launch (SPEC.md: "it never submits automatically or silently chooses
@@ -47,7 +48,8 @@
 //!   showing the launcher) has not asked for its preview yet. Instead of refusing, either waits for the preview and
 //!   starts once it is ready, as the old launcher's guarded submit and quick launch did; any edit, a close, a failed
 //!   preview or another preview cancels the wait, and a quick launch that does not start is shown
-//!   ([`Launcher::submit_or_wait_for_preview`]).
+//!   ([`Launcher::submit_or_wait_for_preview`]). The one exception is a quick launch's own template base name taken:
+//!   it waits for the next numbered candidate's preview instead, out of sight ([`Launcher::settle_waiting_launch`]).
 
 use std::time::Duration;
 
@@ -201,9 +203,23 @@ struct PreviewKey {
     retry: u64,
 }
 
+impl PreviewKey {
+    /// Whether this key is `earlier` with only the name changed: what the taken-name rule's move to the next numbered
+    /// candidate does, and nothing else (a host, repository, revision or agent change differs elsewhere too).
+    fn renamed_from(&self, earlier: &PreviewKey) -> bool {
+        self.title != earlier.title
+            && PreviewKey {
+                title: earlier.title.clone(),
+                ..self.clone()
+            } == *earlier
+    }
+}
+
 /// A launch waiting for its managed checkout's preview ([`Launcher::submit_or_wait_for_preview`]): the mark it counts
-/// from, the one preview it waits for, the window it starts in, and whether it is a quick launch never shown (which
-/// stays out of sight while it waits, and is shown if it does not start).
+/// from, the preview it waits for now, the window it starts in, and whether it is a quick launch never shown (which
+/// stays out of sight while it waits, and is shown if it does not start). It waits for one preview at a time: the one
+/// due when it was armed, or, for a quick launch never shown whose base name was taken, its next candidate's
+/// ([`Launcher::settle_waiting_launch`]).
 struct Armed {
     mark: Mark,
     key: PreviewKey,
@@ -272,6 +288,12 @@ pub(super) struct CheckoutState {
     /// The guarded answer's launch, waiting for the preview: the answer's mark, which the launch's moved-on check counts
     /// from ([`Launcher::submit_or_wait_for_preview`]).
     armed: Option<Armed>,
+    /// The preview whose "taken" answer last moved a numbered name on to its next candidate (the taken-name rule, and
+    /// nothing else), so a hidden quick launch waiting for that preview can follow its own name's numbering rather than
+    /// give up ([`Launcher::settle_waiting_launch`]). Set on every such advance, a shown launcher's included, and cleared
+    /// only when a waiting launch follows it; a stale value is harmless, since it counts only when it equals the
+    /// waiting launch's own key.
+    advanced_from: Option<PreviewKey>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -328,6 +350,7 @@ impl CheckoutState {
             focus_after_setup: None,
             setup: None,
             armed: None,
+            advanced_from: None,
             _subscriptions: vec![events, focus, blur],
         }
     }
@@ -522,11 +545,34 @@ impl Launcher {
     /// showing or was never shown. A quick launch that does not start comes back to be seen, with the failed preview's
     /// line or the new preview, as any quick launch that did not start does. The old launcher's guarded submit compared
     /// the whole preview identity the same way.
+    ///
+    /// One exception: a quick launch never shown follows its own template base name's numbering. When the preview it
+    /// waits for came back taken and the taken-name rule moved the name on to its next candidate, with nothing else
+    /// changed, it waits for that candidate's preview instead (SPEC.md, "Managed checkouts": a shortcut "obtains the
+    /// same exact preview and launches without showing the path first", and a base name "uses its first free
+    /// candidate"; the old app's "quick launch numbers a template base name when its checkout is taken"). The user
+    /// pressed the shortcut for exactly that numbering. A shown launcher's wait (the YOLO question's guarded answer)
+    /// still gives up, since the user sees the name change and presses Launch again for the new folder.
     fn settle_waiting_launch(launcher: &WeakEntity<Launcher>, cx: &mut App) {
         let Some(entity) = launcher.upgrade() else {
             return;
         };
         let settled = entity.update(cx, |launcher, cx| {
+            let armed = launcher.checkout.armed.as_ref()?;
+            let renamed = launcher.preview_key(cx).filter(|key| {
+                armed.unseen
+                    && launcher.checkout.advanced_from.as_ref() == Some(&armed.key)
+                    && key.renamed_from(&armed.key)
+            });
+            if let Some(next) = renamed {
+                // Never drawn, so its next preview is asked for here, as when it was armed.
+                launcher.checkout.advanced_from = None;
+                launcher.follow_preview(cx);
+                if let Some(armed) = launcher.checkout.armed.as_mut() {
+                    armed.key = next;
+                }
+                return None;
+            }
             let armed = launcher.checkout.armed.as_ref()?;
             let start = if launcher.preview_key(cx).as_ref() != Some(&armed.key) {
                 false
@@ -724,8 +770,9 @@ impl Launcher {
                         // the name is part of what the preview answers for.
                         if let Some(Err(words)) = &state.answered
                             && words.raw().contains(OCCUPIED)
+                            && launcher.draft.advance_checkout_name(&key.title)
                         {
-                            let _ = launcher.draft.advance_checkout_name(&key.title);
+                            launcher.checkout.advanced_from = Some(key.clone());
                         }
                         cx.notify();
                     }

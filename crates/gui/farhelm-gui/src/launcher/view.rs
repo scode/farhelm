@@ -76,6 +76,7 @@ use crate::operations::OpKey;
 use crate::permission::words::{effort_label, permission_display};
 use crate::session_list::replace;
 use crate::store::HelmStore;
+use crate::templates::checkout_name;
 use crate::templates::save::Candidate;
 use crate::templates::save_panel::SavePanel;
 use crate::theme::{self, metrics};
@@ -1319,10 +1320,11 @@ impl Launcher {
 }
 
 /// One labelled row: the label in the left column, its control beside it (`.launch-composer-row`). `selector` names the
-/// row for tests, which find a field by where it is drawn.
+/// row for tests, which find a field by where it is drawn. The label is usually its words; the Name row's carries a
+/// launch template's pill beside them.
 fn row(
     selector: &'static str,
-    label: &'static str,
+    label: impl IntoElement,
     control: impl IntoElement,
     palette: &theme::Palette,
 ) -> Div {
@@ -2071,19 +2073,46 @@ impl Render for Launcher {
             self.name.set_placeholder(placeholder.clone(), window, cx);
             self.checkout.name_placeholder = placeholder;
         }
-        let name = (!self.draft.holds(Field::Name)).then(|| {
-            row(
-                "launcher-name-row",
-                "Name (optional)",
-                self.launcher_input(
-                    "launcher-name",
-                    &self.name,
-                    "Name (optional)",
-                    HoverHelp::tooltip("Name: the session's title; left empty, Farhelm names it"),
-                ),
-                palette,
-            )
-        });
+        let name = if self.draft.holds(Field::Name) {
+            None
+        } else {
+            // In a managed checkout, a launch template's base name says so beside the label and, once taken, under
+            // the field (`crate::templates::checkout_name`).
+            let template_base = checkout_name::template_base(&self.draft);
+            let caption = div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.))
+                .child("Name (optional)")
+                .children(
+                    template_base
+                        .as_ref()
+                        .map(|_| checkout_name::pill(palette, window, cx)),
+                );
+            let taken = template_base
+                .filter(|(_, taken)| *taken)
+                .map(|(base, _)| checkout_name::taken_note(&base, palette, window, cx));
+            let field =
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    // Named for tests, which find the field by where it is drawn: the row is taller than the field while
+                    // the pill wraps under its label.
+                    .child(div().debug_selector(|| "launcher-name".into()).child(
+                        self.launcher_input(
+                            "launcher-name",
+                            &self.name,
+                            "Name (optional)",
+                            HoverHelp::tooltip(
+                                "Name: the session's title; left empty, Farhelm names it",
+                            ),
+                        ),
+                    ))
+                    .children(taken);
+            Some(row("launcher-name-row", caption, field, palette))
+        };
         let where_row = self.where_row(palette, cx);
         let host_row = self.host_row(palette, window, cx);
         let checkout_rows = self.checkout_rows(palette, window, cx);
