@@ -1,7 +1,7 @@
 //! The desktop integration: what the app does with its host platform beyond drawing its window. That is the menu bar
 //! and its shortcuts, quitting when the main window closes, the main window's saved frame, its title band and window
 //! decorations, the open-source notices the app menu opens, the updater, and bringing the window forward when the app
-//! is launched again.
+//! starts on a Mac and when it is launched again.
 //!
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
 //! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
@@ -32,7 +32,8 @@
 //! - [`dress_window`] fills in the window's options before it opens, so the title band and decorations are chosen at
 //!   open time, which is the only time GPUI takes them.
 //! - [`quit_when_closed`], [`follow_frame`] and [`follow_activations`] run once the main window exists, because
-//!   all three need its handle.
+//!   all three need its handle. Bringing the window forward at startup on a Mac happens in `follow_activations`,
+//!   the call that already brings it forward on a second launch, so the bootstrap gained no call of its own.
 //!
 //! Nothing in the bootstrap interprets what passes through these calls: the host's frame callbacks reach this module
 //! as they are, and the conversion between the host's frames and GPUI's window bounds lives here.
@@ -123,7 +124,7 @@ pub fn keep_updater(updater: Option<UpdaterHost>, cx: &mut App) {
     updates::keep(updater, cx);
 }
 
-// ---- A second launch ------------------------------------------------------------------------------------------------
+// ---- Bringing the window forward: at startup on a Mac, and on a second launch ---------------------------------------
 
 /// The next second launch the host reports: resolves with `Some(token)`, the launch's activation token (itself `None`
 /// when its launcher gave none), or with `None` once the host stops listening, after which it is not called again.
@@ -138,15 +139,30 @@ pub struct Activations {
     pub next: NextActivation,
 }
 
-/// Bring `main` forward whenever the host reports a second launch, `None` when it reports none. The bootstrap calls
-/// this once the main window is open, after [`follow_frame`], because bringing the window forward needs its handle.
+/// Bring `main` forward once now on a Mac, and whenever the host reports a second launch (`None` when it reports none).
+/// The bootstrap calls this once the main window is open, after [`follow_frame`], because bringing the window forward
+/// needs its handle.
 ///
 /// The token matters on Wayland, where a compositor moves focus to a window only with a valid activation token from the
 /// launch that asked; without one the window is activated the ordinary way, which a compositor may turn into a mere
 /// request for attention.
 pub fn follow_activations(main: AnyWindowHandle, activations: Option<Activations>, cx: &mut App) {
-    follow_activations_with(main, activations, activate, cx);
+    follow_activations_with(main, activations, ACTIVATE_AT_STARTUP, activate, cx);
 }
+
+/// Whether the app asks to be the active app, with its main window in front, as soon as that window is open: on a Mac
+/// only.
+///
+/// macOS activates an app opened through Launch Services (the installed app from the Dock or Finder), but not a
+/// program started any other way, such as a devbuild's bare binary run from a terminal, and GPUI never asks on the
+/// app's behalf. Without this the window opened behind whatever app was in front, and the user had to click the Dock
+/// icon to see it. The old app asked the same way, once its window was visible
+/// (`use_framework_foreground_on_launch` in `crates/farhelm-ui/src/desktop.rs` at the reference commit). Since macOS
+/// 14 the request is cooperative, so the system may still decline it.
+///
+/// Linux is left alone: the compositor decides where a new window goes and whether it gets focus, and a request made
+/// without the launch's activation token could at most ask for attention.
+const ACTIVATE_AT_STARTUP: bool = cfg!(target_os = "macos");
 
 /// Activate `window` for one second launch: with its token when it brought one.
 fn activate(window: &mut Window, token: Option<String>) {
@@ -156,14 +172,23 @@ fn activate(window: &mut Window, token: Option<String>) {
     }
 }
 
-/// [`follow_activations`] with the activation passed in, so a test sees which token reached the window. Follows the
-/// feed for the app's life and stops once the main window is gone.
+/// [`follow_activations`] with the platform's choice and the activation passed in, so a test sees both platforms'
+/// startup and which token reached the window. Follows the feed for the app's life and stops once the main window is
+/// gone.
 fn follow_activations_with(
     main: AnyWindowHandle,
     activations: Option<Activations>,
+    at_startup: bool,
     activate: impl Fn(&mut Window, Option<String>) + 'static,
     cx: &mut App,
 ) {
+    if at_startup {
+        tracing::info!("asking to bring the app and its window forward at startup");
+        cx.activate(true);
+        // The window was opened a moment ago by the same caller, so it is still there; were it gone, there would be
+        // nothing to bring forward and the feed below would end on its first launch anyway.
+        let _ = main.update(cx, |_, window, _| activate(window, None));
+    }
     let Some(Activations { mut next }) = activations else {
         return;
     };
