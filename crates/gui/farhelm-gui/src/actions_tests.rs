@@ -519,7 +519,9 @@ fn escape_in_a_terminal_goes_to_the_program_and_leaves_a_tooltip_open(cx: &mut T
     let mut opened = open(cx);
     // The tooltip's owner token stands for a control the test does not draw; it is kept for the whole test, because
     // its release would take the tooltip down by itself.
-    let owner = opened.cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let owner = opened
+        .cx
+        .update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
     let show = |opened: &mut Opened| {
         opened.cx.update(|window, cx| {
             layers::show_tooltip_at(&owner, "help".into(), point(px(5.), px(5.)), window, cx)
@@ -1511,7 +1513,9 @@ fn an_armed_capture_takes_every_key_down_before_the_terminal_bindings_and_rows(
 fn escape_reaches_an_armed_capture_before_the_dismiss_binding(cx: &mut TestAppContext) {
     let mut opened = open(cx);
     // Kept for the whole test, because the owner token's release would take the tooltip down by itself.
-    let owner = opened.cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let owner = opened
+        .cx
+        .update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
     opened.cx.update(|window, cx| {
         layers::show_tooltip_at(&owner, "help".into(), point(px(5.), px(5.)), window, cx)
     });
@@ -1646,7 +1650,9 @@ fn arming_an_armed_capture_is_refused_until_it_is_disarmed(cx: &mut TestAppConte
 fn the_capture_handler_may_close_a_layer_and_disarm_from_inside(cx: &mut TestAppContext) {
     let mut opened = open(cx);
     opened.focus_terminal();
-    let owner = opened.cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let owner = opened
+        .cx
+        .update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
     opened.cx.update(|window, cx| {
         layers::show_tooltip_at(&owner, "help".into(), point(px(5.), px(5.)), window, cx)
     });

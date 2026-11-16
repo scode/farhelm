@@ -89,7 +89,8 @@
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it, and card
 //!   help ([`Help::card`]) draws a view of the caller's at a fixed width. The [`tooltip`] submodule holds it, and says
-//!   when it shows and goes. Ordinary help sits at the pointer; help a control asks to have beside the sidebar
+//!   when it shows and goes. Ordinary help sits against its control, centered above it or else below, as the old
+//!   app placed it; help a control asks to have beside the sidebar
 //!   ([`Hint::beside`]: SPEC.md's session-row hovers and host progress card) sits 6 pixels past the edge the sidebar
 //!   draws ([`beside_edge`]), centered on its control, with a notch pointing back at it and a ring on it, or against
 //!   the control without either in a window too narrow for that. The [`beside`] submodule has the numbers.
@@ -184,14 +185,13 @@ mod tooltip_tests;
 
 pub use beside::beside_edge;
 // The tooltip's public items, at the paths every caller has always used (`layers::hover_began` and the like).
-#[cfg(test)]
-pub(crate) use tooltip::show_tooltip_at;
 pub use tooltip::{
-    BesideCues, BesideTarget, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner,
-    TooltipSide, focus_drawn, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed,
-    shown_tooltip,
+    BesideCues, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner, TooltipSide,
+    focus_drawn, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed, shown_tooltip,
 };
 use tooltip::{Hovered, tooltip_card};
+#[cfg(test)]
+pub(crate) use tooltip::{TRACKER, show_tooltip_at};
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
 
@@ -244,11 +244,11 @@ pub struct LayerStack {
     /// Every control with hover help the pointer is over, innermost first; the first one's help is the one the pointer
     /// calls for ([`hover_began`], "Nested hover help").
     hovered: Vec<Hovered>,
-    /// The first of `hovered` when the hover news last settled. A pointer moving inside the same control changes
-    /// nothing, so it neither shows a showing tooltip again nor (not yet: see the [`tooltip`] module's NOTE) starts a
-    /// waiting one's delay over, and a help a press put away stays away while the hover lasts ([`pointer_pressed`];
-    /// that NOTE says when GPUI ends it). A tooltip shown or waiting through a hover is always the winner's; only the
-    /// goldens' [`show_tooltip_at`] shows one that is not.
+    /// The first of `hovered` when the hover news last settled. A pointer moving inside the same control leaves the
+    /// winner as it is, so it never shows a showing tooltip again, and a help a press put away stays away while the
+    /// hover lasts ([`pointer_pressed`]; the [`tooltip`] module's NOTE says when GPUI ends it). Starting a waiting
+    /// tooltip's delay over on such a move is [`hover_moved`]'s, not the winner's. A tooltip shown or waiting through a
+    /// hover is always the winner's; only the goldens' [`show_tooltip_at`] shows one that is not.
     winner: Option<EntityId>,
     /// The hover news of the event being handled, waiting for [`tooltip::settle_hover`], which runs once after it:
     /// `Some` while a settle is scheduled, holding the owners whose move listener ran, in the order GPUI ran them.
@@ -2177,18 +2177,19 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .by_focus
             .as_ref()
             .map(|by_focus| by_focus.focus.clone());
-        let placed = match (&shown.beside, edge, focus) {
+        let placed = match (shown.beside, edge, focus) {
             // Help beside the sidebar decides its place as the frame is laid out ([`beside::PlacedBeside`]).
-            (Some(target), Some(edge), _) => {
-                beside::PlacedBeside::new(shown, target, edge, card, palette).into_any_element()
+            (Some(cues), Some(edge), _) => {
+                beside::PlacedBeside::new(shown, cues, edge, card, palette).into_any_element()
             }
             // Help keyboard focus owns sits against the focused control, as the old app placed all help.
             (_, _, Some(focus)) => {
                 beside::PlacedBeside::around(shown, focus, card).into_any_element()
             }
-            // Offset like a native tooltip so the pointer never covers the text. Help that asks for beside placement
-            // comes here while no sidebar edge is drawn, and says so (its side reads `Pointer`).
-            _ => beside::PlacedBeside::at_pointer(shown, card).into_any_element(),
+            // Ordinary help sits against its control too, centered above it or else below. Help that asks for beside
+            // placement comes here while no sidebar edge is drawn, and help whose control has no recorded bounds (a
+            // test's or a golden's probe, or a control in a cached view) sits at the pointer instead.
+            _ => beside::PlacedBeside::ordinary(shown, card).into_any_element(),
         };
         overlay = overlay.child(gpui::deferred(placed).with_priority(tooltip_depth));
     }

@@ -7,21 +7,25 @@
 //! re-exported from [`crate::layers`], which is the path callers use.
 //!
 //! Help comes in three forms ([`Help`]: a line, paragraphs, a card holding a view) and in two placements: ordinary
-//! help at the pointer, and help a control asks to have beside the sidebar ([`Hint::beside`], placed by
-//! [`super::beside`]). A card's view is either the caller's, made with the help, or made by the tooltip only when it
-//! shows ([`Help::card_with`]) and dropped when it goes, for a view that costs something for as long as it lives.
+//! help against its control, centered above it or else below as the old app placed it, and help a control asks to have
+//! beside the sidebar ([`Hint::beside`]); [`super::beside`] places both, from the bounds the control's tracker records
+//! while its help waits or shows ([`TooltipOwner::track`], [`help_drawn`]). A card's view is either the caller's, made
+//! with the help, or made by the tooltip only when it shows ([`Help::card_with`]) and dropped when it goes, for a view
+//! that costs something for as long as it lives.
 //!
 //! A tooltip waits [`HOVER_DELAY`] (the old app's 300 ms) before it shows, through a ticker deadline, and shows at once
 //! when another tooltip is showing or one went away less than that long ago, so a user scanning a row of icons does
-//! not wait at each. Escape, a press of any mouse button on a control with help ([`pointer_pressed`]) or a layer
-//! opening puts the tooltip away without that grace, as in the old app. After a press made without moving, the help
-//! stays down while the pointer rests on that control, since nothing changes whose help the pointer calls for.
+//! not wait at each. A pointer moving inside the control while its help waits starts the wait again ([`hover_moved`]),
+//! so help shows only once the pointer comes to rest. Escape, a press of any mouse button on a control with help
+//! ([`pointer_pressed`]) or a layer opening puts the tooltip away without that grace, as in the old app. After a press
+//! made without moving, the help stays down while the pointer rests on that control, since nothing changes whose help
+//! the pointer calls for.
 //!
 //! Keyboard focus calls for help too, on every control that can hold it, as the old app showed every focus-visible
 //! control's help: focus the keyboard moves onto a control shows its help after the same delay, and focus leaving
 //! takes it down ([`focus_drawn`] has how the pointer and focus share the one tooltip). Help shown by focus is placed
-//! against the control by the old ordinary rule, centered above it or else below ([`super::beside`]), or beside the
-//! sidebar for help that asks for it, since the pointer may be anywhere.
+//! against the control by the same ordinary rule, from the bounds the focus coordinator records for its stop, or beside
+//! the sidebar for help that asks for it.
 //!
 //! NOTE: Known deviations from the old app's `tooltip.js`, which kept a dismissed control's help down until the pointer
 //! left it: after Escape, the next pointer move brings the help back after the delay; a key other than Escape takes
@@ -29,11 +33,7 @@
 //! key press and then a pointer move bring the help back; a press on a control right after a key press, or a click
 //! whose pointer moves while the button is held, brings the help back after the delay once the button is released (GPUI
 //! ends the control's hover during either and begins it again after); and after a press on a row, a visit to one of its
-//! marks and back shows the row's help again. Still to come here: anchoring ordinary help to its control, above it as
-//! the old app placed it. Until then ordinary help sits below and right of where the pointer was, and a pointer moving
-//! inside a control does not restart the wait. Help that asks to sit beside the sidebar (a session row's, the host
-//! progress card) is already placed against its control, with the old notch and ring ([`super::beside`]), and so is
-//! help keyboard focus owns.
+//! marks and back shows the row's help again.
 //!
 //! NOTE: Two more deviations, in help shown on keyboard focus. The old app landed focus quietly in a few host flows,
 //! keeping the ring but showing no help (`focusWithoutTooltip`, from `modal_dialog.rs`'s quiet `FocusTarget`): the
@@ -75,9 +75,13 @@ pub(super) struct Hovered {
 /// How long the pointer must rest on a control before its hover help shows: the old app's tooltip delay.
 pub const HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 
-/// The token that says which control a tooltip belongs to. It carries no data: its entity id is the owner's identity,
-/// and its release is the signal that the control is gone.
-pub struct TooltipOwner;
+/// The token that says which control a tooltip belongs to: its entity id is the owner's identity, and its release is
+/// the signal that the control is gone. It also holds where the control was last drawn, which its help is placed
+/// against, as the control's bounds tracker records it ([`TooltipOwner::track`]).
+#[derive(Default)]
+pub struct TooltipOwner {
+    target: HelpTarget,
+}
 
 impl TooltipOwner {
     /// The owner token of the control being rendered under `key`, created on its first frame and kept for as long as
@@ -89,7 +93,15 @@ impl TooltipOwner {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<TooltipOwner> {
-        window.use_keyed_state(key, cx, |_, _| TooltipOwner)
+        window.use_keyed_state(key, cx, |_, _| TooltipOwner::default())
+    }
+
+    /// The control's bounds tracker, a zero-cost child that records where the control is drawn and the clip in force
+    /// there as each frame is prepared, before the overlay places the help against it. It covers the box inside the
+    /// control's border. [`crate::components::with_hover_help`] draws it only while the control's help waits or shows
+    /// ([`help_drawn`]), so a control whose help is not in play draws nothing extra.
+    pub fn track(&self) -> impl IntoElement + use<> {
+        self.target.track()
     }
 }
 
@@ -259,66 +271,72 @@ pub struct BesideCues {
     pub radius: Pixels,
 }
 
-/// Hover help as a control hands it to the layer manager: what it says, and for help that sits beside the sidebar,
-/// where the control is drawn and the cues it asks for. Ordinary help (a [`Help`] or a string, converted) shows at
-/// the pointer. [`crate::components::with_hover_help`] makes these for every control, from its
-/// [`crate::components::HoverHelp`].
+/// Hover help as a control hands it to the layer manager: what it says, and for help that sits beside the sidebar, the
+/// cues it asks for. Ordinary help (a [`Help`] or a string, converted) sits against its control, centered above it or
+/// else below, as the old app placed it ([`super::beside`] has the numbers). Either is placed from where the control's
+/// owner token last saw it drawn ([`TooltipOwner::track`]). Help whose control has no recorded bounds, ordinary or
+/// beside, sits at the pointer instead: a probe tests and goldens show for an owner never drawn as a control
+/// ([`show_tooltip_at`]), or a control in a cached view (`cache.rs`, NOTE).
+/// [`crate::components::with_hover_help`] makes these for every control, from its [`crate::components::HoverHelp`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hint {
     help: Help,
-    beside: Option<Beside>,
+    /// The cues of help placed beside the sidebar; `None` for ordinary help.
+    beside: Option<BesideCues>,
 }
 
 impl Hint {
-    /// Help placed beside the sidebar's edge, centered on `target`, the control's own element, which must draw
-    /// `target`'s tracker ([`BesideTarget::track`]) so its bounds are this frame's when the tooltip is placed. The
-    /// module docs of [`super::beside`] give the placement and when it falls back.
-    pub fn beside(help: Help, cues: BesideCues, target: &BesideTarget) -> Hint {
+    /// Help placed beside the sidebar's edge, centered on its control. The module docs of [`super::beside`] give the
+    /// placement and when it falls back.
+    pub fn beside(help: Help, cues: BesideCues) -> Hint {
         Hint {
             help,
-            beside: Some(Beside {
-                cues,
-                target: target.0.clone(),
-            }),
+            beside: Some(cues),
         }
     }
 }
 
-/// Where a control that asks for beside help was last drawn, as its tracker recorded it.
+/// The name each prepaint of a bounds tracker ([`TooltipOwner::track`]) is counted under in test builds
+/// ([`crate::render_count`]), where it counts the trackers a frame draws.
+pub(crate) const TRACKER: &str = "hover-help-tracker";
+
+/// Where a control with hover help was last drawn, as its tracker recorded it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Drawn {
-    /// The control's bounds inside its border, unclipped: what the help is centered on and the ring drawn at.
+    /// The control's bounds inside its border, unclipped: what the help is placed against, and for help beside the
+    /// sidebar, where the ring is drawn.
     pub(super) bounds: Bounds<Pixels>,
     /// The clip in force where the control is drawn (its scrolling list's, say), which the ring is drawn inside, as the
     /// old ring, an inset shadow on the control, was clipped with it.
     pub(super) clip: Bounds<Pixels>,
 }
 
-/// The tracker of a control that asks for beside help: where it is drawn and the clip around it, recorded in every
-/// frame as the frame is prepared, before the overlay places the help. [`crate::components::with_hover_help`] makes and
-/// draws it for every control whose help asks for beside placement.
-#[derive(Clone)]
-pub struct BesideTarget(Rc<Cell<Option<Drawn>>>);
+/// Where a control was last drawn, as its owner token keeps it ([`TooltipOwner::track`]). It keeps the last bounds
+/// recorded after its tracker stops being drawn; the frame that shows the help draws the tracker again and records the
+/// control's bounds before the help is placed ([`help_drawn`]). Two are the same target only when they are one record,
+/// not two that happen to hold the same place.
+#[derive(Clone, Debug, Default)]
+pub(super) struct HelpTarget(Rc<Cell<Option<Drawn>>>);
 
-impl BesideTarget {
-    /// The tracker of the control being rendered under `key`, kept for as long as the control is drawn in consecutive
-    /// frames (GPUI's keyed element state). `key` must differ from the control's own element id.
-    pub fn for_control(
-        key: impl Into<ElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> BesideTarget {
-        window
-            .use_keyed_state(key, cx, |_, _| BesideTarget(Rc::new(Cell::new(None))))
-            .read(cx)
-            .clone()
+impl PartialEq for HelpTarget {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl HelpTarget {
+    /// Where the control was last drawn, or `None` while its tracker has never been drawn.
+    pub(super) fn drawn(&self) -> Option<Drawn> {
+        self.0.get()
     }
 
-    /// A zero-cost child that records the control's bounds and the clip in force there, as [`super::Anchor::track`]
-    /// records an anchor's. It covers the box inside the control's border.
-    pub fn track(&self) -> impl IntoElement + use<> {
+    /// The tracker itself: a zero-cost child that records the control's bounds and the clip in force there, as
+    /// [`super::Anchor::track`] records an anchor's.
+    fn track(&self) -> impl IntoElement + use<> {
         let drawn = self.0.clone();
-        let record = move |bounds, window: &mut Window, _: &mut App| {
+        let record = move |bounds, window: &mut Window, cx: &mut App| {
+            // Counted in test builds only, so a test sees which frames draw a tracker at all.
+            crate::render_count::record(TRACKER, cx);
             let clip = window.content_mask().bounds;
             drawn.set(Some(Drawn { bounds, clip }));
         };
@@ -331,7 +349,7 @@ impl BesideTarget {
     }
 }
 
-/// Ordinary help, shown at the pointer.
+/// Ordinary help, placed against its control.
 impl From<Help> for Hint {
     fn from(help: Help) -> Self {
         Hint { help, beside: None }
@@ -345,34 +363,19 @@ impl From<&'static str> for Hint {
     }
 }
 
-/// The beside half of a [`Hint`]: the cues, and where the target control was last drawn, written by its tracker.
-#[derive(Clone, Debug)]
-pub(super) struct Beside {
-    pub(super) cues: BesideCues,
-    pub(super) target: Rc<Cell<Option<Drawn>>>,
-}
-
-/// The same target is the same tracker, not one that happens to be drawn at the same place.
-impl PartialEq for Beside {
-    fn eq(&self, other: &Self) -> bool {
-        self.cues == other.cues && Rc::ptr_eq(&self.target, &other.target)
-    }
-}
-
-impl Eq for Beside {}
-
 /// Where the showing tooltip was placed in the last frame drawn ([`ShownTooltip::side`]): the old box's `data-side`,
-/// plus the pointer placement that ordinary help uses.
+/// plus the pointer placement of help with no control to sit against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TooltipSide {
-    /// Below and right of where the pointer was: all ordinary help, and help asking for beside placement while no
-    /// sidebar edge is drawn.
+    /// Below and right of where the pointer was: help whose control has no recorded bounds, such as a probe a test or
+    /// golden shows for an owner token no control drew ([`show_tooltip_at`]), or a control in a cached view.
     Pointer,
     /// Beside the sidebar, with the notch and the ring (the old `"right"`).
     Beside,
-    /// Above its control: beside placement's fallback in a window too narrow for it.
+    /// Centered above its control: ordinary help, help keyboard focus owns, and beside placement's fallback in a
+    /// window too narrow for it, wherever there is room above.
     Above,
-    /// Below its control: the same fallback, with no room above.
+    /// Below its control: the same, with no room above.
     Below,
 }
 
@@ -392,16 +395,17 @@ pub struct ShownTooltip {
     /// names a host value the sentence's accessible text, each host value escaped ([`Help::accessible_text`]). The
     /// card never draws it; it draws `help`.
     pub text: SharedString,
-    /// Where the pointer was when the tooltip was asked for, in window coordinates. Help keyboard focus owns is placed
-    /// against its control instead and does not use it.
+    /// Where the pointer was when the tooltip was asked for, in window coordinates. Only help with no drawn control to
+    /// sit against is placed from it ([`TooltipSide::Pointer`]).
     pub at: Point<Pixels>,
     /// The help the card draws. Host values reach a tooltip only as host sentences (a [`Line::Sentence`], or the
     /// paragraphs of [`Help::Paragraphs`]), whose host parts are drawn by host text's own element, escaped and each in
     /// a text element of its own (SPEC_impl.md, "Host-supplied text"); a [`Line::App`] is Farhelm's own wording.
     pub(super) help: Help,
-    /// Where the control is drawn and the cues it asked for, for help placed beside the sidebar; `None` for help at
-    /// the pointer.
-    pub(super) beside: Option<Beside>,
+    /// Where the owning control was last drawn, which the help is placed against ([`TooltipOwner::track`]).
+    pub(super) target: HelpTarget,
+    /// The cues the control asked for, for help placed beside the sidebar; `None` for ordinary help.
+    pub(super) beside: Option<BesideCues>,
     /// Where the overlay placed it in the last frame: written as that frame is laid out, so it is shared with every
     /// clone ([`ShownTooltip::side`]).
     pub(super) side: Rc<Cell<TooltipSide>>,
@@ -436,15 +440,15 @@ pub struct DrawnRing {
     pub radius: Pixels,
 }
 
-/// How far below and right of the pointer help at the pointer starts, like a native tooltip, so the pointer never
-/// covers the text.
+/// How far below and right of the pointer help with no control to sit against starts, like a native tooltip, so the
+/// pointer never covers the text.
 pub(super) const POINTER_OFFSET: Point<Pixels> = point(px(8.), px(16.));
 
 /// The pointer came onto the control `owner`, whose hover help is `help`. This is the hover listener's half of the
 /// tooltip rule, which [`crate::components::with_hover_help`] wires on every control, beside [`hover_moved`] and
 /// [`hover_ended`]. Which hovered control's help shows is decided once, after GPUI has finished telling every
-/// listener about the event ([`settle_hover`]). When it is this control's, it shows after [`HOVER_DELAY`] at the
-/// pointer's position, or at once while another tooltip is showing or has only just gone.
+/// listener about the event ([`settle_hover`]). When it is this control's, it shows against the control after
+/// [`HOVER_DELAY`], or at once while another tooltip is showing or has only just gone.
 ///
 /// A host value reaches a tooltip only as part of a host sentence ([`Help`]). The app's own wording is a
 /// [`Line::App`], which a caller makes from a plain string with `.into()`.
@@ -491,32 +495,60 @@ pub fn hover_began(owner: &Entity<TooltipOwner>, help: Hint, window: &mut Window
     });
 }
 
-/// The pointer moved while over the control `owner`: the move listener's half of the tooltip rule. It says nothing
-/// about the help itself. GPUI runs these on every pointer move, for every hovered control, from the last drawn to the
-/// first, and that order is how [`settle_hover`] tells the innermost control from the ones around it (see "Nested
-/// hover help" at [`hover_began`]).
+/// The pointer moved while over the control `owner`: the move listener's half of the tooltip rule. GPUI runs these on
+/// every pointer move, for every hovered control, from the last drawn to the first, and that order is how
+/// [`settle_hover`] tells the innermost control from the ones around it (see "Nested hover help" at [`hover_began`]).
+///
+/// A move inside the control whose help is waiting starts the wait again, as the old `tooltip.js` restarted its timer
+/// on every move inside the target, so help shows only once the pointer comes to rest. Help that shows already stays,
+/// and so does a wait keyboard focus began, which the pointer did not start.
 pub fn hover_moved(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
     let id = owner.entity_id();
-    stack.update(cx, |stack, cx| {
+    let waiting = stack.update(cx, |stack, cx| {
         stack.settle_after_this_event(cx);
         if let Some(moved) = &mut stack.round
             && !moved.contains(&id)
         {
             moved.push(id);
         }
+        let pending = stack.pending_tooltip.as_ref().map(|(pending, _)| *pending);
+        if pending != Some(id) || stack.by_focus.is_some() {
+            return None;
+        }
+        let hovered = stack.hovered.iter().find(|hovered| hovered.id == id)?;
+        Some(hovered.help.clone())
     });
+    // Begun again, the wait replaces the one waiting, whose deadline is dropped with it.
+    if let Some(help) = waiting {
+        begin_tooltip(owner, help, None, window, cx);
+    }
 }
 
 /// The control `owner` is being drawn with `help` as its hover help: refresh the copy kept while the pointer is over
 /// it, so a tooltip of it that begins later says what the control says then (see [`Hovered::help`]). It redraws
 /// nothing: a tooltip already waiting or showing keeps the words it began with. Called while the control renders, so a
 /// cached view's controls refresh exactly when they re-render, which is when their help can change.
-pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Hint, window: &mut Window, cx: &mut App) {
+///
+/// Returns whether this control's help waits or shows, by the pointer or by keyboard focus: only then does the control
+/// draw its bounds tracker ([`TooltipOwner::track`]), so a control whose help is not in play draws nothing extra in an
+/// idle frame. The tracker is in place by the time the help shows, because showing it notifies the layer stack, which
+/// the root view observes, so the frame that first draws the card re-renders every uncached view, the owning control
+/// included, and its tracker records the control's bounds before the overlay places the card.
+///
+/// A cached view (`cache.rs`; none holds a control with help in the app) does not re-render when its help shows, so its
+/// control draws no tracker then: its help, ordinary or beside, is placed against bounds an earlier render recorded,
+/// which may be stale, or at the pointer, without cues, when none was ever recorded.
+pub fn help_drawn(
+    owner: &Entity<TooltipOwner>,
+    help: &Hint,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
     let Some(stack) = stack(window, cx) else {
-        return;
+        return false;
     };
     let id = owner.entity_id();
     stack.update(cx, |stack, _| {
@@ -525,7 +557,8 @@ pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Hint, window: &mut Window
         {
             hovered.help = help.clone();
         }
-    });
+        stack.current_owner() == Some(id)
+    })
 }
 
 /// The pointer left the control `owner`. Its tooltip goes only if no other hovered control's help takes its place, so
@@ -834,6 +867,7 @@ fn show_tooltip_from(
         return;
     };
     let owner_id = owner.entity_id();
+    let target = owner.read(cx).target.clone();
     let text = hint.help.accessible_text();
     // Made here, when it shows, and dropped with the tooltip it belongs to.
     let help = hint.help.shown(window, cx);
@@ -844,6 +878,7 @@ fn show_tooltip_from(
             text,
             at,
             help,
+            target,
             beside: hint.beside,
             side: Rc::new(Cell::new(TooltipSide::Pointer)),
             ring: Rc::new(Cell::new(None)),

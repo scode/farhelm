@@ -105,7 +105,7 @@ use gpui::{
 
 use crate::focus;
 use crate::host_text::{HostSentence, Line};
-use crate::layers::{self, BesideCues, BesideTarget, Help, Hint, TooltipOwner};
+use crate::layers::{self, BesideCues, Help, Hint, TooltipOwner};
 use crate::theme;
 
 /// What a control says when the user hovers it, moves keyboard focus onto it, or asks assistive technology about it.
@@ -124,17 +124,18 @@ use crate::theme;
 /// any string, so that is held by review rather than by the type, as for a dialog's title. Rich help that is not
 /// words, the session row's summary card, is a view of the caller's on a card of fixed width ([`HoverHelp::card`]).
 ///
-/// Any form can ask to sit beside the sidebar rather than at the pointer ([`HoverHelp::beside`]), as SPEC.md has every
-/// session-row hover and the host progress card do.
+/// Help sits against its control, centered above it or else below, as the old app's ordinary tooltip did. Any form can
+/// ask to sit beside the sidebar instead ([`HoverHelp::beside`]), as SPEC.md has every session-row hover and the host
+/// progress card do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoverHelp {
     help: Help,
-    /// The cues of help placed beside the sidebar; `None` for help at the pointer.
+    /// The cues of help placed beside the sidebar; `None` for ordinary help, placed against the control.
     beside: Option<BesideCues>,
 }
 
 impl HoverHelp {
-    /// Help at the pointer in the given form.
+    /// Ordinary help in the given form.
     fn of(help: Help) -> Self {
         HoverHelp { help, beside: None }
     }
@@ -269,9 +270,11 @@ impl HoverHelp {
 /// reads: in its snapshots a status mark is an interactive entry, and a row button holding marks lists them under it
 /// rather than being a leaf.
 ///
-/// Help placed beside the sidebar ([`HoverHelp::beside`]) is placed against the control's own bounds, so for it this
-/// also adds a zero-cost child that records them in every frame ([`BesideTarget::track`]); that is why the element must
-/// take children. Help at the pointer adds nothing.
+/// Help is placed against the control's own bounds, centered above it or else below, or beside the sidebar for help
+/// that asks for it ([`HoverHelp::beside`]), so while the control's help waits or shows this also adds a zero-cost
+/// child that records them in every frame ([`TooltipOwner::track`]); that is why the element must take children. A
+/// control whose help is not in play draws no such child: [`layers::help_drawn`] says when it is, and why the bounds
+/// are in place by the time the help shows.
 ///
 /// `focus` is the handle of the control's own keyboard stop, or `None` for a control that never holds focus. Its help
 /// also shows when the keyboard puts focus there ([`layers::focus_drawn`], which says how that and the pointer share
@@ -306,16 +309,16 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement + ParentElement>(
     } else {
         element
     };
-    let (element, help) = match help.beside {
-        Some(cues) => {
-            let key = ElementId::Name(format!("{id}-tooltip-target").into());
-            let target = BesideTarget::for_control(key, window, cx);
-            let hint = Hint::beside(help.help.clone(), cues, &target);
-            (element.child(target.track()), hint)
-        }
-        None => (element, Hint::from(help.help.clone())),
+    let help = match help.beside {
+        Some(cues) => Hint::beside(help.help.clone(), cues),
+        None => Hint::from(help.help.clone()),
     };
-    layers::help_drawn(&owner, &help, window, cx);
+    // The bounds tracker only while this control's help waits or shows, so an idle frame draws nothing for it.
+    let element = if layers::help_drawn(&owner, &help, window, cx) {
+        element.child(owner.read(cx).track())
+    } else {
+        element
+    };
     if let Some(focus) = focus {
         layers::focus_drawn(&owner, &help, focus, window, cx);
     }

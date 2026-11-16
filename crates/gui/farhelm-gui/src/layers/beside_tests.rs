@@ -1,9 +1,9 @@
 //! Tests of hover help placed beside the sidebar ([`super::beside`]): the placement's numbers as pure functions, each
 //! pinned to the old app's unit cases (`crates/farhelm-ui/js-tests/tooltip.test.js` at reference commit `24bc0580`),
-//! then the same rules, and ordinary help at the pointer, fitted into a Linux window's content area inside GPUI Kit's
-//! frame and below the window's own title bar (as pure functions too, since no test window reports client
-//! decorations), and in a window, the cues, the fallback and the card form as a control's hover help draws them,
-//! including the card whose view is made only while it shows.
+//! then the same rules, and help with no control at the pointer, fitted into a Linux window's content area inside GPUI
+//! Kit's frame and below the window's own title bar (as pure functions too, since no test window reports client
+//! decorations), and in a window, the cues, the fallback, ordinary placement and the card form as a control's hover
+//! help draws them, including the card whose view is made only while it shows.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -248,9 +248,9 @@ fn the_fallback_stays_below_the_title_bar() {
     );
 }
 
-/// Why this matters: ordinary help sits at the pointer, and the pointer can be on the title bar's own buttons or in the
-/// window's bottom-right corner; the help must still land in the content area, and in a window with no frame it must
-/// land exactly where GPUI's window snap put it before.
+/// Why this matters: help with no drawn control to sit against sits at the pointer, and the pointer can be on the title
+/// bar's own buttons or in the window's bottom-right corner; the help must still land in the content area, and in a
+/// window with no frame it must land exactly where GPUI's window snap put it before.
 ///
 /// Specification: help begins 8 pixels right of and 16 below the pointer. In [`linux_content_area`], for a 200 by 60 card, a
 /// pointer on the bar at 300, 20 puts it at 308, 55 (the area's top); a pointer at 1630, 1070 puts it flush with the
@@ -343,8 +343,9 @@ fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
 /// Why this matters: a control may ask for beside help in a window that draws no sidebar (a dialog's own copy of a
 /// row, a test scene); its help must then show where ordinary help does, not vanish or float against nothing.
 ///
-/// Specification: with no edge drawn, the button's beside help shows 8 right and 16 down from where the pointer came to
-/// rest, as ordinary help does, with neither notch nor ring, and the tooltip reports [`TooltipSide::Pointer`].
+/// Specification: with no edge drawn, the button's beside help, 200 pixels down the column, is placed as ordinary help
+/// is: centered above the button with a 6-pixel gap from the box inside its border, with neither notch nor ring, and
+/// the tooltip reports [`TooltipSide::Above`].
 #[gpui::test]
 fn beside_help_with_no_edge_drawn_sits_where_ordinary_help_does(cx: &mut TestAppContext) {
     let down = Rc::new(Cell::new(200.));
@@ -354,15 +355,19 @@ fn beside_help_with_no_edge_drawn_sits_where_ordinary_help_does(cx: &mut TestApp
         sidebar_scene(false, down, HoverHelp::tooltip("Row help").beside()),
     );
     let tooltip = shown(cx);
-    assert_eq!(tooltip.side(), TooltipSide::Pointer);
-    let at = tooltip.at + point(px(8.), px(16.));
-    assert_eq!(
-        bounds(cx, "tooltip-card").origin,
-        point(at.x.round(), at.y.round())
+    assert_eq!(tooltip.side(), TooltipSide::Above);
+    let (target, card) = (
+        inside_border(bounds(cx, "target")),
+        bounds(cx, "tooltip-card"),
+    );
+    assert!(
+        (card.center().x - target.center().x).abs() <= px(1.)
+            && (target.top() - px(6.) - card.bottom()).abs() <= px(1.),
+        "centered above the button: {card:?} {target:?}"
     );
     assert!(
         !drawn(cx, "tooltip-notch") && !drawn(cx, "tooltip-ring") && tooltip.ring().is_none(),
-        "no cues at the pointer"
+        "no cues in the ordinary placement"
     );
 }
 
@@ -682,9 +687,9 @@ fn a_lazy_card_is_made_once_when_its_tooltip_shows_and_kept_while_it_shows(
 /// Why this matters: a view kept after its tooltip went would keep its clock and pulse running with nothing drawing
 /// them, the cost the lazy card exists to avoid; and a view kept from an earlier hover would show stale progress.
 ///
-/// Specification: at the pointer (no sidebar edge), a lazy card's tooltip shows with the view it made; once the pointer
-/// leaves and the tooltip hides, that view is gone (its weak handle no longer upgrades); and a new hover on the same
-/// control, which shows at once in the grace period a hide leaves, makes a new view.
+/// Specification: as ordinary help (no sidebar edge), a lazy card's tooltip shows above its control with the view it
+/// made; once the pointer leaves and the tooltip hides, that view is gone (its weak handle no longer upgrades); and a
+/// new hover on the same control, which shows at once in the grace period a hide leaves, makes a new view.
 #[gpui::test]
 fn a_lazy_cards_view_goes_with_its_tooltip_and_a_new_hover_makes_another(cx: &mut TestAppContext) {
     let built = Built::default();
@@ -692,7 +697,7 @@ fn a_lazy_cards_view_goes_with_its_tooltip_and_a_new_hover_makes_another(cx: &mu
     point_at(cx, "target");
     advance(cx, layers::HOVER_DELAY);
     redraw(cx);
-    assert_eq!(shown(cx).side(), TooltipSide::Pointer);
+    assert_eq!(shown(cx).side(), TooltipSide::Above);
     assert!(
         alive(&built, 0),
         "the premise: the view was made and is drawn"

@@ -36,7 +36,7 @@ fn tooltip_frame(help: layers::Help) -> Vec<gpui::DriverNode> {
     let mut cx =
         gpui::HeadlessAppContext::with_asset_source(text_system, Arc::new(crate::assets::Assets));
     cx.update(crate::bootstrap::install).unwrap();
-    let owner = cx.update(|cx| cx.new(|_| layers::TooltipOwner));
+    let owner = cx.update(|cx| cx.new(|_| layers::TooltipOwner::default()));
     let kept = owner.clone();
     let window = cx
         .open_window(gpui::size(px(1000.), px(800.)), move |window, cx| {

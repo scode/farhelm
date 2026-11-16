@@ -502,6 +502,107 @@ fn moving_inside_a_control_whose_help_shows_redraws_nothing(cx: &mut TestAppCont
     );
 }
 
+/// Why this matters: the old app's tooltip started its wait again on every pointer move inside a control, so help
+/// shows only once the pointer has come to rest, not while the user is still moving across a wide control (a list row,
+/// a long button) on the way to something else.
+///
+/// Specification: with the pointer resting inside a control for less than the hover delay, a move to another point of
+/// the same control starts the delay again: nothing shows a full delay after the first rest began, and the help shows
+/// once the pointer has rested a full delay after the move.
+#[gpui::test]
+fn moving_inside_a_control_while_its_help_waits_starts_the_wait_again(cx: &mut TestAppContext) {
+    let cx = open(cx, two_buttons());
+    let [first, _, third] = inside(cx, "save");
+    let part = std::time::Duration::from_millis(200);
+    cx.simulate_mouse_move(first, None, Modifiers::none());
+    advance(cx, part);
+    assert_eq!(tooltip(cx), None, "nothing shows yet");
+
+    cx.simulate_mouse_move(third, None, Modifiers::none());
+    advance(cx, layers::HOVER_DELAY - part);
+    assert_eq!(
+        tooltip(cx),
+        None,
+        "a full delay after the first rest, the move inside started the wait again"
+    );
+    advance(cx, part - std::time::Duration::from_millis(1));
+    assert_eq!(tooltip(cx), None, "nothing just before the new wait ends");
+    advance(cx, std::time::Duration::from_millis(1));
+    assert_eq!(tooltip(cx).as_deref(), Some("Save the title"));
+}
+
+/// Why this matters: the old app placed ordinary help against its control, and below it with a gap that clears the
+/// pointer's body when there is no room above (SPEC.md's tooltip coverage: the version at the top edge gets its
+/// tooltip below, clear of the cursor). Help placed from the pointer instead lands wherever the pointer stopped, at the
+/// top edge right under the cursor. Centering above a control with room is pinned by the beside tests' no-edge case.
+///
+/// Specification: with the pointer resting 3 pixels inside the top-left corner of `save`, which sits at the window's
+/// top, its help shows below the button, the card's top 28 pixels (within 1) below the button's box inside its 1-pixel
+/// border.
+#[gpui::test]
+fn pointer_help_at_the_top_edge_sits_below_its_control_clear_of_the_pointer(
+    cx: &mut TestAppContext,
+) {
+    let cx = open(cx, two_buttons());
+    let save = bounds(cx, "save");
+    cx.simulate_mouse_move(save.origin + point(px(3.), px(3.)), None, Modifiers::none());
+    wait_hover_delay(cx);
+    redraw(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("Save the title"),
+        "the premise: its help shows"
+    );
+    let shown = cx.update(|window, cx| layers::shown_tooltip(window, cx));
+    assert_eq!(
+        shown.map(|shown| shown.side()),
+        Some(layers::TooltipSide::Below)
+    );
+    let gap = bounds(cx, "tooltip-card").top() - (save.bottom() - px(1.));
+    assert!(
+        (gap - px(28.)).abs() <= px(1.),
+        "a 28-pixel gap, not {gap:?}"
+    );
+}
+
+/// How many bounds trackers ([`layers::TRACKER`]) the next frame draws.
+fn trackers_in_next_frame(cx: &mut VisualTestContext) -> usize {
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    redraw(cx);
+    cx.update(|_, cx| crate::render_count::count(layers::TRACKER, cx))
+}
+
+/// Why this matters: every control with help is drawn in every frame, about 54 of them in the app, and an idle frame's
+/// cost is being cut, so the tracker that records a control's bounds for placing its help must cost nothing on a
+/// control whose help is not in play. The coordinator ruled on 2026-11-16 that an unhovered control draws exactly what
+/// it drew before ordinary help was anchored to its control.
+///
+/// Specification: with two buttons with ordinary help drawn and the pointer on neither, a frame draws no bounds
+/// tracker. With the pointer resting on one until its help shows, a frame draws exactly one, that control's.
+#[gpui::test]
+fn only_the_control_whose_help_waits_or_shows_draws_a_bounds_tracker(cx: &mut TestAppContext) {
+    let cx = open(cx, two_buttons());
+    assert_eq!(
+        trackers_in_next_frame(cx),
+        0,
+        "no tracker while no help is in play"
+    );
+
+    let save = center(cx, "save");
+    cx.simulate_mouse_move(save, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("Save the title"),
+        "the premise: its help shows"
+    );
+    assert_eq!(
+        trackers_in_next_frame(cx),
+        1,
+        "only the showing help's control tracks"
+    );
+}
+
 /// A press puts a control's help away, as the old app's `tooltip.js` did on any `pointerdown`, and it stays away while
 /// the pointer rests there: a Settings section button's tooltip otherwise came back over the section it had just
 /// opened. Specified: with a control's help showing, a click takes it down; a move inside the control and the hover
@@ -767,6 +868,54 @@ fn keyboard_focus_shows_a_controls_help_after_the_delay_and_a_click_does_not(
         "the premise: the click focused the second control"
     );
     assert_eq!(tooltip(cx), None, "a click shows no focus help");
+}
+
+/// Why this matters: a pointer move inside a control starts its help's wait again only when the pointer began that
+/// wait. Help keyboard focus asked for is focus's: it shows a delay after focus landed, and it stays when the pointer
+/// leaves, as the old `tooltip.js` kept focus-owned help. A restart there would delay the help a keyboard user asked
+/// for, and, begun again by the pointer, the help would no longer be focus's, so the pointer leaving would take it
+/// down.
+///
+/// Specification: Tab onto a control starts its help's wait; the pointer coming onto the control 100 ms later and
+/// moving inside it at 200 ms leaves that wait alone: nothing shows just before a full delay after the Tab, the help
+/// shows then, and it stays when the pointer moves off to empty space.
+#[gpui::test]
+fn a_pointer_moving_over_a_control_leaves_a_wait_keyboard_focus_began(cx: &mut TestAppContext) {
+    let plain = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let cx = open(cx, focus_scene(plain));
+    let [onto, _, within] = inside(cx, "first");
+    let part = std::time::Duration::from_millis(100);
+    key(cx, "tab");
+    assert_eq!(
+        crate::test_support::focused_id(cx).as_deref(),
+        Some("first"),
+        "the premise: Tab focused the first control"
+    );
+    advance(cx, part);
+    assert_eq!(tooltip(cx), None, "nothing shows yet");
+
+    cx.simulate_mouse_move(onto, None, Modifiers::none());
+    advance(cx, part);
+    cx.simulate_mouse_move(within, None, Modifiers::none());
+    advance(
+        cx,
+        layers::HOVER_DELAY - part - part - std::time::Duration::from_millis(1),
+    );
+    assert_eq!(tooltip(cx), None, "nothing just before the Tab's wait ends");
+    advance(cx, std::time::Duration::from_millis(1));
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("First help"),
+        "shown a full delay after the Tab, the pointer's moves notwithstanding"
+    );
+
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("First help"),
+        "the help is still focus's: the pointer leaving keeps it"
+    );
 }
 
 /// Why this matters: help a keyboard user called up must go with the focus that called it, as in the old app, and
