@@ -129,7 +129,7 @@ use gpui::{
     UTF16Selection, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
-use super::files::FileLinks;
+use super::files::{FileLinks, StatusShown};
 use super::tunnels::{self, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
 use crate::actions::{self, KeyOwner};
@@ -282,8 +282,12 @@ pub struct AttachedTerminal {
     files: Entity<FileLinks>,
     /// Redraws the terminal when a file check answers, since a printed path shows the pointing hand only then.
     _files: Subscription,
-    /// The platform the tunnel offer is decided for: this one, except in tests, which decide it for the Mac on any
-    /// machine ([`AttachedTerminal::set_platform`]).
+    /// Puts a refused click's explanation away when the file status line shows something newer
+    /// ([`AttachedTerminal::file_status_shown`]).
+    _file_status: Subscription,
+    /// The platform the tunnel offer, a file display's opening hint and a file click's opening modifier are decided
+    /// for: this one, except in tests, which decide them for either platform on any machine
+    /// ([`AttachedTerminal::set_platform`]).
     platform: Platform,
     /// The buttons held in a press the program's mouse reporting took, as a bit per button (1 left, 2 middle, 4
     /// right); 0 while none is. Moves and releases go to the program until the last of them comes up.
@@ -401,6 +405,9 @@ impl AttachedTerminal {
         let transfers = session.read(cx).transfers().cloned();
         let files = cx.new(|_| FileLinks::new(target.session.clone(), transfers));
         let files_watch = cx.observe(&files, |_, _, cx| cx.notify());
+        let file_status = cx.subscribe(&files, |owner, _, _: &StatusShown, cx| {
+            owner.file_status_shown(cx)
+        });
         let tunnel_reads =
             session::observe_current(cx, |owner: &mut Self, cx| owner.follow_store(cx));
         // A text size step this client sent is held before the helm answers, outside the store, so the store observer
@@ -439,6 +446,7 @@ impl AttachedTerminal {
             tunnels,
             files,
             _files: files_watch,
+            _file_status: file_status,
             platform: actions::THIS_PLATFORM,
             reporting: 0,
             mouse_dedupe: MouseDeduper::default(),
@@ -1680,7 +1688,11 @@ impl Render for AttachedTerminal {
                 .child(self.scrollbar_element(view, cx))
         });
         let disclosure_anchor = self.place_disclosure(window, cx);
-        let refusal = self.refusal_line(cx);
+        // The file links' download status line has the refused click's place, as the old app's one message line did:
+        // a refusal stands in for it ([`FileLinks::status_line`]).
+        let refusal = self
+            .refusal_line(cx)
+            .or_else(|| self.files.read(cx).status_line(cx));
         let tunnel_notice = tunnels::notice_line(&self.tunnels, window, cx);
         // The refused click's explanation and the tunnel notice, stacked at the top of the grid's area so neither
         // hides the other. Drawn outside the grid's element: a press on the notice's Dismiss must not also be a press
@@ -2066,8 +2078,10 @@ impl AttachedTerminal {
         // `activateWeb` passed on (terminal.js:1012).
         if press.link.file_path().is_some() {
             let visible = self.disclosure_fully_visible(&press.link);
-            let refusal = self.files.update(cx, |files, _| {
-                files.clicked(&press.link, press.admitted, press.file_ready, visible)
+            let modifiers = event.modifiers;
+            let refusal = self.files.update(cx, |files, cx| {
+                let (admitted, ready) = (press.admitted, press.file_ready);
+                files.clicked(&press.link, admitted, ready, visible, modifiers, cx)
             });
             if let Some(refusal) = refusal {
                 self.refusal = Some(refusal.into());
@@ -2087,6 +2101,8 @@ impl AttachedTerminal {
         if !press.admitted {
             self.refusal = Some(DISCLOSURE_REFUSAL.into());
             self.refusal_raised = true;
+            // The refusal takes the file status line's place, as it took the old app's one message's.
+            self.files.update(cx, |files, cx| files.clear_status(cx));
             cx.notify();
             return;
         }
@@ -2302,10 +2318,17 @@ impl AttachedTerminal {
             .hint(&link.uri, self.platform, program_owns_clicks)
     }
 
-    /// Decide the tunnel offer for `platform` instead of this machine's, so tests on any machine cover the Mac's.
+    /// Decide the tunnel offer, the file opening hint and the opening modifier for `platform` instead of this
+    /// machine's, so tests on any machine cover both platforms. A file hover takes it when its display next changes.
     #[cfg(test)]
     pub(crate) fn set_platform(&mut self, platform: Platform) {
         self.platform = platform;
+    }
+
+    /// Where the current destination display was last drawn, for tests that stage one past the window's edge.
+    #[cfg(test)]
+    pub(crate) fn disclosure_drawn(&self) -> Option<super::disclosure::Drawn> {
+        self.disclosure.as_ref().map(|shown| shown.drawn.clone())
     }
 
     /// The terminal's file links, for tests: they hand in the fake transfers and read the clicks a check admitted.
@@ -2537,23 +2560,23 @@ impl AttachedTerminal {
     /// display it is about is closed while it shows, so nothing covers it.
     fn refusal_line(&self, cx: &App) -> Option<AnyElement> {
         let text = self.refusal.clone()?;
-        let palette = theme::palette(cx);
-        Some(
-            div()
-                .id("terminal-link-refusal")
-                .debug_selector(|| "terminal-link-refusal".into())
-                .role(Role::Status)
-                .aria_label(text.clone())
-                .px(px(6.))
-                .py(px(4.))
-                .max_h(px(54.))
-                .overflow_hidden()
-                .bg(theme::color(palette.bg_2))
-                .text_color(theme::color(palette.fg_1))
-                .text_size(theme::metrics::TEXT_SM)
-                .child(text)
-                .into_any_element(),
-        )
+        Some(super::disclosure::message_line(
+            "terminal-link-refusal",
+            text.clone(),
+            text,
+            cx,
+        ))
+    }
+
+    /// The file status line shows something new (a save started or finished): it replaces a refused click's
+    /// explanation, as the old app's late message replaced its refusal, so a failure is seen rather than hidden behind
+    /// the refusal and cleared with it at the next press.
+    fn file_status_shown(&mut self, cx: &mut Context<Self>) {
+        let refused = self.refusal.take().is_some();
+        let raised = std::mem::take(&mut self.refusal_raised);
+        if refused || raised {
+            cx.notify();
+        }
     }
 }
 
@@ -2828,6 +2851,8 @@ impl AttachedTerminal {
         if self.refusal.take().is_some() {
             cx.notify();
         }
+        // So does a failed download's line ([`FileLinks::pressed`]).
+        self.files.update(cx, |files, cx| files.pressed(cx));
         if let Some(shown) = &mut self.disclosure {
             shown.pressed = true;
         }

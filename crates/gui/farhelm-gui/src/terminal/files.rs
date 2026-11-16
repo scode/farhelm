@@ -27,23 +27,27 @@
 //! fully visible exactly as that one is; this module owns what the display shows (this entity is the popover's
 //! content) and the check behind it.
 //!
-//! NOTE: An admitted click does not download anything yet; the download, the open on a modifier-click and the status
-//! line at the top of the terminal come next. Until then an admitted click is recorded for tests only.
+//! An admitted click saves the file into Downloads, and opens the save on the platform's modifier-click; the status
+//! line at the top of the terminal says how it went ([`download`]).
 //!
 //! Checks go through the UI session's transfers (`UiSession::transfers`), which the terminal hands over as it is made;
 //! tests serve fake ones through the connection, the same path (`Connection::serve_transfers`).
 
+mod download;
+pub(crate) use download::StatusShown;
 #[cfg(test)]
 mod tests;
+
+use std::collections::HashMap;
 
 use farhelm_grid_model::{LinkKind, TerminalLink};
 use farhelm_helm_client::{FileStat, TransferError, Transfers};
 use farhelm_input_mapping::Platform;
 use farhelm_proto::{DownloadFileInfo, DownloadFileStatus};
 use gpui::{
-    AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    Render, SharedString, StatefulInteractiveElement as _, Styled, Task, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, Modifiers,
+    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Task,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::disclosure::{self, Drawn};
@@ -81,10 +85,13 @@ pub(crate) struct FileLinks {
     hover: Option<Hover>,
     /// The checking ring's turn, held only while the display shows a check in an active window.
     spinner: Option<Spinner>,
-    /// The resolved host path of every click a check admitted, in order: what the download will reopen, once it is
-    /// built. Test builds only, since nothing else acts on an admitted click yet.
-    #[cfg(test)]
-    admitted: Vec<String>,
+    /// What the status line at the top of the terminal says about the latest download ([`download`]).
+    status: Option<download::Status>,
+    /// The saves in flight, by the number each was started under. Dropping one abandons it, and the helm then removes
+    /// what it staged; each removes itself when its answer comes.
+    downloads: HashMap<u64, Task<()>>,
+    /// The number the next save is started under.
+    next_download: u64,
 }
 
 /// One hover over a file link, with its check.
@@ -120,8 +127,9 @@ impl FileLinks {
             transfers,
             hover: None,
             spinner: None,
-            #[cfg(test)]
-            admitted: Vec::new(),
+            status: None,
+            downloads: HashMap::new(),
+            next_download: 0,
         }
     }
 
@@ -218,8 +226,10 @@ impl FileLinks {
 
     /// A click on file link `link` (found again from the live text at the release, with nothing selected and no drag),
     /// which the press found `admitted` (a ready check and a display open and fully visible) and `ready_at_press` (a
-    /// ready check, whatever the display), with the display now `visible` or not. Returns the explanation to show when
-    /// the click is refused for a display that was not fully visible.
+    /// ready check, whatever the display), with the display now `visible` or not, and `modifiers` held, judged for the
+    /// platform the hover's hint named. An admitted click saves the checked file, the one the host resolved, and on
+    /// the opening modifier also opens the save ([`download`]). Returns the explanation to show when the click is
+    /// refused for a display that was not fully visible, which takes the status line's place.
     ///
     /// A click with no ready check, now or at its press, is silent, as the old app's was: the display already says
     /// why, and a check that answered between the press and the release was not one the user pressed over.
@@ -229,24 +239,27 @@ impl FileLinks {
         admitted: bool,
         ready_at_press: bool,
         visible: bool,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
     ) -> Option<&'static str> {
         if !self.ready_for(link) || !(admitted || ready_at_press) {
             return None;
         }
         if admitted {
-            #[cfg(test)]
+            if let Some(hover) = &self.hover
+                && let Check::Answered(stat) = &hover.check
             {
-                if let Some(Hover {
-                    check: Check::Answered(stat),
-                    ..
-                }) = &self.hover
-                {
-                    self.admitted.push(stat.info.path.clone());
-                }
+                let (path, can_open) = (stat.info.path.clone(), stat.can_open == Some(true));
+                let requested = download::opening(modifiers, hover.platform);
+                self.download(path, can_open, requested, cx);
             }
             return None;
         }
-        (!visible).then_some(FILE_REFUSAL)
+        if visible {
+            return None;
+        }
+        self.clear_status(cx);
+        Some(FILE_REFUSAL)
     }
 }
 
