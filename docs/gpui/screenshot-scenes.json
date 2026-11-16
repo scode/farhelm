@@ -1137,6 +1137,11 @@
       "reference": null
     },
     {
+      "golden": "session-list-marked",
+      "title": "The session list with two rows marked: the marked bar (\"2 marked\", the marked menu's toggle and Clear) in place of the title, the count and the heading's actions, the open row marked under its accent fill, and an unselected row's marker and tint (compared with the old stylesheet; there is no reference picture)",
+      "reference": null
+    },
+    {
       "golden": "session-row-menu",
       "title": "A session row's actions menu, open below its button",
       "reference": "session-row-menu"

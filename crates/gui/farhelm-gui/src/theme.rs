@@ -98,6 +98,11 @@ pub struct Palette {
     pub accent_fill_hover: Token,
     /// `--accent-edge`: the edge of a filled primary action.
     pub accent_edge: Token,
+    /// `--accent-fill` over `--bg-1`: the fill of a marked session row that is not the selected one. The old stylesheet
+    /// had no variable for it; its `.session-row[data-session-marked="true"]` rule mixed one in place, `color-mix(in
+    /// srgb, var(--accent-fill) 14%, var(--bg-1))`. Both are opaque, so the mix is premixed here from this palette's
+    /// own `accent_fill` and `bg_1`, 14 and 86 parts per channel, rounded.
+    pub marked_bg: Token,
     /// `--border`: the standard control outline.
     pub border: Token,
     /// `--border-dim`: quiet rules, such as between a dialog's header, body and footer.
@@ -197,6 +202,7 @@ pub const DARK: Palette = Palette {
     accent_fill: rgb_token(0x5268d0),
     accent_fill_hover: rgb_token(0x495fc7),
     accent_edge: rgb_token(0x5268d0),
+    marked_bg: rgb_token(0x242c43),
     border: rgb_token(0x485367),
     border_dim: rgb_token(0x303846),
     border_nested: rgb_token(0x485367),
@@ -273,6 +279,7 @@ pub const LIGHT: Palette = Palette {
     accent_fill: rgb_token(0x4a63d8),
     accent_fill_hover: rgb_token(0x4059c7),
     accent_edge: rgb_token(0x4a63d8),
+    marked_bg: rgb_token(0xd3daf0),
     border: rgb_token(0xb8c2d3),
     border_dim: rgb_token(0xd8deea),
     border_nested: rgb_token(0xb8c2d3),

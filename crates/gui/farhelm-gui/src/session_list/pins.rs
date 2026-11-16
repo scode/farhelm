@@ -302,6 +302,12 @@ pub(super) fn menu_items(
 
 // ---- The requests ----------------------------------------------------------------------------------------------------
 
+/// Send `key`'s Pin to top (`pinned`) or Unpin through the operation store, as the row menu's item does: the marked
+/// bar's Pin and Unpin send each marked row's own request through here, so the request's shape stays in this file.
+pub(super) fn send_pin(key: &str, pinned: bool, cx: &mut gpui::App) {
+    super::menu::send(key, pin_command(key, pinned), cx);
+}
+
 /// The session's Pin to top (`pinned`) or Unpin: `PUT /api/sessions/{id}/pin` with `{"pinned": <bool>}`, which the helm
 /// requires whole (a missing value is refused, never read as an unpin).
 fn pin_command(session: &str, pinned: bool) -> Result<Command, PathError> {
