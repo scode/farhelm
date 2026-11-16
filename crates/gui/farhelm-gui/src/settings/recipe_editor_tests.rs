@@ -176,8 +176,9 @@ fn one_recipe() -> Vec<Value> {
 /// dialog's footer region, not in the scrolling body, or a long form would push Save out of view. Specified: the list
 /// offers New recipe and an Edit per row; New recipe replaces the list with the editor titled "New recipe", focus on
 /// Back; opening sends the credential catalog's read and nothing else; Cancel and Save are drawn inside the dialog's
-/// pinned notices, with the Close row still drawn; Back with a typed name sends nothing (no save, and no read of the
-/// recipes: they are pushed), closes the editor, shows the list and puts focus on New recipe.
+/// pinned notices, with the Close row still drawn; Back with a typed name, then Discard in the question it asks,
+/// sends nothing (no save, and no read of the recipes: they are pushed), closes the editor, shows the list and puts
+/// focus on New recipe.
 #[gpui::test]
 fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, one_recipe());
@@ -213,6 +214,7 @@ fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut Te
 
     fill(cx, "recipe-name", "scratch");
     click(cx, "recipe-back");
+    click(cx, "prompt-alternative-0");
     assert_eq!(sent(&mut helm), [], "closing sends nothing");
     assert!(!drawn(cx, "recipe-editor"));
     assert!(drawn(cx, "recipes-list"));
@@ -434,7 +436,7 @@ fn a_saved_recipes_name_is_fixed(cx: &mut TestAppContext) {
 /// recipe's operation key with the row's build, whose refusal the row draws under its build button; one the editor
 /// already showed must leave the key, or it would come back under the row as a build refusal once the editor closed.
 /// Specified: a refused update shows the helm's words as the editor's error and keeps the edited disk size; the key
-/// records no refusal afterwards; Back shows the list with no refusal under the row.
+/// records no refusal afterwards; Back, then Discard, shows the list with no refusal under the row.
 #[gpui::test]
 fn a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, one_recipe());
@@ -455,7 +457,8 @@ fn a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row(cx: &mut T
     );
 
     click(cx, "recipe-back");
-    assert_eq!(sent(&mut helm), [], "closing sends nothing");
+    click(cx, "prompt-alternative-0");
+    assert_eq!(sent(&mut helm), [], "discarding sends nothing");
     assert!(drawn(cx, "recipe-rust-dev"));
     assert!(
         !drawn(cx, "recipe-rust-dev-build-error"),

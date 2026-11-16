@@ -81,6 +81,8 @@ mod recipe_credential_tests;
 #[cfg(test)]
 mod recipe_editor_tests;
 #[cfg(test)]
+mod recipe_leave_tests;
+#[cfg(test)]
 mod recipe_place_tests;
 #[cfg(test)]
 mod recipe_tests;
@@ -90,6 +92,8 @@ mod tensorlake_key;
 mod terminal;
 #[cfg(test)]
 mod tests;
+
+use std::rc::Rc;
 
 use farhelm_helm_client::PathError;
 use farhelm_input_mapping::Platform;
@@ -104,7 +108,7 @@ use crate::assets::Icon;
 use crate::components::{Button, DialogFrame, HoverHelp, Tier};
 use crate::drafts::{self, Draft};
 use crate::focus::{self, Mark, ReturnTo};
-use crate::layers::{self, Dialog, LayerId};
+use crate::layers::{self, Dialog, Dismissal, LayerId};
 use crate::operations::{Command, OpKey, Outcome};
 use crate::session;
 use crate::theme::{self, Preference};
@@ -228,8 +232,16 @@ fn open_dialog(
             // use, and the old Settings did (`DialogFocus::remembered`, whose gap rule is on).
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Control(opener.clone()),
-            // None: closing never waits. A save in flight goes on in the operation store after the dialog is gone.
-            on_dismiss: None,
+            // Asked on Escape and the close controls ([`SettingsDialog::dismissal`]). Otherwise closing never waits: a
+            // save in flight goes on in the operation store after the dialog is gone.
+            on_dismiss: Some(Rc::new({
+                let dialog = dialog.downgrade();
+                move |window: &mut Window, cx: &mut App| {
+                    dialog
+                        .update(cx, |dialog, cx| dialog.dismissal(window, cx))
+                        .unwrap_or(Dismissal::Close)
+                }
+            })),
             placement: layers::DialogPlacement::Centered,
             dismiss_on_outside_press: false,
         },
@@ -661,7 +673,10 @@ impl SettingsDialog {
                 // Shown again: the catalog is pushed, but whether an API key is saved is not, so that is read again
                 // ([`recipes`]).
                 Some(section) => section.update(cx, |section, cx| section.read_account(cx)),
-                None => self.recipes = Some(cx.new(|cx| recipes::Recipes::new(window, cx))),
+                None => {
+                    let layer = self.layer;
+                    self.recipes = Some(cx.new(|cx| recipes::Recipes::new(layer, window, cx)));
+                }
             }
         } else if let Some(recipes) = &self.recipes {
             // Undrawn from now on: it must not keep holding the running pulse ([`recipes::Recipes::hidden`]).
@@ -692,6 +707,23 @@ impl SettingsDialog {
             }
         }
         cx.notify();
+    }
+
+    /// What closing the dialog by Escape or a close control does: close, unless an open recipe editor asks first
+    /// ([`recipes::Editor::dismissal`]), in which case Recipes is shown, if another section was, so the question
+    /// shows where it is asked.
+    fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
+        let Some(editor) = self
+            .recipes
+            .as_ref()
+            .and_then(|recipes| recipes.read(cx).editor())
+        else {
+            return Dismissal::Close;
+        };
+        if self.shown != Section::Recipes && editor.read(cx).asks_before_leaving(cx) {
+            self.show(Section::Recipes, window, cx);
+        }
+        editor.update(cx, |editor, cx| editor.dismissal(window, cx))
     }
 
     /// The read of `agent`'s trust answered: the switch shows it, and takes focus, scrolled into view, if
