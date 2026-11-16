@@ -1149,6 +1149,13 @@ impl Launcher {
             None
         } else {
             match &self.draft.mode {
+                // A new environment's launch goes to its own route (`LaunchDraft::environment_body`).
+                Mode::New | Mode::Clone if self.draft.target.is_some() => {
+                    self.draft.environment_body(target).map(|mut body| {
+                        body.request.confirm_yolo = confirm_yolo;
+                        Request::Environment(body)
+                    })
+                }
                 Mode::New | Mode::Clone => self.draft.create_body(target).map(|mut body| {
                     body.confirm_yolo = confirm_yolo;
                     Request::Create(body)
@@ -1185,11 +1192,17 @@ impl Launcher {
             }
         };
         // The progress pill's host, captured now for the request's life: the registry's display name, without the
-        // footer's phase. A request exists only for a host the refusal check found among `hosts`.
-        let host = request
-            .as_ref()
-            .and(self.draft.host)
-            .and_then(|id| hosts.iter().find(|host| host.id == id).map(display_name));
+        // footer's phase, or the new environment's label (the old pill named its target the same way). A request exists
+        // only for a host the refusal check found among `hosts`.
+        let host = match &self.draft.target {
+            Some(environment) => request
+                .as_ref()
+                .map(|_| crate::environment_ui::launch_target_label(environment, &hosts)),
+            None => request
+                .as_ref()
+                .and(self.draft.host)
+                .and_then(|id| hosts.iter().find(|host| host.id == id).map(display_name)),
+        };
         let (Some(request), Some(host)) = (request, host) else {
             self.pressed = true;
             cx.notify();
@@ -2321,11 +2334,13 @@ impl Render for Launcher {
                 Some(HostSentence::new("launcher-refusal-words").text(format!("{lead} {reason}")))
             }
             // The helm's timeout reply is not a refusal: the create may still happen, and its words say so.
+            // Words complete as they stand are shown without the lead too: an environment create's failed run, which
+            // the helm already words "Not launched. …", and the launcher's own words for an unknown outcome.
             (_, Some(words))
                 if self
                     .refused
                     .as_ref()
-                    .is_some_and(|refused| refused.may_still_start) =>
+                    .is_some_and(|refused| refused.may_still_start || refused.complete) =>
             {
                 Some(HostSentence::new("launcher-refusal-words").host(words))
             }

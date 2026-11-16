@@ -61,6 +61,8 @@ mod draft_tests;
 #[cfg(test)]
 mod entry_tests;
 #[cfg(test)]
+mod environment_launch_tests;
+#[cfg(test)]
 mod environment_tests;
 #[cfg(test)]
 mod escalation_tests;

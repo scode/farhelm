@@ -947,11 +947,18 @@ fn current_operations_id(cx: &App) -> Option<EntityId> {
 /// its Retry and Adopt) refuse to start during. The old app refused a host change during a launch and
 /// the reverse, through one page-wide token; the migration's orchestrator decided on 2026-11-14 that each side refuses
 /// its own action instead, with a reason, while the other's work is in flight in the operation store. What counts as a
-/// launch is the operation store's to say ([`Work::creates_a_session`]: the launcher's New and Clone, and a session's
-/// Restart and Replace). `false` in an inert window, which has no store and starts nothing anyway.
+/// launch is mostly the operation store's to say ([`Work::creates_a_session`]: the launcher's New and Clone, and a
+/// session's Restart and Replace), besides the environment create below. `false` in an inert window, which has no
+/// store and starts nothing anyway.
+///
+/// An environment create the launcher still waits on counts too (`launcher::launch::environment_create_running`): its
+/// operation key clears on the helm's 202, while the launch goes on for minutes, so the launcher's wait for it is what
+/// keeps launches and host-registry changes exclusive for the whole create (SPEC.md, "Launches and changes to the host
+/// registry still exclude each other").
 pub(crate) fn launch_in_flight(cx: &App) -> bool {
-    session::current_operations(cx)
-        .is_some_and(|operations| operations.read(cx).any_in_flight(Work::creates_a_session))
+    crate::launcher::launch::environment_create_running(cx)
+        || session::current_operations(cx)
+            .is_some_and(|operations| operations.read(cx).any_in_flight(Work::creates_a_session))
 }
 
 /// Whether a host-registry change is in flight anywhere in the operation store: what refuses the launcher's Launch and

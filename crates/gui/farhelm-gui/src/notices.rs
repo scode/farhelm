@@ -35,10 +35,16 @@ pub enum Notice {
     /// may still happen, and its launcher waits with the draft and the reply. Offered and withdrawn as
     /// [`Notice::LaunchNotStarted`] is, without saying the launch did not start.
     LaunchMayStillStart,
+    /// A launch into a new environment (a container or a sandbox) that the user had moved on from ended in a way the
+    /// launcher cannot learn: its run says it ended without a result, or went away, or the helm never named it. The
+    /// environment may exist, so the notice says to check Hosts rather than that nothing launched; its launcher waits
+    /// with the draft, offered and withdrawn as [`Notice::LaunchNotStarted`] is.
+    EnvironmentLaunchUnknown,
 }
 
 impl Notice {
     /// The notice's text, as SPEC.md words it.
+    /// The environment launch's notice is the app's own words: SPEC.md words none for it.
     pub fn text(self) -> SharedString {
         match self {
             Notice::ConnectionLost => {
@@ -61,6 +67,11 @@ impl Notice {
             Notice::LaunchMayStillStart => {
                 "A launch timed out, so the session may still start. Open the launcher to see the reply; it still holds \
                  your settings."
+                    .into()
+            }
+            Notice::EnvironmentLaunchUnknown => {
+                "Farhelm could not learn how a launch into a new environment ended. Check Hosts before launching again; \
+                 the launcher still holds your settings."
                     .into()
             }
         }

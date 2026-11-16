@@ -30,6 +30,16 @@
 //! - **The YOLO question.** A refusal saying the host asks before YOLO launches (`HelmMarker::YoloConfirmation`) is a
 //!   follow-up question, not a failure: the launcher comes back the same way, with the question asked in place
 //!   (`view::yolo_question`).
+//! - **A create in a new environment** (New container, New sandbox) goes to its own route, which the helm accepts (202)
+//!   once it has admitted the launch, naming the run its outcome lands on in the pushed host progress (SPEC_impl.md,
+//!   "The UI channel"). The launcher stays hidden and busy, its progress pill up, until that run ends ([`RunWait`]):
+//!   completed, the new host's session is read and settled exactly as an ordinary create's reply is, so success opens
+//!   it under the same rules; failed, the run's reason comes back in the launcher as a refusal does. It is never
+//!   opened from the 202 itself, which only says the launch began. A completed run whose session read fails or finds
+//!   no session settles as done with nothing to open (logged): the launch succeeded, and its row appears in the list.
+//!   A failed run the helm marks as ending without a known result, or a run that goes away, comes back with words
+//!   saying so, and its notice says to check Hosts rather than that nothing launched
+//!   ([`Notice::EnvironmentLaunchUnknown`]).
 //! - **A quick launch being prepared** (`view::prepare_unseen`): a launcher made out of sight on New's prefill waits
 //!   here while its catalog read is out, before its templates are applied. It counts as busy, as a pending launch does
 //!   ([`busy`]): New, Clone, the template shortcuts and the sequence prefix wait. Then it is started through [`start`]
@@ -38,8 +48,10 @@
 //!
 //! The slot's "waiting for the reply" is the hidden launcher's own lifetime, not a copy of the operation store's busy
 //! state: the store still says whether the create is in flight, and the launcher reads the refusal it shows from the
-//! store, by the launch's key. Dismissing the notice withdraws only the notice; the launcher stays in the slot, and New
-//! (or Clone) brings it back.
+//! store, by the launch's key. An accepted environment create is the one exception: the store lets go of its key at
+//! the 202, and from then on the slot's wait for the run ([`RunWait`]) is the only record that the launch goes on
+//! ([`environment_create_running`]). Dismissing the notice withdraws only the notice; the launcher stays in the slot,
+//! and New (or Clone) brings it back.
 //!
 //! **Reports while hidden.** A create that waits two seconds shows the progress pill (`super::pill`) until its reply,
 //! armed by a ticker deadline the held launcher keeps, so the deadline goes with it on a reply or a reset. A success
@@ -48,7 +60,11 @@
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
-use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody, RestartSessionBody};
+use farhelm_proto::provisioning::{ProvisioningView, RunStatus};
+use farhelm_proto::session_requests::{
+    CreateSessionBody, EnvironmentCreateBody, ReplaceSessionBody, RestartSessionBody,
+};
+use farhelm_proto::ui_channel::{Availability, Collection, HostView, SessionList};
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
 use super::pill::{self, ProgressPill, StartedReport};
@@ -57,7 +73,7 @@ use crate::focus::{self, Mark};
 use crate::host_text::HostText;
 use crate::layers::{self, PillId};
 use crate::notices::{self, Notice};
-use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
+use crate::operations::{self, Command, HelmMarker, OpKey, Outcome, Settled, Work};
 use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::{outcome, replace, selection};
 use crate::ticker;
@@ -80,6 +96,10 @@ struct Held {
     /// The progress pill of the create it waits on: `None` while it waits for the user, and while a quick launch is
     /// being prepared, before any create.
     progress: Option<Progress>,
+    /// The run an accepted environment create's outcome lands on, from its 202 until that run ends; `None` for every
+    /// other wait. While it is set the launcher still waits for its "reply" ([`Waiting::Reply`]): the launch is not
+    /// over, so it stays busy and its progress pill stays up.
+    run: Option<RunWait>,
 }
 
 /// A pending create's progress pill: the deadline that shows it two seconds after the press, then the pill it showed in
@@ -88,6 +108,57 @@ struct Progress {
     _shows: ticker::Deadline,
     shown: Option<PillId>,
 }
+
+/// An environment create the helm accepted, waiting for its run to end in the pushed host progress (SPEC_impl.md, "The
+/// UI channel"), with what its outcome is settled against: the request as sent, its window, and the press's mark, the
+/// same three an ordinary create's reply is settled against.
+///
+/// Keyed by the run, not by the host alone: the host is new, but matching the run id as well keeps any other run
+/// listed under that id from passing for this launch's.
+struct RunWait {
+    host: i64,
+    run: String,
+    sent: Sent,
+    window: AnyWindowHandle,
+    mark: Mark,
+    /// Set once the run has completed and the read of the new host's sessions is out, so the store changes that follow
+    /// send no second one.
+    reading: bool,
+}
+
+/// What an accepted environment create's 202 names: the host the helm registered for the new environment, and the run
+/// on it that carries the launch's outcome.
+#[derive(serde::Deserialize)]
+struct Admitted {
+    host_id: i64,
+    run_id: String,
+}
+
+/// How the run an environment create waits on stands in the store.
+enum RunEnd {
+    /// Still running, or no host progress has been pushed yet.
+    Running,
+    /// The launch's session exists on the run's host.
+    Completed,
+    /// The launch failed, with the run's reason as the helm words it ("Not launched." and the reason), and whether the
+    /// helm marks its outcome as unknown (a launch task that ended without a result).
+    Failed { words: HostText, unknown: bool },
+    /// The run is not listed though host progress is available, so how the launch ended cannot be learned
+    /// (SPEC_impl.md, "The UI channel"). The helm lists the run before it admits the launch and pushes a command's
+    /// changes before its reply, so this holds from the 202 on: a run missing then was never going to appear.
+    Lost,
+}
+
+/// Why the launcher cannot say how an accepted environment create ended: its run is no longer listed, or the 202 did
+/// not name it. Worded as the old app's uncertain environment launch was ("… Check Hosts for the environment before
+/// launching again."), since the environment may exist.
+const RUN_LOST: &str = "Farhelm can no longer see how this launch ended. Check Hosts for the environment before \
+                        launching again.";
+
+/// A failed run that carries no reason of its own. The helm always words one; this only keeps the launcher from showing
+/// an empty sentence if it ever did not. A run whose outcome is unknown says [`RUN_LOST`] instead, which claims no
+/// failure.
+const RUN_FAILED: &str = "Not launched. The launch failed.";
 
 /// What a hidden launcher waits for before it is drawn again or dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +179,8 @@ struct Slot(Entity<LaunchSlot>);
 impl Global for Slot {}
 
 /// The slot, made on first need. It is an entity rather than plain global state so it can follow the UI session: when a
-/// reset drops what it held, the notice offering that launcher has nothing left to open, and goes too.
+/// reset drops what it held, the notice offering that launcher has nothing left to open, and goes too. It follows the
+/// store for an accepted environment create as well, whose outcome arrives as a store change ([`follow_run`]).
 fn slot(cx: &mut App) -> Entity<LaunchSlot> {
     if let Some(slot) = cx.try_global::<Slot>() {
         return slot.0.clone();
@@ -119,7 +191,9 @@ fn slot(cx: &mut App) -> Entity<LaunchSlot> {
         _following: session::observe_current(cx, |slot: &mut LaunchSlot, cx| {
             if slot.held.current(cx).is_none() {
                 withdraw_notices(cx);
+                return;
             }
+            follow_run(slot, cx);
         }),
     });
     cx.set_global(Slot(slot.clone()));
@@ -140,15 +214,32 @@ fn waiting(launcher: &Entity<Launcher>, cx: &mut App) -> Option<Waiting> {
 
 /// Whether the launcher is busy for New and the other ways of starting a launch: a launch's create is out, or a quick
 /// launch is being prepared (SPEC.md: "The same launcher remains busy and cannot accept a second launch or be replaced
-/// with another draft").
-pub(super) fn busy(cx: &mut App) -> bool {
+/// with another draft"). An environment create stays busy after its 202, until its run ends.
+pub(super) fn busy(cx: &App) -> bool {
     matches!(held(cx), Some(Waiting::Reply | Waiting::Preparing))
+}
+
+/// The run an accepted environment create waits on, by host id and run id, while the slot's launcher waits on one;
+/// `None` for every other wait. The progress pill reads it while it draws (`super::pill`), so the slot is its only
+/// record.
+pub(super) fn followed_run(cx: &App) -> Option<(i64, String)> {
+    let slot = cx.try_global::<Slot>()?.0.read(cx);
+    let wait = slot.held.read(cx)?.as_ref()?.run.as_ref()?;
+    Some((wait.host, wait.run.clone()))
+}
+
+/// Whether an environment create the helm accepted is still running, after its 202: what the host registry's side
+/// counts as a launch in flight besides the operation store's (`hosts::launch_in_flight`), since the create's
+/// operation key clears on the 202 while the launch goes on for minutes. A quick launch still being prepared, which
+/// has sent nothing, does not count.
+pub(crate) fn environment_create_running(cx: &App) -> bool {
+    followed_run(cx).is_some()
 }
 
 /// Whether the slot holds a launcher for the current UI session at all: one being prepared, one whose create is out,
 /// or one a refusal left waiting for the user behind its notice. A quick launch is refused while any is
 /// (`entry::quick_launch_available`).
-pub(super) fn holding(cx: &mut App) -> bool {
+pub(super) fn holding(cx: &App) -> bool {
     held(cx).is_some()
 }
 
@@ -161,6 +252,7 @@ pub(super) fn preparing(launcher: Entity<Launcher>, cx: &mut App) {
             // No create is out yet, so no progress pill: the preparation is the catalog read, and then at most the
             // host's history or a checkout preview.
             progress: None,
+            run: None,
         }),
         cx,
     );
@@ -203,12 +295,11 @@ pub(super) fn reveal_prepared(
     );
 }
 
-/// What the slot's launcher for the current UI session waits for, if it holds one, without making the slot.
-fn held(cx: &mut App) -> Option<Waiting> {
-    let slot = cx.try_global::<Slot>().map(|slot| slot.0.clone())?;
-    slot.update(cx, |slot, cx| {
-        slot.held.current(cx).as_ref().map(|held| held.waiting)
-    })
+/// What the slot's launcher for the current UI session waits for, if it holds one, without making the slot. Reads the
+/// slot rather than updating it, so it answers from a plain `&App`.
+fn held(cx: &App) -> Option<Waiting> {
+    let slot = cx.try_global::<Slot>()?.0.read(cx);
+    slot.held.read(cx)?.as_ref().map(|held| held.waiting)
 }
 
 /// Whether the launch whose reply the window waits for is a quick launch that never showed the launcher
@@ -252,6 +343,12 @@ fn hold(held: Option<Held>, cx: &mut App) {
 /// header").
 pub(super) enum Request {
     Create(CreateSessionBody),
+    /// New or Clone into a new disposable environment (New container, New sandbox): a create like [`Request::Create`]
+    /// under a fresh launch key, sent to the environment route (`POST /api/environment-sessions`), which answers 202
+    /// once it has admitted the launch and lands the outcome on a run in the pushed host progress ([`RunWait`]). A
+    /// route of its own rather than a target on the ordinary create, which an older helm would run on its own machine
+    /// (`EnvironmentCreateBody`'s docs).
+    Environment(EnvironmentCreateBody),
     Replace {
         /// The source session's key.
         source: String,
@@ -270,7 +367,7 @@ impl Request {
     /// Restart.
     fn key(&self) -> OpKey {
         match self {
-            Request::Create(_) => OpKey::new_launch(),
+            Request::Create(_) | Request::Environment(_) => OpKey::new_launch(),
             Request::Replace { source, .. } | Request::Restart { source, .. } => {
                 OpKey::session(source)
             }
@@ -281,7 +378,7 @@ impl Request {
     /// source's row and header read them as they read the plain ones.
     fn work(&self) -> Work {
         match self {
-            Request::Create(_) => Work::Launch,
+            Request::Create(_) | Request::Environment(_) => Work::Launch,
             Request::Replace { .. } => Work::Replace,
             Request::Restart { .. } => Work::Restart,
         }
@@ -297,6 +394,13 @@ impl Request {
                 ApiPath::api(&["sessions"]).ok()?,
                 Some(serde_json::to_value(body).ok()?),
                 "POST /api/sessions",
+            )),
+            Request::Environment(body) => Some(Command::new(
+                Work::Launch,
+                Method::Post,
+                ApiPath::api(&["environment-sessions"]).ok()?,
+                Some(serde_json::to_value(body).ok()?),
+                "POST /api/environment-sessions",
             )),
             Request::Replace { source, body } => Some(Command::new(
                 Work::Replace,
@@ -320,6 +424,7 @@ impl Request {
     fn title(&self) -> Option<String> {
         match self {
             Request::Create(body) => body.title.clone(),
+            Request::Environment(body) => body.request.title.clone(),
             Request::Replace { body, .. } => body.with.as_ref().and_then(|with| with.title.clone()),
             Request::Restart { .. } => None,
         }
@@ -328,7 +433,7 @@ impl Request {
     /// The progress pill's verb (the old `LaunchAction::present`).
     fn verb(&self) -> &'static str {
         match self {
-            Request::Create(_) => "Launching",
+            Request::Create(_) | Request::Environment(_) => "Launching",
             Request::Replace { .. } => "Replacing",
             Request::Restart { .. } => "Restarting",
         }
@@ -337,7 +442,7 @@ impl Request {
     /// The source a Replace with replaces or a Restart with restarts; `None` for a create.
     fn source(&self) -> Option<String> {
         match self {
-            Request::Create(_) => None,
+            Request::Create(_) | Request::Environment(_) => None,
             Request::Replace { source, .. } | Request::Restart { source, .. } => {
                 Some(source.clone())
             }
@@ -404,6 +509,7 @@ pub(super) fn start(
                 _shows: shows,
                 shown: None,
             }),
+            run: None,
         }),
         cx,
     );
@@ -412,7 +518,7 @@ pub(super) fn start(
 
 /// The deadline that shows `launcher`'s progress pill in `window` two seconds from now, opening with `verb` and naming
 /// `host` and `title` as the request carries them, counting from now, if the slot still holds `launcher` waiting for
-/// its reply then.
+/// its reply then. The pill finds an accepted environment create's run itself ([`followed_run`]).
 fn arm_progress(
     launcher: &Entity<Launcher>,
     window: AnyWindowHandle,
@@ -483,6 +589,10 @@ struct Sent {
 /// again. Their refusals come back in the launcher as a create's do, and the operation store keeps the same words on
 /// the source's row.
 ///
+/// An environment create's 202 is not its outcome: the launcher goes on waiting for the run it names
+/// ([`wait_for_run`]), and comes back here with the session the run made once it completes ([`completed`]), so its
+/// success opens the session under exactly the rules below.
+///
 /// A launcher the slot no longer holds is left alone: nothing else lets go of a waiting launcher today, but its reply
 /// must not act for a launcher something else has since taken over.
 fn settle(
@@ -494,6 +604,12 @@ fn settle(
     cx: &mut App,
 ) {
     if waiting(&launcher, cx) != Some(Waiting::Reply) {
+        return;
+    }
+    // Only an environment create is answered 202: its launch is admitted, not over, so its pill stays up and the
+    // launcher stays busy until the run ends.
+    if let Outcome::Accepted(body) = &settled.outcome {
+        wait_for_run(launcher, body.clone(), sent, window, mark, cx);
         return;
     }
     let Sent { key, source, work } = sent;
@@ -518,9 +634,8 @@ fn settle(
                 None => opened(body.clone(), unseen, user_moved_on, window, cx),
             }
         }
-        // None of these requests is accepted as long work, so this cannot arrive. If it did, nothing failed, and
-        // the pushed list shows what the helm made of it.
-        Outcome::Accepted(_) => hold(None, cx),
+        // Followed above, on its run.
+        Outcome::Accepted(_) => {}
         // The host asks before YOLO launches: not a failure but a follow-up question, which comes back the way a
         // refusal does (SPEC.md: "A failure or follow-up question restores the same launcher").
         Outcome::Refused(refusal) if refusal.has(HelmMarker::YoloConfirmation) => {
@@ -555,10 +670,261 @@ fn settle(
                 work,
                 may_still_start,
                 unaccepted: refusal.has(HelmMarker::CreateUnaccepted),
+                complete: false,
+                outcome_unknown: false,
             };
             refused(launcher, refused_launch, window, mark, user_moved_on, cx);
         }
     }
+}
+
+// ---- An accepted environment create, waiting for its run ------------------------------------------------------------
+
+/// `launcher`'s environment create was accepted (202) with `body`, which names the new environment's host and the run
+/// on it that carries the launch's outcome: keep the launcher waiting, now for that run ([`RunWait`], which its
+/// progress pill reads), and look at the run at once, since the channel pushes what a command changed before its
+/// reply (SPEC_impl.md, "The UI channel"). A 202 that names no run cannot be followed, so the launcher comes back
+/// saying that how the launch ended is unknown ([`RUN_LOST`]), as for a run that goes away.
+fn wait_for_run(
+    launcher: Entity<Launcher>,
+    body: Option<serde_json::Value>,
+    sent: Sent,
+    window: AnyWindowHandle,
+    mark: Mark,
+    cx: &mut App,
+) {
+    let Some(Admitted { host_id, run_id }) =
+        body.and_then(|body| serde_json::from_value::<Admitted>(body).ok())
+    else {
+        tracing::warn!("an environment create was accepted without naming its run");
+        run_failed(
+            launcher,
+            sent,
+            window,
+            mark,
+            HostText::from_host(RUN_LOST),
+            true,
+            cx,
+        );
+        return;
+    };
+    slot(cx).update(cx, |slot, cx| {
+        if let Some(held) = slot.held.current(cx).as_mut() {
+            held.run = Some(RunWait {
+                host: host_id,
+                run: run_id,
+                sent,
+                window,
+                mark,
+                reading: false,
+            });
+        }
+        // The pill reads the run as it draws, which its seconds clock makes at least once a second.
+        cx.notify();
+    });
+    slot(cx).update(cx, follow_run);
+}
+
+/// Look at the run the slot's launcher waits on, if it waits on one, as the store shows it now: the slot calls this on
+/// every store change, and [`wait_for_run`] once as the wait starts. An ended run is settled after this update, since
+/// settling updates the slot this runs inside: a failed or vanished run comes back in the launcher ([`run_failed`]),
+/// and a completed one has its session read first ([`read_session`]). Either way it is acted on once: a failed run's
+/// wait leaves the slot here, and a completed one is marked as read.
+fn follow_run(slot: &mut LaunchSlot, cx: &mut gpui::Context<LaunchSlot>) {
+    let Some(held) = slot.held.current(cx).as_mut() else {
+        return;
+    };
+    let Some(wait) = held.run.as_mut().filter(|wait| !wait.reading) else {
+        return;
+    };
+    let launcher = held.launcher.clone();
+    let (words, unknown) = match run_end(wait, cx) {
+        RunEnd::Running => return,
+        RunEnd::Completed => {
+            wait.reading = true;
+            let (host, run) = (wait.host, wait.run.clone());
+            cx.defer(move |cx| read_session(launcher, host, run, cx));
+            return;
+        }
+        RunEnd::Failed { words, unknown } => (words, unknown),
+        RunEnd::Lost => (HostText::from_host(RUN_LOST), true),
+    };
+    // A failed run and a lost one come back alike, the lost one as an unknown outcome.
+    if let Some(wait) = held.run.take() {
+        cx.defer(move |cx| {
+            run_failed(
+                launcher,
+                wait.sent,
+                wait.window,
+                wait.mark,
+                words,
+                unknown,
+                cx,
+            )
+        });
+    }
+}
+
+/// Where `wait`'s run stands in the current store. Before host progress is first pushed, or while its read is failing
+/// (the store then keeps the last entries it had, and an absent one proves nothing), the run counts as still running;
+/// a run missing from an available collection is gone.
+fn run_end(wait: &RunWait, cx: &App) -> RunEnd {
+    let Some(store) = session::current_store(cx) else {
+        return RunEnd::Running;
+    };
+    let collections = store.read(cx).collections();
+    let available = collections
+        .meta(Collection::HostProgress)
+        .is_some_and(|meta| meta.availability == Availability::Available);
+    let run = collections
+        .get::<ProvisioningView>(&HostView::key(wait.host))
+        .filter(|run| run.run_id.as_deref() == Some(wait.run.as_str()));
+    match run {
+        None if available => RunEnd::Lost,
+        None => RunEnd::Running,
+        Some(run) => match run.status {
+            RunStatus::Running => RunEnd::Running,
+            RunStatus::Completed => RunEnd::Completed,
+            RunStatus::Failed => RunEnd::Failed {
+                words: failed_words(run),
+                unknown: run.outcome_unknown,
+            },
+        },
+    }
+}
+
+/// A failed run's reason: the run's message, which is the whole text to show (SPEC_impl.md, "The UI channel").
+fn failed_words(run: &ProvisioningView) -> HostText {
+    let fallback = if run.outcome_unknown {
+        RUN_LOST
+    } else {
+        RUN_FAILED
+    };
+    let words = run
+        .message
+        .as_deref()
+        .filter(|words| !words.trim().is_empty())
+        .unwrap_or(fallback);
+    HostText::from_host(words)
+}
+
+/// The run of `launcher`'s environment create on `host` completed: read the new host's sessions
+/// (`GET /api/sessions?host=<host>`, which the helm answers from its cache) and settle the create with the session it
+/// made, exactly as an ordinary create's reply is settled ([`settle`]). The pushed session list is not where to look:
+/// its filter and cap can leave a session on a new host out, or bring it a push after the run's end (SPEC_impl.md,
+/// "The UI channel").
+///
+/// The new host is the launch's own, so its oldest session is the launch's: at completion it is the only one, and any
+/// session made there later (an agent in the environment starting another) is newer. A read that fails, or finds none,
+/// settles the create as done with no session, logged: the launch succeeded, so nothing comes back, and the row appears
+/// when the list shows it. A launcher the slot no longer holds waiting on this run (a reset) is left alone.
+fn read_session(launcher: Entity<Launcher>, host: i64, run: String, cx: &mut App) {
+    let path = ApiPath::api(&["sessions"])
+        .and_then(|path| path.with_query(&[("host", host.to_string().as_str())]));
+    let path = match path {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::warn!(%error, "the new environment's session read could not be built");
+            completed(launcher, host, &run, None, cx);
+            return;
+        }
+    };
+    let sent = operations::read::<SessionList>(path, "GET /api/sessions", cx, move |answer, cx| {
+        let session = match answer {
+            Ok(list) => list
+                .sessions
+                .into_iter()
+                .map(|row| row.info)
+                .min_by_key(|session| session.created_at),
+            Err(reason) => {
+                tracing::warn!(reason = %reason.raw(), "the new environment's session could not be read");
+                None
+            }
+        };
+        if session.is_none() {
+            tracing::warn!(
+                host,
+                "a completed environment launch's host lists no session"
+            );
+        }
+        completed(launcher, host, &run, session, cx);
+    });
+    if !sent {
+        // No UI session, so a reset is dropping the slot anyway.
+        tracing::debug!("the new environment's session read was not sent");
+    }
+}
+
+/// Settle `launcher`'s environment create on `host`'s run `run`, which completed, with `session`, the session it made,
+/// if it was read: through [`settle`], as an ordinary create's reply, so it opens under the same moved-on rule, hands a
+/// quick launch never shown to naming, or shows the "Started" report. Nothing happens unless the slot still holds
+/// `launcher` waiting on that run.
+fn completed(
+    launcher: Entity<Launcher>,
+    host: i64,
+    run: &str,
+    session: Option<SessionInfo>,
+    cx: &mut App,
+) {
+    let wait = slot(cx).update(cx, |slot, cx| {
+        let held = slot.held.current(cx).as_mut()?;
+        let ours = held.launcher == launcher
+            && held
+                .run
+                .as_ref()
+                .is_some_and(|wait| wait.host == host && wait.run == run);
+        if ours { held.run.take() } else { None }
+    });
+    let Some(RunWait {
+        sent, window, mark, ..
+    }) = wait
+    else {
+        return;
+    };
+    let body = session.and_then(|session| serde_json::to_value(session).ok());
+    let settled = Settled {
+        outcome: Outcome::Done(body),
+        // The store's own count ended with the 202; the press's mark carries the moved-on check from here.
+        user_moved_on: false,
+    };
+    settle(launcher, sent, window, mark, &settled, cx);
+}
+
+/// `launcher`'s environment create ended without a session: its run failed, went away, or was never named. Bring the
+/// launcher back with `words` as a refused create comes back ([`refused`]), keeping its draft, recipe and place
+/// included. The words are shown as they are, with no lead of the launcher's: the helm's failed run already starts with
+/// "Not launched.", and the launcher's own words for a lost run say what is known. When the outcome is `unknown`, the
+/// notice offering the launcher says to check Hosts ([`Notice::EnvironmentLaunchUnknown`]). The words go on the
+/// create's key as the store's partial result ([`operations::Operations::note`]), the place a refused create's words
+/// are kept, so the launcher reads them back as it reads any refusal.
+fn run_failed(
+    launcher: Entity<Launcher>,
+    sent: Sent,
+    window: AnyWindowHandle,
+    mark: Mark,
+    words: HostText,
+    unknown: bool,
+    cx: &mut App,
+) {
+    if waiting(&launcher, cx) != Some(Waiting::Reply) {
+        return;
+    }
+    hide_progress(window, cx);
+    if let Some(operations) = session::current_operations(cx) {
+        operations.update(cx, |operations, cx| {
+            operations.note(&sent.key, sent.work, words, cx)
+        });
+    }
+    let user_moved_on = focus::has_moved_on(&mark, cx);
+    let refused_launch = RefusedLaunch {
+        key: sent.key,
+        work: sent.work,
+        may_still_start: false,
+        unaccepted: false,
+        complete: true,
+        outcome_unknown: unknown,
+    };
+    refused(launcher, refused_launch, window, mark, user_moved_on, cx);
 }
 
 /// A create succeeded with the reply `body`, the new session as the helm lists it. Open it, as the quick switcher opens
@@ -616,7 +982,9 @@ fn refused(
     user_moved_on: bool,
     cx: &mut App,
 ) {
-    let notice = if refused_launch.may_still_start {
+    let notice = if refused_launch.outcome_unknown {
+        Notice::EnvironmentLaunchUnknown
+    } else if refused_launch.may_still_start {
         Notice::LaunchMayStillStart
     } else {
         Notice::LaunchNotStarted
@@ -650,6 +1018,7 @@ fn come_back(
                 launcher,
                 waiting: Waiting::User,
                 progress: None,
+                run: None,
             }),
             cx,
         );
@@ -674,13 +1043,22 @@ pub(super) struct RefusedLaunch {
     /// the new folder and presses Launch again (SPEC.md: "If another create wins the displayed path, Launch reports the
     /// conflict and obtains a new preview; it never submits automatically").
     pub(super) unaccepted: bool,
+    /// The words are complete as they stand, and the launcher draws them without its "Not launched." lead: an
+    /// environment create's failed run, whose message the helm already starts with that lead, or the launcher's own
+    /// words for a run whose end it cannot learn.
+    pub(super) complete: bool,
+    /// How the launch ended is unknown, so the environment it made may exist: an environment create's run the helm
+    /// marks as ending without a known result, or one that went away. The notice offering the launcher then says to
+    /// check Hosts ([`Notice::EnvironmentLaunchUnknown`]).
+    pub(super) outcome_unknown: bool,
 }
 
-/// Withdraw both notices that offer a waiting launcher; at most one is up, and either has nothing left to open once it
+/// Withdraw every notice that offers a waiting launcher; at most one is up, and any has nothing left to open once it
 /// comes back or goes.
 fn withdraw_notices(cx: &mut App) {
     notices::withdraw(Notice::LaunchNotStarted, cx);
     notices::withdraw(Notice::LaunchMayStillStart, cx);
+    notices::withdraw(Notice::EnvironmentLaunchUnknown, cx);
 }
 
 /// Bring back the launcher a refusal left waiting for the user, in `window`, and withdraw the notice offering it.
