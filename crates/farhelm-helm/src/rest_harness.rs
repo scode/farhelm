@@ -988,7 +988,7 @@ impl Harness {
             store.clone(),
             _dir.path(),
             crate::provisioning::PayloadSelection::Default,
-            cfg!(farhelm_release_build),
+            crate::RELEASE_BUILD,
         )
         .expect("select restarted provisioning seams");
         // Assemble immutable provider slots before actors can observe them.
@@ -1380,7 +1380,7 @@ impl FleetBuilder {
             self.store.clone(),
             &state_dir,
             crate::provisioning::PayloadSelection::Default,
-            cfg!(farhelm_release_build),
+            crate::RELEASE_BUILD,
         )
         .expect("select harness provisioning seams");
         let sources = match self.place_commands {

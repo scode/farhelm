@@ -257,22 +257,17 @@ jobs:
             scripts/check-static-elf.sh "$binary" "$target"
           done
 
-      # The one check that RUNS the shipped artifact instead of inspecting it:
-      # the published binary names this release's version and starts a helm
-      # that answers on its port with that same version in its build header
-      # (`x-farhelm-build`, on every reply), on a machine that has nothing else
-      # of Farhelm.
+      # The one check that RUNS the shipped artifact instead of inspecting it.
       #
-      # It no longer proves the build release-shaped (D13). That used to be
-      # visible from outside, because the web UI the helm served and the
-      # release marker came from the same variable; with the UI gone, the
-      # marker (`FARHELM_RELEASE_BUILD`, set at the end of
-      # `.github/dist-build-setup.yml`) changes only the provisioning
-      # payload default, which nothing here can observe without a release on
-      # get.farhelm.io to download from.
-      - name: Prove the published farhelm runs
-        # Bounded: a listener that accepts and never replies must fail the
-        # job, not hold it until GitHub's six-hour limit.
+      # A build job that lost the release mark (`crates/farhelm-helm/build.rs`,
+      # D13) still produces a perfectly valid static executable, but its helm
+      # has no host payloads by default. Nothing else in this pipeline can
+      # tell those two binaries apart, so this asks the artifact directly,
+      # through `farhelm internal build-info` (its doc comment in
+      # `crates/farhelm/src/main.rs` is the output contract).
+      - name: Prove the published farhelm is release-shaped
+        # Bounded: a binary that hangs must fail the job, not hold it until
+        # GitHub's six-hour limit.
         timeout-minutes: 5
         run: |
           set -euo pipefail
@@ -285,45 +280,20 @@ jobs:
             exit 1
           fi
 
-          port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
-          state=$(mktemp -d)
-          "$binary" helm run --state-dir "$state" --port "$port" >helm.log 2>&1 &
-          helm=$!
-          # Killed on every exit path: a leaked helm would hold the port and
-          # the state directory for the rest of the job.
-          trap 'kill "$helm" 2>/dev/null || true' EXIT
-
-          # Waits for the LISTENER, not for a particular answer: no `-f`, so
-          # the helm's 404 for `/` (it serves no page) counts as up.
-          answered=no
-          for _ in $(seq 1 60); do
-            if curl -s --max-time 5 -o /dev/null -D headers.txt "http://127.0.0.1:$port/"; then
-              answered=yes
-              break
-            fi
-            sleep 1
-          done
-
-          if ! kill -0 "$helm" 2>/dev/null; then
-            echo "the launched helm exited" >&2
-            cat helm.log >&2
+          if ! "$binary" internal build-info >build-info.out; then
+            echo "the published binary could not report its build info" >&2
             exit 1
           fi
-          kill "$helm" 2>/dev/null || true
-          if [ "$answered" != yes ]; then
-            echo "the launched helm never answered on port $port" >&2
-            cat helm.log >&2
+          # cmp rather than a string comparison: `$(...)` would strip trailing
+          # newlines, and the contract is the exact bytes.
+          if ! printf 'version=%s\nrelease-build=yes\n' "$version" | cmp -s - build-info.out; then
+            echo "the published binary is not a release build of $version; it reports:" >&2
+            sed 's/^/  /' build-info.out >&2
+            echo "expected exactly 'version=$version' and 'release-build=yes', each on its own line" >&2
+            echo "release-build=no is what a build that lost the release mark looks like" >&2
             exit 1
           fi
-          # The header is what tells this helm from an unrelated listener that
-          # took the selected port first.
-          stamp=$(tr -d '\r' <headers.txt | sed -n 's/^x-farhelm-build: *//Ip')
-          if [ "$stamp" != "$version" ]; then
-            echo "the answer on port $port carries build '$stamp', expected '$version'" >&2
-            cat headers.txt helm.log >&2
-            exit 1
-          fi
-          echo "ok: the published farhelm $version runs a helm"
+          echo "ok: the published farhelm $version is a release build"
 
       # The digests of the bytes every check above just passed, plus the
       # tag's `install.sh`, in the sorted `sha256sum` form of the signed
