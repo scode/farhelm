@@ -122,7 +122,8 @@
 //! the rows' menus and the marked menu, since it moves them.
 //!
 //! Under the segments, the list's column draws the Delete notice band ([`delete_notice`]) while a Delete or a Replace
-//! this window sent has left a notice: the helm's words about a checkout it could not archive, say, with Dismiss. It
+//! this window sent has left a notice: the helm's words about a checkout it could not archive, say, or the count of
+//! sessions an environment kept after an environment session's Delete ([`environment_delete`]), with Dismiss. It
 //! belongs to the UI session, so a reset takes it away, and it is drawn with the rest of the column, so the Hosts panel
 //! hides it.
 //!
@@ -156,6 +157,7 @@ pub(crate) mod bulk;
 pub(crate) mod delete;
 pub(crate) mod delete_notice;
 pub(crate) mod environment;
+pub(crate) mod environment_delete;
 pub(crate) mod filters;
 pub(crate) mod hold;
 pub(crate) mod host_rail;
@@ -192,6 +194,9 @@ mod compact_tests;
 
 #[cfg(test)]
 mod delete_notice_tests;
+
+#[cfg(test)]
+mod environment_delete_tests;
 
 #[cfg(test)]
 pub(crate) mod environment_tests;
@@ -506,12 +511,18 @@ impl SessionList {
     /// when it does not yet name the session now open ([`Self::name_open_session`]), and send the open session's seen
     /// mark when one is due. Nothing happens while the window is inert.
     fn settle(&mut self, cx: &mut Context<Self>) {
+        // A "stays" count in the Delete notice band goes once the hosts read shows its environment gone or going.
+        delete_notice::follow_hosts(cx);
         // A bulk Delete's rows not sent yet are held in the store as Deletes (`bulk`'s module docs), so they count here
-        // as the Deletes in flight do, and the selection never opens one of them before its request goes out.
+        // as the Deletes in flight do, and the selection never opens one of them before its request goes out. An
+        // environment session's Delete is a Delete here too.
         let deleting = session::current_operations(cx).is_some_and(|operations| {
-            operations
-                .read(cx)
-                .any_in_flight(|work| matches!(work, operations::Work::Delete(_)))
+            operations.read(cx).any_in_flight(|work| {
+                matches!(
+                    work,
+                    operations::Work::Delete(_) | operations::Work::EnvironmentDelete
+                )
+            })
         });
         let selected = local_state::selected(cx);
         // Read before the store is borrowed below: `delete`'s "This window's own Delete is evidence".

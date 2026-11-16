@@ -63,8 +63,8 @@ pub(crate) const PROGRESS_SHOWS_AFTER: Duration = Duration::from_secs(2);
 /// The name a line about `work` carries in front of the host's words on the row, as the old app's error slot did:
 /// "Stop: ", "Replace: " and "Restart: ", for a refusal and a notice alike, "Seen: " for a refused Mark read or Mark
 /// unread (the old app's `seen_toggle_report`), and "Pin: " and "Move pin: " for a refused pin and move. A Rename or a
-/// Delete refusal shows the words alone, as it did before Stop and Replace came, and a save belongs to an editor, which
-/// shows its own refusal. Exhaustive, so a new kind of work decides.
+/// Delete refusal (an environment Delete's included) shows the words alone, as it did before Stop and Replace came, and
+/// a save belongs to an editor, which shows its own refusal. Exhaustive, so a new kind of work decides.
 pub(super) fn prefix(work: Work) -> Option<&'static str> {
     match work {
         Work::Stop => Some("Stop: "),
@@ -89,6 +89,7 @@ pub(super) fn prefix(work: Work) -> Option<&'static str> {
         // whose refusal the tab strip shows.
         Work::Rename
         | Work::Delete(_)
+        | Work::EnvironmentDelete
         | Work::Save
         | Work::Probe
         | Work::Setup
@@ -219,7 +220,8 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::MovePin
         | Work::Suspend
         | Work::Resume
-        | Work::StopAndSuspend => None,
+        | Work::StopAndSuspend
+        | Work::EnvironmentDelete => None,
     }
 }
 

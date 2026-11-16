@@ -1020,10 +1020,15 @@ pending state is the session's operation key and the host's pushed phase, which 
 
 Case: owned suspended sessions keep Hosts visibility and mandatory whole-sandbox Delete.
 
-partly (its non-Delete parts): the card's explanation and "Suspended outside Farhelm, noticed at", the 30-minute
-sentence, Stop, Restart and Replace unavailable while suspended, the row's Suspended badge, and "dev sandbox". The rail
-leaving the host out is the host rail's existing rule. Waiting for milestone M3.4b: its Delete parts.
+ported: the card's explanation and "Suspended outside Farhelm, noticed at", the 30-minute sentence, Stop, Restart and
+Replace unavailable while suspended, the row's Suspended badge, and "dev sandbox"; and, with skip on, the header's
+Delete helped by "… whole sandbox and everything in it, after you confirm (…)", its question with the warning (every
+session, sessions Farhelm does not list, the Resume hint, snapshots) and the sandbox's name, nothing sent before the
+answer, and "Delete session and sandbox" sending one `?delete_sandbox=true` and no session-lane Delete. The rail leaving
+the host out is the host rail's existing rule.
 
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `a_suspended_sandboxs_delete_is_the_warned_whole_sandbox_delete`
 - crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_suspended_card_says_so_and_resumes`
 - crates/gui/farhelm-gui/src/session_list/environment_tests.rs `the_suspended_detail_and_the_names_are_the_providers`
 - crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_header_suspends_and_resumes_beside_stop`
@@ -1038,7 +1043,25 @@ Case: a connected sandbox's Delete asks its Farhelm and reports the sandbox that
 retires its stays count but keeps the checkout notice; a row's unasked environment Delete offers the warned
 whole-sandbox Delete; the header's unasked environment Delete reopens as the warned whole-sandbox Delete.
 
-not yet ported (the environment Delete, milestone M3.4b).
+ported, in-process over the fake helm: with skip on and nothing alive, the menu's Delete described by the session lane's
+help, its question (the both-outcomes consequence and the sandbox's name, the title, no checkout line, "Delete
+session"), nothing sent before the answer, one `?delete_environment_session=true`, and the band's "The sandbox stays: 2
+other sessions are in it"; the count retired once the hosts read no longer lists the sandbox, or lists it being deleted,
+with the reply's checkout notice kept and a failed read changing nothing; a row's and the header's session-lane Delete
+answered "unasked" asking the warned question again, whose answer sends one `?delete_sandbox=true`, and that Delete's
+refusal shown on the row and below the header. The row leaving the list is the helm's pushed list, which the fake does
+not push.
+
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `a_connected_sandboxs_delete_asks_its_farhelm_and_says_what_stays`
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `a_containers_count_retires_when_it_is_deleted_and_its_notice_stays`
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `a_rows_unasked_delete_offers_the_whole_sandbox_delete`
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `the_headers_unasked_delete_reopens_as_the_whole_sandbox_delete`
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `the_band_keeps_a_count_until_its_environment_moves_on`
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
@@ -1080,7 +1103,11 @@ drives it; the refusal while this window's launch targets the same host waits fo
 
 Case: a connected container's Delete asks its Farhelm and reports the container that stays.
 
-not yet ported (the environment Delete, milestone M3.4b).
+ported: the container's consequence ("the container goes too", no snapshots) and "container: owned-environment", one
+`?delete_environment_session=true`, and "The container stays: 1 other session is in it" ahead of the reply's notice.
+
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `a_containers_count_retires_when_it_is_deleted_and_its_notice_stays`
 
 ## Deviations from the old app
 
@@ -1132,8 +1159,8 @@ Where the port does not match the old app, and why. Each stays until the work na
   focus. A contain-only press kind would remove it (watch list).
 - Not a deviation from the old app but a gap against SPEC.md that the port keeps from it: a bulk Delete of several
   sessions whose checkouts could not be archived shows only the last of their notices in the Delete notice band, each
-  replacing the one before, where SPEC.md asks that each such outcome be visible. The sandbox and container Delete,
-  which reworks the band's text, decides whether one batch's notices are joined.
+  replacing the one before, where SPEC.md asks that each such outcome be visible. The single sandbox and container
+  Delete kept the old one-notice band, so the bulk environment Delete decides whether one batch's notices are joined.
 - A Replace refused after its source was already removed (the helm's "whether the original … was removed is unknown")
   has no row to show its words on, since they belong to the source; the selection moves on as for any removal. The old
   app showed them only in the header while the source stayed selected, which it does not here once the Replace settles.
@@ -1395,3 +1422,18 @@ Where the port does not match the old app, and why. Each stays until the work na
   row had no being-deleted mark.
 - A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while the Hosts panel offers no
   Retry yet: it comes with settings-and-hosts' Delete sandbox. The session list offers no Retry, as the old row did not.
+- The helm answers an environment session's Delete within 20 seconds and carries on past that, where the old app waited
+  up to nine minutes (decided by the migration's orchestrator on 2026-11-16, and SPEC.md says so). The port shows the
+  bound's 504 as no failure: the row and header drop their Delete progress and the pushed lists show how it ended. So a
+  Delete of one session still unanswered then does not open the warned whole-sandbox question; the next Delete does,
+  once the host reads not connected, and while it stays connected, Hosts' Delete sandbox is the way out (not ported
+  yet). A success after the bound shows no "The sandbox stays" count, since its reply never reaches the window. A
+  whole-sandbox Delete that fails after the bound leaves the sandbox listed in its ordinary state with the reason only
+  in the helm's log, where the old app showed the reason on the row. Tested by
+  `session_list/environment_delete_tests.rs` `a_504_at_the_bound_is_not_a_failure_but_a_refusal_shows`.
+- An environment session's "unasked" answer asks the warned whole-sandbox question again only while the user has not
+  moved on since answering the first, as every completion that would open a question does here. Otherwise the helm's
+  words stay on the row, and the next Delete picks its lane from the hosts read again; the old question waited on the
+  row's closed menu and opened with it. A header Delete's second question opens centered, since its Delete button is not
+  drawn while the first Delete runs, where the old one hung under the button. Tested by
+  `session_list/environment_delete_tests.rs` `an_unasked_answer_after_the_user_moved_on_stays_on_the_row`.

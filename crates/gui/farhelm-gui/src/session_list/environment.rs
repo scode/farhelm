@@ -69,7 +69,7 @@
 //! is in progress; try again once it finishes"), since the launcher exposes no predicate for its pending target yet;
 //! meanwhile the helm's lifecycle lock refuses a collision as busy. And Clone's environment wording ("New session in a
 //! new environment, keep this one"), which would describe a Clone into a fresh environment the launcher does not make
-//! yet. The environment Delete and the bulk parts come with the environment Delete's piece.
+//! yet. The environment Delete is [`super::environment_delete`]'s; the bulk parts come with the bulk environment work.
 //!
 //! NOTE: A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while Hosts offers no
 //! Retry yet: it comes with settings-and-hosts' Delete sandbox. Nothing here offers Retry, as the old row did not.
@@ -110,7 +110,8 @@ const STOP_AND_SUSPEND_NOTE: &str = "Stop and suspend freezes the remaining proc
 /// (`within_host_reply_bound_saying` in the helm's sessions module): not a failure here (the module docs). It is not the
 /// only 504: a supervisor's own timeout inside the bound (Stop and suspend's Stop half, say) answers it too, and the
 /// helm marks neither, so such a refusal is dropped as well and only the session's pushed state shows what happened.
-const CARRIES_ON: u16 = 504;
+/// The environment Delete drops it the same way (`super::environment_delete`).
+pub(super) const CARRIES_ON: u16 = 504;
 
 // ---- What a session's environment is --------------------------------------------------------------------------------
 
@@ -150,6 +151,13 @@ impl<'a> Environment<'a> {
     /// sandbox" or "<recipe> container on <place host>" ([`target_label`]). Raw host text, for the caller to escape.
     pub(crate) fn label(self) -> String {
         target_label(&self.described.target, self.described.place_name.as_deref())
+    }
+
+    /// The environment's own name, the sandbox's or the container's as its provider knows it: raw host text, empty when
+    /// the helm has none. The Delete questions name the resource by it apart from the session's title
+    /// (`super::environment_delete`).
+    pub(crate) fn name(self) -> &'a str {
+        &self.described.name
     }
 
     /// Whether the environment is suspended, stopped, changing or being deleted, so that the supervisor's lifecycle
