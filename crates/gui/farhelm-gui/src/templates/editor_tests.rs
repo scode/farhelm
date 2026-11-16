@@ -909,6 +909,131 @@ fn custom_approvals_carry_their_words(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "templates-flags"), "and so did their field");
 }
 
+/// Two Claude templates with Custom approvals and their words: `one` with `--mode`, `ask me` and `$HOME`, `other` with
+/// `--mode` and `second template words`.
+fn custom_templates() -> Vec<LaunchTemplate> {
+    let custom = |name: &str, words: &[&str]| {
+        template(
+            name,
+            TemplateFields {
+                kind: Some(LauncherKind::Agent),
+                agent: Some(LaunchHarness::Claude),
+                permissions: Some(Some(farhelm_proto::LaunchPermission::Custom)),
+                permission_flags: Some(words.iter().map(|word| (*word).to_owned()).collect()),
+                ..TemplateFields::default()
+            },
+        )
+    };
+    vec![
+        custom("one", &["--mode", "ask me", "$HOME"]),
+        custom("other", &["--mode", "second template words"]),
+    ]
+}
+
+/// `words` as the Custom words field spells them, quoted where a word needs it.
+fn spelled(words: &[&str]) -> String {
+    let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+    farhelm_proto::join_permission_flags(&words)
+}
+
+/// The Custom words field keeps what the user typed, quote and all, so a half-typed quote can be repaired in place; but
+/// text that does not parse is no words, and saving it would store a template the helm refuses or one with other words
+/// than shown (the old custom-permissions spec's template half). Each template's field shows its own stored words, and
+/// leaving with Discard puts back what is stored. Specified: `one` opens with its words spelled `--mode 'ask me'
+/// '$HOME'`; `--mode '` typed there shows the words error, Save sends nothing and says "Custom permissions need
+/// permission flags"; `--mode "edited template words"` saves those two words; `other` then opens with its own words;
+/// `--broken '` typed there and `one` opened with Discard shows `one`'s saved words and no error.
+#[gpui::test]
+fn custom_words_that_do_not_parse_refuse_save_and_each_template_shows_its_own(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = open_header(cx, &custom_templates(), None);
+    open_editor(&mut helm, "template-open-one", cx);
+    assert_eq!(
+        flags_text(cx),
+        "--mode 'ask me' '$HOME'",
+        "the stored words, quoted where a word needs it"
+    );
+    assert!(drawn(cx, "templates-flag-words"), "the stored words parse");
+
+    click(cx, "templates-flags");
+    retype(cx, "--mode '");
+    assert!(
+        drawn(cx, "templates-flags-error"),
+        "the words error is shown"
+    );
+    assert_eq!(flags_text(cx), "--mode '", "the text stays as typed");
+    click(cx, "templates-save");
+    assert!(saves(&mut helm).is_empty(), "nothing was saved");
+    assert!(
+        painted(cx).contains("Custom permissions need permission flags"),
+        "{}",
+        painted(cx)
+    );
+
+    click(cx, "templates-flags");
+    retype(cx, "--mode \"edited template words\"");
+    click(cx, "templates-save");
+    let (id, body) = one(&mut helm, Method::Put, "/api/templates/one");
+    assert_eq!(
+        body["permission_flags"],
+        json!(["--mode", "edited template words"])
+    );
+    // The helm pushes the stored template before its reply, as it does for every command.
+    let mut stored = custom_templates();
+    stored[0].fields.permission_flags = Some(vec!["--mode".into(), "edited template words".into()]);
+    push(&mut helm, &stored, Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    assert!(
+        !painted(cx).contains("Unsaved changes"),
+        "the premise: saved"
+    );
+
+    click(cx, "template-open-other");
+    settle(cx);
+    assert_eq!(draft(cx).name, "other", "the premise: other opened");
+    assert_eq!(
+        flags_text(cx),
+        spelled(&["--mode", "second template words"]),
+        "the field shows other's words, not the text typed into one's"
+    );
+
+    click(cx, "templates-flags");
+    retype(cx, "--broken '");
+    assert!(
+        drawn(cx, "templates-flags-error"),
+        "the premise: broken words"
+    );
+    click(cx, "template-open-one");
+    click(cx, "prompt-alternative-0");
+    settle(cx);
+    assert_eq!(draft(cx).name, "one");
+    assert_eq!(
+        flags_text(cx),
+        spelled(&["--mode", "edited template words"]),
+        "one's saved words"
+    );
+    assert!(!drawn(cx, "templates-flags-error"), "and no error");
+}
+
+/// What the open editor's Custom words field holds.
+fn flags_text(cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| {
+        let dialog = cx
+            .try_global::<Opened>()
+            .and_then(|opened| opened.0.upgrade())
+            .expect("a dialog is open");
+        let dialog = dialog.read(cx);
+        dialog
+            .editor
+            .as_ref()
+            .expect("an editor is open")
+            .flags_text()
+            .to_owned()
+    })
+}
+
 /// A wrapper prefix that does not parse stays as typed, so a half-typed quote is never lost, and refuses saving rather
 /// than being saved as some other prefix. Specified: Farhelm's own placeholder typed as a wrapper prefix stays in the
 /// field, Save sends nothing, and the status line gives the reason.

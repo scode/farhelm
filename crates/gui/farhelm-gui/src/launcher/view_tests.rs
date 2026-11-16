@@ -104,8 +104,32 @@ pub(crate) fn read<T>(
     })
 }
 
+/// Whether the open launcher's search box holds focus, for tests outside this module, which cannot reach the box.
+pub(crate) fn search_focused(cx: &mut VisualTestContext) -> bool {
+    read(cx, |launcher, window, cx| {
+        launcher.search.focus_handle(cx).is_focused(window)
+    })
+}
+
+/// What the open launcher's search box holds, for tests outside this module.
+pub(crate) fn search_text(cx: &mut VisualTestContext) -> String {
+    read(cx, |launcher, _, cx| launcher.search.text(cx).to_string())
+}
+
+/// The draft of the launcher the window shows now, found as the dispatcher finds it (`entry::open_launcher`) rather
+/// than through the test global [`draft`] reads, which a launcher a quick launch prepared out of sight never sets.
+pub(crate) fn shown_draft(cx: &mut VisualTestContext) -> LaunchDraft {
+    cx.update(|window, cx| {
+        super::entry::open_launcher(window, cx)
+            .expect("a launcher is shown")
+            .read(cx)
+            .draft
+            .clone()
+    })
+}
+
 /// The open launcher's draft.
-pub(super) fn draft(cx: &mut VisualTestContext) -> LaunchDraft {
+pub(crate) fn draft(cx: &mut VisualTestContext) -> LaunchDraft {
     read(cx, |launcher, _, _| launcher.draft.clone())
 }
 

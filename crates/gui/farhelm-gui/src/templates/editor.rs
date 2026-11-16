@@ -376,6 +376,13 @@ impl Editor {
         &self.draft
     }
 
+    /// The Custom words field's text as the editor keeps it, typed or loaded, for tests that check the field shows its
+    /// own template's words and keeps a half-typed quote.
+    #[cfg(test)]
+    pub(super) fn flags_text(&self) -> &str {
+        &self.flags_text
+    }
+
     /// Replace the draft's name, as typing it would, for the screenshot golden that shows the leave question.
     #[cfg(test)]
     pub(super) fn rename_draft(

@@ -535,3 +535,37 @@ fn a_bolt_write_waits_for_a_delete_in_flight(cx: &mut TestAppContext) {
     settle(cx);
     assert!(helm.commands().is_empty());
 }
+
+/// The mirror of the case above, the old spec's "deletion waits for an in-flight quick mark before clearing it": the
+/// helm clears a deleted template's ⚡ mark with the deletion, so a deletion sent while a mark write is out could race
+/// it, leaving a mark on a name that is gone or a cleared mark the user just set. Specified: with `codex-deep` open and
+/// its bolt's write unanswered, Delete sends nothing and the editor stays on `codex-deep`; once the helm stores the
+/// mark and answers, the early press is not replayed, and a new Delete deletes it and the notice says so.
+#[gpui::test]
+fn delete_waits_for_a_bolt_write_in_flight(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    click(cx, "template-bolt-codex-deep");
+    let (id, body) = one(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(body, json!({"quick_launch_template": "codex-deep"}));
+    click(cx, "templates-delete");
+    assert!(
+        helm.commands().is_empty(),
+        "Delete waits for the bolt's write"
+    );
+    assert_eq!(draft(cx).name, "codex-deep", "and the editor stays");
+
+    push_preferences(&mut helm, Some("codex-deep"), &[], cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert!(
+        helm.commands().is_empty(),
+        "the early press was dropped, not replayed"
+    );
+    delete_open(&mut helm, "codex-deep", &without("codex-deep"), cx);
+    assert!(
+        painted(cx).contains("Deleted codex-deep"),
+        "{}",
+        painted(cx)
+    );
+}

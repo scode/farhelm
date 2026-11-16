@@ -311,7 +311,7 @@ pub(super) fn chord(cx: &mut VisualTestContext) {
 /// Press number key `digit`'s chord once, as this platform spells it (Cmd+digit, Ctrl+Shift+digit). The keystroke
 /// carries no native identity, so the physical-key table matches it by its logical key, as it does every injected key
 /// (`crate::actions`).
-fn number_key(cx: &mut VisualTestContext, digit: u8) {
+pub(super) fn number_key(cx: &mut VisualTestContext, digit: u8) {
     let chord = if cfg!(target_os = "macos") {
         format!("cmd-{digit}")
     } else {
@@ -1014,6 +1014,164 @@ fn a_number_key_launches_its_template_unseen(cx: &mut TestAppContext) {
     );
     assert!(!any_open(cx), "the launcher was never shown");
     assert!(unseen(cx), "a quick launch New never showed");
+}
+
+/// The templates collection of [`templates`], available, with `yolo-go` added last: a command launch of `true` asserted
+/// YOLO, which launches on its own and which a host that asks first refuses until the user answers.
+fn with_yolo_go() -> CollectionState {
+    let mut state = templates(Availability::Available);
+    let yolo_go = template(
+        "yolo-go",
+        TemplateFields {
+            yolo: Some(true),
+            ..runs_true()
+        },
+    );
+    state.entries.push(KeyedEntry {
+        key: yolo_go.name.clone(),
+        value: serde_json::to_value(&yolo_go).unwrap(),
+    });
+    let keys: Vec<String> = state
+        .entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    state.meta = meta(&keys);
+    state
+}
+
+/// The helm refuses create `id` for YOLO, as it does on a host that asks first.
+fn refuse_for_yolo(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64) {
+    helm.reply_marked(
+        id,
+        409,
+        vec![farhelm_proto::ui_channel::HelmMarker::YoloConfirmation],
+        Some(json!("YOLO launches on host1 need --yolo")),
+    );
+    settle(cx);
+}
+
+/// Check that the launcher shows the ordinary YOLO question over `yolo-go`'s draft: focus on Cancel, the asserted
+/// command's reason, the one-off answer, and no helm sentence.
+fn the_yolo_question_is_up(cx: &mut VisualTestContext) {
+    assert!(any_open(cx), "the launcher is shown");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(
+        label(cx, "yolo-reason").as_deref(),
+        Some("This command was asserted to bypass its safety checks.")
+    );
+    assert_eq!(
+        label(cx, "prompt-confirm").as_deref(),
+        Some("Start YOLO session anyway")
+    );
+    assert_eq!(
+        label(cx, "launcher-refusal"),
+        None,
+        "the helm's own sentence is not shown"
+    );
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).command.command,
+        "true",
+        "over the template's draft"
+    );
+}
+
+/// The ordinary YOLO question, revealed by a quick launch the helm refused for YOLO, through each of its answers: press
+/// `press` with `yolo-go` behind it and refuse its create as a host that asks first does; Cancel then keeps the draft
+/// and sends nothing; Launch asks again; "Start YOLO session anyway" retries once with consent, and that retry is no
+/// longer a quick launch New never showed.
+fn a_refused_yolo_quick_launch_asks(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    press: impl FnOnce(&mut VisualTestContext),
+) {
+    press(cx);
+    let sent = creates(helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one press sent one create, not {}", sent.len());
+    };
+    assert!(!any_open(cx), "the premise: the launch went out unseen");
+    assert!(
+        unseen(cx),
+        "the premise: the create is an unseen quick launch"
+    );
+    assert_ne!(
+        create.body.clone().unwrap_or_default()["confirm_yolo"],
+        json!(true),
+        "the premise: the first create carries no consent"
+    );
+    refuse_for_yolo(helm, cx, create.id);
+    the_yolo_question_is_up(cx);
+
+    test_support::click(cx, "prompt-cancel");
+    assert!(creates(helm, cx).is_empty(), "Cancel sends nothing");
+    assert!(any_open(cx), "and keeps the launcher");
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).command.command,
+        "true",
+        "with the template's draft"
+    );
+    test_support::click(cx, "launcher-launch");
+    let sent = creates(helm, cx);
+    let [again] = &sent[..] else {
+        panic!("Launch sent one create, not {}", sent.len());
+    };
+    assert_ne!(
+        again.body.clone().unwrap_or_default()["confirm_yolo"],
+        json!(true),
+        "Launch after Cancel asks again rather than carrying consent"
+    );
+    refuse_for_yolo(helm, cx, again.id);
+    the_yolo_question_is_up(cx);
+
+    test_support::click(cx, "prompt-confirm");
+    let sent = creates(helm, cx);
+    let [retry] = &sent[..] else {
+        panic!("the answer sent one create, not {}", sent.len());
+    };
+    assert_eq!(
+        retry.body.clone().unwrap_or_default()["confirm_yolo"],
+        json!(true),
+        "the retry carries the consent"
+    );
+    assert_eq!(
+        retry.body.clone().unwrap_or_default()["command"]["command"],
+        json!("true"),
+        "of the same draft"
+    );
+    assert!(
+        !unseen(cx),
+        "a revealed launch is no longer unseen while its retry is out"
+    );
+}
+
+/// SPEC.md: a quick launch goes through "exactly New's defaults and ordinary launch path", and a refusal "reveals New with
+/// the draft"; the ordinary path's YOLO refusal is answered by the YOLO question, which "retries with the override only
+/// when the user confirms". A hidden launch that swallowed the question, or retried on its own, would either never start
+/// or start YOLO without consent. Specified: with ⚡ on `yolo-go`, the chord sends one create without consent; the
+/// helm's YOLO refusal reveals the launcher with the question (focus on Cancel, the asserted command's reason, no helm
+/// sentence) over the template's draft; Cancel keeps that draft and sends nothing, and Launch asks again; "Start YOLO
+/// session anyway" sends one create of the same command with `confirm_yolo`, no longer an unseen quick launch.
+#[gpui::test]
+fn the_chords_yolo_refusal_reveals_the_ordinary_question_over_its_draft(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, with_yolo_go());
+    push(&mut helm, cx, marked(Some("yolo-go")));
+    a_refused_yolo_quick_launch_asks(&mut helm, cx, chord);
+}
+
+/// The number key's twin of the case above: a number key launches through the same path as the ⚡ chord, so its YOLO
+/// refusal must reach the same question (the old spec ran both). Specified: with key 1 on `yolo-go`, the key's create,
+/// refused for YOLO, reveals the same question over the template's draft, with the same Cancel and the same answer.
+#[gpui::test]
+fn a_number_keys_yolo_refusal_reveals_the_ordinary_question_over_its_draft(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, with_yolo_go());
+    push(&mut helm, cx, bound(None, &[("1", "yolo-go")]));
+    a_refused_yolo_quick_launch_asks(&mut helm, cx, |cx| number_key(cx, 1));
 }
 
 /// SPEC.md: "Unbound keys open Templates with a binding hint", and a key bound to a name no template has is as

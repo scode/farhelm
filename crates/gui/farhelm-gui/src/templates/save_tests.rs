@@ -24,6 +24,7 @@ use super::save::{Candidate, choice_text};
 use crate::components::EditCommand;
 use crate::focus::Mark;
 use crate::launcher::draft::{LaunchDraft, Tab};
+use crate::launcher::view_tests::search_focused;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences, session};
 use crate::test_support::{self, click, keys, settle};
@@ -547,6 +548,88 @@ fn escape_closes_the_panel_and_keeps_the_launcher(cx: &mut TestAppContext) {
     assert!(drawn(cx, "launcher") && codex_chosen(cx));
     keys(cx, "escape");
     assert!(!drawn(cx, "launcher"));
+}
+
+/// Whether focus is in the open Save as template panel's name field.
+fn panel_name_focused(cx: &mut VisualTestContext) -> bool {
+    crate::launcher::view_tests::read(cx, |launcher, window, cx| {
+        launcher
+            .save_panel_for_tests()
+            .is_some_and(|panel| panel.read(cx).name_focus(cx).is_focused(window))
+    })
+}
+
+/// Leaving the panel without saving puts the user back where the launcher starts them, the search box, as the old panel
+/// returned to the composer's search; focus left in a panel that is gone would leave the next key nowhere. Specified:
+/// opening the panel puts focus in its name field; Escape closes it with focus in the search box; opened again, its
+/// Cancel does the same.
+#[gpui::test]
+fn escape_or_cancel_puts_focus_back_in_the_search_box(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, codex_draft(), &[]);
+    for leave in ["escape", "cancel"] {
+        click(cx, "launcher-save-template");
+        assert!(
+            panel_name_focused(cx),
+            "{leave}: the premise: the panel's name field holds focus"
+        );
+        if leave == "escape" {
+            keys(cx, "escape");
+        } else {
+            click(cx, "save-template-cancel");
+        }
+        assert!(
+            !drawn(cx, "save-template-panel"),
+            "{leave}: the panel closed"
+        );
+        assert!(search_focused(cx), "{leave}: focus is in the search box");
+    }
+    assert!(
+        drawn(cx, "launcher") && codex_chosen(cx),
+        "the launcher stayed"
+    );
+}
+
+/// SPEC.md, "Who may move focus": a result that arrives after the user moved focus moves none. A save's refusal is such
+/// a result, so it must leave focus where the user is: in the panel's name field if they stayed, in the launcher's
+/// search box if they went there while the save was out (the old spec's "save as template refusal respects … focus").
+/// Specified: a save refused with focus left in the name field keeps it there; a second save, with the search box
+/// clicked while it is out, is refused with focus still in the search box; both refusals are shown in the panel.
+#[gpui::test]
+fn a_refused_save_leaves_focus_where_the_user_put_it(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, codex_draft(), &[]);
+    click(cx, "launcher-save-template");
+    let (id, _) = save_as(&mut helm, "my-codex", cx);
+    assert!(
+        panel_name_focused(cx),
+        "the premise: focus stayed in the name field"
+    );
+    helm.reply(id, 409, Some(json!("fixture template save refused")));
+    settle(cx);
+    assert!(painted(cx).contains("fixture template save refused"));
+    assert!(
+        panel_name_focused(cx),
+        "the refusal kept focus in the name field"
+    );
+
+    keys(cx, "enter");
+    let (id, method, path, _) = one(&mut helm);
+    assert_eq!(
+        (method, path.as_str()),
+        (Method::Put, "/api/templates/my-codex")
+    );
+    click(cx, "launcher-search-box");
+    assert!(
+        search_focused(cx),
+        "the premise: the user moved to the search box while the save was out"
+    );
+    helm.reply(id, 409, Some(json!("fixture template save refused again")));
+    settle(cx);
+    assert!(painted(cx).contains("fixture template save refused again"));
+    assert!(
+        search_focused(cx),
+        "the refusal left focus where the user put it"
+    );
+    assert!(drawn(cx, "save-template-panel"), "the panel stays");
 }
 
 /// SPEC.md: "Errors that are not a refused launch, such as "Save as template" refusing a wrapper, keep the plain line".
