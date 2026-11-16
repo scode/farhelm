@@ -324,21 +324,22 @@ Serial admission only works if every handler replies promptly, so every handler 
   not mean the work succeeded.
 - An environment session create (`POST /api/environment-sessions`, and its legacy Tensorlake spelling
   `POST /api/sandbox-sessions`) answers 202 with `{host_id, run_id}` once admitted, and its outcome lands on that run in
-  the pushed host progress: completed, or failed with the "Not launched." reason. A failed run's message is the whole
-  text to show, its "Not launched." lead included, so a client adds no lead of its own. On completed, the client finds
-  the new session by reading `GET /api/sessions?host=<host_id>`, which answers from the helm's cache without waiting on
-  a host, and not from the pushed session list, the channel's filtered and capped query, which can leave a session on a
-  new host out and can bring it a push after the run's end. That read holds exactly the one session: the new environment
-  starts with none, and any other session there needs an agent's spawn, which a new host has no grant to let through
-  without the user's approval. A failed launch's cleanup removes its host, but the helm goes on listing the failed run
-  under the removed host's id, since that run is the only place the reason is published; it keeps a bounded number of
-  the most recent such runs, never dropping one whose cleanup is still running, until it restarts, and host ids are
-  never reused. A launch task that panics ends its run failed, saying it ended without a result, and marks it
-  `outcome_unknown`, since its environment or even its session may be left behind; a client branches on that marker, not
-  on the words. A run the client waits for that is no longer listed means the client cannot learn how the launch ended;
-  Hosts shows whatever environment it left. What is refused before admission (an unconfirmed billed create, a body the
-  route cannot read, a recipe or place that is missing or cannot run the launch) is an ordinary reply, with nothing
-  registered.
+  the pushed host progress: completed, or failed with the "Not launched." reason. A failed run's message is always the
+  whole text to show, so a client adds no lead of its own: it leads with "Not launched." unless the run is
+  `outcome_unknown` (below). On completed, the client finds the new session by reading
+  `GET /api/sessions?host=<host_id>`, which answers from the helm's cache without waiting on a host, and not from the
+  pushed session list, the channel's filtered and capped query, which can leave a session on a new host out and can
+  bring it a push after the run's end. That read holds exactly the one session: the new environment starts with none,
+  ordinary creates refuse a host that belongs to a session, and an agent inside it needs the user's permission to create
+  a session there as well as to spawn one, which a new host has no grant for. A failed launch's cleanup removes its
+  host, but the helm goes on listing the failed run under the removed host's id, since that run is the only place the
+  reason is published; it keeps a bounded number of the most recent such runs, never dropping one whose cleanup is still
+  running, until it restarts, and host ids are never reused. A launch task that panics ends its run failed, saying it
+  ended without a result, and marks it `outcome_unknown`, since its environment or even its session may be left behind;
+  a client branches on that marker, not on the words. A run the client waits for that is no longer listed means the
+  client cannot learn how the launch ended; Hosts shows whatever environment it left. What is refused before admission
+  (an unconfirmed billed create, a body the route cannot read, a recipe or place that is missing or cannot run the
+  launch) is an ordinary reply, with nothing registered.
 - Routes are converted as the work that first ports them needs them, not in a sweep.
 
 Every change a command causes is pushed before that command's reply. When the GUI sees "done", its store already shows

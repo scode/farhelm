@@ -96,9 +96,10 @@ pub(super) struct ProvisioningMemory {
     /// "The UI channel"), and the "Not launched." reason is nowhere else. So
     /// the launch keeps a copy here, taken before its cleanup starts so that
     /// the listing never goes without the run, and publishes the failure on
-    /// it. Kept apart from `runs` so that map still holds only registered
-    /// hosts; host ids are never reused, so a kept run cannot come to describe
-    /// another host. Gone with the helm process, like every run.
+    /// it ([`Self::launch_run_to_end`] finds it). Kept apart from `runs` so
+    /// that map still holds only registered hosts; host ids are never reused,
+    /// so a kept run cannot come to describe another host. Gone with the helm
+    /// process, like every run.
     pub(super) ended_launches: VecDeque<ProvisioningView>,
 }
 
@@ -121,20 +122,23 @@ impl ProvisioningMemory {
         }
     }
 
-    /// The run `run_id` of `host`, wherever it is kept: the host's own entry,
-    /// or the copy a failed launch kept once its host was removed.
-    pub(super) fn launch_run_mut(
+    /// The run `run_id` of `host` that a launch publishes its end on: the
+    /// host's own entry while the host is registered, with any copy kept of
+    /// it dropped (a copy left running would never be evicted), or else the
+    /// copy kept once cleanup removed the host. Both failure publications
+    /// (a failed launch's and a panicked one's) find their run here.
+    pub(super) fn launch_run_to_end(
         &mut self,
         host: HostId,
         run_id: &str,
     ) -> Option<&mut ProvisioningView> {
-        let is_it = |run: &ProvisioningView| run.run_id.as_deref() == Some(run_id);
+        let is_it =
+            |run: &ProvisioningView| run.host_id == host && run.run_id.as_deref() == Some(run_id);
         if self.runs.get(&host).is_some_and(is_it) {
+            self.ended_launches.retain(|kept| !is_it(kept));
             return self.runs.get_mut(&host);
         }
-        self.ended_launches
-            .iter_mut()
-            .find(|run| run.host_id == host && is_it(run))
+        self.ended_launches.iter_mut().find(|run| is_it(run))
     }
 }
 
