@@ -61,13 +61,13 @@ partly (below)
 
 Tests: 21. Covers: wake-to-create leaves ${elsewhere} alone (${mode}).
 
-not yet ported
+partly (below)
 
 ### `tests/tensorlake-tunnels.spec.ts`
 
 Tests: 2. Covers: tunnel failures make a connected host amber and show each mapping.
 
-partly (below)
+replaced (below)
 
 ### `tests/hosts-panel.spec.ts`
 
@@ -367,8 +367,12 @@ in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherw
   editor's pickers following a credential added or deleted while it stays open (see "Recipes" under Deviations).
 - "saved credentials report delivery failures without retaining the secret draft":
   `a_replacement_sends_only_the_secret_and_shows_the_hosts_it_did_not_reach`.
-- "connected credential warnings remain readable in ${palette}": a Tensorlake host's row and rail mark; waits for the
-  Tensorlake hosts in the Hosts panel and the rail's host status.
+- "connected credential warnings remain readable in ${palette}": partly. A sandbox's or container's details say
+  "Credentials not delivered:" and the helm's reason, and its row and rail dot turn amber whatever its phase,
+  `hosts/identity/phase/tests.rs` `credentials_not_delivered_are_said_and_turn_the_host_amber`; the rail's name adds
+  "credentials not delivered", `session_list/host_rail/tests.rs`
+  `failing_credentials_and_forwards_join_the_avatars_words_after_its_phase`. Not ported: its palettes, which need a
+  sandbox or container host no drive can stage.
 
 ## `tests/tensorlake-settings.spec.ts` and `tests/tensorlake-tunnels.spec.ts`, partly
 
@@ -404,6 +408,11 @@ or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.
   sent before a key change is answered before it, and only the newest read's answer is shown:
   `a_clear_hides_the_list_and_its_rows`, `a_saved_key_reads_the_list_which_says_when_it_found_none` (a replaced key
   reads again) and `only_a_tensorlake_host_coming_or_going_reads_the_list_again` (an older read's answer dropped).
+- `tensorlake-tunnels.spec.ts`, "tunnel failures make a connected host amber and show each mapping": the row's details
+  list the forwards' health and each forward ("Tunnels up", "Tunnels failed; retrying in 4s: <reason>", "127.0.0.1:8080
+  → 127.0.0.1:9090"), and a connected host whose forwards failed reads amber in its row and on the rail, whose words add
+  "tunnels failed, retrying", while its phase words stay "Connected": `hosts/identity/phase/tests.rs`
+  `a_machines_details_name_it_and_its_forwards` and `failed_forwards_make_a_connected_host_advisory`.
 - `tensorlake-tunnels.spec.ts`, "Settings lists unknown Farhelm sandboxes and confirms snapshot cleanup": the rows'
   state, "from another helm", creation time, a failed cleanup's line with Retry cleanup and a running cleanup's Cleaning
   up…, `rows_show_their_state_and_cleanup`; Delete's question, Cancel, Delete sandbox's request, the helm's answer at
@@ -480,8 +489,21 @@ Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensor
   Cancel and Escape send nothing (`cancel_and_escape_on_the_question_create_nothing`).
 - An agent's add request draws no kind choice: `approvals/host_add_tests.rs`
   `the_cards_action_opens_the_dialog_prefilled_and_answers_nothing`.
-- "rerun before first create uses Tensorlake skip=${skipTensorlake}" waits for a Tensorlake host's Re-run in the host
-  menu.
+- "rerun before first create uses Tensorlake skip=${skipTensorlake}": a sandbox's Re-run probes the sandbox the host
+  names and asks its creation question, without Back, whatever the SSH preference says, `hosts/environment_tests.rs`
+  `a_sandboxs_rerun_asks_its_creation_question_without_back`; with Tensorlake's own skip on it creates without asking,
+  and a failed read of that skip asks, `the_tensorlake_skip_creates_without_asking_and_a_failed_read_asks`.
+
+## `tests/tensorlake-lifecycle.spec.ts`, partly
+
+Of its 21 cases, 8 are this area's: the host's lifecycle in the Hosts panel. The other 13 are the launcher's
+(wake-to-create, quick launch, Replace with, resume-before-create), in [Launcher](launcher.md). Of the 8, the sandbox
+details half of "suspend confirmation and sandbox details use the standard frame in ${palette}" is ported: a sandbox's
+row details name it, its recipe and size ("Sandbox: <name> · Recipe: <recipe> · 2 CPUs · 4 GB memory"), and a
+container's its container host, `hosts/identity/phase/tests.rs` `a_machines_details_name_it_and_its_forwards`; a
+deletion's details in the provider's words, `a_deletion_is_worded_for_the_hosts_provider`. The rest (Suspend with its
+question, Resume inline and from the menu, the session card's Resume host, the pending verb, and when Suspend asks)
+waits for Suspend and Resume.
 
 ## `tests/provisioning.spec.ts`, Add host's dialog, probe and setup
 
@@ -646,7 +668,8 @@ Not ported, and why:
 
 A host menu's Remove asks the removal confirmation and sends `DELETE /api/hosts/{id}`, or with "Remove hosts without
 asking" on, sends it at once (`crates/gui/farhelm-gui/src/hosts/remove.rs`). Only an SSH host's menu offers it: a
-Tensorlake or container host's removal deletes its machine, which is Delete sandbox, a later piece.
+Tensorlake or container host's removal deletes its machine, which its menu offers as Delete sandbox or Delete container,
+in the provider's words, with a question that always asks and offers no permanent answer.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless named otherwise:
 
@@ -680,8 +703,17 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
 - The menu, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs`: `a_remote_hosts_toggle_opens_a_menu_starting_on_retry`,
   `settings_waits_for_the_hosts_own_work_in_flight` (Remove does nothing while the host is busy),
   `the_local_hosts_greyed_update_says_why_and_sends_nothing` (no Remove on the helm's own machine) and
-  `a_sandbox_hosts_menu_offers_no_remove`; which kinds remove by forgetting, `offers/tests.rs`
+  `a_sandbox_hosts_menu_offers_delete_sandbox_and_no_remove`; which kinds remove by forgetting, `offers/tests.rs`
   `each_kind_decides_its_own_offers`.
+- Delete sandbox and Delete container (the old "Delete sandbox" and its provider label and help), in
+  `crates/gui/farhelm-gui/src/hosts/environment_tests.rs`: always asked with "Remove hosts without asking" on, naming
+  the sandbox and what goes with it, then the request,
+  `delete_sandbox_always_asks_naming_the_sandbox_and_what_goes_with_it`; a container's own words,
+  `a_containers_menu_offers_delete_container_in_its_own_words`; the helm's answer at its bound shown in the question,
+  `a_deletion_the_helm_answers_at_its_bound_shows_in_the_question`; refused during a launch,
+  `delete_sandbox_refuses_during_a_launch`; a failed deletion's Retry deleting again, its 504 an ordinary refusal,
+  `retry_on_a_failed_deletion_deletes_again_and_a_late_answer_is_a_refusal`; which kinds delete their machine,
+  `offers/tests.rs` `each_kind_decides_its_own_offers`.
 - End to end, over the scripted backend's fake hosts: `scripts/gui-e2e-smoke.py`'s step 44 (Cancel, Remove, the
   permanent answer, and a removal without asking).
 - The look: the goldens `host-remove-confirmation` and `host-menu` (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
@@ -1508,6 +1540,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   and Tab reaches Copy plan inside it.
 - **The question is named by its title**, "Set up host · <destination>", where the old one kept the Add host dialog's
   name.
+- **A sandbox's rerun question shows the size it bills for** under its title, "2 CPUs · 4 GB memory · 20 GB disk", as
+  Add host's creation question does: SPEC.md puts "the size beneath the title" of this confirmation and has a setup
+  rerun use it ("skips this confirmation, including for setup reruns"). The old rerun's header said "Farhelm is not
+  running there yet".
 
 ### The host menu and host settings
 
@@ -1612,8 +1648,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   the title on GPUI's default line height.
 - **The body is not a named scroll region of its own** ("Host removal details"): the dialog frame's body scrolls, and it
   holds no control to reach.
-- **Tensorlake and container hosts offer no Remove.** Their removal deletes the machine, which the old menu offered as
-  Delete sandbox (or Delete container) with a question of its own; that comes with the containers and Tensorlake work.
+- **Delete sandbox's question names the machine in its body, not the destination.** The body's first line is the
+  sandbox's own name, as the old dialog showed; for a container it is the container's name, where the old dialog showed
+  the destination. The title names the host as its row does. Its 504 at the helm's reply bound ("the removal carries
+  on") shows in the question as any refusal does; the old dialog had no bound.
+- **Delete is hidden while a deletion runs.** The old menu always offered its removal item on a sandbox or container,
+  and the helm answered it as busy while a destruction ran; here the menu offers neither Delete nor Retry while a
+  deletion is under way, and both come back if it fails.
 - **With Remove unavailable, "Remove, don't ask again" is left out** rather than drawn unavailable beside it, as the old
   dialog drew both: the prompt has no way to disable an extra answer. Remove is unavailable only when the host turned
   busy between the menu and the question.
@@ -1728,9 +1769,9 @@ Where the port does not match the old app, and why. Each stays until the work na
   adopting "resets all five of this host's permissions to asking", where the old one said only that adopting resets the
   host to asking before YOLO launches (SPEC.md, "Topology": adopting "resets all five permissions to asking"). It still
   says only "fix the destination", without naming where: the host settings dialog edits an SSH host's destination, and a
-  sandbox's or a container's is not the user's to change. Interim: a failed delete's "Retry to delete it again" names
-  the environment's own Retry, which comes with Delete sandbox; the menu offers no Retry while an environment is being
-  deleted.
+  sandbox's or a container's is not the user's to change. A failed delete's "Retry to delete it again" names the menu's
+  Retry, which on that phase deletes again; the menu offers no Retry while a deletion is under way, and its Retry on a
+  failed deletion is described "Finish the deletion".
 - "Connecting" and the other pending phases are drawn upright and the port asks for no italics: the GUI bundles no
   italic Inter face, and the old app drew them in italics.
 - The identity mark's "Local" or "Remote" is its accessible name rather than a visually hidden word after it, with the

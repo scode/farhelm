@@ -40,7 +40,12 @@
 //!   without asking under the same preference. The probe's refusal, why setup is manual, and a plan that arrived after
 //!   the user moved on ([`RERUN_MOVED_ON`]) show under the row, the operation store's record under the host's key, as
 //!   does a refused submission: the host already has a row, so nothing reopens. The refusal and the manual setup, and a
-//!   refused submission, also warn the host's rail avatar while Hosts is closed ([`super::status::failed`]).
+//!   refused submission, also warn the host's rail avatar while Hosts is closed ([`super::status::failed`]). A
+//!   Tensorlake sandbox's rerun instead asks the helm to plan creating the sandbox the host names again
+//!   (`tensorlake-host`), and its plan opens the sandbox's creation question below, titled with the host's name and
+//!   drawn with its mark, without Back, since there is no form to go back to; whether it asks is Tensorlake's own
+//!   "Create Tensorlake sandboxes without asking", read from the account as the plan arrives, and a read that fails
+//!   asks, as the old rerun did.
 //! - **During a launch.** A submission and a rerun refuse to start while a session launch is in flight
 //!   ([`super::launch_in_flight`]), as Add does. A new host's Add host reopens saying so, as for a helm refusal, while
 //!   the user has not moved on, and otherwise the Hosts panel's line says "Add host: not started, …", as it prefixes a
@@ -75,9 +80,12 @@ use gpui::{
     SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use serde_json::json;
+use std::cell::Cell;
+use std::rc::Rc;
 
 use super::add::{self, Reply};
 use super::identity::{display_name, host_mark};
+use super::offers::{HostKind, SetupRerun};
 use crate::assets;
 use crate::components::{Button, HoverHelp, Role, Tier, copy_button, with_hover_help};
 use crate::focus::{self, Mark};
@@ -164,6 +172,9 @@ pub(crate) enum Target {
         name: HostText,
         icon: HostIcon,
         color: HostColor,
+        /// The size a Tensorlake sandbox's rerun creates it with, which makes the question the sandbox's creation
+        /// question rather than the setup confirmation ([`confirm`]); `None` for an SSH host.
+        creates: Option<RecipeSize>,
     },
     /// A Tensorlake sandbox Add host is creating ([`confirm`]'s sandbox question): what Back and a refusal reopen Add
     /// host with.
@@ -196,19 +207,23 @@ pub(crate) struct Sandbox {
     pub(crate) resources: RecipeSize,
 }
 
+/// A sandbox creation question's title, "Create Tensorlake sandbox · <name>" with the name as host text, and its
+/// summary, the size `size` the plan bills for: Add host's new sandbox ([`Sandbox`]) and a sandbox's rerun alike.
+fn creation_heading(name: &HostText, size: &RecipeSize) -> (HostSentence, String) {
+    let title = HostSentence::new("sandbox-title")
+        .text("Create Tensorlake sandbox · ")
+        .host(name);
+    let summary = format!(
+        "{} CPUs · {} GB memory · {} GB disk",
+        size.cpus, size.memory_gb, size.disk_gb
+    );
+    (title, summary)
+}
+
 impl Sandbox {
-    /// The creation question's title, "Create Tensorlake sandbox · <name>" with the name as host text, and its summary,
-    /// the size the plan bills for.
+    /// The creation question's title and summary ([`creation_heading`]).
     fn heading(&self) -> (HostSentence, String) {
-        let title = HostSentence::new("sandbox-title")
-            .text("Create Tensorlake sandbox · ")
-            .host(&HostText::from_host(self.name.as_str()));
-        let size = &self.resources;
-        let summary = format!(
-            "{} CPUs · {} GB memory · {} GB disk",
-            size.cpus, size.memory_gb, size.disk_gb
-        );
-        (title, summary)
+        creation_heading(&HostText::from_host(self.name.as_str()), &self.resources)
     }
 
     /// Add host's seed for this sandbox, with `problem` in its error line.
@@ -237,15 +252,32 @@ pub(crate) fn asks_first(cx: &App) -> bool {
 }
 
 /// Ask the setup confirmation for `offer` over everything else in `window`, unless the user moved on since its mark: a
-/// Tensorlake sandbox's creation confirmation for [`Target::Sandbox`] ([`confirm_sandbox`]), the setup confirmation
-/// otherwise.
+/// Tensorlake sandbox's creation confirmation for [`Target::Sandbox`] and for a sandbox's rerun ([`confirm_sandbox`]),
+/// the setup confirmation otherwise.
 pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     let mark = offer.mark;
     let from_agent = offer.target.is_from_agent();
     let (name, (icon, color)) = match &offer.target {
         Target::Sandbox(sandbox) => {
             let heading = sandbox.heading();
-            confirm_sandbox(heading, offer, window, cx);
+            confirm_sandbox(
+                heading,
+                (HostIcon::Cloud, HostColor::Default),
+                offer,
+                window,
+                cx,
+            );
+            return;
+        }
+        Target::Registered {
+            name,
+            icon,
+            color,
+            creates: Some(size),
+            ..
+        } => {
+            let (heading, tile) = (creation_heading(name, size), (*icon, *color));
+            confirm_sandbox(heading, tile, offer, window, cx);
             return;
         }
         Target::New { destination, .. } => (
@@ -253,7 +285,11 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
             (HostIcon::Cloud, HostColor::Default),
         ),
         Target::Registered {
-            name, icon, color, ..
+            name,
+            icon,
+            color,
+            creates: None,
+            ..
         } => (name.clone(), (*icon, *color)),
     };
     let title = HostSentence::new("setup-title")
@@ -326,16 +362,19 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// The Tensorlake sandbox's creation confirmation for `offer` (the module docs), under its sandbox's `(title,
-/// summary)` ([`Sandbox::heading`]): asked over everything else in `window` through the offer's mark, the mark of the
-/// Continue that asked for the plan.
+/// A Tensorlake sandbox's creation confirmation for `offer` (the module docs), under its `(title, summary)`
+/// ([`creation_heading`]) and with its `(icon, color)` in the tile: asked over everything else in `window` through the
+/// offer's mark, the mark of the Continue or the Re-run that asked for the plan. Back is offered only for Add host's
+/// new sandbox, which it goes back to; a rerun's question has no form to go back to, as the old one had none.
 fn confirm_sandbox(
     (title, summary): (HostSentence, String),
+    (icon, color): (HostIcon, HostColor),
     offer: Offer,
     window: &mut Window,
     cx: &mut App,
 ) {
     let mark = offer.mark;
+    let back = matches!(offer.target, Target::Sandbox(_));
     let create = Answer::new(
         "Create sandbox",
         HoverHelp::tooltip("Create sandbox: carry out the plan shown above"),
@@ -347,8 +386,9 @@ fn confirm_sandbox(
             "Cancel",
             HoverHelp::tooltip("Cancel: change nothing on this host"),
             Tier::Neutral,
-        ))
-        .alternative(
+        ));
+    let question = if back {
+        question.alternative(
             Answer::new(
                 "Back",
                 HoverHelp::tooltip(
@@ -365,19 +405,16 @@ fn confirm_sandbox(
                 add::reopen_sandbox(&sandbox.opener, &mark, sandbox.seed(None), window, cx);
             },
         )
+    } else {
+        question
+    };
+    let question = question
         .body(|offer: &Offer, _, cx| {
             let plan = PlanBody::new(&offer.confirmation, &offer.steps);
             let plan = cx.new(|_| plan);
             cx.new(|_| SandboxPlanBody { plan })
         })
-        .tile(|_, cx| {
-            host_mark(
-                HostIcon::Cloud,
-                HostColor::Default,
-                px(24.),
-                theme::palette(cx),
-            )
-        })
+        .tile(move |_, cx| host_mark(icon, color, px(24.), theme::palette(cx)))
         .width(px(WIDTH))
         // As the setup confirmation: the host dialogs keep focus on the control in use on an empty-space click.
         .keeps_focus_on_empty_click();
@@ -642,33 +679,47 @@ pub(super) fn not_started(line: HostSentence, cx: &mut App) {
     show(cx, |lines| lines.not_started = Some((store, line)));
 }
 
-/// `POST /api/hosts/probe` for a registered SSH host's rerun of its setup: its destination with the install paths the
-/// helm recorded for it (`null` for none), and no `new_entry`, so a supervisor that answers is registered onto the same
-/// entry rather than refused as a second one, as the old rerun's probe did.
-pub(crate) fn rerun_command(host: &HostView) -> Result<Command, PathError> {
+/// `POST /api/hosts/probe` for a registered host's rerun of its setup, as `how` probes it: an SSH host's destination
+/// with the install paths the helm recorded for it (`null` for none), and no `new_entry`, so a supervisor that answers
+/// is registered onto the same entry rather than refused as a second one, as the old rerun's probe did; or a Tensorlake
+/// sandbox's registry id, for which the helm plans creating the sandbox the host names again, locally and without a
+/// Tensorlake call.
+pub(crate) fn rerun_command(host: &HostView, how: SetupRerun) -> Result<Command, PathError> {
+    let body = match how {
+        SetupRerun::Ssh => json!({
+            "target": { "kind": "ssh", "destination": host.destination },
+            "remote_farhelm": host.remote_farhelm,
+            "remote_state_dir": host.remote_state_dir,
+        }),
+        SetupRerun::Tensorlake => {
+            json!({ "target": { "kind": "tensorlake-host", "host": host.id } })
+        }
+    };
     Ok(Command::new(
         Work::Probe,
         Method::Post,
         ApiPath::api(&["hosts", "probe"])?,
-        Some(json!({
-            "target": { "kind": "ssh", "destination": host.destination },
-            "remote_farhelm": host.remote_farhelm,
-            "remote_state_dir": host.remote_state_dir,
-        })),
+        Some(body),
         "POST /api/hosts/probe",
     ))
 }
 
 /// Run `host`'s failed setup again, the host menu's Re-run, with `mark` the [`Mark`] taken in its click handler: probe
-/// the host under its own key, and go on from the plan as the module docs say. Sends nothing for a host with no
-/// destination (the menu offers the rerun only on an SSH host, which always has one) or while work on the host is
-/// out. While a session launch is in flight ([`super::launch_in_flight`]) it sends nothing either, and says so on the
-/// Hosts panel's line: "Re-run <host>: not started, …" ([`not_started`]).
+/// the host under its own key as its kind says ([`HostKind::setup_rerun`]), and go on from the plan as the module docs
+/// say. An SSH host's plan is the setup confirmation's, skipped by "Set up new hosts without asking"; a Tensorlake
+/// sandbox's is its creation question ("Create Tensorlake sandbox · <name>", with no Back), skipped only by
+/// Tensorlake's own "Create Tensorlake sandboxes without asking", read when the plan arrives ([`ask_or_create`]). Sends
+/// nothing for a kind with no rerun, an SSH host with no destination, or while work on the host is out. While a session
+/// launch is in flight ([`super::launch_in_flight`]) it sends nothing either, and says so on the Hosts panel's line:
+/// "Re-run <host>: not started, …" ([`not_started`]).
 pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
-    if host.destination.is_none() {
+    let Some(how) = HostKind::of(host).setup_rerun() else {
+        return;
+    };
+    if how == SetupRerun::Ssh && host.destination.is_none() {
         return;
     }
     if super::launch_in_flight(cx) {
@@ -679,7 +730,7 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
         not_started(line, cx);
         return;
     }
-    let command = match rerun_command(host) {
+    let command = match rerun_command(host, how) {
         Ok(command) => command,
         Err(error) => {
             tracing::debug!(?error, "setup rerun probe not built");
@@ -687,64 +738,133 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
         }
     };
     let key = OpKey::host(&HostView::key(host.id));
-    let target = Target::Registered {
-        host: host.id,
-        name: display_name(host),
-        icon: host.icon,
-        color: host.color,
-    };
+    let (name, icon, color) = (display_name(host), host.icon, host.color);
     let handle = window.window_handle();
     let probed = key.clone();
     let id = host.id;
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
-            let problem = match add::read_reply(&settled.outcome) {
-                // The pushed hosts and host progress already show what the helm did.
-                Reply::Added => return,
-                // A refusal or a manual setup is a failed attempt, which warns the rail while Hosts is closed; a plan
-                // that arrived after the user moved on is not, since nothing was refused and nothing ran.
-                Reply::Show(problem) => {
-                    super::status::failed(id, super::status::Action::Setup, cx);
-                    problem.text()
-                }
-                Reply::Setup {
-                    probe_id,
-                    confirmation,
-                    steps,
-                } => {
-                    let offer = Offer {
-                        key: probed.clone(),
+            let target = |creates| Target::Registered {
+                host: id,
+                name: name.clone(),
+                icon,
+                color,
+                creates,
+            };
+            let offer = |probe_id, confirmation, steps, creates| Offer {
+                key: probed.clone(),
+                probe_id,
+                confirmation,
+                steps,
+                target: target(creates),
+                mark,
+            };
+            let plan = match how {
+                SetupRerun::Ssh => match add::read_reply(&settled.outcome) {
+                    // The pushed hosts and host progress already show what the helm did.
+                    Reply::Added => return,
+                    Reply::Show(problem) => Err(problem),
+                    Reply::Setup {
                         probe_id,
                         confirmation,
                         steps,
-                        target,
-                        mark,
-                    };
-                    if !asks_first(cx) {
-                        submit(offer, handle, cx);
+                    } => Ok((offer(probe_id, confirmation, steps, None), asks_first(cx))),
+                },
+                SetupRerun::Tensorlake => match add::read_plan(&settled.outcome) {
+                    Ok(plan) => {
+                        let creates = Some(plan.resources);
+                        let offer = offer(plan.probe_id, plan.confirmation, plan.steps, creates);
+                        ask_or_create(offer, handle, cx);
                         return;
                     }
-                    if !focus::has_moved_on(&mark, cx)
-                        && handle
-                            .update(cx, |_, window, cx| confirm(offer, window, cx))
-                            .is_ok()
-                    {
+                    Err(problem) => Err(problem),
+                },
+            };
+            let problem = match plan {
+                // A refusal or a manual setup is a failed attempt, which warns the rail while Hosts is closed; a plan
+                // that arrived after the user moved on is not, since nothing was refused and nothing ran.
+                Err(problem) => {
+                    super::status::failed(id, super::status::Action::Setup, cx);
+                    problem.text()
+                }
+                Ok((offer, false)) => {
+                    submit(offer, handle, cx);
+                    return;
+                }
+                Ok((offer, true)) => {
+                    if ask(offer, handle, cx) {
                         return;
                     }
                     HostText::from_host(RERUN_MOVED_ON)
                 }
             };
-            // Why the rerun leads nowhere shows under the host's row, where a refusal of the probe already does.
-            if let Some(operations) = session::current_operations(cx) {
-                operations.update(cx, |operations, cx| {
-                    operations.note(&probed, Work::Probe, problem, cx)
-                });
-            }
+            note_rerun(&probed, problem, cx);
         })
     });
     match started {
         Ok(()) => show(cx, |lines| lines.not_started = None),
         Err(not_started) => tracing::debug!(?not_started, "setup rerun probe not sent"),
+    }
+}
+
+/// Ask `offer`'s question in `window` unless the user has moved on since its mark. Whether it opened.
+fn ask(offer: Offer, window: AnyWindowHandle, cx: &mut App) -> bool {
+    !focus::has_moved_on(&offer.mark, cx)
+        && window
+            .update(cx, |_, window, cx| confirm(offer, window, cx))
+            .is_ok()
+}
+
+/// Say why a rerun led nowhere under the host's row, where a refusal of its probe already shows: the operation store's
+/// record under the host's key, `probed`.
+fn note_rerun(probed: &OpKey, problem: HostText, cx: &mut App) {
+    if let Some(operations) = session::current_operations(cx) {
+        operations.update(cx, |operations, cx| {
+            operations.note(probed, Work::Probe, problem, cx)
+        });
+    }
+}
+
+/// A Tensorlake sandbox's rerun plan, `offer`: submit it without asking when Tensorlake's own "Create Tensorlake
+/// sandboxes without asking" is on, else ask its creation question. Whether to ask is read from the account
+/// (`GET /api/tensorlake`) as the plan arrives, never from the SSH setup preference; a read that fails, or cannot be
+/// sent, asks, as the old rerun asked when its settings read failed. The question opens only while the user has not
+/// moved on since the Re-run, and otherwise the row says to run it again.
+fn ask_or_create(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
+    let path = match ApiPath::api(&["tensorlake"]) {
+        Ok(path) => path,
+        // A constant path always builds; were it not to, asking is the safe way on.
+        Err(error) => {
+            tracing::debug!(?error, "Tensorlake account read not built");
+            settle_sandbox_rerun(offer, false, window, cx);
+            return;
+        }
+    };
+    // The offer goes to whichever of the read's answer or its failure to send comes first; only one ever does.
+    let pending = Rc::new(Cell::new(Some(offer)));
+    let answered = Rc::clone(&pending);
+    let sent =
+        crate::operations::read::<Settings>(path, add::ACCOUNT_ROUTE, cx, move |read, cx| {
+            let Some(offer) = answered.take() else {
+                return;
+            };
+            let skips = read.is_ok_and(|account| account.create_without_asking);
+            settle_sandbox_rerun(offer, skips, window, cx);
+        });
+    if !sent && let Some(offer) = pending.take() {
+        settle_sandbox_rerun(offer, false, window, cx);
+    }
+}
+
+/// Go on with a Tensorlake sandbox's rerun plan once whether to ask is known ([`ask_or_create`]).
+fn settle_sandbox_rerun(offer: Offer, skips: bool, window: AnyWindowHandle, cx: &mut App) {
+    if skips {
+        submit(offer, window, cx);
+        return;
+    }
+    let probed = offer.key.clone();
+    if !ask(offer, window, cx) {
+        note_rerun(&probed, HostText::from_host(RERUN_MOVED_ON), cx);
     }
 }
 

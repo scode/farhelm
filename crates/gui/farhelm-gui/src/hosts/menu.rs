@@ -10,7 +10,8 @@
 //! flight and whether the desktop app's updater runs, read while the menu draws, so an open menu follows the host. It
 //! draws Retry first, which tries the host's connection again now, then Adopt for a mismatched identity, naming the
 //! identity it accepts as the host reported it when the menu opened, which is the one the click sends
-//! ([`super::remedies`]); then Re-run on an SSH host whose setup failed, which runs it again ([`super::setup::rerun`]),
+//! ([`super::remedies`]), and which on a host whose machine's deletion failed deletes it again; then Re-run on an SSH
+//! host or a Tensorlake sandbox whose setup failed, which runs it again ([`super::setup::rerun`]),
 //! and on a host whose Update failed, which sends that Update again ([`super::update::rerun`]); Update on a remote
 //! host, which updates it without asking (the same request); Settings, which opens the host settings dialog
 //! ([`super::settings`]); on the helm's own machine the greyed Update with the reason it is greyed ("Run the installer
@@ -19,8 +20,10 @@
 //! newer Farhelm and install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose
 //! progress and outcome show beside the version readout, so the menu just closes, as the old one did; and on an SSH
 //! host, behind a separator in the danger red, Uninstall, which removes Farhelm from the host ([`super::uninstall`]),
-//! and Remove, which forgets the host ([`super::remove`]). Retry, Adopt, Settings, Uninstall and Remove are unavailable
-//! while the host has work in flight or a run going on.
+//! and Remove, which forgets the host ([`super::remove`]); on a Tensorlake sandbox or a container, Delete sandbox or
+//! Delete container in Remove's place, which deletes the machine after a question that always asks (the same module).
+//! Retry, Adopt, Settings, Uninstall, Remove and Delete are unavailable while the host has work in flight or a run
+//! going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so does the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -30,7 +33,7 @@
 //! focus goes back to what held it before the menu opened, or, when that was the control itself (a click focuses it on
 //! Linux), home.
 //!
-//! NOTE: Each of the other commands (Suspend, Resume, Delete sandbox) arrives with the piece of the port that sends it,
+//! NOTE: Each of the other commands (Suspend, Resume) arrives with the piece of the port that sends it,
 //! at its place in the old order (Retry, Suspend or Resume, Adopt, a rerun, Update, Settings, then Uninstall and Remove
 //! behind a separator), and the toggle keeps the old hover help, which names them already. Not ported: opening the
 //! menu with the arrow keys from the closed toggle, and the flyout's pointer notch.
@@ -46,6 +49,7 @@ use super::identity::{display_name, phase};
 use super::offers::{self, HostKind, Offers, Rerun, Update};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
+use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -212,11 +216,11 @@ fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
 }
 
 /// The Re-run the menu draws for `view`, and whether it can be chosen: the rerun of a failed setup on a kind whose
-/// setup the rerun can run again so far ([`HostKind::reruns_setup`]), or of a failed Update, greyed where the panel
-/// cannot update the host. `None` when it draws none.
+/// setup the rerun can run again ([`HostKind::setup_rerun`]), or of a failed Update, greyed where the panel cannot
+/// update the host. `None` when it draws none.
 fn rerun(view: &HostView, offered: &Offers) -> Option<(Rerun, bool)> {
     offered.rerun.filter(|(rerun, _)| match rerun {
-        Rerun::Setup => HostKind::of(view).reruns_setup(),
+        Rerun::Setup => HostKind::of(view).setup_rerun().is_some(),
         Rerun::Update => true,
     })
 }
@@ -272,14 +276,26 @@ impl Render for HostMenu {
         // Retry, first in the old order, in every phase but an environment's deletion.
         let retry = offered.retry.map(|enabled| {
             let (menu, host) = (cx.weak_entity(), self.host);
+            // On a failed deletion Retry deletes again, and says so in the words the row's details use for it.
+            let (help, description) = if super::remedies::deletes_again(&view.state) {
+                (
+                    "Retry: finish deleting this host's machine",
+                    "Finish the deletion",
+                )
+            } else {
+                (
+                    "Retry: try this host's connection again now",
+                    "Try the connection again",
+                )
+            };
             MenuItem::new(
                 "host-menu-retry",
                 Icon::Restart,
                 "Retry",
-                HoverHelp::tooltip("Retry: try this host's connection again now"),
+                HoverHelp::tooltip(help),
                 Role::MenuItem,
             )
-            .description("Try the connection again")
+            .description(description)
             .disabled(!enabled)
             .focus(&self.retry_focus)
             .on_click(move |_, window, cx| {
@@ -431,6 +447,29 @@ impl Render for HostMenu {
                 super::remove::start(host, &mark, window, cx);
             })
         });
+        // The provider's Delete in Remove's place, where removing the host deletes its machine: the old menu's one
+        // removal item, labelled for the provider. Its question always asks, whatever "Remove hosts without asking"
+        // says (`super::remove`).
+        let delete = offered.delete.map(|(provider, enabled)| {
+            let (menu, host) = (cx.weak_entity(), self.host);
+            let words = ProviderUi(provider);
+            MenuItem::new(
+                "host-menu-delete",
+                Icon::Trash,
+                words.host_delete_label(),
+                HoverHelp::tooltip(words.host_delete_help()),
+                Role::MenuItem,
+            )
+            .description(words.host_delete_help())
+            .danger()
+            .disabled(!enabled)
+            .on_click(move |_, window, cx| {
+                // As Remove's: the mark of this click, before the menu closes and returns focus to its toggle.
+                let mark = Mark::take(cx);
+                close(&menu, window, cx);
+                super::remove::start(host, &mark, window, cx);
+            })
+        });
         // Uninstall where the offers say, before Remove in the destructive group, as the old menu ordered them.
         let uninstall = offered.uninstall.map(|enabled| {
             let (menu, host) = (cx.weak_entity(), self.host);
@@ -456,6 +495,7 @@ impl Render for HostMenu {
             .map(IntoElement::into_any_element)
             .into_iter()
             .chain(remove.map(IntoElement::into_any_element))
+            .chain(delete.map(IntoElement::into_any_element))
             .collect();
         let removal = (!destructive.is_empty())
             .then(|| std::iter::once(menu_separator(cx).into_any_element()).chain(destructive));

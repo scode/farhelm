@@ -1152,7 +1152,11 @@ fn heading(view: &HostView, palette: &Palette) -> Div {
                         .id("host-settings-status")
                         .role(Role::Status)
                         .aria_label(phase::words(&view.state))
-                        .child(phase_dot_and_words(&view.state, palette)),
+                        .child(phase_dot_and_words(
+                            &view.state,
+                            phase::tone(&view.state),
+                            palette,
+                        )),
                 )
                 .children(phase::reported_build(&view.state).map(|build| {
                     HostSentence::new("host-settings-version")
