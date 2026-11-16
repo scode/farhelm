@@ -39,12 +39,13 @@
 #
 # ## What the rest of it is for
 #
-# Every build job has to be handed a web bundle and told where it is.
-# `farhelm` and `farhelm-desktop` compile the UI tree named by
-# `FARHELM_UI_DIST` into themselves (D12), and that same variable is what
-# marks the result as a RELEASE build (D13) — a build job that skipped these
-# steps would produce a binary that serves nothing and defaults to refusing to
-# download provisioning payloads.
+# Every build job has to mark what it builds as a RELEASE build (D13).
+# `farhelm-helm`'s build script turns `FARHELM_RELEASE_BUILD` into the
+# `farhelm_release_build` cfg, and both shipped binaries embed the helm. A
+# build job that skipped the last step here would produce a `farhelm` that
+# runs normally and refuses to download provisioning payloads, which nothing
+# else in the build would notice; the desktop build refuses to start without
+# it (`scripts/build-desktop-binary.sh`).
 #
 # ## Release build isolation
 #
@@ -118,11 +119,12 @@
     python3 releasing/check-changelog.py announce --tag "$GITHUB_REF_NAME" --manifest-env PLAN_MANIFEST
 
 - name: Free unused image toolchains before native desktop gates
-  # The release job later holds cargo-dist's musl output, the final web bundle,
-  # and a native WebKit/Dioxus smoke build at once. GitHub's stock Linux image
-  # starts nearly full of unrelated toolchains, so clearing this narrow
-  # allowlist before those builds preserves headroom without touching Rust,
-  # Cargo, dx, caches, or any release output.
+  # The release job later holds the workspace's debug test build (GPUI
+  # included), the desktop app's own test build, and cargo-dist's musl output
+  # at once. GitHub's stock Linux image starts nearly full of unrelated
+  # toolchains, so clearing this narrow allowlist before those builds
+  # preserves headroom without touching Rust, Cargo, caches, or any release
+  # output.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     sudo rm -rf \
@@ -146,11 +148,13 @@
 # arm-specific coverage ever becomes worth paying for, widening the `if` below
 # is the whole change.) macOS is the one that genuinely cannot: the suite wants
 # a systemd user manager and the tests' ssh loopback, neither of which that
-# runner has, which is why its leg is a compile instead.
+# runner has, which is why its leg runs only the suites that need neither:
+# the uninstall, lock and desktop app tests and the GUI crates' tests (see
+# "The macOS half of the gate" below).
 #
 # Ordinary CI retains only fast compile, lint, formatter, installer, generated
-# workflow, and JavaScript-harness checks. The costly Rust, desktop runtime,
-# and cross-distribution gates live here, where a failure rejects publication
+# workflow, and JavaScript-harness checks. The costly Rust and
+# cross-distribution gates live here, where a failure rejects publication
 # from the artifact job that ran it.
 # ---------------------------------------------------------------------------
 
@@ -231,6 +235,18 @@
     podman pull "$base"
     podman run --rm "$base" true
 
+- name: Install the GPUI app's build packages
+  # The workspace selection below builds the GPUI GUI crates (`farhelm-gui`
+  # is a workspace member), and GPUI's -sys crates find fontconfig and
+  # xkbcommon through pkg-config in their build scripts. `libglib2.0-dev` is
+  # here for the desktop app's step further down, which compiles GIO (the app
+  # opens saved downloads through it), whose -sys crates resolve GLib the same
+  # way. Wayland and Vulkan are loaded at run time and need nothing here, and
+  # the GUI's tests run on GPUI's test platform with bundled fonts, never a
+  # display.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: sudo apt-get install -y pkg-config libfontconfig-dev libxkbcommon-dev libglib2.0-dev
+
 - name: Run the test suite
   # Nextest starts a process per test with four slots shared across binaries.
   # Immediate success output retains runtime SKIPPED explanations: a test
@@ -241,11 +257,10 @@
   # diagnosed shallow-pause observation is corrected and the remaining old
   # reports were dismissed; neither still justifies excluding the whole suite.
   #
-  # `--workspace` reaches past `default-members`, so farhelm-desktop must be
-  # excluded by name: it links WebKitGTK, which this runner does not have
-  # (the v0.3.0-rc.3 gate died in gobject-sys's build script on exactly
-  # that). The native desktop tests and smoke step below provide the desktop
-  # coverage after the release-only dependencies are installed.
+  # `--workspace` reaches past `default-members`, so farhelm-desktop is
+  # excluded by name, as in the development inventory's workspace run
+  # (`.agents/validation.md`): its tests are a selection of their own there,
+  # and here in "Test the desktop app" below.
   #
   # ONE BUILD FOR EVERY RUST STEP. Every later Rust test in
   # this job (the doctests here, the CentOS leg)
@@ -256,7 +271,9 @@
   # everything above them is compiled again: the old split into per-package
   # commands spent about six minutes of every tag build recompiling crates
   # this step had just built. Keep the selection identical when adding a
-  # step; narrow with `-E` instead.
+  # step; narrow with `-E` instead. The one exception is "Test the desktop
+  # app", whose crate this selection leaves out: its `-p farhelm-desktop`
+  # recompiles 57 crates on top of this build (measured 2026-11-16).
   # The Podman module's scoped setup additionally builds a native musl CLI
   # payload for the ordinary installer inside its Ubuntu container. That
   # target cannot reuse the host test executable's dynamic glibc linkage.
@@ -272,20 +289,28 @@
       --concurrency '4 doctest threads' --output-root "$RUNNER_TEMP/test-run-evidence" \
       -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4
 
-- name: Run the JS unit harness
+- name: Test the desktop app
+  # The desktop app's process (`crates/farhelm-desktop`): its bootstrap,
+  # updater and state files, the only run of these tests in this job. The GUI
+  # crates' own tests already ran in the workspace selection above. The macOS
+  # job runs this selection together with the GUI crates in "Compile and test
+  # the window half of the Mac release".
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
-    cd crates/farhelm-ui/js-tests
-    python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
-      --kind release --selection 'asset JavaScript unit harness' --concurrency 'node default discovery' \
-      --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
+    python3 scripts/record-test-run.py \
+      --runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' \
+      --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo nextest run --locked -p farhelm-desktop
+    python3 scripts/record-test-run.py \
+      --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
+      --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo test --locked --doc -p farhelm-desktop -- --show-output --test-threads=4
 
 - name: Run the OMP reporter asset scenarios
   # The injected OMP asset's own execution proof — dispatch ordering, stale-id
   # cancellation, execution-time file recheck, the silent-failure boundary —
-  # rides the release JS validation on the same recorder terms as the UI
-  # harness above, with its own selection name. Node is already present for
-  # that harness.
+  # runs through the recorder like every other gate, with its own selection
+  # name. Node comes with the runner image.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     cd crates/farhelm-supervisor/asset-js-tests
@@ -325,7 +350,7 @@
 # ---------------------------------------------------------------------------
 
 - name: Validate standalone uninstall on macOS
-  # Exercise the installed CLI headlessly; file removal needs no WebKit.
+  # Exercise the installed CLI headlessly; file removal needs no window.
   #
   # The three nextest commands select the same packages and targets and pick
   # their tests with a filter, so the first builds everything and the others
@@ -366,27 +391,29 @@
       -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
 
 - name: Compile and test the window half of the Mac release
-  # The WebKit-linked code that has no Linux equivalent in CI, where the same
-  # crate is built against WebKitGTK instead.
+  # The desktop app and the GPUI GUI crates, built against GPUI's macOS
+  # platform (AppKit, Metal, CoreText) instead of the Linux one the x86_64 job
+  # tests. Only here are the Mac-only parts compiled (the desktop app's
+  # NSSound player and keyboard-navigation preference read, the GUI's title
+  # band) and the Mac-only tests run: the title band's rows, the Mac shortcut
+  # names, and the host-text tests that shape with CoreText, which caught a
+  # Mac-only line-break bug Linux cannot see. The tests run on GPUI's test
+  # platform rather than opening real windows.
   if: runner.os == 'macOS'
   run: |
+    gui=(-p farhelm-desktop -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping)
     python3 scripts/record-test-run.py \
       --runner nextest --kind release --selection 'macOS desktop unit tests' --concurrency '4 nextest slots; retries 0' \
       --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run -p farhelm-ui --features desktop
+      -- cargo nextest run --locked "${gui[@]}"
     python3 scripts/record-test-run.py \
       --kind release --selection 'macOS desktop doctests' --concurrency '4 doctest threads' \
       --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
+      -- cargo test --locked --doc "${gui[@]}" -- --show-output --test-threads=4
 
 # ---------------------------------------------------------------------------
 # Release-build prerequisites, on every build job.
 # ---------------------------------------------------------------------------
-
-- name: Install the wasm target for the web bundle
-  # dx compiles the UI crate to wasm32; dist's own `rustup target add` only
-  # covers the triples it is building for, which never include wasm.
-  run: rustup target add wasm32-unknown-unknown
 
 - name: Install musl build tools
   # The Linux targets are static musl (D4), and rusqlite's `bundled` feature
@@ -395,172 +422,6 @@
   # needs none of this.
   if: runner.os == 'Linux'
   run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-- name: Install the pinned Dioxus CLI
-  # Pinned to the `dioxus` version in the ROOT Cargo.toml's
-  # `[workspace.dependencies]`; dx refuses to build against a dioxus crate at
-  # a different version, so the two numbers move together, and the installer
-  # refuses a `.github/dx-pins.json` whose version has fallen behind. The only
-  # `dx` install left in ci.yml is the disabled browser job; release setup is
-  # the active hosted path that installs this tool.
-  #
-  # The binary is the one the Dioxus project publishes with its GitHub
-  # release, accepted only when both its archive and its executable match the
-  # pinned digests, the same way the pinned nextest is installed. Compiling it
-  # with `cargo install` instead cost six to eleven minutes on every build job,
-  # on the critical path of the slowest one, for a tool whose output is the
-  # same either way.
-  run: |
-    dx_dir=$(python3 scripts/install-pinned-dx.py --output-root "$RUNNER_TEMP/dx-tools") || exit 1
-    printf '%s\n' "$dx_dir" >> "$GITHUB_PATH"
-
-- name: Let the toolchain's rust-objcopy find libLLVM on macOS
-  # Rust 1.98.0 links the Darwin toolchain's bundled `rust-objcopy` and
-  # `rust-lld` against a shared `@rpath/libLLVM.dylib` with an rpath of
-  # `@loader_path/../lib` (rust-lang/rust#157205), but the rustc component
-  # ships that library only at `<sysroot>/lib`, not under
-  # `lib/rustlib/<target>/lib` where the rpath points. rustup's proxies paper
-  # over it by prepending `<sysroot>/lib` to `DYLD_FALLBACK_LIBRARY_PATH` for
-  # every tool THEY launch, which is why plain cargo builds still work — but
-  # dx runs `rust-objcopy` directly to strip the bundle (dioxus-cli 0.7.10,
-  # `post_process_executable`), sets the Linux `LD_LIBRARY_PATH` instead of
-  # the Darwin variable, and so dies with "Library not loaded:
-  # @rpath/libLLVM.dylib ... Failed to strip binary". That is what failed
-  # the v0.4.0-rc.1 tag build on 2026-09-04, the first tag cut after the
-  # `macos-15` image moved from Rust 1.97.1 to 1.98.0 (v0.3.0-rc.2, built on
-  # the older image the day before, was fine).
-  #
-  # The symlink puts the library exactly where the rpath looks, the same
-  # shape the nix rustc packagers adopted (nix-community/fenix#253); it is
-  # guarded so a toolchain that already resolves the library (an older Rust,
-  # or a future rustc component that ships it in place) is left untouched.
-  # The pinned Rust 1.99.1 archive still has this layout and these rpaths.
-  # Drop this step once the pinned Rust resolves `rust-objcopy` on its own.
-  if: runner.os == 'macOS'
-  run: |
-    sysroot=$(rustc --print sysroot)
-    for target_dir in "$sysroot"/lib/rustlib/*-apple-darwin; do
-      if [ -x "$target_dir/bin/rust-objcopy" ] && [ ! -e "$target_dir/lib/libLLVM.dylib" ] && [ -e "$sysroot/lib/libLLVM.dylib" ]; then
-        mkdir -p "$target_dir/lib"
-        ln -s "$sysroot/lib/libLLVM.dylib" "$target_dir/lib/libLLVM.dylib"
-        echo "linked libLLVM.dylib into $target_dir/lib"
-      fi
-    done
-    "$sysroot"/lib/rustlib/aarch64-apple-darwin/bin/rust-objcopy --version
-
-- name: Build the web bundle
-  # `rm -rf target/dx` is not hygiene theater: dx never prunes that directory,
-  # so it accumulates every generation it has ever built, and a stale
-  # content-hashed asset there is indistinguishable from a current one once
-  # `FARHELM_UI_DIST` sweeps the tree into the binary. `farhelm-helm`'s
-  # build.rs documents the same trap.
-  #
-  # `--package` is load-bearing: the workspace has `default-members`, and dx
-  # 0.7.10 canonicalizes those relative paths against its own working
-  # directory, which panics from inside `crates/farhelm-ui`.
-  #
-  # It is built here, before the Linux desktop smoke, so that the smoke tests
-  # this exact bundle rather than building its own (see that step). The
-  # manifest of every file's name and digest is what "Point the release build
-  # at the web bundle" checks, after the smoke has run in the same target
-  # tree, so that nothing written there since can ride into the release.
-  run: |
-    rm -rf target/dx
-    (cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release)
-    (cd target/dx/farhelm-ui/release/web/public && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) \
-      > "$RUNNER_TEMP/web-bundle.sha256"
-
-# ---------------------------------------------------------------------------
-# Native Linux desktop gate, after the release web bundle is built (the smoke
-# embeds it) but before it is exported through FARHELM_UI_DIST.
-# ---------------------------------------------------------------------------
-
-- name: Install native desktop smoke dependencies
-  # The release artifact is musl, but WebKitGTK and the desktop shell build
-  # natively. Keep these packages on the Linux/X64 gate only; ordinary CI's
-  # desktop job only compiles and needs none of dx, wasm, Xvfb, or this smoke
-  # harness's display tools.
-  #
-  # The purge is what keeps the smoke's first window from starting 25 seconds
-  # late. libwebkit2gtk-4.1-0 recommends xdg-desktop-portal-gtk, so the install
-  # above brings in the desktop portal, and GTK 3's GtkApplication startup
-  # asks D-Bus to auto-start `org.freedesktop.portal.Desktop` synchronously,
-  # before the window's event loop exists. On this headless runner the portal
-  # cannot come up: systemd's user manager has no DISPLAY, the GTK backend
-  # exits at once, and the portal waits out a 25-second timeout per backend it
-  # looks up. The app's main thread sits in that call for D-Bus's 25-second
-  # default, the page loads around 30 seconds after launch instead of about 6,
-  # and the smoke's 30-second wait for webview authentication failed roughly
-  # every other run (FLAKES.md, 2026-09-29). With no portal installed the
-  # activation fails in milliseconds, which is also what a machine without a
-  # desktop session does. Nothing the smoke covers depends on a portal.
-  if: runner.os == 'Linux' && runner.arch == 'X64'
-  run: |
-    sudo apt-get update
-    sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
-    sudo apt-get purge -y xdg-desktop-portal xdg-desktop-portal-gtk
-
-- name: Test the native desktop seams
-  # This is deliberately after the release job installed wasm and dx, so the
-  # following smoke step can reuse those prerequisites, but before
-  # FARHELM_UI_DIST is written into the job environment.
-  if: runner.os == 'Linux' && runner.arch == 'X64'
-  run: |
-    python3 scripts/record-test-run.py \
-      --runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' \
-      --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo nextest run -p farhelm-ui --features desktop
-    python3 scripts/record-test-run.py \
-      --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
-      --output-root "$RUNNER_TEMP/test-run-evidence" \
-      -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
-
-- name: Run the native desktop smoke gate
-  # The smoke embeds the release's own web bundle, built above, and builds
-  # its native app in the job's ordinary target tree, the one every test step
-  # before it shares. That makes it test the bundle the release ships, and
-  # spares it a cold debug build and a second web build of its own.
-  #
-  # It used to build in a separate target tree, so that nothing it built
-  # could reach a publication input. The two inputs it could reach are covered
-  # without that: cargo-dist's musl build uses its own target triple and
-  # profile, so it never reuses the smoke's host debug artifacts, and the
-  # bundle's digests are checked before it is embedded ("Point the release
-  # build at the web bundle").
-  if: runner.os == 'Linux' && runner.arch == 'X64'
-  env:
-    CI: true
-    DESKTOP_SMOKE_DIR: ${{ runner.temp }}/desktop-smoke
-    DESKTOP_SMOKE_WEB_DIST: ${{ github.workspace }}/target/dx/farhelm-ui/release/web/public
-  run: |
-    python3 scripts/record-test-run.py \
-      --kind release --selection 'native desktop smoke legs' --concurrency 'sequential smoke legs' \
-      --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
-
-- name: Collect native desktop smoke failure evidence
-  # The owned smoke state also contains sockets and credential-bearing config
-  # files. Archive only its human-readable logs, screenshot, and state dump;
-  # do not upload the state directory or disposable build tree wholesale.
-  # Stage explicit shell globs: cargo-dist's template cannot preserve a
-  # multiline upload path, and the uploader must receive only selected files.
-  if: failure() && runner.os == 'Linux' && runner.arch == 'X64'
-  run: |
-    evidence_dir="$RUNNER_TEMP/desktop-smoke-evidence"
-    mkdir -p "$evidence_dir"
-    for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt \
-      "$RUNNER_TEMP"/desktop-smoke/pf-bogus-state.stderr; do
-      if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
-        cp -- "$evidence" "$evidence_dir/"
-      fi
-    done
-
-- name: Upload native desktop smoke failure evidence
-  if: failure() && runner.os == 'Linux' && runner.arch == 'X64'
-  uses: actions/upload-artifact@v4
-  with:
-    name: desktop-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
-    if-no-files-found: warn
-    path: "${{ runner.temp }}/desktop-smoke-evidence"
 
 - name: Collect test run failure evidence
   # Each wrapper invocation owns a UUID directory and bounded logs. Keep
@@ -605,22 +466,18 @@
     if-no-files-found: warn
     path: "${{ runner.temp }}/test-run-failure-evidence"
 
-- name: Point the release build at the web bundle
-  # Absolute, because cargo runs build scripts from their own crate
-  # directory: `farhelm-helm`'s build.rs refuses a relative value outright
-  # rather than resolve it under `crates/farhelm-helm` and embed whatever it
-  # finds there.
+- name: Mark the build as a release build
+  # Every build job, because both shipped binaries embed the helm: cargo-dist's
+  # `farhelm` build on all three targets and, on macOS, the desktop package's
+  # `scripts/build-desktop-binary.sh`, which refuses to run without it. Its
+  # presence is what `farhelm-helm`'s build script turns into the release
+  # cfg (D13), which makes the helm download provisioning payloads by
+  # default; a release built without it would refuse to set up or update
+  # hosts.
   #
-  # The bundle must still be exactly what "Build the web bundle" produced:
-  # the same files, with the same bytes. The Linux desktop smoke builds in the
-  # same target tree after it, and a file added to or changed in this
-  # directory would be embedded into the release like any other.
-  run: |
-    dist="$GITHUB_WORKSPACE/target/dx/farhelm-ui/release/web/public"
-    (cd "$dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) > "$RUNNER_TEMP/web-bundle.now"
-    cmp "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" || {
-      echo "the web bundle changed after it was built; refusing to embed it" >&2
-      diff "$RUNNER_TEMP/web-bundle.sha256" "$RUNNER_TEMP/web-bundle.now" >&2
-      exit 1
-    }
-    echo "FARHELM_UI_DIST=$dist" >> "$GITHUB_ENV"
+  # Written into the job environment for cargo-dist's build, which comes after
+  # these steps, and for nothing before it: every test step above builds and
+  # tests the helm as an ordinary development build, and the marker appearing
+  # mid-job would also rerun `farhelm-helm`'s build script and recompile the
+  # helm and everything above it.
+  run: echo "FARHELM_RELEASE_BUILD=1" >> "$GITHUB_ENV"

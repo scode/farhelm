@@ -4,9 +4,9 @@
 cargo-deny enforces `deny.toml`, the dependency license and source policy. CI's `deny` job and local checks run the
 binary the cargo-deny project publishes with its GitHub release, accepted only if both the archive and the executable
 match `.github/cargo-deny-pins.json`; that is seconds, where `cargo install` compiles it for minutes. The verification
-and publication rules are `pinned_tool.py`'s, shared with the pinned nextest and dx installs. Unlike theirs, cargo-deny's
-archive wraps the executable in a directory beside its README and license files, so this names the executable's path
-inside the archive.
+and publication rules are `pinned_tool.py`'s, shared with the pinned nextest and cargo-about installs. Unlike theirs,
+cargo-deny's archive wraps the executable in a directory beside its README and license files, so this names the
+executable's path inside the archive.
 
 Only the directory is printed to stdout. The executable runs on its own as `<directory>/cargo-deny --locked check
 licenses sources` from the checkout root, so it does not need to be on PATH. CI callers should supply a fresh RUNNER_TEMP root;

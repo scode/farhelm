@@ -51,9 +51,9 @@ interrupted, poorly identified runs, or runs whose coverage no longer applies ar
 run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with the
 reason.
 
-Rustup reads the exact compiler version, rustfmt, clippy and wasm target from `rust-toolchain.toml` for local, CI and
-release builds. Bump that file's version in a deliberate PR. Purpose-specific targets are added to that toolchain by
-their scripts; explicit `cargo +nightly` and `rustup ... --toolchain nightly` still select nightly for coverage.
+Rustup reads the exact compiler version, rustfmt and clippy from `rust-toolchain.toml` for local, CI and release builds.
+Bump that file's version in a deliberate PR. Purpose-specific targets are added to that toolchain by their scripts;
+explicit `cargo +nightly` and `rustup ... --toolchain nightly` still select nightly for coverage.
 
 For Rust execution, first put the pinned nextest on PATH using the guarded setup in `docs/test-run-evidence.md`. Run
 from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes for expensive, slow or
@@ -110,22 +110,23 @@ systemd or SSH substrate ran.
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, the two-host fixture
   reserves two, and the real Podman fixture reserves all four. The release gate runs this same selection, including the
   farhelm integration targets, after preparing rootless Podman, the runner's systemd user manager and bus environment, a
-  verified transient user scope, and its offline Ubuntu image. It narrows every later Rust step with a filter rather
-  than `-p`, so those steps share one build; ordinary CI does not run this suite. Do not also run the old full libtest
-  battery. Every terminal a test's supervisor creates is a terminal host: the e2e suite's in-process harness and its
-  real supervisor process fixture start hosts from the built `farhelm`, and the supervisor's own unit tests that need a
-  real terminal run in terminal hosts their test binary starts from itself (`hosts::test_program`, glibc Linux only). A
-  few tests still start a real tmux server: the tests of ending old terminals at startup, which build an earlier
-  release's server by hand, the test-state cleanup's tests of a server a killed test left behind, and the test of a
-  user's own tmux (stock `/usr/bin/tmux`) under a session's scope. They use the machine's tmux and print `SKIPPED`
-  without one, which is missing coverage, not a pass; the release gate installs the distribution's tmux for them. On
-  Linux the workspace run needs Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's
-  `managed_supervisor::` stop test runs a Python stand-in whose main thread exits before its other thread. `--workspace`
-  also builds the GPUI desktop GUI (`farhelm-gui`), so on Linux this run and the doctest run below need GPUI's build
-  dependencies: `pkg-config`, the fontconfig development package (`libfontconfig-dev`; fontconfig is found through
-  pkg-config at build time) and the xkbcommon one (`libxkbcommon-dev`, linked directly). FreeType is used from the
-  system when pkg-config finds version 24.3.18 or newer and is otherwise built from bundled sources with the C++
-  compiler. Wayland and Vulkan need no development package: they are loaded at run time.
+  verified transient user scope, its offline Ubuntu image, and the GPUI build packages named below. It narrows every
+  later Rust step with a filter rather than `-p`, so those steps share one build; ordinary CI does not run this suite.
+  Do not also run the old full libtest battery. Every terminal a test's supervisor creates is a terminal host: the e2e
+  suite's in-process harness and its real supervisor process fixture start hosts from the built `farhelm`, and the
+  supervisor's own unit tests that need a real terminal run in terminal hosts their test binary starts from itself
+  (`hosts::test_program`, glibc Linux only). A few tests still start a real tmux server: the tests of ending old
+  terminals at startup, which build an earlier release's server by hand, the test-state cleanup's tests of a server a
+  killed test left behind, and the test of a user's own tmux (stock `/usr/bin/tmux`) under a session's scope. They use
+  the machine's tmux and print `SKIPPED` without one, which is missing coverage, not a pass; the release gate installs
+  the distribution's tmux for them. On Linux the workspace run needs Python 3 at `/usr/bin/python3`: besides the e2e
+  stand-ins named below, the supervisor's `managed_supervisor::` stop test runs a Python stand-in whose main thread
+  exits before its other thread. `--workspace` also builds the GPUI desktop GUI (`farhelm-gui`), so on Linux this run
+  and the doctest run below need GPUI's build dependencies: `pkg-config`, the fontconfig development package
+  (`libfontconfig-dev`; fontconfig is found through pkg-config at build time) and the xkbcommon one (`libxkbcommon-dev`,
+  linked directly). FreeType is used from the system when pkg-config finds version 24.3.18 or newer and is otherwise
+  built from bundled sources with the C++ compiler. Wayland and Vulkan need no development package: they are loaded at
+  run time.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p terminal-host`
@@ -656,7 +657,11 @@ systemd or SSH substrate ran.
   decisions, the pre-window refusal surface and its native helper commands, the host listing it reads at startup, the
   app's state files, the window frame's format and restore arithmetic, bundle resolution, the updater against injected
   dependencies (no network or real bundle), and the update readout's wording. Excluded from the workspace nextest run
-  above, so this is the only run of these tests.
+  above, so this is the only development run of these tests. On Linux it needs the packages the clippy entry above
+  names, and no others. The release gate runs this selection on both of its test legs: on x86_64 Linux after the
+  workspace run, and on macOS together with the GUI crates
+  (`-p farhelm-desktop -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping`), each with a doctest run beside
+  it.
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` — proves every ban in
   `crates/gui/clippy.toml` still fires: it lints `crates/gui/lint-demo` (a non-default member that violates each ban on
   purpose behind its `violations` feature) and fails when a demo's expected diagnostic is missing or a ban has no demo.
@@ -726,7 +731,8 @@ systemd or SSH substrate ran.
   `host_text::tests::on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated`, which shapes a sentence
   naming a host value with CoreText and the bundled fonts: it flows between words, breaks before the value, and keeps
   the value's direction isolated. It caught a Mac-only line-break bug that Linux runs cannot see, since Linux shapes
-  with cosmic-text (the test's own docs explain it). Neither CI nor the release gate runs `farhelm-gui` tests on macOS.
+  with cosmic-text (the test's own docs explain it). CI does not run `farhelm-gui` tests on macOS, and the release
+  gate's macOS leg, which runs all of them, runs only at a tag, so before that a Mac sees them only when run by hand.
   Run it on a Mac (the shared test Mac under its lock, `docs/gui-agent.md`, "On a Mac", when an agent runs it) when
   `crates/gui/farhelm-gui/src/host_text.rs`, the bundled fonts under `crates/gui/farhelm-gui/assets/fonts/`, the GPUI
   version, or a GPUI patch (`vendor/README.md`, "GPUI") change. It compiles the GUI crate's tests and needs no GUI
@@ -1073,8 +1079,8 @@ systemd or SSH substrate ran.
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, the desktop app's
 lints, the OMP reporter asset scenarios, the website build and its feedback endpoint tests, installer validation, the
 dependency license and source policy, generated-workflow validation, and the agent-instructions check; costly Rust and
-CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes, update this list in the same
-change.
+CentOS gates run in the x86_64 Linux release artifact job, and the desktop app's and GPUI crates' tests in both it and
+the macOS one. If either workflow changes, update this list in the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build

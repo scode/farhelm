@@ -174,11 +174,12 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 
 Deliberately not here: everything the sweep runs (workspace nextest including the e2e suite, desktop nextest, both
 doctest runs, the OMP reporter's JS harness, `test-install-sh.sh`, CentOS provisioning), the GPUI host text tests on a
-Mac from `.agents/validation.md` (CoreText shaping, which a Linux machine cannot run), and the macOS-only uninstall
-acceptance (the rehearsal's macOS leg runs it in step 4, including legacy upgrade-floor refusal with the old
-installation preserved and uninstall through an indirect Terminal link). The focused macOS CI job's terminal host step
-(the host crate, its entry test in the CLI, and the supervisor's spawning, its client, its host terminal runtime,
-discovery, the test-state cleanup and the stop command) runs only with
+Mac from `.agents/validation.md` (CoreText shaping, which a Linux machine cannot run; the rehearsal's macOS leg runs
+them in step 4 with the rest of the GUI crates' and the desktop app's tests), and the macOS-only uninstall acceptance
+(the rehearsal's macOS leg runs it in step 4 too, including legacy upgrade-floor refusal with the old installation
+preserved and uninstall through an indirect Terminal link). The focused macOS CI job's terminal host step (the host
+crate, its entry test in the CLI, and the supervisor's spawning, its client, its host terminal runtime, discovery, the
+test-state cleanup and the stop command) runs only with
 `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's workspace
 nextest. The same goes for that job's desktop supervisor record and stop tests and the stop's macOS process-exit check
 (`managed_supervisor::`, `procs::tests::finished_exiting`).
@@ -221,9 +222,10 @@ passes, land it without waiting for unrelated work.
 
 The Linux release gate includes the full farhelm integration selection as well as the other workspace targets. Its setup
 prepares rootless Podman, starts the runner's systemd user manager, exports its bus environment and verifies a transient
-user scope before caching the exact Ubuntu digest. Loopback SSH, the distribution's tmux and musl build tools are also
-ready before the workspace selection. The focused nextest setup builds the same-source installer payload before
-cargo-dist has produced a release artifact. The real recipe's network bootstrap is part of the gate.
+user scope before caching the exact Ubuntu digest. Loopback SSH, the distribution's tmux, musl build tools and the GPUI
+app's build packages are also ready before the workspace selection, and the desktop app's tests run after it. The
+focused nextest setup builds the same-source installer payload before cargo-dist has produced a release artifact. The
+real recipe's network bootstrap is part of the gate.
 
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
 (or of `main` when all fixes have already landed):
