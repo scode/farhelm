@@ -1297,6 +1297,11 @@
       "reference": "settings-recipes"
     },
     {
+      "golden": "settings-tensorlake",
+      "title": "Settings at Tensorlake: the EXPERIMENTAL warning, the intro and the API key form with its own Not encrypted on disk warning and no key saved",
+      "reference": "settings-tensorlake"
+    },
+    {
       "golden": "settings-containers",
       "title": "Settings at Containers, three container hosts ready and no containers left behind",
       "reference": "settings-containers"
