@@ -55,8 +55,10 @@ pub(crate) fn fully_visible(drawn: &Drawn) -> bool {
 }
 
 /// The floating surface every destination display is drawn on, under element id `id` (the old app's
-/// `.terminal-link-target`): the interface face at 12 pixels on the floating ground, at most the window's width less 8
-/// pixels. A web link's warning and a file link's stripe are drawn over it by their own views.
+/// `.terminal-link-target`): the interface face at 12 pixels on the floating ground, at most the width of the window's
+/// content area ([`crate::desktop::linux_title_bar::content_area`], the old page) less 8 pixels, since the layer
+/// manager keeps every popover inside that area. A web link's warning and a file link's stripe are drawn over it by
+/// their own views.
 pub(super) fn surface(id: &'static str, window: &Window, cx: &App) -> Stateful<Div> {
     let palette = theme::palette(cx);
     div()
@@ -64,7 +66,12 @@ pub(super) fn surface(id: &'static str, window: &Window, cx: &App) -> Stateful<D
         .debug_selector(move || id.into())
         .role(gpui::Role::Tooltip)
         .relative()
-        .max_w(window.viewport_size().width - px(8.))
+        .max_w(
+            crate::desktop::linux_title_bar::content_area(window)
+                .size
+                .width
+                - px(8.),
+        )
         .rounded(metrics::RADIUS_MD)
         .shadow(crate::layers::menu_shadow(palette))
         .px(px(6.))

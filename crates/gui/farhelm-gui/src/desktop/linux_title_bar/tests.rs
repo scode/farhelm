@@ -16,7 +16,7 @@ use super::{
     opening_allowance, shows,
 };
 use crate::desktop::title_band::{self, Decisions, PressAction, Row};
-use crate::test_support;
+use crate::test_support::{self, rect};
 
 /// The bar drawn for a window that is `maximized` or not, beside one other control (for the focus case), with the
 /// band's press watcher as the main window draws it, and command and drag recorders installed.
@@ -293,11 +293,6 @@ fn a_click_on_the_bars_buttons_leaves_focus_where_it_was(cx: &mut TestAppContext
 
 // ---- The content area -----------------------------------------------------------------------------------------------
 
-/// A rectangle from its left, top, width and height.
-fn rect(left: f32, top: f32, width: f32, height: f32) -> gpui::Bounds<Pixels> {
-    gpui::Bounds::new(point(px(left), px(top)), size(px(width), px(height)))
-}
-
 /// The sidebar sizes itself against the window's content, and a frame counted as content gave it 42 pixels that were
 /// not there: under Mutter the expanded rail took the main pane below its 320-pixel floor (the migration's review gate,
 /// 2026-11-15). GPUI's test platform reports the compositor's decorations on every window, so the frame is pinned here
@@ -337,10 +332,11 @@ fn the_content_width_leaves_out_kits_frame_on_each_untiled_side() {
     assert_eq!(width(30., tiled(false, false), None), px(0.));
 }
 
-/// Why this matters: the layer manager fits dialogs and tooltips, and the dialog frame sizes itself, into this
-/// rectangle. Were it the whole window, a tall card or a dialog at its height limit would cover the Linux window's own
-/// title bar and reach into the shadow GPUI Kit draws around the window, as a host progress card and the launcher did
-/// on 2026-11-15.
+/// Why this matters: the layer manager keeps dialogs, popovers and tooltips inside this rectangle, the notices panels
+/// cap their height by it, and the dialog frame sizes itself into it. Were it the whole window, a tall card or a dialog
+/// at its height limit would cover the Linux window's own title bar and reach into the shadow GPUI Kit draws around the
+/// window, as a host progress card and the launcher did on 2026-11-15, and a wide popover near the right edge would
+/// end in that shadow, outside the page.
 ///
 /// Specification, for the 1642 by 1076 window those reports measured, with client decorations and the bar drawn: the
 /// content area is the window less Kit's 20 px shadow margin and 1 px border on each side and the 34 px bar at the top,

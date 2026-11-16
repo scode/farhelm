@@ -141,6 +141,7 @@ conflicted across all of it.
 | Host rail expansion             | `crates/gui/farhelm-gui/src/session_list/host_rail/expansion.rs`                                                                                                                                                                                                                                                               | [reported](#host-rail-expansion)         | none                                  |
 | Recent setups                   | `crates/gui/farhelm-gui/src/launcher/recents.rs`                                                                                                                                                                                                                                                                               | [reported](#recent-setups)               | none                                  |
 | Attached terminal               | `crates/gui/farhelm-gui/src/terminal/attached.rs`                                                                                                                                                                                                                                                                              | [reported](#attached-terminal)           | none                                  |
+| Session details                 | `crates/gui/farhelm-gui/src/session_pane/details.rs`                                                                                                                                                                                                                                                                           | [reported](#session-details)             | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -213,6 +214,10 @@ control's `aria-expanded` without the open look (sidebar-and-session-view); `But
 a rail avatar opens its host's menu on a right press, leaving keyboard focus where it was as the focus coordinator does
 for every press but the primary one (sidebar-and-session-view); and `RadioGroup::fit_words`, which sizes the session
 list's status filter segments from their words beside the expanded rail (sidebar-and-session-view).
+
+The quick-launch sequence pill's bottom placement takes its bottom gap from area code: `SequencePill::at_bottom` takes
+the gap as an argument, the way the pill's other builder methods (`SequencePill::lowered`, `SequencePill::chip`) take
+their values (templates-and-quick-launch).
 
 `HoverHelp`, `with_hover_help`, `activate_on_enter_or_space`, `activate_on_click`, `enter_choice`, `on_enter_choice`,
 `focus_stop`, `scroll_stop`, `scroll_stop_on` and `scroll_from_controls` in `components/mod.rs` are the layer's rules: a
@@ -980,11 +985,13 @@ Lint exceptions: none.
 Extension points: reported, the whole file: owned by the desktop-integration-and-linux-packaging area, which built it as
 the Linux window's own title bar, drawn by the main view (`bar`, `follow_decorations`). It also carries a rule other
 owners build on: `content_area` is the part of the window that holds the app's content, inside GPUI Kit's frame and
-below the bar, and the layer manager fits its dialogs and tooltips into it (with `bar_height` for the dialog veil's
-padding), the component layer's dialog frame caps its size against it, settings-and-hosts' host progress card caps its
-height against it, and sidebar-and-session-view's sidebar keeps the main pane's floor against its width. A change to
-what `content_area` covers moves every one of those, so it is a foundation-change request, not a pattern change. Another
-area's change follows the pattern already there, and the review gate judges it.
+below the bar, and the layer manager keeps its dialogs, popovers and tooltips inside it (with `bar_height` for the
+dialog veil's padding), the notices panels (other-dialogs' notices bell list and rail notices panel, through
+`notices_bell::list_panel`) cap their height by it, the component layer's dialog frame caps its size against it,
+settings-and-hosts' host progress card caps its height against it, and sidebar-and-session-view's sidebar keeps the main
+pane's floor against its width. A change to what `content_area` covers moves every one of those, so it is a
+foundation-change request, not a pattern change. Another area's change follows the pattern already there, and the review
+gate judges it.
 
 Lint exceptions: none.
 
@@ -1041,6 +1048,15 @@ sidebar-and-session-view, whose session pane says how much of its terminals' own
 Restart runs or the unavailable card shows (`Hold`); the UI-session owner hands each session's terminals their stream
 opener as its `OpenStream` (`session.rs`). Another area's change follows the pattern already there, and the review gate
 judges it.
+
+Lint exceptions: none.
+
+### Session details
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it as the open
+session's details bar under its terminal, and shared with templates-and-quick-launch, whose armed quick-launch sequence
+(`templates/armed.rs`) reads the bar's minimum height (`MIN_HEIGHT`). Another area's change follows the pattern already
+there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -1214,3 +1230,4 @@ without a conflict marker.
 | Host rail expansion    | `crates/gui/farhelm-gui/src/session_list/host_rail/expansion.rs` | `reported`    |
 | Recent setups          | `crates/gui/farhelm-gui/src/launcher/recents.rs`                 | `reported`    |
 | Attached terminal      | `crates/gui/farhelm-gui/src/terminal/attached.rs`                | `reported`    |
+| Session details        | `crates/gui/farhelm-gui/src/session_pane/details.rs`             | `reported`    |

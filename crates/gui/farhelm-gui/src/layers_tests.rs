@@ -31,7 +31,8 @@ use crate::prompt;
 use crate::render_count;
 use crate::test_support::{
     Panel, Thing, anchor_element, bounds, button, center, check, click, focused, follow, frame,
-    handle, is_open, keys, open, open_dialog, open_menu, question, redraw, settle,
+    handle, is_open, keys, linux_content_area, linux_window, open, open_dialog, open_menu,
+    question, rect, redraw, settle,
 };
 
 // ---- Layers: a dialog is modal --------------------------------------------------------------------------------------
@@ -1168,9 +1169,10 @@ fn a_popover_beside_its_anchor_sits_right_of_it_and_a_little_above(cx: &mut Test
 }
 
 /// Port, not redesign: like the old flyout, the beside placement never moves to the other side of its anchor when the
-/// window is too narrow; it is only shifted back inside the window, as every popover is. Specified: near the right and
-/// bottom edges the popover's right and bottom edges sit on the window's, it is not flipped to the anchor's left, and
-/// the overlay invariants still hold (checked as it opens).
+/// window is too narrow; it is only shifted back inside the window's content area, as every popover is. On the test
+/// platform that area is the whole window; the Linux area apart from it is tested on the pure placement below.
+/// Specified: near the right and bottom edges the popover's right and bottom edges sit on the window's, it is not
+/// flipped to the anchor's left, and the overlay invariants still hold (checked as it opens).
 #[gpui::test]
 fn a_popover_beside_an_anchor_near_the_edges_is_kept_inside_and_never_flips(
     cx: &mut TestAppContext,
@@ -1200,6 +1202,109 @@ fn a_popover_beside_an_anchor_near_the_edges_is_kept_inside_and_never_flips(
     assert!(
         menu.left() > opener.left() - menu.size.width,
         "the menu was not flipped to the anchor's left: {menu:?} beside {opener:?}"
+    );
+}
+
+// ---- Layers: a popover inside the Linux window's frame --------------------------------------------------------------
+//
+// These call the placement as a pure function ([`layers::popover_origin`]) with the Linux content area from the shared
+// helpers, since no test window reports client decorations: on the test platform the content area is the whole
+// window, which the window tests above cannot tell from it.
+
+/// Why this matters: SPEC.md accepts a click on a terminal link only while its destination display is wholly inside
+/// the page. A wide display near the right edge, clamped to the whole window, ended about 21 pixels into the frame GPUI
+/// Kit draws around a Linux window, outside the page, so SPEC.md has its click refused; the click check measured
+/// against the window and let it through. The layer manager's owner decided on 2026-11-16 that every popover is kept
+/// inside the window's content area, as dialogs and tooltips already were.
+///
+/// Specification, in [`linux_content_area`] (right edge 1621, bottom edge 1055): a 360 by 200 popover on an anchor at
+/// 1500, 300, 100 by 24 ends at the area's right edge (left 1261), not the window's (1282), whether placed below the
+/// anchor (top 328, 4 below it), beside it (top 296, 4 above its top), or by an owner's rule that answers a point 50
+/// pixels past the area's bottom-right corner, which is also pulled up to end at the area's bottom (top 855).
+#[test]
+fn a_popover_overflowing_the_right_edge_ends_at_the_content_areas_edge_not_the_windows() {
+    let area = linux_content_area();
+    let anchor = rect(1500., 300., 100., 24.);
+    let past_the_corner: layers::PlaceBy =
+        Rc::new(|_, _, area| point(area.right() + px(50.), area.bottom() + px(50.)));
+    let cases = [
+        (
+            "below",
+            layers::Placement::Below,
+            point(px(1261.), px(328.)),
+        ),
+        (
+            "beside",
+            layers::Placement::Beside,
+            point(px(1261.), px(296.)),
+        ),
+        (
+            "by a rule",
+            layers::Placement::By(past_the_corner),
+            point(px(1261.), px(855.)),
+        ),
+    ];
+    for (name, placement, expected) in cases {
+        assert_eq!(
+            layers::popover_origin(
+                Some(anchor),
+                &placement,
+                gpui::size(px(360.), px(200.)),
+                area
+            ),
+            expected,
+            "placed {name}, the popover ends at the content area's right edge, inside the page"
+        );
+    }
+}
+
+/// Why this matters: a menu below an anchor near the bottom of the page goes above it when it would run past the
+/// page's bottom. Measured against the whole window, it stayed below and ran 3 pixels into Kit's frame under the page;
+/// and were only the clamp moved to the area, it would be pushed up over its own anchor.
+///
+/// Specification, in [`linux_content_area`] (top 55, bottom edge 1055, window 1076 tall): a 200 by 130 popover below
+/// an anchor at 200, 900, 100 by 24 would end at 1058, past the area's bottom but inside the window, so it goes above
+/// the anchor with the 4-pixel gap, at top 766.
+#[test]
+fn a_popover_below_an_anchor_near_the_content_areas_bottom_flips_above_it() {
+    let anchor = rect(200., 900., 100., 24.);
+    let below_bottom = anchor.bottom() + px(4.) + px(130.);
+    assert!(
+        below_bottom > linux_content_area().bottom() && below_bottom <= linux_window().height,
+        "the premise: below the anchor it runs past the content area but would still fit in the window"
+    );
+    let size = gpui::size(px(200.), px(130.));
+    assert_eq!(
+        layers::popover_origin(
+            Some(anchor),
+            &layers::Placement::Below,
+            size,
+            linux_content_area()
+        ),
+        point(px(200.), px(766.)),
+        "the popover went above its anchor, 4 pixels clear of it"
+    );
+}
+
+/// Why this matters: a menu beside a row starts 4 pixels above the row's top, so on the first row of the page, right
+/// under the Linux window's own title bar, it rose 4 pixels into the bar, which the window draws and the page does not
+/// own. The clamp holds it at the content area's top instead.
+///
+/// Specification, in [`linux_content_area`] (top 55, under the 34-pixel bar): a 246 by 300 menu beside a row at 21, 55,
+/// 380 by 40 sits 10 pixels past the row's right edge, at left 411, and at the area's top, 55, not at 51.
+#[test]
+fn a_popover_beside_a_row_under_the_title_bar_stays_below_the_bar() {
+    let row = rect(21., 55., 380., 40.);
+    let size = gpui::size(px(246.), px(300.));
+    assert_eq!(
+        layers::popover_origin(
+            Some(row),
+            &layers::Placement::Beside,
+            size,
+            linux_content_area()
+        ),
+        point(px(411.), px(55.)),
+        "the menu is held at the content area's top, below the bar, rather than 4 pixels above the row"
     );
 }
 
@@ -1870,11 +1975,13 @@ fn a_press_through_a_popover_that_lets_the_pointer_through_moves_focus_as_withou
 /// asked by the layer manager as each frame is laid out. It must get this frame's anchor bounds and its own measured
 /// size, so it follows a moved anchor in the frame that moves it, as every popover does, and the area the window's
 /// content is laid out in, which it keeps inside. The shared clamp after it still keeps a rule that answers past the
-/// window's edges inside the window.
+/// area's edges inside the area.
 ///
 /// The test platform draws no client-side decorations, so there the content area is the whole window: this test
-/// cannot tell the two apart and does not pin that the rule gets the content area rather than the window. The
-/// notice's own rule is tested against an area apart from the window (`drag_notice::place`, in the terminal's tests).
+/// cannot tell the two apart and does not pin that the rule gets, or the clamp keeps to, the content area rather than
+/// the window. The notice's own rule is tested against an area apart from the window (`drag_notice::place`, in the
+/// terminal's tests), and the clamp in
+/// `a_popover_overflowing_the_right_edge_ends_at_the_content_areas_edge_not_the_windows`.
 ///
 /// Spec: a rule that places the popover 50 pixels right of and below its anchor's bottom-right corner is handed the
 /// anchor's drawn bounds, the popover's drawn size and the window's content area (the whole window on the test
