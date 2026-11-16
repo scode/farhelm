@@ -213,6 +213,37 @@ fn a_switcher_picks_refusals_are_the_old_switchers_words(cx: &mut TestAppContext
     assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
 }
 
+/// A refused pick still leaves the user in an ordinary New: its refusal is a note, not a lock, so the user can go on
+/// with the launch by hand (the old quick-switcher "opening a template reports the launcher's catalog read failure",
+/// whose last step typed a name). A New that took no typing after a refusal would strand the user. Specified: with the
+/// templates unavailable ("busy"), a pick of `go` opens New saying "Couldn't load templates: busy; search tl: and
+/// retry", and a click into its Name field and typing `by hand` put `by hand` in the draft's name.
+#[gpui::test]
+fn new_stays_editable_after_a_picks_refusal(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(
+        &mut helm,
+        cx,
+        templates(Availability::Unavailable {
+            error: "busy".into(),
+        }),
+    );
+    pick(cx, "go");
+    assert_eq!(
+        note(cx).as_deref(),
+        Some("Couldn't load templates: busy; search tl: and retry"),
+        "the premise: the pick was refused"
+    );
+    crate::test_support::click(cx, "launcher-name");
+    cx.simulate_input("by hand");
+    settle(cx);
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).name.value(),
+        "by hand"
+    );
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+}
+
 /// SPEC.md: with no query, "a separate final 'Quick launch: <template>' row uses the direct quick-launch path, or opens
 /// Templates to mark one". Its label is what tells the user which template the row starts. Specified: with nothing
 /// marked the label is "Quick launch: Mark a template" and the action opens Templates with the ⚡ hint, sending

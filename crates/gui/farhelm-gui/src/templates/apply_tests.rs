@@ -407,6 +407,156 @@ fn the_prompt_follows_the_shared_fold() {
     );
 }
 
+/// SPEC.md: an initial prompt "survives unrelated template applications", and a template that sets it, to the empty
+/// text included, replaces it (the old "initial prompt launcher template stacking" case). A dormant prompt, kept while
+/// the Command tab is chosen or while the agent type takes none, must not be dropped by a template that never names the
+/// prompt, or a name-only template would silently lose the message. Specified: a Codex draft's prompt is cleared by a
+/// template setting `prompt: ""`; set again, it survives a name-only template applied on the Command tab and another
+/// applied with Goose chosen by hand, and is still the draft's once Codex is chosen again.
+#[test]
+fn an_unrelated_template_leaves_a_dormant_prompt_and_an_empty_one_clears_it() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    draft.choose_harness(LaunchHarness::Codex, Some(&fixture.catalog), None);
+    draft.edit_prompt("draft message".into());
+    let clear = template(
+        "clear",
+        TemplateFields {
+            prompt: Some(String::new()),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[clear]).unwrap();
+    assert_eq!(draft.prompt, "", "the empty prompt cleared it");
+
+    draft.edit_prompt("draft message".into());
+    let name_only = template(
+        "name-only",
+        TemplateFields {
+            name: Some("unrelated edit".into()),
+            ..TemplateFields::default()
+        },
+    );
+    draft.choose_tab(Tab::Command);
+    fixture
+        .apply(&mut draft, std::slice::from_ref(&name_only))
+        .unwrap();
+    assert_eq!(draft.prompt, "draft message", "kept on the Command tab");
+    draft.choose_tab(Tab::Agent);
+    assert!(
+        !LaunchHarness::Goose.supports_initial_prompt(false),
+        "the premise: Goose takes no initial prompt"
+    );
+    draft.choose_harness(LaunchHarness::Goose, Some(&fixture.catalog), None);
+    fixture.apply(&mut draft, &[name_only]).unwrap();
+    draft.choose_harness(LaunchHarness::Codex, Some(&fixture.catalog), None);
+    assert_eq!(
+        draft.prompt, "draft message",
+        "kept with Goose, and the draft's again with Codex"
+    );
+}
+
+/// SPEC.md: a command template may carry a resume command, and "`null` explicitly resets the choice, the way choosing
+/// harness default by hand does" (the old "a template fills the command tab and the folder, and a reset clears a
+/// choice"). Specified: a command template declaring Claude, with a resume command, turns Resume on with that
+/// text; on a Codex draft, a template with effort High sets it, and a later template with `effort: null` resets it to
+/// the default.
+#[test]
+fn a_template_fills_the_resume_command_and_a_null_effort_resets_the_choice() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    let command = template(
+        "command",
+        TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(LaunchHarness::Claude),
+            command: Some("claude {farhelm_args}".into()),
+            resume_command: Some(Some("claude --resume {conversation} {farhelm_args}".into())),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[command]).unwrap();
+    assert_eq!(draft.tab, Tab::Command);
+    assert!(draft.command.resume_on, "Resume is on");
+    assert_eq!(
+        draft.command.resume,
+        "claude --resume {conversation} {farhelm_args}"
+    );
+
+    let mut draft = new_draft();
+    let high = template(
+        "high",
+        TemplateFields {
+            agent: Some(LaunchHarness::Codex),
+            model: Some(Some("gpt-6-luna".into())),
+            effort: Some(Some(LaunchEffort::High)),
+            ..TemplateFields::default()
+        },
+    );
+    let reset = template(
+        "reset",
+        TemplateFields {
+            effort: Some(None),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[high]).unwrap();
+    assert_eq!(draft.agent.effort, Some(LaunchEffort::High), "the premise");
+    fixture.apply(&mut draft, &[reset]).unwrap();
+    assert_eq!(draft.agent.effort, None, "the reset chose the default");
+}
+
+/// SPEC.md: a template's workspace-trust field, from before trust left the launcher, "is ignored when applied".
+/// Refusing it would make every such old template unusable. Ignoring it is structural beyond that: the draft has no
+/// trust to set and the launch selection carries none, so the test pins only that the field is not refused. Specified:
+/// Codex templates with `workspace_trust` true, false and null each apply without refusal.
+#[test]
+fn an_old_templates_workspace_trust_is_ignored_when_applied() {
+    let fixture = Fixture::new();
+    for trust in [Some(true), Some(false), None] {
+        let mut draft = new_draft();
+        let old = template(
+            "old",
+            TemplateFields {
+                kind: Some(LauncherKind::Agent),
+                agent: Some(LaunchHarness::Codex),
+                workspace_trust: Some(trust),
+                ..TemplateFields::default()
+            },
+        );
+        fixture
+            .apply(&mut draft, &[old])
+            .unwrap_or_else(|refusal| panic!("{trust:?}: {refusal}"));
+    }
+}
+
+/// A retired container choice in a stored template is shown so it can be removed, but applying it is refused (SPEC.md:
+/// "a retired containerized field is refused"), naming the field, with nothing applied; a template that applied part of
+/// it would start a session the container settings no longer describe. Specified: a Codex template carrying a container
+/// object is refused with a reason naming the container, and the draft keeps its agent type unchosen.
+#[test]
+fn a_retired_container_template_is_refused_and_changes_nothing() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    let before = draft.clone();
+    let retired = template(
+        "retired",
+        TemplateFields {
+            agent: Some(LaunchHarness::Codex),
+            container: Some(Some(farhelm_proto::ContainerConfig {
+                engine: farhelm_proto::ContainerEngine::Podman,
+                image: "localhost/agent:latest".into(),
+                api_proxy_port: 42000,
+                github_token_file: None,
+            })),
+            ..TemplateFields::default()
+        },
+    );
+    let refusal = fixture.apply(&mut draft, &[retired]).unwrap_err();
+    assert!(refusal.to_lowercase().contains("container"), "{refusal}");
+    assert_eq!(draft, before, "nothing applied");
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Refusals
 // ---------------------------------------------------------------------------------------------------------------------

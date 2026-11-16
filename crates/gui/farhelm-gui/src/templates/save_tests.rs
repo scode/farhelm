@@ -75,8 +75,9 @@ fn clone_draft() -> LaunchDraft {
 }
 
 /// The real main view over the fake helm holding `templates`, with the launcher opened on `draft` in a window tall
-/// enough for the whole panel, and the launcher's catalog read answered with an empty catalog. Every command sent so far
-/// is taken, so a test's later commands are its own.
+/// enough for the whole panel, and the launcher's catalog read answered with an empty catalog. A managed checkout's
+/// preview, if the draft asks for one, is refused with [`PREVIEW_REFUSAL`] for every test that uses this. Every command
+/// sent so far is taken, so a test's later commands are its own.
 pub(super) fn launcher_on<'a>(
     cx: &'a mut TestAppContext,
     draft: LaunchDraft,
@@ -108,8 +109,12 @@ fn launcher_with_hosts<'a>(
     });
     settle(window);
     // The fake answers in order, so the main view's own start-up commands are answered too, plainly; the launcher's
-    // catalog read gets an empty catalog.
+    // catalog read gets an empty catalog, and a managed checkout's preview is refused with [`PREVIEW_REFUSAL`].
     for sent in helm.commands() {
+        if sent.path == "/api/github-checkout-preview" {
+            helm.reply(sent.id, 400, Some(json!(PREVIEW_REFUSAL)));
+            continue;
+        }
         let body = (sent.path == "/api/launch-catalog").then(|| json!([]));
         helm.reply(sent.id, 200, body);
     }
@@ -631,6 +636,33 @@ fn a_refused_save_leaves_focus_where_the_user_put_it(cx: &mut TestAppContext) {
         "the refusal left focus where the user put it"
     );
     assert!(drawn(cx, "save-template-panel"), "the panel stays");
+}
+
+/// What [`launcher_with_hosts`] answers a managed checkout's preview with: the helm's refusal when a fixed name's
+/// folder is taken, which no renaming will fix.
+const PREVIEW_REFUSAL: &str = "the checkout folder for review already exists";
+
+/// Save as template captures the draft, not the checkout's preview, so it must work while the preview is refused (the
+/// old github-checkouts "save as template keeps the fixed name", whose preview refused the fixed name's taken folder);
+/// a template is how the user keeps a setup the helm cannot launch right now. Specified: with a managed checkout of
+/// `acme/bar` chosen, the fixed session name `review`, and the preview refused with the helm's words, Save as template
+/// opens, and Enter saves the repository and `review` as a fixed name.
+#[gpui::test]
+fn save_as_template_works_while_the_checkout_preview_is_refused(cx: &mut TestAppContext) {
+    let mut draft = checkout_base_draft();
+    draft.set_template_name_kind(TemplateNameKind::Fixed);
+    let (mut helm, cx) = launcher_on(cx, draft, &[]);
+    assert_eq!(
+        test_support::label(cx, "launcher-preview-error").as_deref(),
+        Some(PREVIEW_REFUSAL),
+        "the premise: the preview is refused"
+    );
+    click(cx, "launcher-save-template");
+    assert!(drawn(cx, "save-template-panel"), "the panel opened");
+    let (_, body) = save_as(&mut helm, "web-review", cx);
+    assert_eq!(body["destination"], json!({"github": "acme/bar"}));
+    assert_eq!(body["name"], json!("review"));
+    assert_eq!(body["name_kind"], json!("fixed"));
 }
 
 /// SPEC.md: "Errors that are not a refused launch, such as "Save as template" refusing a wrapper, keep the plain line".

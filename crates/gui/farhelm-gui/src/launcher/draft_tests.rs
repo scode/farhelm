@@ -906,3 +906,30 @@ fn a_default_from_a_retargeted_installation_is_decided_again() {
     assert_eq!(draft.folder_default, FolderDefault::Pending);
     assert!(draft.folder_default_waiting());
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The initial prompt across prefills
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// SPEC.md keeps the initial prompt a one-time message: recent setups do not carry it, so taking one must leave the
+/// message the user typed alone (the old templates spec's "initial prompt survives a recent but clears on Clone and
+/// Replace prefills"). Losing the message on a recent would discard typing. The case's other half, a prompt not leaking
+/// into the next Clone or Replace with, needs no test here: the old form was one persistent draft that each prefill
+/// had to clear, while every GPUI opening builds a new draft from a session, which carries no prompt. Specified: a
+/// Codex draft's typed prompt survives `restore_recent` of a Claude setup.
+#[test]
+fn a_recent_setup_keeps_the_typed_prompt() {
+    let mut draft = new_draft();
+    draft.choose_harness(LaunchHarness::Codex, Some(&catalog()), None);
+    draft.edit_prompt("one-time message".into());
+    draft.restore_recent(&selection(LaunchHarness::Claude), Some(&catalog()));
+    assert_eq!(
+        draft.agent.harness,
+        Some(LaunchHarness::Claude),
+        "the premise: the recent setup was taken"
+    );
+    assert_eq!(
+        draft.prompt, "one-time message",
+        "the recent kept the message"
+    );
+}

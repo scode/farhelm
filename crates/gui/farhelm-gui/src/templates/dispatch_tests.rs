@@ -1287,6 +1287,131 @@ fn a_quick_launch_of_a_template_with_a_folder_reads_no_history(cx: &mut TestAppC
     );
 }
 
+/// SPEC.md: a template's wrapper prefix is one of the launch choices it carries, and a quick launch uses "exactly New's
+/// defaults and ordinary launch path", so the create must carry the template's words (the old "quick launch submits the
+/// wrapper prefix saved in its agent template"; the pieces are `apply_tests::a_wrapper_prefix_field_has_three_states`
+/// and the launcher's request tests). Specified: ⚡ on a Codex template with the wrapper prefix `env A=1` sends one
+/// create whose launch carries `["env", "A=1"]`, unseen.
+#[gpui::test]
+fn the_chord_launches_a_templates_wrapper_prefix(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    let wrapped = TemplateFields {
+        kind: Some(LauncherKind::Agent),
+        agent: Some(LaunchHarness::Codex),
+        wrapper_prefix: Some(Some(vec!["env".into(), "A=1".into()])),
+        ..TemplateFields::default()
+    };
+    push(&mut helm, cx, templates_with(template("wrapped", wrapped)));
+    push(&mut helm, cx, marked(Some("wrapped")));
+    chord(cx);
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    assert_eq!(
+        create.body.clone().unwrap_or_default()["launch"]["wrapper_prefix"],
+        json!(["env", "A=1"])
+    );
+    assert!(unseen(cx), "a quick launch New never showed");
+}
+
+/// SPEC.md, "Quick-launch sequences": a sequence's templates stack, later ones winning, and Enter "directly launches"
+/// when together they make a complete setup, though one alone does not (the old "launch sequence stacks a number
+/// template and bolt without showing New"; the pieces are `sequence_tests` and `a_sequences_enter_launches_unseen`).
+/// Specified: with key 1 on `partial` (a folder only) and ⚡ on `go`, the prefix, 1, the ⚡ chord and Enter send one
+/// create of `true` in `/srv/partial`, unseen.
+#[gpui::test]
+fn a_sequence_of_a_partial_key_and_the_mark_launches_the_stacked_setup(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(Some("go"), &[("1", "partial")]));
+    keys(
+        cx,
+        &format!("{SEQUENCE_PREFIX_CHORD} 1 {QUICK_LAUNCH_CHORD} enter"),
+    );
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    let body = create.body.clone().unwrap_or_default();
+    assert_eq!(body["cwd"], json!("/srv/partial"), "partial's folder");
+    assert_eq!(body["command"]["command"], json!("true"), "go's command");
+    assert!(!any_open(cx) && unseen(cx), "launched without showing New");
+}
+
+/// The old "a template shortcut preserves editor focus when clearing a quick-launch YOLO question": a press that
+/// applies a template to the draft the question was about takes the question away (it would answer for another launch),
+/// and must not also move the user's focus or drop their selection, since applying by shortcut "leaves focus and search
+/// text alone" (SPEC.md). Specified: the chord's launch of `yolo-named` (YOLO, with the session name `keep this name`)
+/// refused for YOLO; with the question up, focus put in the Name field and its whole text selected, and the question
+/// still up, key 1 (`partial`) applies the folder, the question goes, and the Name field keeps focus, its text and the
+/// selection over all of it (typing then replaces the whole name).
+#[gpui::test]
+fn a_shortcut_clearing_the_yolo_question_keeps_focus_and_selection(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    let named = TemplateFields {
+        yolo: Some(true),
+        name: Some("keep this name".into()),
+        ..runs_true()
+    };
+    push(&mut helm, cx, templates_with(template("yolo-named", named)));
+    push(
+        &mut helm,
+        cx,
+        bound(Some("yolo-named"), &[("1", "partial")]),
+    );
+    chord(cx);
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    refuse_for_yolo(&mut helm, cx, create.id);
+    assert!(
+        label(cx, "yolo-reason").is_some(),
+        "the premise: the question is up"
+    );
+    test_support::click(cx, "launcher-name");
+    cx.update(|window, cx| {
+        window.dispatch_action(crate::components::EditCommand::SelectAll.action(), cx)
+    });
+    settle(cx);
+    assert_eq!(
+        crate::launcher::view_tests::shown_name_focus_and_selection(cx),
+        (true, true),
+        "the premise: the name is focused and selected"
+    );
+    assert!(
+        label(cx, "yolo-reason").is_some(),
+        "the premise: the click and the selection left the question up"
+    );
+    number_key(cx, 1);
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).folder.value(),
+        "/srv/partial",
+        "the template applied"
+    );
+    assert_eq!(label(cx, "yolo-reason"), None, "the question went");
+    assert_eq!(
+        crate::launcher::view_tests::shown_name_focus_and_selection(cx),
+        (true, true),
+        "focus and a selection stayed in the Name field"
+    );
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).name.value(),
+        "keep this name",
+        "the name is unchanged"
+    );
+    // Typing replaces exactly the selection, so a whole name replaced by one letter shows the selection still covered
+    // all of it.
+    cx.simulate_input("x");
+    settle(cx);
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).name.value(),
+        "x",
+        "the selection still covered the whole name"
+    );
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+}
+
 /// SPEC.md: "Unbound keys open Templates with a binding hint", and a key bound to a name no template has is as
 /// unusable (the old dispatcher fell back to the hint for both). A key that did nothing would leave the user guessing
 /// how to give it a template. Specified: with 1 on `deleted` and 0 unbound, each key sends no create and opens

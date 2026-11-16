@@ -4,8 +4,9 @@
 //! whole sequence and yields to another modal" and "typed launcher Tab completion is immediate and preserves spaced
 //! names" at reference commit `24bc0580`.
 //!
-//! NOTE: Not tested here: the "yields to another modal" half of the Replace with case, a template shortcut doing
-//! nothing while a dialog sits over the launcher. The page's half is
+//! The Replace with case's "yields to another modal" half runs in Clone with the Templates dialog over it: the rule (a
+//! shortcut acts on the launcher only while the launcher is the top layer that takes the keyboard) is the same in every
+//! mode, and Clone's draft makes a later press's effect easy to read. The page's half is
 //! `super::dispatch_tests::the_chord_and_number_keys_do_nothing_under_another_dialog`.
 //!
 //! The Clone and Replace with tests run over one session, `a`, on host9 as its recorded install `identity9`, with hosts
@@ -251,4 +252,78 @@ fn tab_completes_in_the_launchers_sequence_and_enter_applies_it(cx: &mut TestApp
     );
     assert_eq!(search_text(cx), "keep", "the query stayed");
     assert!(search_focused(cx), "and so did focus");
+}
+
+/// SPEC.md: "Other visible dialogs keep the keyboard", and a shortcut applies to the launcher only "while the session
+/// launcher is the only visible dialog" (the old Replace with case's "yields to another modal" half, whose fixture was
+/// a modal dialog over the launcher). A key that edited the draft under another dialog would change the launcher
+/// behind what the user is looking at. The app has no path that opens Templates over the launcher; the test opens it
+/// there through `templates::open` as a stand-in for any dialog above it, as the old case used a synthetic modal.
+/// Specified: with key 2 on `renamer`, Clone of `a` with the Templates dialog opened over it, key 2 leaves Clone's Name
+/// field unchanged and the Templates dialog open; once that dialog is closed with Escape, key 2 applies `renamer` to
+/// Clone's draft.
+#[gpui::test]
+fn a_number_key_does_nothing_while_a_dialog_is_open_over_the_launcher(cx: &mut TestAppContext) {
+    let (mut helm, cx) = fleet_window(cx, &[("2", "renamer")]);
+    assert!(
+        cx.update(|window, cx| open_clone("a", window, cx)),
+        "the premise: Clone opened"
+    );
+    settle(cx);
+    assert!(launches(&mut helm, cx).is_empty(), "opening sends nothing");
+    let before = name_value(cx);
+    let opened = cx.update(|window, cx| {
+        let opener = cx.focus_handle();
+        let mark = crate::focus::Mark::take(cx);
+        super::open(&opener, &mark, window, cx)
+    });
+    settle(cx);
+    assert!(opened.is_some(), "the premise: Templates opened over Clone");
+    let templates_open = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            cx.try_global::<super::dialog::Opened>()
+                .is_some_and(|opened| opened.0.upgrade().is_some())
+        })
+    };
+    assert!(templates_open(cx), "the premise: the dialog is open");
+    number_key(cx, 2);
+    assert!(launches(&mut helm, cx).is_empty(), "nothing was sent");
+    assert_eq!(
+        name_value(cx),
+        before,
+        "the key changed nothing under the dialog"
+    );
+    assert!(templates_open(cx), "and the dialog stays");
+    keys(cx, "escape");
+    assert!(!templates_open(cx), "the premise: Escape closed Templates");
+    number_key(cx, 2);
+    assert_eq!(
+        name_value(cx),
+        "applied by shortcut",
+        "with the dialog gone it applies"
+    );
+}
+
+/// The other side of the rule above, the one the dispatcher's docs state: a list that never takes focus, as the
+/// launcher's Host list, does not stop a shortcut, since the keyboard is still the launcher's (the old shortcuts gave
+/// way only to a modal dialog). Specified: with key 2 on `renamer`, Clone of `a` with its Host list open, key 2 applies
+/// `renamer` to Clone's draft and sends nothing.
+#[gpui::test]
+fn a_number_key_applies_while_the_host_list_is_open(cx: &mut TestAppContext) {
+    let (mut helm, cx) = fleet_window(cx, &[("2", "renamer")]);
+    assert!(
+        cx.update(|window, cx| open_clone("a", window, cx)),
+        "the premise: Clone opened"
+    );
+    settle(cx);
+    assert!(launches(&mut helm, cx).is_empty(), "opening sends nothing");
+    assert_ne!(name_value(cx), "applied by shortcut", "the premise");
+    test_support::click(cx, "launcher-host");
+    assert!(
+        cx.debug_bounds("launcher-host-list").is_some(),
+        "the premise: the Host list is open"
+    );
+    number_key(cx, 2);
+    assert_eq!(name_value(cx), "applied by shortcut", "the key applied");
+    assert!(launches(&mut helm, cx).is_empty(), "nothing was sent");
 }

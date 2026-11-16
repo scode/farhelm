@@ -216,6 +216,39 @@ fn cancel_and_close_return_to_the_new_terminal(cx: &mut TestAppContext) {
     }
 }
 
+/// A changed name is the user's draft until they save it: Escape and Cancel throw it away, as they do in ordinary
+/// Rename, and must not send it (the old "quick launch owns input and submits once" cases closed a changed name both
+/// ways). Specified: `n` launched and `typed` typed over the name, which the editor then shows, Escape closes the
+/// editor with no rename and focus on the terminal; `m` launched next, `typed` and Cancel do the same.
+#[gpui::test]
+fn escape_and_cancel_on_a_changed_name_send_no_rename(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("go"));
+    for (key, listed, close) in [
+        ("n", &["n"][..], None),
+        ("m", &["n", "m"][..], Some("rename-cancel")),
+    ] {
+        launch(&mut helm, cx, key, listed);
+        assert!(any_open(cx), "{key}: the premise: naming opened");
+        cx.simulate_input("typed");
+        settle(cx);
+        let shown = crate::session_list::tests::painted(&test_support::frame(cx)).join(" ");
+        assert!(
+            shown.contains("typed"),
+            "{key}: the premise: the name changed: {shown}"
+        );
+        match close {
+            None => keys(cx, "escape"),
+            Some(button) => test_support::click(cx, button),
+        }
+        assert!(!any_open(cx), "{key}: the editor closed");
+        assert_eq!(renames(&mut helm), [], "{key}: no rename was sent");
+        assert!(
+            terminal_focused(cx),
+            "{key}: focus went to the new terminal"
+        );
+    }
+}
+
 /// Naming keeps the created name only when the saved text is that name byte for byte; anything else is the user's
 /// rename and must reach the supervisor, however small. Specified: `n` launched, typing `n` over the selected name
 /// (the same bytes) and Enter close the editor with no rename; `m` launched next, End and `2` make `m2`, and Enter
