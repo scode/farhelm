@@ -191,12 +191,11 @@ other-dialogs area added with the status sounds; their tests are listed under `t
 split between `tests/workspace-trust.spec.ts` (below) and this spec, whose hint-switch cases are mapped in the Agent
 trust bullet.
 
-NOTE: Terminal shows the link choice and the tunnel consent switch. Its **File types to open with Cmd-click** field
-governs opening downloaded files, so it waits for the terminal area's downloads, which are not on `main` yet; until they
-land it is not drawn. The switch is the old Mac app's, and like it is drawn only on the Mac, where the terminal offers
-tunnels: turning it on asks the terminal's tunnel warning ("Allow tunnels from remote sessions?") and consent is saved
-only on Allow; turning it off saves at once, and the helm then closes every open tunnel. The golden `settings-terminal`
-is decided for the Mac on every machine, so it shows the switch.
+Terminal shows the link choice, the tunnel consent switch and the **File types to open with Cmd-click** field. The
+switch is the old Mac app's, and like it is drawn only on the Mac, where the terminal offers tunnels: turning it on asks
+the terminal's tunnel warning ("Allow tunnels from remote sessions?") and consent is saved only on Allow; turning it off
+saves at once, and the helm then closes every open tunnel. The golden `settings-terminal` is decided for the Mac on
+every machine, so it shows the switch.
 
 The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener and
 opens it at Sessions; the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity
@@ -242,6 +241,16 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `an_allow_whose_save_meets_another_says_so_under_the_switch`. The warning itself, its words and its save are the
   terminal area's (`docs/gpui/parity/terminal.md`). Pending: focus after a mouse press and Cancel on a Mac, where the
   click leaves the switch unfocused and focus goes back to what held it before; the tests decide focus by Linux's rule.
+- Terminal's **File types to open with Cmd-click** field, which no browser spec covered (it was the desktop app's only),
+  in `crates/gui/farhelm-gui/src/settings/file_types_tests.rs`. Its old unit tests, ported:
+  `a_safe_draft_has_no_warnings`, `an_unsafe_draft_warns_once_per_type`, `the_html_family_gets_the_browser_warning` and
+  `repeated_safe_types_do_not_hide_a_later_warning`. With no old case: the default, the label per platform and a pushed
+  list, `the_field_shows_the_default_then_follows_a_pushed_list`; the acknowledged, normalized save,
+  `save_sends_the_normalized_list_and_says_it_was_saved`; a malformed list,
+  `a_malformed_list_sends_nothing_and_says_why`; a refusal, `a_refused_save_keeps_the_draft_and_shows_the_helms_words`;
+  the empty list, `an_empty_field_saves_an_empty_list`; Enter, `enter_never_saves`; and the preference row's key,
+  `a_save_while_another_preference_save_is_out_says_so`. What a modifier-click on a file does with the list is the
+  terminal area's (`docs/gpui/parity/terminal.md`).
 - Agent trust's hint switches ("settings reports and reverts a refused ${choice.field} save" for
   `claude_trust_hint_dismissed` and `codex_trust_hint_dismissed`): they save and refuse as every preference switch does,
   in `a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switch`, and
@@ -1176,6 +1185,16 @@ Where the port does not match the old app, and why. Each stays until the work na
   the Mac app, and on Linux the terminal offers no tunnel while the switch, its help and its warning speak of this Mac.
   SPEC.md's "In the desktop app, the Terminal section also has tunnel consent" names no platform, while its tunnel
   paragraph offers tunnels "In the Mac app".
+- **The file-types warnings do not glow.** The old warning's border pulsed in four steps every three seconds (stopped
+  under reduced motion); here the warning is the same box, the danger outline on its dim fill, without the pulse.
+- **The file-types field is drawn on Linux too.** The old field was the desktop app's (`native_desktop`), which was the
+  Mac app; SPEC.md puts it "In every desktop app", labelled Ctrl-click outside macOS.
+- **A refused file-types save keeps the helm's words until the next Save.** The old field cleared its outcome line on
+  any input; here the helm's refusal stays under the field, as the checkout fields' does, until the next Save starts.
+  The parser's reason, which the field finds before sending anything, still goes as soon as the list changes.
+- **A file-types Save while another preference save is out says so.** The list saves under the preference row's key, as
+  every Settings preference does, so such a Save sends nothing and shows Settings' busy line under the field; the old
+  field had its own request and no such line.
 - **Turning the tunnel switch off shows off while the save is in flight.** The old switch held its last acknowledged
   value in both directions while a request ran. Here turning it off is a draft's save like any switch's, which shows the
   value being saved (the area's no-optimistic-copy rule allows a pending value only as the draft); turning it on still

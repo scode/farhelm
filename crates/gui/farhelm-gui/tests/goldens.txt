@@ -190,8 +190,8 @@ linux/settings-sessions--dark.png 1c4b800673bdbf596a8472b688bacf857ee67383
 linux/settings-sessions--light.png 12e0e96c350886a36536c62b62318bc4a3d62991
 linux/settings-tensorlake--dark.png 2b3959b86a6b0d965c3d73e8e947345620c638cf
 linux/settings-tensorlake--light.png 2f3506e5fc26799aca8e56a8ed62ccdb19448097
-linux/settings-terminal--dark.png 5e035b909af8654364796e07300b60aafd84fa4b
-linux/settings-terminal--light.png 9d89b2d71fdfa393c67b6ddc8fbf9a4ede3a94f7
+linux/settings-terminal--dark.png b5b2c9db6e3e1752e165994e34ee1028ff6b7a58
+linux/settings-terminal--light.png c5618077def9f64057bd48b7131281520839e32b
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
 linux/switch--light.png c9201c7be7cddf684884b2764fa0365e33df51d5
 linux/tab-strip--dark.png e17eedac340fe529a9b41dbdc0ea4695ea7c7a4e

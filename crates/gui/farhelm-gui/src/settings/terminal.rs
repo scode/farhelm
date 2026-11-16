@@ -35,8 +35,8 @@
 //! (`native_desktop`, which the browser interface lacked). On Linux the terminal offers no tunnel, and the switch's
 //! words and its warning's speak of this Mac.
 //!
-//! NOTE: Not drawn yet, recorded in `docs/gpui/parity/settings-and-hosts.md`: the desktop app's **File types to open
-//! with Cmd-click** field governs opening downloaded files and comes with file downloads, later in the migration.
+//! The section's last control, the **File types to open with Cmd-click** field, is a view of its own
+//! ([`super::file_types`]).
 
 use farhelm_helm_client::PathError;
 use farhelm_input_mapping::Platform;
