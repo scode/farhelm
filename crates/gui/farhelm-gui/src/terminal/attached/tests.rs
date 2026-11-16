@@ -7,6 +7,9 @@
 //! socket. The owner is drawn in a pane of a fixed size inside a window from the shared harness (`test_support`), so
 //! its first fit is a real measurement, its status line's Reconnect is a real button, and the focus and layer
 //! invariants are checked after every step.
+//!
+//! The file-link tests (`terminal::files`) drive the same harness, so it is visible across the terminal module, and
+//! its UI session checks and saves files through the helm client's fake transfers ([`Harness::transfers`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -15,6 +18,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{
     FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest,
 };
+use farhelm_helm_client::fake::transfers::{FakeTransfer, FakeTransfers};
 use farhelm_input_mapping::Modifiers as KeyModifiers;
 use farhelm_proto::{DETACH_REASON_STALLED, DetachCode};
 use gpui::{
@@ -51,7 +55,8 @@ const PILL_ROW: f32 = 30.;
 /// counting its runs. Its own root view rather than [`test_support::open`]'s scene because the test changes its size
 /// and reads its counts.
 struct Pane {
-    owner: Entity<AttachedTerminal>,
+    /// `None` once a test has taken the terminal out ([`Harness::close_terminal`]).
+    owner: Option<Entity<AttachedTerminal>>,
     second: Option<Entity<AttachedTerminal>>,
     size: Rc<Cell<(f32, f32)>>,
     deletes: Rc<Cell<usize>>,
@@ -67,7 +72,7 @@ impl Pane {
         cx: &mut Context<Self>,
     ) -> Pane {
         Pane {
-            owner,
+            owner: Some(owner),
             second,
             size: Rc::new(Cell::new(PANE)),
             deletes: Rc::new(Cell::new(0)),
@@ -84,7 +89,8 @@ impl Render for Pane {
         // session has tunnels open (never otherwise, so no other test's layout moves).
         let pill = self
             .owner
-            .update(cx, |owner, cx| owner.tunnel_pill(window, cx))
+            .clone()
+            .and_then(|owner| owner.update(cx, |owner, cx| owner.tunnel_pill(window, cx)))
             .map(|pill| {
                 div()
                     .flex_none()
@@ -104,7 +110,7 @@ impl Render for Pane {
                     .flex_none()
                     .w(px(width))
                     .h(px(height))
-                    .child(self.owner.clone()),
+                    .children(self.owner.clone()),
             )
             .children(self.second.clone().map(|second| {
                 div()
@@ -118,17 +124,22 @@ impl Render for Pane {
 }
 
 /// Where an owner's opener leaves the fake stream it opened and the attach it was asked for.
-type Opened = Rc<RefCell<Option<(FakeTerminal, FakeAttach)>>>;
+pub(in crate::terminal) type Opened = Rc<RefCell<Option<(FakeTerminal, FakeAttach)>>>;
 
 /// One owner in its window (and maybe a second), the helm behind its UI session, and the fake stream each opened
 /// (once it has).
-struct Harness<'a> {
-    cx: &'a mut VisualTestContext,
+pub(in crate::terminal) struct Harness<'a> {
+    pub(in crate::terminal) cx: &'a mut VisualTestContext,
     helm: FakeHelm,
+    /// The window's root view, which a test takes the terminal out of.
+    pane: Entity<Pane>,
     connection: Entity<Connection>,
-    owner: Entity<AttachedTerminal>,
+    pub(in crate::terminal) owner: Entity<AttachedTerminal>,
     size: Rc<Cell<(f32, f32)>>,
-    opened: Opened,
+    pub(in crate::terminal) opened: Opened,
+    /// The test's side of the UI session's file transfers: every check and save the terminal starts, held until the
+    /// test answers it.
+    pub(in crate::terminal) transfers: FakeTransfers,
     second: Option<(Entity<AttachedTerminal>, Opened)>,
     /// How many times the session Delete shortcut's action ran.
     deletes: Rc<Cell<usize>>,
@@ -139,7 +150,7 @@ struct Harness<'a> {
 /// opener records the attach it was asked for and hands out a fake stream for it. Every step a test takes after this
 /// ends in one of the harness's step helpers ([`settle`] for a fake's delivery or a raw key event), so the checks run
 /// after each.
-fn harness(cx: &mut TestAppContext) -> Harness<'_> {
+pub(in crate::terminal) fn harness(cx: &mut TestAppContext) -> Harness<'_> {
     harness_with(cx, false)
 }
 
@@ -183,6 +194,9 @@ fn harness_connected(
     test_support::install(cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = cx.update(|cx| session::start(handle, events, None, cx));
+    // The UI session takes its transfers when the snapshot makes it, so the fake's are served before the connect.
+    let (transfers, served) = FakeTransfers::new();
+    cx.update(|cx| connection.update(cx, |connection, _| connection.serve_transfers(served)));
     // An empty preferences row, as a fresh helm pushes it: a test changes a preference by pushing to it (the client
     // ignores changes to a collection it has no snapshot of).
     // `more` may bring its own preferences row; otherwise the row is empty.
@@ -216,7 +230,9 @@ fn harness_connected(
     let (owner, second, size, deletes) = cx.update(|_, cx| {
         let pane = pane.read(cx);
         (
-            pane.owner.clone(),
+            pane.owner
+                .clone()
+                .expect("the pane was made with its owner"),
             pane.second.clone(),
             pane.size.clone(),
             pane.deletes.clone(),
@@ -225,10 +241,12 @@ fn harness_connected(
     Harness {
         cx,
         helm,
+        pane,
         connection,
         owner,
         size,
         opened,
+        transfers,
         second: second.map(|owner| (owner, second_opened)),
         deletes,
     }
@@ -264,8 +282,20 @@ fn opener(slot: Opened) -> OpenStream {
 }
 
 impl Harness<'_> {
+    /// Take the terminal out of its window, which stays open, so the test's own handle ([`Harness::owner`]) is the last
+    /// one the window's views do not hold.
+    pub(in crate::terminal) fn close_terminal(&mut self) {
+        let pane = self.pane.clone();
+        self.cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.owner = None;
+                cx.notify();
+            })
+        });
+    }
+
     /// The fake stream; panics if the owner has not opened one.
-    fn fake(&self) -> std::cell::RefMut<'_, FakeTerminal> {
+    pub(in crate::terminal) fn fake(&self) -> std::cell::RefMut<'_, FakeTerminal> {
         std::cell::RefMut::map(self.opened.borrow_mut(), |opened| {
             &mut opened.as_mut().expect("the owner opened no stream").0
         })
@@ -369,7 +399,7 @@ impl Harness<'_> {
 
     /// The input the owner sent since the last call, with whether the stream carried each to the attachment it was
     /// stamped for. Other requests (resizes) are left out.
-    fn sent(&mut self) -> Vec<(GridInput, bool)> {
+    pub(in crate::terminal) fn sent(&mut self) -> Vec<(GridInput, bool)> {
         self.fake()
             .received()
             .into_iter()
@@ -431,7 +461,7 @@ fn screen(cols: u16, rows: u16, text: &str, exit: serde_json::Value) -> Vec<Grid
 }
 
 /// A frame committing revision `rev` of a `cols` by `rows` screen.
-fn frame(rev: u64, cols: u16, rows: u16) -> serde_json::Value {
+pub(in crate::terminal) fn frame(rev: u64, cols: u16, rows: u16) -> serde_json::Value {
     serde_json::json!({"t":"frame","rev":rev,"cols":cols,"rows":rows,
         "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}})
 }
@@ -447,7 +477,7 @@ fn update(rev: u64, cols: u16, rows: u16, text: &str) -> [GridOutput; 2] {
 
 /// The size the old app's fit gives the test pane: 816 by 496 less 8 pixels of padding a side is 800 by 480; less the
 /// 14-pixel scrollbar column that is 786 pixels of 10-pixel cells and 480 pixels of 22-pixel rows.
-const FITTED: (u16, u16) = (78, 21);
+pub(in crate::terminal) const FITTED: (u16, u16) = (78, 21);
 
 // ---- Fit -----------------------------------------------------------------------------------------------------------
 
@@ -681,7 +711,7 @@ fn owner_window(
 }
 
 /// The resizes `opened`'s fake stream received since the last look, as sizes.
-fn resizes(opened: &Opened) -> Vec<(u16, u16)> {
+pub(in crate::terminal) fn resizes(opened: &Opened) -> Vec<(u16, u16)> {
     let mut opened = opened.borrow_mut();
     let fake = &mut opened.as_mut().expect("the owner opened a stream").0;
     let received = fake.received().into_iter();
@@ -1873,7 +1903,12 @@ fn the_probe_prefers_the_active_windows_terminal(cx: &mut TestAppContext) {
         let owner = cx.new(|cx| owner(&session, slot, cx));
         Pane::new(owner, None, window, cx)
     });
-    let second = other.update(|_, cx| pane.read(cx).owner.clone());
+    let second = other.update(|_, cx| {
+        pane.read(cx)
+            .owner
+            .clone()
+            .expect("the pane holds its owner")
+    });
     {
         let mut opened = opened.borrow_mut();
         let fake = &mut opened
@@ -2428,7 +2463,7 @@ fn the_terminals_scrollbar_moves_the_view_and_sends_nothing(cx: &mut TestAppCont
 impl Harness<'_> {
     /// The window point a little inside the left edge of screen cell (`col`, `row`), vertically centred: a press there
     /// lands on the boundary before the cell, a drag's end there selects up to that boundary.
-    fn at_cell(&mut self, col: u16, row: u16) -> Point<Pixels> {
+    pub(in crate::terminal) fn at_cell(&mut self, col: u16, row: u16) -> Point<Pixels> {
         self.read(|owner, cx| {
             let view = owner.committed.as_ref().unwrap().read(cx);
             let placement = owner.placement(view, cx).unwrap();
@@ -2471,7 +2506,7 @@ impl Harness<'_> {
 }
 
 /// A state message turning the program's mouse reporting `mode` on (or `"off"`).
-fn mouse_mode(mode: &str) -> GridOutput {
+pub(in crate::terminal) fn mouse_mode(mode: &str) -> GridOutput {
     serde_json::from_value(
         serde_json::json!({"t":"state","mouse":mode,"focus":false,"alt_screen":false,
         "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
@@ -3067,7 +3102,7 @@ const OTHER_URL: &str = "https://example.com/y";
 
 impl Harness<'_> {
     /// Set the Terminal settings' link choice (`intercept`, `both` or `program`) as the helm pushes it.
-    fn link_click(&mut self, mode: &str) {
+    pub(in crate::terminal) fn link_click(&mut self, mode: &str) {
         self.helm
             .push(farhelm_proto::ui_channel::CollectionChanges {
                 collection: farhelm_proto::ui_channel::Collection::Preferences,
@@ -3252,7 +3287,7 @@ impl Harness<'_> {
     }
 
     /// Rest the pointer on `at` and let the destination display open (it opens after the frame that saw the hover).
-    fn rest_on(&mut self, at: Point<Pixels>) {
+    pub(in crate::terminal) fn rest_on(&mut self, at: Point<Pixels>) {
         self.cx.simulate_mouse_move(at, None, Modifiers::none());
         settle(self.cx);
         redraw(self.cx);
@@ -3370,7 +3405,11 @@ fn a_hyperlink_relabelled_between_press_and_release_does_not_open(cx: &mut TestA
 impl Harness<'_> {
     /// Attach a screen whose rows are `rows` (the wire's `[line, {"w": wrapped, "r": runs}]` entries) with the
     /// hyperlinks `links` (`[id, uri]` pairs the runs index), replayed whole.
-    fn attach_rows(&mut self, rows: serde_json::Value, links: serde_json::Value) {
+    pub(in crate::terminal) fn attach_rows(
+        &mut self,
+        rows: serde_json::Value,
+        links: serde_json::Value,
+    ) {
         let asked = self.fake().attach();
         let mut replay = screen(asked.cols, asked.rows, "", serde_json::Value::Null);
         replay[2] =
@@ -3712,8 +3751,8 @@ fn a_display_closed_without_a_press_stays_closed_until_the_pointer_moves(cx: &mu
 }
 
 /// A program's hyperlink that is not a web address (a `file://` link, as `ls --hyperlink` prints) never reaches the
-/// browser. Its display is its file check ([`super::super::files`]), which here has nowhere to go and fails, so a
-/// click on it admits nothing and must not claim the display was hidden.
+/// browser. Its display is its file check ([`super::super::files`]), which here the fake transfers never answer, so a
+/// click on it, made while it is still checking, saves nothing and must not claim the display was hidden.
 #[gpui::test]
 fn a_click_on_a_file_hyperlink_says_nothing(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -3732,6 +3771,11 @@ fn a_click_on_a_file_hyperlink_says_nothing(cx: &mut TestAppContext) {
     assert!(
         h.cx.debug_bounds("terminal-link-refusal").is_none(),
         "no refusal"
+    );
+    let transfers = h.transfers.take();
+    assert!(
+        matches!(transfers.as_slice(), [FakeTransfer::Stat { .. }]),
+        "one check, still pending, and no save: {transfers:?}"
     );
 }
 
@@ -3815,7 +3859,7 @@ impl Harness<'_> {
     }
 
     /// A press and release at `at` with `modifiers` held, the pointer at rest there already.
-    fn click_with(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
+    pub(in crate::terminal) fn click_with(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
         self.cx
             .simulate_mouse_down(at, MouseButton::Left, modifiers);
         self.cx.simulate_mouse_up(at, MouseButton::Left, modifiers);
