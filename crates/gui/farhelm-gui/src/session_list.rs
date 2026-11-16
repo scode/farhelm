@@ -121,6 +121,11 @@
 //! their own, so the sessions stay reachable however many hosts need attention, and a change of what it draws closes
 //! the rows' menus and the marked menu, since it moves them.
 //!
+//! Under the segments, the list's column draws the Delete notice band ([`delete_notice`]) while a Delete or a Replace
+//! this window sent has left a notice: the helm's words about a checkout it could not archive, say, with Dismiss. It
+//! belongs to the UI session, so a reset takes it away, and it is drawn with the rest of the column, so the Hosts panel
+//! hides it.
+//!
 //! The Templates button opens the Templates dialog ([`crate::templates::open`]), which returns focus to what held it
 //! when it opened, as SPEC.md's "Opening and closing" asks. New, after it, opens the launcher through its entry point
 //! ([`open_new`], which the quick switcher's "New session named X" row and the New shortcut share): the sidebar's one
@@ -147,6 +152,7 @@ pub(crate) mod age;
 mod attention;
 pub(crate) mod bulk;
 pub(crate) mod delete;
+pub(crate) mod delete_notice;
 pub(crate) mod environment;
 pub(crate) mod filters;
 pub(crate) mod hold;
@@ -180,6 +186,9 @@ mod bulk_tests;
 
 #[cfg(test)]
 mod compact_tests;
+
+#[cfg(test)]
+mod delete_notice_tests;
 
 #[cfg(test)]
 pub(crate) mod environment_tests;
@@ -278,6 +287,9 @@ pub struct SessionList {
     /// or acknowledged ([`crate::hosts::status::observe_changes`]). The rest of that status is read from the store and
     /// the operation store while drawing, which GPUI already redraws the list for.
     _host_status: Subscription,
+    /// Redraws the list when the Delete notice band changes ([`delete_notice::observe`]): Dismiss changes nothing else
+    /// the list reads.
+    _delete_notice: Subscription,
     /// The pulse's ticks (see the module docs), held exactly while the window is active and some listed row pulses.
     /// Taken and dropped at the top of each frame, before the frame reads its step, as the terminal cursor's blink
     /// is: everything that decides it (the store, the connection, the window's activation) redraws the list when it
@@ -457,6 +469,7 @@ impl SessionList {
             _following: following,
             _selection: selection,
             _host_status: crate::hosts::status::observe_changes(cx),
+            _delete_notice: delete_notice::observe(cx),
             pulse: None,
             spinner: None,
             clock: None,
@@ -918,6 +931,8 @@ impl Render for SessionList {
         }
         // The heading and the segments row are drawn before the first listing too (the module docs).
         let filter_row = filters::row(collections, choice.chosen(), &weak, expanded, palette);
+        // Under the segments, where the old `.delete-notice` sat between the status filter and the listing.
+        let notice = delete_notice::band(cx);
         let refused = choice
             .refusal()
             .map(|refusal| failure_line(filters::refusal_sentence(refusal), palette));
@@ -927,6 +942,7 @@ impl Render for SessionList {
                     list.children(attention)
                         .child(heading(bar, title, None, self, new_available, &weak, cx))
                         .child(filter_row)
+                        .children(notice)
                         .children(refused)
                         .child(status_line("Loading sessions…")),
                 )
@@ -1012,6 +1028,7 @@ impl Render for SessionList {
                 list.children(attention)
                     .child(heading)
                     .child(filter_row)
+                    .children(notice)
                     .children(refused)
                     .children(truncated)
                     .children(unavailable)

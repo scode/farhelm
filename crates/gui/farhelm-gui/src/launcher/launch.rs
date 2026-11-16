@@ -476,11 +476,12 @@ struct Sent {
 /// `launcher`'s request (`sent`) settled. `mark` is the user's answer the launch counts from (the press of Launch, or the YOLO
 /// question's answer), which also reopens the launcher: the layer manager refuses a mark the user moved on from.
 ///
-/// A Replace with's success is plain Replace's ([`replace::settle`]): the source's delete notice goes onto the
-/// replacement, which opens only while its source is still the open session (SPEC.md, "Creation": "Replace with opens
-/// its replacement only while its source is still selected"); no "Started" report. A Restart with's success does
-/// nothing more ("Restart with never navigates"): the pushed list shows the session running again. Their refusals come
-/// back in the launcher as a create's do, and the operation store keeps the same words on the source's row.
+/// A Replace with's success is plain Replace's ([`replace::settle`]): the source's delete notice goes to the session
+/// list's Delete notice band, and the replacement opens only while its source is still the open session (SPEC.md,
+/// "Creation": "Replace with opens its replacement only while its source is still selected"); no "Started" report. A
+/// Restart with's success does nothing more ("Restart with never navigates"): the pushed list shows the session running
+/// again. Their refusals come back in the launcher as a create's do, and the operation store keeps the same words on
+/// the source's row.
 ///
 /// A launcher the slot no longer holds is left alone: nothing else lets go of a waiting launcher today, but its reply
 /// must not act for a launcher something else has since taken over.

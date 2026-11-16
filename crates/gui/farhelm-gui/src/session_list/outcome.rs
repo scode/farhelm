@@ -5,19 +5,20 @@
 //! SPEC.md, "Lifecycle operations": "A failure or partial result appears on the source session's row", and "After about
 //! two seconds waiting for the reply, the sidebar, session header and interrupted-session card share a spinner, the
 //! host and elapsed seconds, updated about once a second". Ported from the old app's one error slot per session
-//! (`errors` in `session_ops.rs`, filled by `list/view.rs` with "Stop: …" and "Replace: …"), its delete-notice band, and
-//! its `LaunchProgress` (`launch_progress.rs`) at the reference commit. Here's the TLDR of the rules:
+//! (`errors` in `session_ops.rs`, filled by `list/view.rs` with "Stop: …" and "Replace: …") and its `LaunchProgress`
+//! (`launch_progress.rs`) at the reference commit. A Delete's notice, and the one a Replace's source's Delete carried,
+//! are not this module's: they go to the list's Delete notice band (`super::delete_notice`), since the row they were
+//! about is gone. Here's the TLDR of the rules:
 //!
-//! - **One line per session, shown until the session's next operation starts.** This is the one statement of that
-//!   rule; the row, its menu and each operation's module link here. The line is the operation store's slot for the
-//!   session ([`crate::operations::Operations::failure`]): a refusal, or a partial result a success carried (a Stop
-//!   that could not close a tab, a Replace whose source's Delete reported something), which the operation's completion
-//!   records there with [`crate::operations::Operations::note`]. The store keeps either until the key's next start or
-//!   a reset, whoever starts that work, so an editor or a later header needs no call here. Both are drawn alike, in the
-//!   refusal style, as the old app's one error slot drew them. A Stop, Replace, Restart, seen-toggle, pin or move line
-//!   carries its operation's name in front of the words, as that slot did, and a Rename or Delete refusal shows the
-//!   words alone, as before. The open session's header shows the same line below its top row ([`pane_line`]), as the
-//!   old header's error lines did.
+//! - **One line per session, shown until the session's next operation starts.** This is the one statement of that rule;
+//!   the row, its menu and each operation's module link here. The line is the operation store's slot for the session
+//!   ([`crate::operations::Operations::failure`]): a refusal, or a partial result a success carried (a Stop that could
+//!   not close a tab), which the operation's completion records there with [`crate::operations::Operations::note`]. The
+//!   store keeps either until the key's next start or a reset, whoever starts that work, so an editor or a later header
+//!   needs no call here. Both are drawn alike, in the refusal style, as the old app's one error slot drew them. A Stop,
+//!   Replace, Restart, seen-toggle, pin or move line carries its operation's name in front of the words, as that slot
+//!   did, and a Rename or Delete refusal shows the words alone, as before. The open session's header shows the same
+//!   line below its top row ([`pane_line`]), as the old header's error lines did.
 //! - **A bulk action's not-started line is one of them.** A marked row a bulk action skipped because its commands were
 //!   refused says so ("Pin: not started, …", "Delete: not started, …"), and [`super::bulk`] records that line in the
 //!   same slot with [`crate::operations::Operations::note`], so it lasts until the session's next operation starts and a

@@ -26,10 +26,10 @@
 //!   still selected when the reply lands, although the helm removed it first, is the selection rules' doing
 //!   ([`super::selection`], "A Replace keeps its own source open until it answers"). A refusal shows as "Replace: <the
 //!   helm's words>" on the row and in its menu, for as long as [`super::outcome`] says.
-//! - **The source's Delete notice moves to the replacement.** The old app showed the reply's `delete_notice` in its
-//!   list-wide delete-notice band, which the port does not have yet. The source's row is gone by then, so the notice
-//!   shows on the replacement's row as "Replace: <notice>", for as long as [`super::outcome`] says. It is a notice of
-//!   this Replace like Stop's of its Stop, named by its operation the same way.
+//! - **The source's Delete notice goes to the Delete notice band.** The reply's `delete_notice` (the source's Delete
+//!   reporting, say, a checkout it could not archive) shows in the list's band ([`super::delete_notice`]), unprefixed,
+//!   as the old app showed it and as an ordinary Delete's notice shows, until it is dismissed or a newer notice takes
+//!   its place. The source's row is gone by then, and the band is what outlives it.
 //!
 //! The question, the precondition, the command and the progress line are functions of a session's row, so the open
 //! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and so does the
@@ -376,8 +376,9 @@ fn settle_sent(source: &str, sent: Sent, window: AnyWindowHandle, settled: &Sett
 /// `source`'s Replace settled, from the row's question, the header's or the launcher's Replace with alike. A refusal is
 /// not handled here: plain Replace's is [`settle_sent`]'s, and Replace with's the launcher's. A success's reply
 /// ([`SessionReplaceReply`]) is the replacement's own session (its `id` the key the helm files it under) and, when the
-/// source's Delete carried one, its `delete_notice`; see the module docs for where each goes. A reply that does not read
-/// so selects nothing. `settled.user_moved_on` is the caller's to combine with the mark of the answer it counts from.
+/// source's Delete carried one, its `delete_notice`, which goes to the Delete notice band whether or not the
+/// replacement opens; see the module docs. A reply that does not read so selects nothing and shows no notice.
+/// `settled.user_moved_on` is the caller's to combine with the mark of the answer it counts from.
 pub(crate) fn settle(source: &str, settled: &Settled, cx: &mut App) {
     let Outcome::Done(body) = &settled.outcome else {
         return;
@@ -396,18 +397,7 @@ pub(crate) fn settle(source: &str, settled: &Settled, cx: &mut App) {
         return;
     };
     let replacement = replacement.id.as_str();
-    if let (Some(words), Some(operations)) = (delete_notice, session::current_operations(cx)) {
-        let key = OpKey::session(replacement);
-        operations.update(cx, |operations, cx| {
-            // The note lands on the replacement's key, not on the key of the work it reports, so newer work may run
-            // there already (the helm lists the replacement before it deletes the source, and a Stop or Rename of it
-            // can start meanwhile). A note then would outlive that work, which the store's `note` forbids and which
-            // would break `outcome`'s "until the next operation starts"; the notice is dropped instead.
-            if operations.in_flight(&key).is_none() {
-                operations.note(&key, Work::Replace, HostText::from_host(words), cx);
-            }
-        });
-    }
+    super::delete_notice::publish(delete_notice, cx);
     if local_state::selected(cx).as_deref() != Some(source) {
         return;
     }
