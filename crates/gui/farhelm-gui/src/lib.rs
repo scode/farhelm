@@ -149,6 +149,8 @@ mod layers_tests;
 #[cfg(test)]
 mod local_time_tests;
 #[cfg(test)]
+mod main_view_tests;
+#[cfg(test)]
 mod operations_tests;
 #[cfg(test)]
 mod prompt_tests;
