@@ -35,6 +35,7 @@ mod divider;
 mod enter_choice;
 mod focus_stop;
 mod hover_help;
+mod list_row;
 mod mark_toggle;
 mod menu_item;
 mod menu_keys;

@@ -10,8 +10,10 @@
 //! What it paints itself is only the interaction feedback: the old hover and focus fill (`--bg-2`, or one step up the
 //! accent family, `--accent-fill-hover`, on the selected row, so hovering the selected row does not swallow its
 //! selection), and the keyboard focus ring, which is drawn inside the edge (the old `outline-offset: -2px`) because the
-//! button fills the sidebar's width and an outer ring would be clipped. The selected row's own solid fill belongs to the
-//! row around this control, which also holds the row's other controls once they exist.
+//! button fills the sidebar's width and an outer ring would be clipped. The ring is the accent, except on the selected
+//! row, where it takes the on-fill ink, as the old `.session-row.selected :focus-visible` did: an accent ring would
+//! barely show on the selection's accent fill. The selected row's own solid fill belongs to the row around this
+//! control, which also holds the row's other controls once they exist.
 //!
 //! Focus and activation follow [`super::Button`]: a tab stop tracked through the focus coordinator's click rule, and
 //! activation on click or through the controls' shared key rule ([`super::activate_on_enter_or_space`]). Which row is
@@ -61,7 +63,8 @@ impl ListRow {
         }
     }
 
-    /// Whether this row is the selected one, which it hovers in the accent family rather than with the neutral fill.
+    /// Whether this row is the selected one, which it hovers in the accent family rather than with the neutral fill and
+    /// rings under keyboard focus in the on-fill ink rather than the accent (the module docs say why).
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
@@ -92,10 +95,10 @@ impl RenderOnce for ListRow {
             cx,
         );
         let ring = focus::shows_ring(&focus, window);
-        let hover_fill = if self.selected {
-            palette.accent_fill_hover
+        let (hover_fill, ring_color) = if self.selected {
+            (palette.accent_fill_hover, palette.on_fill)
         } else {
-            palette.bg_2
+            (palette.bg_2, palette.accent)
         };
         let (pad_y, pad_left) = metrics::ROW_PAD;
         let handler = self.on_click.clone();
@@ -128,7 +131,7 @@ impl RenderOnce for ListRow {
                     .right_0()
                     .bottom_0()
                     .border_2()
-                    .border_color(theme::color(palette.accent)),
+                    .border_color(theme::color(ring_color)),
             );
         }
         let row = super::with_hover_help(row, &self.id, &self.help, true, Some(&focus), window, cx);

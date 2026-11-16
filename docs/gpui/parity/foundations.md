@@ -36,7 +36,19 @@ partly: screenshot goldens `buttons--{light,dark}`
 
 Tests: 3. Covers: the three-level surface ladder renders distinct, correctly grouped levels.
 
-not yet ported
+replaced
+
+- screenshot goldens `session-list`, `session-details-bar` and `session-row-menu` (the three-level surface ladder: the
+  sidebar and the details bar on the raised level over the ground, and the floating menu)
+- selected session identity stays legible while Rename disables its open button: nothing to port, since the GPUI app
+  never disables the row under Rename; the layer manager blocks the page behind the dialog instead
+  (crates/gui/farhelm-gui/src/layers_tests.rs `the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus`),
+  so the row draws unchanged
+- crates/gui/farhelm-gui/src/components/tests/list_row.rs
+  `keyboard_focus_rings_a_row_in_the_accent_and_the_selected_row_in_on_fill_and_a_click_does_not` (keyboard focus uses
+  accent on ordinary controls and inverse on selection; a mouse click does not: here the ordinary control is an
+  unselected session row, which rings in the accent, the selected row rings in the on-fill ink, and a click shows no
+  ring under either click rule; a button's accent ring is pinned by the `focus-ring` golden)
 
 ### `tests/interface-fonts.spec.ts`
 
@@ -156,7 +168,12 @@ not yet ported
 
 Tests: 11. Covers: the invalidation feed.
 
-superseded by the UI channel (SPEC_impl "The UI channel"); port remaining acceptance cases
+superseded by the UI channel (SPEC_impl "The UI channel")
+
+- crates/gui/farhelm-gui/src/main_view_tests.rs `an_idle_window_sends_the_helm_nothing` (a healthy feed performs no
+  periodic reads on the list, with a session view open, and with a stale session view open: one test, in which an idle
+  window with no session open, with a session open, and with a session on an unreachable host open sends the helm
+  nothing for ten minutes)
 
 ### `tests/readers.spec.ts`
 
