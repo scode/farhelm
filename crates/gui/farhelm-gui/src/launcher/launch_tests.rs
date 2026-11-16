@@ -18,8 +18,9 @@ use crate::notices::{self, Notice};
 use crate::session_list::tests::{listing, session};
 use crate::test_support::{self, any_open, keys, settle};
 
-/// The smallest complete draft: a Command tab launch of `true`, asserted not YOLO, on host1 in `~`.
-pub(super) fn command_draft() -> LaunchDraft {
+/// The smallest complete draft: a Command tab launch of `true`, asserted not YOLO, on host1 in `~`. The session pane's
+/// tests launch it too, for a first launch over an empty fleet.
+pub(crate) fn command_draft() -> LaunchDraft {
     let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
     draft.choose_tab(Tab::Command);
     draft.edit_command("true".into());
