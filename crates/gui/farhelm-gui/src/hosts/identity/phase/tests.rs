@@ -4,10 +4,12 @@
 //! `a_newer_host_reads_too_new_with_both_versions_on_hover`, `a_connected_hosts_detail_reports_its_refresh_health`, the
 //! remedy cases). Pure functions of the pushed state; what the row draws from them is tested in `hosts/tests.rs`.
 
-use farhelm_proto::tensorlake::LifecycleDirection;
+use farhelm_proto::recipes::RecipeSize;
+use farhelm_proto::tensorlake::recipes::Tunnel;
+use farhelm_proto::tensorlake::{LifecycleDirection, TunnelState, TunnelView};
 use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, RefreshView};
 
-use super::{Kind, Tone, detail_lines, hover, tone, words};
+use super::{Kind, Tone, detail_lines, host_tone, hover, tone, tunnels_failed, words};
 use crate::host_text::HostText;
 use crate::hosts::tests::{LOCAL_DIAL_FAILURE, connected, connecting, host, local_down, skew};
 use crate::local_time::Zone;
@@ -548,4 +550,216 @@ fn install_ids_are_spelled_so_two_ids_never_look_alike() {
             .starts_with(&format!("This entry reaches install {spelled},")),
         "{duplicate:?}"
     );
+}
+
+// ---- Sandboxes and containers --------------------------------------------------------------------------------------
+
+/// `host`'s detail lines, each as (its kind, its accessible name), times in UTC.
+fn lines_for(host: &farhelm_proto::ui_channel::HostView) -> Vec<(Kind, String)> {
+    detail_lines(host, |_| None, Zone::UTC)
+        .into_iter()
+        .map(|(kind, line)| (kind, line.accessible_name().to_string()))
+        .collect()
+}
+
+/// A Tensorlake sandbox host `farhelm-host-k7q2` from `rust-dev` at 2 CPUs and 4 GB, connected, with `tunnels`.
+fn sandbox(tunnels: Option<TunnelView>) -> farhelm_proto::ui_channel::HostView {
+    let mut view = host(4, "tensorlake", connected());
+    view.tensorlake = Some(farhelm_proto::ui_channel::TensorlakeHostView {
+        sandbox: "farhelm-host-k7q2".into(),
+        recipe: "rust-dev".into(),
+        size: Some(RecipeSize {
+            cpus: 2,
+            memory_gb: 4,
+            disk_gb: 20,
+        }),
+        tunnels,
+        credential_warning: None,
+    });
+    view
+}
+
+/// Forwards of one port in `state`.
+fn forwards(state: TunnelState) -> TunnelView {
+    TunnelView {
+        tunnels: vec![Tunnel {
+            sandbox_port: 8080,
+            host: "127.0.0.1".into(),
+            port: 9090,
+        }],
+        state,
+    }
+}
+
+/// Why this matters: the details are where a sandbox's or container's row says which machine it is, what it runs and
+/// how its forwards are doing (the old `host-tensorlake-detail`, `host-environment-detail` and `TunnelDetails`), since
+/// its destination is Farhelm's own and says nothing to the user.
+///
+/// Specified: a sandbox's details start "Sandbox: farhelm-host-k7q2 · Recipe: rust-dev · 2 CPUs · 4 GB memory", then
+/// its forwards' health and one line per forward ("127.0.0.1:8080 → 127.0.0.1:9090"), in each health: up, failed with
+/// the reason, retrying after a failure ("retrying in 4s") and connecting; a container placed on a container host
+/// starts "Container: crate-1 · Recipe: dev · Container host: build-box".
+#[test]
+fn a_machines_details_name_it_and_its_forwards() {
+    let up = lines_for(&sandbox(Some(forwards(TunnelState::Up))));
+    assert_eq!(
+        up[..3],
+        [
+            (
+                Kind::Evidence,
+                "Sandbox: farhelm-host-k7q2 · Recipe: rust-dev · 2 CPUs · 4 GB memory".to_owned()
+            ),
+            (Kind::Evidence, "Tunnels up".to_owned()),
+            (Kind::Evidence, "127.0.0.1:8080 → 127.0.0.1:9090".to_owned()),
+        ]
+    );
+    for (state, health) in [
+        (
+            TunnelState::Failed {
+                reason: "listen port taken".into(),
+            },
+            "Tunnels failed: listen port taken",
+        ),
+        (
+            TunnelState::Retrying {
+                reason: Some("remote port forwarding failed".into()),
+                delay_secs: 4,
+            },
+            "Tunnels failed; retrying in 4s: remote port forwarding failed",
+        ),
+        (
+            TunnelState::Retrying {
+                reason: None,
+                delay_secs: 1,
+            },
+            "Tunnels connecting…",
+        ),
+    ] {
+        assert_eq!(lines_for(&sandbox(Some(forwards(state))))[1].1, health);
+    }
+    let mut container = host(5, "podman", connected());
+    container.environment = Some(farhelm_proto::EnvironmentHostView {
+        name: "crate-1".into(),
+        place_name: Some("build-box".into()),
+        target: farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::PodmanHost(2),
+        },
+        tunnels: None,
+        credential_warning: None,
+    });
+    assert_eq!(
+        lines_for(&container)[0].1,
+        "Container: crate-1 · Recipe: dev · Container host: build-box"
+    );
+}
+
+/// Why this matters: a failed deletion may leave a sandbox and its snapshots billing, which the old row said in the
+/// provider's words, and those words come from the one per-provider module.
+///
+/// Specified: a sandbox being deleted says "Farhelm is deleting this sandbox, its files and its snapshots"; failed, it
+/// says Farhelm could not finish, that some may remain and bill, and that Retry finishes it, then the reason; a
+/// container's say "this container"; the remedy stays "Retry to delete it again".
+#[test]
+fn a_deletion_is_worded_for_the_hosts_provider() {
+    let mut deleting = sandbox(None);
+    deleting.state = HostStateView::Deleting { failure: None };
+    assert!(
+        lines_for(&deleting).iter().any(
+            |(_, line)| line == "Farhelm is deleting this sandbox, its files and its snapshots"
+        )
+    );
+    deleting.state = HostStateView::Deleting {
+        failure: Some("Tensorlake refused".into()),
+    };
+    let failed = lines_for(&deleting);
+    assert!(failed.iter().any(|(_, line)| line
+        == "Farhelm could not finish deleting this sandbox and its snapshots; some of them may remain and bill. \
+            Retry finishes the deletion: Tensorlake refused"));
+    assert_eq!(
+        failed.last(),
+        Some(&(Kind::Remedy, "Retry to delete it again".to_owned()))
+    );
+    let mut container = host(5, "podman", HostStateView::Deleting { failure: None });
+    container.name = "crate-1".into();
+    assert!(
+        lines_for(&container)
+            .iter()
+            .any(|(_, line)| line == "Farhelm is deleting this container and its files")
+    );
+}
+
+/// Why this matters: agents may work while their inference endpoint is unreachable, so a connected host whose forwards
+/// failed must read as needing attention in its row and on the rail (the old "tunnel failures make a connected host
+/// amber"), while forwards still starting claim nothing and a host that is not connected keeps its own phase's color.
+///
+/// Specified: connected with failed forwards, or retrying after a failure, the host's tone is advisory and
+/// `tunnels_failed` is true, while the phase's own tone stays connected; with forwards up or connecting it is
+/// connected; an unreachable host with failed forwards keeps its phase's tone and does not count as failed forwards.
+#[test]
+fn failed_forwards_make_a_connected_host_advisory() {
+    for state in [
+        TunnelState::Failed {
+            reason: "listen port taken".into(),
+        },
+        TunnelState::Retrying {
+            reason: Some("refused".into()),
+            delay_secs: 4,
+        },
+    ] {
+        let failed = sandbox(Some(forwards(state)));
+        assert!(tunnels_failed(&failed));
+        assert_eq!(host_tone(&failed), Tone::Advisory);
+        assert_eq!(
+            tone(&failed.state),
+            Tone::Connected,
+            "the phase is unchanged"
+        );
+    }
+    for state in [
+        TunnelState::Up,
+        TunnelState::Retrying {
+            reason: None,
+            delay_secs: 1,
+        },
+    ] {
+        let fine = sandbox(Some(forwards(state)));
+        assert!(!tunnels_failed(&fine));
+        assert_eq!(host_tone(&fine), Tone::Connected);
+    }
+    let mut away = sandbox(Some(forwards(TunnelState::Failed {
+        reason: "gone".into(),
+    })));
+    away.state = HostStateView::Unreachable {
+        cause: "transport-failure".into(),
+        last_error: "socket closed".into(),
+    };
+    assert!(!tunnels_failed(&away));
+    assert_eq!(host_tone(&away), tone(&away.state));
+}
+
+/// Why this matters: an agent in a sandbox or container whose credentials the helm could not deliver may run without
+/// the keys it needs, and delivery can fail during setup too, so the old row said why and turned amber whatever its
+/// phase ("connected credential warnings remain readable").
+///
+/// Specified: a sandbox whose credentials were not delivered has the details line "Credentials not delivered: the
+/// vault refused" after its machine's line, and its host tone is advisory both connected and connecting, while the
+/// phase's own tone is unchanged.
+#[test]
+fn credentials_not_delivered_are_said_and_turn_the_host_amber() {
+    let mut undelivered = sandbox(None);
+    if let Some(binding) = undelivered.tensorlake.as_mut() {
+        binding.credential_warning = Some("the vault refused".into());
+    }
+    assert_eq!(
+        lines_for(&undelivered)[1],
+        (
+            Kind::Evidence,
+            "Credentials not delivered: the vault refused".to_owned()
+        )
+    );
+    assert_eq!(host_tone(&undelivered), Tone::Advisory);
+    undelivered.state = connecting(1, None);
+    assert_eq!(host_tone(&undelivered), Tone::Advisory);
+    assert_eq!(tone(&undelivered.state), Tone::Pending);
 }

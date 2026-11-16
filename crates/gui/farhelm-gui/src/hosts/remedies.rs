@@ -17,6 +17,12 @@
 //!   silent adoption of a third install.
 //! - **The request** is the operation store's work under the host's key ([`Work::RetryHost`], [`Work::AdoptHost`]); the
 //!   helm answers at once, without waiting on the host, and its outcome is the pushed host list.
+//! - **Retry on a failed deletion.** On a host whose machine's deletion failed (a sandbox or container shown "Deleting
+//!   failed"), Retry deletes it again rather than reconnecting, as the old Retry did:
+//!   `POST /api/hosts/{id}/retry-delete`, chosen by the phase the host shows when Retry is pressed. That attempt can
+//!   wait on the provider for longer than the UI channel allows, so the helm answers at its reply bound that the
+//!   deletion carries on; that 504 is an ordinary refusal of this attempt, shown as any other, and the pushed hosts
+//!   list shows how the deletion ends.
 //! - **A refusal** opens the host refusal dialog ([`super::refusal`], "Retry host" or "Adopt host") through the mark of
 //!   the press, and is then dropped from the store's record under the host's key; one that opened no dialog (the user
 //!   moved on) stays under the row, which opens for it.
@@ -32,7 +38,7 @@
 mod tests;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
-use farhelm_proto::ui_channel::HostView;
+use farhelm_proto::ui_channel::{HostStateView, HostView};
 use gpui::{AnyWindowHandle, App, Window};
 use serde_json::json;
 
@@ -58,6 +64,8 @@ enum Remedy {
     Retry,
     /// Adopt the identity the menu showed, raw, as the helm compares it.
     Adopt(String),
+    /// Delete again a machine whose deletion failed: Retry on a host in that phase ([`retry`]).
+    DeleteAgain,
 }
 
 impl Remedy {
@@ -80,13 +88,20 @@ impl Remedy {
                 Some(json!({ "reported": reported })),
                 "POST /api/hosts/[host]/adopt",
             ),
+            Remedy::DeleteAgain => Command::new(
+                Work::RetryHost,
+                Method::Post,
+                ApiPath::api(&["hosts", &key, "retry-delete"])?,
+                None,
+                "POST /api/hosts/[host]/retry-delete",
+            ),
         })
     }
 
     /// The refusal dialog's title action, the old dialog's words.
     fn action(&self) -> &'static str {
         match self {
-            Remedy::Retry => "Retry host",
+            Remedy::Retry | Remedy::DeleteAgain => "Retry host",
             Remedy::Adopt(_) => "Adopt host",
         }
     }
@@ -95,7 +110,7 @@ impl Remedy {
     /// (`super::setup::remedy_not_started`).
     fn kind(&self) -> Action {
         match self {
-            Remedy::Retry => Action::Retry,
+            Remedy::Retry | Remedy::DeleteAgain => Action::Retry,
             Remedy::Adopt(_) => Action::Adopt,
         }
     }
@@ -103,7 +118,7 @@ impl Remedy {
     /// The verb the Hosts panel's line names a remedy not started by.
     fn verb(&self) -> &'static str {
         match self {
-            Remedy::Retry => "Retry",
+            Remedy::Retry | Remedy::DeleteAgain => "Retry",
             Remedy::Adopt(_) => "Adopt",
         }
     }
@@ -111,16 +126,27 @@ impl Remedy {
     /// The id of the Hosts panel's line for this remedy not started.
     fn line_id(&self) -> &'static str {
         match self {
-            Remedy::Retry => "hosts-retry-not-started",
+            Remedy::Retry | Remedy::DeleteAgain => "hosts-retry-not-started",
             Remedy::Adopt(_) => "hosts-adopt-not-started",
         }
     }
 }
 
-/// The host menu's Retry for `host`, pressed with `mark` taken in its handler. While a session launch is in flight it
-/// sends nothing and the Hosts panel's line says why.
+/// The host menu's Retry for `host`, pressed with `mark` taken in its handler: a connection retry, or on a host whose
+/// machine's deletion failed, that deletion again ([`deletes_again`]). While a session launch is in flight it sends
+/// nothing and the Hosts panel's line says why.
 pub(super) fn retry(host: i64, mark: Mark, window: &mut Window, cx: &mut App) {
-    send(host, Remedy::Retry, mark, window.window_handle(), cx);
+    let remedy = match listed(host, cx) {
+        Some(view) if deletes_again(&view.state) => Remedy::DeleteAgain,
+        Some(_) | None => Remedy::Retry,
+    };
+    send(host, remedy, mark, window.window_handle(), cx);
+}
+
+/// Whether Retry on a host in `state` deletes its machine again rather than retrying its connection: the host shows a
+/// failed deletion, the one phase in which the helm destroys a sealed machine again without a fresh question.
+pub(super) fn deletes_again(state: &HostStateView) -> bool {
+    matches!(state, HostStateView::Deleting { failure: Some(_) })
 }
 
 /// The host menu's Adopt for `host`, approving `reported`, the identity the menu item showed, pressed with `mark`

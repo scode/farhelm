@@ -1772,3 +1772,102 @@ fn the_rings_and_the_hosts_arrows_inks_follow_the_old_sheet() {
         assert_eq!(required.count, 3);
     }
 }
+
+/// A Tensorlake sandbox host `id`, connected, whose forwards failed when `tunnels_failed` and whose credentials were
+/// not delivered when `credentials_failed`.
+fn troubled_sandbox(id: i64, tunnels_failed: bool, credentials_failed: bool) -> HostView {
+    use farhelm_proto::tensorlake::{TunnelState, TunnelView};
+    let mut view = status_host(id, "tensorlake", connected());
+    view.tensorlake = Some(farhelm_proto::ui_channel::TensorlakeHostView {
+        sandbox: "farhelm-host-k7q2".into(),
+        recipe: "rust-dev".into(),
+        size: None,
+        tunnels: Some(TunnelView {
+            tunnels: Vec::new(),
+            state: if tunnels_failed {
+                TunnelState::Failed {
+                    reason: "listen port taken".into(),
+                }
+            } else {
+                TunnelState::Up
+            },
+        }),
+        credential_warning: credentials_failed.then(|| "the vault refused".to_owned()),
+    });
+    view
+}
+
+/// Why this matters: the old rail added a machine's failing credentials or forwards to the avatar's name, right after
+/// the phase's words and before the too-new explanation, since a screen reader hears only the name, and the amber dot
+/// alone says nothing. Specified as a pure function: a connected sandbox whose forwards failed reads "Connected;
+/// tunnels failed, retrying"; one whose credentials were not delivered reads "Connected; credentials not delivered";
+/// both read "Connected; credentials not delivered; tunnels failed, retrying"; a sandbox with neither reads
+/// "Connected".
+#[test]
+fn failing_credentials_and_forwards_join_the_avatars_words_after_its_phase() {
+    use crate::hosts::status::HostStatus;
+    let quiet = HostStatus {
+        update: None,
+        live: None,
+        warned: false,
+    };
+    for (tunnels, credentials, words) in [
+        (true, false, "Connected; tunnels failed, retrying"),
+        (false, true, "Connected; credentials not delivered"),
+        (
+            true,
+            true,
+            "Connected; credentials not delivered; tunnels failed, retrying",
+        ),
+        (false, false, "Connected"),
+    ] {
+        assert_eq!(
+            status::state_words(&troubled_sandbox(4, tunnels, credentials), &quiet, false),
+            words
+        );
+    }
+}
+
+/// Why this matters: the old spec checked the rail's state class turn amber for failed forwards ("tunnel failures make
+/// a connected host amber"); the dot is the only thing that shows it at a glance, so the ink actually painted is what
+/// is tested, not the function that picks it. Specified: the dot of a connected sandbox whose forwards failed paints
+/// the palette's amber (`warn`) and not its green (`ok`); with its forwards up it paints green.
+#[gpui::test]
+fn failed_forwards_paint_the_rail_dot_amber(cx: &mut TestAppContext) {
+    let listed = [troubled_sandbox(4, true, false), {
+        let mut fine = troubled_sandbox(5, false, false);
+        fine.name = "fine".into();
+        fine
+    }];
+    let (_fake, cx) = status_rail(cx, &listed, &[]);
+    let palette = cx.update(|_, cx| crate::theme::palette(cx));
+    let inks = |cx: &mut VisualTestContext, selector: &'static str| {
+        let dot = cx.debug_bounds(selector).expect("the dot is drawn");
+        let (scale, quads) = cx.update(|window, _| (window.scale_factor(), window.painted_quads()));
+        let dot = dot.scale(scale);
+        quads
+            .into_iter()
+            .filter(|quad| {
+                quad.bounds.origin.x >= dot.origin.x
+                    && quad.bounds.origin.y >= dot.origin.y
+                    && quad.bounds.bottom_right().x <= dot.bottom_right().x
+                    && quad.bounds.bottom_right().y <= dot.bottom_right().y
+            })
+            .map(|quad| quad.background)
+            .collect::<Vec<_>>()
+    };
+    let (amber, green) = (
+        gpui::Background::from(crate::theme::color(palette.warn)),
+        gpui::Background::from(crate::theme::color(palette.ok)),
+    );
+    let failed = inks(cx, "host-rail-dot-4");
+    assert!(
+        failed.contains(&amber) && !failed.contains(&green),
+        "the failed forwards' dot paints amber, not green"
+    );
+    let fine = inks(cx, "host-rail-dot-5");
+    assert!(
+        fine.contains(&green) && !fine.contains(&amber),
+        "the working forwards' dot paints green"
+    );
+}

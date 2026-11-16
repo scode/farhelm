@@ -6,7 +6,8 @@
 //! the GPUI app, ported from the old app's `environment_ui.rs` at the reference commit. It holds only what a GPUI
 //! surface has needed so far, starting with an agent's environment-launch approval card; the launcher's and host
 //! management's environment surfaces add their own methods here as they are ported, rather than starting a second
-//! module. The session list's and the session view's environment session rows, controls and suspended card take theirs
+//! module. The Hosts panel's deletion of a sandbox or container and its details take theirs from here too
+//! (`host_delete_label`, `delete_consequence`, `deleting_detail`, `locality_label`). The session list's and the session view's environment session rows, controls and suspended card take theirs
 //! from the section on a session's own environment below. The launcher's refusals and its name for a new environment
 //! take their words from here (`recipe_refusal`, [`target_label`]).
 
@@ -95,6 +96,62 @@ impl ProviderUi {
         }
     }
 
+    /// The Hosts panel's command that removes a host of this provider, which deletes its machine: the host menu's item
+    /// and the label and answer of its question (`hosts::remove`). The old app's `host_delete_label`.
+    pub(crate) fn host_delete_label(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Delete sandbox",
+            ProviderKind::Podman => "Delete container",
+        }
+    }
+
+    /// What that command removes, as its menu item's description and its answer's hover help (the old
+    /// `host_delete_help`).
+    pub(crate) fn host_delete_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Terminate this Tensorlake sandbox and delete its snapshots"
+            }
+            ProviderKind::Podman => {
+                "Delete this container, all its sessions, running processes and files"
+            }
+        }
+    }
+
+    /// The consequence that command's question states after the machine's name: it always destroys the whole machine,
+    /// and its consent covers work the helm's session list does not show, since nothing asks the machine's own Farhelm
+    /// what it holds (the old `delete_consequence`).
+    pub(crate) fn delete_consequence(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete the whole sandbox? Every session, running process, file, checkout, unpushed change and \
+                 snapshot in it will be permanently removed. This cannot be undone."
+            }
+            ProviderKind::Podman => {
+                "Delete the whole container? Every session, running process, file, checkout and unpushed change in \
+                 it will be permanently removed. This cannot be undone."
+            }
+        }
+    }
+
+    /// What a host whose machine is being deleted says about it under its row; with `failed`, that the deletion failed
+    /// and Retry finishes it (the old `deleting_detail`).
+    pub(crate) fn deleting_detail(self, failed: bool) -> &'static str {
+        match (self.0, failed) {
+            (ProviderKind::Tensorlake, false) => {
+                "Farhelm is deleting this sandbox, its files and its snapshots"
+            }
+            (ProviderKind::Podman, false) => "Farhelm is deleting this container and its files",
+            (ProviderKind::Tensorlake, true) => {
+                "Farhelm could not finish deleting this sandbox and its snapshots; some of them may remain and bill. \
+                 Retry finishes the deletion"
+            }
+            (ProviderKind::Podman, true) => {
+                "Farhelm could not finish deleting this container; it may remain. Retry finishes the deletion"
+            }
+        }
+    }
+
     /// Why the launcher cannot create this provider's environment from `recipe`, or `None` when it can: a base the
     /// provider cannot run, then the provider's own prerequisites. The old app's `ProviderUi::recipe_refusal`, worded as
     /// it was. A Tensorlake recipe needs a built snapshot ("No snapshot yet"); its account prerequisites (an API key,
@@ -151,7 +208,8 @@ impl ProviderUi {
     }
 
     /// The word assistive technology reads for a session row's environment mark, in place of the host mark's `Local`
-    /// or `Remote`: the old visually hidden `locality_label`.
+    /// or `Remote`: the old visually hidden `locality_label`. A sandbox's or container's details line in the Hosts
+    /// panel starts with it too ("Sandbox: <name> · Recipe: …"), as the old details line did.
     pub(crate) fn locality_label(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => "Sandbox",
