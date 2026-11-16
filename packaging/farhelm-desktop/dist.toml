@@ -1,21 +1,25 @@
-# cargo-dist's description of the desktop shell as a GENERIC (non-cargo)
-# package.
+# cargo-dist's description of the desktop app's release archive, as a
+# GENERIC (non-cargo) package.
 #
-# This directory holds no source. It exists because the shipped
-# `farhelm-desktop` binary cannot come out of cargo: dx rewrites the
-# `asset!()` paths into the binary after the link, so a cargo-built one asks
-# for placeholder paths and renders nothing (`crates/farhelm-desktop/README.md`
-# has the mechanism). dist 0.32 offers no post-build hook, but it does support
-# hybrid workspaces — `dist-workspace.toml` lists this directory beside the
-# cargo workspace — and a generic package may name its own `build-command`.
-# That command is `scripts/build-desktop-binary.sh`, which runs dx and drops
-# the result where `out-dir` says.
+# This directory holds no source: the app is the cargo crate
+# `crates/farhelm-desktop`, built with cargo. It stays a generic package
+# because the release workflow's files are left alone until the cutover
+# changes that workflow. The likely simpler replacement is the cargo package
+# itself with an `include` for the icon (a cargo package's `include` does
+# reach dist's plan, as the `binaries` comment below notes), not yet checked
+# for the archive's layout or the icon's file mode.
 #
-# The cargo package `crates/farhelm-desktop` is marked `dist = false` for the
-# same reason, so exactly one description of `farhelm-desktop` produces a
-# release asset. Everything else about the crate — how it is compiled,
-# checked, and depended on — still lives in its Cargo.toml; only the release
-# artifact comes from here.
+# dist supports hybrid workspaces — `dist-workspace.toml` lists this
+# directory beside the cargo workspace — and a generic package names its own
+# `build-command`. That command is `scripts/build-desktop-binary.sh`, which
+# builds the crate, checks the binary and drops it with the icon where
+# `out-dir` says.
+#
+# The cargo package `crates/farhelm-desktop` is marked `dist = false`, so
+# exactly one description of `farhelm-desktop` produces a release asset.
+# Everything else about the crate — how it is compiled, checked, and depended
+# on — still lives in its Cargo.toml; only the release artifact comes from
+# here.
 #
 # ## The version is duplicated, and a test guards it
 #
@@ -34,7 +38,7 @@
 [package]
 name = "farhelm-desktop"
 version = "0.0.0-unreleased"
-description = "Farhelm desktop window (webview shell around the helm)"
+description = "Farhelm desktop app (the native window, with the helm embedded)"
 repository = "https://github.com/scode/farhelm"
 homepage = "https://github.com/scode/farhelm"
 license = "Apache-2.0"
@@ -43,9 +47,10 @@ license = "Apache-2.0"
 build-command = ["../../scripts/build-desktop-binary.sh"]
 # What dist expects to find in `out-dir` once the command has run, and the
 # members inside `farhelm-desktop-aarch64-apple-darwin.tar.gz` beyond the
-# LICENSE. `install.sh` puts `farhelm-desktop` next to `farhelm` in
-# `~/.local/bin`, where the shell finds its CLI sibling by this exact name
-# (D6), and uses `Farhelm.icns` to assemble the `Farhelm.app` bundle.
+# LICENSE. `install.sh` finds both by these exact names: it installs
+# `farhelm-desktop` as the main program of `~/Applications/Farhelm.app`,
+# beside the `farhelm` its supervisor runs (`~/.local/bin/farhelm` is only a
+# symlink, for Terminal), and uses `Farhelm.icns` to assemble the bundle.
 #
 # Yes, an icon listed under `binaries`: dist 0.32 silently ignores a
 # package-level `include` in a generic package's dist.toml (verified against
@@ -75,7 +80,7 @@ out-dir = "../../target/dist-desktop"
 
 [dist]
 dist = true
-# macOS only (D6). A Linux user runs `farhelm helm run` and opens a browser,
-# so a Linux desktop artifact would be a WebKitGTK dependency chain shipped
-# for nobody.
+# macOS only (D6). The app also runs on Linux, but the maintainer decided on
+# 2026-11-15 to defer Linux installation and updates for the desktop app
+# beyond the GPUI migration, so no Linux archive ships.
 targets = ["aarch64-apple-darwin"]

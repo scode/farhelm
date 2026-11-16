@@ -91,10 +91,10 @@ farhelm-teststate.workspace = true
 farhelm-testtrace.workspace = true
 tempfile.workspace = true
 
-# Not built by cargo-dist's cargo build. The release still describes the shipped `farhelm-desktop` as a generic package
-# (`packaging/farhelm-desktop/dist.toml`) whose build command ran dx over the old Dioxus app; that build is broken until
-# the GPUI cutover replaces it. `dist = false` keeps cargo-dist from also publishing an archive for this binary target
-# under the same name.
+# Not built by cargo-dist's cargo build. The release describes the shipped `farhelm-desktop` as a generic package
+# (`packaging/farhelm-desktop/dist.toml`), whose build command builds this crate with cargo and stages the binary with
+# the app icon. `dist = false` keeps cargo-dist from also publishing an archive for this binary target under the same
+# name.
 [package.metadata.dist]
 dist = false
 

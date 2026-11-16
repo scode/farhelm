@@ -29,9 +29,9 @@ On a Mac, `scripts/devbuild-mac.sh` does the same thing in release mode, stages 
 Linux `farhelm` payloads built from the same working copy (so Update works on remote hosts), and runs the app on a state
 directory of its own instead of the installed app's. Its header has the details.
 
-The release still describes `farhelm-desktop` as a generic dist package (`packaging/farhelm-desktop/dist.toml`) whose
-build ran `dx` over the old Dioxus app. That build is broken until the GPUI cutover replaces it; the cargo package here
-is marked `dist = false` so the two descriptions cannot both produce an asset.
+The release describes `farhelm-desktop` as a generic dist package (`packaging/farhelm-desktop/dist.toml`), whose build
+command, `scripts/build-desktop-binary.sh`, builds this crate with cargo and stages the binary with the app icon; the
+cargo package here is marked `dist = false` so the two descriptions cannot both produce an asset.
 
 ## Environment overrides
 
