@@ -912,13 +912,14 @@ pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
 pub(super) fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
     let palette = theme::palette(cx);
     let (pad_y, pad_x) = metrics::TOOLTIP_PAD;
-    let viewport = window.viewport_size();
     // Every form keeps 8 pixels inside the window: `max-width: min(280px, 100vw - 8px)` (440 for paragraphs, a fixed
-    // `width: min(310px, 100vw - 8px)` for the summary card) and `max-height: 100vh - 8px`, as the old tooltip.
-    let room = viewport.width - px(8.);
+    // `width: min(310px, 100vw - 8px)` for the summary card) and `max-height: 100vh - 8px`, as the old tooltip. The old
+    // viewport was the page: the content area here (`desktop::linux_title_bar::content_area`).
+    let area = crate::desktop::linux_title_bar::content_area(window).size;
+    let room = area.width - px(8.);
     let card = div()
         .debug_selector(|| "tooltip-card".into())
-        .max_h(viewport.height - px(8.))
+        .max_h(area.height - px(8.))
         .overflow_hidden()
         .bg(theme::color(palette.bg_2))
         .text_color(theme::color(palette.fg_0))
