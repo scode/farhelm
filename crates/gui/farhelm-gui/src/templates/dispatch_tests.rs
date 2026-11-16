@@ -38,6 +38,7 @@ use crate::launcher::yolo_tests::refuse_for_yolo;
 use crate::launcher::{self, launch};
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
+use crate::session_list::host_rail::tests::node;
 use crate::session_list::tests::{listing, painted, preferences_state, session};
 use crate::test_support::{self, any_open, focused_id, frame, keys, label, meta, settle, started};
 use crate::{focus, local_state};
@@ -736,6 +737,53 @@ fn a_sequence_that_cannot_launch_opens_new(cx: &mut TestAppContext) {
         shown.starts_with("Not launched. No template matches"),
         "{shown:?}"
     );
+}
+
+/// Whether the sidebar shows its Hosts panel in place of the session list.
+fn hosts_panel(cx: &mut VisualTestContext) -> bool {
+    node(&frame(cx), "hosts-panel").is_some()
+}
+
+/// Show the sidebar's Hosts panel, as its rail button does.
+fn show_hosts_panel(cx: &mut VisualTestContext) {
+    test_support::click(cx, "hosts-panel-toggle");
+    assert!(hosts_panel(cx), "the premise: the Hosts panel shows");
+}
+
+/// SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff". In the
+/// old app every quick launch from the page went through the list's New, which hid the panel, so a session the user
+/// started from the panel showed up in the list. The dispatcher hides it where a page quick launch starts preparing and
+/// where a refusal opens New; the ⚡ chord's launch and Templates with a hint are pinned through the switcher's Quick
+/// launch row (`session_list::quick_switcher::tests`). Specified, each from the Hosts panel: number key 2 on `partial`
+/// opens New and the panel goes; a sequence of `zzz` opens New with its refusal and the panel goes.
+#[gpui::test]
+fn a_quick_launch_from_the_page_leaves_the_hosts_panel(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(None, &[("2", "partial")]));
+    show_hosts_panel(cx);
+    number_key(cx, 2);
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "the premise: nothing launched"
+    );
+    assert!(
+        text(cx).contains("/srv/partial"),
+        "the premise: New with partial"
+    );
+    assert!(!hosts_panel(cx), "number key: the panel went");
+    keys(cx, "escape");
+
+    show_hosts_panel(cx);
+    keys(cx, &format!("{SEQUENCE_PREFIX_CHORD} z z z enter"));
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "the premise: nothing launched"
+    );
+    assert!(
+        note(cx).is_some(),
+        "the premise: New with the sequence's refusal"
+    );
+    assert!(!hosts_panel(cx), "sequence: the panel went");
 }
 
 // ---- The open launcher ----

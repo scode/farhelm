@@ -49,7 +49,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::session;
 use crate::templates::shortcuts::{Bindings, KEYS};
-use crate::theme::{self, Palette, metrics};
+use crate::theme::{self, Palette, Token, metrics};
 
 // ---- Layout: the old `.keyboard-shortcuts-*` rules ------------------------------------------------------------------
 
@@ -388,7 +388,21 @@ fn row(entry: Row, palette: &Palette) -> Div {
         Keys::Chord(chord) => chord.label().into(),
         Keys::Typed(keys) => keys.into(),
     };
-    let chip = div()
+    div()
+        .flex()
+        .items_center()
+        .gap(px(ROW_GAP))
+        .py(px(ROW_PAD))
+        .child(div().flex_1().min_w_0().child(name))
+        .child(chip(keys, palette.fg_1, palette))
+}
+
+/// A key chip (`.quick-switcher-template-keys kbd`, the rule the old overview's rows shared): `keys` in 11-pixel `ink`
+/// inside a small rounded box with the dialog's border ink. The overview draws every chord in one, and the template list
+/// draws a template's ⚡ and number-key chords in them, so both lists show a chord the same way. `ink` is the caller's
+/// because a chip on a selected row takes the dimmer inverse ink, as the old sheet's selected rule had it.
+pub(crate) fn chip(keys: impl Into<SharedString>, ink: Token, palette: &Palette) -> Div {
+    div()
         .flex_none()
         .py(px(CHIP_PAD.0))
         .px(px(CHIP_PAD.1))
@@ -396,15 +410,8 @@ fn row(entry: Row, palette: &Palette) -> Div {
         .border_color(theme::color(palette.border_dialog))
         .rounded(metrics::RADIUS_SM)
         .text_size(px(CHIP_TEXT))
-        .text_color(theme::color(palette.fg_1))
-        .child(keys);
-    div()
-        .flex()
-        .items_center()
-        .gap(px(ROW_GAP))
-        .py(px(ROW_PAD))
-        .child(div().flex_1().min_w_0().child(name))
-        .child(chip)
+        .text_color(theme::color(ink))
+        .child(keys.into())
 }
 
 impl Render for KeyboardShortcuts {

@@ -28,8 +28,9 @@
 //! view, [`quick_launch`] for the ⚡ chord, and [`begin_sequence`] for the sequence prefix with
 //! [`watch_sequence_presses`] for the press that cancels it; and [`open_at`] for the launcher's Save as template, which
 //! opens Templates on the template it saved. The quick switcher calls [`rows::template_query`] and [`rows::rows`] for
-//! its templates section, [`rows::pick_from_switcher`] for a pick there, and [`rows::quick_launch_row_label`] and
-//! [`rows::quick_launch_from_switcher`] for its Quick launch row.
+//! its templates section, [`rows::pick_from_switcher`] for a pick there, [`rows::quick_launch_row_label`] and
+//! [`rows::quick_launch_from_switcher`] for its Quick launch row, and [`rows::launch_from_list`] for a pick in its
+//! templates-only mode, the Cmd+J list.
 //!
 //! Templates, the ⚡ mark and the number keys are read from the store the helm pushes, never with a request per use.
 //! SPEC.md says the shortcuts read "the mark and templates fresh on each use, so an agent's or the command line's

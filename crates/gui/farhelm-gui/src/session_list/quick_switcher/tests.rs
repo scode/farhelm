@@ -182,7 +182,7 @@ fn marks_are_found_on_the_shown_spelling_of_a_matched_value() {
 // ---- The window ----------------------------------------------------------------------------------------------------
 
 /// The real main view over the fake helm ([`test_support::MainWindow`]), with this module's steps.
-type Main<'a> = test_support::MainWindow<'a>;
+pub(super) type Main<'a> = test_support::MainWindow<'a>;
 
 /// Sessions a, b and c, in that order, with a the last visited, so a is open at startup.
 fn fleet() -> Vec<CollectionState> {
@@ -234,7 +234,7 @@ impl Main<'_> {
 }
 
 /// The switcher opened last, which must still be open.
-fn switcher(cx: &mut VisualTestContext) -> Entity<QuickSwitcher> {
+pub(super) fn switcher(cx: &mut VisualTestContext) -> Entity<QuickSwitcher> {
     let switcher = cx.update(|_, cx| {
         cx.try_global::<Opened>()
             .and_then(|opened| opened.0.upgrade())
@@ -243,7 +243,7 @@ fn switcher(cx: &mut VisualTestContext) -> Entity<QuickSwitcher> {
 }
 
 /// Whether the switcher's search field holds focus.
-fn field_focused(cx: &mut VisualTestContext) -> bool {
+pub(super) fn field_focused(cx: &mut VisualTestContext) -> bool {
     let switcher = switcher(cx);
     cx.update(|window, cx| switcher.read(cx).input.focus_handle(cx).is_focused(window))
 }
@@ -274,7 +274,7 @@ fn listed(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
 }
 
 /// Type `text` into the switcher's field, which holds focus.
-fn type_query(cx: &mut VisualTestContext, text: &str) {
+pub(super) fn type_query(cx: &mut VisualTestContext, text: &str) {
     let keystrokes: Vec<String> = text.chars().map(|ch| ch.to_string()).collect();
     keys(cx, &keystrokes.join(" "));
 }
@@ -1068,7 +1068,7 @@ fn a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices(
 const NAME: &str = "nightly";
 
 /// Whether the switcher's card is drawn.
-fn switcher_drawn(cx: &mut VisualTestContext) -> bool {
+pub(super) fn switcher_drawn(cx: &mut VisualTestContext) -> bool {
     cx.debug_bounds("quick-switcher").is_some()
 }
 
@@ -1081,7 +1081,7 @@ fn launcher_name(cx: &mut VisualTestContext) -> Vec<String> {
 }
 
 /// Replace the open switcher's query with `text` and settle, for a query the test's keystrokes cannot type (spaces).
-fn set_query(cx: &mut VisualTestContext, text: &str) {
+pub(super) fn set_query(cx: &mut VisualTestContext, text: &str) {
     let switcher = switcher(cx);
     cx.update(|window, cx| {
         switcher.update(cx, |switcher, cx| {
@@ -1418,7 +1418,7 @@ fn template_fleet(mark: Option<&str>) -> Vec<CollectionState> {
 }
 
 /// The template rows the frame drew, top to bottom, by name, and the one drawn selected.
-fn drawn_templates(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
+pub(super) fn drawn_templates(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
     let mut rows: Vec<_> = frame(cx)
         .into_iter()
         .filter_map(|node| {
@@ -1436,7 +1436,7 @@ fn drawn_templates(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) 
 
 /// The creates the window sent since the last call, every other command answered at once and the catalog read with an
 /// empty catalog (the launcher's own helper).
-fn creates(main: &mut Main<'_>) -> Vec<FakeCommand> {
+pub(super) fn creates(main: &mut Main<'_>) -> Vec<FakeCommand> {
     creates_answering(&mut main.helm, main.cx, &json!([]))
 }
 
