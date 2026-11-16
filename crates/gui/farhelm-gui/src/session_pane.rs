@@ -94,9 +94,8 @@ use crate::components::{Spinner, spinner_icon};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
-use crate::prompt::Inline;
 use crate::session::{self, PerSession, UiSession};
-use crate::session_list::{age, delete, replace};
+use crate::session_list::{age, delete};
 use std::rc::Rc;
 
 use crate::terminal::CellMetrics;
@@ -166,10 +165,11 @@ pub struct SessionPane {
 }
 
 /// What the pane keeps for the open session: the session's key, the terminals it shows (the session's agent terminal
-/// and its tabs) unless the session shows its interrupted card, the card's focus handle and the Replace question the
-/// card asked, and the details bar's copy confirmations. All of it is made and dropped with the selection (the old
-/// view's keyed remount reset it the same way); the terminals and the card's question also go when the session goes
-/// into or out of its card.
+/// and its tabs) unless the session shows its interrupted card, the card's focus handle, and the details bar's copy
+/// confirmations. All of it is made and dropped with the selection (the old view's keyed remount reset it the same
+/// way); the terminals also go when the session goes into or out of its card. The Replace question the card asked is
+/// kept by the card ([`card::keep_question`]), since the row menu reads it too, and `sync` drops it when the selection
+/// changes and whenever the card does not show ([`card::drop_question`]).
 struct Mounted {
     key: String,
     /// `None` while the session shows its interrupted card (or when the terminal font could not be measured).
@@ -179,8 +179,6 @@ struct Mounted {
     copies: details::Copies,
     /// The interrupted card's focus handle, a tab stop: home while the card shows.
     card_focus: FocusHandle,
-    /// The Replace question the interrupted card asked, which the card draws while it is open.
-    question: Option<Inline<replace::Frozen>>,
     /// The row the interrupted card was last drawn from, kept only to go on drawing the card while the store holds no
     /// row for the session at all: between the helm removing a confirmed Replace's source and its reply, the selection
     /// stays on the source (`session_list::selection`), and the card stays up with the Replace's wait line until the
@@ -213,7 +211,6 @@ impl Mounted {
             _home: None,
             copies: details::Copies::new(cx),
             card_focus: cx.focus_handle().tab_stop(true),
-            question: None,
             card_row: None,
         })
     }
@@ -295,7 +292,10 @@ impl SessionPane {
         let reachable = wanted.as_deref().is_none_or(|key| card::reachable(key, cx));
         let mounted = self.mounted.current(cx);
         if mounted.as_ref().map(|mounted| &mounted.key) != wanted.as_ref() {
-            // The old terminals go with this assignment, and their streams with them.
+            // The old terminals go with this assignment, and their streams with them. The old card's question goes
+            // too: the session now open may show a card of its own, which the drop below leaves alone, and the
+            // question would otherwise go on refusing the actions of the session it was about.
+            card::drop_question(cx);
             *mounted = session
                 .zip(wanted)
                 .and_then(|(session, key)| Mounted::new(&session, key, !card, cx));
@@ -313,8 +313,14 @@ impl SessionPane {
                 terminals(session, &mounted.key, cx)
             };
             mounted._home = None;
-            mounted.question = None;
             cx.notify();
+        }
+        // The card's question goes whenever the card does not show, however it went: the session recovered, its host
+        // dropped away (no card and no terminal, so nothing would draw the question while it went on refusing the
+        // session's actions), or another session is open. A card that comes back starts with no question, as the old
+        // card's did (its `use_clear_when_hidden`).
+        if !card {
+            card::drop_question(cx);
         }
         // Home follows the shown terminal: a tab the user chooses (the set has already focused it) or the agent
         // terminal when the chosen tab goes, which takes focus if the tab held it. Only while the set is still the one
@@ -397,10 +403,9 @@ impl Render for SessionPane {
                 mounted.set.clone(),
                 mounted.copies.clone(),
                 mounted.card_focus.clone(),
-                mounted.question.clone(),
             )
         });
-        let Some((key, terminals, copies, card_focus, question)) = shown else {
+        let Some((key, terminals, copies, card_focus)) = shown else {
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
@@ -456,7 +461,8 @@ impl Render for SessionPane {
                     key: &key,
                     row,
                     focus: &card_focus,
-                    question,
+                    question: card::question(&key, cx),
+                    launcher_wait: session_list::menu::launcher_wait(cx),
                     step,
                 },
                 cx.weak_entity(),

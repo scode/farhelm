@@ -481,8 +481,9 @@ impl SessionPane {
         let shown = Shown {
             row: &row_now,
             skipped,
-            // The interrupted card's open Replace question refuses these too, as any open lifecycle question does.
-            busy: menu::refused(key, cx) || self.card_asking(cx),
+            // `refused` counts the interrupted card's open Replace question too (`card::asks`), as any open
+            // lifecycle question.
+            busy: menu::refused(key, cx),
             launch_wait: menu::launch_wait(cx),
             launcher_wait: menu::launcher_wait(cx),
             stopping: stop::in_flight(key, cx),
@@ -622,7 +623,8 @@ impl SessionPane {
         let Some(key) = self.open_key(cx) else {
             return;
         };
-        if self.header.open_question(window, cx).is_some() || self.card_asking(cx) {
+        // The card's open question refuses through `actionable` below, as any open lifecycle question does.
+        if self.header.open_question(window, cx).is_some() {
             return;
         }
         let Some(target) = menu::actionable(&key, cx) else {
