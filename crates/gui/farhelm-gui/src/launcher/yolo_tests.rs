@@ -157,10 +157,21 @@ fn the_one_off_answer_launches_with_consent(cx: &mut gpui::TestAppContext) {
 
 /// SPEC.md: the permanent answer "first sets the host to start YOLO sessions without asking, exactly as its settings
 /// would, and then retries with the override". Specified: it sends the host settings' own write for host1, and only
-/// once that is answered a create with `confirm_yolo`.
+/// once that is answered a create with `confirm_yolo`; the launcher has hidden again, and focus is where the launcher's
+/// close returned it the first time.
+///
+/// The focus check guards an ordering the code does not state. The answer's success closes the question after the
+/// retry has already closed the launcher, and the question would return focus for the click that ran it, into the
+/// launcher that is gone. Today it cannot: the launcher drops the question as it closes, and GPUI releases a dropped
+/// entity before the question's deferred close runs.
 #[gpui::test]
 fn the_permanent_answer_stops_asking_then_launches(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx, create) = launched_with(cx, yolo_command_draft());
+    let returned = cx.update(|window, cx| window.focused(cx));
+    assert!(
+        returned.is_some(),
+        "the premise: the launcher's close left focus on something"
+    );
     refuse_for_yolo(&mut helm, cx, create.id);
     test_support::click(cx, "prompt-alternative-0");
     cx.run_until_parked();
@@ -177,6 +188,12 @@ fn the_permanent_answer_stops_asking_then_launches(cx: &mut gpui::TestAppContext
         panic!("one create after the write, not {}", sent.len());
     };
     assert_eq!(retry.body.as_ref().unwrap()["confirm_yolo"], json!(true));
+    assert!(!any_open(cx), "the launcher hid again");
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        returned,
+        "focus is where the launcher's close returned it, not in the closed launcher"
+    );
 }
 
 /// SPEC.md: "if changing that setting fails, nothing is started and the confirmation stays up with the reason". And
