@@ -1,7 +1,8 @@
 //! Tests of the connection and UI-session owner, and of what its reset does to the window: the replies and failures it
 //! keeps from the new session, the notice it posts, the dialogs it closes, the terminal streams it refuses to open for a
-//! retired session, the key capture it disarms, and the selected session that survives it; and of following the
-//! current UI session from a view across resets (`session::observe_current`).
+//! retired session, the key capture it disarms, and the selected session that survives it; of following the current
+//! UI session from a view across resets (`session::observe_current`); and of reading per-session state without
+//! starting it over (`session::PerSession::read`).
 //!
 //! The helm is the helm client's fake: in process, ordered like the real channel, and moved only by the test, which is
 //! what GPUI's deterministic scheduler needs. Each test stages exactly the feed it is about (a reply queued before a
@@ -33,7 +34,7 @@ use crate::layers::{self, Dialog};
 use crate::local_state;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
-use crate::session::{self, Connection, ObservingCurrent, UiSession};
+use crate::session::{self, Connection, ObservingCurrent, PerSession, UiSession};
 use crate::terminal::attached::OpenStream;
 use crate::test_support::{
     self, check_store, current, meta, session_entry, sessions, started, state,
@@ -721,5 +722,113 @@ fn dropping_the_handle_ends_the_calls(cx: &mut TestAppContext) {
     assert!(
         early.borrow().is_empty(),
         "a handle dropped before its first call never makes it"
+    );
+}
+
+// ---- Per-session state ----------------------------------------------------------------------------------------------
+
+/// What a test's [`PerSession`] holds: anything with a default that a write visibly changes.
+type Kept = PerSession<Vec<u32>>;
+
+/// What `kept` reads under the current UI session, copied out of the app.
+fn read_now(kept: &Kept, cx: &mut TestAppContext) -> Option<Vec<u32>> {
+    cx.update(|cx| kept.read(cx).cloned())
+}
+
+/// `PerSession::read` is how code that draws with only `&App` (the YOLO questions on a row, the interrupted card's
+/// restarted marks and question) tells whether per-session state belongs to the window's current UI session. If it
+/// handed back state from before a reset, a question or mark made for a connection that is gone would show and refuse
+/// actions on the new one; if reading moved the state to the new session, it would hand the new session the old
+/// session's state the moment it was read. Specified: nothing reads back before the first `current`; after a write
+/// under one UI session the write reads back under it; after a reset to a new UI session it reads `None`, again on a
+/// second read (reading does not adopt the new session), and the next `current` under the new session starts from the
+/// default.
+#[gpui::test]
+fn per_session_state_reads_back_only_under_the_ui_session_it_was_written_in(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    let first = cx.update(|cx| session::current_ui_session(cx));
+    assert!(first.is_some(), "the premise: a live UI session");
+    let mut kept = Kept::default();
+    assert_eq!(read_now(&kept, cx), None, "nothing written yet");
+
+    cx.update(|cx| kept.current(cx).push(7));
+    assert_eq!(read_now(&kept, cx), Some(vec![7]), "the write reads back");
+
+    fake.break_channel();
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    let second = cx.update(|cx| session::current_ui_session(cx));
+    assert!(
+        second.is_some() && second != first,
+        "the premise: the reset made a new UI session"
+    );
+    assert_eq!(
+        read_now(&kept, cx),
+        None,
+        "the old session's state is not read under the new one"
+    );
+    assert_eq!(
+        read_now(&kept, cx),
+        None,
+        "and reading did not move the state to the new session"
+    );
+    assert_eq!(
+        cx.update(|cx| kept.current(cx).clone()),
+        Vec::<u32>::new(),
+        "the new session's first write starts from the default"
+    );
+    assert_eq!(
+        read_now(&kept, cx),
+        Some(vec![]),
+        "and from then on the new session's state reads back"
+    );
+}
+
+/// An inert window has no UI session, so per-session state must read as the default there: a write made while inert
+/// (`current` starts over on every inert call) or left over from the session the break retired would otherwise be
+/// drawn on a window that holds nothing from the helm. Specified: before the first connect, `read` is `None` even right
+/// after a `current` wrote to the state; and a write made under a live UI session reads `None` once the channel breaks,
+/// while the window waits to reconnect.
+#[gpui::test]
+fn per_session_state_reads_nothing_while_the_window_is_inert(cx: &mut TestAppContext) {
+    let (mut fake, connection) = started(cx);
+    assert_eq!(
+        cx.update(|cx| session::current_ui_session(cx)),
+        None,
+        "the premise: not connected yet, so inert"
+    );
+    let mut kept = Kept::default();
+    cx.update(|cx| kept.current(cx).push(1));
+    assert_eq!(
+        read_now(&kept, cx),
+        None,
+        "a write while inert reads nothing"
+    );
+
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    cx.update(|cx| kept.current(cx).push(2));
+    assert_eq!(
+        read_now(&kept, cx),
+        Some(vec![2]),
+        "the premise: the live session's write reads back, without the inert one"
+    );
+
+    fake.break_channel();
+    cx.run_until_parked();
+    assert_eq!(state(&connection, cx), ChannelState::Reconnecting);
+    assert_eq!(
+        cx.read(session::current_ui_session),
+        None,
+        "the premise: a broken channel leaves no current UI session"
+    );
+    assert_eq!(
+        read_now(&kept, cx),
+        None,
+        "the retired session's state is not read while inert"
     );
 }

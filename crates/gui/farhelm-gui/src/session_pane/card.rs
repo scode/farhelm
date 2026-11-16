@@ -64,8 +64,8 @@ use std::collections::HashSet;
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{RestartOffer, SessionLaunch, SessionStatus};
 use gpui::{
-    AnyElement, App, Context, EntityId, FocusHandle, Global, InteractiveElement as _, IntoElement,
-    ParentElement, Role, Styled, Subscription, WeakEntity, Window, div, px, relative,
+    AnyElement, App, BorrowAppContext as _, Context, FocusHandle, Global, InteractiveElement as _,
+    IntoElement, ParentElement, Role, Styled, Subscription, WeakEntity, Window, div, px, relative,
 };
 
 use super::SessionPane;
@@ -73,7 +73,7 @@ use crate::components::{self, Button, HoverHelp, Ring, Tier};
 use crate::focus::Mark;
 use crate::operations::Work;
 use crate::prompt::{self, Inline};
-use crate::session::{self, ObservingCurrent};
+use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::replace_yolo::{self, Surface};
 use crate::session_list::{self, menu, outcome, replace, restart};
 use crate::theme::{self, metrics};
@@ -138,24 +138,14 @@ fn row(key: &str, cx: &App) -> Option<SessionRow> {
 
 /// The sessions a Restart relaunched while the store may still list them as Interrupted, under the UI session they were
 /// marked in (see the module docs, "Restarted, until the list says so"). A global, because the Restart's completion
-/// marks it from the operation store, with no view at hand, and the follower and the pane read it.
+/// marks it from the operation store, with no view at hand, and the follower and the pane read it. The marked keys are
+/// read through [`PerSession::read`], since [`is_restarted`] answers while drawing, with only `&App`; they are written
+/// through `current` inside a global update, which takes the global off the app for the closure, so `current` can
+/// borrow the app to read the connection.
 #[derive(Default)]
-struct Restarted {
-    session: Option<EntityId>,
-    keys: HashSet<String>,
-}
+struct Restarted(PerSession<HashSet<String>>);
 
 impl Global for Restarted {}
-
-/// The current UI session's id, `None` while the window is inert.
-fn ui_session(cx: &App) -> Option<EntityId> {
-    session::connection(cx).and_then(|connection| {
-        connection
-            .read(cx)
-            .session()
-            .map(|session| session.entity_id())
-    })
-}
 
 /// A Restart of the session filed under `key` succeeded: its card treats it as recovered until the list catches up.
 /// Called from every Restart's completion (`session_list::restart`), the header's included, since a Restart from there
@@ -163,48 +153,52 @@ fn ui_session(cx: &App) -> Option<EntityId> {
 /// nothing of the row, and a mark on a session the store lists as anything but Interrupted is dropped at once
 /// ([`forget_settled`] runs as the mark notifies), so it changes nothing.
 pub(crate) fn restarted(key: &str, cx: &mut App) {
-    let now = ui_session(cx);
-    let marks = cx.default_global::<Restarted>();
-    if marks.session != now {
-        marks.session = now;
-        marks.keys.clear();
-    }
-    marks.keys.insert(key.to_owned());
+    cx.update_default_global::<Restarted, _>(|marks, cx| {
+        marks.0.current(cx).insert(key.to_owned());
+    });
 }
 
 /// Whether the session filed under `key` is marked restarted under the current UI session.
 fn is_restarted(key: &str, cx: &App) -> bool {
     cx.try_global::<Restarted>()
-        .is_some_and(|marks| marks.session == ui_session(cx) && marks.keys.contains(key))
+        .and_then(|marks| marks.0.read(cx))
+        .is_some_and(|keys| keys.contains(key))
 }
 
 /// Drop the marks the store has caught up with: a session it lists as anything but Interrupted, on a host the helm
-/// cannot reach, or not at all, and every mark of an earlier UI session. A mark matters only while the open session's
-/// card would show, and the open session always has a row unless it is gone; a row that left the listing (a filter,
-/// the cap, another session opened) could otherwise keep its mark until a later reboot made it Interrupted again, and
-/// then hide that card. Changes the global (which notifies its observers) only when a mark goes.
+/// cannot reach, or not at all. A mark matters only while the open session's card would show, and the open session
+/// always has a row unless it is gone; a row that left the listing (a filter, the cap, another session opened) could
+/// otherwise keep its mark until a later reboot made it Interrupted again, and then hide that card. Changes the global
+/// (which notifies its observers) only when a mark goes, since the follower that calls this observes the global.
+///
+/// Marks of an earlier UI session are left alone: no read finds them ([`is_restarted`] reads through
+/// [`PerSession::read`]), and the next mark starts them over. Dropping them here would notify the follower of a change
+/// nothing can see.
 fn forget_settled(cx: &mut App) {
-    let Some(marks) = cx.try_global::<Restarted>() else {
+    let Some(keys) = cx
+        .try_global::<Restarted>()
+        .and_then(|marks| marks.0.read(cx))
+    else {
         return;
     };
-    let now = ui_session(cx);
-    let gone: Vec<String> = marks
-        .keys
+    let gone: Vec<String> = keys
         .iter()
         .filter(|key| {
-            marks.session != now
-                || row(key, cx)
-                    .is_none_or(|row| row.stale || row.info.status != SessionStatus::Interrupted)
+            row(key, cx)
+                .is_none_or(|row| row.stale || row.info.status != SessionStatus::Interrupted)
         })
         .cloned()
         .collect();
     if gone.is_empty() {
         return;
     }
-    let marks = cx.default_global::<Restarted>();
-    for key in gone {
-        marks.keys.remove(&key);
-    }
+    cx.update_global::<Restarted, _>(|marks, cx| {
+        // The marks were just read under the current UI session, so this starts nothing over.
+        let keys = marks.0.current(cx);
+        for key in gone {
+            keys.remove(&key);
+        }
+    });
 }
 
 // ---- The card's question ---------------------------------------------------------------------------------------------
@@ -213,47 +207,38 @@ fn forget_settled(cx: &mut App) {
 /// was asked in (see the module docs, "While it asks"). A global, because the row menu and the header read it through
 /// `session_list::menu::refused`, with only `&App` and no pane at hand; the pane is its one writer ([`keep_question`],
 /// [`drop_question`]). One question at most, since only the open session shows a card.
+///
+/// The global exists only while it holds a question: [`keep_question`] makes it and [`drop_question`] removes it. It is
+/// read through [`PerSession::read`], so a question a reset left behind is never drawn or counted under the new UI
+/// session, even before the pane drops it.
 #[derive(Default)]
-struct Asked {
-    session: Option<EntityId>,
-    question: Option<(String, Inline<replace::Frozen>)>,
-}
+struct Asked(PerSession<Option<(String, Inline<replace::Frozen>)>>);
 
 impl Global for Asked {}
 
 /// Keep `question`, which the card of the session filed under `key` just asked, in place of any earlier one.
 pub(super) fn keep_question(key: &str, question: Inline<replace::Frozen>, cx: &mut App) {
-    let session = ui_session(cx);
-    cx.set_global(Asked {
-        session,
-        question: Some((key.to_owned(), question)),
+    cx.update_default_global::<Asked, _>(|asked, cx| {
+        *asked.0.current(cx) = Some((key.to_owned(), question));
     });
 }
 
 /// Drop the card's question, unanswered if it is still open: the pane calls this whenever it stops showing the card
 /// the question belongs to. Dropping is what ends the fact then, since a question dropped unanswered still reads open
-/// for any clone of it (`prompt::Inline::is_open`), this one included.
+/// for any clone of it (`prompt::Inline::is_open`), this one included. A question kept under an earlier UI session goes
+/// too, as it always has: removing the whole global needs no comparison with the session, and since the global exists
+/// only while it holds a question, the pane's calls while none is kept change nothing.
 pub(super) fn drop_question(cx: &mut App) {
-    if cx
-        .try_global::<Asked>()
-        .is_some_and(|asked| asked.question.is_some())
-    {
-        cx.set_global(Asked::default());
+    if cx.has_global::<Asked>() {
+        cx.remove_global::<Asked>();
     }
 }
 
 /// The question the card of the session filed under `key` asked, if one is kept for it under the current UI session,
 /// open or answered: what the card draws while it is open.
 pub(super) fn question(key: &str, cx: &App) -> Option<Inline<replace::Frozen>> {
-    let asked = cx.try_global::<Asked>()?;
-    if asked.session != ui_session(cx) {
-        return None;
-    }
-    asked
-        .question
-        .as_ref()
-        .filter(|(asked_for, _)| asked_for == key)
-        .map(|(_, question)| question.clone())
+    let (asked_for, question) = cx.try_global::<Asked>()?.0.read(cx)?.as_ref()?;
+    (asked_for == key).then(|| question.clone())
 }
 
 /// Whether the interrupted card of the session filed under `key` asks its Replace question now: one is kept for it
