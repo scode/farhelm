@@ -281,7 +281,7 @@
         ],
         [
           "click",
-          "text:Local (this machine)"
+          "id:host-rail-host-1"
         ],
         [
           "wait",
@@ -456,7 +456,7 @@
     },
     {
       "id": "app-header-delete-question",
-      "title": "Delete asked from the open session's header (the exited Fixture 4, which the row would delete unasked): the question hung under the Delete button",
+      "title": "Delete asked from the open session's header (the exited Fixture 4, which the row would delete unasked): the question hung under the Delete button, asked with the Delete shortcut because the narrow window's pane clips that button, as the old app's did",
       "reference": "header-delete-question",
       "mockup": false,
       "steps": [
@@ -470,8 +470,8 @@
           "Confirm replace"
         ],
         [
-          "click",
-          "id:session-header-delete"
+          "action",
+          "farhelm::DeleteSession"
         ],
         [
           "wait",
@@ -1361,7 +1361,7 @@
     },
     {
       "id": "app-rail-host-context-menu",
-      "title": "The local host's actions menu, opened by a right click on its rail avatar",
+      "title": "The local host's actions menu, opened by a right click on its rail avatar (after Escape on the feedback dialog)",
       "reference": "rail-host-context-menu",
       "mockup": false,
       "start": [
@@ -1369,6 +1369,15 @@
         "running,waiting,idle,exited"
       ],
       "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Nothing is sent until you press Send"
+        ],
         [
           "click",
           "id:host-rail-host-1",
@@ -1383,7 +1392,7 @@
     },
     {
       "id": "app-host-rail-expanded",
-      "title": "The expanded host rail beside the list, its hosts named and the foot's controls labelled",
+      "title": "The expanded host rail beside the list, its hosts named and the foot's controls labelled (after Escape on the host's actions menu)",
       "reference": null,
       "mockup": false,
       "start": [
@@ -1391,6 +1400,15 @@
         "running,waiting,idle,exited"
       ],
       "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Try the connection again"
+        ],
         [
           "click",
           "id:host-rail-toggle"
