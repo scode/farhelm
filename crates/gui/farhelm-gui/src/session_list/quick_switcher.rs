@@ -25,6 +25,10 @@
 //!   `mark`; the fill's ink on the selected row), found again on the escaped spelling the user sees
 //!   ([`mark_positions`], [`host_text::marked`]). A value that did not match is never marked; one that matched only
 //!   through a character shown as an escape marks less or nothing, since no escape is drawn partly marked.
+//! - **Host marks.** A session row draws its host's chosen mark before the host's name, the sidebar row's own mark
+//!   ([`row_marks::HostMark::of`], drawn by [`row_marks::host_mark`]) in the `--on-fill` ink on the selected row. The
+//!   switcher's read names each session's host only by id, so the mark comes from the registry the store holds as the
+//!   row is drawn; a host the registry cannot place yet draws no mark and keeps its name, as in the sidebar.
 //! - **Choosing.** The first match is selected after every edit; Up and Down move the selection, stopping at both
 //!   ends, and scroll it into view. Focus stays in the search field the whole time: the rows are not focusable
 //!   ([`OptionRow`]), and the field hands Up and Down over rather than moving its caret ([`TextInput::on_vertical`]).
@@ -80,8 +84,7 @@
 //! that scrolls. The layer manager places it near the window's top and caps its height
 //! ([`DialogPlacement::Top`]); the card keeps the old side margin by capping its own width.
 //!
-//! NOTE: Not built here: the host's chosen mark beside its name (host marks arrive with the sidebar's row marks). The
-//! old layout for windows narrower than 600 pixels is not ported either, because the window's minimum width is 720.
+//! NOTE: The old layout for windows narrower than 600 pixels is not ported, because the window's minimum width is 720.
 
 #[cfg(test)]
 mod tests;
@@ -96,6 +99,7 @@ use gpui::{
 };
 
 use super::menu::{self, AgentName};
+use super::row_marks::{self, HostMark};
 use super::selection;
 use super::status::{self, Badge};
 use crate::components::{
@@ -130,6 +134,13 @@ const STATUS_COLUMN: Pixels = px(24.);
 const AGENT_COLUMN: Pixels = px(70.);
 const COLUMN_GAP: Pixels = px(10.);
 const ROW_CHROME: Pixels = px(22.);
+/// `.quick-switcher-host`'s gap between the host's mark and its name.
+const HOST_MARK_GAP: Pixels = px(6.);
+
+/// A result row's host mark id prefix; the session's key follows it, then [`row_marks::host_mark`]'s own `-host`
+/// (`quick-switcher-session-<key>-host`). Not the row's own prefix, so that every id starting with
+/// `quick-switcher-row-` still names a row, as the tests find rows by it.
+const HOST_MARK_ID_PREFIX: &str = "quick-switcher-session-";
 
 /// The words of the cap notice, shown when the helm's listing cap cut the snapshot.
 pub(crate) const CAP_NOTICE: &str =
@@ -639,24 +650,29 @@ impl Render for QuickSwitcher {
                     let empty = matches.is_empty().then(|| {
                         announced("quick-switcher-empty", Role::Status, "No sessions match")
                     });
+                    // The host marks come from the registry as the store holds it when the frame is drawn, as the
+                    // templates do, not from the switcher's read, which names each host only by id.
+                    let store = session::current_store(cx);
+                    let collections = store.as_ref().map(|store| store.read(cx).collections());
                     let rows = matches
                         .iter()
                         .map(|&index| {
                             let row = &list.sessions[index];
                             let weak = weak.clone();
-                            result_row(
-                                row,
-                                query.trim(),
-                                selected == Some(Selected::Session(index)),
-                                step,
-                                columns,
-                                palette,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = weak
-                                    .update(cx, |switcher, cx| switcher.pick(index, window, cx));
-                            })
-                            .into_any_element()
+                            let selected = selected == Some(Selected::Session(index));
+                            // The sidebar row's own decision, so the two never disagree about where a session
+                            // runs or how its host looks. The selected row's mark takes the fill's ink in place of
+                            // the host's tint, as the old sheet's one `!important` rule had it for both rows.
+                            let ink = selected.then_some(palette.on_fill);
+                            let mark = collections
+                                .and_then(|collections| HostMark::of(row, collections, ink));
+                            result_row(row, query.trim(), selected, mark, step, columns, palette)
+                                .on_click(move |_, window, cx| {
+                                    let _ = weak.update(cx, |switcher, cx| {
+                                        switcher.pick(index, window, cx)
+                                    });
+                                })
+                                .into_any_element()
                         })
                         .collect();
                     (empty, rows)
@@ -1067,15 +1083,16 @@ impl Columns {
     }
 }
 
-/// One session's result row: its status mark, title, agent, host and working directory on one line, and an ended
-/// status's words on a second line under the title, since they do not fit the mark's column. Everything the host wrote
-/// is host text, each value its own element, with the characters `query` (already trimmed) matches in it marked. On the
-/// selected row the title and marks take the inverse ink and the quieter columns the dimmer one, as the old sheet's
-/// selected row did.
+/// One session's result row: its status mark, title, agent, host (its `host` mark, if any, before its name) and working
+/// directory on one line, and an ended status's words on a second line under the title, since they do not fit the
+/// mark's column. Everything the host wrote is host text, each value its own element, with the characters `query`
+/// (already trimmed) matches in it marked. On the selected row the title and marks take the inverse ink and the quieter
+/// columns the dimmer one, as the old sheet's selected row did.
 fn result_row(
     row: &SessionRow,
     query: &str,
     selected: bool,
+    host: Option<HostMark>,
     step: u64,
     columns: Columns,
     palette: &Palette,
@@ -1130,7 +1147,28 @@ fn result_row(
         host_text::marked(value, |shown| mark_positions(raw, shown, query), style)
     };
     let host_name = row.host_name.as_str();
-    let host = marked(host_name, &HostText::from_host(host_name)).into_any_element();
+    // `.quick-switcher-host`: the mark at the row slot's size, which never shrinks, then the name, which the column
+    // cuts with an ellipsis.
+    let mark_id = format!("{HOST_MARK_ID_PREFIX}{key}");
+    let host = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(HOST_MARK_GAP)
+        .min_w_0()
+        .children(host.map(|mark| {
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .child(row_marks::host_mark(&mark_id, mark, palette))
+        }))
+        .child(
+            marked(host_name, &HostText::from_host(host_name))
+                .min_w_0()
+                .truncate(),
+        )
+        .into_any_element();
     let cwd = row.info.cwd.as_str();
     let directory = marked(cwd, &HostText::from_host(cwd))
         .font_family(assets::TERMINAL_FONT)

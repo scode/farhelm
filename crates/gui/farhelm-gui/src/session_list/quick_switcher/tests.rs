@@ -7,10 +7,11 @@
 //! shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
 //! Later tests pick sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the
-//! session list makes once the pick has opened the session (`filters.rs`). The last ones drive the `tl:` templates
-//! section and the Quick launch row over a fleet that adds the helm's own host and three templates
-//! ([`template_fleet`]); what a pick then does inside New (the catalog wait, refusals) is the templates area's, tested
-//! in `templates::rows_tests`, so these stop at New opening with the template applied.
+//! session list makes once the pick has opened the session (`filters.rs`). Then come the `tl:` templates section and
+//! the Quick launch row, over a fleet that adds the helm's own host and three templates ([`template_fleet`]); what a
+//! pick then does inside New (the catalog wait, refusals) is the templates area's, tested in `templates::rows_tests`,
+//! so these stop at New opening with the template applied. The last ones pin the host mark a session row draws, over a
+//! registry with a host that chose its own mark ([`marked_hosts`]).
 //!
 //! No test here depends on glyph widths, so the simulated platform's fake text system is enough: the scroll test needs
 //! only the rows' heights, which come from the line height.
@@ -1774,5 +1775,96 @@ fn the_quick_launch_row_leaves_the_hosts_panel_only_for_a_launch(cx: &mut TestAp
     assert!(
         node(&nodes, "session-list").is_some(),
         "Sessions shows again"
+    );
+}
+
+// ---- Host marks ----------------------------------------------------------------------------------------------------
+
+/// The registry of the host-mark tests: the helm's own host (registry id 1, the red laptop) and host 3, which chose a
+/// teal rocket.
+fn marked_hosts() -> CollectionState {
+    hosts(&[
+        local(),
+        remote(3, "deploy@builder-east.example.invalid").mark("rocket", "teal"),
+    ])
+}
+
+/// The old `host-picker.spec.ts` case: the switcher shows where each session runs with its host's chosen mark, the same
+/// one the sidebar row draws, so a host the user marked can be told apart while searching every host. The frame's
+/// record carries no colors, so this pins what it can show; the inks (the host's tint, and the selected row's
+/// `--on-fill`) are the shared mark decision's, pinned in `row_marks_tests.rs`. Specified: over the local host and host
+/// 3's teal rocket, a reply of a on the local host and b on host 3 (named `builder-east`) draws a's mark as the laptop
+/// and b's as the rocket, b's an image named `Remote`, painted before `builder-east` with the old 6-pixel gap and level
+/// with it.
+#[gpui::test]
+fn a_row_draws_its_hosts_chosen_mark_before_the_hosts_name(cx: &mut TestAppContext) {
+    let mut fleet = fleet();
+    fleet.push(marked_hosts());
+    let mut main = open_main(cx, fleet);
+    let read = main.open_switcher();
+    main.answer(
+        read,
+        &[
+            session("a").host(1),
+            session("b").host(3).host_name("builder-east"),
+        ],
+        false,
+    );
+    assert!(
+        main.cx
+            .debug_bounds("quick-switcher-session-a-host:laptop")
+            .is_some()
+    );
+    let mark = main
+        .cx
+        .debug_bounds("quick-switcher-session-b-host:rocket")
+        .expect("b's row draws its host's rocket");
+    let nodes = frame(main.cx);
+    let image = node(&nodes, "quick-switcher-session-b-host").expect("b's mark is a node");
+    assert_eq!(
+        (image.role, image.label.as_deref()),
+        (Some(gpui::Role::Image), Some("Remote"))
+    );
+    let name = texts_within(&nodes, "quick-switcher-row-b")
+        .into_iter()
+        .find(|text| text.text.as_ref() == "builder-east")
+        .expect("b's row paints its host's name")
+        .bounds;
+    let gap = f32::from(name.left()) - f32::from(mark.right());
+    assert!(
+        (gap - 6.).abs() < 0.5,
+        "the mark {mark:?} sits 6 pixels before the name {name:?}"
+    );
+    assert!(
+        mark.center().y >= name.top() && mark.center().y <= name.bottom(),
+        "the mark {mark:?} is level with the name {name:?}"
+    );
+}
+
+/// The unplaced case drawn: the row keeps the host's name without a mark, as the sidebar keeps its, so a session is
+/// never shown without where it runs. Specified: with no host list in the store (checked first), a's row draws no host
+/// mark and still paints its host's name, `buildbox`.
+#[gpui::test]
+fn an_unplaced_host_draws_no_mark_and_keeps_its_name(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    assert!(
+        main.cx.update(
+            |_, cx| crate::session::current_store(cx).is_some_and(|store| store
+                .read(cx)
+                .collections()
+                .meta(Collection::Hosts)
+                .is_none())
+        ),
+        "the premise: the store holds no host list, so a's host cannot be placed"
+    );
+    let nodes = frame(main.cx);
+    assert!(node(&nodes, "quick-switcher-session-a-host").is_none());
+    assert!(
+        texts_within(&nodes, "quick-switcher-row-a")
+            .iter()
+            .any(|text| text.text.as_ref() == "buildbox"),
+        "a's row still names its host"
     );
 }
