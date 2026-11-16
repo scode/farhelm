@@ -64,7 +64,7 @@ mod tests;
 pub use banner::Banner;
 pub use button::{Button, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
-pub use copy_button::copy_button;
+pub use copy_button::{copy_button, copy_button_then};
 pub use copy_field::{CONFIRMATION, COPIED, CopyFeedback, CopyField};
 pub use custom_flags::CustomFlags;
 pub use dialog::DialogFrame;

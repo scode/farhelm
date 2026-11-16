@@ -5,10 +5,12 @@
 //! path. Each copies text frozen when the button was drawn, so what lands on the clipboard is what the user was shown.
 //! One shared control so they cannot drift apart; Copy plan and SSH help's commands use it.
 //!
-//! NOTE: No "copied" confirmation. Neither the old Copy plan nor SSH help's Copy showed one (reference commit
-//! `24bc0580`). The one old copy that did, the details bar's directory and command line, is a different control: a
-//! value drawn as itself rather than a labelled button, which says "✓ Copied" for a moment after each click
-//! ([`super::CopyField`]). Both write the clipboard through [`write`], so they cannot drift apart on how.
+//! NOTE: No "copied" confirmation of its own. Neither the old Copy plan nor SSH help's Copy showed one (reference commit
+//! `24bc0580`). The old Tensorlake key command's Copy did, as a line under the command ("Command copied") that its
+//! section drew, so [`copy_button_then`] tells the owner of each copy and the owner draws the line. The details bar's
+//! directory and command line confirm too, but they are a different control: a value drawn as itself rather than a
+//! labelled button, which says "✓ Copied" for a moment after each click ([`super::CopyField`]). All of them write the
+//! clipboard through [`write`], so they cannot drift apart on how.
 
 use gpui::{App, ClipboardItem, SharedString};
 
@@ -24,10 +26,26 @@ pub fn copy_button(
     help: HoverHelp,
     text: impl Into<SharedString>,
 ) -> Button {
+    copy_button_then(id, label, help, text, |_| {})
+}
+
+/// [`copy_button`], also running `copied` after each copy, for the one old copy button that confirmed a click with a
+/// line of its own (Settings → Tensorlake's "Command copied"); the owner draws and times the line. The text is written
+/// first, so `copied` follows a copy the user can already paste.
+pub fn copy_button_then(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    help: HoverHelp,
+    text: impl Into<SharedString>,
+    copied: impl Fn(&mut App) + 'static,
+) -> Button {
     let text = text.into();
     Button::new(id, label, help, Role::Button)
         .tier(Tier::Neutral)
-        .on_click(move |_, _, cx| write(&text, cx))
+        .on_click(move |_, _, cx| {
+            write(&text, cx);
+            copied(cx);
+        })
 }
 
 /// Put `text` on the system clipboard, byte for byte. Every copy control writes through here.

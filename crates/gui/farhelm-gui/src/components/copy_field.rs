@@ -70,7 +70,9 @@ const SHRINK: f32 = 3.;
 const GLYPH: f32 = 13.;
 const GLYPH_GAP: f32 = 4.;
 
-/// One copy field's confirmation state, held by the field's owner in an entity and handed to the field each frame.
+/// One copy field's confirmation state, held by the field's owner in an entity and handed to the field each frame. Its
+/// second user is Settings → Tensorlake's registration command, whose Copy ([`super::copy_button_then`]) confirms
+/// through one of these and draws "Command copied" while it lasts.
 ///
 /// The field reads it while drawing, so a change notifies the window that drew it, and the deadline that ends a
 /// confirmation needs no view to hold anything. Dropping it drops a pending deadline with it.
