@@ -197,6 +197,12 @@ impl RowLayers {
         !self.open.is_empty()
     }
 
+    /// The rows that opened a layer which may still be open, by key: a caller closing every row's menu needs only
+    /// these, and [`SessionList::close_menu`] checks each with the layer manager.
+    pub(super) fn opened_rows(&self) -> Vec<String> {
+        self.open.keys().cloned().collect()
+    }
+
     /// The layer `key`'s row opened that is still open, if any.
     fn still_open(&mut self, key: &str, window: &Window, cx: &App) -> Option<(LayerId, Opened)> {
         let open = *self.open.get(key)?;
@@ -580,8 +586,9 @@ pub(crate) fn launcher_wait(cx: &mut App) -> Option<&'static str> {
 }
 
 /// [`launcher_wait`]'s words while a launch is pending (the launcher holds one launch at a time). The old app had none:
-/// it never greyed these triggers, and its launcher refused a second opening silently.
-const LAUNCH_PENDING: &str = "Wait for the pending launch to finish";
+/// it never greyed these triggers, and its launcher refused a second opening silently. The Hosts attention list's
+/// Update, Update all and Always update say the same while a session launch is in flight (`super::attention`).
+pub(crate) const LAUNCH_PENDING: &str = "Wait for the pending launch to finish";
 
 /// Refuse `key`'s `work` (a Restart or a Replace about to be sent) while a host change is in flight, and say why on
 /// the session: the reason goes in the operation store's slot for the key, which the row, its menu and the header draw

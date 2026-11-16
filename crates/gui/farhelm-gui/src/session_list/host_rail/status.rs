@@ -34,7 +34,7 @@ use gpui::{
 
 use crate::hosts::identity::phase;
 use crate::hosts::offers::runs_newer_version;
-use crate::hosts::status::{Activity, HostStatus, Urgency};
+use crate::hosts::status::{HostStatus, Urgency};
 use crate::hosts::tone_ink;
 use crate::theme::{self, Palette, metrics};
 
@@ -68,7 +68,7 @@ pub(super) fn state_words(host: &HostView, status: &HostStatus, last_read: bool)
         // One sentence: the verb is capitalized where it stands alone (the attention list's working rows), not here.
         (Some(live), _) => {
             words.push_str("; ");
-            words.push_str(&verb(live.activity).to_lowercase());
+            words.push_str(&live.activity.verb().to_lowercase());
         }
         (None, Some(_)) => words.push_str("; update available"),
         (None, None) => {}
@@ -84,15 +84,6 @@ pub(super) fn state_words(host: &HostView, status: &HostStatus, last_read: bool)
         words.push_str("; setup or update needs attention; open Hosts for details");
     }
     words
-}
-
-/// The words for work going on on a host where they stand alone, as the attention list's working rows show them.
-fn verb(activity: Activity) -> &'static str {
-    match activity {
-        Activity::Setup => "Setting up",
-        Activity::Update => "Updating",
-        Activity::Uninstall => "Uninstalling",
-    }
 }
 
 /// Whether the host's mark is dimmed: it cannot serve sessions now. The old `rail_presentation`'s rule, which also
