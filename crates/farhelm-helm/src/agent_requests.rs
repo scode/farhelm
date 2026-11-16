@@ -14127,6 +14127,19 @@ mod tests {
         fail_destroy: std::sync::atomic::AtomicBool,
         /// How many times `destroy` was asked, failed or not.
         destroys: std::sync::atomic::AtomicUsize,
+        /// When set, `destroy` waits here once counted (and before failing,
+        /// if `fail_destroy` says so), so a test can hold a destruction past
+        /// the host reply bound and then let it end.
+        destroy_gate: std::sync::Mutex<Option<Arc<DestroyGate>>>,
+    }
+
+    /// Where [`RunningContainers::destroy`] waits while a test holds it: it
+    /// signals `entered` on arrival and goes on once `release` is signalled.
+    /// Both are `Notify` permits, so either side may come first.
+    #[derive(Default)]
+    struct DestroyGate {
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
     }
 
     /// What the stand-in's refused build says, so a test can find it in the
@@ -14216,6 +14229,11 @@ mod tests {
         ) -> anyhow::Result<crate::environment::Destroyed> {
             self.destroys
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let gate = self.destroy_gate.lock().unwrap().clone();
+            if let Some(gate) = gate {
+                gate.entered.notify_one();
+                gate.release.notified().await;
+            }
             if self.fail_destroy.load(std::sync::atomic::Ordering::SeqCst) {
                 anyhow::bail!("the stand-in container host refused the removal");
             }
@@ -17574,8 +17592,6 @@ mod tests {
             Deleted(u32),
             Sealed,
             NotFound,
-            /// Ends the connection instead of answering.
-            Hangs,
         }
 
         /// Script an environment supervisor that answers every
@@ -17586,11 +17602,27 @@ mod tests {
             peer: tokio::io::DuplexStream,
             answer: Answer,
         ) -> EnvironmentRequests {
+            spawn_seal_responder_holding(peer, answer, None).0
+        }
+
+        /// [`spawn_seal_responder`], except that with `release` given, each
+        /// answer waits for a `release` permit while the responder keeps
+        /// reading, so the helm's connection stays up and the request stays
+        /// unanswered for as long as a test needs (past the host reply
+        /// bound). The returned `Notify` gets a permit as each request
+        /// arrives, after it is recorded.
+        fn spawn_seal_responder_holding(
+            peer: tokio::io::DuplexStream,
+            answer: Answer,
+            release: Option<Arc<tokio::sync::Notify>>,
+        ) -> (EnvironmentRequests, Arc<tokio::sync::Notify>) {
             use farhelm_proto::ControlMsg;
             use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
             let seen: EnvironmentRequests = Default::default();
             let recorded = std::sync::Arc::clone(&seen);
+            let arrived = Arc::new(tokio::sync::Notify::new());
+            let arrivals = Arc::clone(&arrived);
             tokio::spawn(async move {
                 let (r, w) = tokio::io::split(peer);
                 let mut reader = FrameReader::new(r);
@@ -17598,7 +17630,18 @@ mod tests {
                 handshake(&mut reader, &mut writer, "supervisor")
                     .await
                     .expect("handshake");
+                // Shared with the held answers' tasks, which write once
+                // released while this loop goes on reading.
+                let writer = Arc::new(tokio::sync::Mutex::new(writer));
                 while let Ok(Some(frame)) = reader.read_frame().await {
+                    // The helm's heartbeat is a data frame on channel 0, which
+                    // falls due in a test that runs a paused clock past the
+                    // bound; it is no control message. A control frame that
+                    // does not decode still panics, so an encoding regression
+                    // fails loudly. Other control messages are not ours.
+                    if frame.kind != farhelm_proto::FrameKind::Control {
+                        continue;
+                    }
                     let ControlMsg::DeleteSessionOrSeal { req_id, session_id } =
                         parse_control(&frame).expect("decode request")
                     else {
@@ -17608,6 +17651,7 @@ mod tests {
                         .lock()
                         .unwrap()
                         .push(format!("seal-delete:{session_id}"));
+                    arrivals.notify_one();
                     let reply = match answer {
                         Answer::Deleted(remaining) => ControlMsg::SessionDeletedOrSealed {
                             req_id,
@@ -17625,14 +17669,25 @@ mod tests {
                             message: format!("no such session: {session_id}"),
                             create_unaccepted: false,
                         },
-                        Answer::Hangs => return,
                     };
-                    if writer.write_control(&reply).await.is_err() {
-                        return;
+                    match &release {
+                        None => {
+                            if writer.lock().await.write_control(&reply).await.is_err() {
+                                return;
+                            }
+                        }
+                        Some(release) => {
+                            let release = Arc::clone(release);
+                            let writer = Arc::clone(&writer);
+                            tokio::spawn(async move {
+                                release.notified().await;
+                                let _ = writer.lock().await.write_control(&reply).await;
+                            });
+                        }
                     }
                 }
             });
-            seen
+            (seen, arrived)
         }
 
         /// `DELETE /api/sessions/{ref}{query}` through the protected router:
@@ -17685,6 +17740,30 @@ mod tests {
             (status, String::from_utf8(body.to_vec()).unwrap())
         }
 
+        /// Poll `check` every 20 ms until it yields a value, failing after 20
+        /// seconds with what `failure` says then. The one polling loop of
+        /// these tests, for facts that have no change signal of their own to
+        /// wait on (see each caller).
+        async fn poll_until<T, Fut>(
+            mut check: impl FnMut() -> Fut,
+            failure: impl FnOnce() -> String,
+        ) -> T
+        where
+            Fut: std::future::Future<Output = Option<T>>,
+        {
+            let polled = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                loop {
+                    if let Some(value) = check().await {
+                        return value;
+                    }
+                    // sleep-ok: polling interval, bounded by the timeout above.
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await;
+            polled.unwrap_or_else(|_| panic!("{}", failure()))
+        }
+
         /// Wait until what `host` SHOWS (`ConnectionManager::state`, which
         /// a sealed host's record overrides) satisfies `predicate`. Polled,
         /// because the override does not pass through the connection's own
@@ -17694,25 +17773,19 @@ mod tests {
             host: HostId,
             mut predicate: impl FnMut(&HostState) -> bool,
         ) -> HostState {
-            tokio::time::timeout(std::time::Duration::from_secs(20), async {
-                loop {
-                    if let Some(state) = h.manager.state(host)
-                        && predicate(&state)
-                    {
-                        return state;
-                    }
-                    // The seal record has no change channel of its own, and the timeout above bounds this.
-                    // sleep-ok: polling interval for the shown state of a sealed host.
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
-            })
+            poll_until(
+                || {
+                    let shown = h.manager.state(host).filter(|state| predicate(state));
+                    async move { shown }
+                },
+                || {
+                    format!(
+                        "host {host} never showed the expected state; last {:?}",
+                        h.manager.state(host)
+                    )
+                },
+            )
             .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "host {host} never showed the expected state; last {:?}",
-                    h.manager.state(host)
-                )
-            })
         }
 
         /// `POST /api/hosts/{id}/{verb}` through the protected router.
@@ -17846,15 +17919,27 @@ mod tests {
 
         /// Why: when the environment's own Farhelm cannot be asked, or does
         /// not answer, nothing may be destroyed that the user did not confirm
-        /// in the warned whole-environment Delete. Spec: with the supervisor
-        /// ending the connection instead of answering, and with the host held
-        /// as suspended so nothing is connected, the Delete answers 409 with
-        /// the "nothing decided" marker, and the environment stays.
+        /// in the warned whole-environment Delete. Spec: with the connection
+        /// to the supervisor ending after the request arrived and before any
+        /// answer, and with the host held as suspended so nothing is
+        /// connected, the Delete answers 409 with the "nothing decided"
+        /// marker, each well inside the host reply bound, and the environment
+        /// stays.
+        ///
+        /// The connection is ended by the harness rather than by the peer
+        /// returning: the splice keeps the helm's side open after its peer
+        /// returns (`rest_harness`'s module docs) until the helm next writes,
+        /// which can be after the bound, where the route answers its 504
+        /// instead of a decision.
         #[farhelm_testtrace::test]
         async fn a_delete_that_cannot_be_decided_offers_nothing_but_the_warning() {
             let (h, _, _, containers) = container_fleet().await;
             let (client_side, peer) = tokio::io::duplex(64 * 1024);
-            let seen = spawn_seal_responder(peer, Answer::Hangs);
+            // Never released: the connection ends before any answer, so the
+            // held answer's value never matters.
+            let never = Arc::new(tokio::sync::Notify::new());
+            let (seen, arrived) =
+                spawn_seal_responder_holding(peer, Answer::Deleted(1), Some(never));
             let owned = owned_environment(
                 &h,
                 farhelm_proto::ProviderKind::Podman,
@@ -17863,9 +17948,13 @@ mod tests {
             )
             .await;
 
-            let (status, unasked, text) = delete(&h, owned, "one", ENVIRONMENT_DELETE).await;
+            let call = spawn_environment_delete(&h, owned, "one", ENVIRONMENT_DELETE);
+            premise(&arrived, "the Delete reached the environment's supervisor").await;
+            h.fleet.kill_connection(owned);
+            let (status, unasked, text, waited) = call.await.unwrap();
             assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
             assert!(unasked, "a lost answer is marked nothing-decided: {text}");
+            assert!(waited < crate::sessions::HOST_REPLY_BOUND, "{waited:?}");
             assert_eq!(*seen.lock().unwrap(), ["seal-delete:one"]);
 
             assert!(
@@ -17879,12 +17968,16 @@ mod tests {
                     )
                     .await
             );
-            let (status, unasked, text) = delete(&h, owned, "two", ENVIRONMENT_DELETE).await;
+            let (status, unasked, text, waited) =
+                spawn_environment_delete(&h, owned, "two", ENVIRONMENT_DELETE)
+                    .await
+                    .unwrap();
             assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
             assert!(
                 unasked,
                 "an environment the helm cannot ask is marked too: {text}"
             );
+            assert!(waited < crate::sessions::HOST_REPLY_BOUND, "{waited:?}");
             assert_eq!(
                 *seen.lock().unwrap(),
                 ["seal-delete:one"],
@@ -18101,6 +18194,440 @@ mod tests {
                 !registered(&h, owned).await,
                 "Retry finishes the destruction"
             );
+        }
+
+        // -------------------------------------------------------------
+        // Answering within the host reply bound
+        // -------------------------------------------------------------
+        //
+        // The GUI sends these routes over its ordered UI channel, which
+        // treats a command unanswered for 30 seconds as a broken connection,
+        // so each answers by `HOST_REPLY_BOUND` and carries on. Each test
+        // below holds the work past the bound on a paused clock, checks the
+        // exact 504, and then lets the work end, checking that its outcome
+        // lands in the state the helm pushes. The words are written out here
+        // so that changing them is a deliberate change to these tests too.
+
+        /// The 504 of an environment Delete of one session still running at
+        /// the bound.
+        const SESSION_DELETE_CARRIES_ON: &str = "deleting this session did not finish within 20 \
+             seconds; it may still delete the session, along with the environment if this was its \
+             last session, and the session list will show the result";
+
+        /// The 504 of a warned whole-environment Delete still running at the
+        /// bound.
+        const WHOLE_DELETE_CARRIES_ON: &str = "deleting the environment did not finish within 20 \
+             seconds; the deletion carries on, and the hosts list will show the result";
+
+        /// The 504 of a Retry of a failed destruction still running at the
+        /// bound.
+        const RETRY_DELETE_CARRIES_ON: &str = "retrying the deletion did not finish within 20 \
+             seconds; it carries on, and the host's state in the hosts list will show the result";
+
+        /// How long past the bound a timed request may stay unanswered before
+        /// the test fails, so that a route without its bound fails here with a
+        /// message rather than after its own minutes-long deadlines.
+        const PAST_THE_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
+
+        /// How long a test waits for a premise it observes (a request reaching
+        /// the supervisor, a destruction reaching the provider).
+        const PREMISE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+        /// What [`spawn_timed`] yields: the status, whether the "nothing
+        /// decided" marker came with it, the body, and how long the reply
+        /// took on the tokio clock.
+        type TimedReply = (axum::http::StatusCode, bool, String, std::time::Duration);
+
+        /// Send `method uri` through the protected router on a task of its
+        /// own, timed on the tokio clock from just before the send, so the
+        /// test can steer the environment while the route waits.
+        fn spawn_timed(
+            h: &Harness,
+            method: &str,
+            uri: String,
+        ) -> tokio::task::JoinHandle<TimedReply> {
+            use tower::ServiceExt as _;
+            let request = axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("host", "127.0.0.1:7433")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let router = h.router();
+            tokio::spawn(async move {
+                let started = tokio::time::Instant::now();
+                let response = router.oneshot(request).await.unwrap();
+                let waited = started.elapsed();
+                let status = response.status();
+                let unasked = response
+                    .headers()
+                    .get(farhelm_proto::http::ENVIRONMENT_UNASKED_HEADER)
+                    .is_some();
+                let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                    .await
+                    .unwrap();
+                let body = String::from_utf8(body.to_vec()).unwrap();
+                (status, unasked, body, waited)
+            })
+        }
+
+        /// The environment Delete of session `id` on `host`, timed.
+        fn spawn_environment_delete(
+            h: &Harness,
+            host: HostId,
+            id: &str,
+            query: &str,
+        ) -> tokio::task::JoinHandle<TimedReply> {
+            spawn_timed(
+                h,
+                "DELETE",
+                format!("/api/sessions/{}{query}", h.session_ref(host, id)),
+            )
+        }
+
+        /// Fail unless `call` answers no sooner than the host reply bound and
+        /// within a second of it on the tokio clock, with a 504 whose whole
+        /// text is `text` and without the "nothing decided" marker, which only
+        /// a decision may carry.
+        async fn carries_on_at_the_bound(call: tokio::task::JoinHandle<TimedReply>, text: &str) {
+            let bound = crate::sessions::HOST_REPLY_BOUND;
+            let (status, unasked, body, waited) =
+                tokio::time::timeout(bound + PAST_THE_BOUND, call)
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("no reply {PAST_THE_BOUND:?} past the host reply bound")
+                    })
+                    .unwrap();
+            assert!(
+                waited >= bound && waited < bound + std::time::Duration::from_secs(1),
+                "the route answered after {waited:?}: {status} {body}"
+            );
+            assert_eq!(
+                (status, body.as_str()),
+                (axum::http::StatusCode::GATEWAY_TIMEOUT, text)
+            );
+            assert!(!unasked, "the bound's answer is not a decision");
+        }
+
+        /// Wait for a permit on `notify`, failing after [`PREMISE_WAIT`] with
+        /// `what` named as the premise that did not hold.
+        async fn premise(notify: &tokio::sync::Notify, what: &str) {
+            tokio::time::timeout(PREMISE_WAIT, notify.notified())
+                .await
+                .unwrap_or_else(|_| panic!("premise: {what}"));
+        }
+
+        /// The ids of the sessions the helm lists for `host`.
+        async fn listed(h: &Harness, host: HostId) -> Vec<String> {
+            h.store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect()
+        }
+
+        /// Wait until the helm no longer lists `id` on `host`. Polled rather
+        /// than woken by the fleet's change bump (`FleetEvents`, which the
+        /// forgetting fires), because that bump fires for any change in the
+        /// fleet, so a test would still have to read the listing after each.
+        async fn await_unlisted(h: &Harness, host: HostId, id: &str) {
+            poll_until(
+                || async move {
+                    (!listed(h, host).await.iter().any(|session| session == id)).then_some(())
+                },
+                || format!("session {id} stayed listed on host {host}"),
+            )
+            .await
+        }
+
+        /// Wait until `host` is no longer registered, polled for the same
+        /// reason as [`await_unlisted`].
+        async fn await_unregistered(h: &Harness, host: HostId) {
+            poll_until(
+                || async move { (!registered(h, host).await).then_some(()) },
+                || {
+                    format!(
+                        "host {host} stayed registered; it shows {:?}",
+                        h.manager.state(host)
+                    )
+                },
+            )
+            .await
+        }
+
+        /// Hold [`RunningContainers::destroy`] at a fresh gate from now on.
+        fn hold_destruction(containers: &RunningContainers) -> Arc<DestroyGate> {
+            let gate = Arc::new(DestroyGate::default());
+            *containers.destroy_gate.lock().unwrap() = Some(Arc::clone(&gate));
+            gate
+        }
+
+        /// How many times the stand-in provider was asked to destroy.
+        fn destroys(containers: &RunningContainers) -> usize {
+            containers
+                .destroys
+                .load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        /// Why: the environment's own Farhelm may take minutes to answer a
+        /// Delete, longer than the GUI's channel tolerates, so the route must
+        /// answer at the bound, and the Delete must still end the way the
+        /// late answer says, with nobody waiting.
+        ///
+        /// Spec: for a late `Deleted` and a late `Sealed`, with the
+        /// environment's supervisor holding its answer (the request observed
+        /// arriving), on a paused clock, the route answers
+        /// [`SESSION_DELETE_CARRIES_ON`] at `HOST_REPLY_BOUND`, while the
+        /// Delete still holds the host's provisioning lock and nothing has
+        /// changed: the session listed, nothing destroyed. Once the answer is
+        /// released, a `Deleted` stops listing the session and keeps the
+        /// environment; a `Sealed` shows the host as being deleted while its
+        /// destruction is held, then forgets the host.
+        #[farhelm_testtrace::test]
+        async fn an_environment_delete_answers_at_the_bound_and_its_late_answer_lands() {
+            for (label, late) in [("Deleted", Answer::Deleted(1)), ("Sealed", Answer::Sealed)] {
+                let (h, _, _, containers) = container_fleet().await;
+                let destruction = hold_destruction(&containers);
+                let release = Arc::new(tokio::sync::Notify::new());
+                let (client_side, peer) = tokio::io::duplex(64 * 1024);
+                let (seen, arrived) =
+                    spawn_seal_responder_holding(peer, late, Some(Arc::clone(&release)));
+                let owned = owned_environment(
+                    &h,
+                    farhelm_proto::ProviderKind::Podman,
+                    client_side,
+                    vec![session("one", 50), session("two", 51)],
+                )
+                .await;
+
+                tokio::time::pause();
+                let call = spawn_environment_delete(&h, owned, "one", ENVIRONMENT_DELETE);
+                premise(&arrived, "the Delete reached the environment's supervisor").await;
+                assert_eq!(*seen.lock().unwrap(), ["seal-delete:one"], "{label}");
+                carries_on_at_the_bound(call, SESSION_DELETE_CARRIES_ON).await;
+                assert!(
+                    h.manager.try_host_provision_lock(owned).is_none(),
+                    "{label}: the Delete still runs after its reply"
+                );
+                assert!(
+                    listed(&h, owned).await.contains(&"one".to_string()),
+                    "{label}: nothing changed before the answer"
+                );
+                assert_eq!(destroys(&containers), 0, "{label}");
+
+                release.notify_one();
+                tokio::time::resume();
+                if let Answer::Sealed = late {
+                    premise(&destruction.entered, "the seal's destruction began").await;
+                    assert!(
+                        matches!(
+                            h.manager.state(owned),
+                            Some(HostState::Deleting { failure: None })
+                        ),
+                        "a sealed environment shows as being deleted: {:?}",
+                        h.manager.state(owned)
+                    );
+                    destruction.release.notify_one();
+                    await_unregistered(&h, owned).await;
+                    assert_eq!(destroys(&containers), 1, "{label}: destroyed exactly once");
+                } else {
+                    await_unlisted(&h, owned, "one").await;
+                    assert!(registered(&h, owned).await, "the environment stays");
+                    assert_eq!(destroys(&containers), 0);
+                }
+            }
+        }
+
+        /// Why: an environment Delete first waits up to a minute for its
+        /// host's turn behind another one (a bulk Delete's queue, say), and
+        /// that wait alone outlasts the GUI's channel watchdog; the 504's
+        /// words must hold then too, when the environment's Farhelm has not
+        /// even been asked.
+        ///
+        /// Spec: with the host's turn among environment Deletes held by the
+        /// test, on a paused clock, the route answers
+        /// [`SESSION_DELETE_CARRIES_ON`] at `HOST_REPLY_BOUND` with the
+        /// environment's supervisor not asked; once the turn is given back,
+        /// the Delete asks it, and its `Deleted` stops listing the session.
+        #[farhelm_testtrace::test]
+        async fn an_environment_delete_waiting_for_its_turn_answers_at_the_bound_then_proceeds() {
+            let (h, _, _, _) = container_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let (seen, arrived) = spawn_seal_responder_holding(peer, Answer::Deleted(1), None);
+            let owned = owned_environment(
+                &h,
+                farhelm_proto::ProviderKind::Podman,
+                client_side,
+                vec![session("one", 50), session("two", 51)],
+            )
+            .await;
+            let turn = h.manager.environment_delete_turn(owned).await;
+
+            tokio::time::pause();
+            let call = spawn_environment_delete(&h, owned, "one", ENVIRONMENT_DELETE);
+            carries_on_at_the_bound(call, SESSION_DELETE_CARRIES_ON).await;
+            assert!(
+                seen.lock().unwrap().is_empty(),
+                "the Delete was still waiting for its turn"
+            );
+
+            drop(turn);
+            tokio::time::resume();
+            premise(&arrived, "the Delete went on to ask once it had its turn").await;
+            assert_eq!(*seen.lock().unwrap(), ["seal-delete:one"]);
+            await_unlisted(&h, owned, "one").await;
+            assert!(registered(&h, owned).await, "the environment stays");
+        }
+
+        /// Why: the warned whole-environment Delete destroys the machine
+        /// through host removal's provider calls, which can outlast the GUI's
+        /// channel watchdog; it must answer at the bound, show the host as
+        /// being deleted meanwhile, and still end.
+        ///
+        /// Spec: with the provider's destruction held (observed entered), on
+        /// a paused clock, `?delete_sandbox=true` answers
+        /// [`WHOLE_DELETE_CARRIES_ON`] at `HOST_REPLY_BOUND` while the host
+        /// shows `Deleting` with no failure, still registered and its
+        /// provisioning lock held, and its supervisor is never asked. Once
+        /// released: a destruction that succeeds forgets the host; one that
+        /// fails leaves the host registered and no longer `Deleting`.
+        #[farhelm_testtrace::test]
+        async fn a_whole_environment_delete_answers_at_the_bound_and_carries_on() {
+            for fails in [false, true] {
+                let (h, _, _, containers) = container_fleet().await;
+                let destruction = hold_destruction(&containers);
+                containers
+                    .fail_destroy
+                    .store(fails, std::sync::atomic::Ordering::SeqCst);
+                let (client_side, peer) = tokio::io::duplex(64 * 1024);
+                let seen = spawn_seal_responder(peer, Answer::Sealed);
+                let owned = owned_environment(
+                    &h,
+                    farhelm_proto::ProviderKind::Podman,
+                    client_side,
+                    vec![session("one", 50)],
+                )
+                .await;
+
+                tokio::time::pause();
+                let call = spawn_environment_delete(&h, owned, "one", "?delete_sandbox=true");
+                premise(&destruction.entered, "the destruction reached the provider").await;
+                carries_on_at_the_bound(call, WHOLE_DELETE_CARRIES_ON).await;
+                assert!(
+                    matches!(
+                        h.manager.state(owned),
+                        Some(HostState::Deleting { failure: None })
+                    ),
+                    "fails {fails}: the host shows as being deleted: {:?}",
+                    h.manager.state(owned)
+                );
+                assert!(
+                    h.manager.try_host_provision_lock(owned).is_none(),
+                    "fails {fails}: the deletion still runs after its reply"
+                );
+                assert!(registered(&h, owned).await, "fails {fails}");
+
+                destruction.release.notify_one();
+                tokio::time::resume();
+                if fails {
+                    shown_state(&h, owned, |state| {
+                        !matches!(state, HostState::Deleting { .. })
+                    })
+                    .await;
+                    assert!(registered(&h, owned).await, "a late failure keeps the host");
+                } else {
+                    await_unregistered(&h, owned).await;
+                }
+                assert_eq!(destroys(&containers), 1, "fails {fails}");
+                assert!(
+                    seen.lock().unwrap().is_empty(),
+                    "fails {fails}: the whole-environment Delete asks no supervisor"
+                );
+            }
+        }
+
+        /// Why: Retry runs the same destruction again and can outlast the
+        /// GUI's channel watchdog the same way; unlike the whole-environment
+        /// Delete, its late outcome must stay visible through the seal record,
+        /// a new failure included, since that is what the 504 points to.
+        ///
+        /// Spec: with a sealed environment whose destruction failed (shown as
+        /// `Deleting` with the reason) and the provider's next destruction
+        /// held (observed entered), on a paused clock, Retry answers
+        /// [`RETRY_DELETE_CARRIES_ON`] at `HOST_REPLY_BOUND` while the host
+        /// shows `Deleting` with no failure and its provisioning lock is
+        /// held. Once released: success forgets the host; a new failure shows
+        /// the host `Deleting` with that reason again, still registered.
+        #[farhelm_testtrace::test]
+        async fn a_retry_answers_at_the_bound_and_its_outcome_shows_on_the_host() {
+            for fails in [false, true] {
+                let (h, _, _, containers) = container_fleet().await;
+                containers
+                    .fail_destroy
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                let (client_side, peer) = tokio::io::duplex(64 * 1024);
+                spawn_seal_responder(peer, Answer::Sealed);
+                let owned = owned_environment(
+                    &h,
+                    farhelm_proto::ProviderKind::Podman,
+                    client_side,
+                    vec![session("last", 50)],
+                )
+                .await;
+                let (status, _, text) = delete(&h, owned, "last", ENVIRONMENT_DELETE).await;
+                assert!(
+                    !status.is_success(),
+                    "premise: the sealing Delete's destruction failed: {text}"
+                );
+                assert!(
+                    matches!(
+                        h.manager.state(owned),
+                        Some(HostState::Deleting { failure: Some(_) })
+                    ),
+                    "premise: the failure shows, with Retry: {:?}",
+                    h.manager.state(owned)
+                );
+
+                let destruction = hold_destruction(&containers);
+                containers
+                    .fail_destroy
+                    .store(fails, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::pause();
+                let call = spawn_timed(&h, "POST", format!("/api/hosts/{owned}/retry-delete"));
+                premise(&destruction.entered, "the Retry reached the provider").await;
+                carries_on_at_the_bound(call, RETRY_DELETE_CARRIES_ON).await;
+                assert!(
+                    matches!(
+                        h.manager.state(owned),
+                        Some(HostState::Deleting { failure: None })
+                    ),
+                    "fails {fails}: the retried host shows as being deleted: {:?}",
+                    h.manager.state(owned)
+                );
+                assert!(
+                    h.manager.try_host_provision_lock(owned).is_none(),
+                    "fails {fails}: the Retry still runs after its reply"
+                );
+
+                destruction.release.notify_one();
+                tokio::time::resume();
+                if fails {
+                    let failed = shown_state(&h, owned, |state| {
+                        matches!(state, HostState::Deleting { failure: Some(_) })
+                    })
+                    .await;
+                    assert!(
+                        matches!(&failed, HostState::Deleting { failure: Some(reason) } if reason.contains("refused the removal")),
+                        "{failed:?}"
+                    );
+                    assert!(registered(&h, owned).await, "a failed Retry keeps the host");
+                } else {
+                    await_unregistered(&h, owned).await;
+                }
+                assert_eq!(destroys(&containers), 2, "fails {fails}");
+            }
         }
     }
 }
