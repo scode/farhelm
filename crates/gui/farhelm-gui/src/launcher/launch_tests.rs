@@ -48,7 +48,19 @@ pub(crate) fn creates_answering(
     cx: &mut VisualTestContext,
     catalog: &serde_json::Value,
 ) -> Vec<FakeCommand> {
-    let mut creates = Vec::new();
+    creates_answering_with(helm, cx, catalog, &empty_history()).0
+}
+
+/// [`creates_answering`] with every launch-history read answered with `history`: the creates, left unanswered, and how
+/// many history reads the window made, for tests that check whether a quick launch waited for the host's last folder.
+/// Every other command is answered as it arrives.
+pub(crate) fn creates_answering_with(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    catalog: &serde_json::Value,
+    history: &serde_json::Value,
+) -> (Vec<FakeCommand>, usize) {
+    let (mut creates, mut history_reads) = (Vec::new(), 0);
     loop {
         cx.run_until_parked();
         let mut answered = false;
@@ -59,8 +71,9 @@ pub(crate) fn creates_answering(
                 helm.reply(command.id, 200, Some(catalog.clone()));
                 answered = true;
             } else if command.path.starts_with("/api/launch-history") {
-                // A host with no history, so New's folder default settles on `~` (a quick launch waits for it).
-                helm.reply(command.id, 200, Some(empty_history()));
+                // The host's history: New's folder default settles from it (a quick launch waits for it).
+                history_reads += 1;
+                helm.reply(command.id, 200, Some(history.clone()));
                 answered = true;
             } else {
                 helm.reply(command.id, 200, None);
@@ -69,7 +82,7 @@ pub(crate) fn creates_answering(
         }
         settle(cx);
         if !answered {
-            return creates;
+            return (creates, history_reads);
         }
     }
 }
