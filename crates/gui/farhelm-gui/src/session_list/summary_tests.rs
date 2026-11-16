@@ -1,11 +1,14 @@
 //! Tests of a session row's hover help beside the sidebar: the summary card on the row's open control (what it says for
-//! each kind of session, in either density) and every row mark asking for the beside placement, with its ring.
+//! each kind of session, in either density, from the pointer and on keyboard focus) and every row mark asking for the
+//! beside placement, with its ring, the marks that hold focus showing their own help on keyboard focus too.
 //!
 //! What the card shows is pinned through [`Summary::of`], a pure function, for a running, an idle, an exited and a
 //! managed-checkout session; that the row shows it, beside the sidebar and with those words painted, is pinned through
 //! the real main view over the helm client's fake, as the list's other tests run it, reading the frame from GPUI's
 //! driver record and the showing tooltip from the layer manager ([`layers::shown_tooltip`]: its side and the ring it
 //! painted). Ages and stamps are counted from GPUI's test clock, which starts at [`TEST_NOW`].
+
+use std::time::Duration;
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::Preferences;
@@ -303,6 +306,34 @@ fn card_words(cx: &mut VisualTestContext, key: &str) -> Vec<String> {
         .collect()
 }
 
+/// The words [`card_words`] reads from the card of a [`local_session`] keyed `key` (its directory is `/home/user/src/`
+/// and the key), top to bottom: the header, each fact under its label, and the footer, with the times in the app's zone
+/// as a test pins it five hours west of UTC (`local_time::pin(-5 * 3_600, cx)`).
+fn local_card_words(key: &str) -> Vec<String> {
+    [
+        "Fix the widget",
+        "Running",
+        "Codex · YOLO · Model: gpt-5 · Effort: High",
+        "Host",
+        "Local (this machine)",
+        "Directory",
+        &format!("/home/user/src/{key}"),
+        "Started",
+        "2025-07-01 17:59:58",
+        "Last active",
+        "2m · 2025-07-01 18:57:58",
+        CLICK_HINT,
+        ACTIONS_HINT,
+    ]
+    .map(str::to_owned)
+    .into()
+}
+
+/// Whether `key`'s card is in the frame at all: the layer manager draws its view only while it shows.
+fn card_drawn(cx: &mut VisualTestContext, key: &str) -> bool {
+    node(&frame(cx), &format!("{SUMMARY_ID_PREFIX}{key}")).is_some()
+}
+
 /// The theme's accent and on-fill inks as the ring paints them.
 fn ring_inks(cx: &mut VisualTestContext) -> (Hsla, Hsla) {
     cx.update(|_, cx| {
@@ -342,24 +373,7 @@ fn a_rows_title_shows_its_summary_card_beside_the_sidebar_with_its_ring(cx: &mut
         cx.debug_bounds("tooltip-notch").is_some(),
         "the notch shows"
     );
-    assert_eq!(
-        card_words(cx, "b"),
-        [
-            "Fix the widget",
-            "Running",
-            "Codex · YOLO · Model: gpt-5 · Effort: High",
-            "Host",
-            "Local (this machine)",
-            "Directory",
-            "/home/user/src/b",
-            "Started",
-            "2025-07-01 17:59:58",
-            "Last active",
-            "2m · 2025-07-01 18:57:58",
-            CLICK_HINT,
-            ACTIONS_HINT,
-        ]
-    );
+    assert_eq!(card_words(cx, "b"), local_card_words("b"));
 
     let shown = card_over_title(cx, "a", "Fix the widget");
     assert_eq!(shown.side(), TooltipSide::Beside);
@@ -385,6 +399,21 @@ fn assert_mark_help(
     bordered: bool,
 ) {
     let shown = shown_over(cx, row, target);
+    check_mark_help(cx, &shown, target, words, color, radius, bordered);
+}
+
+/// [`assert_mark_help`]'s checks of `shown`, however it was called up (the pointer resting on the mark, or keyboard
+/// focus landing on it): the mark's own help beside the sidebar, saying or starting with `words`, its ring in `color`
+/// with `radius` corners on the mark's own bounds (inside its 1-pixel border when `bordered`).
+fn check_mark_help(
+    cx: &mut VisualTestContext,
+    shown: &ShownTooltip,
+    target: &str,
+    words: &str,
+    color: Hsla,
+    radius: Pixels,
+    bordered: bool,
+) {
     assert_eq!(shown.side(), TooltipSide::Beside, "{target}");
     assert!(
         shown.text.starts_with(words),
@@ -565,5 +594,186 @@ fn a_compact_row_shows_the_same_card_with_its_hidden_folder(cx: &mut TestAppCont
         ),
     ] {
         assert_mark_help(cx, "session-row-x", target, words, accent, px(0.), false);
+    }
+}
+
+// ---- On keyboard focus ----------------------------------------------------------------------------------------------
+
+/// Press `chord` and draw the frame it changes, which is where a control sees keyboard focus land on it.
+fn key(cx: &mut VisualTestContext, chord: &str) {
+    test_support::keys(cx, chord);
+    test_support::redraw(cx);
+}
+
+/// The tooltip showing now, if any.
+fn showing(cx: &mut VisualTestContext) -> Option<ShownTooltip> {
+    cx.update(|window, cx| layers::shown_tooltip(window, cx))
+}
+
+/// Focus on `a`'s actions button, as the keyboard leaves it when Escape closes the menu a click opened there, so the
+/// next Tab is a keyboard move onto `b`'s open control (the dot before it is no tab stop). Checks that premise. The
+/// pointer is then parked in the middle of the main pane, away from the rows, so every help a test sees afterwards is
+/// what keyboard focus called up, not the pointer's help on the button the click left it resting on.
+fn focus_on_as_menu_button(cx: &mut VisualTestContext) {
+    test_support::click(cx, "session-menu-a");
+    key(cx, "escape");
+    let sidebar_edge = test_support::bounds(cx, "session-row-a").right();
+    let viewport = cx.update(|window, _| window.viewport_size());
+    let parked = point((sidebar_edge + viewport.width) / 2., viewport.height * 0.6);
+    cx.simulate_mouse_move(parked, None, Modifiers::none());
+    test_support::redraw(cx);
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-menu-a"),
+        "the premise: focus is on a's actions button"
+    );
+}
+
+/// Let the hover delay pass and draw the frame that shows what it woke.
+fn wait_hover_delay(cx: &mut VisualTestContext) {
+    test_support::advance(cx, layers::HOVER_DELAY);
+    test_support::redraw(cx);
+}
+
+/// SPEC.md, "Session list": the summary card appears "from the title or any unmarked part of the open button, in either
+/// density and on keyboard focus", and the old app showed it when Tab landed on the open button, after the same 300 ms
+/// as for the pointer, taking it down when focus left. Without it a keyboard user never sees the card, which is where
+/// the facts the row abbreviates are recorded in full, the directory above all. Specified, over the open session `a`
+/// and a running local session `b`: Tab from a's actions button onto b's open control shows nothing 1 ms before the
+/// hover delay and b's card once it ends, beside the sidebar, reporting `Running — open this session`, with the accent
+/// ring on b's open control and the notch drawn, its painted words exactly those the pointer's card paints (in the
+/// same pinned zone); Shift+Tab back onto a's actions button takes the card down and shows that button's own help
+/// instead, at once; Shift+Tab onto the open row a's open control shows a's card with its ring in the on-fill ink;
+/// Escape puts it away, and it stays away past the delay while focus rests there.
+#[gpui::test]
+fn tab_onto_a_rows_open_control_shows_its_card_until_focus_moves_on(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_rows(cx, &[local_session("a"), local_session("b")], false);
+    cx.update(|_, cx| local_time::pin(-5 * 3_600, cx));
+    let (accent, on_fill) = ring_inks(cx);
+    focus_on_as_menu_button(cx);
+    key(cx, "tab");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-row-b"),
+        "the premise: Tab reached b's open control"
+    );
+    test_support::advance(cx, layers::HOVER_DELAY - Duration::from_millis(1));
+    test_support::redraw(cx);
+    assert!(showing(cx).is_none(), "nothing before the hover delay");
+    test_support::advance(cx, Duration::from_millis(1));
+    test_support::redraw(cx);
+    let Some(shown) = showing(cx) else {
+        panic!("b's card shows once the delay ends");
+    };
+    assert_eq!(shown.side(), TooltipSide::Beside);
+    assert_eq!(shown.text, "Running — open this session");
+    let control = node(&frame(cx), "session-row-b")
+        .expect("b's open control is drawn")
+        .bounds;
+    assert_eq!(
+        shown
+            .ring()
+            .map(|ring| (ring.bounds, ring.color, ring.radius)),
+        Some((control, accent, px(0.))),
+        "the ring on b's open control"
+    );
+    assert!(
+        cx.debug_bounds("tooltip-notch").is_some(),
+        "the notch shows"
+    );
+    assert_eq!(card_words(cx, "b"), local_card_words("b"));
+
+    key(cx, "shift-tab");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-menu-a"),
+        "the premise: Shift+Tab went back to a's actions button"
+    );
+    assert!(!card_drawn(cx, "b"), "b's card went with focus");
+    let shown = showing(cx).expect("the actions button's own help shows at once");
+    assert!(
+        shown.text.starts_with("Session actions: "),
+        "the button's help, not a card: {:?}",
+        shown.text
+    );
+
+    key(cx, "shift-tab");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-row-a"),
+        "the premise: Shift+Tab reached the open row's open control"
+    );
+    let Some(shown) = showing(cx) else {
+        panic!("a's card shows at once, in the grace the button's help left");
+    };
+    assert_eq!(shown.text, "Running — open this session");
+    assert_eq!(shown.ring().map(|ring| ring.color), Some(on_fill));
+    assert_eq!(card_words(cx, "a"), local_card_words("a"));
+
+    key(cx, "escape");
+    wait_hover_delay(cx);
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-row-a"),
+        "the premise: focus still rests on a's open control"
+    );
+    assert!(showing(cx).is_none(), "Escape put the card away");
+    assert!(!card_drawn(cx, "a"), "and it is not painted");
+}
+
+/// The old app showed every focus-visible control's help on keyboard focus, and inside a row a focused mark is what
+/// the user is on, so its own help must show rather than the card of the open control around it; that help sits beside
+/// the sidebar like the pointer's, or it would cover the rows below. Specified, over the open session `a` and a running
+/// local session `b` with one unread notification: Tab onto b's open control shows its card; Tab onto b's bell shows
+/// the bell's own help (`Notifications: 1 unread; click to list them`) at once, beside the sidebar with the accent ring
+/// square on the bell, and b's card is no longer painted; Tab onto b's actions button shows its own help (`Session
+/// actions: …`) with the ring following the button's corners inside its edge.
+#[gpui::test]
+fn a_focused_row_mark_shows_its_own_help_beside_the_sidebar_not_the_card(cx: &mut TestAppContext) {
+    let rows = [
+        local_session("a"),
+        local_session("b").notifications(one_note(), 0),
+    ];
+    let (_fake, cx) = open_rows(cx, &rows, false);
+    let (accent, _) = ring_inks(cx);
+    focus_on_as_menu_button(cx);
+    key(cx, "tab");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("session-row-b"),
+        "the premise: Tab reached b's open control"
+    );
+    wait_hover_delay(cx);
+    assert!(card_drawn(cx, "b"), "the premise: b's card is drawn");
+    assert_eq!(
+        showing(cx).map(|shown| shown.text.to_string()),
+        Some("Running — open this session".to_owned()),
+        "the premise: b's card shows on its open control"
+    );
+
+    let button_radius = metrics::RADIUS_SM - px(1.);
+    for (target, words, radius, bordered) in [
+        (
+            "session-bell-b",
+            "Notifications: 1 unread; click to list them",
+            px(0.),
+            false,
+        ),
+        (
+            "session-menu-b",
+            "Session actions: rename, clone, replace, stop, delete and more",
+            button_radius,
+            true,
+        ),
+    ] {
+        key(cx, "tab");
+        assert_eq!(
+            test_support::focused_id(cx).as_deref(),
+            Some(target),
+            "the premise: Tab reached {target}"
+        );
+        let shown = showing(cx).unwrap_or_else(|| panic!("{target}: its help shows at once"));
+        check_mark_help(cx, &shown, target, words, accent, radius, bordered);
+        assert!(!card_drawn(cx, "b"), "{target}: the card is gone");
     }
 }

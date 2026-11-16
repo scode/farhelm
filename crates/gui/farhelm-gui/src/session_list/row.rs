@@ -47,7 +47,12 @@
 //! ([`row_marks::HelpPlace`]): SPEC.md, "Session list", puts every session-row hover "just right of the sidebar" with a
 //! notch and a ring on its target, the ring in the on-fill ink on the selected row. The innermost control's help wins
 //! ([`crate::layers::hover_began`]), so a mark's own help replaces the card while the pointer is on the mark. The bell
-//! asks for the same placement in [`crate::notices_bell`], which draws it.
+//! asks for the same placement in [`crate::notices_bell`], which draws it. Keyboard focus shows the same help as the
+//! pointer, in the same place: the card when Tab lands on the open control, and the bell's or the actions button's
+//! own help when it lands on one of them, each a shared control that hands its focus stop to its hover help. The other
+//! marks are no tab stops (the status dot is a pointer shortcut for the menu's Mark read and Mark unread, the pin grip
+//! takes focus only from the press that starts its drag, and the rest are status marks), so their help shows for the
+//! pointer only.
 //!
 //! The row's list item records whether the pointer is over it ([`RowHover`]), for its menu button's reveal
 //! ([`super::menu`]).
