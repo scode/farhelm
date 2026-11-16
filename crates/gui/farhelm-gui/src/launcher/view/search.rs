@@ -322,26 +322,40 @@ impl Launcher {
                 cx,
             ),
             Row::Model { id, harness } => {
+                // A switch made from the Command tab raises no banner, as the draft's own rule says
+                // (`LaunchDraft::escalation_since`): the tab is switched here first, for the model's sake, so the
+                // edit's escalation is judged as if from the Agent tab and dropped.
+                let from_command = self.draft.tab == Tab::Command;
                 self.draft.choose_tab(Tab::Agent);
                 let wrapper = self.remembered_wrapper(harness, cx);
-                let edit = self.draft.choose_catalog_model(
+                let mut edit = self.draft.choose_catalog_model(
                     harness,
                     &id,
                     self.catalog.as_deref(),
                     wrapper.as_deref(),
                 );
+                if from_command {
+                    edit.escalation = None;
+                }
                 self.chose(edit, window, cx);
             }
             // A model from a past launch, owned as a custom id by the agent type it ran with.
             Row::HistoryModel { id, harness } => {
+                // A switch made from the Command tab raises no banner, as the draft's own rule says
+                // (`LaunchDraft::escalation_since`): the tab is switched here first, for the model's sake, so the
+                // edit's escalation is judged as if from the Agent tab and dropped.
+                let from_command = self.draft.tab == Tab::Command;
                 self.draft.choose_tab(Tab::Agent);
                 let wrapper = self.remembered_wrapper(harness, cx);
-                let edit = self.draft.choose_history_model(
+                let mut edit = self.draft.choose_history_model(
                     harness,
                     &id,
                     self.catalog.as_deref(),
                     wrapper.as_deref(),
                 );
+                if from_command {
+                    edit.escalation = None;
+                }
                 self.chose(edit, window, cx);
             }
             Row::Effort(effort) => self.choose_effort(effort, cx),

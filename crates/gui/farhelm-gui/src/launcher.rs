@@ -58,6 +58,8 @@ mod draft_tests;
 #[cfg(test)]
 mod entry_tests;
 #[cfg(test)]
+mod escalation_tests;
+#[cfg(test)]
 mod folder_check_tests;
 #[cfg(test)]
 mod folder_default_tests;

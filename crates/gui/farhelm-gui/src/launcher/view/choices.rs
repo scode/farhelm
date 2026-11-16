@@ -17,8 +17,8 @@
 //! Enter on any of them applies it and launches (SPEC.md: "Enter on a choice button ... applies that choice and then
 //! launches"), except Custom, whose Enter only chooses, since a Custom choice with no flags yet cannot launch.
 //!
-//! NOTE: Not built yet: the model field (with its catalog list), and Restart with's "Changed" markers beside each
-//! choice. An agent switch's escalation (the red banner, with Undo) is computed by the draft and not yet shown.
+//! An agent switch that made the shown permission more dangerous puts up the red banner, with Undo, and outlines the
+//! permission choices (`escalation`); the draft decides when.
 
 use farhelm_proto::launcher::{EFFORT_ORDER, compatible_efforts};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
@@ -54,9 +54,10 @@ const APPROVAL_MODES: [LaunchPermission; 3] = [
 ];
 
 impl Launcher {
-    /// The agent-choice edit `edit` happened: its notice replaces the one shown (none clears it), and the draft
-    /// changed. The escalation it may carry is the banner's, which comes later.
+    /// The agent-choice edit `edit` happened: its notice replaces the one shown (none clears it), the draft changed,
+    /// and an agent switch or escalation it carries takes away or puts up the escalation banner (`escalation`).
     pub(super) fn chose(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
+        self.follow_edit_escalation(&edit, cx);
         self.notice = edit.notice;
         self.sync_fields(window, cx);
         self.changed(cx);
@@ -371,7 +372,8 @@ impl Launcher {
             .flex_wrap()
             .items_center()
             .gap(px(8.))
-            .child(group)
+            // The escalation banner's thick red outline goes around the permission choices themselves.
+            .child(self.with_escalation_outline(group, palette, cx))
             .children(harness.map(|harness| {
                 Button::new(
                     "launcher-permission-help",

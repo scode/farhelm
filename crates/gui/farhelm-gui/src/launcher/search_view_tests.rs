@@ -468,8 +468,23 @@ fn templates_state(unavailable: Option<&str>) -> farhelm_proto::ui_channel::Coll
                 ..TemplateFields::default()
             },
         },
+        // An agent and nothing about permissions: applied over an explicit Guarded, it escalates.
+        LaunchTemplate {
+            name: "to-opencode".into(),
+            fields: TemplateFields {
+                agent: Some(LaunchHarness::OpenCode),
+                ..TemplateFields::default()
+            },
+        },
     ];
-    let mut meta = test_support::meta(&["partial", "go", "nowhere", "reset-codex", "reset-goose"]);
+    let mut meta = test_support::meta(&[
+        "partial",
+        "go",
+        "nowhere",
+        "reset-codex",
+        "reset-goose",
+        "to-opencode",
+    ]);
     if let Some(error) = unavailable {
         meta.availability = Availability::Unavailable {
             error: error.into(),
@@ -553,6 +568,29 @@ fn a_tl_row_applies_its_template_and_keeps_the_launch_kind(cx: &mut TestAppConte
     let applied = draft(cx);
     assert_eq!(applied.tab, Tab::Command, "the template's launch kind");
     assert_eq!(applied.command.command, "true");
+}
+
+/// A template whose agent cannot run an explicitly chosen permission raises the escalation banner, as the hand switch
+/// would, judged once for the whole template. Why: SPEC.md applies a template's edits "in the same way and with the same
+/// effects as making them by hand" (old "template permissions are compared after the complete template transaction").
+#[gpui::test]
+fn a_tl_row_that_escalates_raises_the_banner(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "perms:guarded");
+    keys(cx, "enter");
+    assert_eq!(super::escalation_tests::banner(cx), None, "the premise");
+    type_in(cx, "tl:to-opencode");
+    keys(cx, "enter");
+    assert_eq!(
+        draft(cx).agent.harness,
+        Some(LaunchHarness::OpenCode),
+        "the premise"
+    );
+    assert_eq!(
+        super::escalation_tests::banner(cx).as_deref(),
+        Some("Permission changed: Guarded → YOLO, because OpenCode does not support Guarded.")
+    );
 }
 
 /// SPEC.md: a template that does not apply "is refused with a message naming the field, and nothing from it is

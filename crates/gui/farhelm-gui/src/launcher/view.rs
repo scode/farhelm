@@ -91,6 +91,7 @@ mod checkout;
 #[cfg(test)]
 pub(super) use checkout::repository_choices as repository_choices_for_tests;
 mod choices;
+mod escalation;
 mod folder_check;
 mod folder_list;
 #[cfg(test)]
@@ -493,6 +494,11 @@ type BatchResult = Result<BatchApplied, HostSentence>;
 pub(crate) struct BatchApplied {
     pub(crate) notice: Option<Option<String>>,
     pub(crate) note: Option<Note>,
+    /// Whether the batch switched the agent type, which takes an earlier escalation banner away
+    /// (`view::escalation`).
+    pub(crate) switched_agent: bool,
+    /// The permission escalation the whole batch made, if any: the banner it puts up.
+    pub(crate) escalation: Option<super::draft::Escalation>,
 }
 
 /// The open launcher. See the module docs.
@@ -558,6 +564,11 @@ pub(crate) struct Launcher {
     /// ([`Launcher::start_or_wait_for_folder`]), with the mark it started from and its window; it goes on when the
     /// history answers.
     folder_wait: Option<(Mark, AnyWindowHandle)>,
+    /// The permission-escalation banner while it shows (`escalation`): its own state, which edits other than an agent
+    /// switch leave alone, unlike [`Self::note`].
+    escalation: Option<escalation::EscalationBanner>,
+    /// How many escalation banners this launcher has shown, so each new one's motion plays afresh.
+    escalation_generation: u64,
     /// What the launcher says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
     /// banner until [`Launcher::banner_expiry`] if that comes first.
     note: Option<Note>,
@@ -790,6 +801,8 @@ impl Launcher {
             layer: None,
             yolo: None,
             quick_launch_unseen: false,
+            escalation: None,
+            escalation_generation: 0,
             folder_wait: None,
             note: None,
             banner_expiry: None,
@@ -891,13 +904,21 @@ impl Launcher {
 
     /// [`Launcher::apply_batch`] with the catalog answered.
     fn apply_now(&mut self, edit: Batch, window: &mut Window, cx: &mut Context<Self>) {
+        // What the agent choices said before the batch, for an escalation banner's Undo to put back.
+        let notice_before = self.notice.clone();
         match edit(&mut self.draft, self.catalog.as_deref(), cx) {
-            Ok(BatchApplied { notice, note }) => {
+            Ok(BatchApplied {
+                notice,
+                note,
+                switched_agent,
+                escalation,
+            }) => {
                 if let Some(notice) = notice {
                     self.notice = notice;
                 }
                 self.sync_fields(window, cx);
                 self.changed(cx);
+                self.follow_escalation(switched_agent, escalation, notice_before, cx);
                 // After the edit, which takes away what the launcher was saying. A banner (a switcher pick's) goes on its
                 // own after the same while as a quick launch's, counted from now, when its template has applied.
                 if matches!(note, Some(Note::Banner(_))) {
@@ -1188,6 +1209,9 @@ impl Launcher {
             });
         self.draft.reset_choices(remembered);
         self.notice = None;
+        // The old Reset also emptied the search box and closed its results.
+        self.search.set_text("", window, cx);
+        self.close_search(window, cx);
         self.sync_fields(window, cx);
         self.changed(cx);
     }
@@ -2373,6 +2397,8 @@ impl Render for Launcher {
                     Role::Button,
                 )
                 .tier(Tier::Neutral)
+                // Busy while the YOLO question's host write is out, as the old button was disabled while busy.
+                .busy(holding)
                 .on_click(on_launcher(weak.clone(), Launcher::reset_choices)),
             );
         }
@@ -2427,6 +2453,8 @@ impl Render for Launcher {
             .on_click(on_launcher(weak.clone(), Launcher::press)),
         );
         let (title, summary) = self.heading();
+        // Across the top of the launcher, pinned while the body scrolls, as the old sticky banner was.
+        let escalation = self.escalation_band(holding, palette, window, cx);
         let mut frame = DialogFrame::new("launcher", title, body, answers)
             .summary(summary)
             // `.create-session-form .dialog-tile .action-icon`: the launch glyph at 22 pixels.
@@ -2447,6 +2475,9 @@ impl Render for Launcher {
             );
         if let Some(notices) = notices {
             frame = frame.notices(notices);
+        }
+        if let Some(escalation) = escalation {
+            frame = frame.top_band(escalation);
         }
         frame
     }
