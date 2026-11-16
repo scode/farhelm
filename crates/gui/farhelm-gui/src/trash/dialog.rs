@@ -75,6 +75,7 @@ use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText, Line};
 use crate::layers::{self, DismissHook, Dismissal, LayerId};
+use crate::local_time::{self, Zone};
 use crate::prompt::{self, Answer, Inline, Question};
 use crate::theme::{self, Palette, metrics};
 use crate::ticker;
@@ -376,6 +377,7 @@ impl Render for TrashDialog {
         }
         self.fence(&snapshot, cx);
         let palette = theme::palette(cx);
+        let zone = local_time::zone(cx);
         let handles = Handles {
             button: self.button.clone(),
             dialog: cx.weak_entity(),
@@ -445,9 +447,15 @@ impl Render for TrashDialog {
                 focus: &focus,
                 asked,
             };
-            if let Some(section) =
-                host_section(host, &snapshot, deletes_allowed, ask, &handles, palette)
-            {
+            if let Some(section) = host_section(
+                host,
+                &snapshot,
+                deletes_allowed,
+                ask,
+                &handles,
+                zone,
+                palette,
+            ) {
                 body = body.child(section);
             }
         }
@@ -536,13 +544,14 @@ impl Render for TrashDialog {
 }
 
 /// One host's card (`.checkout-trash-host`), or `None` when the host has nothing to say: a connected, settled host with
-/// an empty listing and nothing kept for it.
+/// an empty listing and nothing kept for it. Its times are in `zone`, the viewer's.
 fn host_section(
     host: &HostSnapshot,
     snapshot: &Snapshot,
     deletes_allowed: bool,
     ask: HostAsk,
     handles: &Handles,
+    zone: Zone,
     palette: &Palette,
 ) -> Option<AnyElement> {
     let listing = host.listed();
@@ -674,7 +683,7 @@ fn host_section(
         }
         for checkout in &listing.checkouts {
             let enabled = deletes_allowed && host.entry_target(&checkout.id).is_some();
-            card = card.child(entry(host, checkout, enabled, handles, palette));
+            card = card.child(entry(host, checkout, enabled, handles, zone, palette));
         }
         for (at, issue) in listing.issues.iter().enumerate() {
             card = card.child(issue_block(
@@ -768,12 +777,14 @@ fn confirmation(batches: &[Batch]) -> Question<Vec<Target>> {
 }
 
 /// One archived checkout (`.checkout-trash-entry`): its name, measured size and own Delete, Retry or Removing… on the
-/// first line; the repository and archive time under it; then whether removal runs or why it failed.
+/// first line; the repository and archive time under it; then whether removal runs or why it failed. The archive and
+/// failure times are to the minute in `zone`, the viewer's local time.
 fn entry(
     host: &HostSnapshot,
     checkout: &ArchivedCheckout,
     enabled: bool,
     handles: &Handles,
+    zone: Zone,
     palette: &Palette,
 ) -> AnyElement {
     let key = format!("{}-{}", host.id, checkout.id);
@@ -838,7 +849,7 @@ fn entry(
     let archived = match checkout.archived_at {
         Some(seconds) => HostSentence::new(format!("trash-entry-archived-{key}"))
             .text("Archived ")
-            .mono(&HostText::from_host(listing::stamp(seconds))),
+            .mono(&HostText::from_host(local_time::minute(seconds, zone))),
         None => {
             HostSentence::new(format!("trash-entry-archived-{key}")).text("Archive time unknown")
         }
@@ -885,7 +896,7 @@ fn entry(
                 .child(
                     HostSentence::new(format!("trash-entry-stuck-{key}"))
                         .text("Could not free space · ")
-                        .mono(&HostText::from_host(listing::stamp(stuck.at))),
+                        .mono(&HostText::from_host(local_time::minute(stuck.at, zone))),
                 )
                 .child(
                     HostSentence::new(format!("trash-entry-stuck-reason-{key}"))

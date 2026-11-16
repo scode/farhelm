@@ -16,9 +16,9 @@ use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, HostView, RefreshView};
 use gpui::SharedString;
 
-use super::utc_stamp;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::offers::runs_newer_version;
+use crate::local_time::{self, Zone};
 
 #[cfg(test)]
 mod tests;
@@ -176,13 +176,15 @@ pub(crate) enum Kind {
 
 /// The lines a row shows when its details are open, in the old order: the destination behind an alias, the evidence
 /// for the phase, and the remedy where waiting will not help. `twin` names another host by id, as the duplicate lines
-/// mention the entry that holds the same machine, or `None` when the registry does not list it.
+/// mention the entry that holds the same machine, or `None` when the registry does not list it. `zone` is the viewer's
+/// time zone, for the times the evidence gives.
 ///
 /// Each line is drawn under `host-detail-<host id>-<n>`, numbered from 0 in this order, which is how the panel's tests
 /// and the agent bridge find a row's lines.
 pub(crate) fn detail_lines(
     host: &HostView,
     twin: impl Fn(i64) -> Option<HostText>,
+    zone: Zone,
 ) -> Vec<(Kind, HostSentence)> {
     let id = host.id;
     let numbered =
@@ -199,7 +201,7 @@ pub(crate) fn detail_lines(
     }
     lines.push((
         Kind::Evidence,
-        evidence(numbered(lines.len()), &host.state, &twin),
+        evidence(numbered(lines.len()), &host.state, &twin, zone),
     ));
     let last = remedy(numbered(lines.len()), &host.state, &twin);
     lines.extend(last.map(|line| (Kind::Remedy, line)));
@@ -210,26 +212,29 @@ pub(crate) fn detail_lines(
 /// line its row's details show ([`detail_lines`]' evidence), or `None` while it is connected, when the card has no
 /// connection section (the old card's `host_state_detail`, shown only while `!is_connected`). The card follows the host
 /// entry, not the run, so a host that reconnects mid-run loses the section at the next push. `twin` names a duplicate's
-/// other entry, as for the row.
+/// other entry, as for the row, and `zone` is the viewer's, for the times the line gives.
 pub(crate) fn connection_line(
     host: &HostView,
     id: impl Into<gpui::ElementId>,
     twin: impl Fn(i64) -> Option<HostText>,
+    zone: Zone,
 ) -> Option<HostSentence> {
     match host.state {
         HostStateView::Connected { .. } => None,
-        _ => Some(evidence(HostSentence::new(id), &host.state, &twin)),
+        _ => Some(evidence(HostSentence::new(id), &host.state, &twin, zone)),
     }
 }
 
 /// What the helm knows about the host's phase (the old `state_detail`), appended to `line`. For a connected host this
 /// one line is its version, identity and session count. Visible to the crate for the session pane's unavailable card,
 /// whose smaller diagnostics line is this one after the host's name, as the old card's was. The progress card reaches it
-/// through [`connection_line`].
+/// through [`connection_line`]. The times it gives (when a suspension was noticed, when a provider was asked) are the
+/// viewer's local time in `zone`.
 pub(crate) fn evidence(
     line: HostSentence,
     state: &HostStateView,
     twin: &impl Fn(i64) -> Option<HostText>,
+    zone: Zone,
 ) -> HostSentence {
     match state {
         HostStateView::Connecting {
@@ -359,7 +364,7 @@ pub(crate) fn evidence(
                 } else {
                     "noticed"
                 },
-                utc_stamp(suspended_by_farhelm_at.unwrap_or(*observed_at) / 1000)
+                local_time::stamp(suspended_by_farhelm_at.unwrap_or(*observed_at) / 1000, zone)
             ));
             match resume_failed {
                 Some(reason) => line.text(". Resume failed: ").host(&pushed(reason)),
@@ -376,7 +381,7 @@ pub(crate) fn evidence(
                 LifecycleDirection::Suspending => "suspend",
                 LifecycleDirection::Resuming => "resume",
             },
-            utc_stamp(requested_at / 1000)
+            local_time::stamp(requested_at / 1000, zone)
         )),
         HostStateView::Stopped {
             start_failed,

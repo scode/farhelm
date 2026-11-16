@@ -33,7 +33,7 @@ use super::tests::{
 };
 use crate::main_view::MainView;
 use crate::test_support::{self, frame};
-use crate::{assets, bootstrap, layers, render_count, theme, ticker};
+use crate::{assets, bootstrap, layers, local_time, render_count, theme, ticker};
 
 // ---- Helpers --------------------------------------------------------------------------------------------------------
 
@@ -171,9 +171,10 @@ fn the_test_clock_starts_where_the_fixtures_expect(cx: &mut TestAppContext) {
 
 /// SPEC.md, "Status": a row shows how long ago the session was last active as a short age "with the full timestamp
 /// available on the row", falls back to the creation time when the helm sends no activity stamp, and shows "no age at
-/// all" when neither exists. Specified: a session last active two minutes ago paints `2m`, is named and helped by
-/// `Last activity 2025-07-01 23:57:58 UTC`; one with no activity stamp created three hours ago paints `3h`; one with
-/// neither stamp draws no age mark.
+/// all" when neither exists. Specified: with the app's zone pinned two hours east of UTC, a session last active two
+/// minutes ago (23:57:58 UTC) paints `2m`, and is named and helped by its local time, `Last activity 2025-07-02
+/// 01:57:58`, which names no zone; one with no activity stamp created three hours ago paints `3h`; one with neither
+/// stamp draws no age mark.
 #[gpui::test]
 fn a_rows_age_shows_its_bucket_and_its_timestamp_as_hover_help(cx: &mut TestAppContext) {
     let rows = [
@@ -182,9 +183,11 @@ fn a_rows_age_shows_its_bucket_and_its_timestamp_as_hover_help(cx: &mut TestAppC
         session("c").activity(0).created(0).seen(None),
     ];
     let (_fake, cx) = open_main(cx, vec![listing(&["a", "b", "c"], &rows)]);
+    cx.update(|_, cx| local_time::pin(2 * 3_600, cx));
+    test_support::redraw(cx);
     let nodes = frame(cx);
     assert_eq!(age_text(&nodes, "a").as_deref(), Some("2m"));
-    let stamp = "Last activity 2025-07-01 23:57:58 UTC";
+    let stamp = "Last activity 2025-07-02 01:57:58";
     let mark = node(&nodes, &age_id("a")).unwrap();
     assert_eq!(mark.label.as_deref(), Some(stamp));
     assert_eq!(mark.role, Some(Role::Label));

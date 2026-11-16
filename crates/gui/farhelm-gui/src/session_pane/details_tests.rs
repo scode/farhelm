@@ -32,6 +32,7 @@ use super::details::{
 };
 use crate::actions::{FocusNextControl, FocusPreviousControl};
 use crate::components::{CONFIRMATION, COPIED};
+use crate::local_time::{self, Zone};
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
 use crate::session_list::status::Live;
@@ -268,7 +269,7 @@ fn an_exit_without_a_code_reads_plain_exited_in_the_bar(cx: &mut TestAppContext)
     let exited = active("a", 120).status(json!({"state": "exited", "exit_code": null}));
     let collections = collections(snapshot(std::slice::from_ref(&exited), Vec::new()));
     let row: &SessionRow = collections.get::<SessionRow>("a").unwrap();
-    match Details::of(row, &collections, Some(TEST_NOW)).status {
+    match Details::of(row, &collections, Some(TEST_NOW), Zone::UTC).status {
         Some(Status::Ended(ended)) => {
             assert_eq!((ended.words.as_str(), ended.host), ("Exited", None))
         }
@@ -290,7 +291,8 @@ fn an_exit_without_a_code_reads_plain_exited_in_the_bar(cx: &mut TestAppContext)
 /// Each part's hover help is the whole of what it may cut short or abbreviate: the old bar's tooltips, the title's
 /// through the host-text element, the host's the name as shown, the age's the stamp, and an ended badge's its complete
 /// wording, since the words may end in an ellipsis. Specified, on the exited session: the badge says `Exited (code 0) —
-/// stopped by user`, the title its title, the host name `buildbox`, and the age `Last activity 2025-07-01 23:57:58 UTC`.
+/// stopped by user`, the title its title, the host name `buildbox`, and the age its stamp in the app's zone, pinned five
+/// hours west of UTC here: `Last activity 2025-07-01 18:57:58`.
 #[gpui::test]
 fn each_parts_hover_help_is_its_whole_value(cx: &mut TestAppContext) {
     let row = active("a", 120)
@@ -298,6 +300,8 @@ fn each_parts_hover_help_is_its_whole_value(cx: &mut TestAppContext) {
         .status(json!({"state": "exited", "exit_code": 0}))
         .annotation("stopped by user");
     let (_fake, cx) = open_main(cx, snapshot(&[row], Vec::new()));
+    cx.update(|_, cx| local_time::pin(-5 * 3_600, cx));
+    test_support::redraw(cx);
     assert_eq!(
         hover(cx, STATUS_ID).as_deref(),
         Some("Exited (code 0) — stopped by user")
@@ -309,7 +313,7 @@ fn each_parts_hover_help_is_its_whole_value(cx: &mut TestAppContext) {
     assert_eq!(hover(cx, HOST_NAME_ID).as_deref(), Some("buildbox"));
     assert_eq!(
         hover(cx, AGE_ID).as_deref(),
-        Some("Last activity 2025-07-01 23:57:58 UTC")
+        Some("Last activity 2025-07-01 18:57:58")
     );
 }
 
@@ -325,7 +329,7 @@ fn a_stale_session_draws_no_badge_and_no_age(cx: &mut TestAppContext) {
     let decided = |fixture: &Fixture| {
         let collections = collections_of(fixture);
         let row: &SessionRow = collections.get::<SessionRow>(fixture.key).unwrap();
-        Details::of(row, &collections, Some(TEST_NOW))
+        Details::of(row, &collections, Some(TEST_NOW), Zone::UTC)
     };
     let fresh = decided(&active("a", 120));
     assert_eq!(

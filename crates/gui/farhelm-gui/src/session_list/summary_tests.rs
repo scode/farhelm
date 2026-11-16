@@ -20,6 +20,7 @@ use super::tests::{
 };
 use crate::host_text::tests::painted_words;
 use crate::layers::{self, ShownTooltip, TooltipSide};
+use crate::local_time::{self, Zone};
 use crate::session_list::status::{Ended, Live};
 use crate::test_support::{self, frame};
 use crate::theme::{self, metrics};
@@ -54,13 +55,17 @@ fn agent(harness: &str, permissions: Value) -> Value {
     })
 }
 
-/// `row`'s card as [`Summary::of`] decides it over the local host and host 3, at [`TEST_NOW`].
+/// The viewer's zone in the pure card tests: two hours east of UTC, so both fixture times move into the next day and a
+/// stamp still written in UTC would show.
+const VIEWER: Zone = Zone::fixed(2 * 3_600);
+
+/// `row`'s card as [`Summary::of`] decides it over the local host and host 3, at [`TEST_NOW`], in [`VIEWER`]'s zone.
 fn summary_of(row: &Fixture) -> Summary {
     let collections = collections(vec![
         listing(&[row.key], std::slice::from_ref(row)),
         hosts(&[local(), remote(3, "ops@host3.example.invalid")]),
     ]);
-    Summary::of(row.key, &row.row(), &collections, Some(TEST_NOW))
+    Summary::of(row.key, &row.row(), &collections, Some(TEST_NOW), VIEWER)
 }
 
 /// A card's facts as a reader sees them: each label, and its value's words with host values escaped.
@@ -84,7 +89,8 @@ fn facts(summary: &Summary) -> Vec<(&'static str, String)> {
 /// a running session on the local host launched as the helm fixture's Codex agent (YOLO, model gpt-5, high effort):
 /// title `Fix the widget`, status `Running` with its mark, agent line `Codex · YOLO · Model: gpt-5 · Effort: High`, and
 /// the facts Host `Local (this machine)` (with the host's mark), Directory `/home/user/src/a` unabbreviated, Started
-/// `2025-07-01 22:59:58 UTC` and Last active `2m · 2025-07-01 23:57:58 UTC`; no Checkout for an ordinary folder.
+/// `2025-07-02 00:59:58` and Last active `2m · 2025-07-02 01:57:58`, each the viewer's local time two hours east of
+/// UTC with no zone named; no Checkout for an ordinary folder.
 #[test]
 fn a_running_sessions_card_names_its_agent_host_folder_and_times() {
     let summary = summary_of(&local_session("a"));
@@ -100,8 +106,8 @@ fn a_running_sessions_card_names_its_agent_host_folder_and_times() {
         [
             ("Host", "Local (this machine)".to_owned()),
             ("Directory", "/home/user/src/a".to_owned()),
-            ("Started", "2025-07-01 22:59:58 UTC".to_owned()),
-            ("Last active", "2m · 2025-07-01 23:57:58 UTC".to_owned()),
+            ("Started", "2025-07-02 00:59:58".to_owned()),
+            ("Last active", "2m · 2025-07-02 01:57:58".to_owned()),
         ]
     );
     assert!(
@@ -182,8 +188,8 @@ fn a_managed_checkouts_card_names_the_repository_and_the_checkouts_folder() {
             ("Host", "Local (this machine)".to_owned()),
             ("Checkout", "octo/widgets · widgets".to_owned()),
             ("Directory", "/home/user/src/widgets/api".to_owned()),
-            ("Started", "2025-07-01 22:59:58 UTC".to_owned()),
-            ("Last active", "2m · 2025-07-01 23:57:58 UTC".to_owned()),
+            ("Started", "2025-07-02 00:59:58".to_owned()),
+            ("Last active", "2m · 2025-07-02 01:57:58".to_owned()),
         ]
     );
 }
@@ -203,7 +209,7 @@ fn a_card_leaves_out_what_the_session_does_not_say() {
         .activity(0)
         .stale();
     let collections = collections(vec![listing(&["e"], std::slice::from_ref(&row))]);
-    let summary = Summary::of("e", &row.row(), &collections, None);
+    let summary = Summary::of("e", &row.row(), &collections, None, VIEWER);
     assert_eq!(
         facts(&summary),
         [("Directory", "/home/user/src/e".to_owned())]
@@ -212,7 +218,7 @@ fn a_card_leaves_out_what_the_session_does_not_say() {
     assert_eq!(summary.status, Some(CardStatus::Live(Live::Running)));
 
     let named = row.host_name("unplaced-host");
-    let summary = Summary::of("e", &named.row(), &collections, None);
+    let summary = Summary::of("e", &named.row(), &collections, None, VIEWER);
     assert_eq!(
         facts(&summary),
         [
@@ -311,11 +317,13 @@ fn ring_inks(cx: &mut VisualTestContext) -> (Hsla, Hsla) {
 /// session `b` beside the open session `a`: resting on b's title shows its card beside the sidebar, reporting the row's
 /// words `Running — open this session`, with the accent ring painted at b's open control's own bounds with square
 /// corners and the notch drawn; the card paints exactly `Fix the widget`, `Running`, the agent line, Host
-/// `Local (this machine)`, Directory, Started, Last active, `Click to open` and `⋯ For actions`, in that order; resting
-/// on the open row a's title shows a's card with its ring in the on-fill ink.
+/// `Local (this machine)`, Directory, Started, Last active (both times in the app's zone, pinned five hours west of
+/// UTC), `Click to open` and `⋯ For actions`, in that order; resting on the open row a's title shows a's card with its
+/// ring in the on-fill ink.
 #[gpui::test]
 fn a_rows_title_shows_its_summary_card_beside_the_sidebar_with_its_ring(cx: &mut TestAppContext) {
     let (_fake, cx) = open_rows(cx, &[local_session("a"), local_session("b")], false);
+    cx.update(|_, cx| local_time::pin(-5 * 3_600, cx));
     let (accent, on_fill) = ring_inks(cx);
     let shown = card_over_title(cx, "b", "Fix the widget");
     assert_eq!(shown.side(), TooltipSide::Beside);
@@ -345,9 +353,9 @@ fn a_rows_title_shows_its_summary_card_beside_the_sidebar_with_its_ring(cx: &mut
             "Directory",
             "/home/user/src/b",
             "Started",
-            "2025-07-01 22:59:58 UTC",
+            "2025-07-01 17:59:58",
             "Last active",
-            "2m · 2025-07-01 23:57:58 UTC",
+            "2m · 2025-07-01 18:57:58",
             CLICK_HINT,
             ACTIONS_HINT,
         ]
@@ -446,7 +454,7 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
     let (accent, on_fill) = ring_inks(cx);
     let square = px(0.);
     let button_radius = metrics::RADIUS_SM - px(1.);
-    let age = "Last activity 2025-07-01 23:57:58 UTC";
+    let age = "Last activity 2025-07-01 23:57:58";
     let bell = "Notifications: 1 unread; click to list them";
     for (target, words, radius, bordered) in [
         ("session-seen-b", "Running — Mark unread", square, false),

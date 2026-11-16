@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 use super::SETTLE;
 use crate::focus;
+use crate::local_time;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{self, focused_id, frame, meta};
@@ -171,13 +172,16 @@ fn opening_measures_each_reachable_host_and_starts_on_footer_close(cx: &mut Test
 /// its repository, archive time, size and folder, totals that miss a size must say they are partial, and an
 /// unreachable host must stay visible without offering anything (SPEC.md). Specified: the local host's card names it
 /// as the registry does, counts two checkouts with a partial size, and shows checkout `a`'s name, repository, archive
-/// time and the folder it is in; the header's total covers the reachable hosts and says partial; `gpu-1`'s card says it
+/// time (to the minute in the viewer's local time, the app's zone pinned eight hours west of UTC here) and the folder
+/// it is in; the header's total covers the reachable hosts and says partial; `gpu-1`'s card says it
 /// is not reachable and has no Delete, its "Delete all on" unavailable; the local host's is named for it.
 #[gpui::test]
 fn each_host_card_shows_its_archives_and_an_unreachable_host_offers_nothing(
     cx: &mut TestAppContext,
 ) {
     let (_helm, _, cx) = opened(cx);
+    cx.update(|_, cx| local_time::pin(-8 * 3_600, cx));
+    test_support::redraw(cx);
     let nodes = frame(cx);
     assert_eq!(label(&nodes, "trash-host-name-1"), "this machine");
     assert_eq!(
@@ -192,7 +196,7 @@ fn each_host_card_shows_its_archives_and_an_unreachable_host_offers_nothing(
     assert_eq!(label(&nodes, "trash-entry-repository-1-a"), "acme/web");
     assert_eq!(
         label(&nodes, "trash-entry-archived-1-a"),
-        "Archived 2026-11-13 17:40 UTC"
+        "Archived 2026-11-13 09:40"
     );
     assert_eq!(
         label(&nodes, "trash-folder-1-0"),
@@ -442,11 +446,13 @@ fn a_refused_delete_stays_visible_on_the_next_opening(cx: &mut TestAppContext) {
 
 /// Why this matters: SPEC.md lists a failed removal with its reason and time and a Retry, which "asks for one more
 /// attempt through the same cleanup checks". Specified: a stuck row says "Could not free space" with its failure time
-/// and the host's reason, its button reads Retry and is named for its checkout, and pressing it sends the same
+/// (the viewer's local time, the app's zone pinned ten hours east of UTC here, which moves it into the next day) and the
+/// host's reason, its button reads Retry and is named for its checkout, and pressing it sends the same
 /// one-checkout delete.
 #[gpui::test]
 fn a_failed_removal_offers_retry_through_the_same_delete(cx: &mut TestAppContext) {
     let (mut helm, _, cx) = open_button(cx, vec![crate::hosts::tests::hosts(&[local()])]);
+    cx.update(|_, cx| local_time::pin(10 * 3_600, cx));
     let mut stuck = checkout("a", Some(4096));
     stuck["stuck"] =
         json!({ "reason": "Permission denied in the retained folder", "at": 1_794_591_715_i64 });
@@ -458,7 +464,7 @@ fn a_failed_removal_offers_retry_through_the_same_delete(cx: &mut TestAppContext
     let nodes = frame(cx);
     assert_eq!(
         label(&nodes, "trash-entry-stuck-1-a"),
-        "Could not free space · 2026-11-13 17:41 UTC"
+        "Could not free space · 2026-11-14 03:41"
     );
     assert_eq!(
         label(&nodes, "trash-entry-stuck-reason-1-a"),

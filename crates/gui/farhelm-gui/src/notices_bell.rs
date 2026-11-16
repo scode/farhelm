@@ -61,6 +61,7 @@ use crate::components::{Button, HoverHelp, MenuHeader, Role, StatusMark, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
+use crate::local_time::{self, Zone};
 use crate::session_list::age;
 use crate::theme::{self, Palette, Token, metrics};
 use crate::{operations, session, ticker};
@@ -538,6 +539,7 @@ impl Render for NotificationList {
             self.shown = Some(self.shown.map_or(newest.seq, |shown| shown.max(newest.seq)));
         }
         let now = age::seconds(ticker::wall_now(cx));
+        let zone = local_time::zone(cx);
         let read_through = row.notifications_read_through;
         let mut body = div()
             .id("notification-entries")
@@ -553,6 +555,7 @@ impl Render for NotificationList {
                 notification,
                 is_unread(notification, read_through),
                 now,
+                zone,
                 palette,
             ));
         }
@@ -602,11 +605,12 @@ impl Render for NotificationList {
 /// One entry of the list (`.session-bell-entry`): its marks and age on a line, then its text. A new entry has a red
 /// edge at its left and the word New, so the distinction does not rest on color alone; a resolved one is greyed and
 /// says Resolved, and is never new. `now` is the viewer's clock in seconds, from which the age is counted; with no
-/// usable clock or no stamp there is no age, as on a row.
+/// usable clock or no stamp there is no age, as on a row. `zone` is the viewer's, for the age's full stamp.
 fn entry(
     notification: &SessionNotification,
     unread: bool,
     now: Option<i64>,
+    zone: Zone,
     palette: &Palette,
 ) -> impl IntoElement {
     let seq = notification.seq;
@@ -635,7 +639,7 @@ fn entry(
                     .child("New"),
             )
         })
-        .children(age::of(notification.at, now).map(|age| {
+        .children(age::of(notification.at, now, zone).map(|age| {
             // The row's buckets with "ago" after them, except "now"; the full stamp is the hover help, as the row's
             // age has it.
             let words = if age.short == "now" {

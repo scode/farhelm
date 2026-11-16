@@ -1241,6 +1241,30 @@ redraws its holders every second, runs until its last holder goes, and wakes no 
 clock. The wall clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's
 scheduler clock outside the ticker, or a view from reading the time without holding a clock handle.
 
+### Clock times: local time
+
+Owner: local time (`crates/gui/farhelm-gui/src/local_time.rs`), the one place an instant becomes clock text.
+
+Every clock time the app shows is the viewer's local time, with no zone named: a session's last activity and start, when
+a credential was saved, when a snapshot was built or prepared, an archived checkout's times, a host's suspension, "None
+found · checked HH:MM". The maintainer decided this on 2026-11-15; the old app wrote all but the last in UTC and said
+so. Each instant is written with its own offset, daylight saving time included, so a time from summer shown in winter
+reads as the clock read then. The GUI crates do not query the platform, so the desktop binary hands in the zone
+(`Host::time_zone`, the C library's `tzset` and `localtime_r` on macOS and Linux), and a GUI with no host's zone, as in
+every test and the screenshot goldens, writes UTC.
+
+The platform reads its zone setting when the app starts and again at most once a minute, on a draw that finds the last
+reading a minute old; turning an instant into an offset in between reads no file. Nothing wakes the app to read it: the
+migration's orchestrator decided on 2026-11-16 that this re-read must not add a wakeup to an idle app, so a view that
+nothing redraws keeps its times until it draws again (the ages' 30-second clock redraws the session list anyway). A view
+reads the zone once per draw and hands it to its pure helpers with the time now; tests pin the zone with an offset of
+their own and never read the machine's.
+
+Enforced by review (no lint stops a view from formatting a time by hand), and by tests of the formatting across midnight
+both ways, before 1970 and on leap days, of an instant on each side of a daylight saving change, of a platform that
+cannot place an instant counting as UTC, and of the re-read happening on the first draw a minute on and on no other
+draw.
+
 ### Notices: the notice center
 
 Owner: the notice center. It is a code owner, not a new surface.

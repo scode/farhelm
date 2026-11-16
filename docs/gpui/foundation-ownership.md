@@ -74,6 +74,7 @@ conflicted across all of it.
 | Drafts                          | `crates/gui/farhelm-gui/src/drafts.rs`                                                                                                                                                                                                                                                                                         | [from area code](#drafts)                | none                                  |
 | Selected-session survivor       | `crates/gui/farhelm-gui/src/local_state.rs`                                                                                                                                                                                                                                                                                    | [none](#selected-session-survivor)       | none                                  |
 | Ticker                          | `crates/gui/farhelm-gui/src/ticker.rs`, `crates/gui/farhelm-gui/src/ticker_tests.rs`                                                                                                                                                                                                                                           | [none](#ticker)                          | 1: `ticker::timer`                    |
+| Local time                      | `crates/gui/farhelm-gui/src/local_time.rs`, `crates/gui/farhelm-gui/src/local_time_tests.rs`                                                                                                                                                                                                                                   | [none](#local-time)                      | none                                  |
 | Notice center                   | `crates/gui/farhelm-gui/src/notices.rs`                                                                                                                                                                                                                                                                                        | [append-only](#notice-center)            | none                                  |
 | Render counter                  | `crates/gui/farhelm-gui/src/render_count.rs`                                                                                                                                                                                                                                                                                   | [none](#render-counter)                  | none                                  |
 | Test harness                    | `crates/gui/farhelm-gui/src/test_support.rs`, `crates/gui/farhelm-gui/src/goldens/`, `scripts/check-gui-goldens.py`                                                                                                                                                                                                            | [reported, append-only](#test-harness)   | none                                  |
@@ -145,7 +146,8 @@ Extension points: reported: `lib.rs`, for a new area module (its `pub mod` line 
 global depends on; its desktop integration seams (menus, quitting on close, the window's saved frame and chrome, the
 notices, the updater, second launches) are calls into the area module `desktop.rs`, and its one status-sound seam, the
 host's player, is handed to other-dialogs' `sounds::install_player`; the bootstrap reads no field of their types, so the
-areas fill them in without touching `bootstrap.rs`.
+areas fill them in without touching `bootstrap.rs`. Its time-zone seam, the host's `time_zone`, is handed to the Local
+time foundation's `local_time::follow_platform`, and the desktop binary's `time_zone` module reads the platform for it.
 
 Lint exceptions: none.
 
@@ -376,6 +378,15 @@ own code (the entrance reads `ticker::reduced_motion`).
 
 Lint exceptions: 1: the executor timer in `ticker::timer`.
 
+### Local time
+
+Extension points: none (a view that shows a clock time reads `local_time::zone` once per draw and writes the time with
+`local_time::stamp`, `minute`, `date` or `clock`, from its own code, not a change here; a test pins the zone with
+`local_time::pin`). The platform's zone comes from the host process (`bootstrap::Host::time_zone`), which reads it, so a
+new platform is a change to the desktop binary, not here.
+
+Lint exceptions: none.
+
 ### Notice center
 
 Extension points: a new `Notice` variant with its text, posted and withdrawn only through `notices::post` and
@@ -472,8 +483,8 @@ Lint exceptions: none.
 ### Host identity
 
 Extension points: reported, the whole module: owned by the settings-and-hosts area, which built it, and shared with the
-areas that show a host (its display name, mark, color, phase words and `utc_stamp`); another area's change follows the
-pattern already there, such as an additive answer for a new kind of host or phase, and the review gate judges it.
+areas that show a host (its display name, mark, color and phase words); another area's change follows the pattern
+already there, such as an additive answer for a new kind of host or phase, and the review gate judges it.
 
 Lint exceptions: none.
 

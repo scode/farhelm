@@ -54,6 +54,7 @@ use super::{Recipes, choices};
 use crate::components::{Button, HoverHelp, Tier};
 use crate::environment_ui::ProviderUi;
 use crate::host_text::{HostSentence, HostText};
+use crate::local_time::{self, Zone};
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
 use crate::theme::{self, metrics};
@@ -190,12 +191,14 @@ impl Recipes {
 
     /// The per-place part of `name`'s row from the pushed `places`: "Reading per-place builds…" until the store has
     /// them, the helm's reason while it cannot read them, or a line per place whose provider has per-place words, in
-    /// the helm's order. `in_flight` says whether the recipe's key has work out, which makes every Rebuild of it busy.
+    /// the helm's order. `in_flight` says whether the recipe's key has work out, which makes every Rebuild of it busy;
+    /// `zone` is the viewer's, for the times the lines give.
     pub(super) fn place_lines(
         &self,
         name: &str,
         places: &Places,
         in_flight: bool,
+        zone: Zone,
         cx: &Context<Self>,
     ) -> Vec<Stateful<Div>> {
         let palette = theme::palette(cx);
@@ -217,19 +220,20 @@ impl Recipes {
             Places::Listed(places) => places
                 .iter()
                 .filter(|place| place.recipe == name)
-                .filter_map(|place| self.place_line(place, in_flight, cx))
+                .filter_map(|place| self.place_line(place, in_flight, zone, cx))
                 .collect(),
         }
     }
 
     /// One place's line (the old `.recipe-row-status`): the place's name, its state in the provider's words or the
-    /// helm's reason, the running step, when it was prepared or built (UTC), pending cleanup, and its Rebuild. `None`
-    /// for a place whose provider has no per-place words, or that names no host to call it by and to tell it apart (no
-    /// provider with per-place words has such a place).
+    /// helm's reason, the running step, when it was prepared or built (the viewer's local time), pending cleanup, and
+    /// its Rebuild. `None` for a place whose provider has no per-place words, or that names no host to call it by and to
+    /// tell it apart (no provider with per-place words has such a place).
     fn place_line(
         &self,
         place: &RecipePlaceView,
         in_flight: bool,
+        zone: Zone,
         cx: &Context<Self>,
     ) -> Option<Stateful<Div>> {
         let palette = theme::palette(cx);
@@ -254,15 +258,9 @@ impl Recipes {
                 .host(&HostText::from_host(step.clone()));
         }
         if let Some(at) = place.prepared_at {
-            sentence = sentence.text(format!(
-                " · Prepared {}",
-                crate::hosts::identity::utc_stamp(at)
-            ));
+            sentence = sentence.text(format!(" · Prepared {}", local_time::stamp(at, zone)));
         } else if let Some(at) = place.built_at {
-            sentence = sentence.text(format!(
-                " · Built {}",
-                crate::hosts::identity::utc_stamp(at)
-            ));
+            sentence = sentence.text(format!(" · Built {}", local_time::stamp(at, zone)));
         }
         if place.cleanup_pending {
             sentence = sentence.text(format!(" · {}", words.cleanup_pending));

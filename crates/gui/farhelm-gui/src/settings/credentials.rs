@@ -55,6 +55,7 @@ use super::tensorlake_key::TensorlakeKey;
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::local_time::{self, Zone};
 use crate::operations::{Command, Work};
 use crate::theme::{self, metrics};
 pub(super) use editor::Editor;
@@ -144,21 +145,20 @@ fn usage(credential: Option<&Credential>) -> String {
     }
 }
 
-/// When the credential was saved or last replaced, in UTC and labelled so, as the old list said it: the helm's epoch
-/// seconds are not the viewer's local time.
-fn saved_status(credential: &Credential) -> String {
-    let secs = credential.updated_at;
-    let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(86_400));
-    let time = secs.rem_euclid(86_400);
+/// When the credential was saved or last replaced, to the minute in `zone`, the viewer's local time: the old list's
+/// `Saved 2026-11-14, 09:05` without the "UTC" it wrote then (the maintainer decided on 2026-11-15 that the app's times
+/// are local).
+fn saved_status(credential: &Credential, zone: Zone) -> String {
+    let at = credential.updated_at;
     let verb = if credential.revision == 1 {
         "Saved"
     } else {
         "Replaced"
     };
     format!(
-        "{verb} {year:04}-{month:02}-{day:02}, {:02}:{:02} UTC",
-        time / 3600,
-        time % 3600 / 60
+        "{verb} {}, {}",
+        local_time::date(at, zone),
+        local_time::clock(at, zone)
     )
 }
 
@@ -417,6 +417,7 @@ impl Credentials {
             .filter(|credential| Group::of(credential.kind) == group)
             .collect();
         let none = (loaded && listed.is_empty()).then(|| choices::help("None saved.", cx));
+        let zone = local_time::zone(cx);
         let rows = listed.into_iter().map(|credential| {
             let edit_label = format!("Edit {}", credential.name);
             let existing = credential.clone();
@@ -459,7 +460,7 @@ impl Credentials {
                             div()
                                 .text_size(metrics::TEXT_SM)
                                 .text_color(theme::color(palette.fg_1))
-                                .child(saved_status(credential)),
+                                .child(saved_status(credential, zone)),
                         ),
                 )
                 .child(
