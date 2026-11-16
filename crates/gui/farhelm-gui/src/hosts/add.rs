@@ -1,5 +1,5 @@
 //! The Add host dialog: an SSH destination and an optional alias, checked by the helm's probe before anything is
-//! added.
+//! added, or a Tensorlake sandbox created from a recipe ([`tensorlake`]).
 //!
 //! SPEC.md, "Topology" (the add host dialog, the host registry and its duplicate refusal). Ported from the old app's
 //! `hosts.rs` (`AddHostForm`, `validate_alias_draft`) and `api.rs` (`probe_ssh_host`), with its look from the
@@ -9,6 +9,15 @@
 //! - **Opening.** [`open`] is the entry point for the host rail's Add host and the Hosts panel heading's add button.
 //!   The opener gets focus back when the dialog closes, as Settings' gear does, because the dialog names it as its
 //!   return target. Focus starts in the destination field.
+//! - **The host kind.** Above the fields, a strip of two choices, SSH and Tensorlake sandbox, picks what the dialog
+//!   adds. SSH, the fields below, is where it opens. Tensorlake sandbox swaps in the sandbox's own body
+//!   ([`tensorlake`]), its Continue in Add's place, its main action for Enter on the dialog itself, and the header's
+//!   summary in its words; choosing SSH again brings back the SSH fields as they were and drops the sandbox's form with
+//!   its draft, as the old dialog's remount did, so choosing the sandbox again starts it afresh and reads the account
+//!   again. The choice is not drawn for an add that began as an agent's request, which asks for an SSH destination.
+//!   While Add's probe or answer is out a choice does nothing, as the old dialog's other kind was unavailable then; the
+//!   strip has no unavailable state, so its arrows still move focus to the other tab there, which chooses nothing
+//!   (recorded in `docs/gpui/parity/settings-and-hosts.md`, "Deviations").
 //! - **Before the probe is sent.** Add refuses an alias the helm would refuse for its shape (the old app's
 //!   `validate_alias_draft`, in its words) and a destination that is already a host entry, naming that entry in the
 //!   helm's own words (SPEC.md: "Adding a destination that is already a host entry is refused, naming that entry,
@@ -61,10 +70,10 @@
 //! [`crate::operations::Settled::user_moved_on`] documents for Rename's success), and the layer manager returns focus
 //! only if it is still inside. If the user closed the dialog before the reply, the reply reaches nobody. The setup
 //! confirmation is the one outcome that would open something; [`super::setup`] says how the same rule applies to it.
-//!
-//! NOTE: Not drawn, recorded in `docs/gpui/parity/settings-and-hosts.md`: the host kind choice (SSH or Tensorlake
-//! sandbox), since this milestone adds hosts over SSH only.
 
+mod tensorlake;
+#[cfg(test)]
+mod tensorlake_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -75,7 +84,7 @@ use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::provisioning::{PlanSteps, ProbeReply};
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, FocusHandle,
+    AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle,
     IntoElement, ParentElement as _, Render, Styled as _, Subscription, WeakEntity, Window, div,
     px,
 };
@@ -86,7 +95,9 @@ use serde_json::{Value, json};
 use super::{setup, ssh_help};
 use crate::approvals::answers;
 use crate::approvals::host_add::{self, AgentRequest, Answered};
-use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
+use crate::components::{
+    Button, DialogFrame, HoverHelp, Role, TabOption, TabStrip, TextInput, TextInputState, Tier,
+};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
@@ -95,6 +106,7 @@ use crate::layers::{self, Dialog, Dismissal, LayerId, MainAction, Subject};
 use crate::operations::{Command, OpKey, Outcome, Settled, Work};
 use crate::session;
 use crate::theme::{self, metrics};
+use tensorlake::TensorlakeForm;
 
 /// `.host-add-dialog`'s width.
 const WIDTH: f32 = 560.;
@@ -118,9 +130,36 @@ const CANCEL_HELP: &str = "Cancel: close without adding a host";
 const ALIAS_MAX_CHARS: usize = 64;
 
 /// The hover help of every control that opens this dialog (the host rail's Add host and the Hosts panel heading's add
-/// button), the old buttons' words, kept although the dialog offers SSH alone for now (the module docs record the
-/// missing Tensorlake choice). One copy, so the entry points cannot drift apart when the choice arrives.
+/// button), the old buttons' words. One copy, so the entry points cannot drift apart.
 pub(crate) const ADD_HOST_HELP: &str = "Add host: connect a machine or create a Tensorlake sandbox";
+
+/// What the dialog adds, as its kind choice says (the module docs): the kind choice's values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// A machine reached over SSH: the destination and alias fields, and Add.
+    Ssh,
+    /// A Tensorlake sandbox created from a recipe ([`tensorlake`]).
+    Tensorlake,
+}
+
+/// What the dialog shows below its kind choice.
+enum Body {
+    /// The SSH destination and alias. Their drafts live on the dialog itself, so they outlast a switch of kind.
+    Ssh,
+    /// A Tensorlake sandbox's form: made each time the kind is chosen and dropped when SSH is chosen again, with its
+    /// draft, as the old dialog remounted its Tensorlake form on each switch.
+    Tensorlake(Entity<TensorlakeForm>),
+}
+
+impl Body {
+    /// The kind this body is for, which the kind choice shows as chosen.
+    fn kind(&self) -> Kind {
+        match self {
+            Body::Ssh => Kind::Ssh,
+            Body::Tensorlake(_) => Kind::Tensorlake,
+        }
+    }
+}
 
 /// Open the Add host dialog on top of everything else in `window`: the entry point for the host rail's Add host and
 /// the Hosts panel heading's add button.
@@ -265,9 +304,9 @@ fn open_with(
     let dialog = cx.new(|cx| AddHostDialog::new(opener.clone(), start, window, cx));
     let start = dialog.read(cx).destination.input().focus_handle(cx);
     let weak = dialog.downgrade();
-    // Enter on the dialog itself (after a click on its empty space) is Add, the dialog's one main action.
+    // Enter on the dialog itself is the shown kind's one main action: Add, or the sandbox's Continue.
     let main_action: MainAction = Rc::new(move |window, cx| {
-        let _ = weak.update(cx, |dialog, cx| dialog.add(window, cx));
+        let _ = weak.update(cx, |dialog, cx| dialog.main_action(window, cx));
     });
     let layer = layers::open_dialog(
         Dialog {
@@ -493,6 +532,8 @@ pub(crate) struct AddHostDialog {
     accepted: bool,
     /// The add began as an agent's request: Add's approval lines show, and the setup confirmation always asks.
     from_agent: bool,
+    /// What the dialog shows below its kind choice (the module docs, "The host kind").
+    body: Body,
     /// An agent's dialog's watches: a redraw when the answer bar's pause ends, which makes Add live again; and a close
     /// when an answer from another surface (the card) settles after the request stopped waiting, which settles in the
     /// operation store, not the pushed store the dialog's subject watches.
@@ -562,8 +603,23 @@ impl AddHostDialog {
             agent,
             accepted: false,
             from_agent,
+            body: Body::Ssh,
             _watches: watches,
         }
+    }
+
+    /// The kind choice picked `kind`: show its body, a new Tensorlake sandbox form (which reads the account) or the
+    /// SSH fields, dropping the sandbox's form. Ignored while Add's probe or answer is out, so the fields being checked
+    /// stay on screen.
+    fn choose_kind(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy(cx) || self.body.kind() == kind {
+            return;
+        }
+        self.body = match kind {
+            Kind::Ssh => Body::Ssh,
+            Kind::Tensorlake => Body::Tensorlake(cx.new(|cx| TensorlakeForm::new(window, cx))),
+        };
+        cx.notify();
     }
 
     /// The agent's request, while Add and Cancel still answer it: until the helm accepted the dialog's Allow.
@@ -631,6 +687,15 @@ impl AddHostDialog {
     /// its label but answers nothing.
     fn busy(&self, cx: &App) -> bool {
         self.probing(cx) || self.pending().is_some_and(|request| request.paused(cx))
+    }
+
+    /// The dialog's main action, Enter on the dialog itself: the shown kind's. Add for SSH; the sandbox's Continue while
+    /// its body shows, so Enter there never probes the SSH destination typed earlier and hidden now.
+    fn main_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.body {
+            Body::Tensorlake(form) => form.clone().update(cx, |form, cx| form.proceed(window, cx)),
+            Body::Ssh => self.add(window, cx),
+        }
     }
 
     /// Add: refuse what can be refused without contacting anything, then refuse while a session launch is in flight,
@@ -858,10 +923,10 @@ fn open_ssh_help(
     }
 }
 
-/// A labelled field (`.add-host-form label`): the label's words in the quiet ink over the input. The ink is the
-/// words' own, not the column's: the input inherits text color, and its text is the ordinary ink (`.add-host-form
-/// input`'s `--fg-0`).
-fn field(label: &'static str, input: TextInput, palette: &theme::Palette) -> AnyElement {
+/// A labelled field (`.add-host-form label`): the label's words in the quiet ink over the control, a text input or the
+/// sandbox's Recipe select. The ink is the words' own, not the column's: the control inherits text color, and its text
+/// is the ordinary ink (`.add-host-form input`'s `--fg-0`).
+fn field(label: &'static str, input: impl IntoElement, palette: &theme::Palette) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -902,12 +967,100 @@ impl Render for AddHostDialog {
                 cx,
             )
         });
+        // The kind choice, above whatever the chosen kind draws. An add that began as an agent's request (its reopen
+        // after a refused setup included) asks for an SSH destination, so it has none, as in the old dialog.
+        let kinds = (!self.from_agent).then(|| {
+            let chooser = weak.clone();
+            TabStrip::new(
+                "add-host-kind",
+                "Host kind",
+                HoverHelp::tooltip(
+                    "Host kind: a machine you reach over SSH, or a new Tensorlake sandbox",
+                ),
+            )
+            .tab(TabOption::new(
+                "SSH",
+                HoverHelp::tooltip("Connect a machine through its SSH destination"),
+                Kind::Ssh,
+            ))
+            .tab(TabOption::new(
+                "Tensorlake sandbox",
+                HoverHelp::tooltip("Create a Tensorlake sandbox from a saved recipe"),
+                Kind::Tensorlake,
+            ))
+            .chosen(self.body.kind())
+            .on_choose(move |kind, window, cx| {
+                let _ = chooser.update(cx, |dialog, cx| dialog.choose_kind(*kind, window, cx));
+            })
+        });
+        let shown: AnyElement = match &self.body {
+            Body::Tensorlake(form) => form.clone().into_any_element(),
+            Body::Ssh => self.ssh_fields(&weak, palette),
+        };
         let body = div()
             .flex()
             .flex_col()
             .gap(px(BODY_GAP))
             .children(requester)
             .children(approved)
+            .children(kinds)
+            .child(shown);
+        let cancel = Button::new(
+            "add-host-cancel",
+            "Cancel",
+            HoverHelp::tooltip(CANCEL_HELP),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .on_click(dismiss(weak.clone()));
+        let add_weak = weak.clone();
+        let (main, summary) = match &self.body {
+            Body::Tensorlake(form) => (
+                form.read(cx).continue_button(form.downgrade()),
+                "A Tensorlake sandbox created from a recipe",
+            ),
+            Body::Ssh => (
+                Button::new(
+                    "add-host-submit",
+                    if probing { "Checking…" } else { "Add" },
+                    HoverHelp::tooltip("Add: check the SSH destination, then add the host"),
+                    Role::Button,
+                )
+                .tier(Tier::Primary)
+                // Busy rather than disabled while the probe is out, so the Add the user pressed keeps focus
+                // (SPEC_impl.md, "Drafts": a disabled button gives up focus).
+                .busy(busy)
+                .on_click(move |_, window, cx| {
+                    let _ = add_weak.update(cx, |dialog, cx| dialog.add(window, cx));
+                }),
+                "An SSH destination this helm can reach",
+            ),
+        };
+        DialogFrame::new("add-host", "Add host", body, vec![cancel, main])
+            .summary(summary)
+            .tile(host_mark(
+                HostIcon::Cloud,
+                HostColor::Default,
+                px(TILE_MARK),
+                palette,
+            ))
+            .width(px(WIDTH))
+            .close(
+                "Cancel adding host",
+                HoverHelp::tooltip(CANCEL_HELP),
+                false,
+                dismiss(weak),
+            )
+    }
+}
+
+impl AddHostDialog {
+    /// The SSH kind's body: the destination and alias with their help, the SSH help link, and the error line.
+    fn ssh_fields(&self, weak: &WeakEntity<Self>, palette: &theme::Palette) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(BODY_GAP))
             .child(field(
                 "SSH destination",
                 TextInput::new(
@@ -976,43 +1129,7 @@ impl Render for AddHostDialog {
                 self.problem
                     .clone()
                     .map(|line| super::problem_line(line, palette)),
-            );
-        let cancel = Button::new(
-            "add-host-cancel",
-            "Cancel",
-            HoverHelp::tooltip(CANCEL_HELP),
-            Role::Button,
-        )
-        .tier(Tier::Neutral)
-        .on_click(dismiss(weak.clone()));
-        let add_weak = weak.clone();
-        let add = Button::new(
-            "add-host-submit",
-            if probing { "Checking…" } else { "Add" },
-            HoverHelp::tooltip("Add: check the SSH destination, then add the host"),
-            Role::Button,
-        )
-        .tier(Tier::Primary)
-        // Busy rather than disabled while the probe is out, so the Add the user pressed keeps focus (SPEC_impl.md,
-        // "Drafts": a disabled button gives up focus).
-        .busy(busy)
-        .on_click(move |_, window, cx| {
-            let _ = add_weak.update(cx, |dialog, cx| dialog.add(window, cx));
-        });
-        DialogFrame::new("add-host", "Add host", body, vec![cancel, add])
-            .summary("An SSH destination this helm can reach")
-            .tile(host_mark(
-                HostIcon::Cloud,
-                HostColor::Default,
-                px(TILE_MARK),
-                palette,
-            ))
-            .width(px(WIDTH))
-            .close(
-                "Cancel adding host",
-                HoverHelp::tooltip(CANCEL_HELP),
-                false,
-                dismiss(weak),
             )
+            .into_any_element()
     }
 }

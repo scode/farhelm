@@ -55,7 +55,7 @@ partly (below)
 
 Tests: 8. Covers: Add host pins inline recipe answers and focuses Name in ${palette}.
 
-not yet ported
+partly (below)
 
 ### `tests/tensorlake-lifecycle.spec.ts`
 
@@ -421,6 +421,33 @@ or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.
   fill and edge, the intro, the key form with no key saved): the golden `settings-tensorlake`. Its section list puts
   Tensorlake before Containers, as SPEC.md orders them; the reference screens, taken from the old app, list Containers
   first.
+
+## `tests/tensorlake-hosts.spec.ts`, partly
+
+Add host opens on SSH and offers the Tensorlake sandbox kind beside it. Choosing it reads the Tensorlake account (each
+time, as the old dialog's remount did) and draws "Loading Tensorlake settings…", a failed read's words with Retry, the
+no-key line with "Open Settings → Tensorlake" (closing Settings reads the account again), or Name and Recipe with the
+chosen recipe's summary. Continue is drawn and not yet available: the creation confirmation, its billing callout and
+Back come with it, as does the inline recipe editor. Replacing tests, in
+`crates/gui/farhelm-gui/src/hosts/add/tensorlake_tests.rs`:
+
+- "the Tensorlake form links Settings and protects an inline recipe draft": its Settings half,
+  `without_a_key_the_body_opens_settings_and_reads_the_account_again_when_it_closes`. The inline draft waits for the
+  inline editor.
+- "Tensorlake Add host structures its form and creation plan in ${palette}": the form's half, the fields, the recipe
+  choice in the catalog's order and a chosen recipe kept, marked unavailable, when it leaves the catalog,
+  `the_recipe_choice_offers_the_catalog_shows_the_summary_and_keeps_a_vanished_choice`; the kind choice keeping the SSH
+  draft and starting the sandbox's form afresh,
+  `the_kind_choice_swaps_bodies_keeps_the_ssh_draft_and_starts_the_sandbox_afresh`; a failed account read,
+  `a_failed_account_read_shows_the_helms_words_and_retry_reads_again`. The plan, Back, Copy, Cancel and Escape wait for
+  the creation confirmation. Its look with no key saved is the screenshot batch's app scene
+  `app-host-add-tensorlake-no-key`; the form with a key has no app scene, since a drive stops at the no-key refusal.
+- An agent's add request draws no kind choice: `approvals/host_add_tests.rs`
+  `the_cards_action_opens_the_dialog_prefilled_and_answers_nothing`.
+- The other cases (pinned inline answers, billing confirmation and setup progress, the image-base recipe through the
+  Tensorlake preference, a recipe deleted during confirmation, Cancel retiring a queued answer, rerun before the first
+  create) wait for the inline editor and the creation confirmation. The deleted recipe's helm half is the helm's test
+  `a_recipe_deleted_while_its_creation_plan_is_offered_refuses_and_registers_nothing`.
 
 ## `tests/provisioning.spec.ts`, Add host's dialog, probe and setup
 
@@ -1329,9 +1356,15 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Add host
 
-- **SSH only.** The old dialog opened on a host kind choice, SSH or Tensorlake sandbox. Containers and Tensorlake wait
-  for the next milestone (decided by the migration's orchestrator on 2026-11-14), so the dialog offers SSH alone and
-  draws no choice.
+- **The host kind choice is a tab strip.** The old dialog drew SSH and Tensorlake sandbox as a two-button segmented
+  control; here it is the launcher's tab strip (the component layer has one strip of choices, and a second extends it),
+  with the strip's look: the chosen kind filled with the accent over a rule. Its keys are the strip's (the arrows switch
+  kinds). As in the old dialog, an add that began as an agent's request draws no choice. While Add's probe is out the
+  old dialog's other kind was unavailable; the strip has no unavailable state, so a choice then does nothing, and its
+  arrows still move focus to the other tab without choosing it.
+- **Settings opens over Add host.** The old dialog's "Open Settings → Tensorlake" replaced Add host with Settings and
+  remounted it when Settings closed; here Settings opens over Add host, which stays as it was below, and closing
+  Settings returns focus to the button.
 - **A duplicate destination is refused by the app as well as the helm**, so the refusal does not wait behind other
   hosts' probes holding the helm's planning slots. The old dialog sent the probe and showed the helm's refusal, which
   the helm also gave before contacting anything. The words are the helm's, so the user reads the same sentence either
