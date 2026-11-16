@@ -76,6 +76,8 @@ mod choices;
 mod configured;
 mod containers;
 #[cfg(test)]
+mod containers_tests;
+#[cfg(test)]
 mod credential_tests;
 mod credentials;
 mod ntfy;
@@ -137,6 +139,8 @@ use tensorlake_key::{Place, TensorlakeAccount, TensorlakeKey};
 
 pub use agent_trust::TrustAgent;
 pub use checkout_field::{CheckoutField, FolderScope, Saved};
+/// The one way the GUI asks the helm for Podman checks, for the launcher too ([`containers::check_container_hosts`]).
+pub(crate) use containers::check_container_hosts;
 /// The line saying why a press sent nothing, shared with the host settings dialog, whose saves share a host's key the way
 /// Settings' share the preference row's.
 pub(crate) use refused::Refused;
@@ -555,8 +559,8 @@ pub(crate) struct SettingsDialog {
     /// The Tensorlake section, made the first time it is shown in this opening, over the shared account above, which
     /// reads it then if no section has yet ([`tensorlake`]).
     tensorlake_section: Option<Entity<tensorlake::Tensorlake>>,
-    /// The Recipes section, made the first time it is shown in this opening. Its rows are the pushed catalog; it reads
-    /// only the Tensorlake account, then and each time it is shown again ([`recipes`]).
+    /// The Recipes section, made the first time it is shown in this opening. Its rows are the pushed catalog; whether
+    /// a key is saved comes from the shared account above, read then if no section has yet ([`recipes`]).
     recipes: Option<Entity<recipes::Recipes>>,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
@@ -663,13 +667,14 @@ impl SettingsDialog {
 
     /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
     /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
-    /// its fields (which read their routes) and reads the spare switch, showing Notifications for the first time
-    /// makes its form, which reads the helm's ntfy settings, and showing Containers for the first time makes its
-    /// section, which reads the container hosts and leftovers. Showing Credentials makes it the first time, which reads
-    /// the Tensorlake account too if no section has yet, and reads its catalog every time; showing Tensorlake makes it
-    /// the first time, over the same account, read then if no section has yet and not again, as the old account was
-    /// read once per opening, except once after a refused Create SSH key ([`tensorlake_ssh_key`]); showing Recipes
-    /// makes it the first time, and reads the Tensorlake account every time.
+    /// its fields (which read their routes) and reads the spare switch, showing Notifications for the first time makes
+    /// its form, which reads the helm's ntfy settings, and showing Containers for the first time makes its section,
+    /// which reads the leftovers and asks the helm to check every container host. Showing Credentials makes it the
+    /// first time, which reads the Tensorlake account too if no section has yet, and reads its catalog every time;
+    /// showing Tensorlake makes it the first time, over the same account, read then if no section has yet and not
+    /// again, as the old account was read once per opening, except once after a refused Create SSH key
+    /// ([`tensorlake_ssh_key`]); showing Recipes makes it the first time, over the same account, read then if no
+    /// section has yet.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
@@ -712,14 +717,14 @@ impl SettingsDialog {
             }
         }
         if section == Section::Recipes {
-            match &self.recipes {
-                // Shown again: the catalog is pushed, but whether an API key is saved is not, so that is read again
-                // ([`recipes`]).
-                Some(section) => section.update(cx, |section, cx| section.read_account(cx)),
-                None => {
-                    let layer = self.layer;
-                    self.recipes = Some(cx.new(|cx| recipes::Recipes::new(layer, window, cx)));
-                }
+            if self.recipes.is_none() {
+                // Whether a key is saved comes from the account Credentials and Tensorlake share ([`recipes`]).
+                let account = self
+                    .tensorlake
+                    .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
+                    .clone();
+                let layer = self.layer;
+                self.recipes = Some(cx.new(|cx| recipes::Recipes::new(layer, account, window, cx)));
             }
         } else if let Some(recipes) = &self.recipes {
             // Undrawn from now on: it must not keep holding the running pulse ([`recipes::Recipes::hidden`]).

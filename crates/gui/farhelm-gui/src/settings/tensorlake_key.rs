@@ -135,13 +135,19 @@ impl TensorlakeAccount {
         self.settings.as_ref()
     }
 
+    /// Whether the helm has an API key saved, once the account has been read: `None` before then and while the read
+    /// failed, which each form treats in its own way (the key form stays locked; Recipes counts no key).
+    pub(super) fn key_set(&self) -> Option<bool> {
+        self.settings.as_ref().map(|settings| settings.api_key_set)
+    }
+
     /// How many Saves and Clears of the key have been done in this opening ([`TensorlakeAccount::key_saves`]'s field).
     pub(super) fn key_saves(&self) -> u64 {
         self.key_saves
     }
 
     /// Why the account could not be read, until a read answers.
-    fn unreadable(&self) -> Option<&HostText> {
+    pub(super) fn unreadable(&self) -> Option<&HostText> {
         self.unreadable.as_ref()
     }
 
@@ -343,10 +349,7 @@ impl TensorlakeKey {
 
     /// Whether the helm has a key saved; `None` until the account's read answers.
     fn key_set(&self, cx: &App) -> Option<bool> {
-        self.account
-            .read(cx)
-            .settings()
-            .map(|settings| settings.api_key_set)
+        self.account.read(cx).key_set()
     }
 
     /// Whether the controls take no input: before the account's read has answered, and while Save, Clear or Test is
@@ -522,16 +525,12 @@ impl Render for TensorlakeKey {
         let unloaded = self.account.read(cx).unreadable().cloned();
         let retry = unloaded.is_some().then(|| {
             let account = self.account.clone();
-            Button::new(
+            choices::retry_loading(
                 format!("{ID}-retry"),
                 "Retry loading",
-                HoverHelp::tooltip("Load the saved Tensorlake settings again"),
-                Role::Button,
+                "Load the saved Tensorlake settings again",
+                move |cx| account.update(cx, |account, cx| account.read_again(cx)),
             )
-            .tier(Tier::Neutral)
-            .on_click(move |_, _, cx| {
-                account.update(cx, |account, cx| account.read_again(cx));
-            })
         });
 
         let no_key = key_set != Some(true);
@@ -571,7 +570,7 @@ impl Render for TensorlakeKey {
         let save = Button::new(
             format!("{ID}-save"),
             "Save",
-            HoverHelp::tooltip("Save this API key for every window using this helm"),
+            HoverHelp::tooltip("Save this API key for this helm"),
             Role::Button,
         )
         .tier(Tier::Primary)

@@ -774,7 +774,7 @@ fn a_running_preparation_pulses_until_the_section_is_hidden(cx: &mut TestAppCont
 /// outcome reaches the place through the helm's push of the places, which it re-reads when the check ends, so the
 /// section must neither read the places nor ask again when a host's check moves. Specified: with `build-box` able to
 /// hold containers and never checked, showing Recipes asks `POST /api/hosts/7/podman-probe` once beside the account
-/// read; showing it again in the same opening asks no second check; pushes of the hosts with the check running and
+/// read; showing it again in the same opening reads and asks nothing; pushes of the hosts with the check running and
 /// then finished send nothing; and the helm's push of the place with the finished check's reason draws that reason.
 #[gpui::test]
 fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
@@ -837,7 +837,11 @@ fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
 
     click(cx, section_button(Section::Sessions));
     click(cx, section_button(Section::Recipes));
-    answer_account(&mut helm, cx, true);
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "no second check, and no second account read"
+    );
 
     let push_hosts = |helm: &mut FakeHelm, cx: &mut VisualTestContext, state: CollectionState| {
         helm.push(CollectionChanges {

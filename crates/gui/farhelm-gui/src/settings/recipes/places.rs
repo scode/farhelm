@@ -130,42 +130,6 @@ pub(super) fn building_places(cx: &App) -> Option<Vec<(String, i64)>> {
 }
 
 impl Recipes {
-    /// Ask the helm to check every host that can hold containers, in the background, as the old section did once when
-    /// Settings opened: the pushed hosts collection carries a check (`container_check`) for exactly those hosts. Each
-    /// answer only says the check was asked for; its outcome reaches the places through the push (the module docs). A
-    /// refusal changes nothing shown here: the place then keeps the reason of the last check, which says what is wrong.
-    pub(super) fn check_hosts(cx: &mut Context<Self>) {
-        let hosts: Vec<i64> = session::current_store(cx)
-            .map(|store| {
-                store
-                    .read(cx)
-                    .collections()
-                    .ordered::<HostView>()
-                    .into_iter()
-                    .filter(|host| host.container_check.is_some())
-                    .map(|host| host.id)
-                    .collect()
-            })
-            .unwrap_or_default();
-        for host in hosts {
-            let Ok(path) = ApiPath::api(&["hosts", &host.to_string(), "podman-probe"]) else {
-                continue;
-            };
-            crate::operations::send(
-                Method::Post,
-                path,
-                None,
-                "POST /api/hosts/[host]/podman-probe",
-                cx,
-                move |answer, _| {
-                    if let Err(reason) = answer {
-                        tracing::debug!(host, ?reason, "Podman check not asked");
-                    }
-                },
-            );
-        }
-    }
-
     /// Rebuild `name` at `place` under the recipe's key. Does nothing while the recipe already has work in flight, when
     /// every Rebuild of it is drawn busy. An accepted rebuild needs nothing more here: the helm has pushed the place
     /// building by the time it replies. A refusal is the store's to keep on the key, where the row shows it.

@@ -928,20 +928,6 @@ fn is_podman(argv: &[String], subcommand: &str) -> bool {
         && argv.get(1).is_some_and(|arg| arg == subcommand)
 }
 
-/// Await a route's reply, failing the test with a message if it takes longer than `HOST_REPLY_BOUND` and a second:
-/// with the clock paused and a host held, a route without its bound would otherwise wait for the hold forever and
-/// hang the test until the runner kills it.
-async fn answered_within_the_bound(
-    reply: impl std::future::Future<Output = axum::response::Response>,
-) -> axum::response::Response {
-    tokio::time::timeout(
-        crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(1),
-        reply,
-    )
-    .await
-    .expect("answered by the host reply bound")
-}
-
 /// The body of a reply, as text.
 async fn body_text(response: axum::response::Response) -> String {
     let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
@@ -966,13 +952,9 @@ async fn a_leftover_listing_answers_at_the_reply_bound_when_its_host_stalls() {
     // store's work on the blocking pool holds it still until it is done.
     tokio::time::pause();
     let started = tokio::time::Instant::now();
-    let response = answered_within_the_bound(listing(Some(provider))).await;
+    let response = crate::rest_harness::within_reply_bound(listing(Some(provider))).await;
     let waited = started.elapsed();
-    assert!(
-        waited >= crate::sessions::HOST_REPLY_BOUND
-            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
-        "the listing answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the listing");
     assert!(
         commands
             .model
@@ -1012,7 +994,7 @@ async fn a_leftover_delete_answers_at_the_reply_bound_and_its_removal_finishes_a
     let before = events.revision();
     tokio::time::pause();
     let started = tokio::time::Instant::now();
-    let response = answered_within_the_bound(deleting(
+    let response = crate::rest_harness::within_reply_bound(deleting(
         Some(provider),
         Arc::clone(&events),
         DeleteLeftover {
@@ -1022,11 +1004,7 @@ async fn a_leftover_delete_answers_at_the_reply_bound_and_its_removal_finishes_a
     ))
     .await;
     let waited = started.elapsed();
-    assert!(
-        waited >= crate::sessions::HOST_REPLY_BOUND
-            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
-        "the delete answered after {waited:?}"
-    );
+    crate::rest_harness::assert_answered_at_reply_bound(waited, "the delete");
     assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
     assert!(body_text(response).await.contains("the cleanup carries on"));
     {
@@ -1092,7 +1070,7 @@ async fn the_listing_asks_its_container_hosts_concurrently() {
     );
     tokio::time::pause();
     let started = tokio::time::Instant::now();
-    let response = answered_within_the_bound(listing(Some(provider))).await;
+    let response = crate::rest_harness::within_reply_bound(listing(Some(provider))).await;
     let waited = started.elapsed();
     assert_eq!(
         response.status(),

@@ -149,11 +149,6 @@ fn settings_scene_with(
                     "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
                     "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
                     "/api/credentials" => serde_json::json!([]),
-                    "/api/environment-places" => serde_json::json!([
-                        { "place": { "kind": "podman_host", "host": 1 }, "name": "this machine", "reason": null, "refreshing": false },
-                        { "place": { "kind": "podman_host", "host": 2 }, "name": "build-box", "reason": null, "refreshing": false },
-                        { "place": { "kind": "podman_host", "host": 3 }, "name": "gpu-1", "reason": null, "refreshing": false },
-                    ]),
                     "/api/container-orphans" => serde_json::json!([]),
                     // Credentials' and Tensorlake's key forms picture no key saved, as their references do; Recipes
                     // pictures rows that can build, which takes a saved key.
@@ -383,10 +378,30 @@ pub(super) fn settings_terminal_setup(state: &SceneState, window: &mut Window, c
     );
 }
 
-/// Settings at Containers: the reference's three container hosts, each Ready, and no containers left behind, as in the
-/// reference. Focus starts on the dialog itself (`Section::first`), so no ring shows.
+/// Settings at Containers: the reference's three container hosts, each pushed with a passed Podman check (Ready), and
+/// no containers left behind, as in the reference. Focus starts on the dialog itself (`Section::first`), so no ring
+/// shows.
 pub(super) fn settings_containers_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    settings_scene(state, crate::settings::Section::Containers, window, cx);
+    let mut hosts = crate::hosts::tests::reference_hosts();
+    for host in &mut hosts {
+        host.container_check = Some(farhelm_proto::ui_channel::ContainerCheckView {
+            checked_at: Some(1_800_000_000),
+            refreshing: false,
+            usable: true,
+            reason: None,
+        });
+    }
+    let fixture = SettingsFixture {
+        hosts,
+        ..SettingsFixture::default()
+    };
+    settings_scene_with(
+        state,
+        crate::settings::Section::Containers,
+        fixture,
+        window,
+        cx,
+    );
 }
 
 /// Settings at Checkouts, its fields empty and the spare switch on, as in the reference. Focus starts on the dialog
