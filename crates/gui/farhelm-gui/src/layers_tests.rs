@@ -14,7 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render,
     StatefulInteractiveElement as _, Styled, TestAppContext, VisualTestContext, Window, div, point,
     prelude::FluentBuilder as _, px,
@@ -1661,69 +1661,55 @@ fn a_popover_that_lets_the_pointer_through_hands_press_hover_and_wheel_to_the_pa
     );
 }
 
-/// Why this matters: a popover that lets the pointer through must not become a way around a modal dialog. It only
-/// gives up its own hit area, so a press on it goes to whatever is next under the pointer: over a dialog that is the
-/// dialog or its veil, never the page the veil covers. And as an ordinary layer in stack order (not a slot above the
-/// dialogs, as the pill is), it is covered by a dialog opened while it shows, as Settings can be from a shortcut during
-/// the drag-copy notice's 30 seconds.
+/// Why this matters: a popover that lets the pointer through is an ordinary layer in stack order, not a slot above the
+/// dialogs as the pill is, so a dialog opened while it shows (Settings from a shortcut during the drag-copy notice's 30
+/// seconds) covers it: a press on it then belongs to that dialog's veil, and never reaches through to the popover or
+/// the page. The reverse order is not tested: its only caller never opens it while a layer that holds focus is open.
 ///
-/// Spec: with a dialog open and a popover that lets the pointer through opened on the page under it, the popover is
-/// drawn over the dialog's veil (a press on its control is the control's), a press on its card reaches neither the
-/// page element under it nor the control and leaves the dialog open with focus inside it; once a second dialog opens,
-/// a press on the popover's control is that dialog's veil's.
+/// Spec: with a popover that lets the pointer through open on the page, a press on its control is the control's; once a
+/// dialog opens over it, a press at the same place reaches neither the control nor the page, and both stay open.
 #[gpui::test]
-fn a_popover_that_lets_the_pointer_through_never_reaches_past_a_dialog(cx: &mut TestAppContext) {
+fn a_dialog_opened_over_a_popover_that_lets_the_pointer_through_covers_it(cx: &mut TestAppContext) {
     let (cx, page) = open_passing_page(cx);
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    let control = bounds(cx, "passing-control");
+    cx.simulate_click(control.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.presses.get(),
+        1,
+        "the premise: with nothing over it, the popover's control takes a press"
+    );
+
     let only = handle(cx);
     let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
-    let id = open_passing(cx, page.anchor(), &page.presses);
-    let (card, control) = (bounds(cx, "passing-card"), bounds(cx, "passing-control"));
     assert!(
-        !bounds(cx, "panel").intersects(&card),
-        "the premise: the popover lies over the dialog's veil, beside the dialog"
+        !bounds(cx, "panel").contains(&control.center()),
+        "the premise: the press lands on the dialog's veil, beside the dialog"
     );
-
+    let reached = page.reached.get();
     cx.simulate_click(control.center(), Modifiers::none());
     check(cx);
     assert_eq!(
         page.presses.get(),
         1,
-        "the popover is drawn over the dialog's veil: its control took the press"
+        "under the dialog, a press on the popover's control is the veil's"
     );
-    cx.simulate_click(card.center(), Modifiers::none());
-    check(cx);
     assert_eq!(
         page.reached.get(),
-        Reached::default(),
-        "no press reached the page under the veil"
+        reached,
+        "and reaches nothing on the page"
     );
-    assert!(
-        is_open(cx, dialog),
-        "the veil took the press; the dialog stays"
-    );
-    assert!(focused(cx, &only), "and keeps focus");
-    assert!(is_open(cx, id), "the premise: the popover is still open");
-
-    let other = handle(cx);
-    let (above, _, _) = open_dialog(cx, vec![("other", other.clone())], &other);
-    cx.simulate_click(control.center(), Modifiers::none());
-    check(cx);
-    assert_eq!(
-        page.presses.get(),
-        1,
-        "under a dialog opened later, a press on the popover's control is that dialog's veil's"
-    );
-    assert!(is_open(cx, above) && is_open(cx, id), "and nothing closed");
+    assert!(is_open(cx, dialog) && is_open(cx, id), "and nothing closed");
 }
 
 /// Why this matters: SPEC.md lists exactly what closes the drag-copy notice (its time, its ×, the next press in its
 /// terminal), and Escape is not on it. Escape goes to the topmost layer the user answers; counted as that layer, a
 /// popover that lets the pointer through would close on an Escape meant for something else, and take it from whatever
-/// should have had it: the menu under it, or the tooltip.
+/// should have had it.
 ///
 /// Spec: with only a popover that lets the pointer through open, Escape from a page control leaves it open, and the
-/// layer manager's dismissal answers that it took no Escape. With a menu open under it, Escape closes the menu, and the
-/// popover above the menu with it, as closing a layer that takes focus takes everything opened over it.
+/// layer manager's dismissal answers that it took no Escape.
 #[gpui::test]
 fn escape_passes_over_a_popover_that_lets_the_pointer_through(cx: &mut TestAppContext) {
     let (cx, page) = open_passing_page(cx);
@@ -1742,60 +1728,6 @@ fn escape_passes_over_a_popover_that_lets_the_pointer_through(cx: &mut TestAppCo
         "with nothing else open, Escape is not taken"
     );
     assert!(is_open(cx, id), "and still open");
-    cx.update(|window, cx| layers::close(id, window, cx));
-    settle(cx);
-
-    let item = handle(cx);
-    let menu = open_menu(cx, page.anchor(), vec![("item", item.clone())]);
-    let id = open_passing(cx, page.anchor(), &page.presses);
-    assert!(
-        focused(cx, &item),
-        "the premise: the menu under it holds focus"
-    );
-    keys(cx, "escape");
-    assert!(
-        !is_open(cx, menu),
-        "Escape closed the menu under the popover"
-    );
-    assert!(
-        !is_open(cx, id),
-        "and the popover opened over the menu went with it"
-    );
-}
-
-/// Why this matters: the quick switcher closes on a press on its veil, but only while it is the layer the user is
-/// answering, so a press beside a menu opened over it closes just the menu. A popover that lets the pointer through is
-/// not a layer the user answers, so one shown over the switcher must not keep a press on the veil from dismissing it.
-///
-/// Spec: with a popover that lets the pointer through open over a dialog that closes on an outside press, a press on
-/// the veil outside both dismisses the dialog.
-#[gpui::test]
-fn a_press_on_the_veil_under_a_popover_that_lets_the_pointer_through_dismisses_the_switcher(
-    cx: &mut TestAppContext,
-) {
-    let OptionDialog {
-        cx,
-        dialog,
-        menu_anchor,
-        corner_presses,
-        ..
-    } = open_option_dialog(cx, SWITCHER, None, Tall::No);
-    let id = open_passing(cx, menu_anchor, &Rc::new(Cell::new(0)));
-    assert!(
-        !bounds(cx, "passing-card").intersects(&bounds(cx, "page-corner"))
-            && !bounds(cx, "panel").intersects(&bounds(cx, "page-corner")),
-        "the premise: the press lands on the veil, outside the switcher and the popover"
-    );
-    click(cx, "page-corner");
-    assert!(
-        !is_open(cx, dialog),
-        "the press on the veil dismissed the switcher"
-    );
-    assert_eq!(corner_presses.get(), 0, "and the veil took it");
-    assert!(
-        !is_open(cx, id),
-        "the popover, opened over the switcher, went with it"
-    );
 }
 
 /// Why this matters: with Escape and outside presses passed over, what is left must still close a popover that lets
@@ -1843,78 +1775,6 @@ fn a_menu_that_asks_to_let_the_pointer_through_panics_in_a_debug_build(cx: &mut 
         let menu = Popover::menu(view, cx.focus_handle(), anchor, start).passes_pointer();
         layers::open_popover(menu, &mark, window, cx)
     });
-}
-
-/// Why this matters: a release build has no assertion, so the same mistake must fail closed there: the popover opens as
-/// an ordinary one, which keeps its focus tracking and outside-press close, rather than one whose focus rules are
-/// broken. A debug build panics before [`layers::open_popover`] reaches this decision, so it is checked directly.
-///
-/// Spec: a popover lets the pointer through only when it asked to and never takes focus.
-#[test]
-fn a_popover_that_takes_focus_never_lets_the_pointer_through() {
-    assert!(layers::lets_pointer_through(true, false));
-    assert!(
-        !layers::lets_pointer_through(true, true),
-        "one that takes focus fails closed"
-    );
-    assert!(!layers::lets_pointer_through(false, false));
-    assert!(!layers::lets_pointer_through(false, true));
-}
-
-/// Why this matters: the truth table above shows the rule, not that the code opening every popover applies it. A debug
-/// build panics before reaching it, so it is opened here as a release build opens it, where the mistake must fail
-/// closed: as an ordinary menu that takes the pointer and closes on a press outside it, not one a press passes through
-/// and only its owner closes.
-///
-/// Spec: opened as a release build opens it ([`layers::open_popover_as_a_release_build`]), a menu (a popover with a
-/// start) built with [`Popover::passes_pointer`] starts focus on its item, a press on its empty space reaches nothing
-/// on the page under it and leaves it open with focus on the item, and a press on the page outside it closes it.
-#[gpui::test]
-fn a_menu_that_asks_to_let_the_pointer_through_opens_as_an_ordinary_menu_in_a_release_build(
-    cx: &mut TestAppContext,
-) {
-    let (cx, page) = open_passing_page(cx);
-    let item = handle(cx);
-    let (anchor, start) = (page.anchor(), item.clone());
-    let id = cx.update(move |window, cx| {
-        let view = cx.new(|_| Panel {
-            controls: vec![("item", start.clone())],
-            shown: Rc::new(Cell::new(true)),
-        });
-        let mark = Mark::take(cx);
-        let menu = Popover::menu(view, cx.focus_handle(), anchor, start).passes_pointer();
-        layers::open_popover_as_a_release_build(menu, &mark, window, cx)
-    });
-    settle(cx);
-    let id = id.expect("the premise: the menu opened");
-    assert!(focused(cx, &item), "the menu starts on its item");
-    let (panel, covered) = (bounds(cx, "panel"), bounds(cx, "covered"));
-    // The panel's padding: empty space of the menu's own, over the page element.
-    let empty = panel.origin + point(px(5.), px(5.));
-    assert!(
-        covered.contains(&empty) && !bounds(cx, "item").contains(&empty),
-        "the premise: the press lands on the menu's empty space, over the page element"
-    );
-    cx.simulate_click(empty, Modifiers::none());
-    check(cx);
-    assert_eq!(
-        page.reached.get().clicks,
-        0,
-        "the menu took the press from the page element under it"
-    );
-    assert!(
-        is_open(cx, id) && focused(cx, &item),
-        "and stays open, with focus on its item"
-    );
-
-    let outside = point(covered.right() - px(10.), covered.bottom() - px(10.));
-    assert!(
-        !panel.contains(&outside),
-        "the premise: the second press lands outside the menu"
-    );
-    cx.simulate_click(outside, Modifiers::none());
-    check(cx);
-    assert!(!is_open(cx, id), "a press outside the menu closed it");
 }
 
 /// Why this matters: a press through a popover that lets the pointer through must do to focus what it would do with
@@ -2651,8 +2511,8 @@ fn tab_out_of_a_list_that_lets_tab_through_wraps_past_the_pages_end(cx: &mut Tes
 }
 
 /// Why this matters: a control of the list may ask something in a layer of its own, which takes focus out of the list
-/// without the user leaving it. Closing the list then would also close the question opened over it, as a layer that
-/// takes focus closes what was opened over it.
+/// without the user leaving it. Closing the list then would also close the question opened from it, as a layer that
+/// takes focus closes the layers opened from it.
 ///
 /// Specified: a dialog opened from a control of a list that lets Tab through takes focus and leaves the list open;
 /// when the dialog is dismissed, focus is back on that control and the list is still open.
@@ -2845,10 +2705,11 @@ fn a_dialog_over_a_popover_that_never_takes_focus_outlives_its_close(cx: &mut Te
     assert!(focused(cx, &only), "with focus still in the dialog");
 }
 
-/// Why this matters: a layer that takes focus owns what was opened over it, since focus stays inside the topmost such
-/// layer and whatever opened over it was opened from there. A dialog opened from a menu's item must go with the menu,
-/// or it would be left over a page whose menu is gone. This is the rule the popover that never takes focus is the
-/// exception to, kept as it was.
+/// Why this matters: a layer that takes focus owns what was opened from it, and since focus stays inside the topmost
+/// such layer, whatever opens over it from the page or a control is opened from there. A dialog opened from a menu's
+/// item must go with the menu, or it would be left over a page whose menu is gone. The popover that never takes focus
+/// owns nothing (the test above), and a layer opened from an approval card belongs to no layer (the tests at the end of
+/// this file).
 ///
 /// Specified: closing a menu with a dialog opened over it closes the dialog too, and focus returns to the page control
 /// that held it when the menu opened.
@@ -4337,4 +4198,322 @@ fn cards_beside_a_raised_dialog_stay_usable(cx: &mut TestAppContext) {
     );
     assert!(focused(cx, &card.allow), "and focused Allow");
     assert!(is_open(cx, raised), "with the dialog still open");
+}
+
+// ---- Layers: a close leaves another owner's layers -------------------------------------------------------------------
+
+/// Open [`CloseScene`]'s page with a card in the window's top right corner, clear of every dialog, under the given
+/// click rule: `true` as on Linux, where a press on the card's Allow focuses it, `false` as on macOS, where it does not.
+fn card_scene(
+    cx: &mut TestAppContext,
+    click_focuses: bool,
+) -> (&mut VisualTestContext, CloseScene, Installed) {
+    let (cx, scene) = CloseScene::open(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(click_focuses, cx));
+    let card = install_card(cx, top_right());
+    (cx, scene, card)
+}
+
+/// Why this matters: SPEC.md, "Nothing closes a dialog, menu, popup list or confirmation that it did not open". A close
+/// takes the layer's descendants, however deep (a question a dialog asked must not outlive the dialog), and nothing
+/// else: what an approval card opened over the dialog (its tunnel warning) stays when the dialog's owner closes it on a
+/// data change (the bulk Stop question once its targets are gone). The warning is raised above the approval region,
+/// and which layers are raised is worked out from stack positions every frame, so once the layers under it are gone it
+/// must still be drawn over the cards, with nothing restacked by hand.
+///
+/// Premises, under Linux's click rule: a dialog holds focus; a second dialog opened from its control (a question it
+/// asks) takes focus; a press on the card's Allow puts focus there with both open; a dialog opened from Allow (standing
+/// in for the warning, whose real opener still refuses to open over a dialog) is raised above the approval region; a
+/// menu opened from that dialog's control takes focus; the frame draws the card, then the raised dialog, then the menu.
+/// (A menu cannot stand in for the question: the press that puts focus on the card is outside it, and closes it.)
+/// Specified: closing the first dialog closes it and its question; the raised dialog and its menu stay open, focus stays
+/// on the menu's item, and the frame still draws the card, then the raised dialog, then the menu; Escape closes the menu
+/// alone and returns focus to the raised dialog's control, and Escape again returns it to Allow.
+#[gpui::test]
+fn closing_a_dialog_takes_its_descendants_and_leaves_the_cards_raised_layers(
+    cx: &mut TestAppContext,
+) {
+    let (cx, scene, card) = card_scene(cx, true);
+    let in_dialog = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("under", in_dialog.clone())], &in_dialog);
+    assert!(
+        focused(cx, &in_dialog),
+        "the premise: the dialog took focus"
+    );
+    let in_question = handle(cx);
+    let (question, _, _) = open_dialog(cx, vec![("question", in_question.clone())], &in_question);
+    assert!(
+        focused(cx, &in_question),
+        "the premise: the question opened from the dialog took focus"
+    );
+    click(cx, "card-allow");
+    assert!(
+        focused(cx, &card.allow) && is_open(cx, question),
+        "the premise: a press on the card put focus on Allow, with the dialog and its question open"
+    );
+    let in_warning = handle(cx);
+    let (warning, _, _) = open_dialog(cx, vec![("warning", in_warning.clone())], &in_warning);
+    cx.update(|window, cx| layers::above_approval_region(warning, window, cx));
+    settle(cx);
+    let item = handle(cx);
+    let menu = open_menu(cx, scene.anchor(), vec![("item", item.clone())]);
+    assert!(
+        focused(cx, &item),
+        "the premise: the menu opened from the raised dialog took focus"
+    );
+
+    // Layers are drawn under element ids `layer-<n>`, `n` counting the window's opens from 0 and never reused: the
+    // raised dialog is the third layer opened and its menu the fourth.
+    let drawn_order = |cx: &mut VisualTestContext| {
+        let nodes = frame(cx);
+        let at = |id: &str| {
+            nodes
+                .iter()
+                .position(|node| node.element_id.as_deref() == Some(id))
+        };
+        (at("card"), at("layer-2"), at("layer-3"))
+    };
+    let in_order = |order: (Option<usize>, Option<usize>, Option<usize>)| matches!(order, (Some(card), Some(raised), Some(menu)) if card < raised && raised < menu);
+    let before = drawn_order(cx);
+    assert!(
+        in_order(before),
+        "the premise: drawn bottom to top, the card, the raised dialog and its menu: {before:?}"
+    );
+
+    cx.update(|window, cx| layers::close(dialog, window, cx));
+    settle(cx);
+    assert!(
+        !is_open(cx, dialog) && !is_open(cx, question),
+        "closing the dialog closed it and the question opened from it"
+    );
+    assert!(
+        is_open(cx, warning) && is_open(cx, menu),
+        "and left the raised dialog and its menu open"
+    );
+    assert!(focused(cx, &item), "with focus still on the menu's item");
+    let after = drawn_order(cx);
+    assert!(
+        in_order(after),
+        "the raised dialog and its menu are still drawn over the card: {after:?}"
+    );
+
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, menu) && is_open(cx, warning),
+        "Escape closed the menu alone"
+    );
+    assert!(
+        focused(cx, &in_warning),
+        "and returned focus to the raised dialog's control"
+    );
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, warning) && focused(cx, &card.allow),
+        "Escape on the raised dialog closed it and returned focus to Allow, which held it when it opened"
+    );
+}
+
+/// Why this matters: on macOS, the one platform with Tunnel and open, a press on a card's button moves no focus, so a
+/// card pressed over a dialog leaves focus in that dialog, and the layer the card opens would be taken for the dialog's
+/// own. Its opener says where it came from instead ([`layers::opened_from_approval_card`]), and the dialog's owner
+/// closing the dialog must leave the card's layer open, as on Linux.
+///
+/// Premises, under the macOS click rule: a dialog holds focus; a press on the card's Allow answers the card and leaves
+/// focus on the dialog's control; a second dialog opened then takes focus, and its opener calls
+/// `opened_from_approval_card`. Specified: closing the first dialog closes it alone; the second stays open with focus
+/// on its control.
+#[gpui::test]
+fn a_layer_a_card_opened_outlives_the_dialog_under_it_where_a_press_moves_no_focus(
+    cx: &mut TestAppContext,
+) {
+    let (cx, _scene, card) = card_scene(cx, false);
+    let in_dialog = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("under", in_dialog.clone())], &in_dialog);
+    click(cx, "card-allow");
+    assert!(
+        card.answers.get() == 1 && focused(cx, &in_dialog),
+        "the premise: the press answered the card and left focus on the dialog's control"
+    );
+    let in_from_card = handle(cx);
+    let (from_card, _, _) = open_dialog(cx, vec![("over", in_from_card.clone())], &in_from_card);
+    cx.update(|window, cx| layers::opened_from_approval_card(from_card, window, cx));
+    assert!(
+        focused(cx, &in_from_card),
+        "the premise: the layer opened from the card took focus"
+    );
+
+    cx.update(|window, cx| layers::close(dialog, window, cx));
+    settle(cx);
+    assert!(!is_open(cx, dialog), "the owner's close closed its dialog");
+    assert!(
+        is_open(cx, from_card),
+        "and left the layer opened from the card open"
+    );
+    assert!(
+        focused(cx, &in_from_card),
+        "with focus still on its control"
+    );
+}
+
+/// From focus on the scene's page control, open a dialog, press the card's Allow (which focuses it, under Linux's click
+/// rule), and open a second dialog from there, standing in for the card's warning. Checks each premise on the way, and
+/// gives back the first dialog and its control, then the second dialog and its container.
+fn dialog_under_card_layer(
+    cx: &mut VisualTestContext,
+    scene: &CloseScene,
+    card: &Installed,
+) -> (LayerId, FocusHandle, LayerId, FocusHandle) {
+    click(cx, "page");
+    assert!(
+        focused(cx, &scene.page),
+        "the premise: the page control holds focus"
+    );
+    let in_dialog = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("under", in_dialog.clone())], &in_dialog);
+    click(cx, "card-allow");
+    assert!(
+        focused(cx, &card.allow) && is_open(cx, dialog),
+        "the premise: a press on the card put focus on Allow, with the dialog still open"
+    );
+    let in_from_card = handle(cx);
+    let (from_card, container, _) =
+        open_dialog(cx, vec![("over", in_from_card.clone())], &in_from_card);
+    assert!(
+        focused(cx, &in_from_card),
+        "the premise: the layer opened from the card took focus"
+    );
+    (dialog, in_dialog, from_card, container)
+}
+
+/// Why this matters: a dialog's close returns focus to what held it when the dialog opened, and with a card's layer
+/// left open above it, that control sits under the card layer's veil: focus there would be outside every open layer,
+/// where keys reach the page behind a dialog. No user path leaves focus in a dialog another layer covers, or on
+/// nothing, while that layer is open, but a close must not depend on that.
+///
+/// Premises: a dialog opened from the page control and a dialog opened from the card's Allow above it, which holds
+/// focus; then focus is put on the first dialog's control (or on nothing: a handle that is dropped at once, which no
+/// frame drew), by a move no user path makes, in the same update as the first dialog's close. Specified: the close
+/// leaves focus inside the card's layer, not on the page control the first dialog was opened from, and the frame after
+/// it keeps the focus rules; Escape then returns focus to Allow.
+#[gpui::test]
+fn a_close_under_another_owners_layer_leaves_focus_in_that_layer(cx: &mut TestAppContext) {
+    let (cx, scene, card) = card_scene(cx, true);
+    let in_card_layer = |cx: &mut VisualTestContext, container: &FocusHandle| {
+        cx.update(|window, cx| container.contains_focused(window, cx))
+    };
+
+    let (dialog, in_dialog, from_card, container) = dialog_under_card_layer(cx, &scene, &card);
+    cx.update(move |window, cx| {
+        focus::force_focus(&in_dialog, window, cx);
+        assert!(
+            in_dialog.is_focused(window),
+            "the premise: focus is on the covered dialog's control"
+        );
+        layers::close(dialog, window, cx);
+    });
+    settle(cx);
+    assert!(
+        !is_open(cx, dialog) && is_open(cx, from_card),
+        "the premise: the close took the dialog and left the card's layer"
+    );
+    assert!(
+        in_card_layer(cx, &container),
+        "focus left in the closed dialog went into the card's layer, not to the page control"
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &card.allow),
+        "Escape on the card's layer returned focus to Allow"
+    );
+
+    let (dialog, _, from_card, container) = dialog_under_card_layer(cx, &scene, &card);
+    cx.update(move |window, cx| {
+        let gone = cx.focus_handle();
+        focus::force_focus(&gone, window, cx);
+        drop(gone);
+        assert!(
+            window.focused(cx).is_none(),
+            "the premise: nothing holds focus"
+        );
+        layers::close(dialog, window, cx);
+    });
+    settle(cx);
+    assert!(
+        !is_open(cx, dialog) && is_open(cx, from_card),
+        "the premise: the close took the dialog and left the card's layer"
+    );
+    assert!(
+        in_card_layer(cx, &container),
+        "with focus on nothing, the close put it in the card's layer, not on the page control"
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &card.allow),
+        "Escape on the card's layer returned focus to Allow"
+    );
+}
+
+/// A dialog of the one control `start`, under the selector `name`, as [`open_dialog`] opens one, for a test that opens
+/// it inside an update of its own.
+fn panel_dialog(name: &'static str, start: &FocusHandle, cx: &mut App) -> Dialog {
+    let view = cx.new(|_| Panel {
+        controls: vec![(name, start.clone())],
+        shown: Rc::new(Cell::new(true)),
+    });
+    Dialog {
+        view: view.into(),
+        container: cx.focus_handle(),
+        start: start.clone(),
+        subject: None,
+        main_action: None,
+        keeps_focus_on_empty_click: true,
+        returns_to: focus::ReturnTo::Opener,
+        on_dismiss: None,
+        placement: layers::DialogPlacement::Centered,
+        dismiss_on_outside_press: false,
+    }
+}
+
+/// Why this matters: a layer may open in the same update as the layer it is opened from (a dialog that asks something
+/// as it opens), before any frame draws the first one. Focus is then on a control no frame has drawn, inside no drawn
+/// layer, and the parent rule falls back to the topmost layer that holds focus, the one the user is in. Were the second
+/// layer to belong to none, closing the first would leave it over the page.
+///
+/// Premises: focus is on the page control and no layer is open; a dialog and a question are opened in one update, each
+/// taking focus on its start, and focus is on the question's control once a frame draws them. Specified: closing the
+/// dialog closes the question too, and focus returns to the page control the dialog was opened from.
+#[gpui::test]
+fn a_layer_opened_before_the_one_under_it_is_drawn_belongs_to_it(cx: &mut TestAppContext) {
+    let (cx, scene) = CloseScene::open(cx);
+    let (in_dialog, in_question) = (handle(cx), handle(cx));
+    let (dialog, question) = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        let dialog = layers::open_dialog(panel_dialog("under", &in_dialog, cx), &mark, window, cx);
+        let question = layers::open_dialog(
+            panel_dialog("question", &in_question, cx),
+            &mark,
+            window,
+            cx,
+        );
+        (dialog, question)
+    });
+    settle(cx);
+    let (Some(dialog), Some(question)) = (dialog, question) else {
+        panic!("the premise: both layers opened")
+    };
+    assert!(
+        focused(cx, &in_question),
+        "the premise: the question took focus"
+    );
+
+    cx.update(|window, cx| layers::close(dialog, window, cx));
+    settle(cx);
+    assert!(
+        !is_open(cx, dialog) && !is_open(cx, question),
+        "closing the dialog closed the question opened with it"
+    );
+    assert!(
+        focused(cx, &scene.page),
+        "and focus returned to the page control the dialog was opened from"
+    );
 }

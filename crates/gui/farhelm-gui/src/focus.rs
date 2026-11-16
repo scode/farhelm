@@ -1574,6 +1574,14 @@ pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut Ap
     apply(Move::To(handle), window, cx);
 }
 
+/// Put focus on `handle` with none of the coordinator's checks. Test builds only, for the layer manager's tests of a
+/// close that finds focus where no user path leaves it (on a dialog another layer covers, or on nothing at all), which
+/// its focus return must still handle: every public move here refuses to make those states, as it should.
+#[cfg(test)]
+pub(crate) fn force_focus(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
+    apply(Move::To(handle), window, cx);
+}
+
 /// Where focus goes when a dialog or menu closes with focus inside it. Its opener chooses
 /// ([`crate::layers::Dialog::returns_to`], [`crate::layers::Popover::returns_to`]); the variants below say "dialog"
 /// for both.

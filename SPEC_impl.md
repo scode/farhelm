@@ -720,7 +720,8 @@ old launcher's were `left: 0; right: 0` under theirs), taken from the frame bein
 the old width. A popover may also never take focus: opening it moves none, it traps no Tab, closing it returns none, and
 a press on it leaves focus where it was, so the field the user types in keeps the keys, as with the old launcher's
 floating lists, whose options were never focusable. Escape, an outside press and its anchor going close it as any
-popover, but it closes alone: closing any other layer closes what was opened over it, and this one owns nothing above
+popover, but it closes alone: closing any other layer closes the layers opened from it (a layer opened from an approval
+card belongs to no layer and stays open when another owner closes the dialog under it), and this one owns nothing above
 it, so a dialog opened while it shows (a shortcut pressed in the terminal beside a link's disclosure) stays open, with
 focus inside, when it goes. The launcher's floating lists and the terminal's overlays on a zero-size anchor element use
 it, and wherever the focus rules say "the topmost layer" (Tab's trap, where focus recovers) they mean the topmost layer
