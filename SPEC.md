@@ -256,15 +256,16 @@ hosts. The supervisor's transport-independent protocol does not know the provide
 is a host without registration: its supervisor (the desktop app's managed local one, or one running beside a Linux helm)
 is reached locally, no SSH-to-self involved. The helm manages it through the same discovery-first flow as remote hosts,
 minus SSH: a supervisor that answers is discovered and registered like any other, and the panel never touches the unit
-file that runs it. What the panel does NOT do on the helm's own machine is install one. On Linux that job belongs to
-`farhelm helm setup`, which writes and owns the helm's and the supervisor's systemd user units; the local row says so
-instead of offering to install, so a machine has exactly one thing writing its units. Until a supervisor exists the
-local host appears with that instruction, not as a phantom unreachable host. There is no supervisor-to-supervisor
-connection or transitive aggregation. A container host's supervisor does not relay the container's protocol. The helm
-sees exactly the hosts in its registry, including the session-owned hosts described under
-[Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions). Those entries participate in
-ordinary host management and session aggregation, with their permanent rail icons hidden. The machine running the helm
-must therefore be able to reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel).
+file that runs it. What the panel does NOT do on the helm's own machine is install one. The desktop app starts that
+machine's supervisor itself whenever it opens and none answers, so the local row tells the user to quit Farhelm and open
+it again instead of offering to install, and the panel never builds a second installation beside the app's. Until a
+supervisor exists the local host appears with that instruction, not as a phantom unreachable host; any detail the helm
+gives is shown as evidence, never as the instruction. There is no supervisor-to-supervisor connection or transitive
+aggregation. A container host's supervisor does not relay the container's protocol. The helm sees exactly the hosts in
+its registry, including the session-owned hosts described under [Sandbox sessions](#sandbox-sessions) and
+[Container sessions](#container-sessions). Those entries participate in ordinary host management and session
+aggregation, with their permanent rail icons hidden. The machine running the helm must therefore be able to reach every
+registered supervisor over the user's network fabric (Tailscale, SSH tunnel).
 
 The host registry belongs to the helm. An ordinary remote entry carries its SSH destination, and an environment entry
 carries its provider binding and place. A host can carry an optional alias, shown in place of its destination everywhere

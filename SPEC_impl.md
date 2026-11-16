@@ -5037,14 +5037,18 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   recorded one install and now reaches another entry's machine is a duplicate; and an adopt prompt shown before the
   other entry recorded the identity turns into the duplicate state when its adoption is refused, because the refusal
   starts the entry's next attempt. The local row's unreachable state additionally distinguishes "no supervisor is
-  running on this machine" from a generic transport failure, because that is the one case whose remedy is a command on
-  the machine the user is already sitting at — a manual-path hint, never an offer to install (provisioning is M7's). A
-  separate state exists that is not about the host at all — **retired** — for an entry whose actor has stopped: a
-  panicked task, or one that outlived its own registry row. Without it, an actor's last published status stands forever
-  after the actor is gone, so a task that died mid-connection would leave the entry reading connected, with a routable
-  client, and nothing left running to ever correct it. Each actor is therefore supervised by the task the manager
-  actually holds, which publishes the retired state (client dropped) when the actor it wraps finishes for any reason
-  other than being cancelled on purpose.
+  running on this machine" from a generic transport failure, because that is the one case whose remedy is something the
+  user does on the machine they are already sitting at — for the desktop app, quitting Farhelm and opening it again,
+  since the app starts that machine's supervisor when it opens — never an offer to install (provisioning is M7's). The
+  GUI's Hosts panel and unavailable-session card give that state the app's sentence alone as its remedy and keep the
+  helm's dial failure only as evidence (the row's evidence line, the card's diagnostics): the dial failure's advice
+  (start `farhelm supervisor run` with the right state directory) is written for a hand-started helm and is wrong for
+  the desktop app's own machine. A separate state exists that is not about the host at all — **retired** — for an entry
+  whose actor has stopped: a panicked task, or one that outlived its own registry row. Without it, an actor's last
+  published status stands forever after the actor is gone, so a task that died mid-connection would leave the entry
+  reading connected, with a routable client, and nothing left running to ever correct it. Each actor is therefore
+  supervised by the task the manager actually holds, which publishes the retired state (client dropped) when the actor
+  it wraps finishes for any reason other than being cancelled on purpose.
 - A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
   has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
   separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
@@ -6722,9 +6726,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `# managed-by: farhelm helm setup`: setup overwrites or removes only files carrying that marker, and refuses anything
   else rather than replacing it. The supervisor unit's `PATH` is the installed `farhelm`'s directory plus a fixed base
   ("Provisioning"). The matching rule on the helm side is that the hosts panel never installs or updates a supervisor on
-  the helm's own machine at all: an absent one is answered with "run `farhelm helm setup` here", a unit already running
-  that same binary is named as setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and
-  registered exactly as a remote one is.
+  the helm's own machine at all: an absent one is answered by telling the user to quit Farhelm and open it again (the
+  desktop app starts that machine's supervisor when it opens), a unit already running that same binary is named as
+  setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and registered exactly as a remote
+  one is.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
 - `farhelm spawn [--cwd <dir>] (--inherit-agent | <launch flags>) [--title ...] [--parent ...] [--idempotency-key ...]`

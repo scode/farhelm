@@ -257,10 +257,15 @@ pub(crate) fn evidence(
                 None => line.text(lead),
             }
         }
-        // The helm's dial failure for the local row carries the exact command that fixes it, so it goes in the remedy,
-        // and this line says only what happened.
-        HostStateView::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
-            line.text("No supervisor is running on this machine")
+        // The local row's evidence is the helm's dial failure, as any unreachable host's is, and what to do goes in the
+        // remedy ([`remedy`]). The dial failure is never blank in practice; the fallback only keeps the line honest if
+        // it ever is.
+        HostStateView::Unreachable { cause, last_error } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
+            if last_error.trim().is_empty() {
+                line.text("No supervisor is running on this machine")
+            } else {
+                line.host(&pushed(last_error))
+            }
         }
         HostStateView::Unreachable { last_error, .. } => {
             if last_error.trim().is_empty() {
@@ -392,25 +397,22 @@ pub(crate) fn evidence(
 
 /// What to do about the phase, where waiting will not help (the old `state_remedy`). Connecting and unreachable hosts
 /// get none: one is still trying and the other is re-probed forever, so telling the user to act would invent work. The
-/// one exception is the helm's own machine with no supervisor, whose remedy is a command on the machine the user sits
-/// at: the helm's own dial failure spells it out with the right state directory, so that is shown rather than words of
-/// the app's, which cannot know the directory. The remedy is appended to `line`. Visible to the crate for the session
-/// pane's unavailable card, which explains an unreachable session with it where there is one, as the old card did.
+/// one exception is the helm's own machine with no supervisor, whose remedy is the app's sentence alone, "Quit Farhelm
+/// and open it again; it starts this machine's supervisor when it opens", because the desktop app starts that
+/// supervisor whenever it opens and none answers. The helm's dial failure stays on the evidence line ([`evidence`])
+/// and never joins the remedy: its advice (start `farhelm supervisor run` with the right state directory) is written
+/// for a hand-started helm, which is wrong for the desktop app's own machine.
+///
+/// The remedy is appended to `line`. Visible to the crate for the session pane's unavailable card, which explains an
+/// unreachable session with it where there is one, as the old card did.
 pub(crate) fn remedy(
     line: HostSentence,
     state: &HostStateView,
     twin: &impl Fn(i64) -> Option<HostText>,
 ) -> Option<HostSentence> {
     match state {
-        HostStateView::Unreachable { cause, last_error } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
-            Some(if last_error.trim().is_empty() {
-                line.text(
-                    "Start a supervisor on this machine with `farhelm supervisor run`, passing the same `--state-dir` \
-                     this helm was started with if it has one",
-                )
-            } else {
-                line.text("The helm reports: ").host(&pushed(last_error))
-            })
+        HostStateView::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
+            Some(line.text("Quit Farhelm and open it again; it starts this machine's supervisor when it opens"))
         }
         HostStateView::Unreachable { .. }
         | HostStateView::Connecting { .. }

@@ -140,9 +140,9 @@ impl HostKind {
         }
     }
 
-    /// Whether the host's supervisor is the one `farhelm helm setup` installs on the helm's own machine, rather than
+    /// Whether the host's supervisor is the one the desktop app starts on its own machine when it opens, rather than
     /// one the panel provisions over SSH.
-    pub(crate) fn sets_up_locally(self) -> bool {
+    pub(crate) fn starts_with_the_app(self) -> bool {
         match self {
             HostKind::Local => true,
             HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
@@ -202,10 +202,10 @@ pub(crate) enum Locality {
     Remote,
 }
 
-/// Whether `host` is the helm's own machine with no supervisor running there: the state SPEC.md ("Topology") answers
-/// with the `farhelm helm setup` instruction rather than an install, and in which the row offers no Update.
-pub(crate) fn needs_local_setup(host: &HostView) -> bool {
-    HostKind::of(host).sets_up_locally()
+/// Whether `host` is the helm's own machine with no supervisor running there: the state SPEC.md ("Topology") answers by
+/// telling the user to reopen Farhelm, rather than with an install, and in which the row offers no Update.
+pub(crate) fn needs_app_supervisor(host: &HostView) -> bool {
+    HostKind::of(host).starts_with_the_app()
         && matches!(
             &host.state,
             HostStateView::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING
@@ -368,7 +368,7 @@ impl Update {
 ///   where the panel cannot update the host (the helm's own machine), as the old menu greyed it; the helm refuses that
 ///   Update before any run exists, so only a run an older helm retained can get here.
 /// - **Update** when nothing runs or is in flight, the kind offers provisioning, the host is not the helm's own machine
-///   waiting for `farhelm helm setup`, it does not run a newer Farhelm, and it is not suspended. On the helm's own
+///   waiting for the app to start its supervisor, it does not run a newer Farhelm, and it is not suspended. On the helm's own
 ///   machine it is [`Update::Greyed`] wherever it would otherwise be offered.
 /// - **Settings** always, chosen only while the host is idle.
 /// - **Uninstall** for a kind the panel uninstalls, chosen only while the host is idle; after a failed uninstall too,
@@ -400,8 +400,12 @@ pub(crate) fn offers(
             }
             ProvisioningOperation::Update | ProvisioningOperation::Uninstall => None,
         });
-    let update_offered =
-        !running && !in_flight && provisions && !needs_local_setup(host) && !too_new && !suspended;
+    let update_offered = !running
+        && !in_flight
+        && provisions
+        && !needs_app_supervisor(host)
+        && !too_new
+        && !suspended;
     let update = update_offered.then(|| {
         if kind.updates_from_panel() {
             Update::Available
