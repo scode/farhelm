@@ -962,7 +962,9 @@ fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
 }
 
 /// A phase's dot and words in its tone's ink, on one line, the words cut short when they do not fit: what a row's
-/// status and the host settings' header both show (the old `.host-status` span, which both drew).
+/// status and the host settings' header both show (the old `.host-status` span, which both drew). The host rail's
+/// connection dot takes its ink from the same tone ([`tone_ink`]), so the rail and the panel cannot disagree on a
+/// phase's color; change them together.
 fn phase_dot_and_words(state: &HostStateView, palette: &Palette) -> Div {
     let ink = tone_ink(phase::tone(state), palette);
     div()
@@ -982,8 +984,9 @@ fn phase_dot_and_words(state: &HostStateView, palette: &Palette) -> Div {
         .child(div().min_w_0().truncate().child(phase::words(state)))
 }
 
-/// The ink of a phase's tone (the old `.host-status.<class>` colors).
-fn tone_ink(tone: Tone, palette: &Palette) -> Token {
+/// The ink of a phase's tone (the old `.host-status.<class>` colors). The host rail's connection dot shares it (the
+/// old `.host-rail-state.<class>` rules gave the same colors), so a phase reads the same on the rail as in the panel.
+pub(crate) fn tone_ink(tone: Tone, palette: &Palette) -> Token {
     match tone {
         Tone::Connected => palette.ok,
         Tone::Advisory => palette.warn,

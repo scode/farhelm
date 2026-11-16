@@ -47,17 +47,22 @@
 //! through the list (or the Hosts panel) to the foot. The rail leaves the foot's height free at its bottom
 //! ([`FOOT_HEIGHT`]), and the foot is drawn over that room.
 //!
+//! Each avatar also shows its host's status: the connection dot, the update badge, the ring while work runs, the
+//! warning mark and dimming, with the state's words in its name and hover help; Hosts carries an `↑` while any avatar
+//! has an update, and its name and help count them. [`status`] draws them from what [`crate::hosts::status`] reads.
+//!
 //! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the expand toggle) for the rail's
-//! expansion; an avatar's right-click menu; every host status (connection dots, update badges, progress rings, dimming
-//! and the state words that join the avatar's name, and the update count that joins Hosts' name); and the rail's
-//! expansion to 220 pixels, with Add host's "Add host" label. The foot is sized for the four controls it holds: the old
-//! foot was 208 pixels, five 40-pixel controls, and it grows back as the last one arrives.
+//! expansion; an avatar's right-click menu; and the rail's expansion to 220 pixels, with Add host's "Add host" label.
+//! The foot is sized for the four controls it holds: the old foot was 208 pixels, five 40-pixel controls, and it grows
+//! back as the last one arrives.
 
+mod status;
 #[cfg(test)]
 pub(crate) mod tests;
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
     Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
@@ -72,6 +77,7 @@ use crate::focus::{self, Mark};
 use crate::help_menu::HelpButton;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, host_mark};
+use crate::hosts::status::{HostStatus, host_status};
 use crate::rail_notices::NoticesButton;
 use crate::settings;
 use crate::theme::{self, Palette};
@@ -110,10 +116,6 @@ pub(super) const FOOT_HEIGHT: f32 = 4. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
 
 /// `SettingsIcon`'s size in the old foot's icon box.
 const SETTINGS_GLYPH: f32 = 16.;
-
-/// Hosts' hover help, the old app's words while no host has an update (the update count that joins its name and help
-/// comes with host status).
-const HOSTS_HELP: &str = "Hosts: show host management";
 
 /// The gear's hover help, the old app's words. The old app added ", and this app's automatic updates" when the desktop
 /// app's updater was active; this app has no updater yet, so the words stop where the old app's did without one.
@@ -171,7 +173,7 @@ impl SessionList {
 /// The host's identity as the rail's avatar and the chip name it (the old `rail_identity`), escaped as the screen shows
 /// host text, for an accessible name and a tooltip: its display name ("Local (this machine)" for the local host under
 /// the registry's own name), then its destination in parentheses when the host is remote and the destination differs
-/// from the name. The state that SPEC.md also wants in the avatar's name joins it with the host status.
+/// from the name. The avatar adds its state after it ([`status::state_words`]); the chip shows the identity alone.
 pub(super) fn identity(host: &HostView) -> SharedString {
     let local = host.is_local();
     // Only its accessible name is used, so the sentence is never drawn and its id never reaches a frame.
@@ -205,6 +207,36 @@ fn registry_read(collections: &Collections) -> bool {
         .is_some_and(|meta| meta.availability == Availability::Available || !meta.order.is_empty())
 }
 
+/// Whether the hosts shown are the last ones read: the registry was read once, and its refresh has failed since
+/// (SPEC.md: "A failed registry refresh retains the avatars and names their state as last-read").
+fn last_read(collections: &Collections) -> bool {
+    collections
+        .meta(Collection::Hosts)
+        .is_some_and(|meta| meta.availability != Availability::Available && !meta.order.is_empty())
+}
+
+/// The hosts that have an avatar, in the registry's order: none before the registry was read, and never a host a
+/// session owns (see [`rail`]).
+fn avatar_hosts(collections: &Collections) -> impl Iterator<Item = &HostView> {
+    registry_read(collections)
+        .then(|| collections.ordered::<HostView>())
+        .into_iter()
+        .flatten()
+        .filter(|host| !host.is_session_owned)
+}
+
+/// The avatars' update badges in the current UI session's store, counted for the Hosts control in the [`foot`]; none
+/// while the window is inert.
+fn updates(cx: &App) -> status::Updates {
+    let mut updates = status::Updates::default();
+    if let Some(store) = crate::session::current_store(cx) {
+        for host in avatar_hosts(store.read(cx).collections()) {
+            updates.add(host_status(host, cx).update);
+        }
+    }
+    updates
+}
+
 /// The registered host `id`, if the registry lists it.
 pub(super) fn registered(collections: &Collections, id: i64) -> Option<&HostView> {
     collections.get::<HostView>(&HostView::key(id))
@@ -236,7 +268,8 @@ impl Kept {
 /// The rail, for the hosts in `collections` with `chosen` pressed; its entries choose through `list`, and All tracks
 /// `all_focus`, the list's handle that removing the filter focuses. While `quiet` (the Hosts panel shows), the chosen
 /// entry wears the quieter pressed look, which leaves the filled Hosts control as the mark of the view on screen.
-/// `kept` is the rail's state across frames ([`Kept`]).
+/// `kept` is the rail's state across frames ([`Kept`]). Each avatar reads its host's status, and the rail its palette,
+/// through `cx`.
 ///
 /// It scrolls on its own when its entries overflow it, beside the list, which scrolls separately (`overflow: hidden
 /// auto`); its padding and gaps are inside the scrolling element, so a wheel over them scrolls the rail. The scrolling
@@ -250,8 +283,9 @@ pub(super) fn rail(
     all_focus: &FocusHandle,
     kept: &Kept,
     quiet: bool,
-    palette: &Palette,
+    cx: &App,
 ) -> impl IntoElement {
+    let palette = theme::palette(cx);
     let choose = |host: Option<i64>| {
         let list = list.clone();
         move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
@@ -274,12 +308,12 @@ pub(super) fn rail(
         .into_any_element(),
     ];
     if registry_read(collections) {
-        for host in collections.ordered::<HostView>() {
-            if host.is_session_owned {
-                continue;
-            }
+        let last_read = last_read(collections);
+        for host in avatar_hosts(collections) {
             entries.push(avatar(
                 host,
+                &host_status(host, cx),
+                last_read,
                 chosen == Some(host.id),
                 quiet,
                 choose(Some(host.id)),
@@ -346,17 +380,25 @@ pub(super) fn rail(
         .child(div().flex_none().h(px(FOOT_HEIGHT)))
 }
 
-/// One host's avatar: its mark in a rail button named by its identity, with its short name as a caption under it;
-/// `quiet` as for [`rail`].
+/// One host's avatar: its mark in a rail button with the host's status (`reading`) drawn over it
+/// ([`status::icon_box`]), named by its identity and its state's words (`last_read` after a failed registry refresh),
+/// with its short name as a caption under it; `quiet` as for [`rail`].
 fn avatar(
     host: &HostView,
+    reading: &HostStatus,
+    last_read: bool,
     chosen: bool,
     quiet: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
     palette: &Palette,
 ) -> AnyElement {
     let id = host.id;
-    let name = identity(host);
+    let name = SharedString::from(format!(
+        "{}: {}",
+        identity(host),
+        status::state_words(host, reading, last_read)
+    ));
+    let mark = host_mark(host.icon, host.color, px(AVATAR_MARK), palette);
     let caption = HostText::from_host(short_name(host));
     div()
         .flex()
@@ -373,7 +415,14 @@ fn avatar(
             .tier(Tier::Rail)
             .pressed(chosen)
             .quiet(quiet)
-            .content(host_mark(host.icon, host.color, px(AVATAR_MARK), palette))
+            .content(status::icon_box(
+                mark.into_any_element(),
+                host,
+                reading,
+                chosen,
+                quiet,
+                palette,
+            ))
             .on_click(on_click),
         )
         // No role, so no node for assistive technology: the avatar's name already says what the caption shows.
@@ -440,7 +489,8 @@ fn add_host(handle: &FocusHandle) -> AnyElement {
 /// own that the list keeps), in the old foot's order, pinned there while the rail's entries scroll above them.
 /// `hosts_focus` and `settings_focus` are their focus handles, which the list keeps for the window's life: Hosts keeps
 /// focus when it toggles, and Settings gives focus back to the gear when it closes. Hosts is pressed and expanded while
-/// `hosts_shown`, and toggles the Hosts panel through `list`.
+/// `hosts_shown`, toggles the Hosts panel through `list`, and carries the avatars' update badges ([`updates`], read
+/// through `cx` like the palette) as its `↑` and in its name and help.
 ///
 /// The element places itself (absolutely, at the bottom left of the row the list draws it in), so that row must be
 /// the one that holds the rail at its left edge and fills the sidebar's height.
@@ -451,8 +501,10 @@ pub(super) fn foot(
     settings_focus: &FocusHandle,
     notices: &Entity<NoticesButton>,
     help: &Entity<HelpButton>,
-    palette: &Palette,
+    cx: &App,
 ) -> impl IntoElement {
+    let palette = theme::palette(cx);
+    let updates = updates(cx);
     let list = list.clone();
     let gear = settings_focus.clone();
     div()
@@ -479,11 +531,14 @@ pub(super) fn foot(
             IconButton::new(
                 "hosts-panel-toggle",
                 Icon::Hosts,
-                "Hosts",
-                HoverHelp::tooltip(HOSTS_HELP),
+                status::hosts_name(updates),
+                HoverHelp::tooltip(status::hosts_help(updates)),
                 Role::Button,
             )
             .tier(Tier::Rail)
+            .when_some(status::hosts_badge(updates, palette), |button, badge| {
+                button.badge(badge)
+            })
             .pressed(hosts_shown)
             .expanded(hosts_shown)
             .focus(hosts_focus)
