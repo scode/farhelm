@@ -1,6 +1,6 @@
 //! Tests of the host progress card ([`super`]): which hosts get one, what it shows and follows as the helm pushes, the
-//! elapsed time it shares with the Hosts row, its hold on the ticker, and its fit in a short window, the last both as
-//! drawn and as the pure share it rests on.
+//! elapsed time it shares with the Hosts row, its hold on the ticker, its fit in a short window (both as drawn and as
+//! the pure share it rests on), and its showing as the hover of the Hosts row's running status, beside the sidebar.
 //!
 //! The card is drawn alone in a test root view beside a Hosts panel that is never drawn: the panel is there because its
 //! store subscription is what records a run's first sight, whether or not Hosts shows, as in the app. The card is read
@@ -18,14 +18,15 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus, StepStatus};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView};
 use gpui::{
-    AppContext as _, Context, DriverNode, Entity, IntoElement, ParentElement as _, Render,
-    Styled as _, TestAppContext, VisualTestContext, Window, div, px, size,
+    AppContext as _, Context, DriverNode, Entity, IntoElement, Modifiers, ParentElement as _,
+    Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px, size,
 };
 
 use super::{FULL_DETAILS, Fit, ProgressCard, fit, progress_card, shares};
 use crate::hosts::HostsPanel;
 use crate::hosts::progress::tests::step;
 use crate::hosts::tests::{aliased, connected, connecting, host, hosts, progress, run};
+use crate::layers::{self, TooltipSide};
 use crate::test_support::{self, frame, meta, started};
 use crate::{render_count, root};
 
@@ -63,10 +64,8 @@ fn setup(status: RunStatus) -> ProvisioningView {
     view
 }
 
-/// The width the card's hover help gives it, the old 310 pixels, which the card fills.
-const WIDTH: f32 = 310.;
-
-/// A root view holding a Hosts panel it never draws, and drawing the card it is given at [`WIDTH`], at the top left.
+/// A root view holding a Hosts panel it never draws, and drawing the card it is given at [`super::WIDTH`], at the top
+/// left.
 struct Harness {
     _panel: Entity<HostsPanel>,
     card: Option<Entity<ProgressCard>>,
@@ -78,7 +77,7 @@ impl Render for Harness {
         root::wrap(
             div()
                 .size_full()
-                .child(div().w(px(WIDTH)).children(self.card.clone())),
+                .child(div().w(super::WIDTH).children(self.card.clone())),
             &self.root,
             window,
             cx,
@@ -518,5 +517,96 @@ fn a_fitting_text_stays_whole_and_a_preview_keeps_whole_lines() {
             caps: vec![Some(0.)],
             notice: true
         }
+    );
+}
+
+// ---- The card as the Hosts row's hover ------------------------------------------------------------------------------
+
+/// A root view drawing a Hosts panel in a sidebar column (the sidebar's width less the rail's), with the edge that help
+/// placed beside the sidebar sits against, as the sidebar draws them.
+struct PanelHarness {
+    panel: Entity<HostsPanel>,
+    root: root::Attachment,
+}
+
+impl Render for PanelHarness {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let column = div()
+            .relative()
+            .w(crate::theme::metrics::SIDEBAR_WIDTH - px(56.))
+            .h_full()
+            .child(self.panel.clone())
+            .child(layers::beside_edge(window, cx));
+        root::wrap(column, &self.root, window, cx)
+    }
+}
+
+/// The showing tooltip, if any.
+fn tooltip(cx: &mut VisualTestContext) -> Option<layers::ShownTooltip> {
+    cx.update(|window, cx| layers::shown_tooltip(window, cx))
+}
+
+/// Why this matters: SPEC.md, "Topology": "Hovering that status opens the same card as a working host in the attention
+/// list", placed "beside the sidebar" with "the shared hover delay"; the sidebar is too narrow for the run, so the card
+/// is the one place its steps and diagnosis show on hover. The card's view holds the ticker's clock and pulse, so it
+/// must go with the hover, and moving within the status must keep the card rather than make it again.
+///
+/// Specified: over the Hosts panel with `build-box` setting up, the running status draws no card while the pointer is
+/// away; after the hover delay on the status, a tooltip reporting "Progress of the run on build-box" shows beside the sidebar with the card drawn on it (its count and its
+/// connection detail); moving within the status keeps that very tooltip, card view included; moving off the status
+/// takes the tooltip and the card away.
+#[gpui::test]
+fn hovering_the_running_status_shows_the_card_beside_the_sidebar(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(vec![
+        hosts(&[build_box()]),
+        progress(&[setup(RunStatus::Running)]),
+    ]);
+    cx.run_until_parked();
+    let (_harness, cx) = test_support::open_view(cx, |window, cx| PanelHarness {
+        panel: cx.new(HostsPanel::new),
+        root: root::attach(window, cx),
+    });
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "host-status-2").is_some(),
+        "the premise: the row shows its running status"
+    );
+    assert!(
+        node(&nodes, "host-card-2").is_none(),
+        "no card before the hover"
+    );
+
+    let status = test_support::bounds(cx, "host-status-2");
+    cx.simulate_mouse_move(status.center(), None, Modifiers::none());
+    test_support::advance(cx, layers::HOVER_DELAY);
+    let nodes = frame(cx);
+    let shown = tooltip(cx).expect("the status's help shows");
+    assert_eq!(shown.text.as_ref(), "Progress of the run on build-box");
+    assert_eq!(shown.side(), TooltipSide::Beside, "beside the sidebar");
+    assert_eq!(
+        label(&nodes, "host-card-count-2").as_deref(),
+        Some("Setting up: 2 of 4 steps done"),
+        "the card is drawn on the tooltip"
+    );
+    assert!(label(&nodes, "host-card-connection-2").is_some());
+
+    let within = point(status.origin.x + px(4.), status.center().y);
+    cx.simulate_mouse_move(within, None, Modifiers::none());
+    test_support::redraw(cx);
+    let still = tooltip(cx).expect("moving within the status keeps the card");
+    assert_eq!(still.owner, shown.owner, "the same control's help");
+
+    cx.simulate_mouse_move(point(px(1150.), px(780.)), None, Modifiers::none());
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(
+        tooltip(cx).is_none(),
+        "leaving the status takes the help away"
+    );
+    assert!(
+        node(&nodes, "host-card-2").is_none(),
+        "and the card with it"
     );
 }

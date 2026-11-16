@@ -29,9 +29,9 @@
 //! tooltip's ground, border, radius and shadow) at the width its caller passes, the old 310 pixels
 //! (`.farhelm-tooltip[data-kind="card"]`), and the card fills that width.
 //!
-//! NOTE: Nothing in the app draws the card yet. Both of its places are card help placed beside the sidebar, and wiring
-//! them waits for a form of card help that makes the card as the tooltip shows and drops it as it goes; the golden
-//! scenes draw it until then.
+//! The Hosts row's running status offers the card as lazy card help placed beside the sidebar
+//! ([`super::status_mark`]), which builds it with [`view`] when the tooltip shows and drops it when it hides. The
+//! attention list's working rows are to offer it the same way.
 //!
 //! ## The fit
 //!
@@ -75,6 +75,10 @@ use crate::render_count;
 use crate::session;
 use crate::theme::{self, Palette, metrics};
 use crate::ticker;
+
+/// The width the card's hover help gives it, which the card fills: the old `.farhelm-tooltip[data-kind="card"]`'s
+/// `width: min(310px, 100vw - 8px)` (the layer manager keeps it inside a narrower window).
+pub(crate) const WIDTH: Pixels = px(310.);
 
 /// `.host-progress-card`'s `max-height: calc(100vh - 10px)`: room kept below the window's height. The chrome around
 /// the card clips it at the window's height less 8 pixels, inside its one-pixel border on each side, so this is the
@@ -133,12 +137,25 @@ fn notice_height() -> f32 {
 /// as the card shows and drops it then (the module docs say why). Nothing while the window is inert.
 pub fn progress_card(host: i64, cx: &mut App) -> Option<Entity<ProgressCard>> {
     running(host, cx)?;
-    Some(cx.new(|_| ProgressCard {
+    Some(view(host, cx))
+}
+
+/// The card of host `host`, made whether or not a run is going on: what lazy card help ([`HoverHelp::card_with`],
+/// which takes a view, never none) builds when the tooltip shows. When the run ends while its card shows, which happens
+/// whenever the user watches a run finish, the card draws nothing (an empty card, for about a frame) until the hover
+/// ends: the phase words that replace the status are drawn under the same id, so the control's hover carries over to
+/// them, and GPUI's check at paint time, finding the pointer not over the words, ends it, which takes the tooltip away.
+/// A run that ends during the hover delay instead has its waiting tooltip cancelled the same way, before anything is
+/// built.
+///
+/// [`HoverHelp::card_with`]: crate::components::HoverHelp::card_with
+pub(crate) fn view(host: i64, cx: &mut App) -> Entity<ProgressCard> {
+    cx.new(|_| ProgressCard {
         host,
         clock: None,
         pulse: None,
         measured: Measured::default(),
-    }))
+    })
 }
 
 /// Host `host`'s retained run, while it is a running run the card draws.
@@ -571,8 +588,8 @@ fn diagnostic(text: HostSentence, cap: Option<f32>, measured: &Diagnostic) -> An
 
 /// An element filling its `relative()` parent that records the parent's height in `cell` as it is drawn, and draws the
 /// window again when the height changed, so the fit catches up with what layout made of the card. The redraw is
-/// deferred to after this frame: the tracker runs while the frame is prepared, where a refresh is dropped.
-/// Copied from `height_tracker` in `approvals/region.rs` (that area's own), for one shared helper to replace both later.
+/// deferred to after this frame: the tracker runs while the frame is prepared, where a refresh is dropped. Copied from
+/// `height_tracker` in `approvals/region.rs` (that area's own), for one shared helper to replace both later.
 fn tracker(cell: Rc<Cell<Pixels>>) -> impl IntoElement {
     canvas(
         move |bounds, window, cx| {

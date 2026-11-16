@@ -9,7 +9,7 @@ use farhelm_proto::provisioning::{
     ProvisioningOperation, ProvisioningView, RunStatus, StepStatus, StepView,
 };
 
-use super::{Run, Seen, Status, clock, fold, follow, opens_row, shown, status};
+use super::{Run, Seen, Status, clock, described, fold, follow, opens_row, shown, status};
 use crate::host_text::HostText;
 use crate::hosts::tests::run;
 use crate::operations::Work;
@@ -235,4 +235,25 @@ fn the_clock_reads_minutes_and_seconds_and_grows_hours() {
     assert_eq!(clock(Duration::from_secs(75)), "1:15");
     assert_eq!(clock(Duration::from_secs(3_909)), "1:05:09");
     assert_eq!(clock(Duration::from_millis(2_750)), "0:02");
+}
+
+/// Why this matters: a running status's hover is the progress card, whose words ("Progress of the run on <host>") are
+/// the only place a screen reader learns what the hover holds, so the status must be described by them; a pending
+/// status's help is its own name again, which a screen reader would read twice as a description. The check is on the
+/// rule `status_mark` applies, because GPUI's test platform never turns its accessibility tree on and the frame's
+/// record has no field for a description. Specified: a running status (setup or Update) is described by its help; a
+/// pending one is not.
+#[test]
+fn a_running_status_is_described_by_its_cards_words_and_a_pending_one_is_not() {
+    let running = |run| Status::Running {
+        run,
+        done: 1,
+        total: 3,
+        current: None,
+        elapsed: Duration::from_secs(5),
+    };
+    assert!(described(&running(Run::Setup)));
+    assert!(described(&running(Run::Update)));
+    assert!(!described(&Status::Pending(Run::Setup)));
+    assert!(!described(&Status::Pending(Run::Update)));
 }
