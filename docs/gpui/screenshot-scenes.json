@@ -837,6 +837,11 @@
           "id:launcher-destination-Managed checkout"
         ],
         [
+          "wait",
+          "--text",
+          "Default checkout folder"
+        ],
+        [
           "click",
           "id:launcher-repository"
         ],
@@ -1506,12 +1511,20 @@
       ],
       "steps": [
         [
+          "scrollintoview",
+          "id:launcher-harness-Codex"
+        ],
+        [
           "click",
           "id:launcher-harness-Codex"
         ],
         [
+          "scrollintoview",
+          "id:launcher-permissions-Guarded"
+        ],
+        [
           "hover",
-          "text:Destination"
+          "text:Start an agent or a command on any host"
         ],
         [
           "wait",
@@ -1619,6 +1632,10 @@
           "wait",
           "--text",
           "Destination"
+        ],
+        [
+          "scrollintoview",
+          "id:launcher-harness-Codex"
         ],
         [
           "click",
@@ -1749,12 +1766,24 @@
           "Destination"
         ],
         [
-          "click",
+          "scrollintoview",
           "id:launcher-harness-Claude"
         ],
         [
           "click",
+          "id:launcher-harness-Claude"
+        ],
+        [
+          "scrollintoview",
           "id:launcher-permissions-Guarded"
+        ],
+        [
+          "click",
+          "id:launcher-permissions-Guarded"
+        ],
+        [
+          "scrollintoview",
+          "id:launcher-harness-OpenCode"
         ],
         [
           "click",
@@ -2718,7 +2747,7 @@
     },
     {
       "id": "launcher-scrolled-end",
-      "ported": false
+      "ported": true
     },
     {
       "id": "launcher-command",
