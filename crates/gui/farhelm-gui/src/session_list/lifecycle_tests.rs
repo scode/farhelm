@@ -905,7 +905,8 @@ fn a_yolo_refused_replace_asks_the_launchers_question_in_its_row(cx: &mut TestAp
     assert!(fake.commands().is_empty(), "nothing more was sent");
 }
 
-/// LA-L18 has the sidebar pass the source's host "and its `hosts::identity::display_name`": the question names the
+/// The launcher's YOLO question for a Replace (`launcher::entry::ask_yolo_for_replace`) has the sidebar pass the
+/// source's host and its name as the rest of the app shows it (`hosts::identity::display_name`): the question names the
 /// machine an agent would act on unchecked, so a wrong or generic name would leave the user unable to tell which host
 /// they are agreeing for. The fixtures' snapshot lists no hosts, so the name is the one the helm sent with the row.
 /// Specified: the question's line about asking names the row's host, `buildbox`, not "this host".
@@ -1037,12 +1038,13 @@ fn an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions(cx: &mut T
     assert_eq!(requests(pending(&mut fake)), [stop("a", true, false)]);
 }
 
-/// LA-L18: the retry "gets the answer's mark to combine with its own `Settled::user_moved_on`". The permanent answer's
-/// retry is sent from the host write's reply, so the operation store's own mark, taken then, misses a press the user
-/// made while the write was out; only the answer's mark sees it. Without the combination the replacement would pull
-/// focus from wherever the user went. Specified: after the permanent answer, the user opens b's menu and closes it with
-/// Escape while the write is out, leaving focus on b's menu button; the write succeeds, the consented Replace is sent
-/// with nothing touched since, and the helm's replacement n opens with focus still on b's button.
+/// The launcher's YOLO question for a Replace (`launcher::entry::ask_yolo_for_replace`) hands its retry the answer's
+/// mark, for the sidebar to combine with its own operation's moved-on flag (`Settled::user_moved_on`). The permanent
+/// answer's retry is sent from the host write's reply, so the operation store's own mark, taken then, misses a press
+/// the user made while the write was out; only the answer's mark sees it. Without the combination the replacement would
+/// pull focus from wherever the user went. Specified: after the permanent answer, the user opens b's menu and closes it
+/// with Escape while the write is out, leaving focus on b's menu button; the write succeeds, the consented Replace is
+/// sent with nothing touched since, and the helm's replacement n opens with focus still on b's button.
 #[gpui::test]
 fn a_press_during_the_host_write_keeps_the_replacement_from_taking_focus(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);
@@ -1069,10 +1071,11 @@ fn a_press_during_the_host_write_keeps_the_replacement_from_taking_focus(cx: &mu
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
 }
 
-/// LA-L18: "Drop it with the UI session." A reset drops the host write's reply, so a question whose write was out
-/// would otherwise stay frozen for good, and with it the guard that keeps the session's own Replace back. Specified:
-/// with the permanent answer's write out, the channel breaks and reconnects with the same sessions; a's row draws no
-/// question, and a's menu Replace asks its Replace question again.
+/// The launcher's YOLO question for a Replace (`launcher::entry::ask_yolo_for_replace`) is to be dropped with the UI
+/// session. A reset drops the host write's reply, so a question whose write was out would otherwise stay frozen for
+/// good, and with it the guard that keeps the session's own Replace back. Specified: with the permanent answer's write
+/// out, the channel breaks and reconnects with the same sessions; a's row draws no question, and a's menu Replace asks
+/// its Replace question again.
 #[gpui::test]
 fn a_reset_drops_the_question(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);

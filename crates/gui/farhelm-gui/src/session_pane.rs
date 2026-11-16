@@ -83,6 +83,10 @@
 //!   beneath the card with their notices held back, and come back to life when the host answers; a session opened while
 //!   its host is away gets none until then. While the card shows it is home, and an inert terminal holds no focus, so
 //!   focus one of the session's terminals held goes home to the card through the focus coordinator.
+//! - **The retired card.** A retired containerized session supports Delete only and has no terminal to attach to, so
+//!   the pane mounts none for it, ever, and draws the retired card ([`retired`]) where the terminals would be, with the
+//!   card as home, while its host is reachable; the unavailable card stands there alone while it is not. A set made
+//!   before the session's row arrived is dropped once the row says it is retired.
 //!
 //! NOTE: The scrim covers whichever terminal is shown, as the old one covered every pane; a Delete holds back the
 //! notices of all of them.
@@ -90,6 +94,7 @@
 pub(crate) mod card;
 pub(crate) mod details;
 pub(crate) mod header;
+mod retired;
 pub(crate) mod unavailable;
 
 #[cfg(test)]
@@ -100,6 +105,8 @@ mod carried_tests;
 mod details_tests;
 #[cfg(test)]
 mod header_tests;
+#[cfg(test)]
+mod retired_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -215,9 +222,9 @@ struct Mounted {
     /// Keeps home on the set's shown terminal as the user chooses tabs and tabs come and go.
     _home: Option<Subscription>,
     copies: details::Copies,
-    /// The focus handle of whichever card shows, the interrupted card or the unavailable one, a tab stop: home while
-    /// either shows. One handle for both, since a session never shows both, and a card that turns into the other (its
-    /// host dropping away) keeps focus on the card that replaces it.
+    /// The focus handle of whichever card shows, the interrupted card, the retired card or the unavailable one, a tab
+    /// stop: home while one shows. One handle for all three, since a session never shows two, and a card that turns
+    /// into another (its host dropping away) keeps focus on the card that replaces it.
     card_focus: FocusHandle,
     /// The unavailable card's scroll state, so its region stays where the user scrolled it from frame to frame.
     scroll: ScrollHandle,
@@ -259,8 +266,8 @@ impl Mounted {
     }
 
     /// Where focus rests for this session: the unavailable card while `unavailable` says it shows, over the terminals
-    /// or not; else the set's shown terminal, or the interrupted card while `card` says it shows. `None` with none of
-    /// them (terminals that could not be made), rather than a handle nothing draws.
+    /// or not; else the set's shown terminal, or the interrupted or retired card while `card` says one shows. `None`
+    /// with none of them (terminals that could not be made), rather than a handle nothing draws.
     fn home(&self, card: bool, unavailable: bool, cx: &App) -> Option<FocusHandle> {
         if unavailable {
             return Some(self.card_focus.clone());
@@ -273,7 +280,7 @@ impl Mounted {
 
     /// [`Mounted::home`] as the store says now.
     fn home_now(&self, cx: &App) -> Option<FocusHandle> {
-        let card = card::shows(&self.key, cx);
+        let card = card::shows(&self.key, cx) || retired::shows(&self.key, cx);
         self.home(card, unavailable::shows(&self.key, cx), cx)
     }
 }
@@ -350,10 +357,10 @@ impl SessionPane {
     }
 
     /// Bring the pane up to date: terminals for the selected session under the current UI session (none when nothing is
-    /// selected, while the window is inert, while the session shows its interrupted card, or when it opened on a host
-    /// the helm cannot reach), inert exactly while the unavailable card shows over them, the shown terminal or the card
-    /// made home every time (New when nothing is mounted and there are no sessions), and the user's latest choice acted
-    /// on.
+    /// selected, while the window is inert, while the session shows its interrupted card, when it opened on a host the
+    /// helm cannot reach, or ever for a retired session), inert exactly while the unavailable card shows over them, the
+    /// shown terminal or the card made home every time (New when nothing is mounted and there are no sessions), and the
+    /// user's latest choice acted on.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session =
             session::connection(cx).and_then(|connection| connection.read(cx).session().cloned());
@@ -363,6 +370,9 @@ impl SessionPane {
         let unavailable = wanted
             .as_deref()
             .is_some_and(|key| unavailable::shows(key, cx));
+        // A retired session never gets terminals, stale or not; its card shows only while its host is reachable.
+        let retired = wanted.as_deref().is_some_and(|key| retired::is(key, cx));
+        let retired_card = wanted.as_deref().is_some_and(|key| retired::shows(key, cx));
         let mounted = self.mounted.current(cx);
         if mounted.as_ref().map(|mounted| &mounted.key) != wanted.as_ref() {
             // The old terminals go with this assignment, and their streams with them. A session opened on a host the
@@ -371,18 +381,20 @@ impl SessionPane {
             // too: the session now open may show a card of its own, which the drop below leaves alone, and the
             // question would otherwise go on refusing the actions of the session it was about.
             card::drop_question(cx);
-            *mounted = session
-                .zip(wanted)
-                .and_then(|(session, key)| Mounted::new(&session, key, !card && !unavailable, cx));
+            *mounted = session.zip(wanted).and_then(|(session, key)| {
+                Mounted::new(&session, key, !card && !unavailable && !retired, cx)
+            });
             cx.notify();
         } else if let (Some(mounted), Some(session)) = (mounted.as_mut(), session.as_ref())
-            && ((mounted.set.is_some() && card) || (mounted.set.is_none() && !card && reachable))
+            && ((mounted.set.is_some() && (card || retired))
+                || (mounted.set.is_none() && !card && !retired && reachable))
         {
             // The open session went into its card (its terminals go, streams and all) or came out of it (new ones,
             // under a new lease, since the reboot took the old terminal). Out of it means on a host the helm reaches:
             // a card whose host drops away mounts nothing, since the terminal is gone there too. The card's question
-            // goes either way.
-            mounted.set = if card {
+            // goes either way. A retired session's row arriving after its terminals were made drops them the same way,
+            // and nothing ever mounts new ones for it.
+            mounted.set = if card || retired {
                 None
             } else {
                 terminals(session, &mounted.key, cx)
@@ -435,7 +447,7 @@ impl SessionPane {
         // nothing mounted, New is home when the store shows there are no sessions, and nothing is otherwise: focus then
         // rests on the root, where keys still reach Farhelm's bindings.
         let home = match mounted.as_ref() {
-            Some(mounted) => mounted.home(card, unavailable, cx),
+            Some(mounted) => mounted.home(card || retired_card, unavailable, cx),
             // `card::empty_fleet`, beside `card::Follow`, which notifies when it changes.
             None => card::empty_fleet(cx).then(|| self.new.clone()),
         };
@@ -586,6 +598,8 @@ impl Render for SessionPane {
                 window,
                 cx,
             )),
+            // Never both: the interrupted card leaves a retired session alone (`card.rs`).
+            Some(row) if retired::shows_row(row) => Some(retired::draw(&card_focus, window, cx)),
             _ => terminals.map(IntoElement::into_any_element),
         };
         // Over the inert terminals, or alone where a session opened unreachable has none.

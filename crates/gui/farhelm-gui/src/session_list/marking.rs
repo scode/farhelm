@@ -25,11 +25,11 @@
 //!   Templates and New. The cut listing's warning and the failure line stay under it. Trash's view and any dialog it
 //!   opened stay alive; only its button is not drawn. New's shortcut still opens the launcher.
 //! - **The metadata actions** ([`MetadataAction`]): Pin for marked rows that are not pinned, Unpin for those that are,
-//!   Mark read and Mark unread for the rows whose own menu offers it. Each sends the row's ordinary request, so its
-//!   refusal shows on the row as the row menu's would. A row whose own commands are refused at that moment
-//!   (`menu::refused`: a request in flight, its YOLO question or its interrupted card's Replace question open) is
-//!   skipped and shows "<action>: not started, …" ([`super::bulk`]). The marks are cleared once the writes are sent,
-//!   not when they are answered.
+//!   Mark read and Mark unread for the rows whose own menu offers it, none of them for a retired containerized session,
+//!   which supports Delete only (`super::retired`). Each sends the row's ordinary request, so its refusal shows on the
+//!   row as the row menu's would. A row whose own commands are refused at that moment (`menu::refused`: a request in
+//!   flight, its YOLO question or its interrupted card's Replace question open) is skipped and shows "<action>: not
+//!   started, …" ([`super::bulk`]). The marks are cleared once the writes are sent, not when they are answered.
 //! - **Escape** in the list's column clears the marks and lets the key go on, so the window's own Escape (a tooltip
 //!   put away) still happens. A menu, a dialog, an inline question or the terminal that holds focus takes Escape before
 //!   it reaches the list, and keeps the marks.
@@ -42,9 +42,9 @@
 //! whether the user has made a newer one since.
 //!
 //! NOTE: Stop and Delete join the bar with their batches (one request at a time per host, the bulk question, the
-//! selection held back for a bulk Delete), which come later in `super::bulk`. Environment (container and sandbox) rows
-//! get nothing special here: their Delete-only and environment-wide cases come with the environments work. GPUI cannot
-//! report `aria-haspopup`.
+//! selection held back for a bulk Delete), which come later in `super::bulk`. Sandbox and recipe container rows get
+//! nothing special here yet: their environment-wide cases come with the environments work. GPUI cannot report
+//! `aria-haspopup`.
 //!
 //! A change of the Hosts attention list above the heading closes the marked menu, as it closes the rows' menus
 //! ([`super::attention`]).
@@ -239,8 +239,14 @@ impl MetadataAction {
     ];
 
     /// The target `row` (under `key`) gives this action, or `None` when the action does not apply to it: Pin to a row
-    /// not pinned, Unpin to a pinned one, and Mark read or Mark unread to a row whose own menu offers that toggle.
+    /// not pinned, Unpin to a pinned one, and Mark read or Mark unread to a row whose own menu offers that toggle. A
+    /// retired containerized session is no target of any of them, since it supports Delete only
+    /// ([`super::retired`]); answering here keeps the bar's offers, its ⋯ and the targets in agreement, as the old
+    /// `applies` did by refusing such a row first.
     pub(super) fn target(self, key: &str, row: &SessionRow) -> Option<Target> {
+        if super::retired::is(row) {
+            return None;
+        }
         let write = match self {
             MetadataAction::Pin => (!row.pinned).then_some(Write::Pin(true)),
             MetadataAction::Unpin => row.pinned.then_some(Write::Pin(false)),

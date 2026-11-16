@@ -200,8 +200,8 @@ pub(super) fn ask(
     };
     let (host, launch) = (row.host, row.info.launch.clone());
     let host_name = host_name(row, collections.get::<HostView>(&HostView::key(row.host)));
-    // The launcher runs this at most once per question (LA-L18), and the operation store refuses a second start on the
-    // session's key while one is out, so nothing here counts the calls.
+    // The launcher runs this at most once per question (`entry::ask_yolo_for_replace`'s contract), and the operation
+    // store refuses a second start on the session's key while one is out, so nothing here counts the calls.
     let key = source.to_owned();
     let send_again = move |answer: Mark, window: &mut Window, cx: &mut App| {
         replace::send_with_consent(&key, guard, surface, answer, window.window_handle(), cx);

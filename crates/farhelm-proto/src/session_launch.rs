@@ -315,6 +315,20 @@ impl SessionLaunch {
         }
     }
 
+    /// Whether this is a retired containerized session's launch, which
+    /// supports Delete only (SPEC.md, "Retired containerized sessions",
+    /// with [`crate::RETIRED_CONTAINER_REASON`] as the reason): an agent
+    /// launch whose selection still names the old supervisor-outside
+    /// container. Only that model stored the choice; a session in a new
+    /// recipe-backed container runs an ordinary launch on a host the helm's
+    /// registry marks as the environment's, so this is never a question
+    /// about the host or its provider. A command or legacy launch is never
+    /// retired.
+    pub fn is_retired_container(&self) -> bool {
+        self.agent_selection()
+            .is_some_and(|selection| selection.container.is_some())
+    }
+
     /// The agent type this launch runs, when it has one: an agent launch's
     /// harness or a command launch's declared type. A legacy session has a
     /// stored integration kind but no agent type in this sense.
@@ -768,6 +782,52 @@ mod tests {
         };
         assert_eq!(legacy.yolo(), None);
         assert_eq!(legacy.agent_kind(), AgentKind::Codex);
+    }
+
+    /// Spec: a launch is retired exactly when it is an agent launch whose
+    /// selection names the old container, decoded from the stored form the
+    /// old model wrote (its legacy `image_file` included); the same agent
+    /// launch without the choice, a command launch and a legacy launch are
+    /// not.
+    ///
+    /// Why: SPEC.md, "Retired containerized sessions", leaves such sessions
+    /// Delete only, and the GUI withdraws every other action and the
+    /// terminal on this one answer. Calling an ordinary session retired would
+    /// strand it with Delete alone; missing a retired one would offer
+    /// actions the helm refuses and open a terminal nothing serves.
+    #[test]
+    fn only_a_stored_container_choice_marks_a_launch_retired() {
+        let retired: SessionLaunch = serde_json::from_value(serde_json::json!({
+            "kind": "agent",
+            "selection": {"harness": "codex", "model": null, "effort": null, "permissions": null,
+                "container": {"engine": "podman", "image_file": "old.tar", "api_proxy_port": 42000}},
+            "start": ["codex", "{farhelm_args}"],
+            "resume": null,
+        }))
+        .unwrap();
+        assert!(retired.is_retired_container());
+        let SessionLaunch::Agent {
+            mut selection,
+            start,
+            resume,
+        } = retired
+        else {
+            panic!("premise: an agent launch");
+        };
+        selection.container = None;
+        let ordinary = SessionLaunch::Agent {
+            selection,
+            start,
+            resume,
+        };
+        assert!(!ordinary.is_retired_container());
+        assert!(!SessionLaunch::plain_command("codex").is_retired_container());
+        let legacy = SessionLaunch::Legacy {
+            invocation: "codex".into(),
+            agent_kind: AgentKind::Codex,
+            resume_template: None,
+        };
+        assert!(!legacy.is_retired_container());
     }
 
     /// Spec: a structured row from before launch kinds becomes an agent
