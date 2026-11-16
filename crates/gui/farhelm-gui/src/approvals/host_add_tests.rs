@@ -290,7 +290,8 @@ fn plan_reply() -> Value {
 
 /// SPEC.md: the card's action opens the ordinary add host dialog with the requested destination and alias, and
 /// opening is not approval. Specified: the dialog opens with focus in the destination field, both fields prefilled,
-/// who asked and what Add approves painted above them, and nothing sent to the helm.
+/// who asked and what Add approves painted above them, no host kind choice (the agent asked for an SSH destination,
+/// so the dialog must not answer with a sandbox), and nothing sent to the helm.
 #[gpui::test]
 fn the_cards_action_opens_the_dialog_prefilled_and_answers_nothing(cx: &mut TestAppContext) {
     let mut f = fixture(cx, Vec::new());
@@ -326,6 +327,12 @@ fn the_cards_action_opens_the_dialog_prefilled_and_answers_nothing(cx: &mut Test
             "{expected:?} painted in {approved}"
         );
     }
+    assert!(
+        frame(f.cx)
+            .iter()
+            .all(|node| node.element_id.as_deref() != Some("add-host-kind")),
+        "an agent's add draws no host kind choice"
+    );
     assert!(f.helm.commands().is_empty(), "opening sent nothing");
 }
 

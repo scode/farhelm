@@ -144,7 +144,7 @@ fn build_command(name: &str) -> Result<Command, PathError> {
 
 /// The one-line summary under a recipe's name: size, base, package count, then the tunnel count only when there are
 /// tunnels, so choosing a recipe shows what its next build will contain. The old `recipe_summary`'s words.
-pub(super) fn summary(view: &RecipeView) -> String {
+pub(crate) fn summary(view: &RecipeView) -> String {
     let plural = |count: usize, one: &str, many: &str| {
         format!("{count} {}", if count == 1 { one } else { many })
     };

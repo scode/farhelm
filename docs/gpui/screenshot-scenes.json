@@ -1390,6 +1390,49 @@
           "Collapse"
         ]
       ]
+    },
+    {
+      "id": "app-host-add-tensorlake-no-key",
+      "title": "Add host with the Tensorlake sandbox kind chosen on a helm with no Tensorlake API key: the kind choice, the no-key line, Open Settings → Tensorlake and the unavailable Continue",
+      "reference": "host-add-dialog",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "0"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "The trash is empty on reachable hosts."
+        ],
+        [
+          "click",
+          "id:host-rail-add"
+        ],
+        [
+          "wait",
+          "--text",
+          "An SSH destination this helm can reach"
+        ],
+        [
+          "click",
+          "id:add-host-kind-Tensorlake sandbox"
+        ],
+        [
+          "wait",
+          "--text",
+          "Save a Tensorlake API key in Settings → Tensorlake before adding a sandbox."
+        ],
+        [
+          "wait",
+          "--idle"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
