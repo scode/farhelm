@@ -523,15 +523,6 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         self.action(target, "remove-directory").await
     }
 
-    /// The e2e fixture never stands in for a machine whose units
-    /// `farhelm helm setup` owns: end-to-end runs drive the hosts
-    /// panel, and a scripted refusal there would test the fixture rather
-    /// than the panel. Answering "no such unit" keeps the local row on the
-    /// path those runs exercise.
-    async fn read_user_unit(&self, _name: &str) -> Result<Option<String>, BackendFailure> {
-        Ok(None)
-    }
-
     async fn injected_attach(
         &self,
         target: &ProvisioningTarget,

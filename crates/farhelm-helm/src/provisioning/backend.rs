@@ -165,12 +165,6 @@ pub(crate) struct Reach {
 pub(crate) enum ReachOutcome {
     Supported(Reach),
     Manual(String),
-    /// The host's supervisor unit carries `farhelm helm setup`'s managed-by
-    /// marker, so setup owns it there and the panel acts on it for no
-    /// operation. Kept apart from `Manual` because the refusal's remedy
-    /// depends on the operation; see
-    /// `ProvisioningOperation::setup_managed_refusal`.
-    SetupManaged,
 }
 
 /// What [`ProvisioningBackend::inspect_uninstall`] found on the host.
@@ -545,8 +539,7 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         unit: &str,
     ) -> Result<ActionOutcome, BackendFailure>;
-    /// Delete the supervisor unit file, refusing one that carries setup's
-    /// managed-by marker; an absent file is a skip.
+    /// Delete the supervisor unit file; an absent file is a skip.
     async fn remove_unit(
         &self,
         target: &ProvisioningTarget,
@@ -584,23 +577,6 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         path: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
-
-    /// Read one unit file out of THIS machine's systemd user directory,
-    /// or `None` when no such file exists.
-    ///
-    /// Takes no target on purpose: the only question it answers is about
-    /// the helm's own machine, where `farhelm helm setup` — not the hosts
-    /// panel — owns the units (D9). The panel never installs on the local
-    /// row; the local row consults this only AFTER a probe found no
-    /// supervisor (or to refuse an update), to choose what to tell the user:
-    /// reopen the Farhelm app, or leave the existing unit alone.
-    ///
-    /// `None` means one thing only: no such file. Every other outcome —
-    /// an unreadable file, contents that are not UTF-8, a unit directory
-    /// that cannot be located — is an error, because the caller reads
-    /// `None` as "there is no unit here" and would tell the user to run
-    /// setup over a unit it merely failed to read.
-    async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure>;
 
     /// Let a deliberately injected backend complete attachment without a
     /// real manager transport. Production returns `None`, preserving the
@@ -1156,7 +1132,6 @@ impl SystemBackend {
             temporary,
             mode,
             description,
-            refuse_setup_managed,
             expected,
         } = install;
         self.cleanup_orphaned_temporaries(target, destination)
@@ -1259,65 +1234,55 @@ impl SystemBackend {
             }
             ProvisioningTarget::Remote(route) => {
                 async {
-                    self.remote_put(route, source, temporary)
-                        .await?;
-                    // Same first-line test as `units::is_managed`, run in the
-                    // command that renames so no plan can outlive it.
-                    // `head -n 1` for the same reasons the reach check uses
-                    // it: a marker line without a newline still counts, and
-                    // an unreadable destination refuses rather than passes.
-                    let ownership_guard = if refuse_setup_managed {
-                        format!(
-                            "if [ -e {dest} ] || [ -L {dest} ]; then \
-                               first_line=$(head -n 1 -- {dest}) || exit 78; \
-                               if [ \"$first_line\" = {marker} ]; then \
-                                 printf '%s\\n' 'refusing to replace a unit managed by farhelm helm setup' >&2; \
-                                 exit 77; \
-                               fi; \
-                             fi; ",
-                            dest = shell_path(destination)?,
-                            marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
-                        )
-                    } else {
-                        String::new()
-                    };
+                    self.remote_put(route, source, temporary).await?;
                     // Status 79 is reserved for a generation mismatch. Hash/read failures
                     // use 78 so delivery never retries an ordinary transport or I/O error.
                     let generation_guard = match expected {
                         None => String::new(),
-                        Some(None) => format!("[ ! -e {dest} ] && [ ! -L {dest} ] || exit 79; ", dest = shell_path(destination)?),
+                        Some(None) => format!(
+                            "[ ! -e {dest} ] && [ ! -L {dest} ] || exit 79; ",
+                            dest = shell_path(destination)?
+                        ),
                         Some(Some(hash)) => format!(
                             "if [ ! -e {dest} ] && [ ! -L {dest} ]; then exit 79; fi; \
                              old=$({sha}) || exit 78; [ \"${{old%% *}}\" = {hash} ] || exit 79; ",
-                            dest = shell_path(destination)?, sha = remote_sha256sum(&shell_path(destination)?),
-                            hash = crate::ssh::shell_quote(hash)),
+                            dest = shell_path(destination)?,
+                            sha = remote_sha256sum(&shell_path(destination)?),
+                            hash = crate::ssh::shell_quote(hash)
+                        ),
                     };
                     // Keep the checksum input on stdin. GNU coreutils escapes
                     // backslashes and newlines in argument-based output; the
                     // stdin form follows install.sh's sha256_of convention.
-                    let output = self.run_shell(
-                        target,
-                        &format!(
-                            "{ownership_guard}actual=$({}) || exit; \
+                    let output = self
+                        .run_shell(
+                            target,
+                            &format!(
+                                "actual=$({}) || exit; \
                              [ \"${{actual%% *}}\" = {} ] || {{ \
                                printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
                              }}; {generation_guard}chmod -- {mode:o} {} && mv -f -- {} {}",
-                            remote_sha256sum(&shell_path(temporary)?),
-                            crate::ssh::shell_quote(source_hash),
-                            shell_path(temporary)?,
-                            shell_path(temporary)?,
-                            shell_path(destination)?
-                        ),
-                        COMMAND_TIMEOUT,
-                    )
-                    .await?;
+                                remote_sha256sum(&shell_path(temporary)?),
+                                crate::ssh::shell_quote(source_hash),
+                                shell_path(temporary)?,
+                                shell_path(temporary)?,
+                                shell_path(destination)?
+                            ),
+                            COMMAND_TIMEOUT,
+                        )
+                        .await?;
                     if output.code != Some(0) {
                         return Err(BackendFailure::new(
                             if output.code == Some(79) && expected.is_some() {
                                 DESTINATION_CHANGED.to_owned()
                             } else {
-                                format!("finishing the atomic {description} install: {}", output.failure_status())
-                            }, output.stderr));
+                                format!(
+                                    "finishing the atomic {description} install: {}",
+                                    output.failure_status()
+                                )
+                            },
+                            output.stderr,
+                        ));
                     }
                     Ok(())
                 }
@@ -1773,13 +1738,6 @@ struct InstallDestination<'a> {
     temporary: &'a Path,
     mode: u32,
     description: &'a str,
-    /// Refuse, on a remote host, to replace a destination whose first line is
-    /// `farhelm helm setup`'s managed-by marker. Only the supervisor unit sets
-    /// it. The reach check already refuses such a unit at planning time; this
-    /// covers setup running on the host between planning and confirmation.
-    /// The local branch has no such check because production never installs
-    /// units locally (the panel hands the helm's own machine to setup).
-    refuse_setup_managed: bool,
     /// Same three-state contract as `ProvisioningBackend::install_bytes_checked`.
     expected: Option<Option<&'a str>>,
 }
@@ -2727,20 +2685,6 @@ impl ProvisioningBackend for SystemBackend {
             ManagerUnitDir::Xdg(dir) => ("usable", dir),
             ManagerUnitDir::HomeDefault => ("usable", String::new()),
         };
-        //
-        // The last field reports whether that directory already holds a
-        // supervisor unit `farhelm helm setup` wrote on the host itself
-        // (first line exactly `units::MANAGED_MARKER`, the same test as
-        // `units::is_managed`). Such a unit belongs to setup there, and ADD
-        // and UPDATE refuse to replace it — see `parse_reach_output`. An
-        // unmarked unit is provisioning's own, or a hand-written one the
-        // user is expected to move aside, and is replaced as before.
-        //
-        // `head -n 1` rather than `read`: `read` fails on a last line with
-        // no newline, and a marker-only file must still count as setup's.
-        // A unit that exists but cannot be read fails the whole check
-        // instead of passing as unmarked, because "could not tell" is not
-        // evidence that provisioning owns it.
         let script = format!(
             "if [ -r /etc/os-release ]; then . /etc/os-release; fi; \
                       printf '%s\\0%s\\0%s\\0' 'farhelm-reach-v1' \"${{ID-}}\" \"${{HOME-}}\"; \
@@ -2748,17 +2692,7 @@ impl ProvisioningBackend for SystemBackend {
                       manager={manager}; unit_dir={unit_dir}; \
                       if [ \"$manager\" = usable ] && [ -z \"$unit_dir\" ]; then \
                         unit_dir=$HOME/.config/systemd/user; fi; \
-                      printf '%s\\0%s\\0' \"$manager\" \"$unit_dir\"; \
-                      unit_owner=''; unit_file=\"$unit_dir\"/{unit}; \
-                      if [ -n \"$unit_dir\" ] && {{ [ -e \"$unit_file\" ] || [ -L \"$unit_file\" ]; }}; then \
-                        first_line=$(head -n 1 -- \"$unit_file\") || {{ \
-                          printf '%s\\n' \"cannot read $unit_file to check whether farhelm helm setup manages it\" >&2; \
-                          exit 78; }}; \
-                        if [ \"$first_line\" = {marker} ]; then unit_owner=setup; fi; \
-                      fi; \
-                      printf '%s\\0' \"$unit_owner\"",
-            unit = crate::units::SUPERVISOR_UNIT_NAME,
-            marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
+                      printf '%s\\0%s\\0' \"$manager\" \"$unit_dir\"",
             manager = manager,
             unit_dir = crate::ssh::shell_quote(&unit_dir),
         );
@@ -2863,7 +2797,6 @@ impl ProvisioningBackend for SystemBackend {
                         temporary,
                         mode,
                         description: "payload",
-                        refuse_setup_managed: false,
                         expected: None,
                     },
                 )
@@ -2901,7 +2834,6 @@ impl ProvisioningBackend for SystemBackend {
                 temporary,
                 mode,
                 description: "unit content",
-                refuse_setup_managed: true,
                 expected,
             },
         )
@@ -3217,11 +3149,6 @@ resolve() {
         Ok(ActionOutcome::Completed)
     }
 
-    /// The marker test is the reach check's (first line exactly
-    /// `units::MANAGED_MARKER`, read with `head` so a marker-only file with
-    /// no newline still counts), repeated here in the same shell as the
-    /// `rm`: setup may have taken the unit over since the plan was made, and
-    /// a unit it cannot read fails the step instead of passing as unmarked.
     async fn remove_unit(
         &self,
         target: &ProvisioningTarget,
@@ -3231,15 +3158,8 @@ resolve() {
         let script = format!(
             "f={file}; \
              if [ ! -e \"$f\" ] && [ ! -L \"$f\" ]; then printf absent; exit 0; fi; \
-             first_line=$(head -n 1 -- \"$f\") || {{ \
-               printf '%s\\n' \"cannot read $f to check whether farhelm helm setup manages it\" >&2; \
-               exit 78; }}; \
-             if [ \"$first_line\" = {marker} ]; then \
-               printf '%s\\n' 'refusing to remove a unit managed by farhelm helm setup' >&2; \
-               exit 79; fi; \
              rm -f -- \"$f\"",
             file = shell_path(destination)?,
-            marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
         );
         let output = self
             .require_shell(target, &script, "removing the supervisor unit file")
@@ -3463,49 +3383,6 @@ resolve() {
         } else {
             ActionOutcome::Completed
         })
-    }
-
-    /// The helm's own process environment is the authority here, which is
-    /// the one place in this file where that is true rather than a
-    /// shortcut: this method asks about the machine the helm itself runs
-    /// on, so the manager that would load the unit is the helm's own user
-    /// manager. Remote hosts are asked over SSH by `inspect` instead, whose
-    /// shell fragment is a separate copy of
-    /// [`crate::units::user_unit_dir_for`]'s rule rather than a call into it
-    /// (see the note there). The two differ for a relative
-    /// `XDG_CONFIG_HOME`: this side falls back to `HOME`, the shell reports
-    /// `unsupported-xdg`.
-    ///
-    /// Everything short of a confirmed absence is an error. A missing
-    /// `HOME` with no absolute `XDG_CONFIG_HOME`, a file this process may
-    /// not read, contents that are not UTF-8 — none of those mean "no unit
-    /// exists", and answering `None` for them would have the panel tell the
-    /// user to run setup over a unit it merely failed to inspect.
-    async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure> {
-        let home = std::env::var_os("HOME").filter(|value| !value.is_empty());
-        let directory = crate::units::user_unit_dir_for(
-            std::env::var_os("XDG_CONFIG_HOME").as_deref(),
-            home.as_ref().map(Path::new),
-        )
-        .map_err(|error| BackendFailure::new(format!("{error:#}"), ""))?;
-        let path = directory.join(name);
-        match tokio::fs::read(&path).await {
-            Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| {
-                BackendFailure::new(
-                    format!(
-                        "the unit file {} is not valid UTF-8, so it cannot be checked for \
-                         ownership",
-                        path.display()
-                    ),
-                    "",
-                )
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(BackendFailure::new(
-                format!("reading the unit file {}", path.display()),
-                error.to_string(),
-            )),
-        }
     }
 }
 
@@ -3825,17 +3702,16 @@ pub(super) fn manager_unit_dir_from_probe(output: &[u8]) -> Result<ManagerUnitDi
 /// Turn the reach probe's NUL-delimited record into a support decision.
 ///
 /// Nothing here gates on the distro ID. Every real requirement is a
-/// capability the probe measured directly: a payload architecture, a
+/// capability the probe measured directly: a payload architecture and a
 /// usable systemd user manager (with a resolvable, absolute unit
-/// directory) and a unit that `farhelm helm setup` does not own there.
-/// The ID is parsed and carried into `Reach`
-/// purely so the confirmation plan can name the host it inspected; an
-/// empty ID (no `/etc/os-release` at all) is not a reason to refuse a
-/// host whose manager is otherwise usable, so it flows through as an
-/// empty string rather than a rejection.
+/// directory). The ID is parsed and carried into `Reach` purely so the
+/// confirmation plan can name the host it inspected; an empty ID (no
+/// `/etc/os-release` at all) is not a reason to refuse a host whose manager
+/// is otherwise usable, so it flows through as an empty string rather than
+/// a rejection.
 pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendFailure> {
     let fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
-    if fields.len() != 8 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[7].is_empty() {
+    if fields.len() != 7 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[6].is_empty() {
         return Err(BackendFailure::new(
             "the provisioning reach check returned malformed output",
             String::from_utf8_lossy(output),
@@ -3905,22 +3781,6 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             "automatic provisioning cannot use the systemd user unit directory {}; run the supervisor manually with explicit paths.",
             user_unit_dir.display()
         )));
-    }
-    // Setup's unit is refused here, before any plan exists, so every
-    // operation refuses it the same way, each in its own words (see
-    // `ProvisioningOperation::setup_managed_refusal`). The unit write and the
-    // unit removal re-check the marker (see `install_bytes` and
-    // `remove_unit`), because a plan is confirmed some time after this
-    // inspection.
-    match fields[6] {
-        b"" => {}
-        b"setup" => return Ok(ReachOutcome::SetupManaged),
-        _ => {
-            return Err(BackendFailure::new(
-                "the provisioning reach check returned malformed output",
-                String::from_utf8_lossy(output),
-            ));
-        }
     }
     Ok(ReachOutcome::Supported(Reach {
         home,

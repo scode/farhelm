@@ -1,5 +1,5 @@
 //! The locks uninstall holds while it removes an installation, so an install,
-//! update, setup, or desktop start cannot interleave with the removal.
+//! update, or desktop start cannot interleave with the removal.
 //!
 //! SPEC.md ("Concurrent and interrupted runs") requires a correct outcome
 //! when uninstall overlaps those operations, and refusing is acceptable.
@@ -13,8 +13,8 @@
 //! then re-checks what it is about to remove: two of them are directories,
 //! which nothing removes when a process dies, so holding them across the
 //! confirmation prompt would turn an ordinary Ctrl-C there into stale
-//! locks. The flock-based ones (setup's, and the supervisor's and helm's)
-//! are released by the kernel however the process ends.
+//! locks. The flock-based ones (the supervisor's and helm's) are released
+//! by the kernel however the process ends.
 //!
 //! Which locks, and why each is enough:
 //! - [`InstallLock`]: the installer's lock directory in the install
@@ -25,8 +25,6 @@
 //!   folder older installers use beside the app
 //!   (`farhelm_supervisor::installation`). The installation lock is a
 //!   kernel lock, so no run ever leaves it behind.
-//! - setup's unit-directory flock, taken through
-//!   `setup::lock_for_selected_services` (Linux).
 //! - [`RuntimeLocks`] (macOS): the supervisor's and helm's state-directory
 //!   flocks. The desktop app's embedded helm holds its lock while the app is
 //!   open, so an open app refuses the uninstall, and an app started during
@@ -36,10 +34,9 @@
 //!   `RuntimeLocks`). A starting supervisor waits a while for a held lock
 //!   (a Farhelm that was just quit may still be shutting down), so it can
 //!   outlast the removal; it then refuses because its own program is gone,
-//!   and the app still does not open. On Linux uninstall stops setup's
-//!   services itself, after which only a process the user started by hand
-//!   could hold these locks, and stopping those is already the operator's
-//!   job (SPEC.md, "Operator prerequisites").
+//!   and the app still does not open. On Linux uninstall takes none of
+//!   these: stopping whatever still runs from the installation is the
+//!   operator's job there (SPEC.md, "Operator prerequisites").
 //!
 //! A refusal names the lock and what holding it usually means, never as
 //! proof that a process is running: a lock directory can be left by a

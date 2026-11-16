@@ -21,8 +21,8 @@
 //!   its progress is the pushed host progress, which the row shows as it shows a setup's: the running row opens once,
 //!   the user may fold it, and a failure opens it on the failed step. Choosing Uninstall again continues a failed run
 //!   ([`super::offers`] keeps it available after a failure).
-//! - **Refusals.** A refused plan (sessions or tabs still on the host, not connected, a `farhelm helm setup` unit, a
-//!   supervisor running from elsewhere, a symlinked lib directory, or any other reason the helm gives) opens the host
+//! - **Refusals.** A refused plan (sessions or tabs still on the host, not connected, a supervisor running from
+//!   elsewhere, a symlinked lib directory, or any other reason the helm gives) opens the host
 //!   refusal dialog ([`super::refusal`], "Uninstall Farhelm · <name>") through the press's mark, with Remove when the
 //!   helm marks the refusal "remove instead"; a refused confirmation opens it through the mark of the Uninstall answer.
 //!   Either one that opened no dialog (the user moved on) stays under the row, the store's record under the host's key;

@@ -84,9 +84,6 @@ impl EnvironmentPreparer for InstallerSnapshotPreparer {
         {
             ReachOutcome::Supported(reach) => reach,
             ReachOutcome::Manual(reason) => anyhow::bail!("{reason}"),
-            ReachOutcome::SetupManaged => anyhow::bail!(
-                "this sandbox has an installation managed by farhelm helm setup; use an image without a Farhelm installation"
-            ),
         };
         let plan = self.layout.plan(
             ProvisioningOperation::Add,
@@ -108,8 +105,8 @@ impl EnvironmentPreparer for InstallerSnapshotPreparer {
             // final guard verifies actual linger and persistent enablement.
             // The bundled tmux's removal is for hosts an earlier release set
             // up. Preparation installs into a sandbox image with no Farhelm
-            // installation (it refuses setup-managed installs and copied
-            // state), so the image is not expected to carry such a tmux.
+            // installation (it refuses copied supervisor state), so the
+            // image is not expected to carry such a tmux.
             if matches!(
                 action,
                 ProvisioningAction::AttachSupervisor

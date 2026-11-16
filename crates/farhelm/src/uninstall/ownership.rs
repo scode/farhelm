@@ -40,7 +40,7 @@ pub(crate) struct InspectionInputs {
     pub(crate) platform: PlatformArtifacts,
 }
 
-/// Everything the remover may act on after service preflight and confirmation.
+/// Everything the remover may act on after inspection and confirmation.
 ///
 /// Which kind depends on the platform. On macOS the installation is the app
 /// bundle with its side-by-side versions ([`super::app`]); on Linux it is a
