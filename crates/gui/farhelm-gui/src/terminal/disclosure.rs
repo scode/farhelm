@@ -22,8 +22,9 @@ use std::rc::Rc;
 
 use farhelm_grid_model::LinkDisclosure;
 use gpui::{
-    Bounds, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
-    Size, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder as _, px,
+    App, Bounds, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
+    Render, Size, Stateful, StatefulInteractiveElement, Styled, Window, canvas, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::host_text::{self, HostSentence, HostText};
@@ -49,6 +50,39 @@ pub(crate) fn fully_visible(drawn: &Drawn) -> bool {
         && bounds.origin.y >= px(0.)
         && bounds.origin.x + bounds.size.width <= window.width
         && bounds.origin.y + bounds.size.height <= window.height
+}
+
+/// The floating surface every destination display is drawn on, under element id `id` (the old app's
+/// `.terminal-link-target`): the interface face at 12 pixels on the floating ground, at most the window's width less 8
+/// pixels. A web link's warning and a file link's stripe are drawn over it by their own views.
+pub(super) fn surface(id: &'static str, window: &Window, cx: &App) -> Stateful<Div> {
+    let palette = theme::palette(cx);
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(gpui::Role::Tooltip)
+        .relative()
+        .max_w(window.viewport_size().width - px(8.))
+        .rounded(metrics::RADIUS_MD)
+        .shadow(crate::layers::menu_shadow(palette))
+        .px(px(6.))
+        .py(px(4.))
+        .bg(theme::color(palette.bg_2))
+        .text_color(theme::color(palette.fg_1))
+        .text_size(metrics::TEXT_SM)
+}
+
+/// Records, as the display holding it paints, the display's bounds and the window's size into `drawn`: what a click
+/// checks the display against ([`fully_visible`]). It fills the display and draws nothing.
+pub(super) fn recorder(drawn: Drawn) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, _| drawn.set(Some((bounds, window.viewport_size()))),
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 /// The panel's view: one disclosure, as the grid model judged it when the hover started (SPEC.md: the warning is
@@ -84,45 +118,18 @@ impl Render for DisclosureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let mismatch = self.claimed.is_some();
-        let drawn = self.drawn.clone();
-        // Records the panel's own bounds as it paints, with the window's size, for the click's check.
-        let recorder = canvas(
-            |_, _, _| (),
-            move |bounds, (), window, _| drawn.set(Some((bounds, window.viewport_size()))),
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full();
-        // The old panel's look (`.terminal-link-target` in app.css): a floating surface in the interface face at 12
-        // pixels, at most the window's width less 8 pixels, wrapping anywhere; the loud form danger-filled at 14
-        // pixels with a 2-pixel edge.
-        let panel = div()
-            .id("terminal-link-disclosure")
-            .debug_selector(|| "terminal-link-disclosure".into())
-            .role(gpui::Role::Tooltip)
-            .relative()
-            .max_w(window.viewport_size().width - px(8.))
-            .rounded(metrics::RADIUS_MD)
-            .shadow(crate::layers::menu_shadow(palette))
-            .when(!mismatch, |panel| {
-                panel
-                    .px(px(6.))
-                    .py(px(4.))
-                    .bg(theme::color(palette.bg_2))
-                    .text_color(theme::color(palette.fg_1))
-                    .text_size(metrics::TEXT_SM)
-            })
-            .when(mismatch, |panel| {
-                panel
-                    .px(px(10.))
-                    .py(px(8.))
-                    .bg(theme::color(palette.danger_bg))
-                    .text_color(theme::color(palette.on_fill))
-                    .border_2()
-                    .border_color(theme::color(palette.danger_strong))
-                    .text_size(px(14.))
-            });
+        // The old panel's look (`.terminal-link-target` in app.css, see [`surface`]); the loud form danger-filled at
+        // 14 pixels with a 2-pixel edge.
+        let panel = surface("terminal-link-disclosure", window, cx).when(mismatch, |panel| {
+            panel
+                .px(px(10.))
+                .py(px(8.))
+                .bg(theme::color(palette.danger_bg))
+                .text_color(theme::color(palette.on_fill))
+                .border_2()
+                .border_color(theme::color(palette.danger_strong))
+                .text_size(px(14.))
+        });
         let strong = if mismatch {
             palette.on_fill
         } else {
@@ -160,6 +167,6 @@ impl Render for DisclosureView {
                     .mt(px(4.))
                     .child(hint)
             }))
-            .child(recorder)
+            .child(recorder(self.drawn.clone()))
     }
 }

@@ -3217,8 +3217,9 @@ fn a_display_closed_without_a_press_stays_closed_until_the_pointer_moves(cx: &mu
     );
 }
 
-/// A program's hyperlink that is not a web address (a `file://` link, as `ls --hyperlink` prints) opens nothing and
-/// has no display; a click on it must not claim the display was hidden.
+/// A program's hyperlink that is not a web address (a `file://` link, as `ls --hyperlink` prints) never reaches the
+/// browser. Its display is its file check ([`super::super::files`]), which here has nowhere to go and fails, so a
+/// click on it admits nothing and must not claim the display was hidden.
 #[gpui::test]
 fn a_click_on_a_file_hyperlink_says_nothing(cx: &mut TestAppContext) {
     let mut h = harness(cx);
