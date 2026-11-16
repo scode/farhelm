@@ -10,10 +10,19 @@ use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, RefreshView};
 use super::{Kind, Tone, detail_lines, hover, tone, words};
 use crate::host_text::HostText;
 use crate::hosts::tests::{LOCAL_DIAL_FAILURE, connected, connecting, host, local_down, skew};
+use crate::local_time::Zone;
 
-/// The detail lines of `state` on an unaliased SSH host, each as (its kind, its accessible name).
+/// The detail lines of `state` on an unaliased SSH host, each as (its kind, its accessible name), times in UTC.
 fn lines_of(state: HostStateView) -> Vec<(Kind, String)> {
     lines_with_twin(state, |_| None)
+}
+
+/// [`lines_of`] with times in `zone`.
+fn lines_in(state: HostStateView, zone: Zone) -> Vec<(Kind, String)> {
+    detail_lines(&host(2, "ssh", state), |_| None, zone)
+        .into_iter()
+        .map(|(kind, line)| (kind, line.accessible_name().to_string()))
+        .collect()
 }
 
 /// [`lines_of`] with `twin` naming hosts by id.
@@ -21,7 +30,7 @@ fn lines_with_twin(
     state: HostStateView,
     twin: impl Fn(i64) -> Option<HostText>,
 ) -> Vec<(Kind, String)> {
-    detail_lines(&host(2, "ssh", state), twin)
+    detail_lines(&host(2, "ssh", state), twin, Zone::UTC)
         .into_iter()
         .map(|(kind, line)| (kind, line.accessible_name().to_string()))
         .collect()
@@ -450,7 +459,7 @@ fn the_destination_shows_only_behind_an_alias() {
     let mut aliased = host(2, "ssh", connected());
     aliased.alias = Some("build-box".into());
     aliased.name = "build-box".into();
-    let first = detail_lines(&aliased, |_| None)
+    let first = detail_lines(&aliased, |_| None, Zone::UTC)
         .first()
         .map(|(_, line)| line.accessible_name().to_string());
     assert_eq!(first.as_deref(), Some("Destination: dev@build-box.invalid"));
@@ -462,21 +471,35 @@ fn the_destination_shows_only_behind_an_alias() {
     );
 }
 
-/// Why this matters: the environment phases' details carry the time something was asked or noticed, as an unambiguous
-/// UTC stamp, since the GUI carries no time zone database. Specified: a suspended host's detail carries the stamp of
-/// the moment the helm noticed the suspension (the stamp's own format is pinned in `hosts/identity/tests.rs`).
+/// Why this matters: the environment phases' details carry the time something was asked or noticed, and the maintainer
+/// decided on 2026-11-15 that every time the app shows is the viewer's local time; the helm pushes milliseconds, so a
+/// detail that forgot to divide would read as a date tens of thousands of years away. Specified: five hours west of
+/// UTC, a suspended host's detail carries the local time the helm noticed the suspension, and a host whose provider was
+/// asked to suspend carries the local time it was asked, each to the second with no zone named (the stamp's own format
+/// is pinned in `local_time_tests.rs`).
 #[test]
-fn environment_times_read_as_utc_stamps() {
+fn environment_times_read_in_the_viewers_zone() {
+    let west = Zone::fixed(-5 * 3_600);
+    let suspended = HostStateView::Suspended {
+        observed_at: 1_700_000_000_000,
+        suspended_by_farhelm_at: None,
+        resume_failed: Some("quota".into()),
+    };
     assert_eq!(
-        lines_of(HostStateView::Suspended {
-            observed_at: 1_700_000_000_000,
-            suspended_by_farhelm_at: None,
-            resume_failed: Some("quota".into()),
-        }),
+        lines_in(suspended, west),
         [(
             Kind::Evidence,
-            "Suspension noticed at 2023-11-14 22:13:20 UTC. Resume failed: quota".to_owned()
+            "Suspension noticed at 2023-11-14 17:13:20. Resume failed: quota".to_owned()
         )]
+    );
+    let asked = HostStateView::TensorlakeChanging {
+        starting: false,
+        direction: LifecycleDirection::Suspending,
+        requested_at: 1_700_000_000_000,
+    };
+    assert_eq!(
+        lines_in(asked, west)[0].1,
+        "Asked the environment provider to suspend at 2023-11-14 17:13:20; waiting for confirmation"
     );
 }
 

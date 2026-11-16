@@ -31,6 +31,7 @@
 //!   until the user touches them, and their saves.
 //! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second), for one-shot deadlines, and for
 //!   the wall clock that ages are drawn from.
+//! - [`local_time`]: clock times in the viewer's time zone, which the host hands in.
 //! - [`notices`]: the notice center, the one place that decides what notice shows.
 //! - [`cache`]: the one way to cache a view.
 //! - [`render_count`]: per-view render counts in test builds.
@@ -95,6 +96,7 @@ pub mod hosts;
 pub mod launcher;
 pub mod layers;
 pub mod local_state;
+pub mod local_time;
 pub mod main_view;
 pub mod marks;
 pub mod notices;
@@ -144,6 +146,8 @@ mod focus_tests;
 mod goldens;
 #[cfg(test)]
 mod layers_tests;
+#[cfg(test)]
+mod local_time_tests;
 #[cfg(test)]
 mod operations_tests;
 #[cfg(test)]

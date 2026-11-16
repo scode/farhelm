@@ -30,11 +30,12 @@ use super::SessionPane;
 use super::details::{AGE_ID, BAR_ID, DIRECTORY_ID, STATUS_ID, Status};
 use super::unavailable::{
     BAND_AGE_ID, BAND_ID, BAND_STATUS_ID, Band, CARD_ID, DETAIL_ID, EXPLANATION_ID, HEADING_ID,
-    Notice, notice,
+    Notice, notice as notice_in,
 };
 use crate::actions::{DELETE_SESSION_CHORD, FocusPreviousControl};
 use crate::host_text::HostText;
 use crate::hosts::tests::LOCAL_DIAL_FAILURE;
+use crate::local_time::{self, Zone};
 use crate::main_view::MainView;
 use crate::render_count;
 use crate::session_list::menu_tests::{drawn, label_of, push, snapshot};
@@ -214,10 +215,13 @@ fn row_of(fixture: Fixture) -> SessionRow {
 /// age "in exactly one band". An attach there would only meet a host that does not answer. Specified: with a stale a
 /// open at startup, the pane opens no stream and draws no terminal and no strip; the card, named "Session unavailable",
 /// sits between the top row and the details bar with the heading, the explanation and the host's evidence line; the
-/// band names a's last-known Running and its age, and the details bar names neither; the card holds focus.
+/// band names a's last-known Running and its age, whose stamp is the viewer's local time (the app's zone pinned five
+/// hours west of UTC), and the details bar names neither; the card holds focus.
 #[gpui::test]
 fn a_session_opened_unreachable_shows_the_card_and_mounts_no_terminal(cx: &mut TestAppContext) {
     let (mut main, pane) = open(cx, fleet(&[a(true), session("b")], unreachable()));
+    main.cx.update(|_, cx| local_time::pin(-5 * 3_600, cx));
+    test_support::redraw(main.cx);
     assert_eq!(streams(&main), [], "no stream");
     assert_eq!(inert(&mut main, &pane), None, "no terminals mounted");
     assert!(!drawn(main.cx, STRIP_ID), "no tab strip");
@@ -249,7 +253,7 @@ fn a_session_opened_unreachable_shows_the_card_and_mounts_no_terminal(cx: &mut T
     );
     assert_eq!(
         label_of(main.cx, BAND_AGE_ID).as_deref(),
-        Some("Last activity 2025-07-01 23:57:58 UTC")
+        Some("Last activity 2025-07-01 18:57:58")
     );
     assert!(
         !drawn(main.cx, STATUS_ID) && !drawn(main.cx, AGE_ID),
@@ -714,6 +718,17 @@ fn lines(notice: &Notice) -> (String, String, Option<String>) {
     )
 }
 
+/// [`notice_in`] with its times in UTC: no notice here gives a time but the suspended one's, which these tests only
+/// check the start of.
+fn notice(
+    host_name: &str,
+    lookup: HostLookup<'_>,
+    failure: Option<&str>,
+    twin: impl Fn(i64) -> Option<HostText>,
+) -> Notice {
+    notice_in(host_name, lookup, failure, twin, Zone::UTC)
+}
+
 /// The card's words for `state` on the host named `buildbox`, with a duplicate's twin named `other-box`.
 fn words_for(state: HostStateView) -> (String, String, Option<String>) {
     let host = known(state);
@@ -892,7 +907,7 @@ fn a_session_without_a_host_name_is_still_named_and_a_name_is_escaped() {
 #[test]
 fn the_band_keeps_the_last_known_status_and_age_of_a_stale_session_only() {
     let now = Some(TEST_NOW);
-    let running = Band::of(&row_of(a(true)), now).expect("a band");
+    let running = Band::of(&row_of(a(true)), now, Zone::UTC).expect("a band");
     assert_eq!(
         running.status,
         Some(Status::Live(crate::session_list::status::Live::Running))
@@ -901,14 +916,19 @@ fn the_band_keeps_the_last_known_status_and_age_of_a_stale_session_only() {
     let exited = Band::of(
         &row_of(a(true).status(json!({"state": "exited", "exit_code": 0}))),
         now,
+        Zone::UTC,
     )
     .expect("a band");
     let Some(Status::Ended(ended)) = exited.status else {
         panic!("an ended status");
     };
     assert_eq!(ended.words, "Exited (code 0)");
-    let unknown =
-        Band::of(&row_of(a(true).status(json!({"state": "unknown"}))), now).expect("a band");
+    let unknown = Band::of(
+        &row_of(a(true).status(json!({"state": "unknown"}))),
+        now,
+        Zone::UTC,
+    )
+    .expect("a band");
     assert!(unknown.status.is_none() && unknown.age.is_some());
-    assert_eq!(Band::of(&row_of(a(false)), now), None);
+    assert_eq!(Band::of(&row_of(a(false)), now, Zone::UTC), None);
 }

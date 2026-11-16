@@ -15,7 +15,8 @@
 
 use farhelm_proto::recipes::{PrepareStep, PrepareView, PreparedStaleReason, RecipeView};
 
-use super::{Line, Tone, Words, utc_minute};
+use super::{Line, Tone, Words};
+use crate::local_time::{self, Zone};
 
 /// "1 min", "41 s", "2 h": how long ago `at` was at `now`, both in seconds since the epoch. Display only, so it
 /// tolerates a viewer's clock behind the helm's (an age never goes negative), and saturating arithmetic keeps extreme
@@ -37,12 +38,17 @@ fn step_of(step: PrepareStep) -> String {
 }
 
 /// The prepared-snapshot line of `view`, with `now` the viewer's time in seconds since the epoch (`None` when the
-/// viewer's clock cannot say, when ages are left out and readiness gives its UTC time instead).
+/// viewer's clock cannot say, when ages are left out and readiness gives its time instead, to the minute in `zone`, the
+/// viewer's local time).
 ///
 /// A running, failed or interrupted preparation takes precedence over the prepared snapshot it may replace. Only the
 /// helm's stale reason makes the line a warning: a client's clock decides nothing about reuse. A running preparation's
 /// line is the one that pulses ([`Line::running`]).
-pub(in crate::settings) fn prepared_status(view: &RecipeView, now: Option<i64>) -> Line {
+pub(in crate::settings) fn prepared_status(
+    view: &RecipeView,
+    now: Option<i64>,
+    zone: Zone,
+) -> Line {
     match &view.preparation {
         PrepareView::Preparing { step, started_at } => {
             let elapsed = now
@@ -100,7 +106,7 @@ pub(in crate::settings) fn prepared_status(view: &RecipeView, now: Option<i64>) 
                 None => {
                     let when = now
                         .map(|now| format!("{} ago", age(now, prepared.prepared_at)))
-                        .unwrap_or_else(|| utc_minute(prepared.prepared_at));
+                        .unwrap_or_else(|| local_time::minute(prepared.prepared_at, zone));
                     Line::app(
                         Tone::Positive,
                         format!(

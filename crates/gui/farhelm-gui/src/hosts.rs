@@ -145,6 +145,7 @@ use crate::components::{Button, Checkbox, HoverHelp, IconButton, StatusMark, Tie
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
+use crate::local_time::{self, Zone};
 use crate::operations::{Failure, OpKey, Work};
 use crate::render_count;
 use crate::session::{self, PerSession};
@@ -434,6 +435,8 @@ struct RowInput<'a> {
     status: Option<progress::Status>,
     /// Whether the host's Update is available ([`update::available`]), which the inline Update needs.
     updatable: bool,
+    /// The viewer's time zone for this frame, for the times the row's details give.
+    zone: Zone,
 }
 
 impl Render for HostsPanel {
@@ -449,6 +452,7 @@ impl Render for HostsPanel {
         let reveal = self.take_reveal(before, cx);
         let operations = session::current_operations(cx);
         let now = ticker::wall_now(cx);
+        let zone = local_time::zone(cx);
         // Copied out for the frame: the rows borrow the store. A handful of entries at most, one per host with a run.
         let seen = progress::seen_now(cx);
         // The running pulse's opacity now, which every row's setup dot and running step share.
@@ -516,6 +520,7 @@ impl Render for HostsPanel {
                             seen,
                             status,
                             updatable: available,
+                            zone,
                         };
                         self.row(
                             &input,
@@ -800,7 +805,7 @@ impl HostsPanel {
             }
         };
         let lines: Vec<AnyElement> = if open {
-            phase::detail_lines(host, twin)
+            phase::detail_lines(host, twin, input.zone)
                 .into_iter()
                 .map(|(kind, line)| detail_line(kind, line, palette))
                 .collect()

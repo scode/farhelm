@@ -181,18 +181,6 @@ pub(crate) fn space(bytes: u64, partial: bool) -> String {
     }
 }
 
-/// `seconds` since the epoch as the old trash dialog printed it, to the minute: "2026-11-13 17:40 UTC". The app's
-/// other stamp (`hosts::identity::utc_stamp`) carries seconds; the old dialog's archive and failure times did not.
-pub(crate) fn stamp(seconds: i64) -> String {
-    let (year, month, day) = farhelm_proto::time::civil_from_days(seconds.div_euclid(86_400));
-    let time = seconds.rem_euclid(86_400);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
-        time / 3_600,
-        time % 3_600 / 60
-    )
-}
-
 /// The folders to copy work out of, under one host: the parent of every listed checkout's and diagnostic's path, each
 /// once, sorted. Computed on the raw paths; the dialog draws each as host text.
 pub(crate) fn folders(listing: &CheckoutTrashListing) -> Vec<String> {

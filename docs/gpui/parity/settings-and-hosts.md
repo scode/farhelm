@@ -1175,10 +1175,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   Refresh, after a key's Save or Clear in this opening, after every answer to a Delete, and when the pushed hosts list
   gains or loses a Tensorlake host (decided by the migration's coordinator on 2026-11-15), since each read lists the
   whole Tensorlake account. A Test that succeeds after a failed read no longer reads the list; Refresh does.
-- **Its times are UTC.** "None found · checked" and a row's creation time are `YYYY-MM-DD HH:MM:SS UTC`. For "checked",
-  the old list showed local hours and minutes and SPEC.md asks for the viewer's local time: the GUI carries no time zone
-  database yet, and a shared local-time helper is to replace this (accepted by the migration's coordinator on
-  2026-11-15). The old creation time was UTC already, to the minute; it now has seconds too.
+- **A row's creation time is local, to the second.** "None found · checked" is local hours and minutes, as the old list
+  showed it and SPEC.md asks. A row's creation time is the viewer's local time, `YYYY-MM-DD HH:MM:SS` with no zone
+  named, where the old list wrote UTC to the minute: the maintainer decided on 2026-11-15 that every time the app shows
+  is local, and seconds are the app's one stamp form.
 - **Its Delete question starts on Cancel**, as Containers' does, since deleting a sandbox cannot be undone; the old
   inline question left focus where it was. A Delete the helm refuses, or answers at its bound, reads the list again too,
   so the row shows how the cleanup stands rather than its earlier Delete.

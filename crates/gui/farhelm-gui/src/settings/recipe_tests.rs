@@ -20,17 +20,24 @@ use serde_json::{Value, json};
 
 use super::Section;
 use super::recipe_place_tests::places_state;
-use super::recipes::{BuildAction, Tone, line_texts, snapshot_status, summary};
+use super::recipes::{self, BuildAction, SnapshotStatus, Tone, line_texts, summary};
 use super::tests::{
     available, drawn, label_of, open_rail, open_rail_with, open_settings, painted, section_button,
     sent,
 };
 use crate::host_text::tests::painted_words;
+use crate::local_time::{self, Zone};
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{advance, click, frame, meta, settle};
 
 // ---- A row's words, from its view alone ---------------------------------------------------------------------------
+
+/// [`recipes::snapshot_status`] with times in UTC: only the built line's time depends on the viewer's zone, and the
+/// tests that pin another zone say so.
+fn snapshot_status(view: &RecipeView) -> SnapshotStatus {
+    recipes::snapshot_status(view, Zone::UTC)
+}
 
 /// A recipe on `base` with `tunnels` tunnels and nothing built, so the list's wording can be checked without a window.
 pub(super) fn view(base: RecipeBase, tunnels: usize) -> RecipeView {
@@ -163,11 +170,12 @@ fn container_bases_explain_their_provider_and_offer_no_tensorlake_build() {
 
 /// This is the whole status vocabulary of the list, settled with the user in the old app: each state must offer
 /// exactly the build the helm accepts, and say what the user would otherwise have to find out from a bill. Specified
-/// (the old `snapshot_status_follows_the_build_state`): with no snapshot, "No snapshot yet" and Build; built, when and
-/// with which agents, and Rebuild; a running build keeps the built line, adds its step as "step n of 9", pulses, and
-/// offers nothing; a failed one names its step and the reason, with Retry; an interrupted one offers Retry; changed
-/// packages (in any order counts as unchanged) and a smaller disk warn, and pending cleanup adds a muted line; image
-/// and snapshot bases offer the same build as managed Ubuntu.
+/// (the old `snapshot_status_follows_the_build_state`): with no snapshot, "No snapshot yet" and Build; built, when (to
+/// the minute, in the viewer's local time, with no zone named) and with which agents, and Rebuild; a running build
+/// keeps the built line, adds its step as "step n of 9", pulses, and offers nothing; a failed one names its step and
+/// the reason, with Retry; an interrupted one offers Retry; changed packages (in any order counts as unchanged) and a
+/// smaller disk warn, and pending cleanup adds a muted line; image and snapshot bases offer the same build as managed
+/// Ubuntu.
 #[test]
 fn snapshot_status_follows_the_build_state() {
     let idle = snapshot_status(&managed(None, BuildView::Idle));
@@ -180,11 +188,22 @@ fn snapshot_status_follows_the_build_state() {
         )
     );
 
-    let built_line = "Snapshot built 2026-11-03 14:02 UTC · 2.0.1 (Claude Code) · codex-cli 0.40.0";
+    let built_line = "Snapshot built 2026-11-03 14:02 · 2.0.1 (Claude Code) · codex-cli 0.40.0";
     let rebuilt = snapshot_status(&managed(Some(built(&["ripgrep", "git"])), BuildView::Idle));
     assert_eq!(
         (line_texts(&rebuilt), rebuilt.action),
         (vec![plain(built_line)], Some(BuildAction::Rebuild))
+    );
+    let west = recipes::snapshot_status(
+        &managed(Some(built(&["ripgrep", "git"])), BuildView::Idle),
+        Zone::fixed(-15 * 3_600),
+    );
+    assert_eq!(
+        line_texts(&west),
+        vec![plain(
+            "Snapshot built 2026-11-02 23:02 · 2.0.1 (Claude Code) · codex-cli 0.40.0"
+        )],
+        "fifteen hours west of UTC the build was the evening before"
     );
 
     let building = snapshot_status(&managed(
@@ -578,9 +597,10 @@ fn snapshot() -> Value {
 /// an API key is saved is not pushed and must still be read each time it shows (a key saved elsewhere since must make
 /// Build available). SPEC.md: "The list shows each recipe's name, … base, package count, tunnel count and build
 /// status". Specified: showing Recipes sends exactly one command, `GET /api/tensorlake`, and no catalog read; the rows
-/// draw at once from the pushed catalog (one built, with its agents' versions and Rebuild; one never built, with
-/// Build) in the Recipes list, with Build unavailable and no no-key note until the account answers, and available once
-/// it says a key is saved; showing Sessions and Recipes again reads the account once more and nothing else.
+/// draw at once from the pushed catalog (one built, with when in the app's zone, pinned an hour east of UTC, its
+/// agents' versions and Rebuild; one never built, with Build) in the Recipes list, with Build unavailable and no no-key
+/// note until the account answers, and available once it says a key is saved; showing Sessions and Recipes again reads
+/// the account once more and nothing else.
 #[gpui::test]
 fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_with(
@@ -590,6 +610,7 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
             entry("py-data", idle(), Value::Null),
         ],
     );
+    cx.update(|_, cx| local_time::pin(3_600, cx));
     open_settings(cx);
     click(cx, section_button(Section::Recipes));
     let read = one_account_read(&mut helm);
@@ -599,7 +620,7 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
     let text = words(cx);
     assert!(
         text.contains(
-            "rust-dev 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package Snapshot built 2026-11-03 14:02 UTC · \
+            "rust-dev 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package Snapshot built 2026-11-03 15:02 · \
              2.0.1 (Claude Code) · codex-cli 0.40.0 Not prepared yet; the first new host or session prepares it \
              (about a minute). Rebuild snapshot"
         ),

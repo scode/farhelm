@@ -1,11 +1,11 @@
-//! Tests of a host's identity mark and of the UTC stamp, as pure functions: each color's tint, each shape's bundled
-//! drawing, and the stamp's format, and the local wording of a name the helm sent with a session. The display name is
-//! pinned through the rail's identity rule, in the rail's tests (`session_list/host_rail/tests.rs`), and the phase
-//! words in `identity/phase/tests.rs`.
+//! Tests of a host's identity mark, as pure functions: each color's tint, each shape's bundled drawing, and the local
+//! wording of a name the helm sent with a session. The display name is pinned through the rail's identity rule, in the
+//! rail's tests (`session_list/host_rail/tests.rs`), the phase words in `identity/phase/tests.rs`, and the times the
+//! phase details give in `local_time_tests.rs` and the phase tests.
 
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 
-use super::{named, tint, utc_stamp};
+use super::{named, tint};
 use crate::{assets, theme};
 
 /// A host's color names a palette token by its place in the color list (SPEC.md: host colors identify hosts), and the
@@ -39,16 +39,6 @@ fn every_host_shape_has_its_own_bundled_drawing() {
             "{path} is bundled"
         );
     }
-}
-
-/// Why this matters: the times a host's details show (and the session row's age, which is to use the same stamp) must
-/// read the same on every machine, so they are written in UTC with the zone named, since the GUI carries no time zone
-/// database. Specified: a known instant reads as its UTC date and time to the second, and one second before the epoch
-/// lands on 1969-12-31 rather than wrapping around 1970.
-#[test]
-fn utc_stamps_name_the_zone_and_hold_before_the_epoch() {
-    assert_eq!(utc_stamp(1_700_000_000), "2023-11-14 22:13:20 UTC");
-    assert_eq!(utc_stamp(-1), "1969-12-31 23:59:59 UTC");
 }
 
 /// The session pane's details bar names a session's host from the name the helm sent with the session, and only the
