@@ -5,7 +5,7 @@
 //! the old launcher's Browse button and `.launch-composer-browser` listing (`list/create_form.rs` and
 //! `list/create_form/draft.rs` at reference commit `24bc0580`). Here's the TLDR:
 //!
-//! - **Asking.** The Browse button beside the host picker, or the search's "Browse this path" row, sends
+//! - **Asking.** The Browse button under the Host row, or the search's "Browse this path" row, sends
 //!   `POST /api/browse-directory` for the folder as typed, on the chosen host's connection. Typing never reaches the
 //!   host. The supervisor answers one level, bounded (at most 200 folders, said as `truncated`); a host that cannot be
 //!   asked answers with its words, shown in place of the listing.
@@ -34,6 +34,9 @@ use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::Field;
 use crate::operations;
 use crate::theme::{self, metrics};
+
+/// Browse's words from inside its edge: the old `padding: 0 14px` (CSS padding sits inside the border).
+const BROWSE_PAD_X: f32 = 14.;
 
 /// What one listing is about: the host, the connection the launcher saw it on, and the folder as typed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,8 +144,9 @@ impl Launcher {
         self.changed(cx);
     }
 
-    /// The Browse button, beside the host picker, while the launcher offers it; greyed while no host is chosen. A press
-    /// only reads, so it never waits on the YOLO question's host write.
+    /// The Browse button, under the Host row ([`Launcher::with_browse_below`]), while the launcher offers it; greyed
+    /// while no host is chosen. A press only reads, so it never waits on the YOLO question's host write. It is as tall
+    /// as the host button (the old `min-height: 36px`) and 14 pixels in at the sides (`padding: 0 14px`).
     pub(super) fn browse_button(&self, cx: &mut Context<Self>) -> Option<Button> {
         if !self.offers_browse() {
             return None;
@@ -154,7 +158,16 @@ impl Launcher {
                 HoverHelp::tooltip("Browse: list the folders under this path on the host"),
                 Role::Button,
             )
-            .content("Browse")
+            .content(
+                div()
+                    .flex()
+                    .items_center()
+                    .h(super::host_picker::control_content_height())
+                    .px(px(BROWSE_PAD_X) - metrics::BUTTON_PAD.1)
+                    // `.launch-composer-destination-row > button`: `font-size: 13px`.
+                    .text_size(metrics::TEXT_MD)
+                    .child("Browse"),
+            )
             .tier(Tier::Neutral)
             .disabled(self.draft.host.is_none())
             .on_click(on_launcher(cx.weak_entity(), Launcher::browse)),
@@ -193,6 +206,8 @@ impl Launcher {
         };
         let mut rows = div()
             .id("launcher-browse-list")
+            // Tests find the listing by where it is drawn; this records nothing outside test builds.
+            .debug_selector(|| "launcher-browse-list".into())
             .flex()
             .flex_col()
             .gap(px(8.))
@@ -257,7 +272,7 @@ impl Launcher {
             Role::Button,
         )
         .content(words)
-        .tier(Tier::Neutral)
+        .tier(Tier::BrowseRow)
         .on_click(move |_, window, cx| {
             let folder = taken.clone();
             let _ = launcher.update(cx, |launcher, cx| launcher.take_browsed(folder, window, cx));

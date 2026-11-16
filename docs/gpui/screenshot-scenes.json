@@ -1433,6 +1433,617 @@
           "--idle"
         ]
       ]
+    },
+    {
+      "id": "app-launcher-agent",
+      "title": "New as it opens from the session list's New button, after a Codex launch in /tmp named Codex scene: focus on the search box, the Codex launch's recent setup, the destination rows and the Agent tab with no agent chosen",
+      "reference": "launcher-agent",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:launcher-harness-Codex"
+        ],
+        [
+          "fill",
+          "id:launcher-name",
+          "Codex scene"
+        ],
+        [
+          "click",
+          "id:launcher-launch"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "wait",
+          "--text",
+          "Codex scene"
+        ],
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-codex-choices",
+      "title": "Codex chosen on the Agent tab: its model, effort and permission choices",
+      "reference": "launcher-codex-choices",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:launcher-harness-Codex"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-scrolled-end",
+      "title": "The launcher's body scrolled to its end with Codex chosen, over the pinned footer with Cancel, Reset choices and Launch",
+      "reference": "launcher-scrolled-end",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "scroll",
+          "down",
+          "3000",
+          "--on",
+          "id:launcher-harness-Codex"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-command",
+      "title": "New reopened (after Escape) on the Command tab: the command line, the YOLO assertion and the declared agent type",
+      "reference": "launcher-command",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:launcher-tabs-Command"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-yolo-confirmation",
+      "title": "New reopened, Codex with YOLO launched on the local host, which asks before YOLO launches: the inline question under the actions naming the host and why this launch is YOLO, with Cancel, the guarded answer, the permanent answer and the one-time answer, Cancel focused",
+      "reference": "launcher-yolo-confirmation",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:launcher-harness-Codex"
+        ],
+        [
+          "scrollintoview",
+          "id:launcher-permissions-YOLO"
+        ],
+        [
+          "click",
+          "id:launcher-permissions-YOLO"
+        ],
+        [
+          "click",
+          "id:launcher-launch"
+        ],
+        [
+          "wait",
+          "--text",
+          "Start YOLO session anyway"
+        ],
+        [
+          "hover",
+          "text:Confirm YOLO launch"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-refusal",
+      "title": "After Cancel on the question, a command launch without YOLO in a folder the host does not have: the refusal under the actions, Not launched. before the helm's words",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:prompt-cancel"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Start YOLO session anyway"
+        ],
+        [
+          "click",
+          "id:launcher-tabs-Command"
+        ],
+        [
+          "type",
+          "id:launcher-command",
+          "true"
+        ],
+        [
+          "click",
+          "id:launcher-yolo-No"
+        ],
+        [
+          "fill",
+          "id:launcher-folder",
+          "/nonexistent-launcher-scene-folder"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--text",
+          "This folder does not exist"
+        ],
+        [
+          "click",
+          "id:launcher-launch"
+        ],
+        [
+          "wait",
+          "--text",
+          "Not launched"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-escalation-banner",
+      "title": "New reopened, Claude with Guarded chosen by hand, then OpenCode, which runs only in YOLO: the red banner across the launcher's top naming both modes with Undo and Dismiss, and the permission choices' fading red outline",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:launcher-harness-Claude"
+        ],
+        [
+          "click",
+          "id:launcher-permissions-Guarded"
+        ],
+        [
+          "click",
+          "id:launcher-harness-OpenCode"
+        ],
+        [
+          "wait",
+          "--text",
+          "Permission changed"
+        ],
+        [
+          "wait",
+          "400"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-folder-list",
+      "title": "New reopened, the folder field's list opened with Down (headless runs fire no focus listeners, so a click there does not open it): the recent folders under Recent, Home and Local home under Reset, the first row highlighted",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:launcher-folder"
+        ],
+        [
+          "press",
+          "down"
+        ],
+        [
+          "wait",
+          "--text",
+          "Local home"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-browse",
+      "title": "Browse pressed with /usr in the folder field: one level of the host's folder listed at the end of the body, scrolled into view, with Use /usr, its parent and one row per subfolder",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "fill",
+          "id:launcher-folder",
+          "/usr"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "click",
+          "id:launcher-browse"
+        ],
+        [
+          "wait",
+          "1500"
+        ],
+        [
+          "scrollintoview",
+          "id:launcher-browse-use"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-search-recents",
+      "title": "New reopened with codex typed into its search: the rows the query matches, the Codex launch's recent setup among them",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "type",
+          "id:launcher-search",
+          "codex"
+        ],
+        [
+          "wait",
+          "--text",
+          "Recent setups"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-clone",
+      "title": "Clone chosen from Fixture 1's row menu: New prefilled from the session's host, folder, title and command launch",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "text:Session actions for Fixture 1"
+        ],
+        [
+          "click",
+          "id:session-menu-clone"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-replace-with",
+      "title": "Replace with chosen from Fixture 1's row menu: the launcher holding the source's host with Browse under it, prefilled from its launch, with Replace's warning under the actions while the source is alive",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "text:Session actions for Fixture 1"
+        ],
+        [
+          "click",
+          "id:session-menu-replace-with"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-restart-with",
+      "title": "Restart with chosen from the Codex session's Restart caret: the held agent type, host and folder shown without their controls, the conversation field it needs, and the action inactive until a setting changes",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "text:Codex scene"
+        ],
+        [
+          "click",
+          "id:session-header-restart-options"
+        ],
+        [
+          "click",
+          "id:session-header-restart-options-with"
+        ],
+        [
+          "wait",
+          "--text",
+          "Restart session"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
@@ -2099,11 +2710,11 @@
     },
     {
       "id": "launcher-agent",
-      "ported": false
+      "ported": true
     },
     {
       "id": "launcher-codex-choices",
-      "ported": false
+      "ported": true
     },
     {
       "id": "launcher-scrolled-end",
@@ -2111,11 +2722,11 @@
     },
     {
       "id": "launcher-command",
-      "ported": false
+      "ported": true
     },
     {
       "id": "launcher-yolo-confirmation",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-sessions",
