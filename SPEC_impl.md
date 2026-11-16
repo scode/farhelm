@@ -325,15 +325,18 @@ and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` be
 preferences supersede the old client's reread of shared preferences before an automatic pick: the GUI picks from the
 preferences as last pushed, since the helm pushes them together with the session changes that prompt a pick (decided by
 the migration's orchestrator on 2026-11-15). The snapshot sent when a channel opens never waits on a remote host. Every
-other read (directory browse, repository lists, the trash list, launch history, file stat) is an ordinary GET command
-whose reply body is the result. Data the old GUI polled stays a query that the GUI issues again; it does not become a
-replicated collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman
-check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
-creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
-they move (decided by the migration's orchestrator on 2026-11-15). A pushed read must start nothing, because it runs
-after every bump; that is why `/api/environment-places`, whose read schedules Podman checks, stays a query. Neither
-recipe collection follows the clock: a prepared artifact that passes its freshness window reads stale at the next
-re-read, not when it passes.
+other read (directory browse, repository lists, the trash list, launch history) is an ordinary GET command whose reply
+body is the result. File stat is not: it is an HTTP request of the helm client's transfers,
+`POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled on its own. A hover
+check sent on the channel would keep running after the pointer left the link, and count against the channel's watchdog
+meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is cancelled by dropping it. Data the
+old GUI polled stays a query that the GUI issues again; it does not become a replicated collection. There are two
+exceptions, both for work whose progress Settings follows while it runs: the Podman check's readiness, which rides each
+local and ssh host's entry so its start and end reach the GUI (see "Podman places, creation and images"), and the recipe
+catalog and recipe places, so a recipe build's steps reach Settings → Recipes as they move (decided by the migration's
+orchestrator on 2026-11-15). A pushed read must start nothing, because it runs after every bump; that is why
+`/api/environment-places`, whose read schedules Podman checks, stays a query. Neither recipe collection follows the
+clock: a prepared artifact that passes its freshness window reads stale at the next re-read, not when it passes.
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -2993,10 +2996,11 @@ producer. The production helm already allocates each id only once. There is no u
 admission cap or progress timer. Session-authenticated connections remain behind the restricted operation allowlist and
 cannot stat or read files.
 
-The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/files/download`, with a `path` field.
-Both use session-owner routing and the same auth-inside-desktop-CORS boundary as attachments; only OPTIONS preflight is
-public. Stat returns the host display name alongside the protocol's resolved path, size and typed status. Download
-reopens independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
+The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/files/download`, with a `path` field. The
+GPUI app sends both as plain HTTP through the helm client, never as UI channel commands (see "The UI channel"). Both use
+session-owner routing and the same auth-inside-desktop-CORS boundary as attachments; only OPTIONS preflight is public.
+Stat returns the host display name alongside the protocol's resolved path, size and typed status. Download reopens
+independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
 Content-Length: a file may change within the cap, and a later stream failure invalidates the whole body.
 
 The desktop supplies its platform Downloads directory to the embedded helm. A download request with

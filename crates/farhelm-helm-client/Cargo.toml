@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The GPUI desktop app's connection to its helm: the UI channel and terminal streams"
+description = "The GPUI desktop app's connection to its helm: the UI channel, terminal streams and file transfers"
 
 # A library; see `farhelm-helm/Cargo.toml` for why every non-shipping member
 # says so explicitly instead of relying on having no binary target.
@@ -12,8 +12,9 @@ description = "The GPUI desktop app's connection to its helm: the UI channel and
 dist = false
 
 [features]
-# The in-process fakes of the UI channel and the terminal streams (`src/fake.rs`) that GUI tests drive in place of a
-# helm. A shipped build never needs them, so only test builds turn this on: farhelm-gui's dev-dependency does.
+# The in-process fakes of the UI channel, the terminal streams and the file transfers (`src/fake.rs`) that GUI tests
+# drive in place of a helm. A shipped build never needs them, so only test builds turn this on: farhelm-gui's
+# dev-dependency does.
 test-support = []
 
 # This crate lives outside `crates/gui/` on purpose: it owns the async runtime and its threads, which the GUI crates'
@@ -23,6 +24,9 @@ test-support = []
 [dependencies]
 farhelm-proto.workspace = true
 futures-util = { workspace = true, features = ["sink", "std"] }
+# File transfers (`src/transfers.rs`): plain HTTP to the loopback helm, with an upload body streamed from disk. The
+# workspace entry's `json` and `stream` features are the two this needs.
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

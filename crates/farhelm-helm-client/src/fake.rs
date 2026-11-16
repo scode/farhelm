@@ -15,9 +15,11 @@
 //! NOTE: The fake does not model the watchdog, heartbeats or reconnect backoff; those belong to the real channel's
 //! own tests. A "break" here is the outcome of all that: the state the GUI would see and the commands it would lose.
 //!
-//! [`terminal::FakeTerminal`] does the same for one terminal stream.
+//! [`terminal::FakeTerminal`] does the same for one terminal stream, and [`transfers::FakeTransfers`] for file
+//! transfers.
 
 pub mod terminal;
+pub mod transfers;
 
 use std::collections::VecDeque;
 
