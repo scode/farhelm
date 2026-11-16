@@ -5,9 +5,9 @@
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
 //! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
 //! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status card
-//! stands over ([`AttachedTerminal::set_inert`]), and the reconnect card with its Reconnect now (below) since. File
-//! links, and the reconnect card's line naming its phase and attempt, come later in that work. The session pane
-//! ([`crate::session_pane`]) mounts one for the selected session.
+//! stands over ([`AttachedTerminal::set_inert`]), and the reconnect card with its phase and attempt line and its
+//! Reconnect now (below) since. File links come later in that work. The session pane ([`crate::session_pane`]) mounts
+//! one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -53,9 +53,10 @@
 //!   was revealed: the kept screen is not live and takes no input until then. A detach that waits for the user, a
 //!   refusal, a close or a protocol fault ends it, and their band takes over.
 //! - **What it draws.** The component layer's accent card ([`crate::components::status_card`], which the session pane's
-//!   Delete scrim shares) on the terminal scrim, with the heading and its spinner, the old explanation line and
-//!   Reconnect now, which asks the stream to skip its backoff ([`AttachedTerminal::reconnect_now`]). The last complete
-//!   screen stays up beneath it. A pane too short for the card scrolls the card, as the old one scrolled.
+//!   Delete scrim shares) on the terminal scrim, with the heading and its spinner, the old explanation line, the phase
+//!   and attempt line ("The phase line" below) and Reconnect now, which asks the stream to skip its backoff
+//!   ([`AttachedTerminal::reconnect_now`]). The last complete screen stays up beneath it. A pane too short for the card
+//!   scrolls the card, as the old one scrolled.
 //! - **The pointer.** The scrim around the card draws no hitbox, like the Delete scrim's: a press there still reaches
 //!   the terminal, which takes focus as usual, and the wheel still scrolls its history, so the kept screen stays
 //!   readable and nothing on its way out eats a click. The card itself takes the pointer, because it holds a button: a
@@ -76,8 +77,28 @@
 //!   hold stays held after the hold lifts, until it ends or its first attempt fails: the helm answers a Restart before
 //!   the stream reattaches, so a hold that ended with the answer would still show the card on almost every Restart.
 //!
-//! NOTE: The old card had a third line, which named the reconnect's phase (retrying, or probing in the background) and
-//! attempt. The card does not draw it yet; it goes between the explanation and Reconnect now.
+//! ### The phase line
+//!
+//! SPEC.md, "Terminal experience": which recovery phase a terminal is in "is visible in the terminal itself". The
+//! card's third line says it, in the old card's four templates word for word (`reconnect.rs` in `farhelm-ui` at the
+//! reference commit), picked by the stream's latest [`ReconnectStatus`] ([`reconnect_line`]):
+//!
+//! - an active retry in flight: "Reconnecting (attempt 2 of 6)…";
+//! - waiting for one: "Reconnecting in 1s (attempt 2 of 6)…";
+//! - a background probe in flight: "Checking whether this terminal is reachable again…";
+//! - waiting for one: "Retrying every 30s; this terminal reattaches on its own once the connection is back".
+//!
+//! The seconds are the wait as it was scheduled, rounded to the nearest whole second (the old `Math.round`, so the
+//! first rung's half second reads "1s"), and they do not count down. That is the old card's rule, kept on purpose: its
+//! source says a per-second repaint of the overlay buys nothing a user is watching for, since the number's job is to
+//! say "soon, and by itself". The line changes only when the stream reports a new wait or the start of an attempt, so
+//! it needs no clock of its own: nothing but the stream redraws it.
+//!
+//! The probing lines name no attempt, as the old ones did not (a number that keeps rising reads as escalating failure
+//! rather than patience), though the stream keeps counting there. Through the catch-up of the attachment the stream
+//! comes back on, the line keeps the attempt that attached, which still reads as in flight: the old card said the same
+//! until the replay was revealed. The old card's fifth template, for a page whose helm was another build and so would
+//! not reconnect by itself, has no counterpart: the stream reports no such state.
 //!
 //! ## Input
 //!
@@ -146,8 +167,8 @@ use farhelm_grid_model::{
     tunnel_port, web_target,
 };
 use farhelm_helm_client::terminal::{
-    Attachment, AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents,
-    TerminalHandle,
+    Attachment, AttachmentLease, ReconnectPhase, ReconnectStatus, StreamState, TerminalAttach,
+    TerminalEvent, TerminalEvents, TerminalHandle,
 };
 use farhelm_input_mapping::pointer::{
     Geometry, MouseDeduper, WheelAccumulator, WheelUnit, mode_reports, wheel_goes_to_program,
@@ -220,6 +241,14 @@ pub(crate) const RECONNECTING_TEXT: &str = "Session unavailable — reconnecting
 /// The reconnect card's explanation, the old card's line word for word.
 pub(crate) const RECONNECT_EXPLANATION: &str =
     "This view reattaches by itself when the connection is back.";
+
+/// The phase line's text size and the space between it and the explanation above it: `.session-unavailable-detail`'s
+/// `font-size: 11.5px` and `margin-top: 7px`.
+const RECONNECT_LINE_TEXT: f32 = 11.5;
+const RECONNECT_LINE_GAP: f32 = 7.;
+
+/// The phase line's selector (the old `.terminal-reconnect-status`), for tests and the bridge.
+pub(crate) const RECONNECT_LINE_ID: &str = "terminal-reconnect-status";
 
 /// Reconnect now's hover help, the old button's tooltip word for word.
 const RECONNECT_NOW_HELP: &str = "Reconnect now: try to reattach this terminal right away";
@@ -307,11 +336,13 @@ pub struct AttachedTerminal {
     pump: Option<Task<()>>,
     /// The stream state last delivered.
     stream: StreamState,
-    /// Whether the stream is coming back from a drop: set by `Reconnecting`, kept through the catch-up of the
-    /// attachment it comes back on, and cleared once that attachment goes live or the stream moves to any state but
-    /// those two. It decides the reconnect card ([`AttachedTerminal::reconnecting`]); `stream` alone cannot, because
-    /// it reads `Attached` during that catch-up exactly as during a first attach's.
-    recovering: bool,
+    /// The stream's latest report on its recovery from a drop, `Some` exactly while it is coming back: set by each
+    /// `Reconnecting`, kept through the catch-up of the attachment it comes back on, and cleared once that attachment
+    /// goes live or the stream moves to any state but those two. Whether it is `Some` decides the reconnect card
+    /// ([`AttachedTerminal::reconnecting`]); `stream` alone cannot, because it reads `Attached` during that catch-up
+    /// exactly as during a first attach's. What it holds is what the card's phase line says ([`reconnect_line`]), which
+    /// is why it is kept rather than read from `stream`.
+    recovery: Option<ReconnectStatus>,
     /// Whether the current recovery began while the owner held the reconnect card back for its own request (a
     /// Restart), and so stays held after that request is answered. The helm answers a Restart while the stream is
     /// still waiting to reattach, so holding the card only until the answer would show it on nearly every Restart.
@@ -527,7 +558,7 @@ impl AttachedTerminal {
             handle: None,
             pump: None,
             stream: StreamState::Attaching,
-            recovering: false,
+            recovery: None,
             recovery_held: false,
             committed: None,
             staging: None,
@@ -742,7 +773,14 @@ impl AttachedTerminal {
     /// [`AttachedTerminal::status_line`], this is the stream's own state, held or not, and drawn or not: an inert
     /// terminal draws no card, and a hold keeps it back.
     pub fn reconnecting(&self) -> bool {
-        self.recovering && self.fault.is_none() && !self.retired
+        self.recovery.is_some() && self.fault.is_none() && !self.retired
+    }
+
+    /// The stream's report the card's phase line is drawn from, while [`AttachedTerminal::reconnecting`]: for tests
+    /// that check the attempt the probing lines do not name (the old card kept it in `data-reconnect-attempt`).
+    #[cfg(test)]
+    pub(crate) fn reconnect_status(&self) -> Option<ReconnectStatus> {
+        self.recovery.filter(|_| self.reconnecting())
     }
 
     /// The user's Reconnect now: ask the stream to skip what is left of its backoff and attach at once, through the
@@ -1022,7 +1060,7 @@ impl AttachedTerminal {
                 self.select = None;
                 self.live = true;
                 // Back, if it was coming back: the reconnect card goes in the same redraw that shows the new screen.
-                self.recovering = false;
+                self.recovery = None;
                 self.recovery_held = false;
                 cx.notify();
                 // As for a state change in `output`: a reconnect that goes live in a hidden window draws nothing.
@@ -1081,8 +1119,8 @@ impl AttachedTerminal {
                 // The reattach attached and then dropped before it went live. The ladder starts over at attempt 1
                 // after any attachment, so the attempt number alone would never show this failure.
                 let reattach_dropped =
-                    self.recovering && matches!(self.stream, StreamState::Attached(_));
-                if !self.recovering {
+                    self.recovery.is_some() && matches!(self.stream, StreamState::Attached(_));
+                if self.recovery.is_none() {
                     self.card_scroll = ScrollHandle::new();
                     self.recovery_held = self.held(cx) == Hold::ReconnectCard;
                 }
@@ -1090,14 +1128,16 @@ impl AttachedTerminal {
                 if status.attempt > 1 || reattach_dropped {
                     self.recovery_held = false;
                 }
-                self.recovering = true;
+                // Each report replaces the last: the phase line shows the wait or the attempt the stream is on now.
+                self.recovery = Some(*status);
             }
+            // Keeps the report of the attempt that attached, which the line still shows as in flight.
             StreamState::Attached(_) => {}
             StreamState::Attaching
             | StreamState::Detached { .. }
             | StreamState::Refused { .. }
             | StreamState::Closed => {
-                self.recovering = false;
+                self.recovery = None;
                 self.recovery_held = false;
             }
         }
@@ -1559,6 +1599,36 @@ fn clipboard_text(item: &ClipboardItem) -> Option<String> {
     Some(text)
 }
 
+/// The reconnect card's phase line for `status`, in the old card's templates word for word (see "The phase line" in
+/// the module docs): an attempt in flight or a wait for one, while retrying or while probing. Only the retrying lines
+/// carry the attempt, and only the waits carry the seconds.
+fn reconnect_line(status: ReconnectStatus) -> String {
+    let ReconnectStatus {
+        attempt: n,
+        of,
+        phase,
+        next_attempt_in,
+    } = status;
+    match (phase, next_attempt_in.map(rounded_seconds)) {
+        (ReconnectPhase::Retrying, None) => format!("Reconnecting (attempt {n} of {of})…"),
+        (ReconnectPhase::Retrying, Some(seconds)) => {
+            format!("Reconnecting in {seconds}s (attempt {n} of {of})…")
+        }
+        (ReconnectPhase::Probing, None) => {
+            "Checking whether this terminal is reachable again…".to_owned()
+        }
+        (ReconnectPhase::Probing, Some(seconds)) => format!(
+            "Retrying every {seconds}s; this terminal reattaches on its own once the connection is back"
+        ),
+    }
+}
+
+/// `wait` in whole seconds, rounded to the nearest with a half second rounding up: the old card's
+/// `Math.round(delayMs / 1000)`, so the ladder's first rung reads "1s" rather than "0s".
+fn rounded_seconds(wait: Duration) -> u128 {
+    (wait.as_millis() + 500) / 1000
+}
+
 /// The exit line's words, the old app's `exitText`.
 pub(crate) fn exit_text(exit: ExitState) -> String {
     match exit {
@@ -1696,12 +1766,17 @@ impl AttachedTerminal {
 
     /// The reconnect card over its scrim, its spinner at `step` (see "The reconnect card" in the module docs): the old
     /// `.terminal-connecting.terminal-reconnecting` overlay and its `.session-unavailable-card`, with the heading, the
-    /// explanation and Reconnect now.
+    /// explanation, the phase line for `status` (the old `.terminal-reconnect-status`) and Reconnect now.
     ///
     /// The button is the component layer's neutral tier in its compact geometry, the closest to the old
     /// `.terminal-reconnect-now` (12 pixels of text, `padding: 1px 8px`); it keeps the component's own text size and
     /// its 2-pixel padding.
-    fn reconnect_card(&self, step: u8, cx: &mut Context<Self>) -> AnyElement {
+    fn reconnect_card(
+        &self,
+        step: u8,
+        status: ReconnectStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let palette = theme::palette(cx);
         let owner = cx.weak_entity();
         let button = Button::new(
@@ -1735,8 +1810,14 @@ impl AttachedTerminal {
                     .text_color(theme::color(palette.fg_1))
                     .child(RECONNECT_EXPLANATION),
             )
-            // NOTE: The old card's phase and attempt line ("attempt 1 of 6", or background probing) goes here, at
-            // 11.5 pixels in `fg_2` with 7 pixels above it, once the helm client reports the reconnect's phase.
+            .child(
+                div()
+                    .debug_selector(|| RECONNECT_LINE_ID.into())
+                    .mt(px(RECONNECT_LINE_GAP))
+                    .text_size(px(RECONNECT_LINE_TEXT))
+                    .text_color(theme::color(palette.fg_2))
+                    .child(reconnect_line(status)),
+            )
             .child(div().mt(px(10.)).flex().child(button));
         // No listener, no focus tracking and no occlusion, so GPUI gives the scrim no hitbox, as the Delete scrim has
         // none: a press beside the card reaches the terminal.
@@ -1845,9 +1926,10 @@ impl Render for AttachedTerminal {
         if spins != self.spinner.is_some() {
             self.spinner = spins.then(|| Spinner::start(window, cx));
         }
-        let card = card.then(|| {
+        // `reconnecting` holds only while there is a report, so a drawn card always has its phase line.
+        let card = self.recovery.filter(|_| card).map(|status| {
             let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
-            self.reconnect_card(step, cx)
+            self.reconnect_card(step, status, cx)
         });
         let owner = cx.weak_entity();
         // Measures the room the screen has, below the status line and inside the padding, handed over after the frame

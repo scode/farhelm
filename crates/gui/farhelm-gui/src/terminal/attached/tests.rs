@@ -1321,6 +1321,32 @@ impl Harness<'_> {
         crate::session_list::tests::painted(&test_support::frame(self.cx))
     }
 
+    /// The card's phase line as a fresh frame paints it, `None` when no line is drawn. The painted text carries no
+    /// selector, so the line is picked out by the openings of the old templates (no other text on the card or the test
+    /// screens starts with them); finding two is a failure, since the card draws one.
+    fn phase_line(&mut self) -> Option<String> {
+        let openings = ["Reconnecting", "Checking whether", "Retrying every"];
+        let lines: Vec<String> = self
+            .painted()
+            .into_iter()
+            .filter(|text| openings.iter().any(|opening| text.starts_with(opening)))
+            .collect();
+        let drawn = self.cx.debug_bounds(RECONNECT_LINE_ID).is_some();
+        assert_eq!(
+            drawn,
+            !lines.is_empty(),
+            "the line's element and its words go together: {lines:?}"
+        );
+        assert!(lines.len() <= 1, "one phase line, not {lines:?}");
+        lines.into_iter().next()
+    }
+
+    /// The stream's attempt number the owner holds for its card, which the probing lines do not show.
+    fn shown_attempt(&mut self) -> Option<u32> {
+        self.read(|owner, _| owner.reconnect_status())
+            .map(|status| status.attempt)
+    }
+
     /// How many Reconnect now requests the owner sent since the last call to the fake's `received`.
     fn reconnect_nows(&mut self) -> usize {
         self.fake()
@@ -1596,6 +1622,176 @@ fn a_fault_during_a_reconnect_ends_the_card(cx: &mut TestAppContext) {
     assert!(h.banner_drawn());
     assert!(!h.card_drawn());
     assert_eq!(h.fake().phase(), FakePhase::Closed);
+}
+
+/// The phase line's words are the old card's, which users and the old e2e specs read ("attempt 1 of 6", "Retrying
+/// every"), so they are written out here as literals: a test that rebuilt them from the same format strings would pass
+/// for any rewording. The seconds are the old `Math.round` of the scheduled wait, which matters at the first rung: a
+/// truncating conversion would tell the user "Reconnecting in 0s" for the half-second wait. Specified: a retry in
+/// flight names its attempt; a retry's wait names its rounded seconds and attempt (0.5 s and 1.499 s read "1s", 15 s
+/// reads "15s"); a probe in flight and a probe's wait use the probing sentences, which name no attempt.
+#[test]
+fn the_phase_line_says_the_old_cards_words() {
+    let status = |attempt, phase, ms: Option<u64>| ReconnectStatus {
+        attempt,
+        of: 6,
+        phase,
+        next_attempt_in: ms.map(Duration::from_millis),
+    };
+    use ReconnectPhase::{Probing, Retrying};
+    let cases = [
+        (status(2, Retrying, None), "Reconnecting (attempt 2 of 6)…"),
+        (
+            status(1, Retrying, Some(500)),
+            "Reconnecting in 1s (attempt 1 of 6)…",
+        ),
+        (
+            status(2, Retrying, Some(1_499)),
+            "Reconnecting in 1s (attempt 2 of 6)…",
+        ),
+        (
+            status(6, Retrying, Some(15_000)),
+            "Reconnecting in 15s (attempt 6 of 6)…",
+        ),
+        (
+            status(7, Probing, None),
+            "Checking whether this terminal is reachable again…",
+        ),
+        (
+            status(9, Probing, Some(30_000)),
+            "Retrying every 30s; this terminal reattaches on its own once the connection is back",
+        ),
+    ];
+    for (status, words) in cases {
+        assert_eq!(reconnect_line(status), words, "for {status:?}");
+    }
+}
+
+/// SPEC.md, "Terminal experience": which recovery phase a terminal is in "is visible in the terminal itself", and the
+/// old card showed it as it climbed its ladder (old `terminal-reconnect.spec.ts`, "retry-exhaustion-shows-reprobe-phase":
+/// the probing phase's "Retrying every" once the six retries are spent, an attempt number past six there, and
+/// Reconnect now still on screen). The line must follow every report the stream makes, not just the outage's first,
+/// and must not start over or stop counting where the phase changes. Specified, on the default ladder: a proven link's
+/// drop shows attempt 1 in flight with no wait before it; each failed attempt (a 5xx refusal, then dropped links) shows
+/// the next rung's wait with its attempt, 1 to 15 seconds over attempts 2 to 6, and each wait's end shows that attempt
+/// in flight; once the sixth fails the line promises a retry every 30 s, the owner holds attempt 7 and Reconnect now
+/// is still drawn; that probe in flight is "Checking whether…", and its failure moves to attempt 8, still probing.
+#[gpui::test]
+fn the_phase_line_follows_the_ladder_into_probing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    assert_eq!(h.phase_line(), None, "the premise: live, no line");
+
+    h.fake().drop_proven_link();
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting (attempt 1 of 6)…")
+    );
+
+    h.fake().refuse(503);
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting in 1s (attempt 2 of 6)…")
+    );
+    h.fake().end_wait();
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting (attempt 2 of 6)…")
+    );
+
+    // A dropped link during an attempt fails it and shows the next wait.
+    for (attempt, seconds) in [(3, 2), (4, 4), (5, 8), (6, 15)] {
+        h.fake().drop_link();
+        settle(h.cx);
+        assert_eq!(
+            h.phase_line(),
+            Some(format!(
+                "Reconnecting in {seconds}s (attempt {attempt} of 6)…"
+            ))
+        );
+        h.fake().end_wait();
+        settle(h.cx);
+        assert_eq!(
+            h.phase_line(),
+            Some(format!("Reconnecting (attempt {attempt} of 6)…"))
+        );
+    }
+
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Retrying every 30s; this terminal reattaches on its own once the connection is back")
+    );
+    assert_eq!(h.shown_attempt(), Some(7), "the count goes on past six");
+    assert!(h.cx.debug_bounds(RECONNECT_NOW_ID).is_some());
+
+    h.fake().end_wait();
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Checking whether this terminal is reachable again…")
+    );
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(h.shown_attempt(), Some(8));
+    assert!(
+        h.phase_line()
+            .is_some_and(|line| line.starts_with("Retrying every 30s;"))
+    );
+}
+
+/// Old `terminal-reconnect.spec.ts`, "manual-reconnect-is-offered-during-the-first-rung": the first wait names its
+/// attempt ("attempt 1 of 6"), and Reconnect now pressed inside it starts that attempt at once. The line must say so,
+/// or a user who pressed it still reads a wait and presses again; and it must keep saying an attempt is under way
+/// through the catch-up that attempt leads to, where the card stays up. Specified: after a dropped link the line reads
+/// "Reconnecting in 1s (attempt 1 of 6)…" (the fake's wait runs until the test ends it, so it is a long rung); a click
+/// on Reconnect now sends one request and the line reads "Reconnecting (attempt 1 of 6)…", with the attempt keeping
+/// its number; it reads the same while the reconnect's replay arrives; the end of the replay takes the line away with
+/// the card.
+#[gpui::test]
+fn reconnect_now_in_the_first_wait_shows_attempt_1_under_way(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("first");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting in 1s (attempt 1 of 6)…")
+    );
+
+    click(h.cx, RECONNECT_NOW_ID);
+    assert_eq!(h.fake().received(), [FakeTerminalRequest::ReconnectNow]);
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting (attempt 1 of 6)…")
+    );
+
+    let asked = h.fake().attach();
+    let replay = screen(asked.cols, asked.rows, "second", serde_json::Value::Null);
+    h.fake().output(replay[0].clone());
+    settle(h.cx);
+    assert!(
+        !h.read(|owner, _| owner.is_live()),
+        "the premise: catching up"
+    );
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting (attempt 1 of 6)…"),
+        "the attempt that attached is still under way"
+    );
+
+    for message in replay.into_iter().skip(1) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert!(h.read(|owner, _| owner.is_live()));
+    assert_eq!(h.phase_line(), None);
 }
 
 // ---- Lifetime ------------------------------------------------------------------------------------------------------

@@ -1703,8 +1703,9 @@ fn terminal_status_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
 
 /// Two attached terminals whose stream dropped and is coming back by itself, each showing the reconnect card over its
 /// kept screen (the old `.terminal-reconnecting` overlay and its `.session-unavailable-card`): the heading with its
-/// spinner on its first step, the explanation and Reconnect now, on the terminal scrim. The first pane has room for the
-/// whole card; the second is too short for it, so the card is cut to the pane and scrolls, at its top.
+/// spinner on its first step, the explanation, the phase line for the first wait ("Reconnecting in 1s (attempt 1 of
+/// 6)…") and Reconnect now, on the terminal scrim. The first pane has room for the whole card; the second is too short
+/// for it, so the card is cut to the pane and scrolls, at its top.
 fn terminal_reconnect_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     attached_setup(state, cx, |keep| {
         vec![dropped_stream(keep.clone()), dropped_stream(keep)]
