@@ -95,11 +95,13 @@
 //!   switcher, templates and Settings are expected to read the same answers
 //!   (the migration's orchestrator placed it there on 2026-11-14). The row's
 //!   permission shield describes an agent launch with the launcher's
-//!   permission help. The rest of the GUI's per-agent-KIND facts that also
-//!   cover command and legacy launches are not ported yet (today the copy
-//!   instruction the terminal's "this drag did not copy" notice offers). Each
-//!   comes back as an exhaustive per-harness or per-kind function in the GUI
-//!   crates. The Dioxus versions are readable at the GPUI
+//!   permission help. The copy instruction the terminal's "this drag did not
+//!   copy" notice offers is `copy_hint` in
+//!   `crates/gui/farhelm-gui/src/terminal/drag_notice.rs`, by the session's
+//!   recorded kind, so it covers command and legacy launches too. Any other
+//!   per-agent-KIND fact the GUI comes to need is an exhaustive per-harness
+//!   or per-kind function in the GUI crates. The Dioxus versions are readable
+//!   at the GPUI
 //!   port's reference commit `24bc0580` (`crates/farhelm-ui/src/launch_composer.rs`,
 //!   `list/row.rs`, `icons.rs`, `list/create_form.rs`, `assets/app.css`, and
 //!   `SessionAgentKind` in `lib.rs`).

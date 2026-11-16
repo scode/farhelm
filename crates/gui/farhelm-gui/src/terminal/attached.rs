@@ -3,7 +3,8 @@
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
-//! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
+//! mouse reporting with the drag-copy notice for a drag the program kept without copying ("The drag-copy notice"
+//! below), web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
 //! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status card
 //! stands over ([`AttachedTerminal::set_inert`]), the reconnect card with its phase and attempt line and its
 //! Reconnect now (below), and a pasted or dropped file or image, which is uploaded and its host path typed, with
@@ -131,6 +132,43 @@
 //!
 //! The restart's own outages are the stream's: a restart whose socket drops climbs the stream's ladder, numbered
 //! afresh from its first attempt, and a restart that is refused or detached for good shows that band.
+//!
+//! ## The drag-copy notice
+//!
+//! SPEC.md, "Terminal experience": "When a plain drag goes to a program under mouse reporting and the program copies
+//! nothing (no OSC 52 write follows), the terminal shows a notice that the program handles selection itself". What it
+//! says, where it sits and what it draws are [`super::drag_notice`]'s; when it shows and goes is this owner's, ported
+//! from the old `terminal.js` driver and `copy-on-select.js` (`dragMayHaveCopiedNothing`) at the reference commit:
+//!
+//! - **Which drags.** A primary press the program's mouse reporting took (mouse reporting on at the press, the forcing
+//!   modifier not held, not a press on a web link Farhelm withholds from the program), released at least
+//!   [`super::drag_notice::DRAG_THRESHOLD`] pixels from where it went down, with no program clipboard write since the
+//!   press. A forced press never counts, even one that selected nothing: telling that user to hold the key they are
+//!   holding would be wrong. A press on the scrollbar is the bar's and never reaches the press handler.
+//! - **The grace window.** The notice opens [`super::drag_notice::GRACE`] after the release unless a program
+//!   clipboard write (either target, a primary-selection write included) or another press came first. Writes are
+//!   counted as output applies them, so a write that arrives between press and release suppresses the notice too. It
+//!   does not open either once the user has pressed a key or clicked anywhere in the window since the release (the
+//!   layer manager refuses the open), or while this terminal's link destination display is open: the notice lets the
+//!   pointer through, so drawn over the display it would hide the target a click on the link then opens, and the
+//!   display's cover check (a hit test, not built yet) could not see it.
+//! - **Where.** A non-focusing popover that lets the pointer through (`layers::Popover::passes_pointer`), on a
+//!   zero-size anchor this owner draws at the release point, placed by [`super::drag_notice::place`] from the pane's
+//!   bounds in this frame (read from an anchor the pane draws, as the layer manager places the notice) and the row
+//!   height this owner sets as it renders that frame. It takes no focus and no pointer but on its ×.
+//! - **Until.** [`super::drag_notice::SHOWN_FOR`], its ×, or the next press in this terminal, any button, the
+//!   scrollbar's included (the grid's area sees it in its capture phase, before the bar or the program does): SPEC.md's
+//!   list. Going inert or retiring puts it away too, and so do the layer manager's own closes (the anchor no longer
+//!   drawn because the pane is hidden, a reset); a notice the layer manager closed does not come back. Escape never
+//!   closes it: the layer manager passes over a popover that lets the pointer through when Escape or a dismissible
+//!   veil looks for the layer the user is answering, so Escape goes on to whatever would get it without the notice,
+//!   and SPEC.md's list of closers has no Escape.
+//! - **Wording.** The agent terminal names the session's own copy key where its kind has one
+//!   ([`super::drag_notice::copy_hint`], by the row's recorded agent kind); a tab runs a shell, whatever the session's
+//!   agent is, and gets the generic advice, as in the old app.
+//!
+//! NOTE: Where this notice differs from the old one is listed in `docs/gpui/parity/terminal.md`, "Deviations from the
+//! old app".
 //!
 //! ## Input
 //!
@@ -458,6 +496,9 @@ pub struct AttachedTerminal {
     disclosure_anchor: Option<Anchor>,
     /// How many displays this terminal has opened, which numbers the next.
     disclosure_count: u64,
+    /// The drag-copy notice: the drag that may raise it, its grace window and the notice shown (see "The drag-copy
+    /// notice" in the module docs).
+    drag_notice: DragNotice,
     /// Whether a click starting with the press now being handled may open the link it is on, decided in the press's
     /// capture phase ([`AttachedTerminal::click_admitted`]) and moved into its [`LinkPress`] as the press is handled.
     press_admitted: bool,
@@ -661,6 +702,7 @@ impl AttachedTerminal {
             disclosure: None,
             disclosure_anchor: None,
             disclosure_count: 0,
+            drag_notice: DragNotice::default(),
             press_admitted: false,
             refusal: None,
             refusal_raised: false,
@@ -736,6 +778,8 @@ impl AttachedTerminal {
             // Dropping the task drops the paste still reading the clipboard, and the earlier ones it waits on, as
             // retiring the terminal does.
             self.paste = None;
+            // The status card over the terminal explains the pane now; guidance about the program under it is stale.
+            self.put_drag_notice_away(cx);
         }
         self.inert = inert;
         // A drop refused while the veil stood over a live terminal asked for exactly this.
@@ -1099,6 +1143,11 @@ impl AttachedTerminal {
             // Not left to the redraw: a hidden window draws no frame, and a program that starts asking for focus
             // reports there must hear that it is unfocused now, not when the window next draws.
             self.report_focus(self.window_focus, cx);
+        }
+        // Any completed write, a primary-selection one too, means the program handled its own copy: it suppresses the
+        // drag-copy notice for a drag pressed before it (see "The drag-copy notice" in the module docs).
+        if effects.clipboard_written {
+            self.drag_notice.writes += 1;
         }
         // A program's own copy (OSC 52), as the old app applied it. The supervisor sends clipboard writes only once a
         // replay is complete, so a replay never repeats an old one.
@@ -1725,6 +1774,7 @@ impl AttachedTerminal {
         self.live = false;
         self.blink = None;
         self.paste = None;
+        self.put_drag_notice_away(cx);
         // The uploads stop with the terminal, and say so in the session's next agent terminal.
         self.attachments
             .update(cx, |attachments, cx| attachments.hand_over(cx));
@@ -2169,6 +2219,7 @@ impl Render for AttachedTerminal {
                         let _ = released.update(cx, |owner, cx| {
                             owner.report_released(event, cx);
                             if event.button == MouseButton::Left {
+                                owner.drag_notice_released(event, cx);
                                 owner.end_selection(Some(event), cx);
                                 owner.link_released(event, window, cx);
                                 // Hover lookups pause during a press; the pointer may rest on other text now. Only
@@ -2212,6 +2263,11 @@ impl Render for AttachedTerminal {
                 .child(self.scrollbar_element(view, cx))
         });
         let disclosure_anchor = self.place_disclosure(window, cx);
+        // The whole pane as an anchor, for the drag-copy notice's placement: its tracker records the pane's bounds as
+        // this frame is prepared, before the layer manager places the notice, where the pane's measurement (`fitted`)
+        // is handed over only after the frame.
+        let pane_anchor = Anchor::for_element("attached-terminal-pane-anchor", window, cx);
+        let notice_anchor = self.place_drag_notice(&pane_anchor, window, cx);
         // The file links' download status line has the refused click's place, as the old app's one message line did:
         // a refusal stands in for it ([`FileLinks::status_line`]).
         let refusal = self
@@ -2267,6 +2323,9 @@ impl Render for AttachedTerminal {
             // Before anything handles the press (the layer manager closes popovers on a press outside them, the
             // destination display among them), decide whether a click on a link starting here may open it.
             .capture_any_mouse_down(cx.listener(|owner, event: &MouseDownEvent, window, cx| {
+                // Any press in the terminal puts the drag-copy notice away, the scrollbar's too, which the bar keeps
+                // from the bubble phase.
+                owner.drag_notice_pressed(window, cx);
                 owner.press_admitted = event.button == MouseButton::Left
                     && owner
                         .pressed_link(event.position, cx)
@@ -2308,7 +2367,8 @@ impl Render for AttachedTerminal {
                     .overflow_hidden()
                     .child(room)
                     .children(screen)
-                    .children(disclosure_anchor),
+                    .children(disclosure_anchor)
+                    .children(notice_anchor),
             )
             .children(scrollbar);
         // An inert terminal tracks no focus handle, so it holds none: focus it held is reported lost once a frame no
@@ -2384,6 +2444,7 @@ impl Render for AttachedTerminal {
                     .then(|| inert_scrim(cx).on_drop(cx.listener(Self::dropped))),
             )
             .child(measure)
+            .child(pane_anchor.track())
     }
 }
 
@@ -3127,6 +3188,305 @@ impl AttachedTerminal {
     }
 }
 
+// ---- The drag-copy notice --------------------------------------------------------------------------------------------
+
+/// The drag-copy notice's state, from the press that may raise it to the notice's going (see "The drag-copy notice" in
+/// the module docs).
+#[derive(Default)]
+struct DragNotice {
+    /// Completed program clipboard writes this terminal has applied, counted so a press can tell whether one came
+    /// after it.
+    writes: u64,
+    /// The plain primary press the program's mouse reporting took, until its release.
+    pressed: Option<ProgramPress>,
+    /// The grace window after a qualifying release; firing raises the notice. Dropped, which cancels it, by the next
+    /// press, going inert and retiring, so a grace window that fires is still the latest drag's.
+    grace: Option<ticker::Deadline>,
+    /// The notice raised, from the grace window's end until it goes.
+    shown: Option<ShownNotice>,
+    /// How many notices this terminal has raised, which numbers the next: its anchor's key and its deferred open's
+    /// check.
+    count: u64,
+    /// Layers to close at the next frame: notices put away where no window was at hand (their deadline, a retirement),
+    /// closed through the window rather than left for their anchor's going, which would draw them one frame more.
+    closing: Vec<LayerId>,
+    /// The height a terminal row is drawn at, the unit of the notice's three-row gap: set as the terminal renders and
+    /// read as the layer manager places the notice later in the same frame. Only this is relayed; the pane's bounds
+    /// come from its anchor's tracker ([`AttachedTerminal::place_drag_notice`]), which records them in that frame.
+    row_height: Rc<Cell<f32>>,
+}
+
+/// A press the program's mouse reporting took, as its release judges it.
+struct ProgramPress {
+    /// Where it went down (window coordinates).
+    at: Point<Pixels>,
+    /// [`DragNotice::writes`] at the press.
+    writes: u64,
+}
+
+/// A raised notice.
+struct ShownNotice {
+    text: SharedString,
+    /// The release it is placed by (window coordinates).
+    at: Point<Pixels>,
+    /// Its number ([`DragNotice::count`]).
+    generation: u64,
+    /// The user's input as of the release, which the layer's open is checked against.
+    mark: Mark,
+    /// Its layer once opened. `None` while the open waits for the frame that draws its anchor.
+    layer: Option<LayerId>,
+    /// Whether that open has been asked for.
+    requested: bool,
+    /// Puts it away [`super::drag_notice::SHOWN_FOR`] after it was raised. It lives in the notice, so a notice put
+    /// away or replaced takes its deadline with it: one that fires is always the notice shown.
+    _expiry: ticker::Deadline,
+}
+
+impl AttachedTerminal {
+    /// A press of any button anywhere in the terminal's grid area (its capture phase): the old notice's "a new press
+    /// dismisses old guidance". It retires a grace window still running and the press a release would have judged.
+    fn drag_notice_pressed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.drag_notice.pressed = None;
+        self.drag_notice.grace = None;
+        self.dismiss_drag_notice(window, cx);
+    }
+
+    /// The primary button came up anywhere in the window: if it ends a press the program took, moved far enough to be
+    /// a drag and answered by no clipboard write so far, start the grace window that gives the program its last chance
+    /// to copy (the old `dragMayHaveCopiedNothing` at the release, and its `OSC52_GRACE_MS` wait).
+    fn drag_notice_released(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(press) = self.drag_notice.pressed.take() else {
+            return;
+        };
+        let moved = event.position - press.at;
+        let distance = f32::from(moved.x).hypot(f32::from(moved.y));
+        if distance < super::drag_notice::DRAG_THRESHOLD || self.drag_notice.writes != press.writes
+        {
+            return;
+        }
+        let (writes, release) = (press.writes, event.position);
+        // The release is the user's act that raises the notice: taken now, it lets the layer manager refuse the open
+        // if they have moved on by the time the grace window ends.
+        let mark = Mark::take(cx);
+        let owner = cx.weak_entity();
+        self.drag_notice.grace = Some(ticker::after(super::drag_notice::GRACE, cx, move |cx| {
+            let _ = owner.update(cx, |owner, cx| {
+                owner.drag_grace_over(writes, release, mark, cx)
+            });
+        }));
+    }
+
+    /// The grace window after the latest drag ended with no clipboard write since the count stood at `writes`: raise
+    /// the notice, unless the terminal is inert. The next frame draws its anchor and opens its layer
+    /// ([`AttachedTerminal::place_drag_notice`]).
+    fn drag_grace_over(
+        &mut self,
+        writes: u64,
+        release: Point<Pixels>,
+        mark: Mark,
+        cx: &mut Context<Self>,
+    ) {
+        self.drag_notice.grace = None;
+        // Going inert drops the grace window, but the scrim that keeps presses off an inert terminal is drawn only in
+        // the next frame, and a press that reaches the grid before then can still start one.
+        if self.inert || self.drag_notice.writes != writes {
+            return;
+        }
+        let text = super::drag_notice::text(self.copy_hint(cx), actions::THIS_PLATFORM);
+        self.drag_notice.count += 1;
+        let generation = self.drag_notice.count;
+        let owner = cx.weak_entity();
+        let expiry = ticker::after(super::drag_notice::SHOWN_FOR, cx, move |cx| {
+            let _ = owner.update(cx, |owner, cx| owner.put_drag_notice_away(cx));
+        });
+        self.drag_notice.shown = Some(ShownNotice {
+            text: text.into(),
+            at: release,
+            generation,
+            mark,
+            layer: None,
+            requested: false,
+            _expiry: expiry,
+        });
+        cx.notify();
+    }
+
+    /// The agent's own copy instruction for this terminal's notice: the session's recorded agent kind's
+    /// ([`super::drag_notice::copy_hint`]) for the agent terminal, and none for a tab, which runs a shell whatever the
+    /// session's agent is. `None` too while the session's row is not listed.
+    fn copy_hint(&self, cx: &App) -> Option<&'static str> {
+        if self.target.tab.is_some() {
+            return None;
+        }
+        let store = session::current_store(cx)?;
+        let row = store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(&self.target.session)?;
+        super::drag_notice::copy_hint(row.info.agent_kind)
+    }
+
+    /// Put the notice away where no window is at hand: its layer is closed at the next frame.
+    fn put_drag_notice_away(&mut self, cx: &mut Context<Self>) {
+        let notice = &mut self.drag_notice;
+        notice.pressed = None;
+        notice.grace = None;
+        if let Some(shown) = notice.shown.take() {
+            notice.closing.extend(shown.layer);
+            cx.notify();
+        }
+    }
+
+    /// The notice's ×: put it away now. It is no press in the terminal (the × takes the pointer), so it sends the
+    /// program nothing and leaves focus where it was.
+    fn dismiss_drag_notice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(shown) = self.drag_notice.shown.take() {
+            if let Some(layer) = shown.layer {
+                layers::close(layer, window, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// Keep the notice in step as the owner draws, and return its anchor to draw: close the layers put away without a
+    /// window, refresh the row height its placement reads, forget a notice whose layer something else closed, and ask
+    /// for a raised notice's layer once its anchor is drawn. `pane` is the anchor the whole pane draws this frame,
+    /// whose bounds the placement reads as the layer manager asks it.
+    fn place_drag_notice(
+        &mut self,
+        pane: &Anchor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let closing = std::mem::take(&mut self.drag_notice.closing);
+        if !closing.is_empty() {
+            window.defer(cx, move |window, cx| {
+                for layer in closing {
+                    layers::close(layer, window, cx);
+                }
+            });
+        }
+        let row_height = self
+            .committed
+            .as_ref()
+            .and_then(|view| self.placement(view.read(cx), cx))
+            .map_or(self.metrics.char_height, |placement| placement.cell_height);
+        self.drag_notice.row_height.set(row_height);
+        // Closed by the layer manager (a reset, the anchor not drawn while the pane was hidden): it stays gone.
+        if self
+            .drag_notice
+            .shown
+            .as_ref()
+            .and_then(|shown| shown.layer)
+            .is_some_and(|layer| !layers::is_open(layer, window, cx))
+        {
+            self.drag_notice.shown = None;
+        }
+        let origin = self.grid_origin?;
+        let shown = self.drag_notice.shown.as_mut()?;
+        // The rule captures the pane's anchor and a cell, never this entity: the layer keeps it until it closes. Read
+        // while the layer manager places the notice, the pane's anchor gives this frame's bounds, so a pane that moved
+        // without this terminal redrawing still places the notice right.
+        let (pane, row) = (pane.clone(), self.drag_notice.row_height.clone());
+        let anchor = Anchor::for_element(
+            gpui::ElementId::Name(
+                format!("terminal-drag-copy-notice-anchor-{}", shown.generation).into(),
+            ),
+            window,
+            cx,
+        )
+        .placed_by(move |at, size, area| {
+            super::drag_notice::place(at.origin, pane.drawn_bounds(), row.get(), size, area)
+        });
+        let element = div()
+            .absolute()
+            .left(shown.at.x - origin.x)
+            .top(shown.at.y - origin.y)
+            .w(px(0.))
+            .h(px(0.))
+            .child(anchor.track())
+            .into_any_element();
+        if !shown.requested {
+            shown.requested = true;
+            let generation = shown.generation;
+            let owner = cx.weak_entity();
+            window.defer(cx, move |window, cx| {
+                let _ = owner.update(cx, |owner, cx| {
+                    owner.open_drag_notice(generation, anchor, window, cx)
+                });
+            });
+        }
+        Some(element)
+    }
+
+    /// Open notice `generation`'s layer on `anchor`, drawn in the frame that asked, if it is still the notice raised.
+    /// Not while a dialog or menu holds the keyboard, which it would float above (the destination display's rule), not
+    /// while this terminal's link destination display is open, and not once the user has moved on since the release
+    /// (the layer manager's rule): each way the notice is dropped rather than left pending.
+    ///
+    /// The display rule is a deviation from the old app, which drew the display above the notice, and was decided by
+    /// the migration's orchestrator on 2026-11-16. Here both are popovers in stack order, so a notice opening after the
+    /// display is drawn over it; letting the pointer through, it would leave a click on the link opening a target the
+    /// notice hides, and SPEC.md admits that click only while the display is not covered. The cover check is to be a
+    /// hit test, which a popover that registers no hit area is invisible to, so keeping the notice off the display is
+    /// this owner's job.
+    fn open_drag_notice(
+        &mut self,
+        generation: u64,
+        anchor: Anchor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((text, mark)) = self
+            .drag_notice
+            .shown
+            .as_ref()
+            .filter(|shown| shown.generation == generation && shown.layer.is_none())
+            .map(|shown| (shown.text.clone(), shown.mark))
+        else {
+            return;
+        };
+        let owner = cx.weak_entity();
+        let dismiss: super::drag_notice::Dismiss = Rc::new(move |window, cx| {
+            let _ = owner.update(cx, |owner, cx| owner.dismiss_drag_notice(window, cx));
+        });
+        let display_open = self
+            .disclosure
+            .as_ref()
+            .and_then(|shown| shown.layer)
+            .is_some_and(|layer| layers::is_open(layer, window, cx));
+        let layer = (!layers::focus_layer_open(window, cx) && !display_open)
+            .then(|| {
+                let view = cx.new(|_| super::drag_notice::NoticeView::new(text, dismiss));
+                layers::open_popover(
+                    Popover::floating(view, cx.focus_handle(), anchor).passes_pointer(),
+                    &mark,
+                    window,
+                    cx,
+                )
+            })
+            .flatten();
+        match layer {
+            Some(layer) => {
+                if let Some(shown) = &mut self.drag_notice.shown {
+                    shown.layer = Some(layer);
+                }
+            }
+            None => self.drag_notice.shown = None,
+        }
+    }
+
+    /// Whether the drag-copy notice's layer is open, for tests.
+    #[cfg(test)]
+    pub(crate) fn drag_notice_open(&self, window: &Window, cx: &App) -> bool {
+        self.drag_notice
+            .shown
+            .as_ref()
+            .and_then(|shown| shown.layer)
+            .is_some_and(|layer| layers::is_open(layer, window, cx))
+    }
+}
+
 // ---- Mouse reporting -------------------------------------------------------------------------------------------------
 
 /// The format's number for `button` in a press, release or move report: 0 left, 1 middle, 2 right; `None` for the
@@ -3431,6 +3791,14 @@ impl AttachedTerminal {
             if link.is_some_and(|link| Self::withholds_press(&link, cx)) {
                 view.update(cx, |view, cx| view.set_selection(None, cx));
                 return;
+            }
+            // The program takes this press; if it turns out to be a drag it did not copy, the release raises the
+            // drag-copy notice. A withheld press (above) never does.
+            if event.button == MouseButton::Left {
+                self.drag_notice.pressed = Some(ProgramPress {
+                    at: event.position,
+                    writes: self.drag_notice.writes,
+                });
             }
             self.report_press(event, cx);
             return;
