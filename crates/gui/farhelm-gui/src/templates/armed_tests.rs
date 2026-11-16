@@ -30,10 +30,12 @@ use super::sequence::{Entry, Input, Sequence};
 use super::shortcuts::Bindings;
 use crate::actions::{self, BeginSequence, SEQUENCE_PREFIX_CHORD};
 use crate::components::{ENTRANCE, HoverHelp, TextInput, TextInputState};
+use crate::launcher::view_tests::fixture_hosts;
 use crate::layers::{self, Anchor, Pill, PillPlacement};
 use crate::session_list::tests::{listing, painted, preferences_state, session};
+use crate::session_pane::details::{BAR_ID, MIN_HEIGHT};
 use crate::test_support::{self, advance, bounds, frame, keys, meta, settle};
-use crate::ticker;
+use crate::{launcher, local_state, ticker};
 
 // ---- Sorting keys ----------------------------------------------------------------------------------------------------
 
@@ -689,8 +691,9 @@ fn a_reset_disarms_the_sequence(cx: &mut TestAppContext) {
 
 /// Inside the launcher the pill says "apply" and sits at the bottom of the main area so it does not cover the launcher
 /// (SPEC.md). Its view is shown directly here, so its place can be measured against a known area; arming it from the
-/// launcher is tested in `dispatch_tests`. Specified: the launcher form's pill paints "Apply sequence:" and "Enter
-/// apply", with its bottom edge 14 pixels above the anchor's.
+/// launcher is tested in `dispatch_tests`, and its place over a real session pane below. Specified: with no session
+/// selected, the launcher form's pill paints "Apply sequence:" and "Enter apply", with its bottom edge 14 pixels above
+/// the anchor's.
 #[gpui::test]
 fn the_launcher_form_says_apply_and_sits_at_the_bottom(cx: &mut TestAppContext) {
     let out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
@@ -721,6 +724,10 @@ fn the_launcher_form_says_apply_and_sits_at_the_bottom(cx: &mut TestAppContext) 
     })
     .expect("the pill shows");
     settle(cx);
+    assert!(
+        cx.update(|_, cx| local_state::selected(cx).is_none()),
+        "the premise: no session is selected, so the pill reserves nothing for a details bar"
+    );
     let text = painted(&frame(cx)).join(" ");
     assert!(
         text.contains("Apply sequence:") && text.contains("Enter apply"),
@@ -730,5 +737,42 @@ fn the_launcher_form_says_apply_and_sits_at_the_bottom(cx: &mut TestAppContext) 
     assert!(
         (area.bottom() - px(14.) - capsule.bottom()).abs() <= px(1.),
         "the pill keeps 14 pixels above the area's bottom edge: {capsule:?} in {area:?}"
+    );
+}
+
+/// Without room for the session's details bar, the launcher's pill sat on the bar and covered its top 16 pixels.
+/// Specified: with session `a` open, its bar at the pane's bottom edge and its minimum height, and a word armed in New
+/// that draws the candidate box, the lowest of the pill's parts ends 14 pixels above the bar's top, within a pixel.
+#[gpui::test]
+fn the_launcher_pill_stays_above_an_open_sessions_details_bar(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, true);
+    main.helm.push(change(fixture_hosts(&[0])));
+    settle(main.cx);
+    assert!(
+        main.cx.update(launcher::entry::open_new),
+        "the premise: New opened"
+    );
+    settle(main.cx);
+    main.arm();
+    keys(main.cx, "w");
+    assert!(
+        main.text().contains("Apply sequence:"),
+        "the premise: the launcher's form of the pill"
+    );
+    let capsule = bounds(main.cx, "sequence-capsule");
+    let names = main
+        .cx
+        .debug_bounds("sequence-candidates")
+        .expect("the premise: the word draws the candidate box");
+    let drawn_bottom = names.bottom().max(capsule.bottom());
+    let (bar, pane) = (bounds(main.cx, BAR_ID), bounds(main.cx, "main-pane"));
+    assert!(
+        (pane.bottom() - bar.bottom()).abs() <= px(1.)
+            && (bar.size.height - px(MIN_HEIGHT)).abs() <= px(1.),
+        "the premise: the bar is {MIN_HEIGHT} pixels tall at the pane's bottom edge: {bar:?} in {pane:?}"
+    );
+    assert!(
+        (bar.top() - px(14.) - drawn_bottom).abs() <= px(1.),
+        "the pill keeps 14 pixels above the bar: it ends at {drawn_bottom:?}, the bar is at {bar:?}"
     );
 }

@@ -109,8 +109,9 @@ pub(crate) const COMMAND_ID: &str = "session-details-command";
 /// The hidden-characters warning's id.
 pub(crate) const WARNING_ID: &str = "session-details-copy-warning";
 
-/// `.session-details`'s `min-height`, the same as the top row's.
-const MIN_HEIGHT: f32 = 30.;
+/// `.session-details`'s `min-height`, the same as the top row's. The bar never wraps and its content fits inside its
+/// padding, so this is its height.
+pub(crate) const MIN_HEIGHT: f32 = 30.;
 /// `.session-details`'s padding: 3 pixels above and below, 10 at the sides.
 const PAD_Y: f32 = 3.;
 const PAD_X: f32 = 10.;

@@ -49,7 +49,7 @@ const CANDIDATES_MARGIN: f32 = 6.;
 const CANDIDATES_GAP: (f32, f32) = (6., 12.);
 const CANDIDATES_PAD: (f32, f32) = (6., 10.);
 /// `.launch-sequence-indicator[data-in-launcher="true"]`'s `bottom: 14px`: the gap the bottom placement keeps above the
-/// area's bottom edge.
+/// area's bottom edge, or above whatever the caller reserves there ([`SequencePill::at_bottom`]).
 const BOTTOM_GAP: f32 = 14.;
 
 /// One queued entry as the pill shows it.
@@ -71,7 +71,9 @@ pub struct SequencePill {
     word: Option<HostText>,
     hint: SharedString,
     candidates: Vec<HostText>,
-    at_bottom: bool,
+    /// `Some` for the bottom placement, holding how much of the area's bottom edge the pill must stay above before its
+    /// own gap; `None` for the centered one.
+    at_bottom: Option<Pixels>,
     lowered: Pixels,
 }
 
@@ -84,7 +86,7 @@ impl SequencePill {
             word: None,
             hint: hint.into(),
             candidates: Vec::new(),
-            at_bottom: false,
+            at_bottom: None,
             lowered: px(0.),
         }
     }
@@ -111,8 +113,12 @@ impl SequencePill {
     /// Lay the pill out for the bottom placement the layer manager uses while the launcher is open: the old
     /// launcher-context rules, with the candidates in the flow above the pill's bottom gap rather than hanging below it,
     /// so the whole group stays clear of the area's bottom edge.
-    pub fn at_bottom(mut self) -> Self {
-        self.at_bottom = true;
+    ///
+    /// `reserved` is height at the area's bottom that the pill must stay clear of: the session's details bar, which is
+    /// inside the main pane the layer manager places the pill on. The 14-pixel gap is kept above it, as the old sheet's
+    /// `bottom: 44px` did with the bar's 30 pixels.
+    pub fn at_bottom(mut self, reserved: Pixels) -> Self {
+        self.at_bottom = Some(reserved);
         self
     }
 
@@ -190,7 +196,7 @@ impl RenderOnce for SequencePill {
                 .font_family(crate::assets::TERMINAL_FONT)
                 .children(self.candidates.iter().map(host_text::element))
         });
-        let group: Div = if self.at_bottom {
+        let group: Div = if self.at_bottom.is_some() {
             div()
                 .flex()
                 .flex_col()
@@ -224,7 +230,9 @@ impl RenderOnce for SequencePill {
             .role(Role::Status)
             .px(px(SIDE_CLEARANCE))
             .pt(self.lowered * 2.)
-            .when(self.at_bottom, |frame| frame.pb(px(BOTTOM_GAP)))
+            .when_some(self.at_bottom, |frame, reserved| {
+                frame.pb(reserved + px(BOTTOM_GAP))
+            })
             .text_color(warn)
             .text_size(metrics::TEXT_MD)
             .child(group)
