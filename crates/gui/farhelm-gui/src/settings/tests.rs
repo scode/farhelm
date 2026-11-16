@@ -2761,7 +2761,7 @@ fn wheel(cx: &mut VisualTestContext, delta: f32) {
 /// Wheel the dialog's body until the element drawn under `selector` shows whole in it, as a user scrolls to a control
 /// before clicking it. A click lands wherever the element's center is drawn, and below the body's fold that is the
 /// footer or nothing: the Sounds sub-heading above the ntfy form puts the form's lower fields there.
-fn into_view(cx: &mut VisualTestContext, selector: &'static str) {
+pub(super) fn into_view(cx: &mut VisualTestContext, selector: &'static str) {
     for _ in 0..60 {
         if shows_whole(cx, selector, DIALOG_BODY) {
             return;

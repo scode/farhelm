@@ -93,6 +93,7 @@ mod recipes;
 mod refused;
 mod tensorlake;
 mod tensorlake_key;
+mod tensorlake_ssh_key;
 #[cfg(test)]
 mod tensorlake_tests;
 mod terminal;
@@ -662,7 +663,8 @@ impl SettingsDialog {
     /// section, which reads the container hosts and leftovers. Showing Credentials makes it the first time, which reads
     /// the Tensorlake account too if no section has yet, and reads its catalog every time; showing Tensorlake makes it
     /// the first time, over the same account, read then if no section has yet and not again, as the old account was
-    /// read once per opening; showing Recipes makes it the first time, and reads the Tensorlake account every time.
+    /// read once per opening, except once after a refused Create SSH key ([`tensorlake_ssh_key`]); showing Recipes
+    /// makes it the first time, and reads the Tensorlake account every time.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
@@ -687,15 +689,22 @@ impl SettingsDialog {
                 }
             }
         }
-        if section == Section::Tensorlake && self.tensorlake_section.is_none() {
-            let account = self
-                .tensorlake
-                .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
-                .clone();
-            let key =
-                cx.new(|cx| TensorlakeKey::new(account.clone(), Place::Tensorlake, window, cx));
-            self.tensorlake_section =
-                Some(cx.new(|cx| tensorlake::Tensorlake::new(account, key, cx)));
+        if section == Section::Tensorlake {
+            match &self.tensorlake_section {
+                // Shown again: the SSH key group reads the account again if a refused Create SSH key asked it to.
+                Some(shown) => shown.update(cx, |shown, cx| shown.shown_again(cx)),
+                None => {
+                    let account = self
+                        .tensorlake
+                        .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
+                        .clone();
+                    let key = cx.new(|cx| {
+                        TensorlakeKey::new(account.clone(), Place::Tensorlake, window, cx)
+                    });
+                    self.tensorlake_section =
+                        Some(cx.new(|cx| tensorlake::Tensorlake::new(account, key, window, cx)));
+                }
+            }
         }
         if section == Section::Recipes {
             match &self.recipes {
