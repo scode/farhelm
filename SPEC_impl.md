@@ -6952,18 +6952,18 @@ grammar declared next to the types.
 
 ## Native app packaging
 
-During the GPUI migration this section describes release machinery that no longer builds: the browser UI and the dx
-build it relies on are gone from main. `scripts/build-desktop-binary.sh` already builds the GPUI `farhelm-desktop` with
-cargo, but the release workflow's build setup still runs dx, and the paragraphs below on dx and the embedded web bundle
-describe the old app until they are rewritten at cutover. Main ships no releases in the meantime.
+NOTE: Until the GPUI cutover is finished, a release cut from main cannot build the desktop archive. The release
+workflow's build setup (`.github/dist-build-setup.yml`) still installs dx and builds the old browser UI's web bundle,
+which no longer exists, and it still exports the old release mark described below. That setup is the maintainer's to
+change. Main ships no releases in the meantime.
 
-Dioxus desktop (wry) wrapping farhelm-ui, released as a BARE BINARY rather than a `.app` bundle: `farhelm-desktop`, a
-thin crate (`crates/farhelm-desktop`) whose `main` is one call into farhelm-ui's desktop module, built by cargo-dist
-alongside `farhelm` and published as its own archive. The two are one artifact pair from one workspace version: the
-shell embeds farhelm-helm and reaches supervisor code through the CLI, discovering a local supervisor that already
-answers or spawning `farhelm supervisor run` when none does. Where it finds the CLI is the desktop's sibling, except in
-the side-by-side layout below. Replacing that pair never re-issues what running sessions already hold, which is why
-newer binaries keep accepting those values (see "What running sessions hold across versions").
+The desktop app is `farhelm-desktop` (`crates/farhelm-desktop`), the GPUI app with the helm embedded in its process,
+released as a BARE BINARY rather than a `.app` bundle: cargo-dist builds it alongside `farhelm` and publishes it as its
+own archive, and the installer assembles the bundle. The two are one artifact pair from one workspace version: the app
+embeds farhelm-helm and runs its supervisor through the CLI, discovering a local supervisor that already answers or
+spawning `farhelm supervisor run` when none does. Where it finds the CLI is the app's sibling, except in the
+side-by-side layout below. Replacing that pair never re-issues what running sessions already hold, which is why newer
+binaries keep accepting those values (see "What running sessions hold across versions").
 
 `install.sh`, which is macOS-only, puts the pair into `~/Applications/Farhelm.app`, which is the whole installation: the
 side-by-side layout below, an Info.plist (bundle identifier `org.scode.farhelm.desktop`) and the icon shipped in the
@@ -6971,18 +6971,18 @@ desktop archive, with `~/.local/bin/farhelm` a symlink to the forwarder for term
 name `farhelm-desktop`, because the default case-insensitive APFS would make an executable named `Farhelm` the same
 directory entry as the forwarder `farhelm`. The bundle gives Farhelm its launcher identity (Spotlight/Alfred
 launchability, a Dock icon, a Cmd-Tab name, and Launch Services' single-instance activation, so relaunching activates
-the running app instead of racing it for the embedded helm's state); asset serving stays the embedded tree below. A
-fresh install builds the bundle in a private directory beside the public name and renames it into place. An update
-changes the bundle in place, as the next section describes, because a running app survives that and does not survive
-having its bundle replaced. The installer changes an existing `Farhelm.app` only when its ownership record
-(`Contents/.farhelm-installation`, `farhelm-app-v2` and the terminal link's path) names this installation's link; the
-one-time move from the layout that copied both binaries into `~/.local/bin` and the bundle also accepts that layout's
-record naming this bin directory, or the recordless bundle installers built before records existed, and is done with
-Farhelm quit. Anything else is refused before anything changes. Only one run changes the bundle at a time: a run that
-finds `~/Applications/.farhelm-app.lock` held, or left by an interrupted run, refuses. Old releases are refused before
-anything changes: those without the icon, and those whose desktop program lacks a fixed piece of the text it prints when
-its own version folder is missing (`grep` on the downloaded binary; a test in `desktop/bundle.rs` ties the two
-together), which marks every desktop build that understands the side-by-side layout.
+the running app instead of racing it for the embedded helm's state). A fresh install builds the bundle in a private
+directory beside the public name and renames it into place. An update changes the bundle in place, as the next section
+describes, because a running app survives that and does not survive having its bundle replaced. The installer changes an
+existing `Farhelm.app` only when its ownership record (`Contents/.farhelm-installation`, `farhelm-app-v2` and the
+terminal link's path) names this installation's link; the one-time move from the layout that copied both binaries into
+`~/.local/bin` and the bundle also accepts that layout's record naming this bin directory, or the recordless bundle
+installers built before records existed, and is done with Farhelm quit. Anything else is refused before anything
+changes. Only one run changes the bundle at a time: a run that finds `~/Applications/.farhelm-app.lock` held, or left by
+an interrupted run, refuses. Old releases are refused before anything changes: those without the icon, and those whose
+desktop program lacks a fixed piece of the text it prints when its own version folder is missing (`grep` on the
+downloaded binary; a test in `crates/farhelm-desktop/src/bundle.rs` ties the two together), which marks every desktop
+build that understands the side-by-side layout.
 
 Installing a supported target over a newer Installed version remains part of the installer contract: there is no
 version-order refusal for a Terminal install whose existing version meets the target's upgrade floor, and the target's
@@ -6999,36 +6999,48 @@ treats a development build or an unparseable version as below the floor. The flo
 data-schema compatibility. An agent raises it in the change that first relies on an earlier release's upgrade logic; the
 release procedure surfaces the raise for the maintainer's decision before proceeding.
 
-The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
-`asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
-`farhelm-helm`, through a `dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the
-`dioxus://` scheme. The helm does not serve this tree over HTTP. Registering a handler for a path prefix takes
-precedence over dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the
-desktop build's asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on
-every change. The desktop page declares UTF-8 in its head, and every `text/*` asset response declares `charset=utf-8`.
-Without these declarations WebKit can use a locale-dependent legacy encoding, garbling literal UTF-8 in the stylesheet
-and scripts.
+The release `farhelm-desktop` is an ordinary cargo build (`cargo build --release --locked -p farhelm-desktop`). The
+Dioxus app it replaced could not be: dx had to write its assets' names into the binary after the link, and the binary
+embedded the web bundle and served it to a webview. None of that is left. The GPUI app draws its own window, so there is
+no web bundle, no asset handler and no dx anywhere in the app's build.
 
-A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The `asset!()` macro emits a placeholder
-into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain
-`cargo build` links and launches but requests placeholder paths, so every asset 404s even with the web bundle embedded.
-Release production therefore has to run or consume `dx build --package farhelm-desktop --platform desktop --release`
-with `FARHELM_UI_DIST` set; that it must happen is not negotiable, because the failure is invisible to a build that
-succeeds.
+The app is still described to cargo-dist TWICE, and exactly one of the two descriptions ships. `crates/farhelm-desktop`
+(the Cargo package) carries `[package.metadata.dist] dist = false`. `packaging/farhelm-desktop/dist.toml` declares a
+generic (non-Cargo) dist package of the same name in the hybrid workspace `dist-workspace.toml` defines, and its
+`build-command` is `scripts/build-desktop-binary.sh`, which builds the crate with cargo, checks the binary (below) and
+stages it with `Farhelm.icns` for archiving. dx was why the generic package existed. It stays because it already carries
+the icon, which the archive needs beside the binary so `install.sh` can assemble the bundle from files the release's
+checksums cover: it does so through its `binaries` list, since dist 0.32 silently ignores a generic package's `include`
+(`dist.toml` explains). Neither half is redundant: without the generic package the release has no desktop archive the
+installer accepts, and without the `dist = false` it grows a second `farhelm-desktop` archive with no icon in it. The
+cost of the arrangement is a version number duplicated into that `dist.toml`, which a unit test in `assets.rs` holds to
+the workspace's. The likely simpler replacement is the cargo package itself with an `include` for the icon, which does
+reach dist's plan, but replacing the generic package changes release machinery (`dist-workspace.toml` lists it), which
+is the maintainer's, and nobody has checked that the replacement gives the archive the same layout and the icon the same
+file mode.
 
-How that is wired: cargo-dist cannot be asked to run dx over a package it built, and it has no post-build hook — so the
-shell is declared to it TWICE, and exactly one of the two descriptions ships. `crates/farhelm-desktop` (the Cargo
-package) carries `[package.metadata.dist] dist = false`, which is what stops cargo-dist from publishing its own
-placeholder-bearing Cargo output. `packaging/farhelm-desktop/dist.toml` declares a generic (non-Cargo) dist package of
-the same name in the hybrid workspace `dist-workspace.toml` defines, and its `build-command` is
-`scripts/build-desktop-binary.sh`, which builds the crate with cargo, refuses a binary the installer would turn away,
-one that carries the test-automation bridge and one whose `--licenses` fails, and hands it back with the app icon for
-archiving. Neither half is redundant: delete the generic package and the Mac loses its window; delete the `dist = false`
-and the release grows a second `farhelm-desktop` archive that renders nothing. The cost of the arrangement is a version
-number duplicated into that `dist.toml`, which a unit test in `assets.rs` holds to the workspace's.
+A release build is marked by `FARHELM_RELEASE_BUILD`, set and not empty while the crates compile, and the mark does one
+thing: `crates/farhelm-helm/build.rs` turns it into `cfg(farhelm_release_build)`, which makes a helm, the app's embedded
+one included, default to downloading its host payloads from its own version's release instead of having none (see
+"Provisioning"). Before the GPUI migration the mark was the presence of `FARHELM_UI_DIST`, the path to the web bundle a
+release embedded, because a release build was exactly a build that embedded a UI; with no web bundle left, the fact got
+a name of its own. During the transition the helm accepts either name, so the order in which the desktop build's switch
+and the release workflow's switch land cannot leave a release unmarked. The old name goes once the workflow exports the
+new one.
 
-Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
-risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
+`scripts/build-desktop-binary.sh` refuses to start without `FARHELM_RELEASE_BUILD`, before any compiling, because an
+unmarked app embeds a helm that refuses to add or update a remote host unless it is given a payload directory, and
+nothing else would notice until a user tried. After the build it checks the file about to be archived rather than
+trusting earlier checks, because a tag can point at a commit no other check ran on, and it refuses three kinds of binary
+that would otherwise go unnoticed until a Mac user installed one: one without the fixed text `install.sh` looks for
+(above), which the installer would turn away; one carrying the test-automation bridge (the GUI's `agent` feature, whose
+unauthenticated socket lets any process of the same user drive the app; `docs/gui-agent.md`, "Why the bridge never
+ships"); and one whose `--licenses` fails or does not print the dependency notices that must travel with the binary. It
+reads the installer's text and the bridge's socket variable from the files that define them, so neither check can drift
+from what it guards. Its `--self-test` exercises each refusal against stand-in files and builds nothing.
+
+Native glue that GPUI does not provide (the status sounds through AppKit's `NSSound`, the Mac's keyboard navigation
+preference, opening a saved download through GIO on Linux) lives in `crates/farhelm-desktop`, kept deliberately thin.
 
 The native desktop stores a versioned window rectangle and maximized flag (`desktop-window.json`, version 3) separately
 from client credentials, in the logical pixels GPUI reports for windows and displays alike. The old app stored physical
@@ -7929,12 +7941,19 @@ no longer necessary now that GitHub's arm64 Linux runners are generally availabl
 devbuild's Linux cross-builds on a Mac. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and `farhelm-desktop`) are
 built on a macOS runner with the native toolchain. The Darwin `farhelm` is also the remote Mac supervisor payload;
 `farhelm-desktop` remains local to the desktop installation. Cross-building them from Linux was audited and rejected:
-zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, and cross ships no darwin
-images. Dropping the `.app` bundle removed a third reason (`dx bundle` produces bundles only on the native platform) but
-not those two, and it added one: `farhelm-desktop` is built through `dx build`, which patches the asset names into the
-linked binary and so has to run where that binary is linked. The macOS runner stays. Signing and notarization are
-deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would become one if that
-changes.
+zig cannot link Apple frameworks without a licensed macOS SDK, and cross ships no darwin images. The audit was made for
+the old webview app, whose frameworks were WebKit and AppKit; the GPUI app links Apple frameworks of its own (AppKit,
+Metal, Core Text, among others), so the reason holds. The reason dx added, that it patched asset names into the binary
+where that binary was linked, went away with dx. The macOS runner stays. Signing and notarization are deferred (D11) and
+the artifacts ship unsigned, so signing is not among today's reasons — it would become one if that changes.
+
+No Linux desktop artifact ships: on Linux the app is run from a build (SPEC.md, "Installation and updates", has the
+decision). Only `farhelm` ships for Linux, as static musl (the motivation is below), and the desktop app cannot be built
+by the release's musl jobs anyway. Those jobs build for a musl target on a glibc host, which counts as cross-compiling,
+and two C libraries the app links are found through pkg-config by build scripts that refuse that ("pkg-config has not
+been configured to support cross-compilation"): GPUI's fontconfig (`yeslogic-fontconfig-sys`) and the app's own GIO,
+which is GLib (`gio-sys` and `glib-sys`). This is the same refusal `dist-workspace.toml`'s `precise-builds` keeps the
+release's Linux builds away from.
 
 Motivation: musl-static sidesteps glibc version skew across Ubuntu releases, which matters because provisioning drops
 binaries on machines we do not control; "predicated on whatever cross-compiled binaries are available" in SPEC.md
