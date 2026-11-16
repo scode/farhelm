@@ -310,6 +310,20 @@ fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
     }
 }
 
+/// The current UI session's entity id, `None` while the window is inert (and before the bootstrap starts the
+/// connection).
+///
+/// It is what tells one UI session from the next: a reset always makes a new session entity, so two reads that give
+/// the same id were made under the same connection's state. [`PerSession`] keys its state on it.
+pub fn current_ui_session(cx: &App) -> Option<EntityId> {
+    let connection = connection(cx)?;
+    connection
+        .read(cx)
+        .session
+        .as_ref()
+        .map(|session| session.entity_id())
+}
+
 /// State a view keeps for one UI session, started over when the session changes.
 ///
 /// Views must not keep a session's handles across draws or events (see [`UiSession`]), but some keep state that only
@@ -317,31 +331,46 @@ fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
 /// session pane mounted. A reset makes a new UI session, and state from the old one would act for a connection that
 /// is gone. So the view keeps that state here and reaches it only through [`PerSession::current`], which compares the
 /// current UI session's entity id with the one the state was made under and starts the state over from its default when
-/// they differ. While the window is inert there is no session, and the state is the default too.
+/// they differ, or through [`PerSession::read`], which makes the same comparison but only reads. While the window is
+/// inert there is no session, and the state is the default too.
 ///
 /// The comparison happens when the view asks, not when the reset happens, so a view must reach the state only through
-/// `current`.
+/// `current` or `read`. State an earlier UI session left behind stays in place, unreadable, until the next `current`
+/// starts it over.
 #[derive(Default)]
 pub struct PerSession<T: Default> {
+    /// The UI session `state` was made under; `None` before the first `current`, or when that call found the window
+    /// inert.
     session: Option<EntityId>,
     state: T,
 }
 
 impl<T: Default> PerSession<T> {
-    /// The state for the current UI session, started over if the session changed since the last call.
+    /// The state for the current UI session, started over if the session changed since the last call. While the window
+    /// is inert it starts over on every call, so nothing written then outlives the call.
     pub fn current(&mut self, cx: &App) -> &mut T {
-        let current = connection(cx).and_then(|connection| {
-            connection
-                .read(cx)
-                .session
-                .as_ref()
-                .map(|session| session.entity_id())
-        });
+        let current = current_ui_session(cx);
         if current != self.session || current.is_none() {
             self.session = current;
             self.state = T::default();
         }
         &mut self.state
+    }
+
+    /// The state, only if it was made under the current UI session; `None` otherwise, which the caller reads as the
+    /// default state, since that is what [`PerSession::current`] would start over from.
+    ///
+    /// It exists for code that reads per-session state while drawing, with only `&App` (and so no `&mut` to the state's
+    /// owner): `current` needs `&mut self` because it may start the state over. Reading never starts anything over. So
+    /// `read` gives `None` before the first `current`, while the window is inert, and after a reset until `current` is
+    /// next called, and the state left behind by the earlier session is still there for that call to replace. A writer
+    /// still goes through `current`, which is also what moves the state to a new session.
+    ///
+    /// `None` rather than a default value, because the default is not stored anywhere to lend out; callers pick theirs
+    /// (`is_some_and`, `and_then`).
+    pub fn read(&self, cx: &App) -> Option<&T> {
+        let current = current_ui_session(cx)?;
+        (self.session == Some(current)).then_some(&self.state)
     }
 }
 
