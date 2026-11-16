@@ -90,6 +90,7 @@ pub use status_mark::StatusMark;
 pub use tab_strip::{TabOption, TabStrip};
 pub use text_input::{EditCommand, TextInput, TextInputEvent, TextInputState, Vertical};
 pub use transition::{ENTRANCE, entrance};
+pub use transition::{outline_fade, slide_down};
 
 use std::rc::Rc;
 

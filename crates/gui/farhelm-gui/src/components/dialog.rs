@@ -102,6 +102,7 @@ pub struct DialogFrame {
     fixed_height: Option<Pixels>,
     footer_lead: Option<AnyElement>,
     notices: Option<AnyElement>,
+    top_band: Option<AnyElement>,
     notices_rule: bool,
     compact: bool,
     scroll_stop: Option<SharedString>,
@@ -136,6 +137,7 @@ impl DialogFrame {
             fixed_height: None,
             footer_lead: None,
             notices: None,
+            top_band: None,
             notices_rule: false,
             compact: false,
             scroll_stop: None,
@@ -269,6 +271,14 @@ impl DialogFrame {
     /// is drawn exactly as before.
     pub fn scroll_stop(mut self, label: impl Into<SharedString>) -> Self {
         self.scroll_stop = Some(label.into());
+        self
+    }
+
+    /// A band pinned across the top of the body, under the header, that does not scroll with the body: the launcher's
+    /// permission-escalation banner (the old `.permission-escalation-banner`, sticky at the top of the launcher's
+    /// body). The band brings its own look; the frame only places it.
+    pub fn top_band(mut self, band: impl IntoElement) -> Self {
+        self.top_band = Some(band.into_any_element());
         self
     }
 
@@ -548,6 +558,12 @@ impl RenderOnce for DialogFrame {
             .rounded(metrics::RADIUS_MD)
             .shadow(dialog_shadow(palette))
             .child(header)
+            // Pinned like the header: it neither scrolls with the body nor shrinks. Clipped, so a band that moves into
+            // place (the escalation banner's slide) never draws over the header.
+            .children(
+                self.top_band
+                    .map(|band| div().flex_shrink_0().overflow_hidden().child(band)),
+            )
             .child(body)
             .when(has_footer, |card| card.child(footer));
         focus::scroll_region(card, &card_scroll)

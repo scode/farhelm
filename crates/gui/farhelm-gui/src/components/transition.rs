@@ -2,8 +2,10 @@
 //! "Animation time: the ticker"). GPUI Kit's internals animate too, inside the dependency, where the GUI crates' lint
 //! bans do not reach.
 //!
-//! NOTE: This is not an animation framework. It holds the one transition an area needs today, the fade the quick-launch
-//! pill makes as it appears ([`entrance`]), and a new one is added here only when SPEC.md asks for it.
+//! NOTE: This is not an animation framework. It holds the transitions areas need, each one SPEC.md asks for: the fade the
+//! quick-launch pill makes as it appears ([`entrance`]), and the launcher's permission-escalation banner sliding down
+//! ([`slide_down`]) with the permission control's red outline fading ([`outline_fade`]). A new one is added here only
+//! when SPEC.md asks for it.
 //!
 //! Everything else that moves goes through the ticker, at most ten redraws a second and none in an inactive window. A
 //! one-shot entrance cannot: the old pill's was a 200 ms CSS animation at the display's rate, and at the ticker's
@@ -42,7 +44,9 @@
 
 use std::time::Duration;
 
-use gpui::{Animation, AnimationExt as _, AnyElement, App, ElementId, IntoElement, Styled};
+use gpui::{
+    Animation, AnimationExt as _, AnyElement, App, ElementId, Hsla, IntoElement, Styled, px,
+};
 
 use crate::ticker;
 
@@ -75,6 +79,64 @@ pub fn entrance<E: IntoElement + Styled + 'static>(
             let own = element.style().opacity.unwrap_or(1.);
             element.opacity(own * progress)
         },
+    )
+    .into_any_element()
+}
+
+/// How long the permission-escalation banner takes to slide into place: the old `permission-banner-slide 200ms ease-out`.
+pub const SLIDE_DOWN: Duration = Duration::from_millis(200);
+
+/// How far above its place the banner starts, in pixels: the old `translateY(-12px)`.
+const SLIDE_FROM: f32 = -12.;
+
+/// How long the permission control's red outline takes to fade: the old `permission-outline-* 2.5s ease-out`.
+pub const OUTLINE_FADE: Duration = Duration::from_millis(2500);
+
+/// Draw `element` sliding down into place when it appears, from 12 pixels above over [`SLIDE_DOWN`] on CSS's
+/// `ease-out`, as the old permission-escalation banner did (SPEC.md, "Creation": "a red banner slides down"). GPUI
+/// cannot move a quad by a transform (module docs), so the slide is a layout offset: the element is drawn `relative`
+/// and its `top` goes from -12 pixels to 0, which moves what follows it not at all, as a transform would not. Under
+/// reduced motion it is drawn in place at once. `id` follows [`entrance`]'s rule: fixed for the element's lifetime, a
+/// new id for a new slide.
+pub fn slide_down<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    if ticker::reduced_motion(cx) {
+        return element.into_any_element();
+    }
+    one_shot(
+        id.into(),
+        element.relative(),
+        SLIDE_DOWN,
+        css_ease_out,
+        |element, progress| element.top(px(SLIDE_FROM * (1. - progress))),
+    )
+    .into_any_element()
+}
+
+/// Draw `element`, which already has a border in `color`, with that border fading to transparent over
+/// [`OUTLINE_FADE`] on CSS's `ease-out`: the permission control's thick red outline after an escalation (SPEC.md,
+/// "Creation": "a thick red outline that fades after about two and a half seconds"). Under reduced motion the border
+/// stays as drawn, in full, for as long as the caller draws it ("Reduced motion replaces slide and fade with a static
+/// outline while the banner is shown"). `id` follows [`entrance`]'s rule; a new banner gives a new id, so the fade
+/// plays again.
+pub fn outline_fade<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    color: Hsla,
+    cx: &App,
+) -> AnyElement {
+    if ticker::reduced_motion(cx) {
+        return element.into_any_element();
+    }
+    one_shot(
+        id.into(),
+        element,
+        OUTLINE_FADE,
+        css_ease_out,
+        move |element, progress| element.border_color(color.opacity(1. - progress)),
     )
     .into_any_element()
 }

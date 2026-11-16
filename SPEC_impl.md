@@ -1122,32 +1122,39 @@ over the old rule that nothing redraws on its own more than 10 times a second; w
 whole list at display rate.
 
 One-shot transitions are the exception to the ten-a-second rule, and they do not go through the ticker. One owner in the
-component layer draws them (`components::entrance`, in `crates/gui/farhelm-gui/src/components/transition.rs`), the only
-caller of GPUI's `with_animation` in the GUI crates' own code (GPUI Kit's internals animate inside the dependency, where
-the bans do not reach). The migration's orchestrator approved such an owner on 2026-11-14, for the quick-launch pill's
-entrance (SPEC.md: "a short fade and scale entrance", the old `launch-sequence-enter 200ms ease-out`), should the ticker
-be unable to carry it. It cannot. At ten ticks a second a 200 ms entrance is two or three drawn frames (its first, one
-step, its last), which reads as a jump rather than a fade, against 12 at 60 Hz and 24 at 120 Hz; a ticker handle carries
-no elapsed time to draw from, and needs a view to subscribe, which a component's element-building function does not
-have; and an inactive window gets no ticks, so an entrance started there would sit on its first, invisible frame until
-something else redrew the window, the trap the old stylesheet's note on paused animations describes. GPUI's animation
-works out its value from the executor's clock each time it draws, so it shows the state for the time that has passed,
-ends on its final state on time whether or not the window was active or drew in between, and asks for no frame once it
-ends: a bounded burst at the display's rate. Its callers pass no animation of their own, so none is told to repeat; a
-caller must keep the entrance's id the same from frame to frame, since an id that changes every frame starts a new
-entrance each frame, which never finishes and asks for a frame on every display frame. An inactive window gets the same
-transition as an active one: pausing it there leaves it invisible, and skipping it there would replay it when the window
-is activated. Under reduced motion the owner draws the final state at once, taking the setting from the ticker
-(`ticker::reduced_motion`) rather than from GPUI's own flag, so that all of the motion the app's own code draws follows
-one reading: the host's, read once at startup, which tests can drive. GPUI's flag holds GPUI Kit's own reading of the
-platform (on Linux from the desktop portal, followed live), which can differ from the host's, and under the test
-scheduler nothing writes it. `with_animations` and `with_spring` have no owner.
+component layer draws them (`components::entrance`, `slide_down` and `outline_fade`, in
+`crates/gui/farhelm-gui/src/components/transition.rs`), the only caller of GPUI's `with_animation` in the GUI crates'
+own code (GPUI Kit's internals animate inside the dependency, where the bans do not reach). The migration's orchestrator
+approved such an owner on 2026-11-14, for the quick-launch pill's entrance (SPEC.md: "a short fade and scale entrance",
+the old `launch-sequence-enter 200ms ease-out`), should the ticker be unable to carry it. It cannot. At ten ticks a
+second a 200 ms entrance is two or three drawn frames (its first, one step, its last), which reads as a jump rather than
+a fade, against 12 at 60 Hz and 24 at 120 Hz; a ticker handle carries no elapsed time to draw from, and needs a view to
+subscribe, which a component's element-building function does not have; and an inactive window gets no ticks, so an
+entrance started there would sit on its first, invisible frame until something else redrew the window, the trap the old
+stylesheet's note on paused animations describes. GPUI's animation works out its value from the executor's clock each
+time it draws, so it shows the state for the time that has passed, ends on its final state on time whether or not the
+window was active or drew in between, and asks for no frame once it ends: a bounded burst at the display's rate. Its
+callers pass no animation of their own, so none is told to repeat; a caller must keep the entrance's id the same from
+frame to frame, since an id that changes every frame starts a new entrance each frame, which never finishes and asks for
+a frame on every display frame. An inactive window gets the same transition as an active one: pausing it there leaves it
+invisible, and skipping it there would replay it when the window is activated. Under reduced motion the owner draws no
+motion, taking the setting from the ticker (`ticker::reduced_motion`) rather than from GPUI's own flag, so that all of
+the motion the app's own code draws follows one reading: the host's, read once at startup, which tests can drive. GPUI's
+flag holds GPUI Kit's own reading of the platform (on Linux from the desktop portal, followed live), which can differ
+from the host's, and under the test scheduler nothing writes it. The launcher's permission-escalation banner uses the
+same owner for its two motions, which SPEC.md "Creation" names: `components::slide_down`, the banner sliding into place
+over 200 ms, and `components::outline_fade`, the permission control's red outline fading over 2.5 s; the migration's
+orchestrator approved both on 2026-11-15. Under reduced motion the entrance and the slide draw their final state at
+once, while the outline keeps its first, full color for as long as it is drawn: SPEC.md's "static outline while the
+banner is shown". `with_animations` and `with_spring` have no owner.
 
-Only the fade is drawn (a deviation from the old entrance, to surface to the maintainer): GPUI transforms only sprites,
-not quads or shadows, so the old scale from 96% needs a GPUI patch, and animating the text size instead would re-lay out
-the text every frame and add each in-between size to the glyph atlas, which never evicts. The terminal scrollbar's old
-fade (in over 100 ms, out over 800 ms) is not an entrance but a show and hide that can reverse midway, from wherever the
-fade has got to, which a one-shot transition cannot express; it stays a recorded deviation.
+The banner's slide is a layout offset, `top` going from -12 pixels to 0 on an element drawn `relative`, in place of the
+old `translateY(-12px)`, for the same reason the pill is not scaled (a deviation). Only the fade is drawn (a deviation
+from the old entrance, to surface to the maintainer): GPUI transforms only sprites, not quads or shadows, so the old
+scale from 96% needs a GPUI patch, and animating the text size instead would re-lay out the text every frame and add
+each in-between size to the glyph atlas, which never evicts. The terminal scrollbar's old fade (in over 100 ms, out over
+800 ms) is not an entrance but a show and hide that can reverse midway, from wherever the fade has got to, which a
+one-shot transition cannot express; it stays a recorded deviation.
 
 Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
 `BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker and the
@@ -1156,10 +1163,11 @@ channel's watchdog and heartbeat, and on `with_animation` everywhere but the tra
 window is inactive; by a test that a view holding the clock redraws every 30 seconds in an inactive window under reduced
 motion and leaves no timer once it is gone; and by tests that an entrance follows CSS's `ease-out` to the element's own
 opacity, asks for no frame once it ends, starts opaque with no frame under reduced motion, and in an inactive window
-ends on time and does not play again when the window is activated; and by tests that the one-second clock redraws its
-holders every second, runs until its last holder goes, and wakes no view that holds only the 30-second clock. The wall
-clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's scheduler clock
-outside the ticker, or a view from reading the time without holding a clock handle.
+ends on time and does not play again when the window is activated; by tests that the banner's slide and the outline's
+fade run their course and end in place, and do not move under reduced motion; and by tests that the one-second clock
+redraws its holders every second, runs until its last holder goes, and wakes no view that holds only the 30-second
+clock. The wall clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's
+scheduler clock outside the ticker, or a view from reading the time without holding a clock handle.
 
 ### Notices: the notice center
 

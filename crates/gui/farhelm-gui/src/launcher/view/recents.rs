@@ -166,6 +166,9 @@ impl Launcher {
         }
         self.draft
             .restore_recent(&entry.selection, self.catalog.as_deref());
+        // A setup taken replaces the agent choices, so the escalation banner goes, as the old strip took it away: its
+        // Undo would throw this setup away.
+        self.follow_escalation(true, None, None, cx);
         match &entry.github_repo {
             Some(repo) => self.draft.choose_repository(repo.clone()),
             None => {
