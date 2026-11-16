@@ -1530,25 +1530,38 @@ The confirmation states both outcomes: the session and its checkout are deleted,
 sandbox, the sandbox, every process and file in it and its snapshots are deleted too, with **Delete session**. It is
 never skipped, since it may destroy the sandbox. If other sessions remain, only the chosen session is removed, with its
 checkout discarded rather than moved to the checkout trash (unless another session still uses that checkout), and the
-result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them. If it was the last, the
-helm destroys the sandbox through the ordinary Tensorlake deletion path. A sealed sandbox's Farhelm reports the seal
-whenever it lists its sessions, and the helm finishes destroying any sealed sandbox it sees, whether or not it sent the
-Delete: after a lost reply, a failed destruction or its own restart. While that runs, and if it fails, Hosts and the
-sidebar attention area show the sandbox as being deleted, with the reason and **Retry**, and its sessions show as being
-deleted with their actions unavailable. Deleting a sandbox's last two sessions at once (from the window and an agent,
-say) can briefly show "the sandbox stays" for one Delete just before the other seals it; the list then shows the truth.
+result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them, when that answer comes
+within 20 seconds (below). If it was the last, the helm destroys the sandbox through the ordinary Tensorlake deletion
+path. A sealed sandbox's Farhelm reports the seal whenever it lists its sessions, and the helm finishes destroying any
+sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.
+While that runs, and if it fails, Hosts and the sidebar attention area show the sandbox as being deleted, with the
+reason and **Retry**, and its sessions show as being deleted with their actions unavailable. Deleting a sandbox's last
+two sessions at once (from the window and an agent, say) can briefly show "the sandbox stays" for one Delete just before
+the other seals it; the list then shows the truth.
 
 When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version
-this helm cannot talk to until it is updated), or the request gets no answer, nothing is decided. Delete does not guess
-and never resumes the sandbox: it offers the whole-sandbox Delete instead, whose confirmation warns that every session,
-process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does
-not list because they were started while it was not connected, and that resuming or updating the sandbox first lets
-Farhelm delete just this session. **Delete session and sandbox** proceeds; it works while suspended or disconnected
-through the ordinary Tensorlake deletion path. Sandbox and snapshot cleanup finish before the host and its session
-entries are forgotten; failure keeps a visible reason and allows retry. A sandbox that was sealed and then suspended or
-became unreachable before the helm read the seal shows no sessions until the helm reaches it again; **Delete sandbox**
-in Hosts is the way out meanwhile. **Delete sandbox** in Hosts always destroys the whole sandbox after its own
-confirmation, whether or not its Farhelm answers.
+this helm cannot talk to until it is updated), or the request gets no answer within 20 seconds (below), nothing is
+decided. Delete does not guess and never resumes the sandbox: it offers the whole-sandbox Delete instead, whose
+confirmation warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be
+removed, including sessions Farhelm does not list because they were started while it was not connected, and that
+resuming or updating the sandbox first lets Farhelm delete just this session. **Delete session and sandbox** proceeds;
+it works while suspended or disconnected through the ordinary Tensorlake deletion path. Sandbox and snapshot cleanup
+finish before the host and its session entries are forgotten; a failure within 20 seconds keeps a visible reason and
+allows retry (below for a later one). A sandbox that was sealed and then suspended or became unreachable before the helm
+read the seal shows no sessions until the helm reaches it again; **Delete sandbox** in Hosts is the way out meanwhile.
+**Delete sandbox** in Hosts always destroys the whole sandbox after its own confirmation, whether or not its Farhelm
+answers.
+
+A session's Delete, the whole-sandbox Delete and **Retry** each answer within 20 seconds and carry on past that (decided
+by the GPUI migration's orchestrator on 2026-11-16, under the maintainer's preference for bounded replies). A Delete of
+one session still running then answers that it may still delete the session, and the sandbox with it if it was the last;
+the list then shows how it ended, without the count of other sessions the sandbox holds, and a Delete that decided
+nothing leaves the session listed to delete again. Such a late "nothing decided" does not offer the whole-sandbox Delete
+at once: the next Delete offers it once the sandbox shows as not connected. While the sandbox stays connected but its
+Farhelm does not answer, **Delete sandbox** in Hosts is the way out, once the earlier Delete has ended. A whole-sandbox
+Delete still running then shows the sandbox as being deleted until it ends; if it then fails, the sandbox stays listed
+in its ordinary state, with the reason only in the helm's log, as for a host removal. A Retry still running shows its
+outcome on the sandbox in Hosts, a new failure with its reason and **Retry** again.
 
 Bulk Delete sends one such request per marked session of a sandbox the helm is connected to; its Farhelm takes them one
 at a time, and the last one seals if nothing else remains. Marked sessions of a sandbox the helm could not ask when the
@@ -4833,8 +4846,10 @@ container, every session and process in it, its checkouts, files and unpushed wo
 Farhelm does not list. That Delete works while paused or while its supervisor is disconnected when the container host
 can be reached, without Resume. Confirmed container absence precedes forgetting its row and cached sessions. Failure
 keeps the resource and reason visible for retry; a sealed container whose destruction failed shows as being deleted,
-with the reason and Retry. Host-level **Delete container** always destroys the whole container after its confirmation.
-Whole-container deletion moves no checkout to the trash.
+with the reason and Retry. These Deletes and Retry answer within 20 seconds as Sandbox sessions' do, so a late answer
+loses the count of other sessions and the immediate offer of the whole-container Delete, and a late failure of the
+whole-container Delete reaches only the helm's log. Host-level **Delete container** always destroys the whole container
+after its confirmation. Whole-container deletion moves no checkout to the trash.
 
 Suspend uses Podman pause, preserving processes and memory. Resume unpauses them. The helm closes its exec connection
 before pausing, since a paused exec pipe can hang. Controls, the suspended card, rows and Stop and suspend follow the
