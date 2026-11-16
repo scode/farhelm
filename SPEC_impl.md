@@ -8199,11 +8199,12 @@ which opens the sidebar's Rename editor over it in naming mode (`session_list::r
 an unchanged save kept without a request, focus to the new terminal however it closes) unless the helm's
 `name_session_on_quick_launch` is false. From the submit on, the outcome is the launcher's, and the dispatcher watches
 no reply. Templates and bindings are read from the store at the press, and the hosts, remembered wrapper prefixes and
-default folders when the batch applies; the catalog is the one read a press waits for; there is no snapshot of the
-keyboard context or of the modal epoch: GPUI handles presses in order on one thread, a shown launcher's moved-on rule
-decides whether a prepared launch opens anything, and the UI channel's ordering keeps a launch from overtaking a
-template save sent before it. A launcher prepared out of sight shown after the user moved on waits behind the launch
-notice, as a refused launch does.
+default folders when the batch applies; a press waits for the catalog, and a press that launches out of sight also for
+the host's launch history while New's folder default is pending and the templates chose neither a folder nor a managed
+checkout; there is no snapshot of the keyboard context or of the modal epoch: GPUI handles presses in order on one
+thread, a shown launcher's moved-on rule decides whether a prepared launch opens anything, and the UI channel's ordering
+keeps a launch from overtaking a template save sent before it. A launcher prepared out of sight shown after the user
+moved on waits behind the launch notice, as a refused launch does.
 
 One row search (`templates/rows.rs`) is what the quick switcher's templates section, the launcher's `tl:` search and the
 Cmd+J list call; the launcher's search draws its rows (`launcher::search` filters them by `rows::matches`, only under

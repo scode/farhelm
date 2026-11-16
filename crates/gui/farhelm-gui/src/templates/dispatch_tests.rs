@@ -26,13 +26,15 @@ use serde_json::json;
 
 use super::SEQUENCE_PREFIX_NAME;
 use super::dispatch::{Origin, Reference, incomplete_banner, resolve};
+use super::save_tests::panel_name_focused;
 use super::sequence::{self, Binding, Refusal};
 use super::shortcuts::Bindings;
 use super::summary::Part;
 use crate::actions::{QUICK_LAUNCH_CHORD, SEQUENCE_PREFIX_CHORD};
-use crate::launcher::launch_tests::creates_answering;
+use crate::launcher::launch_tests::{creates_answering, creates_answering_with};
 use crate::launcher::view::BANNER_SHOWS_FOR;
 use crate::launcher::view_tests::fixture_hosts;
+use crate::launcher::yolo_tests::refuse_for_yolo;
 use crate::launcher::{self, launch};
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
@@ -1019,17 +1021,21 @@ fn a_number_key_launches_its_template_unseen(cx: &mut TestAppContext) {
 /// The templates collection of [`templates`], available, with `yolo-go` added last: a command launch of `true` asserted
 /// YOLO, which launches on its own and which a host that asks first refuses until the user answers.
 fn with_yolo_go() -> CollectionState {
-    let mut state = templates(Availability::Available);
-    let yolo_go = template(
+    templates_with(template(
         "yolo-go",
         TemplateFields {
             yolo: Some(true),
             ..runs_true()
         },
-    );
+    ))
+}
+
+/// The templates collection of [`templates`], available, with `extra` added last.
+fn templates_with(extra: LaunchTemplate) -> CollectionState {
+    let mut state = templates(Availability::Available);
     state.entries.push(KeyedEntry {
-        key: yolo_go.name.clone(),
-        value: serde_json::to_value(&yolo_go).unwrap(),
+        key: extra.name.clone(),
+        value: serde_json::to_value(&extra).unwrap(),
     });
     let keys: Vec<String> = state
         .entries
@@ -1039,17 +1045,6 @@ fn with_yolo_go() -> CollectionState {
     let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
     state.meta = meta(&keys);
     state
-}
-
-/// The helm refuses create `id` for YOLO, as it does on a host that asks first.
-fn refuse_for_yolo(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64) {
-    helm.reply_marked(
-        id,
-        409,
-        vec![farhelm_proto::ui_channel::HelmMarker::YoloConfirmation],
-        Some(json!("YOLO launches on host1 need --yolo")),
-    );
-    settle(cx);
 }
 
 /// Check that the launcher shows the ordinary YOLO question over `yolo-go`'s draft: focus on Cancel, the asserted
@@ -1172,6 +1167,76 @@ fn a_number_keys_yolo_refusal_reveals_the_ordinary_question_over_its_draft(
     push(&mut helm, cx, with_yolo_go());
     push(&mut helm, cx, bound(None, &[("1", "yolo-go")]));
     a_refused_yolo_quick_launch_asks(&mut helm, cx, |cx| number_key(cx, 1));
+}
+
+/// The creates the window sent, unanswered, and the launch-history reads it made, every other command answered (the
+/// catalog with [`catalog`], each history read with one whose only launch went into `/srv/last-work` on host1), round
+/// after round until a round sends nothing but creates.
+fn creates_and_history_reads(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+) -> (Vec<FakeCommand>, usize) {
+    let history = json!({
+        "launches": [{
+            "host": 1, "github_repo": null, "canonical_cwd": "/srv/last-work", "cwd": "/srv/last-work",
+            "selection": { "harness": "codex" }, "created_at": 1, "creation_seq": null,
+        }],
+        "folders": [],
+        "checkout_config_revision": 1,
+    });
+    creates_answering_with(helm, cx, &catalog(), &history)
+}
+
+/// SPEC.md, "Working directory": with no session open on the host, New starts in "the directory of the newest recent
+/// setup on that installation that launched into a plain folder", and a quick launch uses "exactly New's defaults".
+/// The launcher waits out of sight for the host's history for that (`launcher::folder_default_tests`); through a
+/// template's press it must still wait when the template leaves the folder alone, and need not when the template names
+/// one: `apply` sets a template's folder with `edit_folder`, which marks it touched, so the history cannot change it,
+/// and waiting would only hold the launch on a read it does not need. Specified: with no session open, ⚡ on `go` (no
+/// folder) reads host1's history once and sends one create in `/srv/last-work`, the folder it names.
+#[gpui::test]
+fn a_quick_launch_without_a_folder_starts_in_the_hosts_last_folder(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("go"));
+    chord(cx);
+    let (sent, reads) = creates_and_history_reads(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    assert_eq!(reads, 1, "the quick launch read the host's history");
+    assert_eq!(
+        create.body.clone().unwrap_or_default()["cwd"],
+        json!("/srv/last-work")
+    );
+    assert!(!any_open(cx), "the launcher was never shown");
+}
+
+/// The other half of the case above. Specified: with no session open, ⚡ on `go-here`, `go` with its own folder
+/// `/srv/here`, sends one create in `/srv/here` and reads no history.
+#[gpui::test]
+fn a_quick_launch_of_a_template_with_a_folder_reads_no_history(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    assert_eq!(
+        cx.update(|_, cx| local_state::selected(cx)),
+        None,
+        "the premise: no session is open, so New's folder default is the host's"
+    );
+    assert!(!any_open(cx), "the premise: nothing is open");
+    let go_here = TemplateFields {
+        destination: Some(TemplateDestination::Folder("/srv/here".into())),
+        ..runs_true()
+    };
+    push(&mut helm, cx, templates_with(template("go-here", go_here)));
+    push(&mut helm, cx, marked(Some("go-here")));
+    chord(cx);
+    let (sent, reads) = creates_and_history_reads(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    assert_eq!(reads, 0, "the template's folder needs no history");
+    assert_eq!(
+        create.body.clone().unwrap_or_default()["cwd"],
+        json!("/srv/here")
+    );
 }
 
 /// SPEC.md: "Unbound keys open Templates with a binding hint", and a key bound to a name no template has is as
@@ -1330,15 +1395,6 @@ fn template_shortcuts_change_nothing_while_save_as_template_is_open(cx: &mut Tes
 /// Whether Save as template's panel is drawn in the open launcher.
 fn panel_open(cx: &mut VisualTestContext) -> bool {
     text(cx).contains("Choose which parts of this setup the template keeps")
-}
-
-/// Whether focus is in the open Save as template panel's name field.
-fn panel_name_focused(cx: &mut VisualTestContext) -> bool {
-    crate::launcher::view_tests::read(cx, |launcher, window, cx| {
-        launcher
-            .save_panel_for_tests()
-            .is_some_and(|panel| panel.read(cx).name_focus(cx).is_focused(window))
-    })
 }
 
 /// A press made while the launcher's catalog read is out waits for it; if Save as template's panel opens meanwhile,

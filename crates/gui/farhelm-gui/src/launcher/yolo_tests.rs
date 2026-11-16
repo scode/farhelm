@@ -96,8 +96,9 @@ fn yolo_codex_draft() -> LaunchDraft {
     draft
 }
 
-/// The helm refuses create `id` for YOLO, as it does on a host that asks first.
-fn refuse_for_yolo(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64) {
+/// The helm refuses create `id` for YOLO, as it does on a host that asks first. Shared with the quick-launch tests
+/// (`templates::dispatch_tests`), whose hidden launches meet the same refusal.
+pub(crate) fn refuse_for_yolo(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64) {
     helm.reply_marked(
         id,
         409,

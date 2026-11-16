@@ -26,7 +26,9 @@
 //! - **Applying.** The templates are applied all or nothing, through [`super::apply`], the only path by which a template
 //!   changes a draft, and always against the model catalog the launcher read: in the launcher to its draft, each press
 //!   or completed sequence its own refusal unit; on the page to New's prefill, in a launcher prepared out of sight
-//!   while its catalog read runs (`launcher::view::prepare_unseen`).
+//!   while its catalog read runs (`launcher::view::prepare_unseen`), which, for a launch, then also waits out of sight
+//!   for the host's launch history while New's folder default is pending and the templates chose neither a folder nor
+//!   a managed checkout.
 //! - **Launching or showing** (the page). When the templates together supply what their launch kind needs (the shared
 //!   `stacked_quick_launch_eligible` fold), the draft is started without drawing the launcher, through its ordinary
 //!   submit path; otherwise New is shown with the draft and the banner the origin calls for ([`incomplete_banner`]). A
@@ -34,10 +36,14 @@
 //!   session unless the user moved on, and a refusal brings the launcher back with its draft or offers it in a notice.
 //!   Nothing here watches the reply.
 //!
-//! The one read a press waits for is the catalog, and only on the page; presses that land in the launcher while its
-//! catalog read is out wait for it in order (`Launcher::apply_batch`). The templates and bindings are resolved at the
-//! press; the hosts, remembered wrapper prefixes and default folders they are applied against are read from the store
-//! when they apply, which for a press that waited is a frame or two later and fresher.
+//! On the page a press waits for the catalog. A press that launches out of sight then also waits for the host's launch
+//! history while New's folder default is pending (no session open on the host) and the templates chose neither a
+//! folder nor a managed checkout: its newest plain-folder launch names the folder, and a failed read shows New saying
+//! so (`launcher::view`'s quick-launch folder wait). A press that shows New does not wait for it there. Presses that
+//! land in the launcher while its catalog read is out wait for it in order (`Launcher::apply_batch`). The templates
+//! and bindings are resolved at the press; the hosts, remembered wrapper prefixes and default folders they are applied
+//! against are read from the store when they apply, which for a press that waited is a frame or two later and
+//! fresher.
 //!
 //! The banner New opens with goes about six seconds after the templates applied, or at the user's first edit (SPEC.md,
 //! "Template number shortcuts", which the sequence's banner follows); the launcher keeps that deadline
