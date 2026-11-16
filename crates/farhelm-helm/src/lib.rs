@@ -982,6 +982,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/retry-delete",
             axum::routing::post(sessions::retry_environment_delete),
         )
+        // Suspend and Resume sit here too, but their handlers own their work:
+        // each runs its change on a task of its own under the host reply bound
+        // (`sessions::within_host_reply_bound_saying`), which finishes the
+        // change whether or not the caller still waits.
         .route(
             "/api/hosts/{id}/suspend",
             axum::routing::post(tensorlake::lifecycle::suspend),

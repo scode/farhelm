@@ -2018,13 +2018,59 @@ async fn lifecycle_resume_holds_its_direction_until_the_api_finishes() {
     harness.await_state(host, HostState::is_connected).await;
 }
 
+/// How [`lifecycle_outcomes_before_and_after_the_reply_bound_in_each_direction`]
+/// ends a Suspend or Resume it holds at Tensorlake's gate.
+#[derive(Clone, Copy, Debug)]
+enum HeldOutcome {
+    /// Tensorlake refuses the call once released, well inside the bound.
+    Refused,
+    /// The call stays held until Tensorlake's own budget (60 seconds for
+    /// Suspend, 120 for Resume) runs out, long after the host reply bound.
+    LateFailure,
+    /// The call succeeds once released after the host reply bound.
+    LateSuccess,
+}
+
+/// The exact 504 text a host's Suspend (`resume` false) or Resume still
+/// running at the host reply bound answers with, written out here so that a
+/// change to the wording is a deliberate change to this test too.
+fn still_changing_text(resume: bool) -> String {
+    format!(
+        "{} the host did not finish within 20 seconds; it carries on, and the host's state in \
+         the hosts list and the session list will show the result",
+        if resume { "resuming" } else { "suspending" }
+    )
+}
+
 /// Neither a vendor refusal nor an expired lifecycle budget may strand a
-/// connection hold. Observe the unsettled operation before causing either
-/// outcome, then prove a running sandbox can obtain a fresh connection.
+/// connection hold, and since the GUI's ordered channel resets the window
+/// when a command goes unanswered for 30 seconds, a change Tensorlake has not
+/// settled by the host reply bound must answer then and still finish.
+///
+/// Spec, for each direction with Tensorlake's suspend or resume call held at
+/// a gate (observed held, showing Suspending or Resuming, before any outcome):
+///
+/// - Refused: the route answers Tensorlake's reason with a 503.
+/// - LateFailure: at `HOST_REPLY_BOUND` the route answers the exact
+///   carries-on 504 ([`still_changing_text`]) while the change still holds the
+///   host's provisioning lock; once Tensorlake's budget runs out, the change
+///   gives the host back (it leaves Suspending or Resuming).
+/// - LateSuccess: the same 504 at the bound with the lock still held; once
+///   released, the change finishes with nobody waiting: Suspend leaves the
+///   host Suspended with its completion time stored, Resume connects it again
+///   with the stale suspension time it started with cleared.
+///
+/// After either failure no suspension time is stored and a running sandbox
+/// obtains a fresh connection.
 #[farhelm_testtrace::test(start_paused = true)]
-async fn lifecycle_failures_and_timeouts_release_each_direction() {
+async fn lifecycle_outcomes_before_and_after_the_reply_bound_in_each_direction() {
+    let bound = crate::sessions::HOST_REPLY_BOUND;
     for resume in [false, true] {
-        for timed_out in [false, true] {
+        for outcome in [
+            HeldOutcome::Refused,
+            HeldOutcome::LateFailure,
+            HeldOutcome::LateSuccess,
+        ] {
             let verb = if resume { "resume" } else { "suspend" };
             let initial = if resume {
                 SandboxStatus::Suspended
@@ -2041,10 +2087,12 @@ async fn lifecycle_failures_and_timeouts_release_each_direction() {
                 } else {
                     state.suspend_gate = Some(gate.clone());
                 }
-                state.failures.push((
-                    verb,
-                    TensorlakeError::Transport("injected lifecycle failure".into()),
-                ));
+                if !matches!(outcome, HeldOutcome::LateSuccess) {
+                    state.failures.push((
+                        verb,
+                        TensorlakeError::Transport("injected lifecycle failure".into()),
+                    ));
+                }
             }
             let (harness, host) = sandbox_helm(&api, true).await;
             if resume {
@@ -2053,6 +2101,15 @@ async fn lifecycle_failures_and_timeouts_release_each_direction() {
                     .await;
             } else {
                 harness.await_state(host, HostState::is_connected).await;
+            }
+            if resume && matches!(outcome, HeldOutcome::LateSuccess) {
+                // A suspension time the late Resume must clear, so that its
+                // absence afterwards shows the change ran after the reply.
+                harness
+                    .store
+                    .set_tensorlake_suspended_at(host, Some(1))
+                    .await
+                    .unwrap();
             }
             let harness = Arc::new(harness);
             let request = tokio::spawn({
@@ -2068,25 +2125,59 @@ async fn lifecycle_failures_and_timeouts_release_each_direction() {
                     if direction == if resume { LifecycleDirection::Resuming } else { LifecycleDirection::Suspending }
             ));
             assert_eq!(api.0.lock().unwrap().sandboxes[0].2, initial);
-            if timed_out {
-                tokio::time::advance(Duration::from_secs(if resume { 120 } else { 60 })).await;
-            } else {
+            if let HeldOutcome::Refused = outcome {
                 gate.release.notify_one();
+                let (status, body) = request.await.unwrap();
+                assert_eq!(
+                    status,
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "{body}"
+                );
+                assert!(body.contains("injected lifecycle failure"), "{body}");
+            } else {
+                tokio::time::advance(bound).await;
+                let (status, body) = request.await.unwrap();
+                assert_eq!(
+                    (status, body.as_str()),
+                    (
+                        axum::http::StatusCode::GATEWAY_TIMEOUT,
+                        still_changing_text(resume).as_str()
+                    ),
+                    "{outcome:?}"
+                );
+                assert!(
+                    harness
+                        .state
+                        .manager
+                        .try_host_provision_lock(host)
+                        .is_none(),
+                    "{verb} {outcome:?}: the change still runs after its reply"
+                );
+                if let HeldOutcome::LateSuccess = outcome {
+                    gate.release.notify_one();
+                    if resume {
+                        harness.await_state(host, HostState::is_connected).await;
+                    } else {
+                        harness
+                            .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+                            .await;
+                    }
+                    let suspended_at = row(&harness.store, host)
+                        .await
+                        .tensorlake
+                        .unwrap()
+                        .suspended_at;
+                    assert_eq!(suspended_at.is_some(), !resume, "{suspended_at:?}");
+                    continue;
+                }
+                let budget = Duration::from_secs(if resume { 120 } else { 60 });
+                tokio::time::advance(budget - bound).await;
+                harness
+                    .await_state(host, |state| {
+                        !matches!(state, HostState::TensorlakeChanging { .. })
+                    })
+                    .await;
             }
-            let (status, body) = request.await.unwrap();
-            assert_eq!(
-                status,
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                "{body}"
-            );
-            assert!(
-                body.contains(if timed_out {
-                    "within"
-                } else {
-                    "injected lifecycle failure"
-                }),
-                "{body}"
-            );
             assert!(
                 row(&harness.store, host)
                     .await
@@ -2103,6 +2194,312 @@ async fn lifecycle_failures_and_timeouts_release_each_direction() {
             harness.await_state(host, HostState::is_connected).await;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Stop and suspend
+// ---------------------------------------------------------------------------
+
+/// How the supervisor [`stop_peer`] stands in for answers a session's Stop.
+#[derive(Clone, Copy)]
+enum StopAnswer {
+    /// Never: the Stop stays unanswered for as long as the test runs.
+    Never,
+    /// Stopped, with every tab closed.
+    Clean,
+    /// Stopped, but with this cleanup notice: a tab it could not close.
+    LeavesBehind(&'static str),
+}
+
+/// A supervisor peer that answers the helm's first `StopSession` as `answer`
+/// says and ignores everything else, reading on until the helm drops the
+/// connection so that it never ends the connection itself. The receiver
+/// yields the stopped session's id once the Stop has arrived.
+fn stop_peer(
+    answer: StopAnswer,
+) -> (
+    tokio::io::DuplexStream,
+    tokio::sync::oneshot::Receiver<String>,
+) {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (arrived, stop) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (read, write) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let mut arrived = Some(arrived);
+        while let Ok(Some(frame)) = reader.read_frame().await {
+            let Ok(ControlMsg::StopSession {
+                req_id, session_id, ..
+            }) = parse_control(&frame)
+            else {
+                continue;
+            };
+            let notice = match answer {
+                StopAnswer::Never => None,
+                StopAnswer::Clean => Some(None),
+                StopAnswer::LeavesBehind(notice) => Some(Some(notice.to_string())),
+            };
+            if let Some(notice) = notice {
+                writer
+                    .write_control(&ControlMsg::SessionStopped { req_id, notice })
+                    .await
+                    .unwrap();
+            }
+            if let Some(arrived) = arrived.take() {
+                let _ = arrived.send(session_id);
+            }
+        }
+    });
+    (client_side, stop)
+}
+
+/// Wait up to ten seconds for [`stop_peer`]'s Stop to arrive and check that
+/// it named the fixture's session, so that a Stop that never arrives fails
+/// here rather than parking the test until nextest's timeout.
+async fn stop_arrived(stopped: tokio::sync::oneshot::Receiver<String>) {
+    let session = tokio::time::timeout(Duration::from_secs(10), stopped)
+        .await
+        .expect("premise: the Stop reached the supervisor")
+        .unwrap();
+    assert_eq!(session, "sess-1");
+}
+
+/// A helm over `api` with the key saved and one session-owned sandbox host
+/// (an environment created for its session), whose actor reads the
+/// sandbox's status from `api` and whose supervisor is `peer`, listing one
+/// session, `sess-1`, under an identity so that the session is cached and
+/// routable. Returns once the host is connected with that listing.
+async fn session_sandbox_helm(
+    api: &FakeApi,
+    peer: tokio::io::DuplexStream,
+) -> (crate::rest_harness::Harness, HostId) {
+    let harness = crate::rest_harness::FleetBuilder::new()
+        .await
+        .tensorlake_api(Arc::new(api.clone()))
+        .sandboxes(Arc::new(api.clone()))
+        .start()
+        .await;
+    harness
+        .store
+        .save_tensorlake_config(SaveSettings {
+            api_key: Some(KEY.into()),
+            ..Default::default()
+        })
+        .await
+        .ok()
+        .unwrap();
+    let host = harness
+        .store
+        .register_session_sandbox(crate::store::NewTensorlakeHost {
+            destination: super::test_support::destination("farhelm-sess-k7q2-owned-abcd"),
+            entry: crate::store::NewHostEntry::new(Some("Owned sandbox")).unwrap(),
+            sandbox: "farhelm-sess-k7q2-owned-abcd".into(),
+            recipe: "dev".into(),
+            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 1,
+                memory_gb: 1,
+                disk_gb: 10,
+            },
+        })
+        .await
+        .unwrap();
+    harness
+        .store
+        .set_tensorlake_sandbox_id(host, "sbx-1")
+        .await
+        .unwrap();
+    harness
+        .store
+        .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
+        .await
+        .unwrap();
+    harness.fleet.edit(host, |script| {
+        *script = crate::rest_harness::HostScript {
+            identity: Some("owned-install".into()),
+            sessions: vec![crate::rest_harness::session("sess-1", 100)],
+            peer: Some(peer),
+            ..crate::rest_harness::HostScript::default()
+        }
+    });
+    harness.manager.sync_registry().await.unwrap();
+    harness.await_refreshed(host).await;
+    (harness, host)
+}
+
+/// Send the ordinary `POST /api/sessions/sess-1/stop-and-suspend` on `host`
+/// through the real router, on a task of its own, timed from just before the
+/// send (`crate::tensorlake::tests::spawn_call`).
+fn spawn_stop_and_suspend(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+) -> tokio::task::JoinHandle<(axum::http::StatusCode, String, Duration)> {
+    crate::tensorlake::tests::spawn_call(
+        harness,
+        crate::tensorlake::tests::request(
+            "POST",
+            &harness.session_uri(host, "/api/sessions/sess-1/stop-and-suspend"),
+            Some("{}".into()),
+        ),
+    )
+}
+
+/// The exact 504 text Stop and suspend answers with when it is still running
+/// at the host reply bound, whichever half is running then.
+const STOP_AND_SUSPEND_CARRIES_ON: &str = "Stop and suspend did not finish within 20 seconds; it \
+     carries on, suspending the environment only once the agent has stopped cleanly, and the \
+     session list will show the result";
+
+/// Wait for a Stop and suspend reply at the host reply bound: it must come
+/// no sooner than the bound and within a second of it on the tokio clock,
+/// with [`STOP_AND_SUSPEND_CARRIES_ON`].
+async fn carries_on_at_the_bound(
+    call: tokio::task::JoinHandle<(axum::http::StatusCode, String, Duration)>,
+) {
+    let bound = crate::sessions::HOST_REPLY_BOUND;
+    let (status, body, waited) = crate::tensorlake::tests::reply_of(call).await;
+    assert!(
+        waited >= bound && waited < bound + Duration::from_secs(1),
+        "the route answered after {waited:?}: {status} {body}"
+    );
+    assert_eq!(
+        (status, body.as_str()),
+        (
+            axum::http::StatusCode::GATEWAY_TIMEOUT,
+            STOP_AND_SUSPEND_CARRIES_ON
+        )
+    );
+}
+
+/// Why: Stop and suspend is one command with one reply, so one bound must
+/// cover its Stop and its Suspend together for the GUI's ordered channel,
+/// and the user's suspension must still happen after the reply.
+///
+/// Spec: with the supervisor answering the Stop cleanly and Tensorlake's
+/// suspend call held (both observed first), on a paused clock, the route
+/// answers 504 at `HOST_REPLY_BOUND`, counted from the send, with
+/// [`STOP_AND_SUSPEND_CARRIES_ON`], while the Suspend still holds the host's
+/// provisioning lock and the sandbox still runs. Released, the Suspend
+/// finishes with nobody waiting: the host is Suspended with its completion
+/// time stored.
+#[farhelm_testtrace::test]
+async fn stop_and_suspend_answers_at_the_reply_bound_and_suspends_after() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-sess-k7q2-owned-abcd",
+        SandboxStatus::Running,
+    );
+    let gate = Arc::new(Gate::default());
+    api.0.lock().unwrap().suspend_gate = Some(gate.clone());
+    let (peer, stopped) = stop_peer(StopAnswer::Clean);
+    let (harness, host) = session_sandbox_helm(&api, peer).await;
+
+    tokio::time::pause();
+    let call = spawn_stop_and_suspend(&harness, host);
+    stop_arrived(stopped).await;
+    tokio::time::timeout(Duration::from_secs(10), gate.entered.notified())
+        .await
+        .expect("premise: the Suspend reached Tensorlake and is held there");
+    carries_on_at_the_bound(call).await;
+    assert!(
+        harness
+            .state
+            .manager
+            .try_host_provision_lock(host)
+            .is_none(),
+        "the Suspend still runs after the reply"
+    );
+    assert_eq!(api.0.lock().unwrap().sandboxes[0].2, SandboxStatus::Running);
+
+    gate.release.notify_one();
+    tokio::time::resume();
+    harness
+        .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+        .await;
+    assert!(
+        row(&harness.store, host)
+            .await
+            .tensorlake
+            .unwrap()
+            .suspended_at
+            .is_some()
+    );
+}
+
+/// Fail unless Tensorlake was never asked to suspend the sandbox. Its status
+/// reads are not counted: the connection actor reads the status before every
+/// dial, whatever the route does.
+fn assert_no_suspend_asked(api: &FakeApi) {
+    let calls = api.calls();
+    assert!(
+        !calls.iter().any(|call| call.starts_with("suspend ")),
+        "{calls:?}"
+    );
+    assert_eq!(api.0.lock().unwrap().sandboxes[0].2, SandboxStatus::Running);
+}
+
+/// Why: the reply at the bound cannot tell which half is running, so what
+/// keeps a partial outcome truthful is that the environment is never
+/// suspended before its agent has stopped cleanly, bound or no bound.
+///
+/// Spec: with the supervisor never answering the Stop (observed arriving),
+/// on a paused clock, the route answers 504 at `HOST_REPLY_BOUND` with
+/// [`STOP_AND_SUSPEND_CARRIES_ON`], with Tensorlake never asked to suspend
+/// and the host still connected. With the supervisor's Stop leaving a tab
+/// open, the route answers within the bound with the 409 that says so and
+/// that the environment was not suspended, again with no suspend asked.
+#[farhelm_testtrace::test]
+async fn stop_and_suspend_never_suspends_before_its_stop_finishes() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-sess-k7q2-owned-abcd",
+        SandboxStatus::Running,
+    );
+    let (peer, stopped) = stop_peer(StopAnswer::Never);
+    let (harness, host) = session_sandbox_helm(&api, peer).await;
+    tokio::time::pause();
+    let call = spawn_stop_and_suspend(&harness, host);
+    stop_arrived(stopped).await;
+    carries_on_at_the_bound(call).await;
+    assert_no_suspend_asked(&api);
+    assert!(
+        harness
+            .state
+            .manager
+            .state(host)
+            .is_some_and(|state| state.is_connected()),
+        "an unfinished Stop leaves the host as it was"
+    );
+    tokio::time::resume();
+    drop(harness);
+
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-sess-k7q2-owned-abcd",
+        SandboxStatus::Running,
+    );
+    let (peer, stopped) = stop_peer(StopAnswer::LeavesBehind(
+        "terminal tab t1 could not be closed",
+    ));
+    let (harness, host) = session_sandbox_helm(&api, peer).await;
+    let call = spawn_stop_and_suspend(&harness, host);
+    stop_arrived(stopped).await;
+    let (status, body, waited) = crate::tensorlake::tests::reply_of(call).await;
+    assert!(waited < crate::sessions::HOST_REPLY_BOUND, "{waited:?}");
+    assert_eq!(
+        (status, body.as_str()),
+        (
+            axum::http::StatusCode::CONFLICT,
+            "The agent stopped, but cleanup was incomplete; the environment was not suspended: \
+             terminal tab t1 could not be closed"
+        )
+    );
+    assert_no_suspend_asked(&api);
 }
 
 /// Suspend and Delete must drop actual actor-owned tunnel leases before
