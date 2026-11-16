@@ -65,7 +65,7 @@ use gpui::{
 use super::editor::{self, DeleteKind, Editor, Ended};
 use super::fields::taken_refusal;
 use super::shortcuts::{self, Bindings, KEYS};
-use super::summary::{self, Part};
+use super::summary;
 use crate::assets::Icon;
 use crate::components::{Button, DialogFrame, HoverHelp, IconButton, MenuHeader, MenuItem, Tier};
 use crate::focus::{self, Mark, ReturnTo};
@@ -369,39 +369,8 @@ fn dismiss(
     }
 }
 
-/// A template's summary on one line (`.templates-row-summary`: `white-space: nowrap`): the app's words as text, the
-/// template's values through the host-text element. The parts never wrap; a summary longer than the row is cut at the
-/// row's edge, without the old ellipsis, since an ellipsis can only end one text element and a summary is several
-/// (recorded in the parity file).
-fn summary_line(template: &LaunchTemplate) -> gpui::Div {
-    div()
-        .flex()
-        .flex_row()
-        .flex_nowrap()
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .children(
-            summary::parts(&template.fields)
-                .into_iter()
-                .map(|part| -> AnyElement {
-                    match part {
-                        Part::Words(words) => div().flex_none().child(words).into_any_element(),
-                        Part::Host(value) => host_text::element(&HostText::from_host(value))
-                            .flex_none()
-                            .into_any_element(),
-                        Part::Mono(value) => host_text::element(&HostText::from_host(value))
-                            .flex_none()
-                            .font_family(crate::assets::TERMINAL_FONT)
-                            .into_any_element(),
-                    }
-                }),
-        )
-}
-
 /// `.templates-quick-mark`: the bolt button's column width.
 const BOLT_WIDTH: f32 = 28.;
-/// `.templates-quick-chord`: the marked row's chord line.
-const CHORD_TEXT: f32 = 11.;
 /// `.templates-number-key`: the key button's text size.
 const KEY_TEXT: f32 = 10.;
 /// The number-key menu's width, as wide as the old flyout drew its longest description.
@@ -951,12 +920,12 @@ impl TemplatesDialog {
                     } else {
                         palette.fg_1
                     }))
-                    .child(summary_line(template)),
+                    .child(summary::line(&summary::parts(&template.fields))),
             );
         if marked {
             lines = lines.child(
                 div()
-                    .text_size(px(CHORD_TEXT))
+                    .text_size(px(summary::CHORD_TEXT))
                     .font_family(crate::assets::TERMINAL_FONT)
                     .text_color(theme::color(palette.fg_2))
                     .child(super::QUICK_LAUNCH_SHORTCUT_NAME),
