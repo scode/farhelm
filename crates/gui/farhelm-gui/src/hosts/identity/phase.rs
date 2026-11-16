@@ -206,9 +206,26 @@ pub(crate) fn detail_lines(
     lines
 }
 
+/// The progress card's connection detail for `host`, drawn under `id`: what the helm knows about its phase, the same
+/// line its row's details show ([`detail_lines`]' evidence), or `None` while it is connected, when the card has no
+/// connection section (the old card's `host_state_detail`, shown only while `!is_connected`). The card follows the host
+/// entry, not the run, so a host that reconnects mid-run loses the section at the next push. `twin` names a duplicate's
+/// other entry, as for the row.
+pub(crate) fn connection_line(
+    host: &HostView,
+    id: impl Into<gpui::ElementId>,
+    twin: impl Fn(i64) -> Option<HostText>,
+) -> Option<HostSentence> {
+    match host.state {
+        HostStateView::Connected { .. } => None,
+        _ => Some(evidence(HostSentence::new(id), &host.state, &twin)),
+    }
+}
+
 /// What the helm knows about the host's phase (the old `state_detail`), appended to `line`. For a connected host this
 /// one line is its version, identity and session count. Visible to the crate for the session pane's unavailable card,
-/// whose smaller diagnostics line is this one after the host's name, as the old card's was.
+/// whose smaller diagnostics line is this one after the host's name, as the old card's was. The progress card reaches it
+/// through [`connection_line`].
 pub(crate) fn evidence(
     line: HostSentence,
     state: &HostStateView,
