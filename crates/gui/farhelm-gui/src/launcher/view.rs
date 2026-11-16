@@ -64,7 +64,7 @@ use super::draft::{
     remembered_permission,
 };
 use super::launch::{self, Request};
-use super::request::{Target, capitalized};
+use super::request::{Recipes, Target, capitalized};
 use super::words::agent_note;
 use crate::assets::Icon;
 use crate::components::{
@@ -1042,10 +1042,12 @@ impl Launcher {
                 .host_refusal(&hosts)
                 .or_else(|| Some("Choose a model before restarting".to_owned()));
         }
+        let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         let target = Target {
             hosts: &hosts,
             catalog: self.catalog.as_deref(),
             preview: self.checkout_preview(cx),
+            recipes: &recipes,
         };
         self.draft.refusal(target, self.live_launch(cx).as_ref())
     }
@@ -1136,10 +1138,12 @@ impl Launcher {
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
         self.note = None;
         let hosts = self.hosts(cx);
+        let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         let target = Target {
             hosts: &hosts,
             catalog: self.catalog.as_deref(),
             preview: self.checkout_preview(cx),
+            recipes: &recipes,
         };
         let request = if self.refusal(cx).is_some() {
             None

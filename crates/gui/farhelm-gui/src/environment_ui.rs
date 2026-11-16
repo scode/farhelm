@@ -7,9 +7,10 @@
 //! surface has needed so far, starting with an agent's environment-launch approval card; the launcher's and host
 //! management's environment surfaces add their own methods here as they are ported, rather than starting a second
 //! module. The session list's and the session view's environment session rows, controls and suspended card take theirs
-//! from the section on a session's own environment below.
+//! from the section on a session's own environment below. The launcher's refusals take their words from here
+//! (`recipe_refusal`).
 
-use farhelm_proto::recipes::RecipeBase;
+use farhelm_proto::recipes::{RecipeBase, RecipeView};
 use farhelm_proto::{LaunchTarget, Place, ProviderKind};
 
 use crate::assets::Icon;
@@ -89,6 +90,27 @@ impl ProviderUi {
                 cleanup_pending: "Previous image cleanup is unfinished",
                 rebuild_help: "Rebuild this recipe at this place; existing environments retain their files",
             }),
+        }
+    }
+
+    /// Why the launcher cannot create this provider's environment from `recipe`, or `None` when it can: a base the
+    /// provider cannot run, then the provider's own prerequisites. The old app's `ProviderUi::recipe_refusal`, worded as
+    /// it was. A Tensorlake recipe needs a built snapshot ("No snapshot yet"); its account prerequisites (an API key,
+    /// Farhelm's local SSH key) need the Tensorlake settings read, which comes with the launcher's New sandbox. A
+    /// container place builds a missing image on first launch, so Podman has none.
+    pub(crate) fn recipe_refusal(self, recipe: &RecipeView) -> Option<String> {
+        if !recipe.base.supports(self.0) {
+            return Some(format!(
+                "This recipe's base cannot run as a {}",
+                self.noun()
+            ));
+        }
+        match self.0 {
+            ProviderKind::Tensorlake => recipe
+                .snapshot
+                .is_none()
+                .then(|| "No snapshot yet".to_owned()),
+            ProviderKind::Podman => None,
         }
     }
 

@@ -17,11 +17,15 @@ use serde_json::{Value, json};
 
 use super::draft::{DestinationKind, LaunchDraft, Mode, Tab};
 use super::request::{
-    CONVERSATION_IN_CHECKOUT, Preview, SELECT_REPOSITORY, Target, UNVERIFIED_HOST, WAIT_FOR_PREVIEW,
+    CONVERSATION_IN_CHECKOUT, Preview, Recipes, SELECT_REPOSITORY, Target, UNVERIFIED_HOST,
+    WAIT_FOR_PREVIEW,
 };
 use super::view_tests::{answer_catalog, draft, launcher_on, name_of, read, shown_refusal};
 use crate::layers;
 use crate::test_support::{self, settle};
+
+/// The recipe catalog these tests check against: none read yet, which only a new environment's launch looks at.
+static NO_CATALOG: Recipes = Recipes::Loading;
 
 fn repo(owner: &str, name: &str) -> GithubRepo {
     GithubRepo {
@@ -250,6 +254,7 @@ fn a_checkout_launches_only_with_a_repository_and_a_current_preview() {
         hosts: &hosts,
         catalog: None,
         preview,
+        recipes: &NO_CATALOG,
     };
     let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
     assert_eq!(
@@ -306,6 +311,7 @@ fn a_checkout_create_carries_its_preview() {
         hosts: &hosts,
         catalog: None,
         preview: Preview::Ready(&ready),
+        recipes: &NO_CATALOG,
     };
     let mut draft = command_draft(1);
     draft.choose_repository(repo("acme", "bar"));

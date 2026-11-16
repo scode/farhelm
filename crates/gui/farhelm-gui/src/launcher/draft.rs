@@ -31,9 +31,17 @@
 //! underneath an open Clone does not reseed it. The helm validates every launch again; nothing here turns a model id
 //! into argv.
 //!
+//! - A placement ([`LaunchDraft::target`]): an existing host, or a new disposable environment made from a recipe at a
+//!   place (SPEC.md, "Creation", the Runs on bullet). Its three hand edits are [`LaunchDraft::choose_runs_on`],
+//!   [`LaunchDraft::choose_recipe`] and [`LaunchDraft::choose_container_host`]. While a recipe is chosen a folder
+//!   destination is the new environment's home, `~`, and nothing edits it: no folder default waits for a host's
+//!   history, and no installation binds it. A managed checkout works as on a host, its repository cloned inside the
+//!   new environment (SPEC.md, "Container sessions" and "Sandbox sessions"), and it survives entering and leaving.
+//!
 //! Not here: the composer search's parsing, recent setups and the host's default-folder precedence (the view passes
 //! the folder a host change should seed), a managed checkout's suggestions and preview (the view reads them from the
-//! helm; the draft holds only what the user chose), environments, and the launch's validation and request bodies.
+//! helm; the draft holds only what the user chose), which recipes and places can be chosen (the view offers those from
+//! the store), and the launch's validation and request bodies.
 
 use farhelm_proto::github_checkout::CheckoutNameSequence;
 use farhelm_proto::launcher::{
@@ -41,7 +49,7 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::{
     CommandLaunch, GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    SessionInfo, SessionLaunch, parse_github_repo, ui_channel::HostView,
+    LaunchTarget, SessionInfo, SessionLaunch, parse_github_repo, ui_channel::HostView,
 };
 
 use crate::drafts::Draft;
@@ -348,6 +356,29 @@ pub struct LaunchDraft {
     /// ([`Self::folder_installation_moved`]), and one that is still the untouched default is decided again
     /// ([`Self::redecide_moved_default`]): the user's edit mark tells the two apart.
     pub folder_install: Option<Install>,
+    /// Where the launch runs when it is not an existing host: a new disposable environment made from a recipe at a
+    /// place, which the helm creates for this launch alone (SPEC.md, "Sandbox sessions" and "Container sessions").
+    /// `None` is Existing host, the Host row's choice. Set only through the Runs on edits
+    /// ([`Self::choose_runs_on`], [`Self::choose_recipe`], [`Self::choose_container_host`]); [`Self::host`] is kept
+    /// while it is set, so leaving the environment gives the Host row back as it was.
+    pub target: Option<LaunchTarget>,
+}
+
+/// The Runs on switch's segments (SPEC.md, "Creation": "Existing host, New container and New sandbox"): an existing
+/// host, or a new environment of one provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunsOn {
+    ExistingHost,
+    New(farhelm_proto::ProviderKind),
+}
+
+impl RunsOn {
+    /// The segment `target` stands for.
+    pub fn of(target: Option<&LaunchTarget>) -> RunsOn {
+        target.map_or(RunsOn::ExistingHost, |target| {
+            RunsOn::New(target.provider())
+        })
+    }
 }
 
 /// A host's installation as the launcher saw it: its registry row, and the installation identity the registry records
@@ -431,6 +462,7 @@ impl LaunchDraft {
             // history says otherwise, marks it pending (`entry::new_draft`).
             folder_default: FolderDefault::Settled,
             folder_install: None,
+            target: None,
         }
     }
 
@@ -530,6 +562,7 @@ impl LaunchDraft {
             name_kind: None,
             folder_default: FolderDefault::Settled,
             folder_install: None,
+            target: None,
         }
     }
 
@@ -943,6 +976,9 @@ impl LaunchDraft {
     /// nothing, so it cannot re-seed a Clone's folder; it marks [`Self::host_chosen`] and ends a taken folder's tie to
     /// its installation ([`Self::folder_install`]).
     pub fn choose_host(&mut self, host: i64, default_folder: String) {
+        // A host is Existing host's choice: picking one (from the search, or a template's host) leaves a new
+        // environment, which gives the Host row back. Replace with and Restart with never hold a target.
+        self.target = None;
         // Picking the host already chosen still makes it the user's own choice, as the old picker did. It also answers
         // a refusal of a folder the user took on another installation; an untouched default keeps its installation, so
         // a later retarget still decides it again.
@@ -998,7 +1034,7 @@ impl LaunchDraft {
     /// A folder the user took from `install`'s history (a recent setup, a saved folder): the folder, as any pick is,
     /// and bound to that installation ([`Self::folder_install`]).
     pub fn take_history_folder(&mut self, folder: String, install: Install) {
-        if self.holds(Field::Destination) {
+        if self.holds(Field::Destination) || self.target.is_some() {
             return;
         }
         self.edit_folder(folder);
@@ -1062,9 +1098,14 @@ impl LaunchDraft {
         self.folder_default == FolderDefault::Unread && self.folder_is_the_default()
     }
 
-    /// Whether the folder is still the default New seeded: untouched, on a folder destination this draft may change.
+    /// Whether the folder is still the default New seeded: untouched, on a folder destination this draft may change. A
+    /// new environment's fixed home is no host's default, so nothing waits for a host's history to decide it, and a
+    /// history answer seeds nothing into it.
     fn folder_is_the_default(&self) -> bool {
-        !self.folder.is_touched() && self.checkout.is_none() && !self.holds(Field::Destination)
+        !self.folder.is_touched()
+            && self.checkout.is_none()
+            && !self.holds(Field::Destination)
+            && self.target.is_none()
     }
 
     /// The folder field's text, as typed, or a folder picked from the dropdown, Browse or search: either is the
@@ -1073,7 +1114,9 @@ impl LaunchDraft {
     /// existing-directory launch without changing the agent choice"); the field itself is read-only then, so this is a
     /// folder picked elsewhere, as by the composer search.
     pub fn edit_folder(&mut self, text: String) {
-        if self.holds(Field::Destination) {
+        // A new environment's folder is its home, fixed while its recipe is chosen (SPEC.md: "Folder is fixed to the
+        // new sandbox's home, without Browse or recent folders").
+        if self.holds(Field::Destination) || self.target.is_some() {
             return;
         }
         // `Draft::edit` refuses only while a save of the draft is in flight; the launcher never saves its drafts (a
@@ -1179,7 +1222,7 @@ impl LaunchDraft {
 
     /// The base a managed checkout's name is numbered from, when it has one: a template's base name, or Clone's
     /// `<title>-clone` while the source's repository is the one chosen and the user has not named the session.
-    fn numbered_base(&self) -> Option<String> {
+    pub(super) fn numbered_base(&self) -> Option<String> {
         let repo = self.checkout.as_ref()?.repo.as_ref()?;
         let name = self.name.value();
         if self.name_kind == Some(TemplateNameKind::Base) && !name.trim().is_empty() {
@@ -1234,6 +1277,76 @@ impl LaunchDraft {
     /// launcher has no container control any more), so template application calls this directly.
     pub fn clear_retired_container(&mut self) {
         self.agent.container = None;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runs on: an existing host or a new environment
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The folder a new environment's launch starts in: its home.
+pub const ENVIRONMENT_HOME: &str = "~";
+
+impl LaunchDraft {
+    /// The Runs on switch's segment `segment`, with `entering` the target the view chose for it from what the store
+    /// offers: the first recipe the provider can run, at the last container host used, or the first usable one. The
+    /// segment already chosen changes nothing, so it keeps the user's explicit recipe and place (SPEC.md: "An active
+    /// segment keeps its explicit choices"); so does a provider `entering` is not for, or none to enter with.
+    ///
+    /// Entering an environment sets the folder to the environment's home ([`ENVIRONMENT_HOME`]), untouched, and the
+    /// host's folder default and installation stop applying. A managed checkout stays chosen, and so does its
+    /// repository on the way back, as the old launcher kept "repository intent" across placement changes. Its numbered
+    /// default name starts over either way, as on a host change ([`Checkout::naming`]). Leaving for Existing host gives
+    /// the Host row back on the host the draft still holds, with the folder left at `~`. Refused, changing nothing,
+    /// where the mode holds the host (Restart with and Replace with keep the existing environment).
+    pub fn choose_runs_on(&mut self, segment: RunsOn, entering: Option<LaunchTarget>) {
+        if self.holds(Field::Host) || segment == RunsOn::of(self.target.as_ref()) {
+            return;
+        }
+        match segment {
+            RunsOn::ExistingHost => self.target = None,
+            RunsOn::New(provider) => {
+                let Some(target) = entering.filter(|target| target.provider() == provider) else {
+                    return;
+                };
+                self.target = Some(target);
+                self.folder = Draft::load(ENVIRONMENT_HOME.to_owned());
+                self.folder_install = None;
+            }
+        }
+        // A suffix the existing host's previews moved the name to says nothing about the new environment, where the
+        // helm numbers the base itself once it can see what is taken; carrying it in would name a fresh container
+        // `review-2` where `review` is free. Coming back, the search starts over from the base, as after a host change.
+        if let Some(checkout) = &mut self.checkout {
+            checkout.naming = CheckoutNameSequence::default();
+        }
+    }
+
+    /// Choose recipe `recipe` for the new environment, at the place already chosen. Only while an environment is
+    /// chosen; otherwise, and where the mode holds the host, nothing changes.
+    pub fn choose_recipe(&mut self, recipe: String) {
+        if self.holds(Field::Host) {
+            return;
+        }
+        if let Some(LaunchTarget::Environment { place, .. }) = &self.target {
+            let place = *place;
+            self.target = Some(LaunchTarget::Environment { recipe, place });
+        }
+    }
+
+    /// Choose `host` as the container host of a new container, keeping its recipe. Only while the place chosen is on
+    /// a container host ([`farhelm_proto::Place::on_container_host`], the place's own answer); otherwise, and where
+    /// the mode holds the host, nothing changes.
+    pub fn choose_container_host(&mut self, host: i64) {
+        if self.holds(Field::Host) {
+            return;
+        }
+        if let Some(LaunchTarget::Environment { recipe, place }) = &self.target
+            && let Some(place) = place.on_container_host(host)
+        {
+            let recipe = recipe.clone();
+            self.target = Some(LaunchTarget::Environment { recipe, place });
+        }
     }
 }
 

@@ -13,7 +13,10 @@ use farhelm_proto::{
 };
 
 use super::draft::{LaunchDraft, Tab};
-use super::request::{Preview, Target};
+use super::request::{Preview, Recipes, Target};
+
+/// The recipe catalog these tests check against: none read yet, which only a new environment's launch looks at.
+static NO_CATALOG: Recipes = Recipes::Loading;
 
 /// Host 1 connected with connection 4, as the helm's pinned host list serves it; host 2 the same row never
 /// connected (connection 0) and not connected now.
@@ -49,6 +52,7 @@ fn target<'a>(hosts: &'a [HostView], catalog: Option<&'a [LaunchCatalogModel]>) 
         hosts,
         catalog,
         preview: Preview::Waiting,
+        recipes: &NO_CATALOG,
     }
 }
 

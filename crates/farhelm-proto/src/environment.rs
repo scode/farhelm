@@ -45,6 +45,15 @@ impl Place {
             Self::PodmanHost(host) => Some(host),
         }
     }
+    /// The same provider's place on container host `host`, for a place on a
+    /// container host; `None` for a place that is not on one. How a launcher
+    /// moves a new container to another host without naming the provider.
+    pub fn on_container_host(self, host: i64) -> Option<Place> {
+        match self {
+            Self::TensorlakeAccount => None,
+            Self::PodmanHost(_) => Some(Self::PodmanHost(host)),
+        }
+    }
     /// Provider identity follows the place, including when its host is absent.
     /// Resolving or validating the current host remains the helm's responsibility.
     pub fn provider(self) -> ProviderKind {
