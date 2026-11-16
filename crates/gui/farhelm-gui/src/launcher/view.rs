@@ -306,6 +306,11 @@ pub enum Prepared {
 /// the slot again, so New is not held up. The second half waits on the launcher itself ([`Launcher::after_catalog`]),
 /// so the slot is the launcher's only owner and a reset drops the read and the launcher with it.
 ///
+/// It asks every container host for a Podman check as an opened launcher does ([`open_noted`]), because a quick launch
+/// may be the first thing after a helm restart to want one, and the helm has no result for a host until something
+/// asks. If the hidden launch reaches Launch before that host's result is pushed, it is refused and shown with "this
+/// host needs a Podman check", as the old app's was, and the launcher's place turns usable when the result arrives.
+///
 /// Refused, returning `false`, without a UI session, while a dialog or menu holds the keyboard (an open launcher is
 /// not in the slot, so a second one would go live beside it), or while a quick launch may not start
 /// (`super::entry::quick_launch_available`: the slot holds a launcher already, or a host change is in flight).
@@ -335,6 +340,7 @@ pub fn prepare_unseen(
     if !read_catalog(launcher.downgrade(), cx) {
         launch::abandon_prepared(&launcher, cx);
     }
+    placement::check_container_hosts(cx);
     true
 }
 
