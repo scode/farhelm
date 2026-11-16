@@ -48,7 +48,7 @@ pub(crate) mod prepared;
 pub(crate) mod recipes;
 pub(crate) mod shell;
 pub(crate) mod ssh;
-mod ssh_key;
+pub(crate) mod ssh_key;
 pub(crate) mod tunnels;
 
 #[cfg(test)]
@@ -230,6 +230,28 @@ impl Tensorlake {
             Arc::clone(&self.0.api),
             shell,
             self.0.ssh_keys.clone(),
+            None,
+            Arc::clone(&self.0.delivery),
+            Arc::clone(&self.0.preparer),
+        )))
+    }
+
+    /// The same service with `keygen` writing Farhelm's ssh key, in the same
+    /// key directory, for tests that stand in for `ssh-keygen`. A service
+    /// without a key store keeps none.
+    #[cfg(test)]
+    pub(crate) fn with_keygen(&self, keygen: Arc<dyn ssh_key::Keygen>) -> Self {
+        let keys = self.0.ssh_keys.as_ref().map(|keys| {
+            Arc::new(SshKeyStore::with_keygen(
+                keys.tensorlake_dir().to_path_buf(),
+                keygen,
+            ))
+        });
+        Self(Arc::new(Inner::new(
+            self.0.store.clone(),
+            Arc::clone(&self.0.api),
+            Arc::clone(&self.0.shell),
+            keys,
             None,
             Arc::clone(&self.0.delivery),
             Arc::clone(&self.0.preparer),
@@ -462,11 +484,32 @@ pub(crate) async fn put(
 
 /// Create Farhelm's ssh key on the user's request and answer the new
 /// snapshot. A failure is the reason, for display; an existing key is kept.
+///
+/// It answers within the host reply bound
+/// ([`crate::sessions::HOST_REPLY_BOUND`]), as every route the GUI sends that
+/// can wait does: `ssh-keygen` may run for up to its own 30-second bound, and
+/// the GUI's channel resets the window when a command stays unanswered for 30
+/// seconds. The generation runs on a task of its own and carries on past a
+/// timeout reply, which is a 504 saying so; the settings read reports no key
+/// until the pair is in place, and a Create sent again meanwhile waits for the
+/// running generation and answers its key ([`ssh_key::SshKeyStore::ensure`]).
+/// A generation that fails after the reply is only logged and leaves no key,
+/// so the next Create generates again.
 pub(crate) async fn create_ssh_key(State(state): State<Arc<AppState>>) -> Response {
-    if let Err(reason) = state.tensorlake.create_ssh_key().await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, reason).into_response();
-    }
-    get(State(state)).await
+    crate::sessions::within_host_reply_bound_saying(
+        async move {
+            if let Err(reason) = state.tensorlake.create_ssh_key().await {
+                return (StatusCode::INTERNAL_SERVER_ERROR, reason).into_response();
+            }
+            get(State(state)).await
+        },
+        format!(
+            "Farhelm's SSH key was not ready within {} seconds; its creation carries on, and \
+             Settings shows the key once it exists",
+            crate::sessions::HOST_REPLY_BOUND.as_secs()
+        ),
+    )
+    .await
 }
 
 /// One user-initiated listing with the saved key. Its reply says how many

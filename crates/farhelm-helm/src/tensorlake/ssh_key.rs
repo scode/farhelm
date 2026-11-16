@@ -21,14 +21,23 @@
 //! fresh temporary directory and renamed into place as a whole, so a helm
 //! that dies mid-generation leaves either no key or a complete one, never a
 //! private key without its public half.
+//!
+//! Settings' Create SSH key answers within the helm's host reply bound
+//! (`super::create_ssh_key`), while a generation runs on until `ssh-keygen`
+//! ends or [`KEYGEN_TIMEOUT`] stops it. The settings read reports no key until
+//! the pair is renamed into place; a Create pressed again meanwhile waits for
+//! the running generation and returns its key rather than making a second.
 
 use std::{
     io,
     os::unix::fs::{DirBuilderExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::Duration,
 };
+
+use async_trait::async_trait;
 
 /// The key directory's name under the helm's Tensorlake directory, and the
 /// key file names inside it.
@@ -40,8 +49,32 @@ const PUBLIC_KEY: &str = "id_ed25519.pub";
 const TEMP_PREFIX: &str = ".ssh-key.tmp-";
 
 /// How long `ssh-keygen` may take. Generating an ed25519 key is instant; the
-/// bound only stops a wedged process from holding the generation lock.
+/// bound only stops a wedged process from holding the generation lock. It is
+/// longer than the host reply bound the Create SSH key route answers within,
+/// which is fine: the route answers at its bound and the generation goes on
+/// (`super::create_ssh_key`).
 const KEYGEN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// What writes a new key pair: `ssh-keygen` in production ([`SshKeygen`]),
+/// and in tests a stand-in that can stall on cue, so the route's bound can be
+/// tested without a wedged process or any change to the test's environment.
+#[async_trait]
+pub(crate) trait Keygen: Send + Sync {
+    /// Write an ed25519 pair, the private key at `private_key` and the public
+    /// key beside it with `.pub` appended, the public key's comment being
+    /// `comment`. The error is a sentence for display.
+    async fn generate(&self, private_key: &Path, comment: &str) -> Result<(), String>;
+}
+
+/// The production [`Keygen`]: `ssh-keygen` ([`run_keygen`]).
+pub(crate) struct SshKeygen;
+
+#[async_trait]
+impl Keygen for SshKeygen {
+    async fn generate(&self, private_key: &Path, comment: &str) -> Result<(), String> {
+        run_keygen(private_key, comment).await
+    }
+}
 
 /// Where the key pair lives under the helm's Tensorlake directory.
 fn key_dir(tensorlake_dir: &Path) -> PathBuf {
@@ -70,7 +103,10 @@ pub(crate) struct SshKey {
 /// process out.
 pub(crate) struct SshKeyStore {
     tensorlake_dir: PathBuf,
+    /// Held for the whole of a generation, so a second request waits for the
+    /// first and then finds its key.
     generation: tokio::sync::Mutex<()>,
+    keygen: Arc<dyn Keygen>,
 }
 
 impl SshKeyStore {
@@ -78,10 +114,17 @@ impl SshKeyStore {
     /// public key by path, and a relative path would mean something else in
     /// whatever directory the user runs it from.
     pub(crate) fn new(tensorlake_dir: PathBuf) -> Self {
+        Self::with_keygen(tensorlake_dir, Arc::new(SshKeygen))
+    }
+
+    /// [`SshKeyStore::new`] with `keygen` writing the pair, for tests that
+    /// stand in for `ssh-keygen`.
+    pub(crate) fn with_keygen(tensorlake_dir: PathBuf, keygen: Arc<dyn Keygen>) -> Self {
         debug_assert!(tensorlake_dir.is_absolute());
         Self {
             tensorlake_dir,
             generation: tokio::sync::Mutex::new(()),
+            keygen,
         }
     }
 
@@ -168,7 +211,9 @@ impl SshKeyStore {
             .await
             .map_err(|_| format!("Farhelm could not create {}", temp.display()))?;
         let result = async {
-            run_keygen(&temp.join(PRIVATE_KEY), comment).await?;
+            self.keygen
+                .generate(&temp.join(PRIVATE_KEY), comment)
+                .await?;
             // ssh-keygen already writes the private key 0600; set it anyway,
             // since ssh refuses a private key others can read and this file
             // must stay usable whatever umask the helm started with.
