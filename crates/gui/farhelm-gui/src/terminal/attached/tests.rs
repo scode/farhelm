@@ -4977,6 +4977,53 @@ fn a_remote_sessions_terminal_reads_its_tunnels_once_as_it_opens(cx: &mut TestAp
     assert_eq!(h.pill_label(), None, "no pill without tunnels");
 }
 
+/// A failed open-time tunnel read must wait for the next hover of a loopback link, not go out again on every pushed
+/// change: on a Mac each frame without a loopback link under the pointer re-arms the hover retry, and when that also
+/// cleared what marked the open-time read as sent, every push after a failure sent another `GET` (caught by the
+/// session list's exact-command tests when the GUI tests first ran on a Mac).
+///
+/// Spec: on a Mac, a remote session's terminal whose open-time tunnel read fails sends nothing more over several frames
+/// (which re-arm the hover) and an unrelated pushed preferences change; resting on a loopback address then sends
+/// exactly one read, whose answer brings the tunnel hint.
+#[gpui::test]
+fn a_failed_open_time_tunnel_read_waits_for_a_hover_on_a_mac(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let read = h.helm.commands();
+    assert_eq!(read.len(), 1, "the premise: the open-time read");
+    h.helm
+        .reply(read[0].id, 404, Some(serde_json::json!("no such session")));
+    settle(h.cx);
+    redraw(h.cx);
+    assert!(
+        h.read(|owner, cx| owner.tunnels.read(cx).unrequested()),
+        "the premise: a frame off the address re-armed the hover"
+    );
+    h.helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: farhelm_proto::ui_channel::Collection::Preferences,
+        meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+        upsert: vec![farhelm_proto::ui_channel::KeyedEntry {
+            key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+            value: serde_json::json!({ "color_terminal_frames": true }),
+        }],
+        remove: Vec::new(),
+    });
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.helm.commands(), [], "not again on a push");
+    // The failure's notice sits over the address's row; dismissed, the address is under the pointer again.
+    click(h.cx, "terminal-tunnel-notice-dismiss");
+    settle(h.cx);
+    redraw(h.cx);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    assert_eq!(h.hint().as_deref(), Some(LOOPBACK_HINT));
+}
+
 /// SPEC.md: "A distinctively colored pill beside the terminal tabs shows the local-port → host-port mapping for one
 /// listener, or a count for several ... with the full mapping in its tooltip and accessible name." Specified: one
 /// tunnel names its mapping; a change of the shared consent reads the listing again (withdrawing it closes every
