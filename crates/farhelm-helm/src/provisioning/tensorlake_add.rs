@@ -903,6 +903,22 @@ impl ProvisioningService {
 
     /// Register before any billed work, claim progress, and run on an owned
     /// task under the normal host lock and fleet-wide run limit.
+    ///
+    /// A setup run again on an existing sandbox (`plan.host`) takes that
+    /// host's provisioning lock without waiting, before it claims the host's
+    /// progress, and is refused as busy while the lock is taken by another
+    /// operation: a Suspend, Resume or removal can hold it for minutes, and
+    /// this holds `add_confirmations`, which every other host's confirmation
+    /// waits for too, so waiting would stall every Add host's confirmation
+    /// behind one host's lifecycle and keep the GUI's channel waiting on this
+    /// one (SPEC.md, "Waiting between operations on one host"). The refusal
+    /// is plain words with no busy marker: the plan is already spent, so
+    /// sending the same confirmation again after the wait could only be
+    /// refused as an unknown plan, and the remedy is running setup again.
+    /// Taken before the claim, the refusal leaves a failed earlier run's
+    /// progress (its Re-run) as it was. A new sandbox's lock is expected to be
+    /// free, as its row was registered just above; it is waited for as
+    /// before.
     pub(super) async fn start_tensorlake_add(
         self: Arc<Self>,
         plan: TensorlakeAddPlan,
@@ -947,6 +963,21 @@ impl ProvisioningService {
                 host
             }
         };
+        // Taken without waiting, ahead of the claim: holding a host's
+        // provisioning lock while taking `memory` is the order every run
+        // already uses, and nothing waits for this lock while holding
+        // `memory`. The holder may be any other operation on the host (a
+        // Suspend, Resume or removal, another setup, an update, an edit), so
+        // the refusal names none.
+        let rerun_write = match plan.host {
+            Some(_) => Some(self.manager.try_host_provision_lock(host).ok_or_else(|| {
+                refused(
+                    "this sandbox is busy with another operation; once it finishes, run setup again if it \
+                     is still needed",
+                )
+            })?),
+            None => None,
+        };
         let run_id = uuid::Uuid::new_v4().to_string();
         {
             let mut memory = self.memory.lock().await;
@@ -957,22 +988,17 @@ impl ProvisioningService {
                 .runs
                 .insert(host, progress(host, run_id.clone(), &plan.steps));
         }
-        let host_write = self.manager.host_provision_lock(host).await;
+        let host_write = match rerun_write {
+            Some(host_write) => host_write,
+            None => self.manager.host_provision_lock(host).await,
+        };
         let valid = self.host_row(host).await.is_ok_and(|row| {
             row.tensorlake
                 .as_ref()
                 .is_some_and(|binding| binding.sandbox == plan.sandbox)
         });
-        // Both refusals below withdraw a run that a connected GUI may already
-        // show (any feed bump while this waited for the lock re-read it), so
-        // each bumps the feed after its removal, as every progress change does.
         if !valid {
-            {
-                let mut memory = self.memory.lock().await;
-                memory.busy.remove(&host);
-                memory.runs.remove(&host);
-            }
-            self.manager.events().bump();
+            self.withdraw_claim(host).await;
             return Err(refused(
                 "this Tensorlake host was removed or changed; probe again",
             ));
@@ -982,12 +1008,7 @@ impl ProvisioningService {
         // destroyed) can only get in the way of that. Checked under the
         // provisioning lock the deletion takes too.
         if self.manager.is_sealed(host) {
-            {
-                let mut memory = self.memory.lock().await;
-                memory.busy.remove(&host);
-                memory.runs.remove(&host);
-            }
-            self.manager.events().bump();
+            self.withdraw_claim(host).await;
             return Err(refused(
                 "this sandbox is being deleted, so it cannot be set up again; use Retry to finish deleting it",
             ));
@@ -1018,6 +1039,20 @@ impl ProvisioningService {
             host_id: host,
             run_id,
         })
+    }
+
+    /// Withdraw the busy claim and progress [`Self::start_tensorlake_add`] took
+    /// for `host` when it refuses after taking them (the host was removed or
+    /// changed, or is sealed). A connected GUI may already show that run (any
+    /// feed bump since the claim re-read it), so the withdrawal bumps the
+    /// feed, as every progress change does.
+    async fn withdraw_claim(&self, host: HostId) {
+        {
+            let mut memory = self.memory.lock().await;
+            memory.busy.remove(&host);
+            memory.runs.remove(&host);
+        }
+        self.manager.events().bump();
     }
 
     /// Keep setup and an optional session launch under one resource admission.
