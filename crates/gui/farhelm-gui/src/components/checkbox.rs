@@ -288,7 +288,15 @@ impl RenderOnce for Checkbox {
         if enabled {
             control = control.cursor_pointer();
         }
-        let control = super::with_hover_help(control, &self.id, &self.help, true, window, cx);
+        let control = super::with_hover_help(
+            control,
+            &self.id,
+            &self.help,
+            true,
+            Some(&focus),
+            window,
+            cx,
+        );
         let control = if enabled {
             focus::track(control, &focus, focus::OnPress::Control)
         } else {

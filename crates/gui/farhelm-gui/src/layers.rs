@@ -169,7 +169,8 @@ pub use beside::beside_edge;
 pub(crate) use tooltip::show_tooltip_at;
 pub use tooltip::{
     BesideCues, BesideTarget, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner,
-    TooltipSide, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed, shown_tooltip,
+    TooltipSide, focus_drawn, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed,
+    shown_tooltip,
 };
 use tooltip::{Hovered, POINTER_OFFSET, tooltip_card};
 
@@ -197,6 +198,13 @@ pub struct LayerStack {
     /// as the pill is, so that nothing that walks the layers for focus, Escape or "is anything open" counts it.
     region: Option<Region>,
     tooltip: Option<ShownTooltip>,
+    /// Keyboard focus owning the tooltip shown or waiting, if it does: the pointer leaving does not take it down, focus
+    /// leaving does, and it is placed against its control ([`focus_drawn`]).
+    by_focus: Option<tooltip::ByFocus>,
+    /// The control with help that last rendered holding focus ([`focus_drawn`]).
+    focused: Option<EntityId>,
+    /// Focus news waiting for the settle after this event, like `round` for the pointer's.
+    focus_news: Option<tooltip::FocusNews>,
     /// The edge help placed beside the sidebar sits against, as the sidebar last drew it ([`beside_edge`]).
     beside_edge: Option<Anchor>,
     /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
@@ -337,6 +345,9 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         next_pill_id: 0,
         region: None,
         tooltip: None,
+        by_focus: None,
+        focused: None,
+        focus_news: None,
         beside_edge: None,
         tooltip_release: None,
         pending_tooltip: None,
@@ -1824,10 +1835,18 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .beside_edge
             .clone()
             .filter(|edge| edge.drawn_bounds().is_some());
-        let placed = match (&shown.beside, edge) {
+        let focus = stack
+            .by_focus
+            .as_ref()
+            .map(|by_focus| by_focus.focus.clone());
+        let placed = match (&shown.beside, edge, focus) {
             // Help beside the sidebar decides its place as the frame is laid out ([`beside::PlacedBeside`]).
-            (Some(target), Some(edge)) => {
+            (Some(target), Some(edge), _) => {
                 beside::PlacedBeside::new(shown, target, edge, card, palette).into_any_element()
+            }
+            // Help keyboard focus owns sits against the focused control, as the old app placed all help.
+            (_, _, Some(focus)) => {
+                beside::PlacedBeside::around(shown, focus, card).into_any_element()
             }
             // Offset like a native tooltip so the pointer never covers the text. Help that asks for beside placement
             // comes here while no sidebar edge is drawn, and says so.

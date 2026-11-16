@@ -25,7 +25,8 @@
 //!   the control is clipped: app.css line 1900 drew it inset so that the sidebar's clipping kept it inside the list,
 //!   so a row half scrolled out of the list has its ring only on the half in view.
 //!
-//! With no edge drawn, the help shows at the pointer through the ordinary tooltip's own placement ([`super::overlay`]
+//! With no edge drawn, the help shows at the pointer through the ordinary tooltip's own placement, or, when keyboard
+//! focus owns it, against its control by the fallback's rule alone ([`PlacedBeside::around`]; [`super::overlay`]
 //! decides). The place is decided while each frame is laid out, after every tracker has recorded this frame's bounds,
 //! so help follows a control that moves (a re-sorted row) in the same frame, cues included.
 //!
@@ -52,9 +53,9 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, AvailableSpace, BorderStyle, Bounds, ContentMask, Corners, Element, ElementId,
-    GlobalElementId, Hsla, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
-    ParentElement as _, PathBuilder, Pixels, Point, Size, Style, Styled as _, Window, canvas, div,
-    point, px,
+    FocusHandle, GlobalElementId, Hsla, InspectorElementId, InteractiveElement as _, IntoElement,
+    LayoutId, ParentElement as _, PathBuilder, Pixels, Point, Size, Style, Styled as _, Window,
+    canvas, div, point, px,
 };
 
 use super::tooltip::{Beside, Drawn, DrawnRing, ShownTooltip, TooltipSide};
@@ -183,19 +184,31 @@ fn around_target(target: Bounds<Pixels>, size: Size<Pixels>, viewport: Size<Pixe
 
 /// The tooltip's card for help beside the sidebar, placed by [`place`] as the frame is laid out (for the reason
 /// `PlacedPopover` is: trackers record this frame's bounds before overlays are prepared), with the notch under it and
-/// the ring around its control while it sits beside the sidebar. It writes the side it chose, and the ring it paints,
-/// to the shown tooltip ([`ShownTooltip::side`], [`ShownTooltip::ring`]). Nothing in it asks for the pointer, so a
-/// press goes through it as through any tooltip. The overlay makes one only while the sidebar's edge is drawn.
+/// the ring around its control while it sits beside the sidebar; or, for help keyboard focus owns away from the
+/// sidebar, placed against the focused control by the old ordinary rule ([`PlacedBeside::around`]). It writes the side
+/// it chose, and the ring it paints, to the shown tooltip ([`ShownTooltip::side`], [`ShownTooltip::ring`]). Nothing in
+/// it asks for the pointer, so a press goes through it as through any tooltip.
 pub(super) struct PlacedBeside {
-    target: Rc<Cell<Option<Drawn>>>,
-    edge: Anchor,
+    against: Against,
     side: Rc<Cell<TooltipSide>>,
     /// The shown tooltip's record of the painted ring, cleared at each prepaint so a frame that paints none (the
     /// fallback, once a resting hover's window narrows) does not keep reporting the last one.
     painted: Rc<Cell<Option<DrawnRing>>>,
     card: AnyElement,
-    notch: AnyElement,
-    ring: AnyElement,
+}
+
+/// What a [`PlacedBeside`] places its card against.
+enum Against {
+    /// The sidebar's edge, centered on the control its tracker records (with the clip around it), with the notch and
+    /// the ring while it fits there.
+    Beside {
+        target: Rc<Cell<Option<Drawn>>>,
+        edge: Anchor,
+        notch: AnyElement,
+        ring: AnyElement,
+    },
+    /// The control holding focus, as the focus coordinator records its stop, for help keyboard focus owns.
+    Focused(FocusHandle),
 }
 
 impl PlacedBeside {
@@ -215,22 +228,35 @@ impl PlacedBeside {
         });
         let ring = ring(color, beside.cues.radius, shown.ring.clone());
         PlacedBeside {
-            target: beside.target.clone(),
-            edge,
+            against: Against::Beside {
+                target: beside.target.clone(),
+                edge,
+                notch,
+                ring,
+            },
             side: shown.side.clone(),
             painted: shown.ring.clone(),
             card: card.into_any_element(),
-            notch,
-            ring,
+        }
+    }
+
+    /// The card of `shown`, help keyboard focus owns, placed against the control whose focus stop is `focus` by the
+    /// old ordinary rule ([`around_target`]: centered above it, else below), as the old app placed help shown on
+    /// focus. Placed as each frame is laid out, it follows the control through a scroll or a reflow.
+    pub(super) fn around(shown: &ShownTooltip, focus: FocusHandle, card: gpui::Div) -> Self {
+        PlacedBeside {
+            against: Against::Focused(focus),
+            side: shown.side.clone(),
+            painted: shown.ring.clone(),
+            card: card.into_any_element(),
         }
     }
 }
 
 /// What a frame of [`PlacedBeside`] paints, as its prepaint decided.
 pub(super) enum Painting {
-    /// Nothing: the control has no bounds yet (help shown at once before its control's first frame, which only a
-    /// golden's `show_tooltip_at` does), so there is nowhere to put the help. The overlay builds this element only
-    /// once the edge has bounds.
+    /// Nothing: the control or the edge has no bounds yet (help shown at once before its control's first frame, which
+    /// only a golden's `show_tooltip_at` does), so there is nowhere to put the help.
     Nothing,
     /// The card alone: the fallback placement.
     Card,
@@ -284,32 +310,48 @@ impl Element for PlacedBeside {
         cx: &mut App,
     ) -> Painting {
         self.painted.set(None);
-        let (Some(edge), Some(target)) = (self.edge.drawn_bounds(), self.target.get()) else {
-            return Painting::Nothing;
+        let (size, viewport) = (window.layout_bounds(*card).size, window.viewport_size());
+        // The place, and for beside help the control as its tracker drew it, which the cues need.
+        let (placed, tracked) = match &self.against {
+            Against::Beside { target, edge, .. } => {
+                let (Some(target), Some(edge)) = (target.get(), edge.drawn_bounds()) else {
+                    return Painting::Nothing;
+                };
+                (
+                    place(edge.right(), target.bounds, size, viewport),
+                    Some(target),
+                )
+            }
+            Against::Focused(focus) => {
+                let Some(target) = crate::focus::control_bounds(focus, window, cx) else {
+                    return Painting::Nothing;
+                };
+                (around_target(target, size, viewport), None)
+            }
         };
-        let size = window.layout_bounds(*card).size;
-        let placed = place(edge.right(), target.bounds, size, window.viewport_size());
         self.side.set(placed.side);
         let offset = placed.origin - bounds.origin;
         let offset = point(offset.x.round(), offset.y.round());
         window.with_element_offset(offset, |window| self.card.prepaint(window, cx));
-        let Some(notch_y) = placed.notch_y else {
+        let (Some(notch_y), Some(target), Against::Beside { notch, ring, .. }) =
+            (placed.notch_y, tracked, &mut self.against)
+        else {
             return Painting::Card;
         };
         // The turned square's bounding box, centered on the card's left edge at the notch's height.
         let across = px(NOTCH_SIDE * SQRT_2);
         let left = bounds.origin.x + offset.x;
         let square = gpui::size(across, across).map(AvailableSpace::Definite);
-        self.notch.layout_as_root(square, window, cx);
+        notch.layout_as_root(square, window, cx);
         let corner = point(left - across / 2., notch_y.round() - across / 2.);
-        self.notch.prepaint_at(corner, window, cx);
+        notch.prepaint_at(corner, window, cx);
         let size = target.bounds.size.map(AvailableSpace::Definite);
-        self.ring.layout_as_root(size, window, cx);
+        ring.layout_as_root(size, window, cx);
         let clip = Some(ContentMask {
             bounds: target.clip,
         });
         window.with_content_mask(clip, |window| {
-            self.ring.prepaint_at(target.bounds.origin, window, cx)
+            ring.prepaint_at(target.bounds.origin, window, cx)
         });
         Painting::Cues { clip: target.clip }
     }
@@ -328,12 +370,15 @@ impl Element for PlacedBeside {
             Painting::Nothing => {}
             Painting::Card => self.card.paint(window, cx),
             Painting::Cues { clip } => {
+                let Against::Beside { notch, ring, .. } = &mut self.against else {
+                    return;
+                };
                 // The notch first, so the card covers its right half as the old box (z-index 50) covered the notch
                 // (49).
-                self.notch.paint(window, cx);
+                notch.paint(window, cx);
                 self.card.paint(window, cx);
                 let clip = Some(ContentMask { bounds: clip });
-                window.with_content_mask(clip, |window| self.ring.paint(window, cx));
+                window.with_content_mask(clip, |window| ring.paint(window, cx));
             }
         }
     }

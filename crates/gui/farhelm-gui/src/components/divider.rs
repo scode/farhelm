@@ -191,7 +191,15 @@ impl RenderOnce for Divider {
             // what the frame record (and so the test bridge) reports.
             .aria_value(self.value.to_string());
         // The help as the strip's description; its tooltip is the grip's, which lies over it.
-        let strip = super::with_hover_help(strip, &self.id, &self.help, true, window, cx);
+        let strip = super::with_hover_help(
+            strip,
+            &self.id,
+            &self.help,
+            true,
+            Some(&self.focus),
+            window,
+            cx,
+        );
         let strip = focus::track(strip, &self.focus, focus::OnPress::Focus);
         // The arrows, on the focused strip only (a key listener runs only on the focus path).
         let on_step = self.on_step.clone();
@@ -246,7 +254,7 @@ impl RenderOnce for DividerGrip {
                         .border_color(theme::color(palette.fg_1)),
                 )
             });
-        let grip = super::with_hover_help(grip, &id, &divider.help, false, window, cx);
+        let grip = super::with_hover_help(grip, &id, &divider.help, false, None, window, cx);
 
         // The press: focus moves to the strip on a press of any mouse button, in one move through the coordinator (see
         // the module docs). The grip blocks the pointer from everything behind it, so the page's empty-space rule and

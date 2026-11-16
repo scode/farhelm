@@ -645,7 +645,8 @@ fn a_lazy_card_shown_after_its_control_changed_is_built_for_the_latest_render(
                 Role::Button,
             ));
         let help = lazy_help(&record, current.get());
-        crate::components::with_hover_help(row, &id, &help, false, window, cx).into_any_element()
+        crate::components::with_hover_help(row, &id, &help, false, None, window, cx)
+            .into_any_element()
     };
     let cx = opened(cx, 1000., scene);
     point_at(cx, "inner");
@@ -707,4 +708,25 @@ fn a_lazy_cards_view_goes_when_another_tooltip_replaces_it(cx: &mut TestAppConte
         "the second card replaced it"
     );
     assert!(!alive(&built, 0), "the first card's view is gone");
+}
+
+/// Why this matters: a keyboard user reaching a session row or a host's progress must get the same help a pointer
+/// user does, beside the list with its cues, and a lazy card must be made for it as for the pointer.
+///
+/// Specification: Tab onto a control whose lazy card help asks for beside placement shows, after the hover delay, the
+/// card beside the sidebar with its ring, made once.
+#[gpui::test]
+fn keyboard_focus_shows_beside_help_and_makes_its_lazy_card(cx: &mut TestAppContext) {
+    let built = Built::default();
+    let cx = opened(cx, 1000., lazy_scene(true, built.clone()));
+    crate::test_support::keys(cx, "tab");
+    redraw(cx);
+    advance(cx, layers::HOVER_DELAY);
+    redraw(cx);
+    assert_eq!(shown(cx).side(), TooltipSide::Beside);
+    assert!(shown(cx).ring().is_some(), "the ring shows");
+    assert!(
+        built.borrow().len() == 1 && alive(&built, 0),
+        "the card made once"
+    );
 }

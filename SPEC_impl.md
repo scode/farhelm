@@ -766,24 +766,40 @@ row nobody hovers keeps no card alive. A re-render refreshes the help a hovered 
 card shown later is built for what the latest render described; it never makes the view, nor changes a tooltip already
 waiting or showing.
 
-Ordinary help sits below and right of where the pointer came to rest; anchoring it above its control, as the old app
-did, is still to come. Help a control asks to have beside the sidebar (SPEC.md's session-row hovers and host progress
-card) is placed against that control, from the bounds it records as each frame is prepared, and against the edge the
-sidebar draws (`layers::beside_edge`), deciding the place as the frame is laid out so it follows a moved row in that
-frame. The numbers are the old app's `placeSessionCard` and `placeTooltip` (`tooltip.js` at `24bc0580`): left at the
-sidebar's outer right edge plus 6 pixels (at least 4), top centered on the control and kept 4 pixels inside the window,
-never shifted sideways; when the card, at its own maximum width, would come within 4 pixels of the window's right edge,
-the old ordinary placement against the control instead (centered across it, above with a 6-pixel gap, else below with a
-28-pixel one, else the roomier side, clamped 4 pixels inside). Only beside, a notch (the visible half of the old 10 by
-10 square turned 45 degrees, under the card, level with the control's center but at least 12 pixels, or half the card's
-height, from its top and bottom) and a 1-pixel ring just inside the control, in the accent or the on-fill color of a
-selected row, with the control's corners, clipped where the control is clipped, as the old inset-shadow ring was. With
-no edge drawn, such help is ordinary help at the pointer. The old app placed help beside the sidebar only for a control
-inside it; here any control asking for it is placed against the edge, so only controls inside the sidebar ask. A
-control's bounds are taken inside its border, where the ring goes, so a bordered control's fallback gap is that much
-wider than the old one, which measured from the border box. One deviation: the old hover closed on any scroll of a
-container holding its control; here it stays and follows the control while the pointer stays on it, since the layer
-manager does not know which scrolling element holds a control.
+Hover help also shows on keyboard focus, for every control that can hold focus, as the old app's did for every
+focus-visible control and as SPEC.md asks of the summary card: focus the keyboard moves onto a control (the user's last
+input was the keyboard, as for the focus ring) shows its help after the same 300 ms, or at once in the grace after
+another, and focus leaving takes it down; a click that focuses a control does not, nor does a later key press on it,
+since only the move counts. Escape with no layer open, or a press, puts it away until focus next lands on a control, the
+same one included; with a layer open, Escape closes the layer. The pointer and focus share the one tooltip, and the
+latest call wins: focus landing on a control replaces the pointer's help, the pointer coming onto another control
+replaces focus help, the pointer leaving keeps focus help, and focus landing on the control whose help the pointer shows
+makes it focus-owned, as the old `tooltip.js` did. Help shown by focus is placed by the old ordinary rule against the
+control (centered across it, above with a 6-pixel gap, else below with 28), from the bounds the focus coordinator
+records for the control's stop, so it follows the control through a scroll or reflow. Two deviations: the old app landed
+focus quietly in a few host flows (the host add dialog's provisioning confirm and Cancel, the remembered first focus of
+host settings and the uninstall confirmation, the attention row's handoff to a host row's menu), keeping the ring but
+showing no help, where here every keyboard landing shows help until those flows bring a quiet landing; and pointer help
+stays up when the window loses focus, where the old app hid it (help focus owns goes, and does not come back when the
+window regains focus). Only the control's own focus stop counts, not one inside it. Ordinary help sits below and right
+of where the pointer came to rest; anchoring it above its control, as the old app did, is still to come. Help a control
+asks to have beside the sidebar (SPEC.md's session-row hovers and host progress card) is placed against that control,
+from the bounds it records as each frame is prepared, and against the edge the sidebar draws (`layers::beside_edge`),
+deciding the place as the frame is laid out so it follows a moved row in that frame. The numbers are the old app's
+`placeSessionCard` and `placeTooltip` (`tooltip.js` at `24bc0580`): left at the sidebar's outer right edge plus 6 pixels
+(at least 4), top centered on the control and kept 4 pixels inside the window, never shifted sideways; when the card, at
+its own maximum width, would come within 4 pixels of the window's right edge, the old ordinary placement against the
+control instead (centered across it, above with a 6-pixel gap, else below with a 28-pixel one, else the roomier side,
+clamped 4 pixels inside). Only beside, a notch (the visible half of the old 10 by 10 square turned 45 degrees, under the
+card, level with the control's center but at least 12 pixels, or half the card's height, from its top and bottom) and a
+1-pixel ring just inside the control, in the accent or the on-fill color of a selected row, with the control's corners,
+clipped where the control is clipped, as the old inset-shadow ring was. With no edge drawn, such help is ordinary help
+at the pointer. The old app placed help beside the sidebar only for a control inside it; here any control asking for it
+is placed against the edge, so only controls inside the sidebar ask. A control's bounds are taken inside its border,
+where the ring goes, so a bordered control's fallback gap is that much wider than the old one, which measured from the
+border box. One deviation: the old hover closed on any scroll of a container holding its control; here it stays and
+follows the control while the pointer stays on it, since the layer manager does not know which scrolling element holds a
+control.
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,

@@ -605,7 +605,15 @@ impl RenderOnce for TextInput {
         // focus when the control beside it disappears.
         let handle = self.state.focus_handle(cx);
         let wrapper = crate::focus::record_position(wrapper, &handle);
-        let wrapper = super::with_hover_help(wrapper, &self.id, &self.help, false, window, cx);
+        let wrapper = super::with_hover_help(
+            wrapper,
+            &self.id,
+            &self.help,
+            false,
+            Some(&handle),
+            window,
+            cx,
+        );
         // Whether the Enter is held, for its submission (the module docs, "A held Enter"). In the capture phase, so the
         // field's own listeners cannot stop the key-down before it is recorded.
         let (held, unheld) = (self.state.3.clone(), self.state.3.clone());
