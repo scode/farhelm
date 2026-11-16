@@ -83,10 +83,10 @@ pub fn install_identity(host: &HostView) -> Option<&str> {
 /// identity, the destination (the folder, or the chosen repository of a managed checkout, or none while the repository
 /// field holds only typed text), and the session name with the kind a template gave it.
 ///
-/// The name is the one a template saves, and a template's base name is its unnumbered original text, never the
-/// numbered name a managed checkout resolves it to (SPEC.md, "Launch templates": "A template base is saved as its
-/// original text, never the numbered name displayed by the launcher"). Save as template and the held-value checks
-/// rely on that; see the comment where it is read.
+/// The name is the one a template saves: a name a template set (a base or a fixed name) as it was written, and any
+/// other name as the session would get it. So a template base is never the number a managed checkout moved it to
+/// (SPEC.md, "Launch templates": "A template base is saved as its original text, never the numbered name displayed by
+/// the launcher"), which Save as template relies on. This is the old app's `launcher_snapshot` rule.
 ///
 /// Text that does not parse (custom flags or a wrapper prefix being typed) is left out rather than guessed at; the
 /// launcher refuses to launch with it anyway. The initial prompt is the one the launch would send, so a dormant prompt
@@ -137,12 +137,12 @@ pub fn snapshot(draft: &LaunchDraft, hosts: &[HostView]) -> LauncherState {
                 .as_ref()
                 .map(|repo| TemplateDestination::Github(repo_identifier(repo))),
         },
-        // The name the session would get. Today that is the name as held, or, in a managed checkout, the name the
-        // checkout gets (an untouched copied Clone title dropped). Once the launcher numbers a template's base name in a
-        // checkout, `shown_name` will return the numbered name, and this must instead read the template's own
-        // unnumbered base, with its kind: SPEC.md, "A template base is saved as its original text, never the numbered
-        // name displayed by the launcher".
-        name: Some(draft.shown_name()),
+        // A name a template set, base or fixed, as held, never the number a checkout moved a base to; any other name
+        // as the session would get it, which in a managed checkout drops an untouched copied Clone title.
+        name: Some(match draft.name_kind {
+            Some(_) => draft.name.value().clone(),
+            None => draft.shown_name(),
+        }),
         name_kind: draft.name_kind,
     }
 }
