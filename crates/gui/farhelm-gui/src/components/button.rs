@@ -7,6 +7,11 @@
 //! Either part of a split button is a button too ([`Button::split`]): the session header's Restart and Replace, a main
 //! part and a caret joined with no gap, each its own control with its own focus and help.
 //!
+//! The session header's buttons ([`Button::compact`]) also have a condensed look ([`Button::condensed`]), the old
+//! `.actions-compact` rule, which the header takes only while its row cannot hold its actions at their ordinary size
+//! beside a tunnel pill. It changes only the box, the text size and the line height: names, help, focus and activation
+//! stay as they are.
+//!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
 //! it is the one in force ([`Button::pressed`]), as the rail's entries do.
@@ -247,6 +252,39 @@ const COMPACT_ICON: f32 = 13.;
 /// A compact split button caret's side padding: `.header-action-caret`'s `padding: 2px 4px`.
 const CARET_PAD_X: f32 = 4.;
 
+/// A condensed button's padding on every side: `.actions-compact .titlebar-actions .btn`'s `padding: 2px`. A
+/// [`Condensed::Words`] button keeps it above and below only.
+const CONDENSED_PAD: f32 = 2.;
+/// A [`Condensed::Words`] button's text size, its line height and its gap between icon and label: the old rule's
+/// `font-size: 11px` and `gap: 2px`, and `.btn`'s `line-height: 1.4` at that size (15.4 pixels, rounded as the ordinary
+/// 16.8 is to 17). Such a button is therefore 2 pixels shorter than an ordinary one, as the old one was 1.4 pixels
+/// shorter. The gap is public for content a condensed button shows in place of its label (the header's "Stopping…").
+const CONDENSED_TEXT: f32 = 11.;
+const CONDENSED_LINE: f32 = 15.;
+pub const CONDENSED_GAP: Pixels = px(2.);
+
+/// The session header's geometry a button is drawn in, if any ([`Button::compact`], [`Button::condensed`]): one field,
+/// so a condensed button is always a compact one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Compact {
+    Ordinary,
+    Condensed(Condensed),
+}
+
+/// How a compact button gives up width while the session header's row is short of it ([`Button::condensed`]). The old
+/// stylesheet had two rules under `.actions-compact`, and which one a header button took depended on its class, so the
+/// owner says which applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Condensed {
+    /// `.titlebar-actions .btn { padding: 2px }`: 2 pixels of padding all round, the text, icon and gap unchanged. Every
+    /// header button the next rule does not name (an environment session's Suspend or Resume).
+    Padding,
+    /// The rule for `.header-stop`, `.restart-primary`, `.header-replace`, `.header-clone`, `.header-delete` and
+    /// `.header-action-caret`: 11-pixel text, no padding at the sides (2 pixels above and below remain from the rule
+    /// before), and 2 pixels between the icon and the label.
+    Words,
+}
+
 /// Which part of a split button a button is ([`Button::split`]): the session header's Restart and Replace, whose main
 /// part performs the ordinary action and whose caret opens a menu of that action and its "with…" variant (SPEC.md,
 /// "Terminal experience"). The two parts are drawn side by side with no gap, the way the old `.header-action-split`
@@ -281,8 +319,8 @@ pub struct Button {
     busy: bool,
     /// Whether the button's action would be refused now: drawn as unavailable, but still pressed ([`Button::refused`]).
     refused: bool,
-    /// The session header's tighter geometry ([`Button::compact`]).
-    compact: bool,
+    /// The session header's tighter geometry ([`Button::compact`]), condensed or not ([`Button::condensed`]).
+    compact: Option<Compact>,
     /// The list heading band's padding for a button with words ([`Button::heading`]).
     heading: bool,
     /// The marked bar's geometry ([`Button::toolbar`]).
@@ -345,7 +383,7 @@ impl Button {
             disabled: false,
             busy: false,
             refused: false,
-            compact: false,
+            compact: None,
             heading: false,
             toolbar: false,
             expanded: None,
@@ -425,7 +463,14 @@ impl Button {
     /// The session header's geometry (`.titlebar-actions .btn`): 2 by 8 pixels of padding, 4 between the icon and the
     /// label, and a 13-pixel icon, so the header's actions keep their compact height and fit a 650-pixel pane.
     pub fn compact(mut self) -> Self {
-        self.compact = true;
+        self.compact.get_or_insert(Compact::Ordinary);
+        self
+    }
+
+    /// The session header's geometry ([`Button::compact`]), condensed as `condensed` says, or ordinary for `None`: the
+    /// header's look while its row cannot hold its actions at their ordinary size (see [`Condensed`]).
+    pub fn condensed(mut self, condensed: Option<Condensed>) -> Self {
+        self.compact = Some(condensed.map_or(Compact::Ordinary, Compact::Condensed));
         self
     }
 
@@ -779,16 +824,25 @@ impl RenderOnce for Button {
             )
         });
         let ring = focus::shows_ring(&focus, window);
+        // The lifecycle buttons' condensed look: smaller text and line, no side padding, a narrower gap.
+        let words = self.compact == Some(Compact::Condensed(Condensed::Words));
         // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.
         let (pad_y, pad_x) = match self.tier {
             _ if self.heading => (px(HEADING_WORDS_PAD.0), px(HEADING_WORDS_PAD.1)),
             _ if self.toolbar => (px(TOOLBAR_PAD.0), px(TOOLBAR_PAD.1)),
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
-            _ if self.compact && matches!(self.split, Some(SplitPart::Caret { .. })) => {
+            // Condensed before the compact geometry it replaces, the caret's included.
+            _ if words => (px(CONDENSED_PAD), px(0.)),
+            _ if self.compact == Some(Compact::Condensed(Condensed::Padding)) => {
+                (px(CONDENSED_PAD), px(CONDENSED_PAD))
+            }
+            _ if self.compact.is_some() && matches!(self.split, Some(SplitPart::Caret { .. })) => {
                 (px(COMPACT_PAD.0), px(CARET_PAD_X))
             }
-            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
+            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger
+                if self.compact.is_some() =>
+            {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
             Tier::Rail
@@ -908,7 +962,11 @@ impl RenderOnce for Button {
             .flex()
             .items_center()
             .justify_center()
-            .gap(px(if self.compact { COMPACT_GAP } else { 6. }))
+            .gap(match self.compact {
+                Some(Compact::Condensed(Condensed::Words)) => CONDENSED_GAP,
+                Some(_) => px(COMPACT_GAP),
+                None => px(6.),
+            })
             .py(pad_y)
             .px(pad_x)
             .when_some(height, |button, height| button.h(height))
@@ -956,6 +1014,11 @@ impl RenderOnce for Button {
             .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
             .line_height(px(17.))
+            .when(words, |button| {
+                button
+                    .text_size(px(CONDENSED_TEXT))
+                    .line_height(px(CONDENSED_LINE))
+            })
             .text_color(theme::color(text))
             // A transparent edge where a tier has none keeps every tier the same size.
             .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)))
@@ -1131,7 +1194,11 @@ impl RenderOnce for Button {
             button = button.child(
                 svg()
                     .path(icon.path())
-                    .size(px(if self.compact { COMPACT_ICON } else { 14. }))
+                    .size(px(if self.compact.is_some() {
+                        COMPACT_ICON
+                    } else {
+                        14.
+                    }))
                     .text_color(theme::color(text)),
             );
         }
@@ -1251,6 +1318,11 @@ impl IconButton {
     /// See [`Button::compact`]: the session header's split carets.
     pub fn compact(self) -> Self {
         IconButton(self.0.compact())
+    }
+
+    /// See [`Button::condensed`]: the session header's carets while its row is short of width.
+    pub fn condensed(self, condensed: Option<Condensed>) -> Self {
+        IconButton(self.0.condensed(condensed))
     }
 
     /// See [`Button::split`].
