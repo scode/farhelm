@@ -209,7 +209,7 @@ pub fn open_returning(
             .map(|on_closed| cx.on_release_in(window, move |_, window, cx| on_closed(window, cx)));
     });
     #[cfg(test)]
-    cx.set_global(tests::Opened(dialog.downgrade()));
+    layers::record_opened(&dialog, cx);
     Some(layer)
 }
 

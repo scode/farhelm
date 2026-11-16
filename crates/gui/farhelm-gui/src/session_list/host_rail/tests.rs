@@ -32,7 +32,6 @@ use serde_json::{Value, json};
 
 use super::{identity, status};
 use crate::host_text::tests::SPOOFING_CORPUS;
-use crate::hosts::add::tests::Opened;
 use crate::hosts::identity::LOCAL_NAME;
 use crate::hosts::tests::{
     connected, connecting, host as status_host, hosts as status_hosts, progress as status_progress,
@@ -1124,13 +1123,11 @@ fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppConte
 /// the rail's entries.
 const ADD_HOST: &str = "host-rail-add";
 
-/// Whether the Add host dialog is open: the dialog its own tests reach through [`Opened`] is alive, and its frame
-/// (drawn under the dialog's id, `add-host`) is in a fresh frame.
+/// Whether the Add host dialog is open: the dialog its own tests reach through [`layers::last_opened`] is alive, and
+/// its frame (drawn under the dialog's id, `add-host`) is in a fresh frame.
 fn add_host_dialog_shown(cx: &mut VisualTestContext) -> bool {
-    let alive = cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .is_some_and(|opened| opened.0.upgrade().is_some())
-    });
+    let alive =
+        cx.update(|_, cx| layers::last_opened::<crate::hosts::add::AddHostDialog>(cx).is_some());
     alive && node(&frame(cx), "add-host").is_some()
 }
 

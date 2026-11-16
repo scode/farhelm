@@ -747,20 +747,20 @@ fn confirmation(batches: &[Batch]) -> Question<Vec<Target>> {
     };
     let mut question = Question::new(
         title,
-        Answer {
-            label: "Delete permanently".into(),
-            help: HoverHelp::tooltip(
+        Answer::new(
+            "Delete permanently",
+            HoverHelp::tooltip(
                 "Delete permanently: remove these folders for good; work never committed or pushed is lost",
             ),
-            tier: Tier::Danger,
-        },
+            Tier::Danger,
+        ),
         targets,
     )
-    .cancel_answer(Answer {
-        label: "Cancel".into(),
-        help: HoverHelp::tooltip("Cancel: delete nothing and go back to the trash"),
-        tier: Tier::Neutral,
-    });
+    .cancel_answer(Answer::new(
+        "Cancel",
+        HoverHelp::tooltip("Cancel: delete nothing and go back to the trash"),
+        Tier::Neutral,
+    ));
     for line in lines {
         question = question.line(line);
     }

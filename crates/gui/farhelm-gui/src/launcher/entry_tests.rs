@@ -18,8 +18,9 @@ use super::draft::{LaunchDraft, Tab};
 use super::entry::{ENVIRONMENT_NOT_CARRIED, HOST_NOT_CARRIED};
 use super::entry::{new_available, open_clone, open_new, open_new_named};
 use super::launch_tests::{HostChange, created, creates, start_host_change};
-use super::view_tests::{Opened, draft, fixture_hosts, name_of, shown_refusal};
+use super::view_tests::{draft, fixture_hosts, name_of, shown_refusal};
 use crate::actions::NewSession;
+use crate::layers;
 use crate::local_state;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences_state, session};
@@ -110,9 +111,7 @@ fn new(cx: &mut VisualTestContext) -> bool {
 /// The launcher opened last, by its entity id.
 fn opened(cx: &mut VisualTestContext) -> Option<gpui::EntityId> {
     cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .map(|launcher| launcher.entity_id())
+        layers::last_opened::<super::view::Launcher>(cx).map(|launcher| launcher.entity_id())
     })
 }
 
@@ -242,9 +241,7 @@ fn new_waits_for_a_pending_launch_and_then_brings_back_its_refusal(cx: &mut Test
     let (mut helm, cx) = window_with(cx, None);
     assert!(new(cx));
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade());
+        let launcher = layers::last_opened::<super::view::Launcher>(cx);
         launcher
             .expect("New opened a launcher")
             .update(cx, |launcher, cx| {
@@ -460,9 +457,7 @@ fn clone_brings_back_a_refused_launch_waiting_behind_its_notice(cx: &mut TestApp
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(new(cx));
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade());
+        let launcher = layers::last_opened::<super::view::Launcher>(cx);
         launcher
             .expect("New opened a launcher")
             .update(cx, |launcher, cx| {
@@ -518,9 +513,7 @@ fn each_clone_starts_from_its_source_and_new_starts_fresh_after_closing(cx: &mut
     let (_helm, cx) = window_with(cx, Some("a"));
     assert!(clone(cx, "e"));
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade());
+        let launcher = layers::last_opened::<super::view::Launcher>(cx);
         launcher.expect("Clone opened").update(cx, |launcher, cx| {
             launcher.draft.edit_name("renamed".into());
             cx.notify();

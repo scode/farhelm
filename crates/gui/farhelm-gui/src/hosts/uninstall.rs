@@ -304,18 +304,18 @@ fn confirm(plan: Plan, mark: &Mark, window: &mut Window, cx: &mut App) -> Option
         .host(&name);
     let summary = super::remove::phase_summary("uninstall-summary", &plan.view);
     let (icon, color) = (plan.view.icon, plan.view.color);
-    let uninstall = Answer {
-        label: "Uninstall".into(),
-        help: HoverHelp::tooltip("Uninstall: remove Farhelm from this host as described above"),
-        tier: Tier::Danger,
-    };
+    let uninstall = Answer::new(
+        "Uninstall",
+        HoverHelp::tooltip("Uninstall: remove Farhelm from this host as described above"),
+        Tier::Danger,
+    );
     let question = Question::new(title, uninstall, plan)
         .summary(summary)
-        .cancel_answer(Answer {
-            label: "Cancel".into(),
-            help: HoverHelp::tooltip("Cancel: leave Farhelm installed on this host"),
-            tier: Tier::Neutral,
-        })
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Cancel: leave Farhelm installed on this host"),
+            Tier::Neutral,
+        ))
         .body(|plan: &Plan, _, cx| {
             let body = PlanBody::new(&plan.confirmation, &plan.steps);
             cx.new(|_| body)

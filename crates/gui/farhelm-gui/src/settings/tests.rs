@@ -19,9 +19,9 @@ use farhelm_proto::ui_channel::{
     PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render,
-    Styled as _, TestAppContext, Toggled, VisualTestContext, WeakEntity, Window, WindowAppearance,
-    div, px, size,
+    AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, Toggled, VisualTestContext, Window, WindowAppearance, div, px,
+    size,
 };
 use serde_json::{Value, json};
 
@@ -2143,12 +2143,6 @@ fn trust_agents_are_listed_at_their_own_numbers() {
 
 // ---- Checkouts -----------------------------------------------------------------------------------------------------
 
-/// The Settings dialog opened last, for the tests that read a checkout field's text: GPUI Kit's field reports no
-/// accessible value, so the frame cannot tell it. Set by `open_dialog` in test builds only.
-pub(super) struct Opened(pub(super) WeakEntity<super::SettingsDialog>);
-
-impl Global for Opened {}
-
 /// Which of Checkouts' two text fields.
 #[derive(Clone, Copy)]
 enum Field {
@@ -2183,9 +2177,7 @@ impl Field {
 /// The open dialog's Checkouts field `field`.
 fn entity(cx: &mut VisualTestContext, field: Field) -> Entity<super::CheckoutField> {
     cx.update(|_, cx| {
-        let dialog = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade());
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx);
         let dialog = dialog.expect("the premise: Settings is open");
         let fields = dialog.read(cx).checkout_fields.as_ref();
         let fields = fields.expect("the premise: Checkouts was shown");
@@ -3050,9 +3042,7 @@ fn a_failed_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppContext)
 /// The topic field of the ntfy form drawn last.
 fn topic_input(cx: &mut VisualTestContext) -> crate::components::TextInputState {
     cx.update(|_, cx| {
-        let dialog = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade());
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx);
         let dialog = dialog.expect("the premise: Settings is open");
         let form = dialog.read(cx).ntfy.clone();
         form.expect("the premise: Notifications was shown")

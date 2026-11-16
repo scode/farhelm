@@ -215,13 +215,6 @@ struct Undo {
     _expires: Deadline,
 }
 
-/// The dialog last opened, for tests that reach into its editor and the screenshot goldens that open a row or a menu.
-#[cfg(test)]
-pub(crate) struct Opened(pub(crate) WeakEntity<TemplatesDialog>);
-
-#[cfg(test)]
-impl gpui::Global for Opened {}
-
 /// A preference write this dialog sends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Write {
@@ -339,7 +332,7 @@ fn open_dialog(
     )?;
     dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
     #[cfg(test)]
-    cx.set_global(Opened(dialog.downgrade()));
+    layers::record_opened(&dialog, cx);
     Some((layer, dialog))
 }
 
@@ -531,10 +524,8 @@ impl TemplatesDialog {
         };
         let mark = Mark::take(cx);
         focus::focus_in_layer(&name, &mark, window, cx);
-        let answer = |label: &'static str, help: &'static str, tier| Answer {
-            label: label.into(),
-            help: HoverHelp::tooltip(help),
-            tier,
+        let answer = |label: &'static str, help: &'static str, tier| {
+            Answer::new(label, HoverHelp::tooltip(help), tier)
         };
         let discard = cx.weak_entity();
         let question = Question::new(

@@ -144,11 +144,11 @@ pub(crate) fn question(
 ) -> Question<Frozen> {
     let question = Question::new(
         "Replace confirmation",
-        Answer {
-            label: "Confirm replace".into(),
-            help: HoverHelp::tooltip("Replace this session now, as described"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Confirm replace",
+            HoverHelp::tooltip("Replace this session now, as described"),
+            Tier::Danger,
+        ),
         Frozen {
             key: key.to_owned(),
             guard,
@@ -156,11 +156,11 @@ pub(crate) fn question(
         },
     )
     .line(consequence(row))
-    .cancel_answer(Answer {
-        label: "Cancel".into(),
-        help: HoverHelp::tooltip("Cancel: keep this session as it is"),
-        tier: Tier::Neutral,
-    });
+    .cancel_answer(Answer::new(
+        "Cancel",
+        HoverHelp::tooltip("Cancel: keep this session as it is"),
+        Tier::Neutral,
+    ));
     if surface == Surface::Card {
         return question;
     }

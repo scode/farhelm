@@ -206,7 +206,7 @@ fn open_returning(
     )?;
     editor.update(cx, |editor, _| editor.layer = Some(layer));
     #[cfg(test)]
-    cx.set_global(tests::Opened(editor.downgrade()));
+    layers::record_opened(&editor, cx);
     Some(layer)
 }
 

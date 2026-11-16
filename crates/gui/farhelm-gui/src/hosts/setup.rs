@@ -181,26 +181,26 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     let title = HostSentence::new("setup-title")
         .text("Set up host · ")
         .host(&name);
-    let set_up = Answer {
-        label: "Set up".into(),
-        help: HoverHelp::tooltip("Set up: set up this host as the plan above describes"),
-        tier: Tier::Primary,
-    };
+    let set_up = Answer::new(
+        "Set up",
+        HoverHelp::tooltip("Set up: set up this host as the plan above describes"),
+        Tier::Primary,
+    );
     let question = Question::new(title, set_up, offer)
         .summary("Farhelm is not running there yet")
-        .cancel_answer(Answer {
-            label: "Cancel".into(),
-            help: HoverHelp::tooltip("Cancel: change nothing on this host"),
-            tier: Tier::Neutral,
-        })
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Cancel: change nothing on this host"),
+            Tier::Neutral,
+        ))
         .alternative(
-            Answer {
-                label: "Set up, don't ask again".into(),
-                help: HoverHelp::tooltip(
+            Answer::new(
+                "Set up, don't ask again",
+                HoverHelp::tooltip(
                     "Set up this host, and set up new hosts from now on without asking",
                 ),
-                tier: Tier::PrimaryOutline,
-            },
+                Tier::PrimaryOutline,
+            ),
             |offer, window, cx| {
                 let offer = Offer {
                     mark: Mark::take(cx),

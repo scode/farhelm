@@ -17,7 +17,6 @@ use farhelm_proto::{
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
-use super::dialog::Opened;
 use super::dialog_tests::{painted, push, template, templates_state};
 use super::fields::Field;
 use super::save::{Candidate, choice_text};
@@ -25,6 +24,7 @@ use crate::components::EditCommand;
 use crate::focus::Mark;
 use crate::launcher::draft::{LaunchDraft, Tab};
 use crate::launcher::view_tests::search_focused;
+use crate::layers;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences, session};
 use crate::test_support::{self, click, keys, settle};
@@ -478,7 +478,8 @@ fn enter_saves_the_checked_fields_and_opens_the_new_template(cx: &mut TestAppCon
     settle(cx);
     assert!(!drawn(cx, "launcher"), "the launcher closed");
     let editor_name = cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Templates opened");
+        let dialog =
+            layers::last_opened::<super::dialog::TemplatesDialog>(cx).expect("Templates opened");
         dialog
             .read(cx)
             .editor

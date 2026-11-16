@@ -164,7 +164,7 @@ pub(in crate::launcher) fn open_noted(
     let layer = show(&launcher, mark, window, cx)?;
     read_catalog(launcher.downgrade(), cx);
     #[cfg(test)]
-    cx.set_global(super::view_tests::Opened(launcher.downgrade()));
+    layers::record_opened(&launcher, cx);
     Some(layer)
 }
 

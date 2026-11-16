@@ -14,7 +14,8 @@ use serde_json::{Value, json};
 use super::draft::{LaunchDraft, Mode};
 use super::entry::{open_restart_with, restart_with_unavailable};
 use super::entry_tests::window_with;
-use super::view_tests::{Opened, draft, name_of, shown_refusal};
+use super::view_tests::{draft, name_of, shown_refusal};
+use crate::layers;
 use crate::local_state;
 use crate::operations::Work;
 use crate::session_list::outcome;
@@ -53,10 +54,8 @@ fn restarts(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand>
 /// Change the open Restart with's effort to Medium, an edit, so its main action is not inactive.
 fn edit_effort(cx: &mut VisualTestContext) {
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             launcher.draft.choose_effort(Some(LaunchEffort::Medium));
             cx.notify();
@@ -302,10 +301,8 @@ fn restart_with_marks_an_edited_command(cx: &mut TestAppContext) {
     assert!(restart_with(cx, "e"));
     assert_eq!(name_of(cx, "launcher-changed-command"), None, "the premise");
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             launcher
                 .draft

@@ -313,11 +313,11 @@ impl Containers {
         let name = HostText::from_host(row.name.clone());
         let question = Question::new(
             "Delete container?",
-            Answer {
-                label: "Delete container".into(),
-                help: HoverHelp::tooltip("Delete the whole container and its files"),
-                tier: Tier::Danger,
-            },
+            Answer::new(
+                "Delete container",
+                HoverHelp::tooltip("Delete the whole container and its files"),
+                Tier::Danger,
+            ),
             row,
         )
         .line(
@@ -326,11 +326,11 @@ impl Containers {
                 .host(&name)
                 .text("? Every session, process, file and unpushed change in it will be permanently removed."),
         )
-        .cancel_answer(Answer {
-            label: "Cancel".into(),
-            help: HoverHelp::tooltip("Cancel: keep this container"),
-            tier: Tier::Neutral,
-        })
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Cancel: keep this container"),
+            Tier::Neutral,
+        ))
         // Deleting a container cannot be undone (SPEC.md, "Opening and closing": focus starts on Cancel then).
         .starts_on_cancel();
         self.question = Some(prompt::ask_inline(

@@ -16,7 +16,7 @@ use farhelm_proto::ui_channel::{
     CollectionChanges, CollectionState, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use gpui::{
-    Action, Global, KeyContext, KeybindingKeystroke, Keystroke, Modifiers, TestAppContext,
+    Action, KeyContext, KeybindingKeystroke, Keystroke, Modifiers, TestAppContext,
     VisualTestContext, WeakEntity, point, px,
 };
 
@@ -27,6 +27,7 @@ use crate::actions::{
     RenameSession, ShowKeyboardShortcuts, TERMINAL_KEYS, THIS_PLATFORM, TemplateList,
     TemplateNumberKey,
 };
+use crate::layers;
 use crate::session_list::tests::{listing, preferences_state, session};
 use crate::templates::shortcuts::Bindings;
 use crate::test_support::{
@@ -34,11 +35,6 @@ use crate::test_support::{
 };
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
-
-/// The overview [`super::open`] opened last, recorded in test builds only, so a test can tell one opening from another.
-pub(super) struct Opened(pub(super) WeakEntity<KeyboardShortcuts>);
-
-impl Global for Opened {}
 
 /// The chord on this platform (SPEC.md, "Desktop window chrome"), in GPUI's keystroke syntax. Pressed by the simulated
 /// platform, it carries no native identity, so the physical-key table matches it by its US key.
@@ -88,9 +84,10 @@ fn open(cx: &mut VisualTestContext) -> bool {
         .any(|node| node.element_id.as_deref() == Some(DIALOG))
 }
 
-/// The overview opened last, if it is still alive.
+/// The overview opened last, as a weak handle that may since have died, so a test can tell one opening from another;
+/// `None` when none was opened.
 fn opened(cx: &mut VisualTestContext) -> Option<WeakEntity<KeyboardShortcuts>> {
-    cx.update(|_, cx| cx.try_global::<Opened>().map(|opened| opened.0.clone()))
+    cx.update(|_, cx| layers::last_opened_weak::<KeyboardShortcuts>(cx))
 }
 
 /// Whether some text node of the frame reads exactly `text`.

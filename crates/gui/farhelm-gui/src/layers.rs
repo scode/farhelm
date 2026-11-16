@@ -1358,6 +1358,45 @@ pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
         })
 }
 
+// ---- The dialog opened last, for tests -------------------------------------------------------------------------------
+
+/// The last view of type `T` that an open function recorded ([`record_opened`]): one global per type, so each dialog
+/// has its own slot and recording one never touches another's.
+///
+/// Weak, so the record never keeps a closed dialog alive: a test that checks that a closed dialog is gone (its view
+/// dropped with its layer) would otherwise always fail.
+#[cfg(test)]
+struct Opened<T>(WeakEntity<T>);
+
+#[cfg(test)]
+impl<T: 'static> Global for Opened<T> {}
+
+/// Record `view` as the last view of its type opened, so tests and golden scenes can reach the dialog (or other
+/// layer's view) an open function made inside itself, and read or drive its fields. Test builds only: an open
+/// function calls it under `#[cfg(test)]` right after its open succeeds, so a refused open records nothing.
+///
+/// Each open records over the previous one of the same type. A new dialog records itself here, under `#[cfg(test)]`
+/// in its open function, rather than declaring a global of its own.
+#[cfg(test)]
+pub(crate) fn record_opened<T: 'static>(view: &Entity<T>, cx: &mut App) {
+    cx.set_global(Opened(view.downgrade()));
+}
+
+/// The last view of type `T` recorded by [`record_opened`], if one was recorded and is still alive. `None` cannot tell
+/// "never opened" from "opened and since dropped"; [`last_opened_weak`] can.
+#[cfg(test)]
+pub(crate) fn last_opened<T: 'static>(cx: &App) -> Option<Entity<T>> {
+    last_opened_weak(cx).and_then(|view| view.upgrade())
+}
+
+/// The record [`record_opened`] keeps for type `T`, whether or not the view is still alive: `None` only when no view
+/// of that type was recorded in this app. For the tests that check that nothing opened at all, that a closed view is
+/// gone, or that a second opening made a new view.
+#[cfg(test)]
+pub(crate) fn last_opened_weak<T: 'static>(cx: &App) -> Option<WeakEntity<T>> {
+    cx.try_global::<Opened<T>>().map(|opened| opened.0.clone())
+}
+
 // ---- The pill --------------------------------------------------------------------------------------------------------
 
 /// A display-only element to draw above every layer ([`show_pill`]): SPEC.md's quick-launch sequence pill, with its

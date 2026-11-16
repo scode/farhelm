@@ -2,6 +2,7 @@
 //! `SCENES` with each scene's name and size, stays in `mod.rs`.
 
 use crate::focus::Mark;
+use crate::layers;
 use crate::{session, test_support};
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
@@ -138,9 +139,7 @@ pub(super) fn template_editor_setup(state: &SceneState, window: &mut Window, cx:
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::templates::open(&opener, &mark, window, cx);
-            if let Some(dialog) = cx
-                .try_global::<crate::templates::dialog::Opened>()
-                .and_then(|opened| opened.0.upgrade())
+            if let Some(dialog) = layers::last_opened::<crate::templates::dialog::TemplatesDialog>(cx)
             {
                 dialog.update(cx, |dialog, cx| {
                     dialog.open_template("codex-deep", window, cx)
@@ -184,9 +183,7 @@ pub(super) fn template_number_menu_scene(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let dialog = cx
-        .try_global::<crate::templates::dialog::Opened>()
-        .and_then(|opened| opened.0.upgrade());
+    let dialog = layers::last_opened::<crate::templates::dialog::TemplatesDialog>(cx);
     if let Some(dialog) = dialog
         && dialog.read(cx).key_button_drawn("codex-deep")
         && take_pending(state)
@@ -248,9 +245,7 @@ pub(super) fn template_leave_question_scene(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let dialog = cx
-        .try_global::<crate::templates::dialog::Opened>()
-        .and_then(|opened| opened.0.upgrade());
+    let dialog = layers::last_opened::<crate::templates::dialog::TemplatesDialog>(cx);
     if let Some(dialog) = dialog
         && dialog.read(cx).key_button_drawn("codex-deep")
         && take_pending(state)

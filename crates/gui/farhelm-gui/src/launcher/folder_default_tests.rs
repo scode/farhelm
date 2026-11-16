@@ -21,6 +21,7 @@ use super::draft::{FolderDefault, LaunchDraft, Tab};
 use super::entry::open_new;
 use super::entry_tests::window_with;
 use super::view_tests::{draft, name_of, read, shown_refusal};
+use crate::layers;
 use crate::test_support::{self, any_open, settle};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -85,10 +86,8 @@ fn sent(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
 /// Fill the open launcher's Command tab with a complete command launch, so only the folder can hold Launch back.
 fn complete_command(cx: &mut VisualTestContext) {
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<super::view_tests::Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             launcher.draft.choose_tab(Tab::Command);
             launcher.draft.edit_command("true".into());
@@ -173,10 +172,8 @@ fn a_host_change_waits_for_the_new_hosts_folder(cx: &mut TestAppContext) {
     assert_eq!(draft(cx).folder.value(), "/srv/remote-work", "the premise");
     // The draft edit the host picker makes (`LaunchDraft::choose_host`), made directly.
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<super::view_tests::Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             launcher.draft.choose_host(9, "~".into());
             cx.notify();
@@ -402,10 +399,8 @@ fn push_host(
 /// Edit the open launcher's draft directly, and let it draw.
 fn edit_draft(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<super::view_tests::Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             edit(&mut launcher.draft);
             cx.notify();

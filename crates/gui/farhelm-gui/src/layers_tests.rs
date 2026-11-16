@@ -965,24 +965,24 @@ fn a_dialog_can_ask_before_it_closes_and_each_answer_does_its_part(cx: &mut Test
             let (counted, discards, saves) = (counted.clone(), closes.clone(), closes.clone());
             let leave = prompt::Question::new(
                 "Save these changes before leaving?",
-                prompt::Answer {
-                    label: "Save".into(),
-                    help: HoverHelp::tooltip("Save the draft, then leave"),
-                    tier: Tier::Primary,
-                },
+                prompt::Answer::new(
+                    "Save",
+                    HoverHelp::tooltip("Save the draft, then leave"),
+                    Tier::Primary,
+                ),
                 (),
             )
-            .cancel_answer(prompt::Answer {
-                label: "Keep editing".into(),
-                help: HoverHelp::tooltip("Go back to the draft"),
-                tier: Tier::Neutral,
-            })
+            .cancel_answer(prompt::Answer::new(
+                "Keep editing",
+                HoverHelp::tooltip("Go back to the draft"),
+                Tier::Neutral,
+            ))
             .alternative(
-                prompt::Answer {
-                    label: "Discard".into(),
-                    help: HoverHelp::tooltip("Leave without saving"),
-                    tier: Tier::Neutral,
-                },
+                prompt::Answer::new(
+                    "Discard",
+                    HoverHelp::tooltip("Leave without saving"),
+                    Tier::Neutral,
+                ),
                 move |(), window, cx| {
                     if let Some(id) = discards.get() {
                         layers::close(id, window, cx);

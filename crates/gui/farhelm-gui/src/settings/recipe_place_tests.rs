@@ -26,9 +26,10 @@ use super::recipe_tests::{
 use super::recipes::Tone;
 use super::recipes::prepared::{age, prepared_status};
 use super::tests::{
-    Opened, available, drawn, label_of, open_rail_with, open_settings, section_button, sent,
+    available, drawn, label_of, open_rail_with, open_settings, section_button, sent,
 };
 use crate::hosts::tests::{aliased, connected, host, hosts};
+use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{advance, click, meta, settle};
@@ -670,7 +671,7 @@ fn places_read_again_after_a_failure_do_not_count_as_starting(cx: &mut TestAppCo
 /// The open Recipes section, through the handle the dialog's opening records for tests.
 fn recipes_section(cx: &mut VisualTestContext) -> gpui::Entity<super::recipes::Recipes> {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx).expect("Settings is open");
         dialog.read(cx).recipes.clone().expect("Recipes was shown")
     })
 }
