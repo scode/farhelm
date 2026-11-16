@@ -495,7 +495,13 @@ committed-text path is covered by crates/gui/farhelm-gui/src/terminal/attached/t
 `text_an_input_method_commits_reaches_the_program`, `a_composition_reaches_the_program_only_when_it_commits` and
 `a_dead_key_composes_with_the_next_key`, crates/gui/farhelm-input-mapping/src/tests.rs
 `composition_and_app_routing_have_one_owner`, and scripts/gui-e2e-smoke.py
-`test_31_text_an_input_method_commits_reaches_the_program`
+`test_31_text_an_input_method_commits_reaches_the_program`. Input-method gaps, the same as the old grid client's (its
+`compositionend` handler at the reference commit says showing the composition at the cursor was left out as not worth
+its complexity): a composition in progress is not drawn in the terminal, only in the input method's own window if it
+shows one; and the terminal tells the input method neither where its cursor is nor which character a point is over
+(`bounds_for_range` and `character_index_for_point` in `terminal/attached.rs` answer nothing), so the candidate window
+sits where the operating system puts it, not at the cursor. Input-method support stays at what GPUI gives, decided by
+the maintainer on 2026-11-12, so these are recorded, not built.
 
 ## Scheduled for M3
 
