@@ -33,8 +33,21 @@
 //!   working), and it is drawn only when the conversation can be resumed. **Replace** asks its inline question in the
 //!   card, unless Skip session confirmations is on, through `replace::begin` and `confirm` as the row and the header do.
 //!   A legacy launch (a session from before launch kinds) cannot be replaced as it is, so its card offers the
-//!   launcher's Replace with in Replace's place, as the old card did. Restart, Replace and Replace with start a session,
-//!   so they wait for a host change as the header's and the row's do (`session_list::menu::launch_wait`).
+//!   launcher's Replace with in Replace's place, as the old card did. Restart and Replace start a session, so they wait
+//!   for a host change as the header's and the row's do (`session_list::menu::launch_wait`). Replace with opens the
+//!   launcher, so it waits whenever the launcher cannot open (`session_list::menu::launcher_wait`: a pending launch as
+//!   well as a host change), as the row's and the header's Replace with do, saying why in its hover help.
+//! - **While it asks.** The card's open Replace question is a lifecycle confirmation like any other, so it refuses the
+//!   session's other lifecycle actions (SPEC.md: "an open lifecycle confirmation or a pending request refuses another
+//!   lifecycle action"): the header's, the row menu's and the card's own Restart. It is inline, so a press elsewhere
+//!   does not close it as it closes the row's and the header's anchored questions; they have to refuse on their own.
+//!   So the question is kept here, under the UI session and the session it was asked for, rather than by the pane
+//!   alone, and [`asks`] is the fact `session_list::menu::refused` reads with only `&App`. The fact goes when the
+//!   question closes by any path: an answer (Escape is Cancel) closes it, which [`asks`] reads from the prompt itself,
+//!   and the pane drops it unanswered ([`drop_question`]) whenever the selection moves (the session deleted elsewhere
+//!   included) and whenever the card does not show: the session recovered, or its host dropped away, which hides the
+//!   card and with it the question. A card that shows again starts with no question, as the old card's did. A reset
+//!   makes a new UI session, under which nothing kept earlier is read.
 //! - **The lines move in.** While the card shows, a long Restart's or Replace's wait, the session's refusal or notice,
 //!   and the YOLO question its Replace met are drawn in the card and not below the top row, so nothing shows twice; the
 //!   wait line is the one copy announced, as the header's is otherwise.
@@ -45,11 +58,6 @@
 //!   written after the old app. It is the component layer's focus stop (`components::focus_stop`) on a handle the pane
 //!   keeps, so the pane can make it home before its first frame. It has no hover help: a tooltip over the whole card
 //!   would cover the explanation it is there to show.
-//!
-//! NOTE: The card's open Replace question refuses the header's actions (their buttons are drawn unavailable) and the
-//! card's own, but not yet the row menu's, which reads only the operation store and the YOLO question: a row action
-//! taken meanwhile acts on its own frozen question, and the card's answer still sends only the guard its question
-//! froze. The row menu's refusal is to read a per-session "the card asks" fact kept beside the restarted marks.
 
 use std::collections::HashSet;
 
@@ -188,6 +196,62 @@ fn forget_settled(cx: &mut App) {
     }
 }
 
+// ---- The card's question ---------------------------------------------------------------------------------------------
+
+/// The Replace question the open session's card asked, with the key of the session it is about, under the UI session it
+/// was asked in (see the module docs, "While it asks"). A global, because the row menu and the header read it through
+/// `session_list::menu::refused`, with only `&App` and no pane at hand; the pane is its one writer ([`keep_question`],
+/// [`drop_question`]). One question at most, since only the open session shows a card.
+#[derive(Default)]
+struct Asked {
+    session: Option<EntityId>,
+    question: Option<(String, Inline<replace::Frozen>)>,
+}
+
+impl Global for Asked {}
+
+/// Keep `question`, which the card of the session filed under `key` just asked, in place of any earlier one.
+pub(super) fn keep_question(key: &str, question: Inline<replace::Frozen>, cx: &mut App) {
+    let session = ui_session(cx);
+    cx.set_global(Asked {
+        session,
+        question: Some((key.to_owned(), question)),
+    });
+}
+
+/// Drop the card's question, unanswered if it is still open: the pane calls this whenever it stops showing the card
+/// the question belongs to. Dropping is what ends the fact then, since a question dropped unanswered still reads open
+/// for any clone of it (`prompt::Inline::is_open`), this one included.
+pub(super) fn drop_question(cx: &mut App) {
+    if cx
+        .try_global::<Asked>()
+        .is_some_and(|asked| asked.question.is_some())
+    {
+        cx.set_global(Asked::default());
+    }
+}
+
+/// The question the card of the session filed under `key` asked, if one is kept for it under the current UI session,
+/// open or answered: what the card draws while it is open.
+pub(super) fn question(key: &str, cx: &App) -> Option<Inline<replace::Frozen>> {
+    let asked = cx.try_global::<Asked>()?;
+    if asked.session != ui_session(cx) {
+        return None;
+    }
+    asked
+        .question
+        .as_ref()
+        .filter(|(asked_for, _)| asked_for == key)
+        .map(|(_, question)| question.clone())
+}
+
+/// Whether the interrupted card of the session filed under `key` asks its Replace question now: one is kept for it
+/// under the current UI session and has had no answer. While it does, the session's lifecycle commands are refused
+/// everywhere (`session_list::menu::refused`).
+pub(crate) fn asks(key: &str, cx: &App) -> bool {
+    question(key, cx).is_some_and(|question| question.is_open(cx))
+}
+
 /// Whether `row`'s card offers the launcher's Replace with in place of plain Replace: only for a row that says its
 /// launch is legacy, which plain Replace cannot copy as it is (the old card's `card_offers_replace_with`).
 fn offers_replace_with(row: &SessionRow) -> bool {
@@ -282,12 +346,16 @@ impl Follow {
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
 /// What the card draws for the open session filed under `key`: its row as the store holds it, the focus handle the
-/// card tracks (home while it shows), the Replace question it asked if one is kept, and the spinner's step.
+/// card tracks (home while it shows), the Replace question it asked if one is kept, why the launcher cannot open now
+/// if it cannot, and the spinner's step.
 pub(crate) struct Drawn<'a> {
     pub(crate) key: &'a str,
     pub(crate) row: &'a SessionRow,
     pub(crate) focus: &'a FocusHandle,
     pub(crate) question: Option<Inline<replace::Frozen>>,
+    /// [`menu::launcher_wait`], read by the caller, which has the `&mut App` it needs (the pane's render, as for the
+    /// header's `Shown::launcher_wait`), so that drawing keeps to `&App`.
+    pub(crate) launcher_wait: Option<&'static str>,
     pub(crate) step: u8,
 }
 
@@ -309,12 +377,15 @@ pub(crate) fn draw(
         row,
         focus,
         question,
+        launcher_wait,
         step,
     } = drawn;
     let palette = theme::palette(cx);
-    let busy = menu::refused(key, cx);
     let question = question.filter(|question| question.is_open(cx));
     let asking = question.is_some();
+    // The card's own open question is among what `refused` counts ([`asks`]); it refuses the card's Restart, but its
+    // Replace stays drawn pressed rather than unavailable, so focus can rest on it and come back to it on Escape.
+    let busy = menu::refused(key, cx) && !asking;
     let text = text(row);
     let ink = theme::color(palette.fg_0);
     let mut lines: Vec<AnyElement> = Vec::new();
@@ -335,9 +406,9 @@ pub(crate) fn draw(
     if let Some(line) = outcome::pane_line(key, cx) {
         lines.push(line.w_full().into_any_element());
     }
-    // Restart and Replace (or Replace with) start a session, so they wait for a host change as the header's and the
-    // row's do (`menu::launch_wait`), saying why in place of what they do; busy rather than disabled, so that reason
-    // stays reachable.
+    // Restart and Replace start a session, so they wait for a host change as the header's and the row's do
+    // (`menu::launch_wait`), saying why in place of what they do; busy rather than disabled, so that reason stays
+    // reachable. Replace with waits for the launcher instead (`Drawn::launcher_wait`), the same way.
     let wait = menu::launch_wait(cx);
     let mut buttons: Vec<AnyElement> = Vec::new();
     if restart::offered(row) {
@@ -363,13 +434,14 @@ pub(crate) fn draw(
         Button::new(
             "session-card-replace-with",
             "Replace with",
-            HoverHelp::tooltip(wait.unwrap_or(
+            HoverHelp::tooltip(launcher_wait.unwrap_or(
                 "Replace with: edit the settings, then swap this session for a new one",
             )),
             Role::Button,
         )
-        // The launcher's entry point refuses to open during a host change anyway (`launcher::entry::new_available`).
-        .busy(wait.is_some())
+        // The launcher holds one launch at a time, so a pending launch keeps it from opening as a host change does; the
+        // entry point refuses then anyway (`launcher::entry::new_available`), and this says why rather than look ready.
+        .busy(launcher_wait.is_some())
         .on_click(move |_, window, cx| {
             launcher::entry::open_replace_with(&owner, window, cx);
         })
@@ -465,13 +537,11 @@ fn restart_from_card(key: &str, cx: &mut App) {
 }
 
 impl SessionPane {
-    /// The card's Replace at `mark`: ask Replace's question inside the card, or send it at once when confirmations are
-    /// skipped (`replace::begin` decides). Nothing happens while the card's question is open, for a session the store
-    /// holds no row for, or for one with a request in flight.
+    /// The card's Replace at `mark`: ask Replace's question inside the card and keep it ([`keep_question`]), or send it
+    /// at once when confirmations are skipped (`replace::begin` decides). Nothing happens while the card's question is
+    /// open, for a session the store holds no row for, or for one with a request in flight: `menu::actionable` refuses
+    /// all three, the first through [`asks`].
     fn replace_from_card(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_asking(cx) {
-            return;
-        }
         let Some(key) = self.open_key(cx) else {
             return;
         };
@@ -487,19 +557,12 @@ impl SessionPane {
             cx,
         )
         .map(|ask| prompt::ask_inline(ask(), mark, replace::confirm, window, cx));
-        if let Some(mounted) = self.mounted.current(cx).as_mut() {
-            mounted.question = asked;
+        match asked {
+            Some(question) => keep_question(&key, question, cx),
+            // Sent at once: an earlier question, answered by now, has nothing left to draw.
+            None => drop_question(cx),
         }
         cx.notify();
-    }
-
-    /// Whether the card's Replace question is open now.
-    pub(super) fn card_asking(&mut self, cx: &App) -> bool {
-        self.mounted
-            .current(cx)
-            .as_ref()
-            .and_then(|mounted| mounted.question.as_ref())
-            .is_some_and(|question| question.is_open(cx))
     }
 }
 
