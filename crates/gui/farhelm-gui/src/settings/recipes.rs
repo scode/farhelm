@@ -70,7 +70,8 @@ mod editor;
 mod places;
 pub(super) mod prepared;
 
-pub(super) use editor::{Departure, Editor};
+pub(in crate::settings) use editor::Host;
+pub(crate) use editor::{Departed, Departure, Editor};
 
 use std::collections::HashSet;
 
@@ -634,8 +635,8 @@ impl Recipes {
     ) {
         let mark = Mark::take(cx);
         let parent = cx.weak_entity();
-        let editor = cx.new(|cx| Editor::new(parent, existing, window, cx));
-        let target = editor.read(cx).start();
+        let editor = cx.new(|cx| Editor::new(Host::Recipes(parent), existing, window, cx));
+        let target = editor.read(cx).start(cx);
         self.editor = Some(editor);
         focus::focus_in_layer(&target, &mark, window, cx);
         cx.notify();

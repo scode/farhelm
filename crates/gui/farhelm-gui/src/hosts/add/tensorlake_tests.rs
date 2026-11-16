@@ -93,11 +93,6 @@ fn sandbox_name(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| sandbox_form(cx).read(cx).name_typed())
 }
 
-/// Whether the sandbox body's Name holds focus.
-fn name_focused(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| sandbox_form(cx).read(cx).name_focused(window, cx))
-}
-
 /// Whether the control `id` is drawn, from a fresh frame.
 fn drawn(cx: &mut VisualTestContext, id: &str) -> bool {
     frame(cx)
@@ -123,6 +118,23 @@ fn shows(cx: &mut VisualTestContext, words: &str) -> bool {
         .join(" ");
     let drawn = drawn.split_whitespace().collect::<Vec<_>>().join(" ");
     drawn.contains(words)
+}
+
+/// Whether focus is inside the control `id`, from a fresh frame: the focused element or one around it has that id.
+/// GPUI Kit's text inputs share one inner focus id (`input-state`), so [`focused_id`] cannot tell one field from
+/// another; the field's own id is on an element around that one.
+fn focus_in(cx: &mut VisualTestContext, id: &str) -> bool {
+    let nodes = frame(cx);
+    nodes.iter().filter(|node| node.flags.focused).any(|node| {
+        let mut at = Some(node);
+        while let Some(node) = at {
+            if node.element_id.as_deref() == Some(id) {
+                return true;
+            }
+            at = node.parent.map(|parent| &nodes[parent]);
+        }
+        false
+    })
 }
 
 /// The value the closed Recipe select shows, from a fresh frame.
@@ -245,7 +257,7 @@ fn without_a_key_the_body_opens_settings_and_reads_the_account_again_when_it_clo
     assert!(drawn(cx, "add-tensorlake-name") && drawn(cx, "add-tensorlake-recipe"));
     assert!(any_open(cx), "Add host is still open");
     assert!(
-        name_focused(cx),
+        focus_in(cx, "add-tensorlake-name"),
         "the key saved in Settings put focus in Name"
     );
 }
@@ -286,9 +298,9 @@ fn a_failed_account_read_shows_the_helms_words_and_retry_reads_again(cx: &mut Te
 /// exactly the catalog's recipes, describe the chosen one the way Settings → Recipes does, and never silently swap a
 /// chosen recipe that went away for another.
 ///
-/// Specified: Recipe starts on "Choose a recipe" and offers the catalog's recipes in order; choosing one shows it and
-/// its summary (size, base and packages, with the image's name as written); when a push takes it out of the catalog,
-/// the select shows "<name> (unavailable)" and no summary.
+/// Specified: Recipe starts on "Choose a recipe" and offers the catalog's recipes in order, then "New recipe…";
+/// choosing one shows it and its summary (size, base and packages, with the image's name as written); when a push takes
+/// it out of the catalog, the select shows "<name> (unavailable)" and no summary.
 #[gpui::test]
 fn the_recipe_choice_offers_the_catalog_shows_the_summary_and_keeps_a_vanished_choice(
     cx: &mut TestAppContext,
@@ -311,9 +323,10 @@ fn the_recipe_choice_offers_the_catalog_shows_the_summary_and_keeps_a_vanished_c
         offered,
         [
             "add-tensorlake-recipe-option-rust-dev",
-            "add-tensorlake-recipe-option-web"
+            "add-tensorlake-recipe-option-web",
+            "add-tensorlake-recipe-option-__new__"
         ],
-        "the catalog's recipes in order"
+        "the catalog's recipes in order, then New recipe…"
     );
     click(cx, "add-tensorlake-recipe-option-rust-dev");
     assert_eq!(recipe_shown(cx).as_deref(), Some("rust-dev"));
@@ -390,4 +403,142 @@ fn a_kind_switch_while_the_probe_is_out_does_nothing(cx: &mut TestAppContext) {
     );
     assert!(drawn(cx, "add-host-destination") && !drawn(cx, "add-tensorlake-continue"));
     assert_eq!(label(cx, "add-host-submit").as_deref(), Some("Checking…"));
+}
+
+// ---- The recipe editor in Add host ---------------------------------------------------------------------------------
+
+/// Open Add host on the Tensorlake sandbox kind with a key saved and `recipes` in the catalog, then choose "New
+/// recipe…" and answer the one read the editor sends as it opens, the credential catalog's, with nothing saved.
+fn open_new_recipe<'a>(
+    cx: &'a mut TestAppContext,
+    recipes: &[Value],
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let (mut helm, cx, _) = open_rail_with(cx, vec![catalog(recipes)]);
+    open_dialog(cx);
+    let read = choose_tensorlake(cx, &mut helm);
+    helm.reply(read, 200, Some(account(true)));
+    cx.run_until_parked();
+    click(cx, "add-tensorlake-recipe");
+    click(cx, "add-tensorlake-recipe-option-__new__");
+    let (credentials, _) = one_command(&mut helm, Method::Get, "/api/credentials");
+    helm.reply(credentials, 200, Some(json!([])));
+    cx.run_until_parked();
+    assert!(
+        focus_in(cx, "recipe-name"),
+        "the premise: the editor opened with focus in its Name"
+    );
+    (helm, cx)
+}
+
+/// Why this matters: a recipe made from Add host must not cost the user the dialog they are in, and its Save must stay
+/// reachable: the editor is taller than the dialog, and answers that scroll with it are lost below the fold (the old
+/// suite's "Add host pins inline recipe answers and focuses Name").
+///
+/// Specified: "New recipe…" opens the editor in place of the fields with focus in its Name, without Back; the kind
+/// choice, Cancel and Continue give way to the editor's Cancel and Save. The editor is taller than the dialog's body,
+/// and Cancel and Save sit in the footer, below the scrolling body and inside the frame; Tab from the editor's fields
+/// reaches Cancel, then Save.
+#[gpui::test]
+fn new_recipe_opens_the_editor_with_focus_in_name_and_pins_its_answers(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_new_recipe(cx, &[recipe("rust-dev", "team/devbox")]);
+    assert!(drawn(cx, "recipe-editor") && !drawn(cx, "add-tensorlake-name"));
+    assert!(!drawn(cx, "recipe-back"), "Add host's editor has no Back");
+    assert!(
+        !drawn(cx, SANDBOX_TAB),
+        "the kind choice is hidden while the editor is open"
+    );
+    assert!(!drawn(cx, "add-host-cancel") && !drawn(cx, "add-tensorlake-continue"));
+    assert!(drawn(cx, "recipe-cancel") && drawn(cx, "recipe-save"));
+    let (frame_box, body, last, save) = (
+        crate::test_support::bounds(cx, "add-host"),
+        crate::test_support::bounds(cx, "add-host-body"),
+        crate::test_support::bounds(cx, "recipe-add-tunnel"),
+        crate::test_support::bounds(cx, "recipe-save"),
+    );
+    assert!(
+        last.top() > body.bottom(),
+        "the premise: the editor runs on below the body's view: {last:?} under {body:?}"
+    );
+    assert!(
+        save.bottom() <= frame_box.bottom() && save.top() >= body.bottom(),
+        "Save is pinned below the scrolling body, inside the dialog: {save:?} under {body:?} in {frame_box:?}"
+    );
+    // Tab walks the editor's fields and then reaches the pinned answers, Cancel first.
+    for _ in 0..60 {
+        if focused_id(cx).as_deref() == Some("recipe-cancel") {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("recipe-cancel"),
+        "Tab reached Cancel"
+    );
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("recipe-save"), "then Save");
+}
+
+/// Why this matters: the point of making a recipe from Add host is to create the sandbox from it, so a done Save must
+/// come back to the form with that recipe chosen, and with focus where the user goes on from.
+///
+/// Specified: Save sends `POST /api/tensorlake/recipes` for the typed name; once it is done (the catalog pushed with
+/// the new recipe first, as the helm does), the editor closes, Recipe shows the new recipe with its summary, and focus
+/// is on Recipe.
+#[gpui::test]
+fn a_done_save_chooses_the_new_recipe_and_returns_focus_to_recipe(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_new_recipe(cx, &[recipe("rust-dev", "team/devbox")]);
+    type_text(cx, "newbox");
+    click(cx, "recipe-save");
+    let (save, body) = one_command(&mut helm, Method::Post, "/api/tensorlake/recipes");
+    assert_eq!(body["name"], "newbox", "{body}");
+    push_catalog(
+        &mut helm,
+        &[
+            recipe("rust-dev", "team/devbox"),
+            recipe("newbox", "team/new"),
+        ],
+        &[],
+    );
+    helm.reply(save, 200, Some(json!({})));
+    cx.run_until_parked();
+    assert!(!drawn(cx, "recipe-editor") && drawn(cx, "add-tensorlake-name"));
+    assert_eq!(recipe_shown(cx).as_deref(), Some("newbox"));
+    assert!(shows(cx, "base: your image team/new"));
+    assert_eq!(focused_id(cx).as_deref(), Some("add-tensorlake-recipe"));
+    assert!(drawn(cx, SANDBOX_TAB), "the kind choice is back");
+}
+
+/// Why this matters: closing Add host must not silently drop a recipe being written, and the editor's own Cancel must
+/// return to the form rather than close Add host.
+///
+/// Specified: with a typed name, the editor's Cancel asks "Save these changes before leaving?", and Discard returns
+/// to the form with Add host open and focus on Recipe; opened again and typed into, Escape asks the same question with
+/// Add host still open, and Discard then closes Add host. Nothing is sent to the helm.
+#[gpui::test]
+fn leaving_with_unsaved_changes_asks_and_discard_goes_where_it_was_asked(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_new_recipe(cx, &[]);
+    type_text(cx, "draft");
+    click(cx, "recipe-cancel");
+    assert!(shows(cx, "Save these changes before leaving?"));
+    click(cx, "prompt-alternative-0");
+    assert!(
+        any_open(cx) && drawn(cx, "add-tensorlake-name"),
+        "Discard went back to the form"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("add-tensorlake-recipe"));
+
+    click(cx, "add-tensorlake-recipe");
+    click(cx, "add-tensorlake-recipe-option-__new__");
+    let (credentials, _) = one_command(&mut helm, Method::Get, "/api/credentials");
+    helm.reply(credentials, 200, Some(json!([])));
+    cx.run_until_parked();
+    assert!(focus_in(cx, "recipe-name"), "the premise: focus in Name");
+    type_text(cx, "draft");
+    keys(cx, "escape");
+    assert!(shows(cx, "Save these changes before leaving?"));
+    assert!(any_open(cx), "Escape asked rather than closing Add host");
+    click(cx, "prompt-alternative-0");
+    assert!(!any_open(cx), "Discard closed Add host");
+    assert!(helm.commands().is_empty(), "nothing was saved");
 }

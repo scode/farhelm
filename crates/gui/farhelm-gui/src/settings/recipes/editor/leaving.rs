@@ -10,7 +10,8 @@
 //!
 //! - **The editor owns its leaving.** Back and Cancel call [`Editor::leave`] for a return to the list, and the hosting
 //!   dialog's dismissal hook calls [`Editor::dismissal`] for a close, so a dialog other than Settings can host the
-//!   editor with the same rules. Where a departure goes is the section's ([`super::super::Recipes::depart`]).
+//!   editor with the same rules. Where a departure goes is the host's ([`super::Host`]): the section's
+//!   ([`super::super::Recipes::depart`]), or Add host's.
 //! - **The questions are the prompt's, inline.** Each is drawn where the editor's answers are, in their place, as the
 //!   old questions replaced the ordinary actions; Keep editing, Discard and Save in the old order, Cancel and Delete for
 //!   the delete confirmation. Opening one takes the other away.
@@ -62,7 +63,7 @@ const CARRIES_ON: u16 = 504;
 
 /// Where leaving the editor goes: back to the list, or out of the hosting dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::settings) enum Departure {
+pub(crate) enum Departure {
     Back,
     Close,
 }
@@ -101,11 +102,7 @@ impl Editor {
 
     /// What the hosting dialog's dismissal hook answers for the editor (Escape and its close controls): stay and ask
     /// the leave question when [`Editor::asks_before_leaving`], and otherwise let the dialog close.
-    pub(in crate::settings) fn dismissal(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Dismissal {
+    pub(crate) fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
         if self.asks_before_leaving(cx) {
             self.ask_leave(Departure::Close, window, cx);
             return Dismissal::Stay;
@@ -122,9 +119,16 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         let id = cx.entity_id();
-        let _ = self.parent.update(cx, |parent, cx| {
-            parent.depart(id, departure, mark, window, cx)
-        });
+        match &self.host {
+            super::Host::Recipes(parent) => {
+                let _ = parent.update(cx, |parent, cx| {
+                    parent.depart(id, departure, mark, window, cx)
+                });
+            }
+            super::Host::AddHost(departed) => {
+                departed(id, departure, self.saved.clone(), mark, window, cx)
+            }
+        }
     }
 
     /// A save the editor sent answered done: leave as the leave question's Save asked (`leaving`), or where the leave

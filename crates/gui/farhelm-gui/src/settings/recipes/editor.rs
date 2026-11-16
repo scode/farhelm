@@ -34,7 +34,11 @@
 //! - **The answers are a separate element.** [`Editor::actions`] builds the error line, the busy line and the buttons
 //!   for whichever dialog hosts the editor to place: Settings passes them to its frame's pinned notices only while
 //!   Recipes shows an open editor, so switching sections hides them, and the Close row stays as it is. Add host's
-//!   Tensorlake sandbox can host the same editor and its answers when it is built.
+//!   Tensorlake sandbox hosts the same editor for its "New recipe…" and pins the answers in place of its own footer.
+//! - **Two hosts, one editor.** Where the editor is open ([`Host`]) decides the little that differs, as the old
+//!   editor's `in_add_host` did: in Settings → Recipes, Back above the title, where focus starts; in Add host, focus
+//!   starting in Name and no Back, while Add host's Escape and header close ask before closing Add host as Settings'
+//!   do. Each host decides where a departure goes.
 //! - **Leaving asks first, and Delete confirms.** Back, Cancel and closing the hosting dialog ask "Save these changes
 //!   before leaving?" while the form has unsaved changes, and Delete asks before it deletes; [`leaving`] has their
 //!   rules.
@@ -45,7 +49,7 @@ mod leaving;
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::recipes::{CreateRecipe, RecipeSave, RecipeView, check_recipe_name};
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _,
+    AnyElement, App, Context, Entity, EntityId, FocusHandle, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
     Styled as _, Subscription, WeakEntity, Window, div, px,
 };
@@ -65,7 +69,8 @@ use crate::settings::Refused;
 use crate::settings::choices::{self, FIELD_HEIGHT, LABEL_GAP};
 use crate::theme::{self, metrics};
 use credentials::{Agent, Choices};
-pub(in crate::settings) use leaving::Departure;
+pub(crate) use leaving::Departure;
+use std::rc::Rc;
 
 /// `.recipe-editor`: the gap between the editor's parts.
 const EDITOR_GAP: f32 = 8.;
@@ -230,10 +235,39 @@ impl TunnelRow {
     }
 }
 
+/// Where an editor is open (the module docs, "Two hosts, one editor"): what decides the parts that differ between its
+/// hosting dialogs, and where its departures go.
+pub(in crate::settings) enum Host {
+    /// Settings → Recipes, in place of the list: Back above the title, where focus starts. Departures go to the
+    /// section ([`Recipes::depart`]).
+    Recipes(WeakEntity<Recipes>),
+    /// Add host's Tensorlake sandbox, in place of its fields, for "New recipe…": no Back, and focus starting in Name.
+    /// Departures go to the callback.
+    AddHost(Departed),
+}
+
+impl Host {
+    /// Whether the editor draws Back above its title: in Settings, where it returns to the list; not in Add host,
+    /// where the editor's Cancel is the way back to the form, as the old `in_add_host` editor had no Back.
+    fn has_back(&self) -> bool {
+        match self {
+            Host::Recipes(_) => true,
+            Host::AddHost(_) => false,
+        }
+    }
+}
+
+/// What an editor hosted by Add host calls when it leaves: with its entity id, so a late reply never moves an editor
+/// opened since; where it goes; the recipe's name once it is saved (a done create included), which Add host chooses;
+/// the press the departure answers; and the window, when a press is at hand rather than a reply.
+pub(crate) type Departed =
+    Rc<dyn Fn(EntityId, Departure, Option<String>, &Mark, Option<&mut Window>, &mut App)>;
+
 /// One recipe's editor (see the module docs). A view of its own, dropped by Back, Cancel, a done save, or the dialog
 /// closing; a save it started goes on in the operation store without it.
-pub(in crate::settings) struct Editor {
-    parent: WeakEntity<Recipes>,
+pub(crate) struct Editor {
+    /// Where the editor is open, and where its departures go.
+    host: Host,
     /// The saved recipe's name, or `None` for a new recipe.
     saved: Option<String>,
     /// The draft as the editor opened it: what "unsaved changes" is measured against.
@@ -274,9 +308,18 @@ pub(in crate::settings) struct Editor {
 }
 
 impl Editor {
-    /// An editor for `existing`, or for a new recipe with the old starting values.
+    /// A new recipe's editor for Add host's Tensorlake sandbox, whose departures go to `departed` (the module docs).
+    pub(crate) fn for_add_host(
+        departed: Departed,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new(Host::AddHost(departed), None, window, cx)
+    }
+
+    /// An editor for `existing`, or for a new recipe with the old starting values, open where `host` says.
     pub(super) fn new(
-        parent: WeakEntity<Recipes>,
+        host: Host,
         existing: Option<&RecipeView>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -294,7 +337,7 @@ impl Editor {
             .map(|(tunnel, key)| TunnelRow::new(key, tunnel, window, cx))
             .collect();
         let mut editor = Editor {
-            parent,
+            host,
             saved: existing.map(|view| view.name.clone()),
             choices: Choices::new(&baseline, window, cx),
             cpus: Input::line(&baseline.cpus, window, cx),
@@ -328,12 +371,16 @@ impl Editor {
         editor
     }
 
-    /// Where focus starts when the editor opens: Back, at the editor's top, so moving focus there brings the top into
-    /// view, Back included, even when the list it replaces was scrolled (SPEC.md: "In Settings the editor opens at its
-    /// top, including Back"). The old editor focused its title, a heading made focusable; headings are not controls
-    /// here, and Back is the control right above it.
-    pub(super) fn start(&self) -> FocusHandle {
-        self.back.clone()
+    /// Where focus starts when the editor opens. In Settings, Back, at the editor's top, so moving focus there brings
+    /// the top into view, Back included, even when the list it replaces was scrolled (SPEC.md: "In Settings the editor
+    /// opens at its top, including Back"); the old editor focused its title, a heading made focusable, and headings are
+    /// not controls here, so Back, the control right above it, takes its place. In Add host, Name, as the old editor
+    /// focused there.
+    pub(crate) fn start(&self, cx: &App) -> FocusHandle {
+        match self.host {
+            Host::Recipes(_) => self.back.clone(),
+            Host::AddHost(_) => self.name.state.focus_handle(cx),
+        }
     }
 
     /// The draft the form holds now: every field's text, the chosen base, the tunnel rows and the credential choices.
@@ -478,12 +525,18 @@ impl Editor {
         let editor = cx.weak_entity();
         let sent = draft;
         let forgetting = key.clone();
+        let created = name.clone();
         let started = operations.update(cx, |operations, cx| {
             operations.start(&key, command, cx, move |settled, cx| {
                 let refusal = match &settled.outcome {
                     Outcome::Refused(refusal) => refusal.words.clone(),
                     Outcome::Done(_) | Outcome::Accepted(_) => {
                         let _ = editor.update(cx, |editor, cx| {
+                            // The recipe is saved now: the departure that follows carries its name, which is how
+                            // Add host learns which recipe to choose (Settings' editor is dropped by the same
+                            // departure). Recorded before `set_saving` locks the fields again, so a saved recipe's
+                            // name is never editable.
+                            editor.saved = Some(created);
                             editor.set_saving(false, cx);
                             editor.saved(&mark, cx);
                         });
@@ -565,7 +618,7 @@ impl Editor {
     /// at the left and Cancel and Save at the right, or, while one is up, the leave question or the delete
     /// confirmation in their place, as the old questions replaced the ordinary actions. Read from the editor as it is
     /// now, so the host draws them in the same frame as the fields.
-    pub(in crate::settings) fn actions(editor: &Entity<Editor>, cx: &App) -> AnyElement {
+    pub(crate) fn actions(editor: &Entity<Editor>, cx: &App) -> AnyElement {
         let this = editor.read(cx);
         let weak = editor.downgrade();
         let busy = this.busy();
@@ -982,7 +1035,7 @@ impl Render for Editor {
             .gap(px(EDITOR_GAP))
             .w_full()
             .min_w_0()
-            .child(div().flex().child(back))
+            .children(self.host.has_back().then(|| div().flex().child(back)))
             .child(heading)
             .child(choices::help(
                 "Software and credentials for new container and sandbox sessions.",
