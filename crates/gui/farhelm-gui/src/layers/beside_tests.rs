@@ -1,14 +1,16 @@
 //! Tests of hover help placed beside the sidebar ([`super::beside`]): the placement's numbers as pure functions, each
 //! pinned to the old app's unit cases (`crates/farhelm-ui/js-tests/tooltip.test.js` at reference commit `24bc0580`),
-//! and in a window, the cues, the fallback and the card form as a control's hover help draws them.
+//! and in a window, the cues, the fallback and the card form as a control's hover help draws them, including the card
+//! whose view is made only while it shows.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
-    AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers,
-    ParentElement as _, Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window,
-    div, point, px, size,
+    AnyView, AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, Modifiers,
+    ParentElement as _, Pixels, Render, Styled as _, TestAppContext, VisualTestContext, WeakEntity,
+    Window, div, point, px, size,
 };
 
 use super::beside::{Placed, place};
@@ -220,9 +222,7 @@ fn hovered(
     width: f32,
     scene: impl Fn(&mut Window, &mut gpui::App) -> gpui::AnyElement + 'static,
 ) -> &mut VisualTestContext {
-    let cx = open(cx, scene);
-    cx.simulate_resize(size(px(width), px(800.)));
-    redraw(cx);
+    let cx = opened(cx, width, scene);
     let at = center(cx, "target");
     cx.simulate_mouse_move(at, None, Modifiers::none());
     advance(cx, layers::HOVER_DELAY);
@@ -493,4 +493,218 @@ fn the_ring_of_a_control_cut_off_by_its_container_is_painted_only_inside_it(
         list.contains(&ring.clip.origin) && ring.clip.bottom() <= list.bottom(),
         "painted inside the list's clip: {ring:?} {list:?}"
     );
+}
+
+/// Every view a lazy card's builder made, oldest first, each with the host its builder captured, as weak handles, so a
+/// test counts builds without keeping a view alive.
+type Built = Rc<RefCell<Vec<(u32, WeakEntity<Summary>)>>>;
+
+/// Lazy card help ([`HoverHelp::card_with`]) whose builder captures `host`, as a host progress card's would, and
+/// records each view it makes in `built` with that host. Every caller makes its help here, at this one call site.
+fn lazy_help(built: &Built, host: u32) -> HoverHelp {
+    let record = built.clone();
+    let build = move |_: &mut Window, cx: &mut gpui::App| {
+        let view = cx.new(|_| Summary);
+        record.borrow_mut().push((host, view.downgrade()));
+        AnyView::from(view)
+    };
+    HoverHelp::card_with(px(310.), build, "Host progress")
+}
+
+/// A scene like [`sidebar_scene`] whose button's help is a lazy card made anew in every render, as a control's help
+/// is, beside the sidebar when `edge` is set.
+fn lazy_scene(
+    edge: bool,
+    built: Built,
+) -> impl Fn(&mut Window, &mut gpui::App) -> gpui::AnyElement {
+    move |window, cx| {
+        let help = lazy_help(&built, 0);
+        let help = if edge { help.beside() } else { help };
+        let scene = sidebar_scene(edge, Rc::new(Cell::new(200.)), help);
+        scene(window, cx)
+    }
+}
+
+/// Open `scene` in a window `width` wide and 800 high, drawn, with the pointer not yet on its target.
+fn opened(
+    cx: &mut TestAppContext,
+    width: f32,
+    scene: impl Fn(&mut Window, &mut gpui::App) -> gpui::AnyElement + 'static,
+) -> &mut VisualTestContext {
+    let cx = open(cx, scene);
+    cx.simulate_resize(size(px(width), px(800.)));
+    redraw(cx);
+    cx
+}
+
+/// Move the pointer onto the element drawn under `selector`, which begins its hover, without waiting for its help.
+fn point_at(cx: &mut VisualTestContext, selector: &'static str) {
+    let at = center(cx, selector);
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+}
+
+/// Whether the `index`th view the builder made is still alive.
+fn alive(built: &Built, index: usize) -> bool {
+    built.borrow()[index].1.upgrade().is_some()
+}
+
+/// Why this matters: the host progress card's view holds the ticker's clock and a running step's pulse for as long as
+/// it lives, so it must not exist for a row nobody looks at, nor be made again in every frame it shows (which would
+/// restart its pulse and leak a view per frame).
+///
+/// Specification: beside the sidebar, a lazy card's view is not made while the control is drawn, nor while the pointer
+/// rests on it until the hover delay ends; it is made once when the tooltip shows, which then sits beside the sidebar
+/// with that view drawn on its card, and further frames, each re-rendering the control and refreshing its help, draw
+/// the same view and make no other.
+#[gpui::test]
+fn a_lazy_card_is_made_once_when_its_tooltip_shows_and_kept_while_it_shows(
+    cx: &mut TestAppContext,
+) {
+    let built = Built::default();
+    let cx = opened(cx, 1000., lazy_scene(true, built.clone()));
+    assert!(built.borrow().is_empty(), "nothing made before the hover");
+    point_at(cx, "target");
+    advance(cx, layers::HOVER_DELAY - Duration::from_millis(1));
+    assert!(
+        built.borrow().is_empty(),
+        "nothing made while the hover waits"
+    );
+    advance(cx, Duration::from_millis(1));
+    assert_eq!(built.borrow().len(), 1, "made when the tooltip shows");
+    for _ in 0..3 {
+        redraw(cx);
+    }
+    assert_eq!(shown(cx).side(), TooltipSide::Beside);
+    assert!(drawn(cx, "summary-view"), "its view is drawn on the card");
+    assert!(
+        built.borrow().len() == 1 && alive(&built, 0),
+        "the same view kept across frames"
+    );
+}
+
+/// Why this matters: a view kept after its tooltip went would keep its clock and pulse running with nothing drawing
+/// them, the cost the lazy card exists to avoid; and a view kept from an earlier hover would show stale progress.
+///
+/// Specification: at the pointer (no sidebar edge), a lazy card's tooltip shows with the view it made; once the pointer
+/// leaves and the tooltip hides, that view is gone (its weak handle no longer upgrades); and a new hover on the same
+/// control, which shows at once in the grace period a hide leaves, makes a new view.
+#[gpui::test]
+fn a_lazy_cards_view_goes_with_its_tooltip_and_a_new_hover_makes_another(cx: &mut TestAppContext) {
+    let built = Built::default();
+    let cx = opened(cx, 1000., lazy_scene(false, built.clone()));
+    point_at(cx, "target");
+    advance(cx, layers::HOVER_DELAY);
+    redraw(cx);
+    assert_eq!(shown(cx).side(), TooltipSide::Pointer);
+    assert!(
+        alive(&built, 0),
+        "the premise: the view was made and is drawn"
+    );
+
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    redraw(cx);
+    let hidden = cx
+        .update(|window, cx| layers::shown_tooltip(window, cx))
+        .is_none();
+    assert!(hidden, "the premise: the tooltip hid");
+    assert!(!alive(&built, 0), "its view went with it");
+
+    point_at(cx, "target");
+    redraw(cx);
+    assert!(
+        built.borrow().len() == 2 && alive(&built, 1),
+        "a new hover made a new view"
+    );
+}
+
+/// Why this matters: one control can keep its help across a change of what it is about (a row re-keyed in place to
+/// another host), and the pointer can rest on a control inside it meanwhile; when the pointer returns, the row's help
+/// shows at once from the copy kept while it was hovered. That copy must be the latest render's, or the card is built
+/// for the previous host.
+///
+/// Specification: a row whose lazy card's builder captures host 1, holding a button with help of its own; with the
+/// pointer resting on the button (its help showing, no card made), the row is drawn for host 2; moving back onto the
+/// row shows its card, built once, for host 2.
+#[gpui::test]
+fn a_lazy_card_shown_after_its_control_changed_is_built_for_the_latest_render(
+    cx: &mut TestAppContext,
+) {
+    let (built, host) = (Built::default(), Rc::new(Cell::new(1)));
+    let (record, current) = (built.clone(), host.clone());
+    let scene = move |window: &mut Window, cx: &mut gpui::App| {
+        let id: gpui::SharedString = "row".into();
+        let row = div()
+            .id("row")
+            .debug_selector(|| "row".into())
+            .w(px(380.))
+            .p(px(20.))
+            .child(Button::new(
+                "inner",
+                "Run",
+                HoverHelp::tooltip("Inner help"),
+                Role::Button,
+            ));
+        let help = lazy_help(&record, current.get());
+        crate::components::with_hover_help(row, &id, &help, false, window, cx).into_any_element()
+    };
+    let cx = opened(cx, 1000., scene);
+    point_at(cx, "inner");
+    advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        shown(cx).text,
+        "Inner help",
+        "the premise: the inner help shows"
+    );
+    host.set(2);
+    redraw(cx);
+    let row = bounds(cx, "row");
+    cx.simulate_mouse_move(row.origin + point(px(4.), px(4.)), None, Modifiers::none());
+    redraw(cx);
+    assert_eq!(
+        shown(cx).text,
+        "Host progress",
+        "the premise: the row's card shows"
+    );
+    let hosts: Vec<u32> = built.borrow().iter().map(|(host, _)| *host).collect();
+    assert_eq!(hosts, [2], "built once, for the latest host");
+}
+
+/// Why this matters: moving from one row to the next replaces the tooltip at once, and the first row's card must not
+/// live on with its clock and pulse after another took its place.
+///
+/// Specification: with two buttons' lazy cards, moving from the first (its card showing) onto the second shows the
+/// second's card, built for it, and the first's view is gone.
+#[gpui::test]
+fn a_lazy_cards_view_goes_when_another_tooltip_replaces_it(cx: &mut TestAppContext) {
+    let built = Built::default();
+    let record = built.clone();
+    let scene = move |_: &mut Window, _: &mut gpui::App| {
+        div()
+            .flex()
+            .flex_col()
+            .child(Button::new(
+                "target",
+                "First",
+                lazy_help(&record, 1),
+                Role::Button,
+            ))
+            .child(Button::new(
+                "next",
+                "Second",
+                lazy_help(&record, 2),
+                Role::Button,
+            ))
+            .into_any_element()
+    };
+    let cx = opened(cx, 1000., scene);
+    point_at(cx, "target");
+    advance(cx, layers::HOVER_DELAY);
+    assert!(alive(&built, 0), "the premise: the first card shows");
+    point_at(cx, "next");
+    redraw(cx);
+    assert!(
+        built.borrow().len() == 2 && built.borrow()[1].0 == 2 && alive(&built, 1),
+        "the second card replaced it"
+    );
+    assert!(!alive(&built, 0), "the first card's view is gone");
 }
