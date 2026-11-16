@@ -1379,7 +1379,8 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
 /// would now strand is helm.db and whatever `--ensure-hosts` was about to
 /// register into it. The ordering rule is the same one, and it is asserted
 /// against the strongest observable there is — the database file must not
-/// exist at all.
+/// exist at all. The helm here is `farhelm-fixtures helm`, which runs the
+/// helm library's standalone entry, where that startup order lives.
 #[farhelm_testtrace::test]
 async fn helm_bind_failure_happens_before_any_durable_setup() {
     let state = farhelm_teststate::tempdir().expect("state");
@@ -1394,8 +1395,8 @@ async fn helm_bind_failure_happens_before_any_durable_setup() {
 
     let output = tokio::time::timeout(
         Duration::from_secs(10),
-        tokio::process::Command::new(farhelm_bin())
-            .args(["helm", "run", "--state-dir"])
+        tokio::process::Command::new(fixtures_bin())
+            .args(["helm", "--state-dir"])
             .arg(state.path())
             .arg("--port")
             .arg(port.to_string())

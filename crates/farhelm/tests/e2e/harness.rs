@@ -435,8 +435,9 @@ pub(crate) fn farhelm_bin() -> &'static str {
     env!("CARGO_BIN_EXE_farhelm")
 }
 
-/// The `farhelm-fixtures` binary: the fake agent and the state sweep, which
-/// are not part of the shipped product.
+/// The `farhelm-fixtures` binary: the fake agent, the state sweep and the
+/// standalone helm [`helm_process`] starts, which are not part of the
+/// shipped product.
 ///
 /// Another package's binary, so Cargo gives integration tests no path to
 /// it. It is found beside [`farhelm_bin`] instead, in the same target
@@ -740,8 +741,19 @@ impl HelmProcess {
     }
 }
 
-/// Start a real `farhelm helm run` on an ephemeral port, against a state
+/// Start a real helm process on an ephemeral port, against a state
 /// directory somebody else owns, and read back the URL it prints.
+///
+/// The process is `farhelm-fixtures helm`, the helm library's standalone
+/// entry with its own argument struct: these tests want the serving code
+/// the desktop embeds in a process of its own.
+///
+/// NOTE: the helm code under test is whatever [`fixtures_bin`] was last
+/// built from. Nextest's setup script (`.config/nextest.toml`) and a plain
+/// `cargo build` rebuild it; Cargo does not rebuild another package's
+/// binary for an integration test. A run that skips both (`cargo test`,
+/// another profile or target directory, a hand-built archive) can test an
+/// older helm library than the source, and pass.
 ///
 /// `--port 0` plus parsing stdout, rather than picking a port and hoping:
 /// this suite runs concurrently with itself and with whatever else is on
@@ -781,9 +793,9 @@ pub(crate) async fn helm_process_with_args(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("removing {}: {error}", credential.display()),
     }
-    let mut command = tokio::process::Command::new(farhelm_bin());
+    let mut command = tokio::process::Command::new(fixtures_bin());
     command
-        .args(["helm", "run", "--port", "0", "--state-dir"])
+        .args(["helm", "--port", "0", "--state-dir"])
         .arg(state_dir)
         .arg("--test-credential-file")
         .arg(&credential);
