@@ -345,6 +345,42 @@ class SeedTest(unittest.TestCase):
         finally:
             gui_agent.helm_request = real_request
 
+    def test_seeded_templates_are_stored_before_their_bindings_and_name_nothing_of_the_machine(self):
+        """The template and quick-launch scenes start from `start --templates`, and their pictures are compared from
+        one run and one machine to the next; a template that carried a build path, a user or a host name would show it
+        in the Templates list, a launcher summary or a launched session's name. The ⚡ mark and keys must also be
+        written after the templates they name, in one preference write, so no scene finds a binding to a template not
+        yet stored. Specified: one `PUT /api/templates/<name>` per seeded template, in the set's order, with its fields
+        as the body; then one `PUT /api/preferences` holding only the mark and the number keys, each naming a seeded
+        template; and no template's fields hold a home directory, a scratch directory or a build directory."""
+        sent = []
+
+        def fake_request(run, method, path, body=None):
+            sent.append((method, path, body))
+            return None
+
+        real_request = gui_agent.helm_request
+        gui_agent.helm_request = fake_request
+        try:
+            run = pathlib.Path("/tmp/farhelm-tmp/run-of-a-test")
+            names = gui_agent.seed_templates(run)
+        finally:
+            gui_agent.helm_request = real_request
+        self.assertEqual(names, list(gui_agent.SEEDED_TEMPLATES))
+        self.assertEqual(
+            sent[:-1],
+            [("PUT", f"/api/templates/{name}", fields) for name, fields in gui_agent.SEEDED_TEMPLATES.items()],
+        )
+        method, path, bindings = sent[-1]
+        self.assertEqual((method, path), ("PUT", "/api/preferences"))
+        self.assertEqual(set(bindings), {"quick_launch_template", "template_shortcuts"})
+        bound = [bindings["quick_launch_template"], *bindings["template_shortcuts"].values()]
+        self.assertTrue(set(bound) <= set(names), f"every binding names a seeded template: {bound}")
+        text = json.dumps(gui_agent.SEEDED_TEMPLATES)
+        # A build path is an absolute path under a home or a scratch directory; the bare fixture name is not one.
+        for leak in ("/home", "/Users", "/tmp/farhelm-tmp", "target/debug"):
+            self.assertNotIn(leak, text)
+
     def test_a_transcript_fits_a_narrow_terminal_and_ends_on_its_kind(self):
         """The screenshot batch waits for a fleet session's last transcript line and photographs it in a 900-pixel
         window, whose terminal is about 55 columns wide: a longer line wraps, and the wrap plus the row an exited

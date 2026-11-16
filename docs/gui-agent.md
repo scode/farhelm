@@ -43,7 +43,8 @@ the app's appearance setting, and a value the app cannot parse makes it refuse t
 window's start dialogs open: the Welcome card, which a helm that has not seen it opens at window start, and the
 announcement batch after it. Without the option `start` keeps them closed for the run (another agent-build variable the
 same file reads), because every run's helm is fresh and the card would otherwise sit over the app and take the run's
-first click or key; nothing is marked seen. `--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts").
+first click or key; nothing is marked seen. `--templates` seeds a fixed set of launch templates with the ⚡ mark and
+number keys over them (see "Seeded templates"). `--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts").
 `--payload-dir DIR` is for a run that sets up or updates a real remote host: it hands the app's embedded helm a
 directory of staged `farhelm` payloads (`farhelm-<target>.tar.gz`, as `scripts/devbuild-mac.sh` stages them) to install
 from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug build has no release to download
@@ -82,6 +83,16 @@ PATH, so the card that shows the command shows no build path), which prints `FAK
 agent's approval card appear in the window. That launch is a command Farhelm did not compose, which an agent may copy
 only on a host that starts YOLO sessions without asking, so seeding a spawner turns that setting on for the run's local
 host; the spawn still waits on its card.
+
+## Seeded templates
+
+`start --templates` stores five launch templates in the run's helm through its API (`PUT /api/templates/<name>`), after
+any sessions, then sets the ⚡ mark and the number keys over them in one sparse `PUT /api/preferences`. The set is
+`SEEDED_TEMPLATES` in `scripts/gui-agent.py`, which says what each is for and which scene it serves. Template and
+quick-launch scenes start from it, so their steps only show the surface they are about. They reach the number keys
+inside a quick-launch sequence, which reads the keys bare: the chord itself is Ctrl+Shift on Linux and Command on a Mac,
+and the bridge cannot dispatch its action by name. No template names the machine: `fixture-run` calls the fake agent by
+its bare binary name, which the session's launch shim resolves, and `in-tmp`'s folder is `/tmp`, as for seeded sessions.
 
 ## Scripted hosts
 

@@ -78,8 +78,9 @@ forgot.
 The scenes that share start options share one app run per variant and run in list order, so each scene's steps begin
 where the one before it left the app (the Delete scene closes the menu the row-menu scene opened, the rename scene
 answers Cancel to the Delete question). A scene that needs another fleet names its own `start` options, `--sessions 0`
-for the empty one, and gets an app run of its own. A new scene goes into the group whose state it can start from, and
-its steps leave the app the way the next scene in that group expects.
+for the empty one, and gets an app run of its own; the template and quick-launch scenes start with `--templates`, which
+seeds their launch templates (`docs/gui-agent.md`, "Seeded templates"). A new scene goes into the group whose state it
+can start from, and its steps leave the app the way the next scene in that group expects.
 
 `python3 -B scripts/test-gui-screenshot-batch.py` tests the page from fixtures and the capture step against a fake
 harness; it needs neither the app nor the reference set.

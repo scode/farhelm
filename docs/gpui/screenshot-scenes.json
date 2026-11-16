@@ -1027,6 +1027,271 @@
           "Command copied"
         ]
       ]
+    },
+    {
+      "id": "app-launcher-tl-rows",
+      "title": "New's search holding tl: alone: the Templates group listing every seeded template by name, the first one highlighted",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:new-session-button"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "fill",
+          "id:launcher-search",
+          "tl:"
+        ],
+        [
+          "wait",
+          "text:Template: codex-deep"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-template-refusal",
+      "title": "A refused tl: pick in New (elsewhere names an install no host has): the refusal as one plain amber line above the search box, the draft unchanged",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "fill",
+          "id:launcher-search",
+          "tl:elsewhere"
+        ],
+        [
+          "wait",
+          "--gone",
+          "codex-deep"
+        ],
+        [
+          "wait",
+          "text:Template: elsewhere"
+        ],
+        [
+          "press",
+          "enter"
+        ],
+        [
+          "wait",
+          "--text",
+          "names an install no host here has"
+        ]
+      ]
+    },
+    {
+      "id": "app-save-as-template-panel",
+      "title": "Save as template's panel in New with Codex chosen, scrolled to its end: the checklist with each choice's value, and Save and Cancel",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "fill",
+          "id:launcher-search",
+          ""
+        ],
+        [
+          "click",
+          "id:launcher-harness-Codex"
+        ],
+        [
+          "click",
+          "id:launcher-save-template"
+        ],
+        [
+          "wait",
+          "id:save-template-panel"
+        ],
+        [
+          "scrollintoview",
+          "id:save-template-save"
+        ],
+        [
+          "wait",
+          "--text",
+          "Choose which parts of this setup the template keeps"
+        ]
+      ]
+    },
+    {
+      "id": "app-launcher-sequence-pill",
+      "title": "A quick-launch sequence armed inside New (after Escape on the panel): the Apply sequence pill at the launcher's bottom with key 2's template as a chip and the word fix with its candidate",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Choose which parts of this setup the template keeps"
+        ],
+        [
+          "action",
+          "farhelm::BeginSequence"
+        ],
+        [
+          "wait",
+          "--text",
+          "Apply sequence:"
+        ],
+        [
+          "type",
+          "--keys",
+          "2fix"
+        ],
+        [
+          "wait",
+          "--text",
+          "fixture-run"
+        ]
+      ]
+    },
+    {
+      "id": "app-quick-launch-banner",
+      "title": "The quick-launch mark on a template that cannot launch on its own (in-tmp, a folder alone): New with the needs-more-choices banner, which goes about six seconds after it applied",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "action",
+          "farhelm::QuickLaunch"
+        ],
+        [
+          "wait",
+          "--text",
+          "needs more choices"
+        ]
+      ]
+    },
+    {
+      "id": "app-quick-launch-naming",
+      "title": "A sequence of key 3 alone, then Enter, on a template that launches on its own (fixture-run): the session starts without showing New, and the rename dialog opens over it in naming mode with the created name selected (headless captures do not draw the selection highlight)",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "action",
+          "farhelm::BeginSequence"
+        ],
+        [
+          "wait",
+          "--text",
+          "Launch sequence:"
+        ],
+        [
+          "press",
+          "3"
+        ],
+        [
+          "press",
+          "enter"
+        ],
+        [
+          "wait",
+          "--text",
+          "Rename session"
+        ]
+      ]
+    },
+    {
+      "id": "app-templates-undo-notice",
+      "title": "Templates after Delete on in-tmp (Escape kept the quick launch's created name): the Deleted in-tmp notice with its Undo under the panes",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1",
+        "--templates"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Rename session"
+        ],
+        [
+          "click",
+          "id:templates-button"
+        ],
+        [
+          "click",
+          "id:template-open-in-tmp"
+        ],
+        [
+          "click",
+          "id:templates-delete"
+        ],
+        [
+          "wait",
+          "--text",
+          "Deleted"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [

@@ -7,7 +7,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
 
     scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
                                        [--lock FILE] [--window-size WxH] [--appearance light|dark]
-                                       [--scripted-hosts] [--start-dialogs] [--payload-dir DIR]
+                                       [--templates] [--scripted-hosts] [--start-dialogs] [--payload-dir DIR]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
@@ -25,8 +25,10 @@ that size and in that palette (agent builds only; `crates/gui/farhelm-gui/src/ag
 can capture each theme and size; they are test hooks, not the app's own appearance setting. A run's helm is always
 fresh, so the Welcome card would open over the app and catch the run's first click; `start` therefore turns the
 window's start dialogs (that card and the announcement batch after it) off through the same agent-build overrides, and
-`--start-dialogs` leaves them on to see the real start. `--scripted-hosts` makes the helm fake every command it runs on
-a host (setup, Update and the rest) with its scripted provisioning backend
+`--start-dialogs` leaves them on to see the real start. `--templates` seeds a fixed set of launch templates with the
+⚡ mark and number keys over them (SEEDED_TEMPLATES), for screenshot scenes of templates and quick launch.
+`--scripted-hosts` makes the helm fake every command it runs on a host (setup, Update and the rest) with its scripted
+provisioning backend
 (SCRIPTED_HOSTS_ENV, debug builds only), controlled with `script_hosts`. `--payload-dir DIR` hands the app's embedded
 helm a directory of staged `farhelm` payloads to install on and update real remote hosts from (PAYLOAD_DIR_ENV), which
 a debug build otherwise has no release to download from; it is the one way to pass that setting in, since the caller's
@@ -757,6 +759,48 @@ def seed_sessions(run: Path, kinds: list[str], fixtures: str) -> list[str]:
     return ids
 
 
+# The launch templates `start --templates` seeds, by name, each with the fields the helm stores (`PUT
+# /api/templates/<name>` takes the fields alone), and the ⚡ mark and number keys over them. Screenshot scenes of
+# templates and quick launch start from these instead of building templates through the Templates dialog, whose steps
+# would break every scene whenever the editor changes. Each one is there for a scene:
+#
+# - `codex-deep` and `quick-claude` are the reference stack's agent templates (the old app's capture and the GUI's
+#   template goldens staged them), on keys 1 and 8 as there.
+# - `in-tmp` sets only a folder, so it cannot launch on its own: ⚡ on it shows New with the needs-more-choices banner,
+#   and key 2 puts it in a quick-launch sequence as a chip.
+# - `fixture-run` is a command launch of the basic fake agent that launches on its own: a sequence of key 3 alone
+#   starts a session without showing New, which opens the naming dialog over it. Scenes reach the number keys
+#   through a sequence because a sequence reads them bare, while the chord itself differs by platform (Ctrl+Shift on
+#   Linux, Command on a Mac) and its action cannot be dispatched by name.
+# - `elsewhere` names an install no host has, so New refuses it, for the refusal line above the search box.
+#
+# Nothing here may name the machine that runs the scenes: `fixture-run` names the fake agent by its bare binary name,
+# which the session's launch shim resolves (as the `spawner` kind does), never a build path, and the folder is `/tmp`,
+# as for seeded sessions (`SESSION_CWD`).
+SEEDED_TEMPLATES = {
+    "codex-deep": {"kind": "agent", "agent": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+    "quick-claude": {"kind": "agent", "agent": "claude", "permissions": "yolo"},
+    "in-tmp": {"destination": {"folder": str(SESSION_CWD)}},
+    "fixture-run": {"kind": "command", "command": "farhelm-fixtures fake-agent --script basic", "yolo": False},
+    "elsewhere": {"host": "no-such-install"},
+}
+SEEDED_BINDINGS = {
+    "quick_launch_template": "in-tmp",
+    "template_shortcuts": {"1": "codex-deep", "2": "in-tmp", "3": "fixture-run", "8": "quick-claude"},
+}
+
+
+def seed_templates(run: Path) -> list[str]:
+    """Store `SEEDED_TEMPLATES` in this run's helm, in that order, then the ⚡ mark and the number keys over them in one
+    sparse preferences write (`SEEDED_BINDINGS`, which touches no other preference); return the names. The app shows
+    them from the helm's push, so `start` does not wait for the window to have them; scenes wait for what they
+    show."""
+    for name, fields in SEEDED_TEMPLATES.items():
+        helm_request(run, "PUT", f"/api/templates/{name}", fields)
+    helm_request(run, "PUT", "/api/preferences", SEEDED_BINDINGS)
+    return list(SEEDED_TEMPLATES)
+
+
 def allow_copied_launches(run: Path) -> None:
     """Turn on the local host's "Start YOLO sessions without asking" in this run's own helm, for a `spawner` session.
 
@@ -822,6 +866,12 @@ def start(run: Path, args: list[str]) -> int:
         "--scripted-hosts",
         action="store_true",
         help="fake the commands the helm runs on hosts with its scripted backend (see docs/gui-agent.md)",
+    )
+    parser.add_argument(
+        "--templates",
+        action="store_true",
+        help="seed the fixed launch templates, the quick-launch mark and number keys screenshot scenes use "
+        "(see docs/gui-agent.md)",
     )
     parser.add_argument(
         "--start-dialogs",
@@ -940,6 +990,8 @@ def start(run: Path, args: list[str]) -> int:
         if targets:
             wait_for_statuses(lambda: listed_states(run), targets)
             print(f"every seeded session reached its status: {', '.join(kinds)}")
+    if options.templates:
+        print(f"seeded launch templates: {', '.join(seed_templates(run))}")
     return 0
 
 

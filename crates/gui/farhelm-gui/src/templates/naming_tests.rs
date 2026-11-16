@@ -318,3 +318,31 @@ fn naming_opens_for_a_session_the_listing_leaves_out(cx: &mut TestAppContext) {
         "the editor started from the reply's name"
     );
 }
+
+/// SPEC.md, "Quick launch": "The actual created name is focused and fully selected". A quick-launched session keeps
+/// changing right after naming opens (its agent starts, so its status moves), and the editor follows the helm's pushes
+/// of the row; a follow that put the name back or moved the caret would leave the user typing after the name instead of
+/// replacing it. Specified: `n` launched and naming open, the helm pushes `n` again with a changed status; typing
+/// `fix` and Enter still sends one rename of `n` to exactly `fix`.
+#[gpui::test]
+fn the_created_name_stays_selected_through_pushes_of_its_row(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("go"));
+    launch(&mut helm, cx, "n", &["n"]);
+    assert!(any_open(cx), "the premise: naming opened");
+
+    let idle = session("n").status(json!({"state": "idle"}));
+    push(&mut helm, cx, listing(&["n"], &[idle]));
+    assert!(any_open(cx), "the push left the editor open");
+
+    keys(cx, "f i x enter");
+    let sent = renames(&mut helm);
+    let [rename] = &sent[..] else {
+        panic!("one rename, not {sent:?}");
+    };
+    assert_eq!(rename.path, "/api/sessions/n/rename");
+    assert_eq!(
+        rename.body.clone().unwrap_or_default(),
+        json!({ "title": "fix" }),
+        "the typed text replaced the whole name after the push"
+    );
+}
