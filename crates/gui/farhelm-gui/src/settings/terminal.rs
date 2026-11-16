@@ -60,8 +60,8 @@ pub(super) const ERROR_ID: &str = "settings-terminal-links-error";
 const FIELD: &str = "terminal_link_click";
 
 /// The help above the group: the old line, with "when they reload" made live (see the module docs).
-const HELP: &str = "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open \
-                    clients pick it up right away. This web-link choice does not change file downloads.";
+const HELP: &str = "Clicking a web link in a terminal: this choice applies to this helm. Changes from the command line \
+                    or an agent show here right away. This web-link choice does not change file downloads.";
 
 /// The line under the group after the helm refused a save, the old app's words.
 const FAILURE: &str = "Could not save how terminal links are clicked. Try again.";
@@ -150,9 +150,7 @@ pub(super) fn links(
         RadioGroup::new(
             ID,
             "Terminal web links",
-            HoverHelp::tooltip(
-                "What a click on a web link in a terminal does, for every client of this helm",
-            ),
+            HoverHelp::tooltip("What a click on a web link in a terminal does, for this helm"),
             Role::RadioGroup,
         )
         .chosen(Some(shown)),

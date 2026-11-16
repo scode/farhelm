@@ -21,11 +21,9 @@
 //!   Retry loading answers, since an off switch drawn then would be a guess. Its save names only its own field, under
 //!   the preference row's key like every other Settings save ([`super::agent_trust`] has the reasoning).
 //!
-//! - **The SSH key group is a view of its own** ([`super::tensorlake_ssh_key`]), under the key form, over the same
+//! - **The SSH key group and Sandboxes not on this helm are views of their own** ([`super::tensorlake_ssh_key`],
+//!   [`super::tensorlake_sandboxes`]), in the old order between the key form and "Creating sandboxes", over the same
 //!   account.
-//!
-//! NOTE: Not ported yet: **Sandboxes not on this helm**, which the old section drew between the SSH key group and
-//! "Creating sandboxes". It comes with its own change; `docs/gpui/parity/settings-and-hosts.md` tracks it.
 
 use farhelm_proto::tensorlake::SaveSettings;
 use gpui::{
@@ -37,6 +35,7 @@ use gpui::{
 use super::Refused;
 use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use super::tensorlake_key::{self, TensorlakeAccount, TensorlakeKey};
+use super::tensorlake_sandboxes::Sandboxes;
 use super::tensorlake_ssh_key::SshKey;
 use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::{self, Draft};
@@ -107,6 +106,8 @@ pub(super) struct Tensorlake {
     key: Entity<TensorlakeKey>,
     /// The SSH key group, under the key form.
     ssh_key: Entity<SshKey>,
+    /// Sandboxes not on this helm, under the SSH key group.
+    sandboxes: Entity<Sandboxes>,
     /// The switch's save: whether it is in flight, and the helm's words for the last refusal. Its value is the choice
     /// being saved, which the switch never shows (see the module docs).
     ask: Draft<bool>,
@@ -126,10 +127,12 @@ impl Tensorlake {
     ) -> Self {
         let observing = cx.observe(&account, |_, _, cx| cx.notify());
         let ssh_key = cx.new(|cx| SshKey::new(account.clone(), window, cx));
+        let sandboxes = cx.new(|cx| Sandboxes::new(account.clone(), cx));
         Tensorlake {
             account,
             key,
             ssh_key,
+            sandboxes,
             ask: Draft::load(false),
             refused: Refused::default(),
             _account: observing,
@@ -298,6 +301,7 @@ impl Render for Tensorlake {
             .child(choices::help(INTRO, cx))
             .child(self.key.clone())
             .child(self.ssh_key.clone())
+            .child(self.sandboxes.clone())
             .child(self.creating(cx))
     }
 }
