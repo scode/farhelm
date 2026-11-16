@@ -57,12 +57,22 @@ use crate::prompt::{Answer, Question};
 use crate::session::{self, Connection, UiSession};
 use crate::{assets, bootstrap, focus, layers, render_count, root};
 
-/// Install the app-wide state a test needs, as the real bootstrap does, on a fake-platform test context.
+/// Install the app-wide state a test needs, as the real bootstrap does, on a fake-platform test context, with one
+/// exception: Linux's click rule is in force (a click focuses the control it lands on) whatever OS the suite runs on.
+///
+/// The app's own default is the platform's rule ([`focus::CLICK_FOCUSES_CONTROLS`]), and on macOS a click focuses no
+/// button. Tests written on Linux took Linux's rule for granted without setting it, so on a Mac their clicks left focus
+/// where it was and they failed for reasons that had nothing to do with what they test. With the rule fixed here, a
+/// test that does not choose one runs the same everywhere. A test of the Mac rule sets it after this, with
+/// [`focus::set_click_focuses_controls`] and `false`, as many already do; calling this again resets it.
+///
+/// The rule is set through the focus coordinator's existing test seam, so nothing changes in the app outside tests.
 pub fn install(cx: &mut TestAppContext) {
     cx.update(|cx| {
         if let Err(error) = bootstrap::install(cx) {
             panic!("bootstrap failed in a test: {error:#}");
         }
+        focus::set_click_focuses_controls(true, cx);
     });
 }
 
@@ -71,6 +81,8 @@ pub fn install(cx: &mut TestAppContext) {
 ///
 /// A machine without a headless renderer fails at capture time; the screenshot goldens treat that as a failure, not a
 /// skip.
+///
+/// Like [`install`], it puts Linux's click rule in force on every OS, for the same reason.
 pub fn headless() -> anyhow::Result<HeadlessAppContext> {
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
         assets::UI_FONT,
@@ -81,6 +93,7 @@ pub fn headless() -> anyhow::Result<HeadlessAppContext> {
         gpui_platform::current_headless_renderer,
     );
     cx.update(bootstrap::install)?;
+    cx.update(|cx| focus::set_click_focuses_controls(true, cx));
     Ok(cx)
 }
 
@@ -933,6 +946,39 @@ mod shared_helper_tests {
         keys(main.cx, "y");
         assert_eq!(main.program_input(), 1, "one letter, one request");
         assert_eq!(main.program_input(), 0, "counted since the last call");
+    }
+
+    /// Why this matters: about thirty tests click a control and then act from it without choosing a click rule, and
+    /// they hold only under Linux's rule. If the harness left the platform's own rule in force, they would fail on a
+    /// Mac for a reason unrelated to what they test, as they once did; and if setting the Mac rule after the harness
+    /// stopped working, the tests of the Mac rule would quietly test Linux's. Specified, on every OS: in a fresh
+    /// [`open`] window with Tab's focus on the first of two buttons, a click on the second moves focus to it (Linux's
+    /// rule); once a test sets the Mac rule, a click on the first leaves focus on the second. Only a Mac build can
+    /// catch a lost default, since Linux's own rule is already Linux's.
+    #[gpui::test]
+    fn a_fresh_harness_clicks_by_linuxs_rule_on_every_os(cx: &mut TestAppContext) {
+        let first = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let second = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let (drawn_first, drawn_second) = (first.clone(), second.clone());
+        let cx = open(cx, move |_, _| {
+            div()
+                .child(button("first", &drawn_first))
+                .child(button("second", &drawn_second))
+                .into_any_element()
+        });
+        keys(cx, "tab");
+        assert!(
+            focused(cx, &first),
+            "the premise: Tab put focus on the first button"
+        );
+        super::click(cx, "second");
+        assert!(focused(cx, &second), "the click focused the second button");
+        cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+        super::click(cx, "first");
+        assert!(
+            focused(cx, &second),
+            "under the Mac rule the click left focus where it was"
+        );
     }
 }
 
