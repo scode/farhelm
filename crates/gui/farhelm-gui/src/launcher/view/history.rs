@@ -26,7 +26,7 @@
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::session_requests::LaunchHistoryReply;
-use farhelm_proto::ui_channel::{HostStateView, HostView};
+use farhelm_proto::ui_channel::HostStateView;
 use gpui::{App, Context};
 
 use super::super::draft::{FolderDefault, Install};
@@ -57,16 +57,9 @@ impl Launcher {
     /// What the history read is about now: the chosen host on its current connection, or `None` when there is no host
     /// or it is not connected (the helm would refuse the read).
     fn history_key(&self, cx: &App) -> Option<HistoryKey> {
-        let host = self.draft.host?;
-        let view = self
-            .store
-            .read(cx)
-            .collections()
-            .ordered::<HostView>()
-            .into_iter()
-            .find(|view| view.id == host)?;
+        let view = self.chosen_host(cx)?;
         matches!(view.state, HostStateView::Connected { .. }).then_some(HistoryKey {
-            host,
+            host: view.id,
             incarnation: view.incarnation,
         })
     }
@@ -145,11 +138,7 @@ impl Launcher {
         if self.draft.folder_default != FolderDefault::Pending {
             return false;
         }
-        let Some(view) = self
-            .draft
-            .host
-            .and_then(|id| hosts.iter().find(|view| view.id == id))
-        else {
+        let Some(view) = self.chosen_host(cx) else {
             return false;
         };
         let host = view.id;
@@ -173,12 +162,7 @@ impl Launcher {
     /// about ([`LaunchDraft::take_history_folder`](crate::launcher::draft::LaunchDraft::take_history_folder)). The
     /// history is only ever the current installation's, so that is the chosen host's row as it stands.
     pub(super) fn take_history_folder(&mut self, folder: String, cx: &App) {
-        let install = self.draft.host.and_then(|id| {
-            self.hosts(cx)
-                .iter()
-                .find(|view| view.id == id)
-                .map(Install::of)
-        });
+        let install = self.chosen_host(cx).map(Install::of);
         match install {
             Some(install) => self.draft.take_history_folder(folder, install),
             None => self.draft.edit_folder(folder),

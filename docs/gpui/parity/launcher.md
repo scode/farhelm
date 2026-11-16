@@ -349,6 +349,10 @@ partly: `launcher::view_tests::the_host_list_offers_every_host_with_its_phase_an
 repeated-letter cycling are not yet tested, and the picker disabled during a launch's write is superseded: the launcher
 hides while its create is out (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`)
 
+The host list keeps its own popover code rather than the shared list the launcher's text fields use
+(`launcher/view/field_list.rs`): it opens from a button that takes focus on a click, and moving it over would risk that
+focus handling to save a few dozen lines (decided by the migration's orchestrator on 2026-11-16).
+
 ## Launcher cases of specs listed in other areas' files
 
 These specs' rows sit in another area's parity file; their launcher cases are this area's (orchestrator's answer of

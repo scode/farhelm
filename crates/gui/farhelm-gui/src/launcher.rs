@@ -67,6 +67,8 @@ mod environment_tests;
 #[cfg(test)]
 mod escalation_tests;
 #[cfg(test)]
+mod field_list_tests;
+#[cfg(test)]
 mod folder_check_tests;
 #[cfg(test)]
 mod folder_default_tests;

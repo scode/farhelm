@@ -315,11 +315,7 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let hosts = self.host_options(cx);
-        let chosen = self
-            .draft
-            .host
-            .and_then(|id| hosts.iter().find(|host| host.id == id).cloned());
+        let chosen = self.chosen_host(cx).cloned();
         let mark = chosen
             .as_ref()
             .map(|host| host_mark(host.icon, host.color, px(MARK), palette).into_any_element());
