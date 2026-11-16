@@ -20,13 +20,14 @@ cards for agents' requests: Allow, the host-only grant, Deny over the quick swit
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
 other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel;
 67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings; 69, the session
-header's Replace with… and Clone; 70, the session list's Pin to top, Move up and Unpin). The behavior itself is specified
-and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
-`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
-`shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it
-clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's
-header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
-order, which is the header's.
+header's Replace with… and Clone; 70, the session list's Pin to top, Move up and Unpin; 71, a row's actions button
+opening its menu on Up; 72 and 73, the terminal: a reopened terminal's replay and live input, and a text size step
+reaching the program's terminal size). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
+`hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`,
+`notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
+session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match
+in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -73,6 +74,7 @@ import argparse
 import ast
 import hashlib
 import importlib.util
+import itertools
 import json
 import re
 import shlex
@@ -2137,6 +2139,179 @@ class Smoke(unittest.TestCase):
         self.ok("press", "escape")
         self.ok("wait", "--gone", MENU_DESCRIPTION)
         self.assertRegex(self.ok("snapshot", "-i"), button, "Escape returns focus to the button")
+
+    # ---- The terminal area's re-open and text size steps (72, 73), on sessions of their own -------------------------
+
+    def test_72_a_reopened_terminal_replays_its_screen_and_takes_typing(self) -> None:
+        """Going back to a session is a fresh attach: the pane drops the old stream when another session is chosen
+        (in-process, `session_pane/tests.rs` `switching_sessions_drops_the_old_stream_and_attaches_the_new_one`), so
+        whatever the reopened terminal shows of the earlier visit came from the supervisor's catch-up, through the
+        helm, into a new client-side screen. Nothing else checks that chain end to end; the old browser suite did it
+        twice (`terminal.spec.ts` at the reference commit: a switch away and back, and a page reload). Specified, on
+        two basic fake-agent sessions this step creates under titles of its own: with A open and its terminal showing
+        its fresh screen, a stamped line typed there comes back as the agent's echo; a click on B's row puts B's
+        terminal in focus (its own stamped origin line, and none of A's echo); a click on A's row then shows A's
+        terminal with the echo of the first line again, replayed, and a second stamped line typed there comes back as
+        the agent's echo of exactly that line, live.
+
+        Each session's command echoes a line stamped for this run before it starts the agent, and every wait after a
+        click is for text only that click's session shows. Every fake agent prints `FAKE-AGENT READY`, and the pane
+        remakes its terminals only once it sees the new selection, after the click has returned, so a wait for that
+        line after a switch could pass on the terminal that was open before."""
+        stamp = uuid.uuid4().hex[:8]
+        roles = ("A", "B")
+        titles = {role: f"Reopen {role} {stamp}" for role in roles}
+        origins = {role: f"reopen-{role.lower()}-origin-{stamp}" for role in roles}
+        for role in roles:
+            seed_stamped_basic(titles[role], origins[role])
+        for role in roles:
+            self.ok("wait", "--text", titles[role])
+
+        self.ok("click", f"text:{titles['A']}")
+        wait_for_fresh_basic_terminal(origins["A"], titles["A"])
+        before = f"before-switch-{stamp}"
+        self.ok("type", "--keys", before)
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", f"echo:{before}")
+
+        self.ok("click", f"text:{titles['B']}")
+        screen = self.ok("terminal-text", "--wait", origins["B"])
+        # The premise for the replay below: the switch really replaced A's terminal with B's. Without it, a pane that
+        # never left A would pass the wait for A's echo with no replay at all.
+        self.assertNotIn(f"echo:{before}", screen, "premise: the focused terminal is B's, not A's")
+
+        self.ok("click", f"text:{titles['A']}")
+        # A's echo is the replayed boundary: the client shows an attachment's screen only once its replay is complete,
+        # and B's terminal never held this line.
+        screen = self.ok("terminal-text", "--wait", f"echo:{before}")
+        self.assertIn(origins["A"], screen, "the reopened terminal is A's, with its start replayed too")
+        after = f"after-switch-{stamp}"
+        self.ok("type", "--keys", after)
+        self.ok("press", "enter")
+        screen = self.ok("terminal-text", "--wait", f"echo:{after}")
+        lines = [line.strip() for line in gui_agent.probe_text(screen).splitlines()]
+        self.assertIn(f"echo:{after}", lines, "the live echo is of exactly the typed line")
+
+    def test_73_a_text_size_step_resizes_the_programs_terminal(self) -> None:
+        """A text size step must change what the program sees, not just how the window draws it (SPEC.md, "Terminal
+        experience": "each terminal is resized so the program inside sees its new rows and columns"). The in-process
+        tests stop at the resize the client sends (`a_text_size_step_resizes_every_open_terminal`); this step follows
+        it through the helm, the supervisor and the terminal host to the program's pty, the old browser suite's
+        "resize reaches the real terminal" case. Specified, in a basic fake-agent session this step creates under a
+        title of its own, with its terminal focused: the agent's `size` answer (`stty size`, `size:<rows> <cols>`)
+        before the step; the Larger terminal text chord makes the helm store a size one point larger; and the next
+        `size` answer has fewer columns and no more rows than before. The chord to Smaller then makes the helm store
+        the starting size again, so no later step sees a larger terminal font.
+
+        The size reaches the program a frame after the chord, not with it: the terminal re-measures, the next frame
+        fits it, and only then does a resize go out. A `size` typed right after the chord can still be answered
+        at the old size, so the step asks again until the answer changes or the effect timeout passes. Each ask is
+        preceded by a line of its own whose echo marks it, so an answer is never mistaken for an earlier ask's, and
+        `size` is typed only once that echo is back: the agent's prompt is the one safe point to type, and a line typed
+        while it still answers can land inside its output."""
+        stamp = uuid.uuid4().hex[:8]
+        title = f"Text size {stamp}"
+        origin = f"text-size-origin-{stamp}"
+        seed_stamped_basic(title, origin)
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        wait_for_fresh_basic_terminal(origin, title)
+
+        def stored() -> int | None:
+            return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("terminal_text_size")
+
+        # 14 points is the app's size while the helm stores none (`terminal/text_size.rs`), and 28 the largest.
+        start = stored() or 14
+        self.assertLess(start, 28, "premise: the text size can still step up")
+        asks = itertools.count()
+
+        def answer() -> tuple[int, int]:
+            """The program's answer to a `size` asked now, as (rows, cols)."""
+            mark = f"size-asked-{stamp}-{next(asks)}"
+            self.ok("type", "--keys", mark)
+            self.ok("press", "enter")
+            self.ok("terminal-text", "--wait", f"echo:{mark}")
+            self.ok("type", "--keys", "size")
+            self.ok("press", "enter")
+            return eventually(
+                lambda: size_answer_after(gui_agent.probe_text(self.ok("terminal-text")), f"echo:{mark}"),
+                f"the agent's `size` answer after {mark!r}",
+            )
+
+        rows, cols = answer()
+        self.ok("press", "cmd-shift-=" if sys.platform == "darwin" else "ctrl-shift-=")
+        # Whatever fails from here on, the shared run must not keep the larger font for the steps after this one.
+        try:
+            eventually(lambda: stored() == start + 1, f"the helm storing the text size {start + 1}")
+            last = (rows, cols)
+
+            def changed() -> bool:
+                nonlocal last
+                last = answer()
+                return last != (rows, cols)
+
+            eventually(changed, f"the program's answer changing from {rows} rows and {cols} columns after the step")
+            self.assertLess(
+                last[1], cols, f"a larger font fits fewer columns; the program saw {last} after {(rows, cols)}"
+            )
+            self.assertLessEqual(last[0], rows, f"a larger font fits no more rows; the program saw {last}")
+        finally:
+            if stored() != start:
+                self.ok("press", "cmd-shift--" if sys.platform == "darwin" else "ctrl-shift--")
+        eventually(lambda: stored() == start, f"the helm storing the text size {start} again")
+
+
+def seed_stamped_basic(title: str, origin: str) -> None:
+    """Create a basic fake-agent session titled `title` whose terminal shows `origin` on its first line, before the
+    agent starts. The origin line is what only this session's terminal shows (every basic agent prints the same start
+    and ready lines), so a step can wait for it after a click without passing on another session's terminal. The launch
+    command runs through `bash -c`, which makes the `;` below a sequence: the echo finishes before the agent starts."""
+    assert RUN is not None
+    fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+    body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+    body["title"] = title
+    body["command"]["command"] = f"echo {origin}; {body['command']['command']}"
+    gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+
+
+def wait_for_fresh_basic_terminal(origin: str, title: str) -> None:
+    """Wait until the focused terminal shows exactly the fresh screen of a session `seed_stamped_basic` made with
+    `origin`: that line, the agent's start and ready lines and its `> ` prompt, and nothing else. The prompt is the
+    fixture's safe-to-type point (input sent on the ready line alone can land on top of it), and the origin line tells
+    this session's terminal from any other. A failure names what the terminal last showed."""
+    fresh = [origin, "fake-agent starting (script=basic)", "FAKE-AGENT READY", ">"]
+    last = ""
+
+    def shown() -> bool:
+        nonlocal last
+        screen = agent("terminal-text")
+        last = screen.stdout.strip() or screen.stderr.strip()
+        if screen.returncode != 0:
+            return False
+        text = gui_agent.probe_text(screen.stdout)
+        return [line.rstrip() for line in text.strip().splitlines()] == fresh
+
+    try:
+        eventually(shown, f"the terminal of {title}, freshly started")
+    except AssertionError:
+        raise AssertionError(
+            f"the focused terminal never showed {title}'s fresh screen alone; it last showed {last}"
+        ) from None
+
+
+def size_answer_after(screen: str, mark: str) -> tuple[int, int] | None:
+    """The basic fake agent's first `size:<rows> <cols>` answer below the line `mark` on `screen`, as (rows, cols), or
+    `None` while there is none yet. The step types `size` only after `mark`'s echo is back, and the agent answers lines
+    in order, so the first answer below that echo is that ask's. A screen without `mark` at all (scrolled away, say)
+    fails at once rather than waiting for an answer that cannot be told apart from an older one."""
+    lines = [line.strip() for line in screen.splitlines()]
+    if mark not in lines:
+        raise AssertionError(f"{mark!r} is not a line of the screen:\n{screen}")
+    for line in lines[lines.index(mark) + 1 :]:
+        if answered := re.fullmatch(r"size:(\d+) (\d+)", line):
+            return int(answered[1]), int(answered[2])
+    return None
+
 
 def waiting_approvals() -> list[dict]:
     """The requests the helm holds for the user's answer, oldest first (`GET /api/approvals`)."""
