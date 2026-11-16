@@ -8,7 +8,9 @@
 //!
 //! - **Opening.** [`open`] is the entry point for the host rail's Add host and the Hosts panel heading's add button.
 //!   The opener gets focus back when the dialog closes, as Settings' gear does, because the dialog names it as its
-//!   return target. Focus starts in the destination field.
+//!   return target. Focus starts in the destination field, or in a reopened sandbox's Name: the sandbox's creation
+//!   question reopens Add host on the Tensorlake sandbox kind for its Back and for a refused creation
+//!   ([`reopen_sandbox`]), with the name, the recipe and the account the form had.
 //! - **The host kind.** Above the fields, a strip of two choices, SSH and Tensorlake sandbox, picks what the dialog
 //!   adds. SSH, the fields below, is where it opens. Tensorlake sandbox swaps in the sandbox's own body
 //!   ([`tensorlake`]), its Continue in Add's place, its main action for Enter on the dialog itself, and the header's
@@ -196,6 +198,16 @@ pub(crate) struct Seed {
     pub(crate) from_agent: bool,
 }
 
+/// What a reopened dialog on the Tensorlake sandbox kind starts from ([`reopen_sandbox`]): the name and recipe its
+/// creation confirmation was for, the account as the form had read it (so Name and Recipe show at once, with focus in
+/// Name), and why it reopened, if it is a refusal rather than the confirmation's Back.
+pub(crate) struct SandboxSeed {
+    pub(crate) name: String,
+    pub(crate) recipe: String,
+    pub(crate) account: farhelm_proto::tensorlake::Settings,
+    pub(crate) problem: Option<HostSentence>,
+}
+
 /// Why [`open_for_agent`] opened nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotOpened {
@@ -265,6 +277,8 @@ enum Start {
     Seed(Seed),
     /// For an agent's request ([`open_for_agent`]).
     Agent(AgentRequest),
+    /// On the Tensorlake sandbox kind, as its creation confirmation left it ([`reopen_sandbox`]).
+    Sandbox(SandboxSeed),
 }
 
 /// [`open`], with the fields and the error line taken from `seed` when there is one: how a setup the helm refused
@@ -287,6 +301,20 @@ pub(crate) fn reopen(
     open_with(opener, mark, start, window, cx)
 }
 
+/// [`reopen`] on the Tensorlake sandbox kind: how the sandbox's creation confirmation goes back to Add host, for its
+/// Back or a refusal of the creation (`setup`'s module docs), with the name and recipe as they were, `seed`'s problem
+/// in the error line, and focus in Name. Focus returns to `opener`, the control that opened the first dialog. Nothing
+/// opens once the user has moved on since `mark`.
+pub(crate) fn reopen_sandbox(
+    opener: &FocusHandle,
+    mark: &Mark,
+    seed: SandboxSeed,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    open_with(opener, mark, Start::Sandbox(seed), window, cx)
+}
+
 /// Open the dialog as `start` says, unless the user moved on since `mark` or the window is inert. An agent's dialog
 /// also gets the dismiss hook that answers Deny and the subject that closes it once its request stops waiting.
 fn open_with(
@@ -303,7 +331,7 @@ fn open_with(
     }
     let agent = matches!(start, Start::Agent(_));
     let dialog = cx.new(|cx| AddHostDialog::new(opener.clone(), start, window, cx));
-    let start = dialog.read(cx).destination.input().focus_handle(cx);
+    let start = dialog.read(cx).start(cx);
     let weak = dialog.downgrade();
     // Enter on the dialog itself is the shown kind's one main action: Add, or the sandbox's Continue.
     let main_action: MainAction = Rc::new(move |window, cx| {
@@ -545,8 +573,13 @@ impl AddHostDialog {
     /// A dialog opened by `opener`, empty or as `seed` says. The drafts follow nothing: there is no pushed value behind
     /// a new host's fields.
     fn new(opener: FocusHandle, start: Start, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut sandbox = None;
         let (destination, alias, problem, from_agent, agent) = match start {
             Start::Empty => (String::new(), String::new(), None, false, None),
+            Start::Sandbox(seed) => {
+                sandbox = Some(seed);
+                (String::new(), String::new(), None, false, None)
+            }
             Start::Seed(seed) => (
                 seed.destination,
                 seed.alias,
@@ -592,8 +625,18 @@ impl AddHostDialog {
             window,
             cx,
         );
+        let key = OpKey::new_host_add();
+        let body = match sandbox {
+            Some(seed) => {
+                let (dialog, key, opener) = (cx.weak_entity(), key.clone(), opener.clone());
+                Body::Tensorlake(
+                    cx.new(|cx| TensorlakeForm::new(dialog, key, opener, Some(seed), window, cx)),
+                )
+            }
+            None => Body::Ssh,
+        };
         AddHostDialog {
-            key: OpKey::new_host_add(),
+            key,
             opener,
             probe_mark: Mark::take(cx),
             destination,
@@ -604,7 +647,7 @@ impl AddHostDialog {
             agent,
             accepted: false,
             from_agent,
-            body: Body::Ssh,
+            body,
             _watches: watches,
         }
     }
@@ -619,8 +662,11 @@ impl AddHostDialog {
         self.body = match kind {
             Kind::Ssh => Body::Ssh,
             Kind::Tensorlake => {
-                let dialog = cx.weak_entity();
-                Body::Tensorlake(cx.new(|cx| TensorlakeForm::new(dialog, window, cx)))
+                let (dialog, key, opener) =
+                    (cx.weak_entity(), self.key.clone(), self.opener.clone());
+                Body::Tensorlake(
+                    cx.new(|cx| TensorlakeForm::new(dialog, key, opener, None, window, cx)),
+                )
             }
         };
         cx.notify();
@@ -636,6 +682,14 @@ impl AddHostDialog {
     fn request_gone(&self, cx: &App) -> bool {
         self.pending()
             .is_some_and(|request| !request.answering(cx) && !request.waiting(cx))
+    }
+
+    /// Where focus starts as the dialog opens: the SSH destination, or a reopened sandbox's Name.
+    fn start(&self, cx: &App) -> FocusHandle {
+        match &self.body {
+            Body::Ssh => self.destination.input().focus_handle(cx),
+            Body::Tensorlake(form) => form.read(cx).name_handle(cx),
+        }
     }
 
     /// The Tensorlake sandbox's recipe editor, while it is open in the shown body.
@@ -695,9 +749,7 @@ impl AddHostDialog {
     /// Whether something Add started is out: this dialog's probe, or an answer to its agent's request. Add reads
     /// "Checking…" then.
     fn probing(&self, cx: &App) -> bool {
-        self.pending().is_some_and(|request| request.answering(cx))
-            || session::current_operations(cx)
-                .is_some_and(|operations| operations.read(cx).in_flight(&self.key).is_some())
+        self.pending().is_some_and(|request| request.answering(cx)) || key_busy(&self.key, cx)
     }
 
     /// Whether Add is busy: [`Self::probing`], or for an agent's request the answer bar's pause, during which Add keeps
@@ -906,6 +958,14 @@ impl AddHostDialog {
     }
 }
 
+/// Whether work is out under an Add host opening's `key`: its probe, or the setup or sandbox creation it led to. Read
+/// by the dialog and by its Tensorlake sandbox form, which runs under the same key and cannot read the dialog while
+/// the dialog draws it.
+fn key_busy(key: &OpKey, cx: &App) -> bool {
+    session::current_operations(cx)
+        .is_some_and(|operations| operations.read(cx).in_flight(key).is_some())
+}
+
 /// A click handler that dismisses the dialog through the layer manager, as Escape does: what Cancel and the header's
 /// close control do, probe or no probe. Called from the click, not from inside an update of the dialog.
 fn dismiss(
@@ -1035,7 +1095,7 @@ impl Render for AddHostDialog {
         let add_weak = weak.clone();
         let (main, summary) = match &self.body {
             Body::Tensorlake(form) => (
-                form.read(cx).continue_button(form.downgrade()),
+                form.read(cx).continue_button(form.downgrade(), cx),
                 "A Tensorlake sandbox created from a recipe",
             ),
             Body::Ssh => (

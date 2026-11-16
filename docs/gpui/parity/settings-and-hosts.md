@@ -428,9 +428,10 @@ Add host opens on SSH and offers the Tensorlake sandbox kind beside it. Choosing
 time, as the old dialog's remount did) and draws "Loading Tensorlake settings…", a failed read's words with Retry, the
 no-key line with "Open Settings → Tensorlake" (closing Settings reads the account again), or Name and Recipe with the
 chosen recipe's summary. "New recipe…" opens Settings → Recipes' editor in place of the fields, with focus in its Name
-and its answers in Add host's footer; a done Save chooses the new recipe. Continue is drawn and not yet available: the
-creation confirmation, its billing callout and Back come with it. Replacing tests, in
-`crates/gui/farhelm-gui/src/hosts/add/tensorlake_tests.rs`:
+and its answers in Add host's footer; a done Save chooses the new recipe. Continue asks the helm for a creation plan,
+and the plan closes Add host and opens the creation question on the prompt, as an SSH plan's setup question does:
+"Create Tensorlake sandbox · <name>", the size, the steps with Copy plan, the billing callout, and Cancel, Back and
+Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensorlake_tests.rs`:
 
 - "Add host pins inline recipe answers and focuses Name in ${palette}": partly.
   `new_recipe_opens_the_editor_with_focus_in_name_and_pins_its_answers` checks the editor's Name holding focus, no Back,
@@ -453,15 +454,34 @@ creation confirmation, its billing callout and Back come with it. Replacing test
   `the_recipe_choice_offers_the_catalog_shows_the_summary_and_keeps_a_vanished_choice`; the kind choice keeping the SSH
   draft and starting the sandbox's form afresh,
   `the_kind_choice_swaps_bodies_keeps_the_ssh_draft_and_starts_the_sandbox_afresh`; a failed account read,
-  `a_failed_account_read_shows_the_helms_words_and_retry_reads_again`. The plan, Back, Copy, Cancel and Escape wait for
-  the creation confirmation. Its look with no key saved is the screenshot batch's app scene
-  `app-host-add-tensorlake-no-key`; the form with a key has no app scene, since a drive stops at the no-key refusal.
+  `a_failed_account_read_shows_the_helms_words_and_retry_reads_again`; the plan's question with its size, steps, billing
+  callout and answers in order, `continue_asks_for_the_plan_and_the_question_shows_its_size_steps_and_billing`; the
+  callout's warning wash and edge, `the_billing_callout_has_the_warning_wash_and_edge`, and its pricing link,
+  `the_pricing_link_opens_tensorlakes_pricing_page`; the fields held still while the probe is out,
+  `the_fields_hold_still_while_the_probe_is_out`; Back reopening Add host with the fields kept and an edited name probed
+  again, `back_reopens_add_host_with_the_fields_kept_and_continue_asks_for_the_edited_name`; Cancel and Escape creating
+  nothing, `cancel_and_escape_on_the_question_create_nothing`; Continue's own refusals and the helm's,
+  `continue_refuses_a_missing_field_or_a_launch_with_the_fields_kept` and
+  `a_refused_probe_or_a_reply_that_is_no_sandbox_plan_says_why`. Copy plan is the plan body the SSH setup question
+  shares, tested there (`hosts/setup/tests.rs` `copy_plan_copies_the_helms_plan_text`). Its look with no key saved is
+  the screenshot batch's app scene `app-host-add-tensorlake-no-key`; the form with a key and the question have no app
+  scene, since a drive stops at the no-key refusal.
+- "adding a Tensorlake host confirms billing and keeps setup progress": its confirmation and submission under Add host's
+  key, `create_sandbox_submits_the_plan_under_add_hosts_key`; the run's progress on the new row is the Hosts panel's,
+  shared with an SSH host's setup.
+- "an inline image-base recipe builds before creating through the Tensorlake preference": the preference's half,
+  `only_the_tensorlake_setting_sends_the_plan_without_asking`, `the_ssh_setup_preference_never_sends_a_sandbox_plan` and
+  `without_asking_the_plan_goes_out_after_the_user_moved_on`; the build before the create is the helm's run.
+- "a recipe deleted during confirmation refuses without registering a host": the helm's test
+  `a_recipe_deleted_while_its_creation_plan_is_offered_refuses_and_registers_nothing`, and its refusal back in Add host
+  with the fields, `a_refused_creation_reopens_add_host_with_the_fields_and_the_helms_words`, or on the Hosts panel's
+  line once the user moved on, `a_creation_refused_after_the_user_moved_on_shows_on_the_hosts_panel`.
+- "cancel retires a Tensorlake creation before a queued answer": the question's first answer wins and closes it, so
+  Cancel and Escape send nothing (`cancel_and_escape_on_the_question_create_nothing`).
 - An agent's add request draws no kind choice: `approvals/host_add_tests.rs`
   `the_cards_action_opens_the_dialog_prefilled_and_answers_nothing`.
-- The other cases (billing confirmation and setup progress, the image-base recipe through the Tensorlake preference, a
-  recipe deleted during confirmation, Cancel retiring a queued answer, rerun before the first create) wait for the
-  creation confirmation. The deleted recipe's helm half is the helm's test
-  `a_recipe_deleted_while_its_creation_plan_is_offered_refuses_and_registers_nothing`.
+- "rerun before first create uses Tensorlake skip=${skipTensorlake}" waits for a Tensorlake host's Re-run in the host
+  menu.
 
 ## `tests/provisioning.spec.ts`, Add host's dialog, probe and setup
 
@@ -1403,6 +1423,25 @@ Where the port does not match the old app, and why. Each stays until the work na
   `set_up_of_a_rerun_during_a_launch_says_why_on_the_panel`,
   `re_run_during_a_launch_sends_nothing_and_says_why_on_the_panel`). "Set up, don't ask again" refused that way leaves
   the preference off (`the_permanent_answer_during_a_launch_leaves_the_preference_off`).
+- **The Tensorlake sandbox's creation confirmation is a question on the prompt.** The old dialog swapped its own body
+  and footer for the plan, with Cancel, Back and Create sandbox in its footer. Here questions go through the prompt, as
+  the SSH setup confirmation does, and a hand-drawn question with its own buttons inside Add host is the one-off the
+  foundations exist to prevent (decided by the migration's orchestrator). So the plan closes Add host and opens the
+  question in its place, with the old answers in the old order and focus on Create sandbox; Back reopens Add host on the
+  Tensorlake sandbox kind with the name and recipe kept and focus in Name, from the account as it was read, and Continue
+  asks for a new plan. A plan that arrives after the user moved on opens nothing, as an SSH plan's does, and Add host
+  says to press Continue again.
+- **Create sandbox goes out as Set up does.** It closes the question at the press, where the old dialog went back to its
+  locked fields, and the creation runs under Add host's key. During a session launch it sends nothing and reopens Add
+  host with the fields and the launch's reason, as Set up does (the old button was disabled while the page-wide token
+  was held); so does a plan that arrives during a launch with "Create Tensorlake sandboxes without asking" on. A refused
+  creation reopens Add host with the fields and the helm's words, and once the user moved on it shows on the Hosts
+  panel's line ("Add host: " and the words), as a refused SSH setup does; the old dialog dropped a refusal that came
+  after it closed.
+- **Continue is busy, not disabled, while the probe is out**, as Add is, so it keeps focus.
+- **Continue sends the name trimmed.** The old dialog checked the trimmed name but sent it as typed; the helm trims the
+  alias but derives the sandbox's `farhelm-host-…` name from the string sent, so a name with spaces around it now gets
+  the sandbox name of the trimmed one.
 
 ### SSH help
 
@@ -1619,12 +1658,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   reports; the status itself is still named for its count and current step ("Setting up: 1 of 9 steps done, now Install
   the farhelm binary"). While only a run's requests are out ("Setting up…"), the hover is those words, as the old label
   had no card then.
-- **Known gap: a tall card can cover the Linux window's title bar.** Beside placement keeps help inside the window's
-  viewport, but on Linux the window draws its own 20-pixel shadow margin and title bar inside that viewport, so a card
-  taller than the window's usable height (a setup's nine steps with explanations and a connection detail) is placed over
-  them, and with a compositor it can hang outside the visible frame. The card is the first help tall enough to meet
-  this. Keeping placement inside the window's client area is a change to the layer manager, requested from its owner;
-  this waits for it.
 - **The card's connection detail sets host values as the row's details do.** Builds and identities are monospace and an
   error is in the interface face, where the old card set every host value monospace.
 - **A shrunk card shows the steps around its current one in proportion.** In a short window the card keeps its current

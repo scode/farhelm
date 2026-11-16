@@ -1,5 +1,6 @@
-//! Setting up an SSH host: the confirmation that shows the helm's plan, and the submission that starts the run, for a
-//! new host from Add host and for a registered host whose setup failed, from its row's menu ([`rerun`]).
+//! Setting up a host: the confirmation that shows the helm's plan, and the submission that starts the run, for a new
+//! SSH host or Tensorlake sandbox from Add host and for a registered host whose setup failed, from its row's menu
+//! ([`rerun`]).
 //!
 //! SPEC.md, "Topology" (remote provisioning: "the panel shows a concrete installation plan ... and proceeds only on
 //! confirmation"). Ported from the old app's `provisioning.rs` (`SetupPlanConfirmation`, `PlanStepList`) and the add
@@ -48,6 +49,16 @@
 //!   leaves the preference off: it is saved only when no launch holds the setup back. The old app held all of this back
 //!   behind its one page-wide token for launches and host registry changes; here each side refuses its own action
 //!   (decided by the migration's orchestrator on 2026-11-14).
+//! - **A Tensorlake sandbox's creation confirmation** ([`Target::Sandbox`]) is the same kind of question, asked by Add
+//!   host's Tensorlake sandbox form when Continue's plan arrives ([`confirm`]): "Create Tensorlake sandbox · <name>",
+//!   the size it bills for, the helm's plan with Copy plan, and the billing callout with its link to Tensorlake's
+//!   pricing ([`SandboxPlanBody`]). Its answers are the old dialog's, in its order: Cancel, Back and Create sandbox,
+//!   where focus starts. Back reopens Add host on the Tensorlake sandbox kind with the name and recipe as they were and
+//!   focus in Name, and Continue then asks for a new plan: a plan is for the name and recipe it was made for. Create
+//!   sandbox is submitted as Set up is ([`submit`]), under Add host's key: it refuses while a session launch is in
+//!   flight, and that refusal and the helm's reopen Add host with the name, the recipe and the words, or show on the
+//!   Hosts panel's line once the user moved on. There is no permanent answer and no footer note: whether to ask is
+//!   Tensorlake's own "Create Tensorlake sandboxes without asking" (the form reads it), never the setup preference.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -55,18 +66,20 @@ pub(crate) mod tests;
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::provisioning::PlanSteps;
+use farhelm_proto::recipes::RecipeSize;
+use farhelm_proto::tensorlake::Settings;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences};
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, EntityId, FocusHandle, FontWeight,
-    Global, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, EntityId, FocusHandle,
+    FontWeight, Global, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use serde_json::json;
 
 use super::add::{self, Reply};
 use super::identity::{display_name, host_mark};
 use crate::assets;
-use crate::components::{HoverHelp, Tier, copy_button, with_hover_help};
+use crate::components::{Button, HoverHelp, Role, Tier, copy_button, with_hover_help};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
@@ -117,11 +130,12 @@ pub(crate) struct Offer {
     pub(crate) steps: PlanSteps,
     /// The host the plan is for, which decides the title, the tile and what a refusal does.
     pub(crate) target: Target,
-    /// The mark of the user's action behind the offer: Add's (or Re-run's) while the confirmation is to open (it opens
-    /// only through it), then the answer's, taken when Set up or the permanent answer is pressed; Add's still when the
-    /// plan goes out without asking. A refusal reopens Add host only through it, so not once the user has moved on
-    /// since. The operation store's own mark is no substitute: on the path without asking, it is taken when the probe's
-    /// reply arrives, which says nothing about what the user did while the probe was out.
+    /// The mark of the user's action behind the offer: Add's (or Re-run's, or a sandbox's Continue's) while the
+    /// confirmation is to open (it opens only through it), then the answer's, taken when Set up, the permanent answer or
+    /// Create sandbox is pressed; Add's (or Continue's) still when the plan goes out without asking. A refusal reopens
+    /// Add host only through it, so not once the user has moved on since. The operation store's own mark is no
+    /// substitute: on the path without asking, it is taken when the probe's reply arrives, which says nothing about what
+    /// the user did while the probe was out.
     pub(crate) mark: Mark,
 }
 
@@ -150,6 +164,50 @@ pub(crate) enum Target {
         icon: HostIcon,
         color: HostColor,
     },
+    /// A Tensorlake sandbox Add host is creating ([`confirm`]'s sandbox question): what Back and a refusal reopen Add
+    /// host with.
+    Sandbox(Sandbox),
+}
+
+/// A Tensorlake sandbox's creation, as its confirmation shows it and Back or a refusal reopens Add host with it.
+#[derive(Clone)]
+pub(crate) struct Sandbox {
+    /// The control that opened Add host, which gets focus back.
+    pub(crate) opener: FocusHandle,
+    /// The host's name and the recipe's name, as Continue sent them.
+    pub(crate) name: String,
+    pub(crate) recipe: String,
+    /// The Tensorlake account as the form had read it: a reopened Add host shows Name and Recipe from it at once, with
+    /// focus in Name, rather than reading it again first.
+    pub(crate) account: Settings,
+    /// The size the plan creates the sandbox with, which it bills for.
+    pub(crate) resources: RecipeSize,
+}
+
+impl Sandbox {
+    /// The creation question's title, "Create Tensorlake sandbox · <name>" with the name as host text, and its summary,
+    /// the size the plan bills for.
+    fn heading(&self) -> (HostSentence, String) {
+        let title = HostSentence::new("sandbox-title")
+            .text("Create Tensorlake sandbox · ")
+            .host(&HostText::from_host(self.name.as_str()));
+        let size = &self.resources;
+        let summary = format!(
+            "{} CPUs · {} GB memory · {} GB disk",
+            size.cpus, size.memory_gb, size.disk_gb
+        );
+        (title, summary)
+    }
+
+    /// Add host's seed for this sandbox, with `problem` in its error line.
+    fn seed(&self, problem: Option<HostSentence>) -> add::SandboxSeed {
+        add::SandboxSeed {
+            name: self.name.clone(),
+            recipe: self.recipe.clone(),
+            account: self.account.clone(),
+            problem,
+        }
+    }
 }
 
 /// Whether a probe that needs setup asks first: the shared "Set up new hosts without asking" preference is off or the
@@ -166,10 +224,17 @@ pub(crate) fn asks_first(cx: &App) -> bool {
     !skips
 }
 
-/// Ask the setup confirmation for `offer` over everything else in `window`, unless the user moved on since its mark.
+/// Ask the setup confirmation for `offer` over everything else in `window`, unless the user moved on since its mark: a
+/// Tensorlake sandbox's creation confirmation for [`Target::Sandbox`] ([`confirm_sandbox`]), the setup confirmation
+/// otherwise.
 pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     let mark = offer.mark;
     let (name, (icon, color)) = match &offer.target {
+        Target::Sandbox(sandbox) => {
+            let heading = sandbox.heading();
+            confirm_sandbox(heading, offer, window, cx);
+            return;
+        }
         Target::New { destination, .. } => (
             HostText::from_host(destination.as_str()),
             (HostIcon::Cloud, HostColor::Default),
@@ -241,6 +306,132 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     );
 }
 
+/// The Tensorlake sandbox's creation confirmation for `offer` (the module docs), under its sandbox's `(title,
+/// summary)` ([`Sandbox::heading`]): asked over everything else in `window` through the offer's mark, the mark of the
+/// Continue that asked for the plan.
+fn confirm_sandbox(
+    (title, summary): (HostSentence, String),
+    offer: Offer,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mark = offer.mark;
+    let create = Answer::new(
+        "Create sandbox",
+        HoverHelp::tooltip("Create sandbox: carry out the plan shown above"),
+        Tier::Primary,
+    );
+    let question = Question::new(title, create, offer)
+        .summary(summary)
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Cancel: change nothing on this host"),
+            Tier::Neutral,
+        ))
+        .alternative(
+            Answer::new(
+                "Back",
+                HoverHelp::tooltip(
+                    "Go back to the host's name and recipe without creating a sandbox",
+                ),
+                Tier::Neutral,
+            ),
+            |offer, window, cx| {
+                // Back gives up the plan: Add host returns with the name and recipe, and Continue asks again.
+                let Target::Sandbox(sandbox) = &offer.target else {
+                    return;
+                };
+                let mark = Mark::take(cx);
+                add::reopen_sandbox(&sandbox.opener, &mark, sandbox.seed(None), window, cx);
+            },
+        )
+        .body(|offer: &Offer, _, cx| {
+            let plan = PlanBody::new(&offer.confirmation, &offer.steps);
+            let plan = cx.new(|_| plan);
+            cx.new(|_| SandboxPlanBody { plan })
+        })
+        .tile(|_, cx| {
+            host_mark(
+                HostIcon::Cloud,
+                HostColor::Default,
+                px(24.),
+                theme::palette(cx),
+            )
+        })
+        .width(px(WIDTH))
+        // As the setup confirmation: the host dialogs keep focus on the control in use on an empty-space click.
+        .keeps_focus_on_empty_click();
+    prompt::ask(
+        question,
+        None,
+        &mark,
+        |offer, window, cx| {
+            let offer = Offer {
+                mark: Mark::take(cx),
+                ..offer
+            };
+            submit(offer, window.window_handle(), cx);
+        },
+        window,
+        cx,
+    );
+}
+
+/// The billing callout's link (`.tensorlake-billing a`), the old callout's.
+const PRICING_URL: &str = "https://www.tensorlake.ai/pricing";
+
+/// `.tensorlake-billing`'s line height: 1.6 at its 13 pixels.
+const BILLING_LINE: f32 = 20.8;
+
+/// The Tensorlake sandbox's creation confirmation's body: the helm's plan with Copy plan, then the billing callout
+/// (`.tensorlake-billing`), the old `SetupPlanConfirmation`'s Tensorlake branch. Built once from the frozen plan.
+struct SandboxPlanBody {
+    plan: Entity<PlanBody>,
+}
+
+impl Render for SandboxPlanBody {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = theme::palette(cx);
+        // The old callout: an amber-washed block with a three-pixel amber edge, its link inline in the paragraph; here
+        // the link wraps to a line of its own where it does not fit, as Add host's SSH help link does.
+        let billing = div()
+            .debug_selector(|| "sandbox-billing".to_owned())
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .py(px(12.))
+            .px(px(14.))
+            .bg(theme::color(palette.warn_bg_dim))
+            .border_l(px(3.))
+            .border_color(theme::color(palette.warn))
+            .rounded(metrics::RADIUS_SM)
+            .text_size(metrics::TEXT_MD)
+            .line_height(px(BILLING_LINE))
+            .text_color(theme::color(palette.fg_0))
+            .child("This sandbox bills while running. ")
+            .child(
+                Button::new(
+                    "sandbox-pricing",
+                    "Tensorlake pricing",
+                    HoverHelp::tooltip("Open Tensorlake's pricing page in your browser"),
+                    Role::Link,
+                )
+                .tier(Tier::Link)
+                .on_click(|_, _, cx| cx.open_url(PRICING_URL)),
+            )
+            .child(
+                " On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection. Farhelm never \
+                 resumes it on its own.",
+            );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .child(self.plan.clone())
+            .child(billing)
+    }
+}
+
 /// `POST /api/hosts/provision` naming the plan by `probe_id`: the helm consumes the plan it kept under that id, once,
 /// and refuses any other.
 pub(crate) fn provision_command(probe_id: &str) -> Result<Command, PathError> {
@@ -274,7 +465,10 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
         }
     };
     let key = offer.key.clone();
-    let new = matches!(offer.target, Target::New { .. });
+    let new = match offer.target {
+        Target::New { .. } | Target::Sandbox(_) => true,
+        Target::Registered { .. } => false,
+    };
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
             // A registered host's refusal is the store's record under the host's key, which its row shows; it also
@@ -285,7 +479,9 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
                 && !reopen_new(&offer, add::error_line().host(&refusal.words), window, cx)
             {
                 match &offer.target {
-                    Target::New { .. } => show(cx, |lines| lines.setup = Some(offer.key.clone())),
+                    Target::New { .. } | Target::Sandbox(_) => {
+                        show(cx, |lines| lines.setup = Some(offer.key.clone()))
+                    }
                     Target::Registered { host, .. } => {
                         super::status::failed(*host, super::status::Action::Setup, cx);
                     }
@@ -308,22 +504,21 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     }
 }
 
-/// A new host's refused submission, `problem` its line in Add host: reopen Add host with the destination and alias as
-/// sent and `problem` in its error line, if the user has not moved on since [`Offer::mark`]. Whether it reopened; never
+/// A new host's refused submission, `problem` its line in Add host: reopen Add host with what was sent (an SSH host's
+/// destination and alias, a sandbox's name and recipe) and `problem` in its error line, if the user has not moved on since [`Offer::mark`]. Whether it reopened; never
 /// for a registered host, whose refusals show elsewhere, nor once the user moved on or the window went inert, when the
 /// caller shows the refusal on the Hosts panel's line instead.
 fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx: &mut App) -> bool {
-    let Target::New {
-        destination,
-        alias,
-        opener,
-        from_agent,
-    } = &offer.target
-    else {
+    if focus::has_moved_on(&offer.mark, cx) {
         return false;
-    };
-    !focus::has_moved_on(&offer.mark, cx)
-        && window
+    }
+    match &offer.target {
+        Target::New {
+            destination,
+            alias,
+            opener,
+            from_agent,
+        } => window
             .update(cx, |_, window, cx| {
                 let seed = add::Seed {
                     destination: destination.clone(),
@@ -333,7 +528,16 @@ fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx:
                 };
                 add::reopen(opener, &offer.mark, Some(seed), window, cx).is_some()
             })
-            .unwrap_or(false)
+            .unwrap_or(false),
+        // A sandbox's Add host reopens on the Tensorlake sandbox kind, with its name and recipe.
+        Target::Sandbox(sandbox) => window
+            .update(cx, |_, window, cx| {
+                let seed = sandbox.seed(Some(problem));
+                add::reopen_sandbox(&sandbox.opener, &offer.mark, seed, window, cx).is_some()
+            })
+            .unwrap_or(false),
+        Target::Registered { .. } => false,
+    }
 }
 
 /// Refuse `offer`'s submission because a session launch is in flight ([`super::launch_in_flight`]), sending nothing:
@@ -348,7 +552,7 @@ fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx:
 /// without asking, is queued before this, so the reopened dialog is not closed with it.
 fn refuse_during_launch(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     let line = match &offer.target {
-        Target::New { .. } => {
+        Target::New { .. } | Target::Sandbox(_) => {
             not_started_line().text(format!("Add host: {}", super::LAUNCH_IN_FLIGHT))
         }
         Target::Registered { name, .. } => not_started_line()
