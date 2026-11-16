@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the GPUI app's screenshot goldens under a renderer that gives the same pixels on every machine.
 
-The goldens (`crates/gui/farhelm-gui/src/goldens.rs`) compare captures pixel for pixel, which only holds when every run
+The goldens (`crates/gui/farhelm-gui/src/goldens/`) compare captures pixel for pixel, which only holds when every run
 draws with the same rasterizer. On Linux that is Mesa's software Vulkan driver (lavapipe): this script points the
 Vulkan and EGL loaders at Mesa's software drivers so a machine's real GPU, if it has one, is never picked. It also gives
 the run a private, empty runtime directory, so the headless app cannot find a display server or a compositor's socket

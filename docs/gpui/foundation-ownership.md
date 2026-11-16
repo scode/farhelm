@@ -76,7 +76,7 @@ conflicted across all of it.
 | Ticker                          | `crates/gui/farhelm-gui/src/ticker.rs`, `crates/gui/farhelm-gui/src/ticker_tests.rs`                                                                                                                                                                                                                                           | [none](#ticker)                          | 1: `ticker::timer`                    |
 | Notice center                   | `crates/gui/farhelm-gui/src/notices.rs`                                                                                                                                                                                                                                                                                        | [append-only](#notice-center)            | none                                  |
 | Render counter                  | `crates/gui/farhelm-gui/src/render_count.rs`                                                                                                                                                                                                                                                                                   | [none](#render-counter)                  | none                                  |
-| Test harness                    | `crates/gui/farhelm-gui/src/test_support.rs`, `crates/gui/farhelm-gui/src/goldens.rs`, `scripts/check-gui-goldens.py`                                                                                                                                                                                                          | [reported, append-only](#test-harness)   | none                                  |
+| Test harness                    | `crates/gui/farhelm-gui/src/test_support.rs`, `crates/gui/farhelm-gui/src/goldens/`, `scripts/check-gui-goldens.py`                                                                                                                                                                                                            | [reported, append-only](#test-harness)   | none                                  |
 | Assets                          | `crates/gui/farhelm-gui/src/assets.rs`, `crates/gui/farhelm-gui/assets/`                                                                                                                                                                                                                                                       | [reported, new files](#assets)           | none                                  |
 | Main view                       | `crates/gui/farhelm-gui/src/main_view.rs`                                                                                                                                                                                                                                                                                      | [reported](#main-view)                   | none                                  |
 | Harness marks                   | `crates/gui/farhelm-gui/src/marks.rs`, `crates/gui/farhelm-gui/src/marks/`                                                                                                                                                                                                                                                     | [append-only, new files](#harness-marks) | none                                  |
@@ -393,8 +393,10 @@ Lint exceptions: none.
 
 Extension points:
 
-- reported: `goldens.rs`, for a golden scene and its reference PNGs under `crates/gui/farhelm-gui/tests/goldens/` for a
-  new control or dialog;
+- reported: the `src/goldens/` directory, for a golden scene and its reference PNGs under
+  `crates/gui/farhelm-gui/tests/goldens/` for a new control or dialog: the scene's functions in its area's file
+  (`src/goldens/<area>.rs`), its entry in `SCENES` in `src/goldens/mod.rs`, and in `mod.rs` only a helper more than one
+  area's scenes use;
 - append-only: `test_support.rs`, for a new shared test helper with a docstring and its test, added only inside its
   "Shared helpers, appended on request" section, any `use` it needs on a line of its own (the other helpers and the
   per-step invariant checks change only by request; the review gate checks that an addition stays inside the section,
@@ -995,7 +997,7 @@ the check let it through.
 
 The Host text and Drafts extension points have no row here, because they are uses of the foundation from area code (a
 view calling `HostText::from_host`, an editor holding a `Draft`) and touch no owned path. The Test harness's reference
-PNGs are not owned, so only the golden scene in `goldens.rs` needs a rule.
+PNGs are not owned, so only the golden scenes under `goldens/` need a rule.
 
 NOTE: An append-only file only works as an extension point when an addition to it leaves every existing line alone, so
 `HarnessGlyph::ALL` in `marks.rs` is a slice with one entry per line. Two traps refused real PRs before the wiring was
@@ -1003,9 +1005,9 @@ reported, and they still apply to the append-only files that remain (`operations
 `test_support.rs`): extending a grouped `use` statement rewraps it, so an area adds a separate `use` line instead, which
 rustfmt leaves alone; and adding to a wrapped doc paragraph rewraps it too, so an area adds its own sentence or doc line
 instead. In a reported file both are fine. The lists areas append to there (`Icon::ALL` in `assets.rs`, `SCENES` in
-`goldens.rs`, `ONCE_PER_PRESS` in `actions.rs`) stay slices with one entry per line all the same: a length in their type
-changed with every addition, and during two rebases jj's automatic merge left the golden scenes' length wrong without a
-conflict marker.
+`goldens/mod.rs`, `ONCE_PER_PRESS` in `actions.rs`) stay slices with one entry per line all the same: a length in their
+type changed with every addition, and during two rebases jj's automatic merge left the golden scenes' length wrong
+without a conflict marker.
 
 | Foundation             | Extension path                                          | Rule          |
 | ---------------------- | ------------------------------------------------------- | ------------- |
@@ -1017,7 +1019,7 @@ conflict marker.
 | Actions and keymap     | `crates/gui/farhelm-gui/src/actions_tests.rs`           | `reported`    |
 | Operation store        | `crates/gui/farhelm-gui/src/operations.rs`              | `append-only` |
 | Notice center          | `crates/gui/farhelm-gui/src/notices.rs`                 | `append-only` |
-| Test harness           | `crates/gui/farhelm-gui/src/goldens.rs`                 | `reported`    |
+| Test harness           | `crates/gui/farhelm-gui/src/goldens/`                   | `reported`    |
 | Test harness           | `crates/gui/farhelm-gui/src/test_support.rs`            | `append-only` |
 | Assets                 | `crates/gui/farhelm-gui/src/assets.rs`                  | `reported`    |
 | Assets                 | `crates/gui/farhelm-gui/assets/icons/`                  | `new-files`   |

@@ -4,7 +4,7 @@
 //! The fixtures are the GPUI prototype's recordings in the grid protocol's JSON form (`tests/fixtures/terminal/`, with
 //! their provenance in its README); tests encode them through the real encoder before the model sees them, so a fixture
 //! cannot bypass the protocol's width, style and ordering checks. Pixel output is the screenshot goldens' job
-//! (`goldens.rs`); these tests pin geometry and redraws, which the fake text system can show. The one test that needs
+//! (`goldens/`); these tests pin geometry and redraws, which the fake text system can show. The one test that needs
 //! real font metrics, the cell's size, measures the bundled font in a headless app (`test_support::headless`), which
 //! needs no renderer until something is drawn.
 
