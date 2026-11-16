@@ -15,7 +15,8 @@
 //!   The Templates editor's model suggestions are its rows for one agent type.
 //! - [`recents`]: which recent setups the chosen host's launch history offers, in what order, and a row's words, with no
 //!   GPUI types.
-//! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
+//! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends: the ordinary
+//!   create, or a launch into a new environment (New container), which has its own route and its own reasons.
 //! - [`search`]: the composer search's rules (what a query means, the rows it offers, the row preselected, what an
 //!   empty result says), with no view.
 //! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
@@ -59,6 +60,8 @@ mod checkout_tests;
 mod draft_tests;
 #[cfg(test)]
 mod entry_tests;
+#[cfg(test)]
+mod environment_tests;
 #[cfg(test)]
 mod escalation_tests;
 #[cfg(test)]
