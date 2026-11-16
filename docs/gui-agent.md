@@ -173,6 +173,14 @@ devbuilds (`scripts/devbuild-mac.sh` builds with `--release`). Nothing else turn
   something without one (the list header, `text:"Recently active"`) first.
 - Headless Mutter reports the window as inactive forever, so agent builds pin the animation ticker's notion of an active
   window on (SPEC_impl.md, "GPUI cookbook: traps"); otherwise nothing would animate in these runs.
+- The same inactive window means no focus or blur listener ever fires in a headless run, and nothing pins that: GPUI
+  drops the focus paths it hands those listeners while the window is inactive (`Window::draw` in
+  `vendor/gpui-pre/src/window.rs`), and the flag it reads is GPUI's own, which only a vendored patch could pin. Focus
+  still moves, so `snapshot`'s `[focused]`, `get focus` and `terminal-text` report it truthfully. What does not happen
+  is anything the app does in reaction to focus arriving or leaving: a launcher field's list opening when the field
+  takes focus, a list or popover closing because Tab took focus out of it, a tooltip shown for keyboard focus ending
+  when focus moves on. A drive that sees none of those has hit this, not a bug; in-process tests are where those
+  reactions are checked (SPEC_impl.md, "GPUI cookbook: traps").
 - `stop` signals only processes it can tie to the run, and only while each is still the process that was recorded (its
   pid and its start time both match): the app as recorded right after launch, the supervisor through the app's record of
   it plus the state directory on its command line, the compositor as recorded when it started. A `start` whose
