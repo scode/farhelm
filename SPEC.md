@@ -3255,7 +3255,9 @@ focus back is a possible later mitigation, not a rule.
 
 With no terminal on screen, focus rests on New when there are no sessions, and on a stopped session's card when the
 selected session has stopped. Enter on that card does nothing, so typing that was already under way cannot restart
-anything; Tab reaches its Restart and Replace.
+anything; Tab reaches its Restart and Replace. While the selected session's host cannot be reached, focus rests on its
+Session unavailable card, whose text the keys scroll (the GPUI migration's coordinator decided this on 2026-11-15; the
+old app left nothing focused there).
 
 Choosing a session, including the one already selected, focuses its terminal.
 

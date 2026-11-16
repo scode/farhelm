@@ -7,7 +7,9 @@
 //!
 //! [`phase`] holds a phase's words, its tone (the color group of its dot and words), its hover, and the detail lines
 //! under a host's row. It is `pub(crate)` so that the launcher's host picker can show the phase words; the detail
-//! lines are the Hosts panel's, and no other area reads them.
+//! lines are the Hosts panel's, and the session pane's unavailable card reads two of their parts, the evidence and the
+//! remedy ([`phase::evidence`], [`phase::remedy`]), so that a session on an unreachable host says what the host's row
+//! says.
 //!
 //! [`utc_stamp`] is here too: the phase details print their times through it, and the session row's age is to use it
 //! as well, importing it from here rather than from inside [`phase`].

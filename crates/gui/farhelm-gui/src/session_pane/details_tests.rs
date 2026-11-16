@@ -62,7 +62,7 @@ fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
 
 /// The strings painted under `id`, at any depth, in paint order. Text is painted by the text elements inside a part, so
 /// this follows the record's parent links up from every node.
-fn painted_within(nodes: &[DriverNode], id: &str) -> Vec<String> {
+pub(super) fn painted_within(nodes: &[DriverNode], id: &str) -> Vec<String> {
     let Some(top) = nodes
         .iter()
         .position(|node| node.element_id.as_deref() == Some(id))
@@ -118,15 +118,15 @@ fn active(key: &'static str, ago: i64) -> Fixture {
 
 /// A root view drawing the pane alone across the window, wired as every root view is, with a session list kept but not
 /// drawn: the list owns the selection rules, so without one nothing opens a session. Undrawn, the list holds no clock
-/// or pulse of its own, so whatever redraws the pane is the pane's.
-struct PaneOnly {
+/// or pulse of its own, so whatever redraws the pane is the pane's. The unavailable card's tests use it too.
+pub(super) struct PaneOnly {
     pane: Entity<SessionPane>,
     _list: Entity<SessionList>,
     root: root::Attachment,
 }
 
 impl PaneOnly {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         PaneOnly {
             pane: cx.new(|cx| SessionPane::new(window, cx)),
             _list: cx.new(SessionList::new),

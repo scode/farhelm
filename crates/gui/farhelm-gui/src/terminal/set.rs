@@ -399,6 +399,12 @@ impl TerminalSet {
         self.chosen.as_deref()
     }
 
+    /// Whether the set is inert ([`TerminalSet::set_inert`]), for tests.
+    #[cfg(test)]
+    pub fn is_inert(&self) -> bool {
+        self.inert
+    }
+
     /// Show tab `id`'s terminal (`None` for the agent's) and focus it, with `mark` taken at the press that chose it,
     /// through the focus coordinator, which also makes it home. A tab that is not listed changes nothing.
     pub fn choose(
@@ -425,8 +431,9 @@ impl TerminalSet {
 
     /// Make every terminal inert, or not ([`AttachedTerminal::set_inert`]), tabs the set learns about later included;
     /// the strip is drawn dimmed and takes no presses meanwhile (SPEC.md: a terminal "keeps its last screen and tab
-    /// strip dimmed and inert beneath the card"). The sidebar area's unreachable-host card calls it; nothing does yet.
-    #[cfg_attr(not(test), expect(dead_code))]
+    /// strip dimmed and inert beneath the card"). Inert terminals hold no focus, so focus one of them held goes home
+    /// through the focus coordinator. The session pane's unavailable card calls it while it shows over the set
+    /// (`session_pane::unavailable`), and makes itself home meanwhile.
     pub fn set_inert(&mut self, inert: bool, cx: &mut Context<Self>) {
         if self.inert == inert {
             return;

@@ -62,6 +62,12 @@
 //!   than from the selection and the connection: when the open session goes into its card the pane drops its
 //!   terminals (their streams with them), and when it comes out (restarted, from here or anywhere) it mounts new ones
 //!   under a new lease, as a fresh view would ([`card::Follow`] tells it when).
+//! - **The unavailable card.** A session whose host the helm cannot reach shows the unavailable card ([`unavailable`])
+//!   over the area the terminals take, with its last-known status and age in a band above that area. Stale beats
+//!   interrupted, so such a session never shows the interrupted card. The terminals the pane already shows stay, inert
+//!   beneath the card with their notices held back, and come back to life when the host answers; a session opened while
+//!   its host is away gets none until then. While the card shows it is home, and an inert terminal holds no focus, so
+//!   focus one of the session's terminals held goes home to the card through the focus coordinator.
 //!
 //! NOTE: The scrim covers whichever terminal is shown, as the old one covered every pane; a Delete holds back the
 //! notices of all of them.
@@ -69,6 +75,7 @@
 pub(crate) mod card;
 pub(crate) mod details;
 pub(crate) mod header;
+pub(crate) mod unavailable;
 
 #[cfg(test)]
 mod card_tests;
@@ -80,13 +87,15 @@ mod details_tests;
 mod header_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unavailable_tests;
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, FontWeight, Global,
-    InteractiveElement as _, IntoElement, ParentElement, Render, Role, Stateful,
+    InteractiveElement as _, IntoElement, ParentElement, Render, Role, ScrollHandle, Stateful,
     StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
 
@@ -144,19 +153,19 @@ pub struct SessionPane {
     mounted: PerSession<Option<Mounted>>,
     /// The serial of the last choice acted on ([`Chosen`]).
     handled: u64,
-    /// The pane's spinner, held exactly while the scrim, the Stop button's "Stopping…" or a long Restart's or Replace's
-    /// line shows in an active window, and worked out at the top of each frame as the session list works out its own:
-    /// everything that decides it (the operation store, the shared clocks, the selection, the window's activation)
-    /// redraws the window when it changes.
+    /// The pane's spinner, held exactly while the scrim, the Stop button's "Stopping…", a long Restart's or Replace's
+    /// line or the unavailable card shows in an active window, and worked out at the top of each frame as the session
+    /// list works out its own: everything that decides it (the operation store, the shared clocks, the selection, the
+    /// window's activation) redraws the window when it changes.
     spinner: Option<Spinner>,
     /// Where the top row's buttons were last drawn, and the question it opened ([`header::Header`]).
     header: header::Header,
     /// The pulse's ticks for the details bar's running mark, held exactly while the bar shows one in an active window,
     /// and worked out at the top of each frame like `spinner`.
     pulse: Option<ticker::Pulsing>,
-    /// The ticker's 30-second clock, held exactly while the details bar shows an age, so the age moves on with the
-    /// rows' ages and no timer of the pane's own (SPEC_impl.md, "Animation time: the ticker"). Worked out at the top of
-    /// each frame like `spinner`.
+    /// The ticker's 30-second clock, held exactly while the details bar or the stale band shows an age, so the age
+    /// moves on with the rows' ages and no timer of the pane's own (SPEC_impl.md, "Animation time: the ticker"). Worked
+    /// out at the top of each frame like `spinner`.
     clock: Option<ticker::Clock>,
     /// Tells the pane when the open session goes into or out of its interrupted card ([`card::Follow`]).
     _card: Entity<card::Follow>,
@@ -165,20 +174,26 @@ pub struct SessionPane {
 }
 
 /// What the pane keeps for the open session: the session's key, the terminals it shows (the session's agent terminal
-/// and its tabs) unless the session shows its interrupted card, the card's focus handle, and the details bar's copy
-/// confirmations. All of it is made and dropped with the selection (the old view's keyed remount reset it the same
-/// way); the terminals also go when the session goes into or out of its card. The Replace question the card asked is
-/// kept by the card ([`card::keep_question`]), since the row menu reads it too, and `sync` drops it when the selection
-/// changes and whenever the card does not show ([`card::drop_question`]).
+/// and its tabs) unless the session shows its interrupted card or opened on an unreachable host, the cards' focus
+/// handle, the unavailable card's scroll state, and the details bar's copy confirmations. All of it is made and dropped
+/// with the selection (the old view's keyed remount reset it the same way); the terminals also go when the session goes
+/// into or out of its interrupted card. The Replace question the interrupted card asked is kept by the card
+/// ([`card::keep_question`]), since the row menu reads it too, and `sync` drops it when the selection changes and
+/// whenever the card does not show, the unavailable card in its place included ([`card::drop_question`]).
 struct Mounted {
     key: String,
-    /// `None` while the session shows its interrupted card (or when the terminal font could not be measured).
+    /// `None` while the session shows its interrupted card, while a session opened on an unreachable host waits for it,
+    /// or when the terminal font could not be measured.
     set: Option<Entity<TerminalSet>>,
     /// Keeps home on the set's shown terminal as the user chooses tabs and tabs come and go.
     _home: Option<Subscription>,
     copies: details::Copies,
-    /// The interrupted card's focus handle, a tab stop: home while the card shows.
+    /// The focus handle of whichever card shows, the interrupted card or the unavailable one, a tab stop: home while
+    /// either shows. One handle for both, since a session never shows both, and a card that turns into the other (its
+    /// host dropping away) keeps focus on the card that replaces it.
     card_focus: FocusHandle,
+    /// The unavailable card's scroll state, so its region stays where the user scrolled it from frame to frame.
+    scroll: ScrollHandle,
     /// The row the interrupted card was last drawn from, kept only to go on drawing the card while the store holds no
     /// row for the session at all: between the helm removing a confirmed Replace's source and its reply, the selection
     /// stays on the source (`session_list::selection`), and the card stays up with the Replace's wait line until the
@@ -211,17 +226,28 @@ impl Mounted {
             _home: None,
             copies: details::Copies::new(cx),
             card_focus: cx.focus_handle().tab_stop(true),
+            scroll: ScrollHandle::new(),
             card_row: None,
         })
     }
 
-    /// Where focus rests for this session: the set's shown terminal, or the card while `card` says it shows. `None` with
-    /// neither (terminals that could not be made), rather than a handle nothing draws.
-    fn home(&self, card: bool, cx: &App) -> Option<FocusHandle> {
+    /// Where focus rests for this session: the unavailable card while `unavailable` says it shows, over the terminals
+    /// or not; else the set's shown terminal, or the interrupted card while `card` says it shows. `None` with none of
+    /// them (terminals that could not be made), rather than a handle nothing draws.
+    fn home(&self, card: bool, unavailable: bool, cx: &App) -> Option<FocusHandle> {
+        if unavailable {
+            return Some(self.card_focus.clone());
+        }
         match &self.set {
             Some(set) => set.read(cx).home(cx),
             None => card.then(|| self.card_focus.clone()),
         }
+    }
+
+    /// [`Mounted::home`] as the store says now.
+    fn home_now(&self, cx: &App) -> Option<FocusHandle> {
+        let card = card::shows(&self.key, cx);
+        self.home(card, unavailable::shows(&self.key, cx), cx)
     }
 }
 
@@ -239,11 +265,14 @@ fn terminals(
         tracing::warn!("could not measure the terminal font; the session's terminal is not shown");
         return None;
     };
-    let deleting = key.to_owned();
+    let held = key.to_owned();
     // Asked while the terminals draw, from the current UI session's operation store, which notifies when a request
-    // starts or settles. A terminal outlives no UI session (it retires with its own), so the store it reads is always
-    // the one its Delete went through.
-    let hold: SharedHold = Rc::new(move |cx| delete::in_flight(&deleting, cx).is_some());
+    // starts or settles, and its store, which notifies with every push. A terminal outlives no UI session (it retires
+    // with its own), so the stores it reads are always the ones its Delete went through and its row arrives in. Held
+    // while a Delete runs (see the module docs) and while the unavailable card shows over the terminals, which says
+    // why they are not live, so their own "Session unavailable — reconnecting" would only say it again.
+    let hold: SharedHold =
+        Rc::new(move |cx| delete::in_flight(&held, cx).is_some() || unavailable::shows(&held, cx));
     Some(cx.new(|cx| TerminalSet::new(session, key.to_owned(), metrics, hold, cx)))
 }
 
@@ -256,8 +285,8 @@ impl SessionPane {
             cx.observe_global_in::<Chosen>(window, Self::sync),
         ];
         // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
-        // and on the store only for whether the open session shows its interrupted card, which the card's follower
-        // reports when it changes. So it does not use `session::observe_current` itself, which would add a sync on
+        // and on the store only for whether the open session shows its interrupted card and whether its row is stale
+        // (the unavailable card), which the card's follower reports when either changes. So it does not use `session::observe_current` itself, which would add a sync on
         // every pushed change, and whose callback gets no window, which every focus move of `sync` needs.
         if let Some(connection) = session::connection(cx) {
             observing.push(cx.observe_in(&connection, window, |pane, _, window, cx| {
@@ -282,23 +311,29 @@ impl SessionPane {
     }
 
     /// Bring the pane up to date: terminals for the selected session under the current UI session (none when nothing is
-    /// selected, while the window is inert, or while the session shows its interrupted card), the shown terminal or the
-    /// card made home every time, and the user's latest choice acted on.
+    /// selected, while the window is inert, while the session shows its interrupted card, or when it opened on a host
+    /// the helm cannot reach), inert exactly while the unavailable card shows over them, the shown terminal or the card
+    /// made home every time, and the user's latest choice acted on.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session =
             session::connection(cx).and_then(|connection| connection.read(cx).session().cloned());
         let wanted = session.as_ref().and_then(|_| local_state::selected(cx));
         let card = wanted.as_deref().is_some_and(|key| card::shows(key, cx));
         let reachable = wanted.as_deref().is_none_or(|key| card::reachable(key, cx));
+        let unavailable = wanted
+            .as_deref()
+            .is_some_and(|key| unavailable::shows(key, cx));
         let mounted = self.mounted.current(cx);
         if mounted.as_ref().map(|mounted| &mounted.key) != wanted.as_ref() {
-            // The old terminals go with this assignment, and their streams with them. The old card's question goes
+            // The old terminals go with this assignment, and their streams with them. A session opened on a host the
+            // helm cannot reach gets none, whatever its last status says (stale beats interrupted): there is nothing
+            // live to attach to, and the branch below mounts them once the host answers. The old card's question goes
             // too: the session now open may show a card of its own, which the drop below leaves alone, and the
             // question would otherwise go on refusing the actions of the session it was about.
             card::drop_question(cx);
             *mounted = session
                 .zip(wanted)
-                .and_then(|(session, key)| Mounted::new(&session, key, !card, cx));
+                .and_then(|(session, key)| Mounted::new(&session, key, !card && !unavailable, cx));
             cx.notify();
         } else if let (Some(mounted), Some(session)) = (mounted.as_mut(), session.as_ref())
             && ((mounted.set.is_some() && card) || (mounted.set.is_none() && !card && reachable))
@@ -331,21 +366,33 @@ impl SessionPane {
             && let Some(set) = &mounted.set
         {
             mounted._home = Some(cx.observe_in(set, window, |pane, set, window, cx| {
-                let current = pane
+                // Through the session's whole rule, not the set's alone: the set also notifies when it goes inert under
+                // the unavailable card, which must stay home then.
+                let home = pane
                     .mounted
                     .current(cx)
                     .as_ref()
-                    .is_some_and(|mounted| mounted.set.as_ref() == Some(&set));
-                if current {
-                    let home = set.read(cx).home(cx);
+                    .filter(|mounted| mounted.set.as_ref() == Some(&set))
+                    .map(|mounted| mounted.home_now(cx));
+                if let Some(home) = home {
                     focus::set_home(home.as_ref(), window, cx);
                 }
             }));
         }
+        // The unavailable card over the terminals: the set inert exactly while it shows. Inert terminals hold no focus,
+        // so focus one of them held goes home through the focus coordinator once a frame no longer tracks it, and home
+        // is the card (below), so it settles there. Focus anywhere else stays where it is.
+        if let Some(mounted) = mounted.as_ref()
+            && let Some(set) = &mounted.set
+        {
+            set.update(cx, |set, cx| set.set_inert(unavailable, cx));
+        }
         // Every time, not only when the pane mounted something else: a reset drops the mounted terminals when `mounted`
         // is next reached (above) while the selection stays, so the key compares equal, and home would otherwise keep
         // naming a terminal that is gone.
-        let home = mounted.as_ref().and_then(|mounted| mounted.home(card, cx));
+        let home = mounted
+            .as_ref()
+            .and_then(|mounted| mounted.home(card, unavailable, cx));
         focus::set_home(home.as_ref(), window, cx);
         self.act_on_choice(window, cx);
     }
@@ -380,13 +427,12 @@ impl SessionPane {
         let Some((key, mark)) = chosen.latest.clone() else {
             return;
         };
-        let card = card::shows(&key, cx);
         let home = self
             .mounted
             .current(cx)
             .as_ref()
             .filter(|mounted| mounted.key == key)
-            .and_then(|mounted| mounted.home(card, cx));
+            .and_then(|mounted| mounted.home_now(cx));
         if let Some(handle) = home {
             focus::choose_terminal(&handle, &mark, window, cx);
         }
@@ -403,22 +449,15 @@ impl Render for SessionPane {
                 mounted.set.clone(),
                 mounted.copies.clone(),
                 mounted.card_focus.clone(),
+                mounted.scroll.clone(),
             )
         });
-        let Some((key, terminals, copies, card_focus)) = shown else {
+        let Some((key, terminals, copies, card_focus, scroll)) = shown else {
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
             return empty(cx);
         };
-        let deleting = delete::in_flight(&key, cx);
-        let spins =
-            (deleting.is_some() || Self::header_spins(&key, cx)) && ticker::is_active(window, cx);
-        if spins != self.spinner.is_some() {
-            self.spinner = spins.then(|| Spinner::start(window, cx));
-        }
-        let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
-        let header = self.header_row(&key, step, window, cx);
         // Read from the store, not from whether terminals are mounted, so a frame drawn before `sync` has caught up
         // with a push already shows what the session is now.
         let stored = session::current_store(cx).and_then(|store| {
@@ -428,6 +467,28 @@ impl Render for SessionPane {
                 .get::<SessionRow>(&key)
                 .cloned()
         });
+        // The unavailable card's notice, worded from the store's row and registry now (`unavailable::Notice`).
+        let notice = stored
+            .as_ref()
+            .filter(|row| unavailable::shows_row(row))
+            .and_then(|row| {
+                let store = session::current_store(cx)?;
+                Some(unavailable::Notice::of(row, store.read(cx).collections()))
+            });
+        // The stale band, from the store's row too, with the viewer's clock.
+        let now = age::seconds(ticker::wall_now(cx));
+        let band = stored
+            .as_ref()
+            .and_then(|row| unavailable::Band::of(row, now));
+        let deleting = delete::in_flight(&key, cx);
+        // The unavailable card's heading turns the spinner too, as the old card's did.
+        let spins = (deleting.is_some() || Self::header_spins(&key, cx) || notice.is_some())
+            && ticker::is_active(window, cx);
+        if spins != self.spinner.is_some() {
+            self.spinner = spins.then(|| Spinner::start(window, cx));
+        }
+        let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
+        let header = self.header_row(&key, step, window, cx);
         // The store's row whenever it has one (remembered while it shows the card); the card's last row only while it
         // has none (see `Mounted::card_row`).
         let held = self
@@ -454,7 +515,17 @@ impl Render for SessionPane {
             .as_ref()
             .is_some_and(|row| card::shows_row(&key, row, cx));
         let lines = self.header_lines(&key, step, shows_card, cx);
-        let bar = self.details_bar(&key, &copies, window, cx);
+        let bar = self.details_bar(
+            &key,
+            &copies,
+            band.as_ref().is_some_and(|band| band.age.is_some()),
+            now,
+            window,
+            cx,
+        );
+        let band = band.map(|band| band.draw(theme::palette(cx)));
+        // Whether the unavailable card has no terminal under it, read before the terminals are drawn.
+        let alone = terminals.is_none();
         let area: Option<AnyElement> = match row.as_ref() {
             Some(row) if shows_card => Some(card::draw(
                 card::Drawn {
@@ -471,23 +542,40 @@ impl Render for SessionPane {
             )),
             _ => terminals.map(IntoElement::into_any_element),
         };
-        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then the terminal
-        // (or the interrupted card in its place), which takes the rest of the height (SPEC.md: "The terminal loses no
-        // height in the steady state"; the lines show only while there is something to say), then the details bar. The
-        // bar comes last in drawing order as well as on screen, so its controls follow the top row and the terminal in
-        // Tab's order (SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar").
+        // Over the inert terminals, or alone where a session opened unreachable has none.
+        let over = notice.map(|notice| {
+            unavailable::draw(
+                unavailable::Drawn {
+                    notice,
+                    focus: &card_focus,
+                    scroll: &scroll,
+                    step,
+                    alone,
+                },
+                window,
+                cx,
+            )
+        });
+        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then a stale
+        // session's band, then the terminal (or the interrupted card in its place, or the unavailable card over it),
+        // which takes the rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines
+        // and the band show only while there is something to say), then the details bar. The bar comes last in drawing
+        // order as well as on screen, so its controls follow the top row and the terminal in Tab's order (SPEC.md:
+        // "Keyboard order follows the top row, terminal, then bottom bar").
         div()
             .flex()
             .flex_col()
             .size_full()
             .child(header)
             .children(lines)
+            .children(band)
             .child(
                 div()
                     .relative()
                     .flex_1()
                     .min_h_0()
                     .children(area)
+                    .children(over)
                     .children(deleting.map(|guard| delete_scrim(guard, step, cx)))
                     // The approval region starts its cards below this box's top, clear of the tabs and the lines
                     // above the terminal, as the old cards started below `.terminal-panes`.
@@ -501,16 +589,18 @@ impl Render for SessionPane {
 impl SessionPane {
     /// The details bar for the open session filed under `key`, read from the store by key whether or not the list
     /// shows it, or `None` when the store holds no row for it (see [`details`]'s module docs) or the window has no UI
-    /// session. Its copy fields confirm as `copies` records. Takes or drops the pulse and clock handles the bar needs
-    /// for this frame, as the session list does for its rows.
+    /// session, with the viewer's clock at `now`. Its copy fields confirm as `copies` records. Takes or drops the pulse
+    /// and clock handles the bar needs for this frame, as the session list does for its rows; the clock also while the
+    /// stale band shows an age (`band_ages`), since the band takes the age the bar leaves out then.
     fn details_bar(
         &mut self,
         key: &str,
         copies: &details::Copies,
+        band_ages: bool,
+        now: Option<i64>,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let now = age::seconds(ticker::wall_now(cx));
         let shown = session::current_store(cx).and_then(|store| {
             let collections = store.read(cx).collections();
             collections
@@ -522,7 +612,7 @@ impl SessionPane {
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        let ages = shown.as_ref().is_some_and(|shown| shown.age.is_some());
+        let ages = band_ages || shown.as_ref().is_some_and(|shown| shown.age.is_some());
         if ages != self.clock.is_some() {
             self.clock = ages.then(|| ticker::clock(cx));
         }

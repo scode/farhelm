@@ -412,3 +412,25 @@ fn a_carried_session_cut_away_on_its_own_host_stays_open(cx: &mut TestAppContext
     );
     assert_eq!(sent(&mut fake), [], "nothing was sent");
 }
+
+/// The helm carries the open session's row outside the list while a filter hides it, and keeps marking it stale with
+/// its host like any row, so the pane must show the unavailable card for it as for a listed session: the card reads the
+/// row by key, never the listing. Specified: with a open and live, and a status filter hiding it (carried), a push that
+/// carries a stale draws the unavailable card over a's veiled terminal.
+#[gpui::test]
+fn a_carried_open_session_that_goes_stale_shows_the_unavailable_card(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_a(cx, session("a"), session("b"));
+    hide_a(&mut fake, cx);
+    assert!(
+        !drawn(cx, super::unavailable::CARD_ID),
+        "the premise: no card yet"
+    );
+    fake.push(change(
+        carrying(filtered(&[], 2, 0), "a"),
+        &[session("a").stale()],
+        &[],
+    ));
+    settle(cx);
+    assert!(drawn(cx, super::unavailable::CARD_ID));
+    assert!(drawn(cx, crate::terminal::attached::INERT_SCRIM_ID));
+}
