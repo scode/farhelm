@@ -97,8 +97,8 @@ const MAX_CLIENT_MESSAGE: usize = 4 * 1024 * 1024;
 const MAX_REPLY_BODY: usize = 32 * 1024 * 1024;
 
 /// How long one outgoing message may take to reach the GUI before the channel
-/// is abandoned. Same reasoning as the event feed's write deadline: a peer
-/// that stopped reading would otherwise park the writer for good.
+/// is abandoned: a peer that stopped reading would otherwise park the writer
+/// for good.
 const WRITE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// How long the GUI may send nothing at all before the helm closes its

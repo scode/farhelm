@@ -245,7 +245,7 @@ mod tests {
         let mut harness = rest_harness::idle_helm().await;
         let addr = harness.serve_unauthenticated().await;
         for route in [
-            "/api/events",
+            farhelm_proto::ui_channel::UI_CHANNEL_PATH,
             "/api/sessions/missing/term",
             "/api/sessions/missing/term/unowned",
         ] {

@@ -43,16 +43,17 @@
 //!
 //! Two things, and they are deliberately independent of each other:
 //!
-//! - **Clients CAN stop polling.** [`events`] serves a WebSocket that
-//!   carries a REVISION NUMBER and nothing else; every chokepoint that
-//!   changes what a client could read bumps it, and only when something
-//!   actually changed. A client re-reads through the same REST readers it
-//!   already had, so there is exactly one serving path and one set of
-//!   consistency rules — see that module for the changed-only rule and the
-//!   subscription handshake the fallback handover depends on. This is the
-//!   capability, not its consumption: retiring the UI's four periodic loops
-//!   is PLAN_M6_75.md item 6's work, against the contract this module
-//!   freezes.
+//! - **Clients CAN stop polling.** [`feed`] is a REVISION NUMBER and nothing
+//!   else; every chokepoint that changes what a client could read bumps it,
+//!   and only when something actually changed. The UI channel, the one
+//!   listener a client sees, re-reads through the same GET handlers, so
+//!   there is exactly one serving path and
+//!   one set of consistency rules — see that module for the changed-only
+//!   rule. M6.75 relayed the number to browsers over a WebSocket,
+//!   `/api/events`; today the only client-facing listener is the UI channel
+//!   ([`ui_channel`]), which re-runs its pushed collections' reads on every
+//!   bump and pushes what changed. The maintainer decided on 2026-11-15 to
+//!   remove `/api/events` once nothing in Farhelm called it.
 //! - **Narrowing happens here, not in the browser.** The merged list takes
 //!   SPEC.md's filter dimensions as query parameters and answers a
 //!   filtered request with two counts (matching, and the fleet's own),
@@ -122,11 +123,6 @@ pub use downloads::{FileOpener, NativeDownloads, cleanup_native_downloads};
 /// before serving starts.
 mod ensure;
 
-/// `/api/events` — the invalidation feed: a WebSocket carrying revision
-/// numbers and nothing else, which is what lets every client drop its
-/// polling loops (PLAN_M6_75.md item 5).
-mod events;
-
 /// Shared condition notices, initially stuck archived-checkout removal.
 mod notices;
 
@@ -144,7 +140,8 @@ mod credentials;
 /// `/api/tensorlake/recipes`.
 mod tensorlake;
 
-/// The changed-only fleet invalidation feed shared by the manager and REST edge.
+/// The changed-only fleet invalidation feed shared by the manager and REST
+/// edge, which the UI channel re-projects on.
 mod feed;
 
 /// `/api/ui` — the GUI's one ordered channel: commands, replies and pushed
@@ -502,14 +499,6 @@ struct AppState {
     store: store::HelmStore,
     /// The client security boundary: the credentials this process minted.
     auth: auth::AuthState,
-    /// How many `/api/events` subscriptions this helm admits at once.
-    ///
-    /// Held here rather than read from a constant at the call site purely so
-    /// a test can exhaust it through REAL sockets: a bound that could only be
-    /// reached by opening sixty-four connections would be tested against the
-    /// counter instead of against the endpoint, which is the half that can
-    /// actually forget to admit.
-    event_subscriber_cap: usize,
     /// Order trash observations across clients without holding the host's
     /// session/cache or provisioning locks during remote work.
     trash_requests: Arc<notices::TrashRequests>,
@@ -573,8 +562,8 @@ impl AppState {
     ///
     /// A constructor rather than a literal at each call site so the defaults
     /// live in ONE place — the test harness stands this up too, and a
-    /// harness that quietly used a different subscriber cap or its own count
-    /// cache would be testing something the product does not do.
+    /// harness that quietly used its own bounds or caches would be testing
+    /// something the product does not do.
     ///
     /// `tensorlake` is built by the caller, before the manager: the manager's
     /// actors ask it about Tensorlake hosts' sandboxes from their first
@@ -628,7 +617,6 @@ impl AppState {
             manager,
             store,
             auth: auth::AuthState::new(),
-            event_subscriber_cap: events::MAX_SUBSCRIBERS,
             trash_requests: Arc::default(),
             provisioning,
             link_opener: None,
@@ -867,12 +855,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/checkout-agent-trust/{harness}",
             get(checkout_config::get_agent_trust).put(checkout_config::put_agent_trust),
         )
-        // The invalidation feed (PLAN_M6_75.md item 5). A WebSocket like the
-        // terminal routes, and served beside them for the same reason they
-        // are here at all — one process, one port, one origin guard — but
-        // with nothing else in common: it names no session, carries no data,
-        // and holds no attachment.
-        .route("/api/events", get(events::events_ws))
         // The GUI's channel (see `ui_channel`). A WebSocket upgrade, so a GET
         // that `own_state_change` runs inline; the commands it carries go
         // back through this same router, owned or cancellable per route.
