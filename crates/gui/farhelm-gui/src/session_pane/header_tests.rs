@@ -1,7 +1,8 @@
 //! Tests of the open session's top row: the actions' order, labels and hover help, Restart's offer and its request,
 //! that Stop, Replace and Delete from the header ask the row's questions and send the row's preconditions, a pending
 //! Delete and Stop, exclusion, where Escape and Cancel leave focus, the row's layout at the 650-pixel floor with the
-//! real text system, and the terminal text size group at the start of the actions (its steps, readout, range, shortcut,
+//! real text system (its actions condensed beside a tunnel pill there, and not in a wide pane), and the terminal text
+//! size group at the start of the actions (its steps, readout, range, shortcut,
 //! and the size a terminal opens at). The header of an open session the list does not show is `carried_tests.rs`'s.
 //!
 //! Everything but the layout test runs in the real main view over the helm client's fake, as the session list's own
@@ -1798,26 +1799,125 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
     assert_whole_on_one_line(&waiting_nodes);
 }
 
-/// SPEC.md: "Stop, Restart, Replace, Clone, Delete and the tunnel pill remain fully visible and keyboard reachable from
-/// a 650px main pane". The pill is the first thing in the top row's left region, so it is what can push the actions,
-/// and with a long host name it is wide: it must give up its width first, cutting the host short and keeping both
-/// ports. With the text size group at the start of the actions, the pill at its widest no longer fits beside them, so
-/// it gives up width, down to no less than its floor for a mapping (154 pixels). Specified:
-/// in a 650-pixel pane, with a session on a remote host whose terminal lists one tunnel on a host with a very long
-/// name, each of the five actions and both carets is drawn whole inside the pane, all on one line, and the pill is
-/// drawn whole inside the pane too, tracking a focus handle so Tab reaches it.
-#[test]
-fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
-    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
-        assets::UI_FONT,
-    ));
-    let mut cx =
-        HeadlessAppContext::with_platform(text_system, Arc::new(assets::Assets), || Ok(None));
-    cx.update(bootstrap::install).unwrap();
-    let (mut fake, handle, events) = FakeHelm::new();
-    let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
-    cx.run_until_parked();
-    // The session on the pinned host list's SSH host 2, so its terminal reads its tunnels as it opens.
+/// A session pane alone in a window of a given width, laid out with the real text system and the bundled fonts (text
+/// width decides every fit here; the test context's fake text system gives every character the same width), over a
+/// fake helm, with its first session open: the setup of the tests of the row under a tunnel pill.
+struct RealPane {
+    /// Declared first, so it drops before `cx`: GPUI's leak check, run as the app context drops, fails on a handle
+    /// still held then.
+    _connection: Entity<crate::session::Connection>,
+    cx: HeadlessAppContext,
+    fake: FakeHelm,
+    window: gpui::AnyWindowHandle,
+}
+
+impl RealPane {
+    /// The pane `width` pixels wide over `snapshot`, not yet drawn.
+    fn open(width: f32, snapshot: Vec<CollectionState>) -> RealPane {
+        let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+            assets::UI_FONT,
+        ));
+        let mut cx =
+            HeadlessAppContext::with_platform(text_system, Arc::new(assets::Assets), || Ok(None));
+        cx.update(bootstrap::install).unwrap();
+        let (mut fake, handle, events) = FakeHelm::new();
+        let connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
+        cx.run_until_parked();
+        fake.connect(snapshot);
+        cx.run_until_parked();
+        let window = cx
+            .open_window(size(px(width), px(300.)), |window, cx| {
+                let view = cx.new(|cx| {
+                    let list = cx.new(SessionList::new);
+                    let new = list.read(cx).new_focus().clone();
+                    let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+                    PaneOnly {
+                        pane,
+                        _list: list,
+                        root: root::attach(window, cx),
+                    }
+                });
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+            .unwrap();
+        RealPane {
+            _connection: connection,
+            cx,
+            fake,
+            window: window.into(),
+        }
+    }
+
+    /// Draw a few frames, letting what each asked for run, and return the driver record of the last one.
+    fn draw(&mut self) -> Vec<gpui::DriverNode> {
+        for _ in 0..3 {
+            self.cx.run_until_parked();
+            self.cx
+                .update_window(self.window, |_, window, cx| {
+                    window.set_driver_enabled(true);
+                    window.draw(cx).clear(cx);
+                })
+                .unwrap();
+        }
+        self.cx
+            .update_window(self.window, |_, window, _| window.driver_nodes().to_vec())
+            .unwrap()
+    }
+
+    /// Make the window `width` pixels wide, as the platform reports a resize.
+    fn resize(&mut self, width: f32) {
+        self.cx
+            .update_window(self.window, |_, window, cx| {
+                window.resize(size(px(width), px(300.)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+    }
+
+    /// Answer what the app sent, in order: the open session's tunnel read lists one tunnel to `host`, and everything
+    /// else succeeds with no body. Panics unless the read was sent, the premise of every pill these tests draw.
+    fn open_tunnel(&mut self, host: &str) {
+        let mut read = false;
+        for command in self.fake.commands() {
+            if command.method == Method::Get && command.path == "/api/sessions/a/tunnels" {
+                read = true;
+                self.fake.reply(
+                    command.id,
+                    200,
+                    Some(json!({
+                        "available": true,
+                        "host_name": host,
+                        "consent": true,
+                        "tunnels": [{ "id": "t1", "local_port": 54321, "remote_port": 5173 }],
+                    })),
+                );
+            } else {
+                self.fake.reply(command.id, 200, None);
+            }
+        }
+        assert!(
+            read,
+            "the premise: the remote session's terminal read its tunnels"
+        );
+    }
+}
+
+/// The node drawn with `id` in `nodes`; panics, naming what was drawn, when there is none or more than one, since each
+/// control must be drawn once (the fit lays out a copy of the actions it never draws).
+fn only_node<'a>(nodes: &'a [gpui::DriverNode], id: &str) -> &'a gpui::DriverNode {
+    let found: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.element_id.as_deref() == Some(id))
+        .collect();
+    match found.as_slice() {
+        [node] => node,
+        _ => panic!("{id} was drawn {} times", found.len()),
+    }
+}
+
+/// A snapshot with an idle session `a` on the pinned host list's SSH host 2, so its terminal reads its tunnels as it
+/// opens.
+fn remote_session() -> Vec<CollectionState> {
     let mut remote = entry(&idle("a"), 0);
     remote.value["host"] = json!(2);
     let hosts: Value = serde_json::from_str(include_str!(
@@ -1841,82 +1941,147 @@ fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
         meta: meta(&keys),
         entries: host_entries,
     });
-    fake.connect(snapshot);
-    cx.run_until_parked();
-    let window = cx
-        .open_window(size(px(650.), px(300.)), |window, cx| {
-            let view = cx.new(|cx| {
-                let list = cx.new(SessionList::new);
-                let new = list.read(cx).new_focus().clone();
-                let pane = cx.new(|cx| SessionPane::new(new, window, cx));
-                PaneOnly {
-                    pane,
-                    _list: list,
-                    root: root::attach(window, cx),
-                }
-            });
-            cx.new(|cx| Root::new(view, window, cx))
-        })
-        .unwrap();
-    let draw = |cx: &mut HeadlessAppContext| {
-        for _ in 0..3 {
-            cx.run_until_parked();
-            cx.update_window(window.into(), |_, window, cx| {
-                window.set_driver_enabled(true);
-                window.draw(cx).clear(cx);
-            })
-            .unwrap();
+    snapshot
+}
+
+/// A snapshot with an idle session `a` on a container environment's host (host 2, remote), whose header draws Suspend
+/// left of Stop.
+fn environment_session() -> Vec<CollectionState> {
+    use crate::session_list::environment_tests::{Provider, connected, environment_host, registry};
+    let mut snapshot = snapshot_of(vec![entry(&idle("a"), 0)], false);
+    snapshot.push(registry(&environment_host(
+        Provider::Container,
+        connected(),
+    )));
+    snapshot
+}
+
+/// A tunnel host's name long enough that the pill would show it past the pill's widest (280 pixels).
+fn long_host() -> String {
+    format!("a-very-long-host-name{}.example.internal", "-x".repeat(40))
+}
+
+/// SPEC.md: "Text size, Stop, both parts of each split button, Clone, Delete and the tunnel pill remain fully visible
+/// and keyboard reachable from a 650px main pane; … Narrower panes may clip the row, which never wraps." Before the
+/// actions could condense, a pill at its floor (154 pixels, which keeps both ports readable) was drawn over the first
+/// 49 pixels of the actions at 650 pixels; the old app condensed its actions instead (`header-layout.js` and
+/// `.actions-compact`), and the terminal area agreed on 2026-11-16 that the pill keeps its floor. Specified: in a
+/// 650-pixel pane, for a remote session and for a container environment's session, once the terminal lists one tunnel
+/// to a very long host name, every action, both carets, the text size group and the environment's control are drawn
+/// once each, whole, inside the pane, on one line, each but the readout tracking a focus handle so Tab reaches it; the
+/// pill is drawn whole, no narrower than its floor and ending left of the actions; Stop is narrower than it was before
+/// the pill showed, by more than its side padding (the condensed look); three more frames draw Stop and the pill in the
+/// same place, so the look does not flip between frames; and the same row widened to 1400 pixels draws Stop as wide as
+/// before the pill showed, and narrowed to 650 again draws it condensed as before, so a condensed look neither sticks
+/// nor fails to come back.
+#[test]
+fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
+    use super::header::ENVIRONMENT_ID;
+    use crate::terminal::text_size::SMALLER_ID;
+    for (name, snapshot, environment) in [
+        ("remote", remote_session(), false),
+        ("environment", environment_session(), true),
+    ] {
+        let mut pane = RealPane::open(650., snapshot);
+        let before = pane.draw();
+        assert!(
+            !before
+                .iter()
+                .any(|node| node.element_id.as_deref() == Some("session-tunnel-pill")),
+            "the premise: no pill before the tunnel read is answered ({name})"
+        );
+        let ordinary_stop = only_node(&before, Action::Stop.id()).bounds;
+        pane.open_tunnel(&long_host());
+        let nodes = pane.draw();
+        assert_whole_on_one_line(&nodes);
+        let mut controls: Vec<&str> = Action::ALL.iter().map(|action| action.id()).collect();
+        controls.extend(CARETS);
+        if environment {
+            controls.push(ENVIRONMENT_ID);
         }
-        cx.update_window(window.into(), |_, window, _| window.driver_nodes().to_vec())
-            .unwrap()
-    };
-    draw(&mut cx);
-    // Answer what the app sent, in order: the terminal's tunnel read lists one tunnel on a very long host name.
-    let long_host = format!("a-very-long-host-name{}.example.internal", "-x".repeat(40));
-    let mut read = false;
-    for command in fake.commands() {
-        if command.method == Method::Get && command.path == "/api/sessions/a/tunnels" {
-            read = true;
-            fake.reply(
-                command.id,
-                200,
-                Some(json!({
-                    "available": true,
-                    "host_name": long_host,
-                    "consent": true,
-                    "tunnels": [{ "id": "t1", "local_port": 54321, "remote_port": 5173 }],
-                })),
+        for id in &controls {
+            let node = only_node(&nodes, id);
+            assert!(node.focus.is_some(), "{id} tracks a focus handle ({name})");
+        }
+        if environment {
+            let control = only_node(&nodes, ENVIRONMENT_ID);
+            assert!(
+                control.bounds.size.width > px(0.)
+                    && control.visible_bounds == control.bounds
+                    && control.bounds.origin.x + control.bounds.size.width <= px(650.),
+                "the environment's control is whole inside the pane ({name}): {:?}",
+                control.bounds
             );
-        } else {
-            fake.reply(command.id, 200, None);
         }
+        let pill = only_node(&nodes, "session-tunnel-pill").bounds;
+        let first = only_node(&nodes, SMALLER_ID).bounds;
+        assert!(
+            pill.size.width >= px(154.) && pill.origin.x + pill.size.width <= first.origin.x,
+            "the pill keeps its floor and ends left of the actions ({name}): pill {pill:?}, first action {first:?}"
+        );
+        assert_eq!(
+            only_node(&nodes, "session-tunnel-pill").visible_bounds,
+            pill,
+            "the pill is drawn whole ({name})"
+        );
+        let stop = only_node(&nodes, Action::Stop.id()).bounds;
+        assert!(
+            stop.size.width + px(16.) < ordinary_stop.size.width,
+            "Stop is condensed ({name}): {stop:?}, ordinary {ordinary_stop:?}"
+        );
+        for _ in 0..3 {
+            let again = pane.draw();
+            assert_eq!(
+                (
+                    only_node(&again, Action::Stop.id()).bounds,
+                    only_node(&again, "session-tunnel-pill").bounds
+                ),
+                (stop, pill),
+                "the next frame keeps the look ({name})"
+            );
+        }
+        pane.resize(1400.);
+        let wide = pane.draw();
+        assert_eq!(
+            only_node(&wide, Action::Stop.id()).bounds.size,
+            ordinary_stop.size,
+            "a wide pane brings the ordinary look back ({name})"
+        );
+        pane.resize(650.);
+        let narrow = pane.draw();
+        assert_eq!(
+            only_node(&narrow, Action::Stop.id()).bounds,
+            stop,
+            "narrowed again, the row condenses again ({name})"
+        );
     }
-    assert!(
-        read,
-        "the premise: the remote session's terminal read its tunnels"
-    );
-    let nodes = draw(&mut cx);
-    assert_whole_on_one_line(&nodes);
-    let pill = nodes
-        .iter()
-        .find(|node| node.element_id.as_deref() == Some("session-tunnel-pill"))
-        .expect("the pill is drawn");
-    assert!(
-        pill.bounds.size.width < px(280.) && pill.bounds.size.width >= px(154.),
-        "the pill gave way to the actions, down to no less than its floor: {:?}",
-        pill.bounds.size.width
-    );
-    assert!(
-        pill.bounds.size.width > px(0.)
-            && pill.visible_bounds == pill.bounds
-            && pill.bounds.origin.x + pill.bounds.size.width <= px(650.),
-        "the pill is drawn whole inside the pane: {:?}, visible {:?}",
-        pill.bounds,
-        pill.visible_bounds
-    );
-    assert!(
-        pill.focus.is_some(),
-        "and tracks a focus handle, so Tab reaches it"
+}
+
+/// The old app condensed its actions only for measured pressure: "a wide row keeps its ordinary spacing even with
+/// tunnels" (the old stylesheet's comment on `.actions-compact`). Specified: in a 1400-pixel pane, once a remote
+/// session's terminal lists one tunnel to a very long host name, the pill is drawn and Stop, Restart and the gap
+/// between them have the same widths as before the pill showed.
+#[test]
+fn a_wide_pane_keeps_the_ordinary_actions_beside_a_pill() {
+    let mut pane = RealPane::open(1400., remote_session());
+    let before = pane.draw();
+    let gap = |nodes: &[gpui::DriverNode]| {
+        let stop = only_node(nodes, Action::Stop.id()).bounds;
+        let restart = only_node(nodes, Action::Restart.id()).bounds;
+        (
+            stop.size.width,
+            restart.size.width,
+            restart.origin.x - (stop.origin.x + stop.size.width),
+        )
+    };
+    let ordinary = gap(&before);
+    pane.open_tunnel(&long_host());
+    let nodes = pane.draw();
+    only_node(&nodes, "session-tunnel-pill");
+    assert_eq!(
+        gap(&nodes),
+        ordinary,
+        "the actions keep their ordinary look"
     );
 }
 

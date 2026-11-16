@@ -1,8 +1,8 @@
 //! Tests of the button: a click and Enter or Space run it once, a disabled one is inert, a busy one keeps focus, its
 //! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, a
 //! square one keeps its side, the session list heading's padding lines its title's words up with the band's edge, a
-//! split button's muted caret reads retired while it still opens its menu, and a badge draws over a button without
-//! changing its size or name.
+//! split button's muted caret reads retired while it still opens its menu, a badge draws over a button without
+//! changing its size or name, and a condensed header button takes the old `.actions-compact` box.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -13,7 +13,7 @@ use gpui::{
 };
 
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, IconButton, Role, SplitPart, Tier};
+use crate::components::{Button, Condensed, HoverHelp, IconButton, Role, SplitPart, Tier};
 use crate::test_support::{bounds, center, check, click, frame, keys, open, redraw};
 
 use super::{tooltip, wait_hover_delay};
@@ -511,4 +511,73 @@ fn a_badge_draws_over_the_button_without_changing_its_size_or_name(cx: &mut Test
         .find(|node| node.element_id.as_deref() == Some("badged"))
         .and_then(|node| node.label);
     assert_eq!(named.as_deref(), Some("Hosts"));
+}
+
+/// The session header condenses its actions beside a tunnel pill by the old `.actions-compact` rules, which take
+/// padding, text size and with it line height (`.btn`'s `line-height: 1.4`), and nothing else: names stay. Specified:
+/// three compact buttons around the same 50-by-16 content, one as usual, one condensed to its padding and one condensed
+/// with its words, are 68, 56 and 52 pixels wide (8, 2 and no pixels of padding at each side inside the 1-pixel edge),
+/// all 22 pixels high (2 pixels of padding above and below), and each keeps its label as its name; the same button with
+/// its label as text is 23 pixels high as usual and 21 condensed with its words (a 17- and a 15-pixel line); and a
+/// split caret's 13-pixel icon is 23 pixels wide as usual and 15 condensed (4 and no pixels at its sides).
+#[gpui::test]
+fn a_condensed_compact_button_gives_up_only_padding_text_size_and_line_height(
+    cx: &mut TestAppContext,
+) {
+    let button = |id: &'static str, condensed: Option<Condensed>| {
+        Button::new(
+            id,
+            "Stop",
+            HoverHelp::tooltip("A test control"),
+            Role::Button,
+        )
+        .compact()
+        .condensed(condensed)
+    };
+    let caret = |id: &'static str, condensed: Option<Condensed>| {
+        IconButton::new(
+            id,
+            Icon::ChevronDown,
+            "Options",
+            HoverHelp::tooltip("A test control"),
+            Role::Button,
+        )
+        .compact()
+        .condensed(condensed)
+        .split(SplitPart::Caret { muted: false })
+    };
+    let cx = open(cx, move |_, _| {
+        let content = |button: Button| button.content(div().w(px(50.)).h(px(16.)));
+        div()
+            .flex()
+            .items_start()
+            .child(content(button("ordinary", None)))
+            .child(content(button("padding", Some(Condensed::Padding))))
+            .child(content(button("words", Some(Condensed::Words))))
+            .child(button("ordinary-text", None))
+            .child(button("words-text", Some(Condensed::Words)))
+            .child(caret("ordinary-caret", None))
+            .child(caret("words-caret", Some(Condensed::Words)))
+            .into_any_element()
+    });
+    let nodes = frame(cx);
+    for (id, width) in [("ordinary", 68.), ("padding", 56.), ("words", 52.)] {
+        let drawn = bounds(cx, id);
+        assert_eq!(
+            (f32::from(drawn.size.width), f32::from(drawn.size.height)),
+            (width, 22.),
+            "{id}"
+        );
+        let node = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} was drawn"));
+        assert_eq!(node.label.as_deref(), Some("Stop"), "{id}");
+    }
+    for (id, height) in [("ordinary-text", 23.), ("words-text", 21.)] {
+        assert_eq!(f32::from(bounds(cx, id).size.height), height, "{id}");
+    }
+    for (id, width) in [("ordinary-caret", 23.), ("words-caret", 15.)] {
+        assert_eq!(f32::from(bounds(cx, id).size.width), width, "{id}");
+    }
 }

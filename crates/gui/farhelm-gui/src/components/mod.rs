@@ -64,7 +64,7 @@ mod transition;
 mod tests;
 
 pub use banner::Banner;
-pub use button::{Button, IconButton, SplitPart, Tier};
+pub use button::{Button, CONDENSED_GAP, Condensed, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
 pub use copy_button::{copy_button, copy_button_then};
 pub use copy_field::{CONFIRMATION, COPIED, CopyFeedback, CopyField};
