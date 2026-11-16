@@ -2407,6 +2407,56 @@ class Smoke(unittest.TestCase):
                     raise
                 print(f"gui-e2e-smoke: step 76 left {destination} behind: {error}", file=sys.stderr)
 
+    # ---- The sidebar area's rail expansion and avatar menu (77) ----------------------------------------------------
+
+    def test_77_the_rails_avatar_menu_and_expansion(self) -> None:
+        """Two of the rail's ways in that only the real app shows working end to end. A secondary click on an avatar
+        opens that host's actions menu (SPEC.md: "the same menu on its rail avatar"), and the old app's right-click
+        reached it; the step's right press goes through the bridge and GPUI's platform layer like a user's. Expansion
+        is the helm's shared `host_rail_open` preference (SPEC.md: "Expansion is a helm preference that every client
+        shares"), so only the real helm shows a press reaching it and the window drawing what it stores. The step seeds
+        and touches no session and leaves the rail collapsed, as every other step finds it, also when it fails partway:
+        its `finally` stores the rail collapsed again through the helm. Specified: with no host chosen and the rail
+        collapsed, a right press on the local host's avatar opens its host menu (its Retry's description showing)
+        without choosing the host, and Escape closes it with focus back on the avatar; then, with the helm storing no
+        expansion, a click on "Expand navigation rail" makes the helm store `host_rail_open` true, the window paint the
+        expanded foot's Collapse label and the control be named "Collapse navigation rail", and a click on it makes the
+        helm store false and the label leave the window."""
+        local = local_host()["id"]
+        avatar = f"id:host-rail-host-{local}"
+        # The premises first, so a step before this one that left a host chosen or the rail expanded fails here, naming
+        # what it left, rather than later on an assertion about this step's own press.
+        before = self.ok("snapshot")
+        self.assertNotIn(LOCAL_CHIP, before, "premise: no host is chosen")
+        self.assertNotIn("Collapse", before, "premise: the rail is collapsed")
+        self.ok("click", avatar, "--right")
+        self.ok("wait", "--text", "Try the connection again")
+        self.assertNotIn(LOCAL_CHIP, self.ok("snapshot"), "the right press chose no host")
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", "Try the connection again")
+        self.assertRegex(
+            self.ok("snapshot", "-i"),
+            r'button "Local \(this machine\)[^"]*" \[focused\]',
+            "focus is back on the avatar",
+        )
+
+        def stored() -> bool | None:
+            return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("host_rail_open")
+
+        self.assertNotEqual(stored(), True, "premise: the helm stores the rail collapsed")
+        try:
+            self.ok("click", "id:host-rail-toggle")
+            eventually(lambda: stored() is True, "the helm storing host_rail_open true")
+            self.ok("wait", "--text", "Collapse")
+            self.assertIn('button "Collapse navigation rail"', self.ok("snapshot", "-i"))
+            self.ok("click", "id:host-rail-toggle")
+            eventually(lambda: stored() is False, "the helm storing host_rail_open false")
+            self.ok("wait", "--gone", "Collapse")
+        finally:
+            # Later steps expect the collapsed rail; the helm's write reaches the window as a push.
+            if stored() is True:
+                gui_agent.helm_request(RUN, "PUT", "/api/preferences", {"host_rail_open": False})
+
     # ---- The session list's pin drag (78), on two sessions of its own -------------------------------------------
 
     def test_78_dragging_a_pins_grip_moves_it_in_the_helms_order(self) -> None:

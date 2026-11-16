@@ -155,8 +155,8 @@ fn the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last()
 /// SPEC.md: "The host rail's foot has a **?** button below the settings gear." A button that drifted or lost its name
 /// would leave keyboard and screen reader users without the way into help. Specified: in a 1200 by 700 window, the
 /// button named "Help" is a 40-pixel square 7.5 pixels from the window's left edge, directly below the gear, with its
-/// bottom 8 pixels above the window's (the old foot's padding); its hover help names the menu's contents
-/// without the update check while no updater runs.
+/// bottom 48 pixels above the window's (the rail's Expand control and the old foot's padding below it); its hover help
+/// names the menu's contents without the update check while no updater runs.
 #[gpui::test]
 fn the_help_button_sits_below_the_gear_with_its_name_and_help(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot());
@@ -169,7 +169,7 @@ fn the_help_button_sits_below_the_gear_with_its_name_and_help(cx: &mut TestAppCo
     let at = button.bounds;
     assert_eq!((at.size.width, at.size.height), (px(40.), px(40.)));
     assert_eq!(at.left(), px(7.5));
-    assert_eq!(at.bottom(), px(700. - 8.));
+    assert_eq!(at.bottom(), px(700. - 48.));
     let gear = node(&nodes, GEAR).expect("the gear is drawn").bounds;
     assert_eq!(
         gear.bottom(),

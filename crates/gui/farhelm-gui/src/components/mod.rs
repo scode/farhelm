@@ -14,13 +14,14 @@
 //! only where SPEC_impl.md allows it: its `Root` around the window (the bootstrap and the screenshot goldens) and the
 //! projection of Farhelm's tokens onto Kit's theme (the theme module), which Kit's input reads.
 //!
-//! Some modules here draw no control. Drawing-only pieces such as `pulse`, `menu_separator`, `spinner` and
-//! `status_card` (the accent card a pane stands over a terminal, which its caller fills with controls of its own) have
-//! no input, focus or name, so the label, hover help and role rule does not reach them. `transition`'s [`entrance`] fades
-//! an element in as it appears: it is the one place in the GUI crates' own code where GPUI's animation may be used, for
-//! one-shot transitions only (its module docs say why the ticker cannot draw them and what it keeps). `menu_keys` draws
-//! nothing either: its two key handlers go on a control or panel an owner draws (a menu's toggle, the open menu), whose
-//! label, hover help and role that control carries, so the rule has nothing of its own to reach.
+//! Some modules here draw no control. Drawing-only pieces such as `pulse`, `menu_separator`, `spinner`, `status_card`
+//! (the accent card a pane stands over a terminal, which its caller fills with controls of its own) and `rail_entry`
+//! (what a host rail button shows inside it) have no input, focus or name, so the label, hover help and role rule does
+//! not reach them. `transition`'s [`entrance`] fades an element in as it appears: it is the one place in the GUI crates'
+//! own code where GPUI's animation may be used, for one-shot transitions only (its module docs say why the ticker cannot
+//! draw them and what it keeps). `menu_keys` draws nothing either: its two key handlers go on a control or panel an
+//! owner draws (a menu's toggle, the open menu), whose label, hover help and role that control carries, so the rule has
+//! nothing of its own to reach.
 //!
 //! Two of the layer's rules make a box its caller draws into a keyboard stop rather than drawing a control.
 //! [`focus_stop`] is a tab stop on a focus handle its caller owns, with a role, a name and the keyboard's ring, for a
@@ -47,6 +48,7 @@ mod menu_separator;
 mod option_row;
 mod pulse;
 mod radio_group;
+mod rail_entry;
 mod scroll_box;
 mod scrollbar;
 mod select;
@@ -80,6 +82,7 @@ pub use menu_separator::menu_separator;
 pub use option_row::OptionRow;
 pub use pulse::pulse_opacity;
 pub use radio_group::{RadioGroup, RadioOption};
+pub use rail_entry::{RAIL_ICON_BOX, rail_entry};
 pub use scroll_box::ScrollBox;
 pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
 pub use select::{Select, SelectOption};

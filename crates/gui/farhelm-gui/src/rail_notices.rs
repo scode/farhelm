@@ -9,7 +9,9 @@
 //!   opened, so the session list only creates it and draws it at the top of the rail's foot, above Hosts, as it draws
 //!   the Help button below the gear. The bell is the rail's quiet 16-pixel glyph while nothing is unread, and the
 //!   filled bell in the strong red with the unread count beside it while something is; its accessible name and hover
-//!   help report the count.
+//!   help report the count. While the host rail is expanded it is a row of the rail with "Notifications" beside its
+//!   glyph, as every foot control is, and keeps its name and help; it reads the expansion in its own render from the
+//!   entity the session list owns and hands it ([`Expansion`]), keeping no copy of it.
 //! - **Read from the store, every frame.** The bell and the panel draw the helm's pushed notices ([`Notice`], the
 //!   `Notices` collection) straight from the store, with no notice-center step (the migration's orchestrator decided
 //!   that on 2026-11-14). A notice is unread while the helm says it is unread and it is unresolved; a resolved notice is
@@ -35,23 +37,27 @@
 //!   where closing it returns focus.
 //!
 //! Host names, checkout names, repositories and reasons are host text, drawn through the host-text element.
+//!
+//! [`Expansion`]: crate::session_list::host_rail::expansion::Expansion
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::notices::{Notice, NoticeContent};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
-    App, AppContext as _, Context, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, WeakEntity, Window, div, prelude::FluentBuilder as _, px, svg,
+    App, AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 use serde_json::json;
 
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, MenuHeader, Role, Tier};
+use crate::components::{Button, HoverHelp, MenuHeader, Role, Tier, rail_entry};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::notices_bell::{entry_frame, hairline, list_panel};
+use crate::session_list::host_rail::expansion::Expansion;
 use crate::theme::{self, Palette, Token};
 use crate::trash::{TrashButton, listing};
 use crate::{operations, session};
@@ -158,16 +164,26 @@ pub struct NoticesButton {
     panel: Option<LayerId>,
     /// The Trash, whose dialog and Retry the trash cleanup notice's actions use.
     trash: WeakEntity<TrashButton>,
+    /// The host rail's expansion, the session list's, read as the bell draws: expanded, the bell is a row with its
+    /// "Notifications" label beside the glyph (SPEC.md, "Session list": expanded, "the foot controls show labels"; the
+    /// old label's word).
+    rail: Entity<Expansion>,
 }
 
 impl NoticesButton {
-    /// A bell with no panel open, whose notices' actions go to `trash`.
-    pub fn new(trash: WeakEntity<TrashButton>, cx: &mut Context<Self>) -> Self {
+    /// A bell with no panel open, whose notices' actions go to `trash`, at the foot of the rail whose expansion is
+    /// `rail`.
+    pub(crate) fn new(
+        trash: WeakEntity<TrashButton>,
+        rail: Entity<Expansion>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         NoticesButton {
             focus: cx.focus_handle().tab_stop(true),
             anchor: None,
             panel: None,
             trash,
+            rail,
         }
     }
 
@@ -220,6 +236,7 @@ impl Render for NoticesButton {
         let anchor = Anchor::for_element("rail-notices-anchor", window, cx);
         self.anchor = Some(anchor.clone());
         let open = self.open_panel(window, cx).is_some();
+        let rail_expanded = self.rail.read(cx).shown(cx);
         let unread = session::current_store(cx).map_or(0, |store| {
             store
                 .read(cx)
@@ -265,9 +282,22 @@ impl Render for NoticesButton {
         .tier(Tier::Rail)
         .expanded(open)
         .focus(&self.focus)
-        .content(glyph)
+        .content(rail_entry(
+            glyph,
+            rail_expanded.then(|| {
+                div()
+                    .text_color(ink)
+                    .child("Notifications")
+                    .into_any_element()
+            }),
+        ))
+        .when(rail_expanded, Button::rail_row)
         .on_click(cx.listener(|bell, _, window, cx| bell.toggle(window, cx)));
-        div().relative().child(button).child(anchor.track())
+        div()
+            .relative()
+            .when(rail_expanded, |wrapper| wrapper.w_full())
+            .child(button)
+            .child(anchor.track())
     }
 }
 

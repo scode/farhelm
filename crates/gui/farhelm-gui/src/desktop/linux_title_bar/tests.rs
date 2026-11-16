@@ -9,7 +9,9 @@ use gpui::{
     size,
 };
 
-use super::{Command, Commands, HEIGHT, draw, minimum_allowance, opening_allowance, shows};
+use super::{
+    Command, Commands, HEIGHT, content_width_of, draw, minimum_allowance, opening_allowance, shows,
+};
 use crate::desktop::title_band::{self, Decisions, PressAction, Row};
 use crate::test_support;
 
@@ -277,4 +279,50 @@ fn a_click_on_the_bars_buttons_leaves_focus_where_it_was(cx: &mut TestAppContext
             "{id} kept focus where it was"
         );
     }
+}
+
+/// The sidebar sizes itself against the window's content, and a frame counted as content gave it 42 pixels that were
+/// not there: under Mutter the expanded rail took the main pane below its 320-pixel floor (the migration's review gate,
+/// 2026-11-15). GPUI's test platform reports the compositor's decorations on every window, so the frame is pinned here
+/// as a pure rule. Specified: a window with the compositor's decorations is all content; a client-decorated one loses
+/// Kit's 20-pixel shadow and 1-pixel border on each side (a 762-pixel surface holds 720 pixels of content), or the
+/// shadow margin Kit set instead of its default; a side tiled against the screen's edge loses neither, so a maximized
+/// window is all content; and nothing goes below zero.
+#[test]
+fn the_content_width_leaves_out_kits_frame_on_each_untiled_side() {
+    let tiled = |left, right| Decorations::Client {
+        tiling: Tiling {
+            top: false,
+            left,
+            right,
+            bottom: false,
+        },
+    };
+    assert_eq!(
+        content_width_of(px(762.), Decorations::Server, None),
+        px(762.)
+    );
+    assert_eq!(
+        content_width_of(px(762.), tiled(false, false), None),
+        px(720.)
+    );
+    assert_eq!(
+        content_width_of(px(762.), tiled(false, false), Some(px(10.))),
+        px(740.)
+    );
+    assert_eq!(
+        content_width_of(px(762.), tiled(true, false), None),
+        px(741.)
+    );
+    assert_eq!(
+        content_width_of(
+            px(762.),
+            Decorations::Client {
+                tiling: Tiling::tiled()
+            },
+            None
+        ),
+        px(762.)
+    );
+    assert_eq!(content_width_of(px(30.), tiled(false, false), None), px(0.));
 }

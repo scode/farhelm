@@ -54,7 +54,8 @@
 //!   the accent fill.
 //! - **Small segments** ([`RadioGroup::small_segments`]): the session list's status filter
 //!   (`.session-status-filter .segmented-control`), the same well with shorter, narrower segments of 12-pixel words,
-//!   all of one width, and the well growing to fill its row.
+//!   all of one width, and the well growing to fill its row; or, where the row is narrow
+//!   ([`RadioGroup::fit_words`]), each segment as wide as its words with tighter sides.
 //! - **Plain radios** ([`RadioGroup::radios`]): the launcher's YOLO fieldset, a circle before each option's words.
 //! - **Chips** ([`RadioGroup::chips`]): the launcher's harness row (`.launch-composer-options`), separate bordered
 //!   buttons on the well color, wrapping with an 8-pixel gap, and no well around them.
@@ -108,6 +109,9 @@ const SEGMENT_LINE_HEIGHT: f32 = 18.2;
 const SMALL_SEGMENT_MIN_HEIGHT: f32 = 28.;
 const SMALL_SEGMENT_PAD_X: f32 = 5.;
 const SMALL_SEGMENT_LINE_HEIGHT: f32 = 16.8;
+/// `html.host-rail-open .session-status-filter .segment-radio > span { padding-inline: 3px }`: the small segments' sides
+/// while they fit their words ([`RadioGroup::fit_words`]).
+const FITTED_SEGMENT_PAD_X: f32 = 3.;
 const SMALL_SEGMENTS_BASIS: f32 = 220.;
 
 /// The harness row's chip as the launcher drew it. The base `.launch-composer-options > button` rule says 38 pixels
@@ -226,6 +230,8 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     options: Vec<RadioOption<V>>,
     disabled: bool,
     look: Look,
+    /// Whether small segments size from their words ([`RadioGroup::fit_words`]).
+    fit_words: bool,
     on_change: Option<OnChange<V>>,
     on_enter: Option<MainAction>,
 }
@@ -276,6 +282,7 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             options: Vec::new(),
             disabled: false,
             look: Look::Segments,
+            fit_words: false,
             on_change: None,
             on_enter: None,
         }
@@ -330,6 +337,16 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// with [`Role::RadioGroup`], as its old inputs were native radios.
     pub fn small_segments(mut self) -> Self {
         self.look = Look::SmallSegments;
+        self
+    }
+
+    /// While `fit`, size each of the small segments ([`RadioGroup::small_segments`]) from its words rather than sharing
+    /// the well equally, with 3 pixels at its sides rather than 5: the old stylesheet's two rules for the status filter
+    /// beside the expanded host rail (`html.host-rail-open .session-status-filter .segment-radio { flex: 1 0 auto }` and
+    /// its `padding-inline: 3px`), where the list column can be too narrow for "Running" in a quarter of the well, so
+    /// equal cells would cut or overlap the longer words. Ignored in every other look.
+    pub fn fit_words(mut self, fit: bool) -> Self {
+        self.fit_words = fit;
         self
     }
 
@@ -529,6 +546,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 enabled: enabled[index],
                 ring: focus::shows_ring(&handles[index], window),
                 stacked,
+                fitted: self.fit_words && self.look == Look::SmallSegments,
             };
             let element = match self.look {
                 Look::Segments | Look::SmallSegments => {
@@ -633,14 +651,16 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
     }
 }
 
-/// How one option is drawn: whether it is chosen, available, showing the keyboard focus ring, and in a group that
-/// stacks its options (so its contents start at the left edge rather than centered).
+/// How one option is drawn: whether it is chosen, available, showing the keyboard focus ring, in a group that stacks
+/// its options (so its contents start at the left edge rather than centered), and a small segment sized from its words
+/// ([`RadioGroup::fit_words`]).
 #[derive(Clone, Copy)]
 struct OptionState {
     chosen: bool,
     enabled: bool,
     ring: bool,
     stacked: bool,
+    fitted: bool,
 }
 
 impl OptionState {
@@ -693,7 +713,11 @@ impl OptionState {
         let (min_height, pad_x, text_size, line_height) = if small {
             (
                 SMALL_SEGMENT_MIN_HEIGHT,
-                SMALL_SEGMENT_PAD_X,
+                if self.fitted {
+                    FITTED_SEGMENT_PAD_X
+                } else {
+                    SMALL_SEGMENT_PAD_X
+                },
                 metrics::TEXT_SM,
                 SMALL_SEGMENT_LINE_HEIGHT,
             )
@@ -710,10 +734,11 @@ impl OptionState {
             .debug_selector(|| id.to_string())
             .relative()
             .flex()
-            // Small segments share the well equally whatever their words (`flex: 1 1 0; min-width: 0`); the others
-            // grow from their words' width and never shrink below it.
+            // Small segments share the well equally whatever their words (`flex: 1 1 0; min-width: 0`), unless they fit
+            // their words ([`RadioGroup::fit_words`]); those and every other look grow from their words' width and never
+            // shrink below it (`flex: 1 0 auto`).
             .map(|segment| {
-                if small {
+                if small && !self.fitted {
                     segment.flex_1().min_w_0()
                 } else {
                     segment.flex_grow(1.).flex_shrink_0()

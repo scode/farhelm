@@ -1347,6 +1347,49 @@
           "Drag to reorder pinned sessions"
         ]
       ]
+    },
+    {
+      "id": "app-rail-host-context-menu",
+      "title": "The local host's actions menu, opened by a right click on its rail avatar",
+      "reference": "rail-host-context-menu",
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "running,waiting,idle,exited"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:host-rail-host-1",
+          "--right"
+        ],
+        [
+          "wait",
+          "--text",
+          "Try the connection again"
+        ]
+      ]
+    },
+    {
+      "id": "app-host-rail-expanded",
+      "title": "The expanded host rail beside the list, its hosts named and the foot's controls labelled",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "running,waiting,idle,exited"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:host-rail-toggle"
+        ],
+        [
+          "wait",
+          "--text",
+          "Collapse"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
@@ -2165,7 +2208,7 @@
     },
     {
       "id": "rail-host-context-menu",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-settings-dialog",

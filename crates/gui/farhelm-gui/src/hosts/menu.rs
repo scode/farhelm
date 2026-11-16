@@ -22,7 +22,7 @@
 //! and Remove, which forgets the host ([`super::remove`]). Retry, Adopt, Settings, Uninstall and Remove are unavailable
 //! while the host has work in flight or a run going on.
 //!
-//! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
+//! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so does the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
 //! button unfocused (macOS), as the old app returned it there (SPEC.md, "Opening and closing"): the menu and the
 //! settings dialog opened from it both name the control as where their closing returns focus
@@ -112,7 +112,7 @@ pub(super) fn toggle(
 }
 
 /// Open host `host`'s actions menu beside `anchor`, the control the user acted on, whose focus handle is `opener`:
-/// the entry point the Hosts panel's row toggle calls, and the host rail's avatar menu will. `mark` is the [`Mark`]
+/// the entry point the Hosts panel's row toggle calls, and the host rail's avatar menu too. `mark` is the [`Mark`]
 /// taken in that control's handler.
 ///
 /// Focus starts on the menu's first command that can act, and the menu names `opener` as where its closing returns
