@@ -256,7 +256,14 @@ fn the_bars_background_drags_and_zooms_and_leaves_focus_alone(cx: &mut TestAppCo
 /// A compositor's title buttons never take keyboard focus, so a click on the drawn bar's buttons must leave the terminal
 /// (or whatever held focus) typed into: otherwise the next Enter would press Maximize again (granted as a focus
 /// exception by the migration's coordinator on 2026-11-14). Specified: with another control focused, a click on each of
-/// the three buttons leaves focus on it, on every platform.
+/// the three buttons leaves focus on it.
+///
+/// Linux only, because the promise is. The bar is never drawn on macOS ([`super::shows`]), and there
+/// `Button::keeps_focus_on_press` deliberately does nothing, since the Mac's own click rule already focuses no
+/// button. The harness runs Linux's click rule on every OS (`test_support::install`), a pairing no Mac build of the
+/// app ever has, so on a Mac this test's clicks would focus the buttons and fail it without saying anything about
+/// the app.
+#[cfg(target_os = "linux")]
 #[gpui::test]
 fn a_click_on_the_bars_buttons_leaves_focus_where_it_was(cx: &mut TestAppContext) {
     let (cx, other) = open_bar(cx, false);
