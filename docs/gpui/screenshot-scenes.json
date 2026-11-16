@@ -1288,6 +1288,10 @@
           "id:template-open-in-tmp"
         ],
         [
+          "scrollintoview",
+          "id:templates-delete"
+        ],
+        [
           "click",
           "id:templates-delete"
         ],
