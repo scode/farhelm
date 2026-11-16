@@ -15,21 +15,9 @@ use super::recents_view_tests::{
 };
 use super::view_tests::{
     answer_catalog, codex, draft, fixture_hosts, launcher_on, launcher_with_hosts, name_of, read,
-    selected_state, shown_refusal,
+    search_focused, search_text, selected_state, shown_refusal,
 };
 use crate::test_support::{self, keys, settle};
-
-/// Whether the search box holds focus.
-fn search_focused(cx: &mut VisualTestContext) -> bool {
-    read(cx, |launcher, window, cx| {
-        launcher.search.focus_handle(cx).is_focused(window)
-    })
-}
-
-/// What the search box holds.
-fn search_text(cx: &mut VisualTestContext) -> String {
-    read(cx, |launcher, _, cx| launcher.search.text(cx).to_string())
-}
 
 /// Whether the search results were drawn in the last frame.
 fn results_shown(cx: &mut VisualTestContext) -> bool {
@@ -464,8 +452,24 @@ fn templates_state(unavailable: Option<&str>) -> farhelm_proto::ui_channel::Coll
                 ..TemplateFields::default()
             },
         },
+        LaunchTemplate {
+            name: "reset-codex".into(),
+            fields: TemplateFields {
+                agent: Some(LaunchHarness::Codex),
+                permissions: Some(None),
+                ..TemplateFields::default()
+            },
+        },
+        LaunchTemplate {
+            name: "reset-goose".into(),
+            fields: TemplateFields {
+                agent: Some(LaunchHarness::Goose),
+                permissions: Some(None),
+                ..TemplateFields::default()
+            },
+        },
     ];
-    let mut meta = test_support::meta(&["partial", "go", "nowhere"]);
+    let mut meta = test_support::meta(&["partial", "go", "nowhere", "reset-codex", "reset-goose"]);
     if let Some(error) = unavailable {
         meta.availability = Availability::Unavailable {
             error: error.into(),
@@ -492,6 +496,18 @@ fn new_launcher_with_templates<'a>(
     farhelm_helm_client::fake::FakeHelm,
     &'a mut VisualTestContext,
 ) {
+    launcher_with_templates_on(cx, unavailable, LaunchDraft::new(Some(1), "~".into(), None))
+}
+
+/// [`new_launcher_with_templates`] with the launcher opened on `draft` instead of New's bare draft.
+fn launcher_with_templates_on<'a>(
+    cx: &'a mut TestAppContext,
+    unavailable: Option<&str>,
+    draft: LaunchDraft,
+) -> (
+    farhelm_helm_client::fake::FakeHelm,
+    &'a mut VisualTestContext,
+) {
     let (mut helm, _connection) = crate::test_support::started(cx);
     helm.connect(vec![
         crate::session_list::tests::listing(&["a"], &[crate::session_list::tests::session("a")]),
@@ -503,7 +519,6 @@ fn new_launcher_with_templates<'a>(
     let (_, window) = test_support::open_view(cx, crate::main_view::MainView::new);
     window.update(|window, cx| {
         let mark = crate::focus::Mark::take(cx);
-        let draft = LaunchDraft::new(Some(1), "~".into(), None);
         assert!(
             super::view::open(draft, &mark, window, cx).is_some(),
             "the launcher opened"
@@ -911,4 +926,69 @@ fn a_catalog_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
         Some(named),
         "Enter took the row the text names"
     );
+}
+
+/// New with `harness` and `chosen` picked by hand, then `tl:<template>` (a template of that agent type with
+/// `permissions: null`) taken with Enter and Launch pressed: checks that the template reset the permission, and returns
+/// the permission the one create carried.
+fn reset_by_template_and_launch(
+    cx: &mut TestAppContext,
+    harness: LaunchHarness,
+    chosen: LaunchPermission,
+    template: &str,
+) -> serde_json::Value {
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    let _ = start.choose_harness(harness, None, None);
+    start.choose_permissions(Some(chosen));
+    let (mut helm, cx) = launcher_with_templates_on(cx, None, start);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    assert_eq!(
+        draft(cx).agent.permissions,
+        Some(chosen),
+        "the premise: the hand choice"
+    );
+    type_in(cx, &format!("tl:{template}"));
+    keys(cx, "enter");
+    let applied = draft(cx);
+    assert_eq!(applied.agent.harness, Some(harness));
+    assert_eq!(
+        applied.agent.permissions, None,
+        "the template reset the permission"
+    );
+    test_support::click(cx, "launcher-launch");
+    let sent = super::launch_tests::creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    create.body.clone().unwrap_or_default()["launch"]["permissions"].clone()
+}
+
+/// A template's `permissions: null` is "a real template reset, not a visible permission click" (the old
+/// terminal-create-idempotency spec): it puts back the agent type's own default, overriding a choice the user made by
+/// hand, and the launch carries that default. Keeping the hand choice would launch with a permission the template meant
+/// to clear. Specified: New with Codex and YOLO chosen by hand, `tl:reset-codex` and Enter leave the permission unset
+/// (the default), and Launch sends a create with `guarded`, Codex's default.
+#[gpui::test]
+fn a_tl_reset_of_codexs_permission_launches_guarded(cx: &mut TestAppContext) {
+    let sent = reset_by_template_and_launch(
+        cx,
+        LaunchHarness::Codex,
+        LaunchPermission::Yolo,
+        "reset-codex",
+    );
+    assert_eq!(sent, serde_json::json!("guarded"));
+}
+
+/// The Goose twin of the case above, whose default is the other way round (the old spec ran both): a reset must give
+/// the agent type's own default, not a fixed one. Specified: New with Goose and Approve chosen by hand,
+/// `tl:reset-goose` and Enter leave the permission unset, and Launch sends a create with `yolo`, Goose's default.
+#[gpui::test]
+fn a_tl_reset_of_gooses_permission_launches_yolo(cx: &mut TestAppContext) {
+    let sent = reset_by_template_and_launch(
+        cx,
+        LaunchHarness::Goose,
+        LaunchPermission::Approve,
+        "reset-goose",
+    );
+    assert_eq!(sent, serde_json::json!("yolo"));
 }
