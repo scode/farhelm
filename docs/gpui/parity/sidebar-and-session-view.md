@@ -194,7 +194,14 @@ the helm pushes one list, re-sorted before the write's reply), and the two `fall
 (the selection rules' newest-created choice from the rows in hand, tests.rs
 `a_selection_moves_only_once_a_complete_listing_shows_it_gone`, which no request precedes). Compact's write and its
 silent refusal: `choosing_compact_sends_its_sparse_write_and_the_rows_follow_it` and
-`a_refused_compact_write_keeps_the_stored_density_and_shows_nothing`. The order hold's cases:
+`a_refused_compact_write_keeps_the_stored_density_and_shows_nothing`. A choice made while another preference write is in
+flight waits for it, latest wins, as the old app's preference writer queued it:
+`an_order_chosen_while_compact_is_saving_is_shown_at_once_and_sent_after_it`,
+`two_quick_choices_of_the_order_send_only_the_latest`, `a_refused_queued_order_restores_the_stored_order`,
+`a_choice_queued_behind_a_refused_write_is_still_sent`,
+`two_fields_queued_behind_a_third_write_go_out_one_after_the_other` and
+crates/gui/farhelm-gui/src/session_list/host_rail/expansion/tests.rs
+`a_press_during_an_order_write_is_shown_at_once_and_sent_after_it`. The order hold's cases:
 `the order holds under the pointer and catches up when it leaves` (crates/gui/farhelm-gui/src/session_list/pins_tests.rs
 `the_pointer_holds_the_order_and_leaving_releases_it`), `a still pointer releases the held order after five seconds`
 (pins_tests.rs `five_seconds_of_stillness_release_the_hold_and_movement_restarts_them`,
@@ -1192,8 +1199,7 @@ Where the port does not match the old app, and why. Each stays until the work na
   launches is allowed, which the old app did not allow.
 - The rail's expansion is the helm's `host_rail_open` preference, shared by every client (the maintainer decided on
   2026-11-13), where the old app kept it per device in `localStorage`; nothing carries over. It is written the way
-  Compact is: a press while another preference write is in flight (an order, Compact, a Settings switch) is dropped and
-  logged, and a refused write is logged and shows nothing, the rail going back to what the helm stores. The old toggle
+  Compact is: a refused write is logged and shows nothing, the rail going back to what the helm stores. The old toggle
   always widened at once, since its write could not fail.
 - An avatar's menu opens on a secondary click (a right press, or a Ctrl+click on macOS) and on Shift+F10, but not on the
   keyboard's ContextMenu key, which GPUI names on neither platform.
@@ -1208,10 +1214,16 @@ Where the port does not match the old app, and why. Each stays until the work na
   the stored order before it answers, so the choice lasts no visible time (decided by the migration's orchestrator on
   2026-11-14). Keeping it in effect would take a session query that names the sort, which stops the channel following
   the shared order. Tested by `session_list/order/tests.rs` `a_refused_write_keeps_the_stored_order_and_shows_nothing`.
-- An order chosen while another preference write is in flight (Settings', the Templates dialog's, or the order's own) is
-  dropped and logged, and the title keeps the order it showed: the operation store admits one request at a time on the
-  preference row's key, as Settings drops a click on its switches meanwhile (decided by the migration's orchestrator on
-  2026-11-14). The old page always applied the chosen order.
+- Two rules stand side by side for a choice made while another preference write is in flight. The list's order, Compact
+  and the rail's Expand and Collapse queue it: it is shown at once and sent when that write settles, the newest choice
+  per field winning, and fields queued together go out one after the other. Settings refuses a press in the same
+  situation with a visible line, "Not saved: another operation was in progress. Try again." (accepted by the migration's
+  orchestrator on 2026-11-14; [Settings and hosts](settings-and-hosts.md) records it). The old app queued every field,
+  Settings' included, and wrote different fields at once. The migration's orchestrator decided on 2026-11-16 to keep
+  both rules, to be revisited if a user meets either. Tested by `session_list/order/tests.rs`
+  `an_order_chosen_while_compact_is_saving_is_shown_at_once_and_sent_after_it`,
+  `two_fields_queued_behind_a_third_write_go_out_one_after_the_other` and
+  `a_choice_queued_behind_a_refused_write_is_still_sent`.
 - The order menu opens below the list's title, where the old one opened beside the sidebar with a pointer; the layer
   manager places a popover below its anchor unless the anchor asks to stand beside it, as a row's menu's does. The title
   cannot report `aria-haspopup`, which GPUI has no way to express. Tab stays inside the open menu, as SPEC.md's

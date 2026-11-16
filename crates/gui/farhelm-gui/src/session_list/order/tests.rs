@@ -502,6 +502,195 @@ fn a_refused_compact_write_keeps_the_stored_density_and_shows_nothing(cx: &mut T
     );
 }
 
+// ---- Choices while a write is in flight ----------------------------------------------------------------------------
+
+/// Choose `item` (an order's item id, or [`COMPACT_ID`]) through the title's menu, by clicks.
+fn choose(cx: &mut VisualTestContext, item: &'static str) {
+    click(cx, TITLE_ID);
+    click(cx, item);
+}
+
+/// The operation store admits one preference write at a time, and SPEC.md, "Losing the connection to the helm", never
+/// lets a user's action be lost silently, so an order chosen while Compact's write is out must wait for it rather than
+/// vanish (the old app's writer queued it; the earlier GPUI port dropped it). Specified: with `{"compact": true}` sent
+/// and unanswered, choosing Title A–Z sends nothing yet, while the title names Title A–Z at once and the rows stay
+/// compact; once the helm answers the Compact write, exactly `{"list_sort": "title"}` is sent, the title still naming
+/// Title A–Z; once that is answered too, nothing more is sent.
+#[gpui::test]
+fn an_order_chosen_while_compact_is_saving_is_shown_at_once_and_sent_after_it(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, _main, cx) = open(cx);
+    choose(cx, COMPACT_ID);
+    let (compact, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "compact": true }),
+        "the premise: Compact is in flight"
+    );
+
+    choose(cx, "session-order-title");
+    assert_eq!(
+        sent(&mut fake),
+        [],
+        "nothing is sent while Compact's is out"
+    );
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Title A–Z");
+    assert!(rows_compact(cx), "Compact is still shown in flight");
+
+    fake.reply(compact, 200, None);
+    test_support::settle(cx);
+    let (order, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "list_sort": "title" }));
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Title A–Z");
+
+    fake.reply(order, 200, None);
+    test_support::settle(cx);
+    assert_eq!(sent(&mut fake), [], "the queued order is sent once");
+}
+
+/// The old app's writer kept one slot per field, latest wins: a burst of choices must neither reach the helm one by one
+/// after the fact nor leave the helm on an older one. Specified: with `{"list_sort": "created"}` sent and unanswered,
+/// choosing Title A–Z and then Recently active sends nothing, the title naming each choice at once; once the helm
+/// answers the first write, exactly `{"list_sort": "activity"}` is sent, never the title order, and the title names
+/// Recently active.
+#[gpui::test]
+fn two_quick_choices_of_the_order_send_only_the_latest(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    choose(cx, "session-order-created");
+    let (first, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "list_sort": "created" }));
+
+    choose(cx, "session-order-title");
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Title A–Z");
+    choose(cx, "session-order-activity");
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Recently active");
+    assert_eq!(
+        sent(&mut fake),
+        [],
+        "nothing is sent while the first is out"
+    );
+
+    fake.reply(first, 200, None);
+    test_support::settle(cx);
+    let (_, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "list_sort": "activity" }),
+        "only the latest choice"
+    );
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Recently active");
+}
+
+/// A queued choice is still a best-effort write once it is sent (SPEC.md, "Errors and diagnostics"): a refusal must put
+/// the title back on what the helm stores, as a refusal of a write sent at once does, and must not be resent. Specified:
+/// with `{"compact": true}` in flight, Title A–Z is chosen and shown; once Compact's write is answered and the helm
+/// stores it, `{"list_sort": "title"}` is sent; once the helm refuses that with words of its own, the title names
+/// Recently active again, the frame paints none of the helm's words, and nothing is sent again.
+#[gpui::test]
+fn a_refused_queued_order_restores_the_stored_order(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    choose(cx, COMPACT_ID);
+    let (compact, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "compact": true }),
+        "the premise: Compact is in flight"
+    );
+    choose(cx, "session-order-title");
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Title A–Z");
+
+    stored_compact(&mut fake, Some(true), cx);
+    fake.reply(compact, 200, None);
+    test_support::settle(cx);
+    let (order, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "list_sort": "title" }));
+    fake.reply(order, 400, Some(json!("no title order on this helm")));
+    test_support::settle(cx);
+
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, TITLE_ID), "Sort: Recently active");
+    assert!(
+        !painted(&nodes)
+            .iter()
+            .any(|text| text.contains("no title order")),
+        "the refusal shows nothing"
+    );
+    assert_eq!(sent(&mut fake), [], "a refused write is not resent");
+}
+
+/// SPEC.md, "One GUI at a time", discards a failed save, but the choice the user made after it is a new action, and the
+/// old app's writer sent a newer choice whatever the earlier one's outcome; dropping it with the refusal would lose it
+/// silently. Specified: with `{"list_sort": "created"}` sent and unanswered, Title A–Z is chosen and nothing is sent;
+/// once the helm refuses the first write, exactly `{"list_sort": "title"}` is sent and the title names Title A–Z.
+#[gpui::test]
+fn a_choice_queued_behind_a_refused_write_is_still_sent(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    choose(cx, "session-order-created");
+    let (first, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "list_sort": "created" }),
+        "the premise: the first write is in flight"
+    );
+    choose(cx, "session-order-title");
+    assert_eq!(
+        sent(&mut fake),
+        [],
+        "nothing is sent while the first is out"
+    );
+
+    fake.reply(first, 400, Some(json!("not now")));
+    test_support::settle(cx);
+    let (_, body) = one_write(&mut fake);
+    assert_eq!(body, json!({ "list_sort": "title" }));
+    assert_eq!(label(&frame(cx), TITLE_ID), "Sort: Title A–Z");
+}
+
+/// The preference row's key admits one request at a time, so two fields queued behind a third write must each go out,
+/// one after the other, rather than the first to start taking the key from the second for good. Specified: with
+/// `{"compact": true}` sent and unanswered, choosing Title A–Z and pressing the rail's Expand control send nothing;
+/// once the Compact write is answered, exactly one of `{"list_sort": "title"}` and `{"host_rail_open": true}` is
+/// sent, and once that is answered, exactly the other; nothing more follows.
+#[gpui::test]
+fn two_fields_queued_behind_a_third_write_go_out_one_after_the_other(cx: &mut TestAppContext) {
+    let (mut fake, _main, cx) = open(cx);
+    choose(cx, COMPACT_ID);
+    let (compact, body) = one_write(&mut fake);
+    assert_eq!(
+        body,
+        json!({ "compact": true }),
+        "the premise: Compact is in flight"
+    );
+    choose(cx, "session-order-title");
+    click(cx, crate::session_list::host_rail::TOGGLE_ID);
+    assert_eq!(
+        sent(&mut fake),
+        [],
+        "nothing is sent while Compact's is out"
+    );
+
+    fake.reply(compact, 200, None);
+    test_support::settle(cx);
+    let (next, first) = one_write(&mut fake);
+    fake.reply(next, 200, None);
+    test_support::settle(cx);
+    let (last, second) = one_write(&mut fake);
+    fake.reply(last, 200, None);
+    test_support::settle(cx);
+    assert_eq!(sent(&mut fake), [], "each queued field is sent once");
+
+    let mut bodies = [first.to_string(), second.to_string()];
+    bodies.sort();
+    assert_eq!(
+        bodies,
+        [
+            json!({ "host_rail_open": true }).to_string(),
+            json!({ "list_sort": "title" }).to_string(),
+        ]
+    );
+}
+
 // ---- The count -----------------------------------------------------------------------------------------------------
 
 /// A bare number beside the title says nothing to a screen reader, so the old count was named, and helped on hover,
