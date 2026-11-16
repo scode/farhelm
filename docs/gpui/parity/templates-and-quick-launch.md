@@ -425,11 +425,20 @@ orchestrator.
 - **The sequence pill fades in without scaling up.** The old pill faded and scaled up from 96% over 200 ms (off under
   reduced motion). The GPUI pill keeps the fade (the component layer's one-shot entrance, also off under reduced motion)
   but not the scale: GPUI cannot scale a box (SPEC_impl.md, "Animation time").
-- **The sequence pill is centered on the main area, not the terminal.** As the old stylesheet did, the pill is centered
-  on the main pane (9 pixels lower in the Mac window with a session open). The old rule assumed a 30-pixel details bar
-  under the terminal; until the details bar is ported, the pill sits about 15 pixels above the terminal's center. Its
-  look was compared with the old `.launch-sequence-*` rules, since there is no reference screenshot of the pill; the
-  golden is `sequence-pill`.
+- **The sequence pill's place follows the selected session, not the details bar.** Otherwise the pill sits where the old
+  one did. Outside the launcher it is centered on the main pane, 9 pixels lower in the Mac window with a session open;
+  with the 30-pixel top row (48 on the Mac) and the 30-pixel details bar, that is the terminal's center. It sits above
+  the center only while lines under the top row (a long Restart or Replace, a refusal, a YOLO question) or the stale
+  band push the terminal down, as the old one did. In the launcher its bottom is 14 pixels above the main pane's bottom
+  edge, or 44 with a session open, which keeps it above the details bar, as the old `bottom: 14px` and `44px` rules did.
+  The difference: the old rules keyed on whether the details bar was drawn, and the GPUI pill keys on whether a session
+  is selected, so a selected session the store has no row for (no bar) still gets the Mac's 9 pixels and the
+  launcher's 30. The tests cover the bottom placement with a session open
+  (`templates::armed_tests::the_launcher_pill_stays_above_an_open_sessions_details_bar`) and without one
+  (`the_launcher_form_says_apply_and_sits_at_the_bottom`), and the centered pill with no session open
+  (`the_prefix_with_no_session_open_centers_the_pill_on_the_main_area`). The centered pill with a session open and the
+  Mac's lowering were checked by reading the code and the old stylesheet, not by a test. Its look was compared with the
+  old `.launch-sequence-*` rules, since there is no reference screenshot of the pill; the golden is `sequence-pill`.
 - **Cancels the GPUI app sees differently.** A lone Alt no longer cancels a sequence (GPUI reports a modifier alone as a
   modifier change, with no key-down; SPEC.md names only Meta, Control and Shift as not cancelling). A dialog that opens
   while a sequence is armed without a click or key (a result the user started finishing) ends the sequence at the next

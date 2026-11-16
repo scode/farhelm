@@ -65,6 +65,7 @@ use crate::components::{SequenceChip, SequencePill};
 use crate::desktop::title_band;
 use crate::host_text::HostText;
 use crate::layers::{self, Anchor, Pill, PillId, PillPlacement};
+use crate::session_pane::details;
 use crate::{launcher, local_state, session};
 
 /// The pill's words outside the launcher and inside it, the old indicator's.
@@ -451,9 +452,16 @@ impl Render for PillView {
             pill = pill.word(HostText::from_host(shown.word));
         }
         pill = pill.candidates(shown.candidates.into_iter().map(HostText::from_host));
+        // One reading for both places, so the Mac lowering and the details bar's room cannot disagree.
+        let session_open = local_state::selected(cx).is_some();
         if self.in_launcher {
-            pill.at_bottom()
-        } else if title_band::ON && local_state::selected(cx).is_some() {
+            let reserved = if session_open {
+                px(details::MIN_HEIGHT)
+            } else {
+                px(0.)
+            };
+            pill.at_bottom(reserved)
+        } else if title_band::ON && session_open {
             pill.lowered(px(MAC_LOWERED))
         } else {
             pill
