@@ -410,11 +410,11 @@ fn one_note() -> Value {
 /// leave the row's card showing there instead, also beside the sidebar with a ring, so each check reads the mark's own
 /// words and a ring on the mark's own bounds. Specified, over the open session `a` (pinned, running, one notification)
 /// and `b` (the same) and a stale `s` on the unreachable host 3: on b, the status dot (`Running — Mark unread`), the host
-/// mark (`Local: …`), the agent track (`Codex — …`), the age (`Last activity …`), the pin (`Pinned`), the bell
-/// (`Notifications: 1 unread; …`) and the actions button (`Session actions: …`) each show their help beside the
-/// sidebar with an accent ring on the mark's bounds, square except the button's, which follows its corners inside its
-/// edge (2 pixels); on s, the stale cause too; and on the open row a, the dot, the age and the bell with the ring in
-/// on-fill.
+/// mark (`Local: …`), the agent track (`Codex — …`), the age (`Last activity …`), the pin (`Pinned`), the pin's grip
+/// (`Drag to reorder pinned sessions`), the bell (`Notifications: 1 unread; …`) and the actions button (`Session
+/// actions: …`) each show their help beside the sidebar with an accent ring on the mark's bounds, square except the
+/// button's, which follows its corners inside its edge (2 pixels); on s, the stale cause too; and on the open row a, the
+/// dot, the age, the grip and the bell with the ring in on-fill.
 #[gpui::test]
 fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestAppContext) {
     let unreachable = json!({
@@ -459,6 +459,12 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
         ("session-row-b-agent", "Codex — ", square, false),
         ("session-row-b-age", age, square, false),
         ("session-row-b-pin", "Pinned", square, false),
+        (
+            "session-pin-grip-b",
+            "Drag to reorder pinned sessions",
+            square,
+            false,
+        ),
         ("session-bell-b", bell, square, false),
         (
             "session-menu-b",
@@ -481,6 +487,7 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
     for (target, words) in [
         ("session-seen-a", "Running — Mark unread"),
         ("session-row-a-age", age),
+        ("session-pin-grip-a", "Drag to reorder pinned sessions"),
         ("session-bell-a", bell),
     ] {
         assert_mark_help(cx, "session-row-a", target, words, on_fill, square, false);

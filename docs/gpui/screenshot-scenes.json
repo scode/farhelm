@@ -1292,6 +1292,61 @@
           "Deleted"
         ]
       ]
+    },
+    {
+      "id": "app-pin-grip",
+      "title": "A pinned run of two, Fixture 1 and Fixture 2 pinned from their menus, with the pointer on the top pin's grip: the grip shown in the row's leading gutter and its help, Drag to reorder pinned sessions, beside the sidebar (the lifted row and the drop line a drag draws are not here: the bridge's drag presses, moves and releases in one command, so no scene can stop halfway through one)",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "running,idle,idle"
+      ],
+      "steps": [
+        [
+          "click",
+          "text:Session actions for Fixture 1"
+        ],
+        [
+          "click",
+          "id:session-menu-pin"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Keep this session above unpinned ones"
+        ],
+        [
+          "click",
+          "text:Session actions for Fixture 2"
+        ],
+        [
+          "click",
+          "id:session-menu-pin"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Keep this session above unpinned ones"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "wait",
+          "text:Drag pinned session"
+        ],
+        [
+          "hover",
+          "text:Drag pinned session"
+        ],
+        [
+          "wait",
+          "--text",
+          "Drag to reorder pinned sessions"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [

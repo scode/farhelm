@@ -80,8 +80,9 @@
 //! a view that draws an age must be, since the cache wrapper cannot see the time.
 //!
 //! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Mark read or Mark unread
-//! ([`seen`], also on a click on the row's status dot), Pin to top or Unpin and Move up and Move down ([`pins`]),
-//! Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]),
+//! ([`seen`], also on a click on the row's status dot), Pin to top or Unpin and Move up and Move down ([`pins`]; a
+//! movable pin's grip drags it to the same effect, [`pin_drag`]), Replace ([`replace`]), Stop ([`stop`]) and Delete
+//! ([`delete`]),
 //! and the open session's header (`session_pane/header.rs`) asks the same Stop, Replace and Delete through the same
 //! functions, plus Restart ([`restart`]), which the old row menu never had; the Rename shortcut reaches Rename for the
 //! open session ([`rename::open_for_selected`]), and the Delete shortcut the header's Delete. A Replace that the
@@ -135,10 +136,10 @@
 //! A retired containerized session supports Delete only, so its row, its menu and its open view withdraw everything
 //! else ([`retired`]).
 //!
-//! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, dragging pins, the row menu's other
-//! commands, and the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where
-//! focus rests"): nothing names it home; that comes with the session pane's status-card work (M2.12), which decides
-//! home when no terminal is on screen.
+//! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, the row menu's other commands, and
+//! the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
+//! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
+//! terminal is on screen.
 
 pub(crate) mod age;
 mod attention;
@@ -151,6 +152,7 @@ pub(crate) mod marking;
 pub(crate) mod menu;
 pub(crate) mod order;
 pub(crate) mod outcome;
+pub(crate) mod pin_drag;
 pub(crate) mod pins;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
@@ -184,6 +186,9 @@ mod marking_tests;
 
 #[cfg(test)]
 pub(crate) mod menu_tests;
+
+#[cfg(test)]
+mod pin_drag_tests;
 
 #[cfg(test)]
 mod pins_tests;
@@ -375,6 +380,9 @@ struct Current {
     /// The order hold ([`hold`]): the order on screen while the pointer is over the rows. Per UI session, so a reset
     /// drops it with the listing it held.
     hold: hold::Hold,
+    /// A pinned row's drag by its grip and the movable rows the last frame drew ([`pin_drag`]). Per UI session, so a
+    /// reset forgets a drag with the listing it was over.
+    pin_drag: pin_drag::Shared,
     /// The marked sessions ([`marking`]), shown or hidden. Per UI session, so a reset forgets them, as the old app's
     /// reload did.
     marks: marking::Marks,
@@ -705,8 +713,10 @@ impl Render for SessionList {
         render_count::record("session-list", cx);
 
         // The sidebar's body: the host rail, then the list's own column in the width the rail leaves, then the rail's
-        // foot, which this row positions absolutely over the room the rail leaves at its bottom.
-        let body_row = div().relative().flex().flex_row().size_full();
+        // foot, which this row positions absolutely over the room the rail leaves at its bottom. Escape ends a pin drag
+        // wherever focus is in the sidebar's body: the host rail, the list's column and the rail's foot
+        // ([`pin_drag::catch_escape`]).
+        let body_row = pin_drag::catch_escape(div().relative().flex().flex_row().size_full(), cx);
         let list = div()
             .id("session-list")
             .role(Role::List)
@@ -741,7 +751,7 @@ impl Render for SessionList {
         // marked menu's offers, whether any row pulses or shows a spinner (a pending Delete or Stop, or a Replace that
         // has waited long enough to say so), and whether any has an activity stamp to show an age for. Everything else
         // is read row by row, for the rows drawn.
-        let (keys, separator, projection, any_pulse, any_spinner, any_stamp) = {
+        let (keys, separator, projection, any_pulse, any_spinner, any_stamp, movable) = {
             let collections = store.read(cx).collections();
             let list_id = self.list_id(collections, cx);
             let current = self.current.current(cx);
@@ -757,6 +767,14 @@ impl Render for SessionList {
                     .is_some_and(|meta| meta.availability == Availability::Available);
             let projection = exposed.then(|| marking::project(&listed, &current.marks));
             self.moves = pins::neighbors(&listed, current.hold.original_pins());
+            // The rows a drag may land beside, and whose grips may drag them: the movable pins, in the order drawn, and
+            // none while the rows are not shown or the listing is unavailable (`pin_drag`'s "The list cancels too"). A
+            // retired session's pin is one of them as a target; `pin_drag` refuses only its own drag.
+            let movable: Vec<String> = listed
+                .iter()
+                .filter(|session| exposed && self.moves.contains_key(session.key))
+                .map(|session| session.key.to_owned())
+                .collect();
             let separator = pins::separator_after(&listed).map(str::to_owned);
             let unchanged = listed.len() == self.entries.len()
                 && listed
@@ -785,8 +803,10 @@ impl Render for SessionList {
                 any_pulse,
                 any_spinner,
                 any_stamp,
+                movable,
             )
         };
+        let pin_drag = self.pin_drag_frame(movable, window.is_window_active(), cx);
         self.marks_projected(projection, window, cx);
         let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
@@ -921,6 +941,7 @@ impl Render for SessionList {
             let entries = self.entries.clone();
             let marked = self.marking.shown();
             let weak = weak.clone();
+            let watch = pin_drag::watch(&pin_drag, &weak);
             let rows = div()
                 .id("session-rows")
                 // Tests scroll the list over this; it records nothing outside test builds.
@@ -928,6 +949,7 @@ impl Render for SessionList {
                 .flex_1()
                 .min_h_0();
             hold::area(rows, &weak)
+                .child(watch)
                 .child(
                     gpui::list(self.rows.clone(), move |ix, window, cx| {
                         let Some((key, focus)) = entries.get(ix) else {
@@ -936,7 +958,8 @@ impl Render for SessionList {
                         let selected = selected.as_deref() == Some(key.as_str());
                         let marked = marked.iter().any(|shown| shown == key);
                         let row = draw_row(
-                            &shared, &weak, key, focus, selected, marked, steps, window, cx,
+                            &shared, &pin_drag, &weak, key, focus, selected, marked, steps, window,
+                            cx,
                         );
                         if separator.as_deref() == Some(key.as_str()) {
                             // After the row's item, so the item's own border stays its bottom edge.
@@ -966,16 +989,17 @@ impl Render for SessionList {
     }
 }
 
-/// Draw the row of `key` for the virtualized list's item callback: its menu button and its notification bell first
-/// (their anchors are element state, so they are made while the row's elements are), then the row from the store as it
-/// is now. A session missing from the store draws nothing; the callback runs in the frame whose listing named it, so
-/// that does not happen.
+/// Draw the row of `key` for the virtualized list's item callback: its menu button, its notification bell and its part
+/// of a pin drag first (their anchors are element state, and the drag records the row's bounds as it is laid out, so
+/// they are made while the row's elements are), then the row from the store as it is now. A session missing from the
+/// store draws nothing; the callback runs in the frame whose listing named it, so that does not happen.
 #[allow(
     clippy::too_many_arguments,
     reason = "the item callback's captures, passed through once"
 )]
 fn draw_row(
     shared: &menu::SharedRows,
+    pin_drag: &pin_drag::Shared,
     weak: &WeakEntity<SessionList>,
     key: &str,
     focus: &FocusHandle,
@@ -1004,6 +1028,9 @@ fn draw_row(
     let bell = (!retired)
         .then(|| crate::notices_bell::bell(key, selected, window, cx))
         .flatten();
+    let drag = pin_drag::paint(
+        pin_drag, shared, weak, key, selected, row_active, window, cx,
+    );
     let card = summary::SummaryCard::of(key, steps, window, cx);
     let collections = store.read(cx).collections();
     let Some(row) = collections.get::<SessionRow>(key) else {
@@ -1018,6 +1045,7 @@ fn draw_row(
         steps,
         menu,
         bell,
+        drag,
         card,
         focus,
         hover,
