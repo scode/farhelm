@@ -18,67 +18,56 @@
 //!   entered it. Restart with holds the agent type, so its list offers no other agent's models.
 //! - **Leaving the field**, Escape or a press outside closes the list and puts the chosen model back in the field.
 //!
-//! The rows are drawn by [`ModelRows`], a small view the popover owns, from the launcher's own state; the launcher
-//! keeps the highlighted row and the show-all switch, which no other surface shares, and what is typed is the field's
-//! own text.
+//! The rows are drawn from the launcher's own state by the launcher's shared floating-list view (`field_list`); the
+//! launcher keeps the highlighted row and the show-all switch, which no other surface shares, and what is typed is the
+//! field's own text.
 
 use farhelm_proto::LaunchHarness;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, WeakEntity, Window, div, px,
+    AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
+    px,
 };
 
 use super::changed::Changed;
+use super::field_list::{Drawn, FieldList};
 use super::{Launcher, choices::status_line, row};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
-use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, harness_label};
 use crate::launcher::model::{
     ModelEnterTarget, ModelOption, NEEDS_HARNESS, model_enter_target, model_options,
     owned_elsewhere_message,
 };
-use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::theme::{self, metrics};
 
 /// `.launch-composer-listbox`: `width: min(100%, 440px)`; the field is held to the same width so the list, as wide as
 /// its anchor, matches it.
 const MAX_WIDTH: f32 = 440.;
-/// `.launch-composer-listbox`: `max-height: 260px`, scrolling past that.
-const LIST_MAX_HEIGHT: f32 = 260.;
 /// What the model field and its first row say for the agent type's own configured model.
 pub(super) const HARNESS_DEFAULT: &str = "Harness default";
-/// `.launch-composer-listbox`: `padding: 6px; gap: 2px`.
-const LIST_PAD: f32 = 6.;
-const LIST_GAP: f32 = 2.;
+/// The list's element id, which tests find it by.
+const MODEL_LIST: &str = "launcher-model-list";
 
 /// What the model field holds besides the draft: the open list and what the user is doing in it. None of it is shared
 /// with any other surface. Focusing the field starts the highlight and the error over; the show-all switch stays as
 /// the user left it while the launcher is open.
 #[derive(Default)]
 pub(super) struct ModelField {
-    /// The open list's layer, if open. The layer manager closes it itself on Escape or a press outside, without telling
-    /// the field, so [`Launcher::model_list_open`] asks it rather than trusting this.
-    layer: Option<LayerId>,
-    /// The row moved to with the arrows, as an index into the current rows.
-    active: Option<usize>,
+    /// The list under the field, with the row moved to with the arrows.
+    list: FieldList,
     /// Whether the list shows every agent type's models.
     show_all: bool,
     /// Why the last Enter changed nothing ([`NEEDS_HARNESS`], [`owned_elsewhere_message`]); cleared by the next
     /// completed choice, by typing, by Escape, and by focusing the field again, and kept when focus leaves it (by Tab,
     /// or a press outside), so the user can follow it to the agent it names.
     error: Option<String>,
-    /// Where the field is drawn, for the list to open under it; refreshed every frame.
-    anchor: Option<Anchor>,
 }
 
 impl Launcher {
     /// Whether the model list is open: opened by the field and not since closed by the layer manager.
     pub(super) fn model_list_open(&self, window: &Window, cx: &App) -> bool {
-        self.model_field
-            .layer
-            .is_some_and(|layer| layers::is_open(layer, window, cx))
+        self.model_field.list.is_open(window, cx)
     }
 
     /// The list's rows for what is typed now. Restart with holds the agent type, so there the list never offers other
@@ -108,13 +97,13 @@ impl Launcher {
     /// Whether the field holds a model not yet applied: typed into its open list, or said under it as not applicable.
     pub(super) fn model_pending(&self, cx: &App) -> bool {
         self.model_field.error.is_some()
-            || self.model_field.layer.is_some() && !self.model_input.text(cx).is_empty()
+            || self.model_field.list.opened() && !self.model_input.text(cx).is_empty()
     }
 
     /// The field took focus: empty it for typing and open the list.
     pub(super) fn model_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.model_field.error = None;
-        self.model_field.active = None;
+        self.model_field.list.highlighted = None;
         self.model_input.set_text("", window, cx);
         self.open_model_list(window, cx);
         cx.notify();
@@ -129,7 +118,7 @@ impl Launcher {
     /// The user typed in the field.
     pub(super) fn model_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.model_field.error = None;
-        self.model_field.active = None;
+        self.model_field.list.highlighted = None;
         if !self.model_list_open(window, cx) {
             self.open_model_list(window, cx);
         }
@@ -144,17 +133,9 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) {
         let count = self.model_rows(cx).len();
-        if !self.model_list_open(window, cx) || count == 0 {
-            return;
+        if self.model_list_open(window, cx) && self.model_field.list.arrow(arrow, count) {
+            cx.notify();
         }
-        let active = &mut self.model_field.active;
-        *active = Some(match (arrow, *active) {
-            (Vertical::Down, None) => 0,
-            (Vertical::Down, Some(index)) => (index + 1) % count,
-            (Vertical::Up, None) => count - 1,
-            (Vertical::Up, Some(index)) => (index + count - 1) % count,
-        });
-        cx.notify();
     }
 
     /// Enter in the field: apply what the open list's highlighted row or the typed text means, then, in Restart with,
@@ -164,7 +145,7 @@ impl Launcher {
             let typed = self.model_input.text(cx);
             let target = model_enter_target(
                 &self.model_rows(cx),
-                self.model_field.active,
+                self.model_field.list.highlighted,
                 &typed,
                 self.catalog.as_deref().unwrap_or_default(),
                 self.draft.agent.harness,
@@ -198,7 +179,7 @@ impl Launcher {
         match option {
             ModelOption::ShowAll => {
                 self.model_field.show_all = !self.model_field.show_all;
-                self.model_field.active = None;
+                self.model_field.list.highlighted = None;
             }
             ModelOption::HarnessDefault => {
                 self.draft.choose_default_model();
@@ -225,29 +206,14 @@ impl Launcher {
 
     /// Open the list under the field, as a popover that never takes focus.
     fn open_model_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(anchor) = self.model_field.anchor.clone() else {
-            return;
-        };
-        let launcher = cx.weak_entity();
-        let rows = cx.new(|cx| ModelRows::new(launcher, cx));
-        let container = cx.focus_handle();
-        let mark = Mark::take(cx);
-        self.model_field.layer = layers::open_popover(
-            Popover::floating(rows, container, anchor),
-            &mark,
-            window,
-            cx,
-        );
+        self.model_field
+            .list
+            .open(MODEL_LIST, draw_model_rows, window, cx);
     }
 
     /// Close the list if it is open, drop the highlight, and show the chosen model in the field.
     fn close_model_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(layer) = self.model_field.layer.take()
-            && layers::is_open(layer, window, cx)
-        {
-            layers::close(layer, window, cx);
-        }
-        self.model_field.active = None;
+        self.model_field.list.close(window, cx);
         let shown = self.model_display();
         self.model_input.set_text(shown, window, cx);
     }
@@ -256,10 +222,8 @@ impl Launcher {
     /// offers no model choice (SPEC.md: such a composer hides the model).
     ///
     /// It also notices a list the layer manager closed on its own (Escape, a press outside), which tells the field
-    /// nothing: the field then shows the chosen model again, and drops the last error if it still has focus (Escape,
-    /// as the old Escape did; a press outside moves focus away, which keeps the error). That relies on the launcher
-    /// being drawn in every frame its dialog is, since the layer manager keeps no cached copy of a dialog's view, so the
-    /// first frame after the close sees it.
+    /// nothing ([`FieldList::follow`]): the field then shows the chosen model again, and drops the last error if it
+    /// still has focus (Escape, as the old Escape did; a press outside moves focus away, which keeps the error).
     pub(super) fn model_row(
         &mut self,
         palette: &theme::Palette,
@@ -270,15 +234,16 @@ impl Launcher {
         if harness.is_some_and(|harness| !harness.offers_model()) {
             return None;
         }
-        if self.model_field.layer.is_some() && !self.model_list_open(window, cx) {
+        if self.model_field.list.follow(window, cx) {
             if self.model_input.focus_handle(cx).is_focused(window) {
                 self.model_field.error = None;
             }
             self.close_model_list(window, cx);
         }
-        let anchor = Anchor::for_element("launcher-model-anchor", window, cx).matching_width();
-        let tracker = anchor.track();
-        self.model_field.anchor = Some(anchor.clone());
+        let tracker = self
+            .model_field
+            .list
+            .track_anchor("launcher-model-anchor", window, cx);
         let hint = match harness {
             Some(harness) => {
                 let count = self
@@ -342,108 +307,69 @@ impl Launcher {
     }
 }
 
-/// The open model list's rows, drawn from the launcher's state, and kept scrolled so the highlighted row is in view.
-pub(super) struct ModelRows {
-    launcher: WeakEntity<Launcher>,
-    scroll: ScrollHandle,
-    /// The child last scrolled into view. The list is scrolled only when the highlight moves, so a wheel scroll is not
-    /// pulled back to the highlighted row on the next redraw (a caret blink, say).
-    scrolled_to: Option<usize>,
-    /// Redraws the rows when the launcher changes (what is typed, the highlighted row, the draft).
-    _redraw: Option<gpui::Subscription>,
-}
-
-impl ModelRows {
-    fn new(launcher: WeakEntity<Launcher>, cx: &mut Context<Self>) -> Self {
-        let redraw = launcher
-            .upgrade()
-            .map(|entity| cx.observe(&entity, |_, _, cx| cx.notify()));
-        ModelRows {
-            launcher,
-            scroll: ScrollHandle::new(),
-            scrolled_to: None,
-            _redraw: redraw,
-        }
-    }
-}
-
-impl Render for ModelRows {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = theme::palette(cx);
-        let list = layers::surface(cx)
-            .id("launcher-model-list")
-            // Tests find the list by where it is drawn; this records nothing outside test builds.
-            .debug_selector(|| "launcher-model-list".into())
-            .role(Role::ListBox)
-            .aria_label("Model")
-            .flex()
-            .flex_col()
-            .gap(px(LIST_GAP))
-            .p(px(LIST_PAD))
-            .max_h(px(LIST_MAX_HEIGHT))
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .text_size(metrics::TEXT_MD);
-        let Some(launcher) = self.launcher.upgrade() else {
-            return list;
-        };
-        let launcher_ref = launcher.read(cx);
-        let options = launcher_ref.model_rows(cx);
-        let active = launcher_ref.model_field.active;
-        let chosen = launcher_ref.draft.agent.harness;
-        let show_all = launcher_ref.model_field.show_all;
-        let mut children: Vec<AnyElement> = Vec::with_capacity(options.len() + 1);
-        // The child index of the highlighted row, for scrolling it into view; the separator before show-all shifts it.
-        let mut active_child = None;
-        for (index, option) in options.into_iter().enumerate() {
-            if option == ModelOption::ShowAll {
-                // The rule between the models and the switch (`.launch-composer-listbox` draws one above it).
-                children.push(
-                    div()
-                        .h(px(1.))
-                        .flex_none()
-                        .bg(theme::color(palette.border_row))
-                        .into_any_element(),
-                );
-            }
-            if active == Some(index) {
-                active_child = Some(children.len());
-            }
-            let id = match &option {
-                ModelOption::HarnessDefault => "launcher-model-default".to_owned(),
-                ModelOption::Model { id, harness } => {
-                    format!("launcher-model-option-{}-{id}", harness_label(*harness))
-                }
-                ModelOption::ShowAll => "launcher-model-show-all".to_owned(),
-            };
-            let words = row_words(&id, &option, show_all, chosen);
-            let label = words.accessible_name();
-            let help = match option {
-                ModelOption::ShowAll => "Switch which agents' models the list shows",
-                ModelOption::HarnessDefault | ModelOption::Model { .. } => {
-                    "Use this model for the session"
-                }
-            };
-            let weak = self.launcher.clone();
+/// The open model list's rows (`field_list`): the default, the catalog's models and the show-all switch below a rule,
+/// with the highlighted row selected.
+fn draw_model_rows(
+    launcher: &Launcher,
+    list: Stateful<Div>,
+    weak: &WeakEntity<Launcher>,
+    _: &Window,
+    cx: &App,
+) -> Drawn {
+    let palette = theme::palette(cx);
+    let list = list.role(Role::ListBox).aria_label("Model");
+    let options = launcher.model_rows(cx);
+    let active = launcher.model_field.list.highlighted;
+    let chosen = launcher.draft.agent.harness;
+    let show_all = launcher.model_field.show_all;
+    let mut children: Vec<AnyElement> = Vec::with_capacity(options.len() + 1);
+    // The child index of the highlighted row, for scrolling it into view; the separator before show-all shifts it.
+    let mut active_child = None;
+    for (index, option) in options.into_iter().enumerate() {
+        if option == ModelOption::ShowAll {
+            // The rule between the models and the switch (`.launch-composer-listbox` draws one above it).
             children.push(
-                OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
-                    .selected(active == Some(index))
-                    .child(words)
-                    .on_click(move |_, window, cx| {
-                        let option = option.clone();
-                        let _ =
-                            weak.update(cx, |launcher, cx| launcher.pick_model(option, window, cx));
-                    })
+                div()
+                    .h(px(1.))
+                    .flex_none()
+                    .bg(theme::color(palette.border_row))
                     .into_any_element(),
             );
         }
-        if active_child != self.scrolled_to {
-            if let Some(child) = active_child {
-                self.scroll.scroll_to_item(child);
-            }
-            self.scrolled_to = active_child;
+        if active == Some(index) {
+            active_child = Some(children.len());
         }
-        list.children(children)
+        let id = match &option {
+            ModelOption::HarnessDefault => "launcher-model-default".to_owned(),
+            ModelOption::Model { id, harness } => {
+                format!("launcher-model-option-{}-{id}", harness_label(*harness))
+            }
+            ModelOption::ShowAll => "launcher-model-show-all".to_owned(),
+        };
+        let words = row_words(&id, &option, show_all, chosen);
+        let label = words.accessible_name();
+        let help = match option {
+            ModelOption::ShowAll => "Switch which agents' models the list shows",
+            ModelOption::HarnessDefault | ModelOption::Model { .. } => {
+                "Use this model for the session"
+            }
+        };
+        let weak = weak.clone();
+        children.push(
+            OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
+                .selected(active == Some(index))
+                .child(words)
+                .on_click(move |_, window, cx| {
+                    let option = option.clone();
+                    let _ = weak.update(cx, |launcher, cx| launcher.pick_model(option, window, cx));
+                })
+                .into_any_element(),
+        );
+    }
+    Drawn {
+        list,
+        children,
+        highlighted: active_child,
     }
 }
 

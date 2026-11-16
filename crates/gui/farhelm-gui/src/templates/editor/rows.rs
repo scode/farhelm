@@ -34,14 +34,14 @@ use gpui::{
 use serde::Serialize;
 
 use super::{Editor, FIELD_GAP, NAME_KIND_HELP, SMALL_LINE_HEIGHT, Text, with_editor};
-use crate::assets::Icon;
 use crate::components::{
     Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Select, SelectOption, TextInput, Tier,
 };
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::display_name;
-use crate::launcher::draft::harness_label;
+use crate::launcher::draft::{DestinationKind, harness_label};
 use crate::launcher::model::{ModelOption, model_options};
+use crate::launcher::view::destination_choice;
 use crate::templates::apply::install_identity;
 use crate::templates::dialog::TemplatesDialog;
 use crate::templates::fields::{Field, effort_options, permission_options};
@@ -544,58 +544,46 @@ impl Rows<'_> {
         controls
     }
 
-    /// The destination: Folder or Managed checkout (the launcher's destination type, with its glyphs), switching
-    /// between them keeping the text, and the folder path or repository under it.
+    /// The destination: Folder or Managed checkout (the launcher's destination choice, `destination_choice`),
+    /// switching between them keeping the text, and the folder path or repository under it.
     fn destination(&self) -> Vec<AnyElement> {
         let github = matches!(
             self.editor.draft.fields.destination,
             Some(TemplateDestination::Github(_))
         );
         let weak = self.weak.clone();
-        let kind = RadioGroup::new(
+        let chosen = if github {
+            DestinationKind::Checkout
+        } else {
+            DestinationKind::Folder
+        };
+        let help =
+            HoverHelp::tooltip("Destination type: an existing folder, or a managed checkout");
+        let kind = destination_choice(
             "templates-destination-type",
-            "Destination type",
-            HoverHelp::tooltip("Destination type: an existing folder, or a managed checkout"),
-            Role::Group,
-        )
-        .option(
-            RadioOption::new(
-                "Folder",
-                HoverHelp::tooltip("Folder: start in an existing folder on this host"),
-                false,
-            )
-            .icon(Icon::Folder),
-        )
-        .option(
-            RadioOption::new(
-                "Managed checkout",
-                HoverHelp::tooltip(
-                    "Managed checkout: Farhelm clones a repository into a new folder for this session",
-                ),
-                true,
-            )
-            .icon(Icon::Branch),
-        )
-        .chosen(Some(github))
-        .on_change(move |github, window, cx| {
-            let github = *github;
-            with_editor(&weak, window, cx, |editor, window, cx| {
-                editor.edit(window, cx, |editor| {
-                    let fields = &mut editor.draft.fields;
-                    let text = match fields.destination.take() {
-                        Some(TemplateDestination::Folder(text) | TemplateDestination::Github(text)) => {
-                            text
-                        }
-                        None => String::new(),
-                    };
-                    fields.destination = Some(if github {
-                        TemplateDestination::Github(text)
-                    } else {
-                        TemplateDestination::Folder(text)
-                    });
-                })
-            });
-        });
+            chosen,
+            help,
+            move |kind, window, cx| {
+                let github = kind == DestinationKind::Checkout;
+                with_editor(&weak, window, cx, |editor, window, cx| {
+                    editor.edit(window, cx, |editor| {
+                        let fields = &mut editor.draft.fields;
+                        let text = match fields.destination.take() {
+                            Some(
+                                TemplateDestination::Folder(text)
+                                | TemplateDestination::Github(text),
+                            ) => text,
+                            None => String::new(),
+                        };
+                        fields.destination = Some(if github {
+                            TemplateDestination::Github(text)
+                        } else {
+                            TemplateDestination::Folder(text)
+                        });
+                    })
+                });
+            },
+        );
         let mut controls = vec![
             self.labelled("Destination", kind).into_any_element(),
             // Labelled "Repository" or "Folder path" by its kind (its [`TextSpec`](super::TextSpec)).
