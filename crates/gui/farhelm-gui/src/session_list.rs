@@ -132,6 +132,9 @@
 //! heading's actions, and Escape anywhere in the list's column clears them. A bulk action's not-started line on a row
 //! is [`bulk`]'s.
 //!
+//! A retired containerized session supports Delete only, so its row, its menu and its open view withdraw everything
+//! else ([`retired`]).
+//!
 //! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, dragging pins, the row menu's other
 //! commands, and the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where
 //! focus rests"): nothing names it home; that comes with the session pane's status-card work (M2.12), which decides
@@ -154,6 +157,7 @@ pub(crate) mod rename;
 pub(crate) mod replace;
 pub(crate) mod replace_yolo;
 pub(crate) mod restart;
+pub(crate) mod retired;
 mod row;
 pub(crate) mod row_marks;
 pub(crate) mod seen;
@@ -189,6 +193,9 @@ mod row_tests;
 
 #[cfg(test)]
 mod row_marks_tests;
+
+#[cfg(test)]
+pub(crate) mod retired_tests;
 
 #[cfg(test)]
 mod seen_tests;
@@ -981,11 +988,11 @@ fn draw_row(
     let Some(store) = session::current_store(cx) else {
         return div().into_any_element();
     };
-    let Some(title) = store
+    let Some((title, retired)) = store
         .read(cx)
         .collections()
         .get::<SessionRow>(key)
-        .map(|row| row.info.title.clone())
+        .map(|row| (row.info.title.clone(), retired::is(row)))
     else {
         return div().into_any_element();
     };
@@ -993,7 +1000,10 @@ fn draw_row(
     // Two of the menu button's reveal reasons, which only the row knows: the pointer over it, focus inside it.
     let row_active = hover.hovered(cx) || focus.contains_focused(window, cx);
     let menu = menu::menu_button(shared, weak, key, &title, selected, row_active, window, cx);
-    let bell = crate::notices_bell::bell(key, selected, window, cx);
+    // A retired session draws no bell: closing one writes a read mark, and such a session supports Delete only.
+    let bell = (!retired)
+        .then(|| crate::notices_bell::bell(key, selected, window, cx))
+        .flatten();
     let card = summary::SummaryCard::of(key, steps, window, cx);
     let collections = store.read(cx).collections();
     let Some(row) = collections.get::<SessionRow>(key) else {

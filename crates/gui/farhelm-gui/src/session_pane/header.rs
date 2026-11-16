@@ -50,6 +50,9 @@
 //! - **Focus.** Each question returns focus home (the terminal) on Escape and to where it was on any other close, which
 //!   is SPEC.md's "Escape cancels the header's Stop, Restart, Replace or Delete question and returns focus to the
 //!   terminal" ([`crate::prompt::Question::returns_home_on_escape`]).
+//! - **A retired containerized session** supports Delete only (`session_list::retired`), so its row draws Delete
+//!   alone, with the ordinary question, and none of Stop, Restart, Replace, Clone or the terminal's text size controls
+//!   (it has no terminal: `super::retired`); a press or shortcut that reaches another action for it does nothing.
 //! - **The YOLO question.** A Replace from the header that the source's host refuses for YOLO asks the launcher's
 //!   question below the top row, among the header's lines, rather than at the source's row
 //!   ([`crate::session_list::replace_yolo`]). It is drawn only while the source is the open session.
@@ -87,7 +90,7 @@ use crate::operations::Work;
 use crate::prompt::{self, Question};
 use crate::session;
 use crate::session_list::replace_yolo::{self, Surface};
-use crate::session_list::{delete, menu, outcome, replace, restart, stop};
+use crate::session_list::{delete, menu, outcome, replace, restart, retired, stop};
 use crate::theme::{self, metrics};
 
 /// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
@@ -495,7 +498,14 @@ impl SessionPane {
         let mut anchors = HashMap::new();
         let mut carets = HashMap::new();
         let mut buttons: Vec<AnyElement> = Vec::new();
-        for action in Action::ALL {
+        // A retired session's row draws Delete alone (the module docs).
+        let retired = retired::is(&row_now);
+        let actions: &[Action] = if retired {
+            &[Action::Delete]
+        } else {
+            &Action::ALL
+        };
+        for &action in actions {
             let anchor = Anchor::for_element(
                 SharedString::from(format!("{}-anchor", action.id())),
                 window,
@@ -559,8 +569,9 @@ impl SessionPane {
                 .flex_none()
                 .items_center()
                 .gap(px(ACTIONS_GAP))
-                // The terminal area's text size group starts the right-hand group (SPEC.md's top row).
-                .child(crate::terminal::text_size::controls(cx))
+                // The terminal area's text size group starts the right-hand group (SPEC.md's top row), for a session
+                // that has a terminal to size.
+                .children((!retired).then(|| crate::terminal::text_size::controls(cx)))
                 .children(buttons),
         )
         .into_any_element()
@@ -631,6 +642,10 @@ impl SessionPane {
             return;
         };
         let (row, skipped) = (&target.row, target.skips_questions);
+        // A retired session supports Delete only; its row draws nothing else, and a stale press does nothing.
+        if retired::is(row) && action != Action::Delete {
+            return;
+        }
         let asking = Asking {
             action,
             key: &key,

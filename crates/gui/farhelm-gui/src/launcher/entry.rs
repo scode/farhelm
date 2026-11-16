@@ -305,13 +305,13 @@ pub fn restart_with_unavailable(session: &str, cx: &App) -> Option<String> {
 pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
     let info = &row.info;
     let offer = info.restart_offer;
+    if info.launch.is_retired_container() {
+        return Some(RETIRED_CONTAINER_REASON.to_owned());
+    }
     match &info.launch {
         SessionLaunch::Agent {
             selection, resume, ..
         } => {
-            if selection.container.is_some() {
-                return Some(RETIRED_CONTAINER_REASON.to_owned());
-            }
             if offer == RestartOffer::Resume || resume.is_some() {
                 return None;
             }

@@ -27,9 +27,10 @@
 //!   takes focus only when nothing else holds it, so a session that went away under the user never pulls focus from a
 //!   control they are using.
 //! - **Opening marks the output seen.** While a session is open, its latest activity is recorded as seen whenever the
-//!   session becomes open or its activity advances, unless it is stale (its host is not connected) or has ended (SPEC.md,
-//!   "Status", as the old app did). The memory of what was stamped is keyed on the session, its activity and its
-//!   eligibility, never on the stamp itself:
+//!   session becomes open or its activity advances, unless it is stale (its host is not connected), has ended (SPEC.md,
+//!   "Status", as the old app did), or is a retired containerized session, whose stored metadata the old app left
+//!   unchanged even on selection, since such a session supports Delete only ([`super::retired`]). The memory of what
+//!   was stamped is keyed on the session, its activity and its eligibility, never on the stamp itself:
 //!   that is what makes a manual mark-unread of the open session stick until new output arrives or the user opens
 //!   another session. The open session is read by key, so one the helm carries outside a filtered or cut list is
 //!   marked like a listed one, and a moment with no row for it leaves the memory alone ([`Open::Hidden`]). A failed
@@ -51,9 +52,6 @@
 //! the helm pushes every preference change, an agent's or the command line's included, and a change a command causes
 //! before that command's reply, so the store is never older than the listing the pick is made from. The old reread's
 //! fallback to the in-memory copy on a failed read has nothing to fall back from.
-//!
-//! NOTE: Not ported yet, because nothing in the app can cause it: the old app's refusal to stamp a retired
-//! environment's session, which arrives with environment sessions.
 
 use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::SessionSeenRequest;
@@ -250,7 +248,7 @@ pub(crate) fn seen_due(open: Open, stamped: &Stamped) -> Option<(Stamped, Option
     };
     let next = Stamped(open.map(|open| {
         let row = open.row;
-        let eligible = !row.stale && !row.info.status.has_ended();
+        let eligible = !row.stale && !row.info.status.has_ended() && !super::retired::is(row);
         (open.key.to_owned(), row.info.effective_activity(), eligible)
     }));
     if &next == stamped {
