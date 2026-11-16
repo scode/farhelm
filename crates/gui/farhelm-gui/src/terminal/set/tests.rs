@@ -1050,3 +1050,37 @@ fn new_terminal_is_refused_while_a_lifecycle_request_is_pending(cx: &mut TestApp
     click(window.cx, super::ADD_ID);
     assert_eq!(tab_requests(&mut window.helm), []);
 }
+
+/// A Restart detaches only the agent's terminal, so the pane's hold of the reconnect card during it must not reach the
+/// session's tabs: a tab whose own stream drops meanwhile has an outage of its own, and holding its card would leave
+/// its screen taking no input with nothing saying so until the helm answered. Specified: with a's agent terminal and
+/// tab t1 live and t1 shown, a Restart of a confirmed and unanswered, t1's link drops and its reconnect card is drawn.
+#[gpui::test]
+fn a_restart_does_not_hold_a_tabs_reconnect_card(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    window.go_live(agent, "agent");
+    window.go_live(t1, "shell");
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: t1 is shown"
+    );
+    click(window.cx, "session-header-restart");
+    click(window.cx, "prompt-confirm");
+    let restarts = window
+        .helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.path.ends_with("/restart"))
+        .count();
+    assert_eq!(restarts, 1, "the premise: a Restart is in flight");
+
+    window.opened.borrow_mut()[t1].0.drop_link();
+    settle(window.cx);
+    assert!(
+        window.cx.debug_bounds("terminal-reconnect-card").is_some(),
+        "the tab's own outage shows its card"
+    );
+}

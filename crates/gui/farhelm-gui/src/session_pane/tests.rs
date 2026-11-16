@@ -37,6 +37,7 @@ use crate::session::Connection;
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::node;
 use crate::session_list::tests::{change, listing, listing_meta, painted, preferences, session};
+use crate::terminal::attached::AttachedTerminal;
 use crate::test_support::{self, click, keys, settle, terminal_focused};
 use crate::test_support::{frame, meta, started};
 use crate::{focus, local_state, root};
@@ -780,9 +781,14 @@ fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_progra
 
 // ---- A Delete of the open session ---------------------------------------------------------------------------------
 
-/// What the status line says once a Delete's detach has dropped the stream: the detach the supervisor sends when it
+/// What the reconnect card says once a Delete's detach has dropped the stream: the detach the supervisor sends when it
 /// deletes a session carries `other`, which the stream answers by reconnecting.
 const RECONNECTING: &str = "Session unavailable — reconnecting";
+
+/// The reconnect card's and the red status band's selectors, which the tests tell apart: a drop the stream recovers
+/// from shows the card, and must never show the band.
+const CARD: &str = "terminal-reconnect-card";
+const BAND: &str = "terminal-status-banner";
 
 /// What the row and the scrim say while a Delete that stops the running agent is in flight.
 const STOPPING: &str = "Stopping agent…";
@@ -849,6 +855,28 @@ impl Fleet<'_> {
             });
             terminal.and_then(|terminal| terminal.read(cx).shown_lift(cx))
         })
+    }
+
+    /// The pane's agent terminal, under the current UI session; `None` while the pane shows none.
+    fn agent(&mut self) -> Option<Entity<AttachedTerminal>> {
+        let pane = self.pane.clone();
+        self.cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.mounted
+                    .current(cx)
+                    .as_ref()
+                    .and_then(|mounted| mounted.set.as_ref())
+                    .map(|set| set.read(cx).agent().clone())
+            })
+        })
+    }
+
+    /// Whether the pane's terminal's stream is coming back from a drop, held or not: what its reconnect card says,
+    /// whether or not the card is drawn.
+    fn reconnecting(&mut self) -> bool {
+        let terminal = self.agent();
+        self.cx
+            .update(|_, cx| terminal.is_some_and(|terminal| terminal.read(cx).reconnecting()))
     }
 
     /// The pane's terminal's own status line, held or not: the stream's state as the terminal knows it.
@@ -927,11 +955,11 @@ fn a_pending_delete_puts_a_scrim_over_the_terminal_until_the_helm_answers(cx: &m
 }
 
 /// SPEC.md: "The terminal's own 'Detached' notice, which the delete itself causes, is held back meanwhile". The Delete
-/// kills the agent and detaches the viewer, and both would otherwise show as failures (an exit line, a red "Session
-/// unavailable" band) under a Delete that is going exactly as asked. Specified: with a's Delete in flight, the agent
-/// ended by signal 15 and the viewer detached with `other`, the terminal's own status line says it is reconnecting
-/// (the premise), yet no exit line is drawn, the band's words are not painted, and the screen is not lifted to make
-/// room for either; the scrim still shows.
+/// kills the agent and detaches the viewer, and both would otherwise show as failures (an exit line, the "Session
+/// unavailable" reconnect card) under a Delete that is going exactly as asked. Specified: with a's Delete in flight,
+/// the agent ended by signal 15 and the viewer detached with `other`, the terminal's stream is reconnecting (the
+/// premise), yet no exit line and no card are drawn, the card's words are not painted, and the screen is not lifted to
+/// make room for either; the scrim still shows.
 #[gpui::test]
 fn the_terminal_holds_back_what_the_delete_does_to_it(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -939,11 +967,8 @@ fn the_terminal_holds_back_what_the_delete_does_to_it(cx: &mut TestAppContext) {
     fleet.delete_open_session();
 
     fleet.delete_happens_to(0);
-    assert_eq!(
-        fleet.status_words().as_deref(),
-        Some(RECONNECTING),
-        "the premise"
-    );
+    assert!(fleet.reconnecting(), "the premise");
+    assert!(!fleet.drawn(CARD));
     assert_eq!(fleet.painted_count(RECONNECTING), 0);
     assert!(!fleet.drawn("terminal-exit"));
     assert_eq!(fleet.lift(), Some(0.), "no room taken for hidden lines");
@@ -955,8 +980,8 @@ fn the_terminal_holds_back_what_the_delete_does_to_it(cx: &mut TestAppContext) {
 /// needs to see that the agent is gone and the terminal is not live. Specified: with a's Delete in flight and the
 /// agent killed and detached as above, a refusal takes the scrim away and the held exit line appears in the frame the
 /// app draws on its own (checked before any frame the test forces, so a terminal that missed the release would fail),
-/// with the screen lifted for it; the row and the header show the helm's words and "Session unavailable —
-/// reconnecting" is painted.
+/// with the screen lifted for it; the row and the header show the helm's words, and the reconnect card shows "Session
+/// unavailable — reconnecting", with no red band.
 #[gpui::test]
 fn a_refused_delete_shows_the_notices_it_held(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -983,13 +1008,15 @@ fn a_refused_delete_shows_the_notices_it_held(cx: &mut TestAppContext) {
         "the row and the header"
     );
     assert_eq!(fleet.painted_count(RECONNECTING), 1);
+    assert!(fleet.drawn(CARD));
+    assert!(!fleet.drawn(BAND));
 }
 
 /// A Delete that succeeds removes its session, and the selection rules open the next one once it has settled
 /// (SPEC.md, "Session list"). Nothing of the deleted session's hold may reach the next terminal: its own exit and
 /// detach are real news. Specified: after a's Delete, a's death and detach, a pushed listing without a and the
 /// helm's success, b is open and its stream attached; once live, no scrim is drawn, and b's own agent ending and its
-/// viewer detaching show the exit line and "Session unavailable — reconnecting".
+/// viewer detaching show the exit line and the reconnect card ("Session unavailable — reconnecting"), with no red band.
 #[gpui::test]
 fn after_a_successful_delete_the_next_terminal_shows_normally(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -1014,13 +1041,15 @@ fn after_a_successful_delete_the_next_terminal_shows_normally(cx: &mut TestAppCo
     assert!(terminal_focused(fleet.cx));
     fleet.delete_happens_to(1);
     assert_eq!(fleet.painted_count(RECONNECTING), 1);
+    assert!(fleet.drawn(CARD));
+    assert!(!fleet.drawn(BAND));
     assert!(fleet.drawn("terminal-exit"));
 }
 
 /// The hold and the scrim belong to the open session's own Delete: SPEC.md lets Deletes of other sessions run while
 /// the user works in this one, and what happens to this one's agent then is real news. Specified: with a open and
 /// live, b's Delete confirmed from its row and unanswered, a's agent ending and its viewer detaching show the exit line
-/// and "Session unavailable — reconnecting", and no scrim is drawn.
+/// and the reconnect card, and no scrim and no red band are drawn.
 #[gpui::test]
 fn a_delete_of_another_session_leaves_the_open_terminal_alone(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -1038,7 +1067,204 @@ fn a_delete_of_another_session_leaves_the_open_terminal_alone(cx: &mut TestAppCo
     fleet.delete_happens_to(0);
     assert!(!fleet.drawn("terminal-delete-scrim"));
     assert_eq!(fleet.painted_count(RECONNECTING), 1);
+    assert!(fleet.drawn(CARD));
+    assert!(!fleet.drawn(BAND));
     assert!(fleet.drawn("terminal-exit"));
+}
+
+// ---- A Restart of the open session --------------------------------------------------------------------------------
+
+impl Fleet<'_> {
+    /// The ids of the Restarts the window sent since the last call; every other command is answered with success at
+    /// once, as [`Fleet::deletes`] does.
+    fn restarts(&mut self) -> Vec<u64> {
+        let mut found = Vec::new();
+        for command in self.helm.commands() {
+            if command.method == Method::Post && command.path.ends_with("/restart") {
+                found.push(command.id);
+            } else {
+                self.helm.reply(command.id, 200, None);
+            }
+        }
+        found
+    }
+
+    /// With a open and live and its agent working, restart it from the header and confirm, and return the Restart's
+    /// id, unanswered.
+    fn restart_open_session(&mut self) -> u64 {
+        self.restarts();
+        click(self.cx, "session-header-restart");
+        click(self.cx, "prompt-confirm");
+        let [id] = self.restarts()[..] else {
+            panic!("one Restart was sent");
+        };
+        id
+    }
+
+    /// The `index`th stream sees what a Restart does to its session: the supervisor moves the viewer to the relaunched
+    /// terminal with a detach carrying `other`, which drops the stream into a reconnect.
+    fn restart_happens_to(&mut self, index: usize) {
+        self.opened.borrow_mut()[index]
+            .0
+            .detach(Some(DetachCode::Other), "session restarted");
+        settle(self.cx);
+    }
+
+    /// Neither the reconnect card nor the red band is drawn, and the terminal has no status line of its own: what the
+    /// pane must show at every step of a Restart that reattaches while it is pending.
+    fn shows_no_outage(&mut self, step: &str) {
+        assert!(!self.drawn(CARD), "{step}: no card");
+        assert!(!self.drawn(BAND), "{step}: no red band");
+        assert_eq!(self.status_words(), None, "{step}: no status line");
+        assert_eq!(self.painted_count(RECONNECTING), 0, "{step}");
+    }
+}
+
+/// The old app's `terminal-restart.spec.ts`, "a restarted session reconnects without a detach banner": a Restart moves
+/// the viewer to the relaunched terminal with a detach that reconnects, and showing an outage for the reattach the user
+/// just asked for reads as a failure. The old spec watched every banner change through the Restart, since a final check
+/// alone would miss a flash; here every step is checked, in the order the real stream gives them: the supervisor
+/// detaches the viewer, the helm answers the Restart while the stream still waits its first rung, and only then does
+/// the reattach happen. Holding the reconnect card for the Restart was decided by the migration's orchestrator on
+/// 2026-11-15; it covers the whole recovery the Restart began, since the helm's answer comes before the reattach.
+/// Specified: with a's Restart confirmed and unanswered, the viewer's `other` detach puts the stream into a reconnect
+/// (the premise), and neither the card nor the red band is drawn, nor any status line; the same holds once the helm
+/// answers the Restart, while the reattach's attempt runs, while its replay arrives and once it is live; a typed key
+/// then reaches the new attachment.
+#[gpui::test]
+fn a_restart_reattaches_without_a_card_or_a_red_band(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    let id = fleet.restart_open_session();
+    fleet.shows_no_outage("restart sent");
+
+    fleet.restart_happens_to(0);
+    assert!(
+        fleet.reconnecting(),
+        "the premise: the restart's detach reconnects"
+    );
+    fleet.shows_no_outage("reconnecting");
+
+    fleet.helm.reply(id, 200, None);
+    settle(fleet.cx);
+    assert!(
+        fleet.reconnecting(),
+        "the premise: answered before the reattach"
+    );
+    fleet.shows_no_outage("answered, still waiting to reattach");
+
+    fleet.opened.borrow_mut()[0].0.end_wait();
+    settle(fleet.cx);
+    fleet.shows_no_outage("the reattach's attempt");
+
+    let replay = {
+        let mut opened = fleet.opened.borrow_mut();
+        let asked = opened[0].0.attach();
+        let replay = screen(asked.cols, asked.rows);
+        opened[0].0.output(replay[0].clone());
+        replay
+    };
+    settle(fleet.cx);
+    fleet.shows_no_outage("catching up");
+    {
+        let mut opened = fleet.opened.borrow_mut();
+        for message in replay.into_iter().skip(1) {
+            opened[0].0.output(message);
+        }
+        opened[0].0.replay_complete();
+    }
+    settle(fleet.cx);
+    assert!(!fleet.reconnecting(), "the premise: live again");
+    fleet.shows_no_outage("live");
+
+    // Choosing the open session again focuses its terminal, wherever the Restart's question left focus.
+    click(fleet.cx, "session-row-a");
+    assert!(
+        terminal_focused(fleet.cx),
+        "the premise: a's terminal has focus"
+    );
+    fleet.input(0);
+    keys(fleet.cx, "x");
+    assert_eq!(fleet.input(0), [letter("x", 88)]);
+}
+
+/// The hold covers the reattach the Restart asked for, not an outage: once that reattach fails, the stream is down for
+/// reasons of its own, and the user needs the card and its Reconnect now (decided by the migration's orchestrator on
+/// 2026-11-15: show the card if the reattach fails). The card must appear in the frame the app draws on its own when
+/// the attempt fails, or a window the user only watches would keep hiding it. Specified: with a's Restart confirmed,
+/// the viewer detached with `other` and the helm's answer in, no card is drawn; when the reattach's first attempt
+/// fails, the card is drawn (checked before any frame the test forces) with its words painted once, and no red band;
+/// once the stream reattaches and goes live, the card goes.
+#[gpui::test]
+fn a_restarts_failed_reattach_shows_the_card(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    let id = fleet.restart_open_session();
+    fleet.restart_happens_to(0);
+    fleet.helm.reply(id, 200, None);
+    settle(fleet.cx);
+    assert!(fleet.reconnecting(), "the premise: reconnecting");
+    assert!(!fleet.drawn(CARD), "the premise: held past the answer");
+
+    fleet.opened.borrow_mut()[0].0.drop_link();
+    settle(fleet.cx);
+    assert!(fleet.drawn(CARD));
+    assert_eq!(fleet.painted_count(RECONNECTING), 1);
+    assert!(!fleet.drawn(BAND));
+
+    fleet.go_live(0);
+    assert!(!fleet.drawn(CARD));
+}
+
+/// A reattach can also fail after its socket attached: it drops in the middle of its replay. The stream then starts
+/// its ladder over (an attachment resets it), so the next wait is numbered attempt 1 again and the attempt number
+/// alone never shows the failure; held, the old screen would sit there taking no input with nothing saying so, for as
+/// long as the reattaches keep dropping. Specified: with a's Restart confirmed, the viewer detached with `other` and
+/// the helm's answer in, no card is drawn; the reattach attaches and its replay begins (still no card), then its link
+/// drops before the replay completes, and the card is drawn with no red band.
+#[gpui::test]
+fn a_restarts_reattach_that_drops_mid_replay_shows_the_card(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    let id = fleet.restart_open_session();
+    fleet.restart_happens_to(0);
+    fleet.helm.reply(id, 200, None);
+    settle(fleet.cx);
+    assert!(!fleet.drawn(CARD), "the premise: held past the answer");
+
+    {
+        let mut opened = fleet.opened.borrow_mut();
+        let asked = opened[0].0.attach();
+        opened[0]
+            .0
+            .output(screen(asked.cols, asked.rows)[0].clone());
+    }
+    settle(fleet.cx);
+    assert!(!fleet.drawn(CARD), "the premise: catching up, still held");
+
+    fleet.opened.borrow_mut()[0].0.drop_link();
+    settle(fleet.cx);
+    assert!(fleet.reconnecting(), "the premise: reconnecting again");
+    assert!(fleet.drawn(CARD));
+    assert!(!fleet.drawn(BAND));
+}
+
+/// The Restart hold is narrower than the Delete's on purpose: a Restart does not take the terminal over, so a takeover
+/// that lands while it is pending is another client's doing, and its band and Take control are the user's only way
+/// back. Specified: with a's Restart confirmed and unanswered, a detach as taken over draws the red band with Take
+/// control.
+#[gpui::test]
+fn a_restart_does_not_hold_back_a_takeover(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    fleet.restart_open_session();
+    fleet.opened.borrow_mut()[0]
+        .0
+        .detach(Some(DetachCode::TakenOver), "another client attached");
+    settle(fleet.cx);
+    assert!(fleet.drawn(BAND));
+    assert!(fleet.drawn("terminal-take-control"));
+    assert!(!fleet.drawn(CARD));
 }
 
 // ---- Resets --------------------------------------------------------------------------------------------------------

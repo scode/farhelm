@@ -30,11 +30,11 @@
 //!   what the row says in place of its actions ([`header`]), a scrim over the terminal says it again (stopping the
 //!   agent, stopping its terminal tabs, or deleting), and the terminal's own notices are held back
 //!   ([`AttachedTerminal::hold_notices`](crate::terminal::attached::AttachedTerminal::hold_notices)): the Delete kills
-//!   the agent and detaches the viewer, so the exit line ("Process ended by signal 15") and the status line ("Session
-//!   unavailable — reconnecting") would otherwise read as failures while the Delete is going as asked. SPEC.md,
-//!   "Lifecycle operations": "a scrim over its terminal says it again. The terminal's own 'Detached' notice, which the
-//!   delete itself causes, is held back meanwhile; if the delete fails, the row and header come back with the refusal
-//!   shown, and a held notice appears." Both the scrim and the hold ask the operation store while they draw
+//!   the agent and detaches the viewer, so the exit line ("Process ended by signal 15") and the reconnect card
+//!   ("Session unavailable — reconnecting") would otherwise read as failures while the Delete is going as asked.
+//!   SPEC.md, "Lifecycle operations": "a scrim over its terminal says it again. The terminal's own 'Detached' notice,
+//!   which the delete itself causes, is held back meanwhile; if the delete fails, the row and header come back with the
+//!   refusal shown, and a held notice appears." Both the scrim and the hold ask the operation store while they draw
 //!   ([`delete::in_flight`]), so neither keeps a copy that could outlive the request. A refusal therefore takes the
 //!   scrim away and lets the terminal show whatever it has to say by then, while the row shows the refusal. A Delete
 //!   that succeeds removes the session, and the selection rules take the pane from there. Ported from the old app's
@@ -44,6 +44,18 @@
 //!   The scrim draws no hitbox and tracks no focus, so the terminal under it keeps focus, keys and clicks: the old
 //!   overlay took no pointer events either, so that a click is never eaten by something on its way out. The Delete
 //!   holds the session's other operations meanwhile anyway.
+//! - **A Restart of the open session.** While this window's Restart of the session (or its Restart with, which runs as
+//!   the same work) is in flight, the terminal's reconnect card is held back, and nothing else is. A Restart stops the
+//!   agent, and the supervisor moves the viewer to the relaunched terminal with a detach that reconnects, so the card
+//!   would announce an outage the user just asked for; the old app's `terminal-restart.spec.ts` ("a restarted session
+//!   reconnects without a detach banner") already ruled out even a brief red banner there. Holding the card for the
+//!   Restart, and showing it if the reattach fails, was decided by the migration's orchestrator on 2026-11-15. The
+//!   pane's hold is the Delete's ([`restart::in_flight`] in place of [`delete::in_flight`]), asked while drawing, so it
+//!   keeps no copy that could outlive the request; but the helm answers a Restart while the stream still waits to
+//!   reattach, so the terminal keeps holding the card for a recovery that began under the hold until that recovery
+//!   ends or its first attempt fails ([`AttachedTerminal`](crate::terminal::attached::AttachedTerminal)'s
+//!   `recovery_held`). A takeover's or refusal's band and the exit line are not held: the decision named only the card,
+//!   and only the agent's terminal is held, since a Restart detaches no tab.
 //!
 //! The pane acts from observers (the selection, the user's choices, the connection), never from drawing: focus moves
 //! made while a frame is drawn are not reliably drawn themselves, and observers also run for a window that is not drawn
@@ -97,23 +109,23 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, FontWeight, Global,
+    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Global,
     InteractiveElement as _, IntoElement, ParentElement, Render, Role, ScrollHandle, Stateful,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div,
 };
 
-use crate::components::{Spinner, spinner_icon};
+use crate::components::{Spinner, status_card, status_heading};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
 use crate::session::{self, PerSession, UiSession};
-use crate::session_list::{age, delete};
+use crate::session_list::{age, delete, restart};
 use std::rc::Rc;
 
 use crate::terminal::CellMetrics;
+use crate::terminal::attached::Hold;
 use crate::terminal::set::{SharedHold, TerminalSet};
-use crate::theme::metrics;
-use crate::{layers, session_list, theme, ticker};
+use crate::{session_list, theme, ticker};
 
 /// The user's latest choice of a session, kept until the pane has acted on it.
 ///
@@ -283,11 +295,20 @@ fn terminals(
     let held = key.to_owned();
     // Asked while the terminals draw, from the current UI session's operation store, which notifies when a request
     // starts or settles, and its store, which notifies with every push. A terminal outlives no UI session (it retires
-    // with its own), so the stores it reads are always the ones its Delete went through and its row arrives in. Held
-    // while a Delete runs (see the module docs) and while the unavailable card shows over the terminals, which says
-    // why they are not live, so their own "Session unavailable — reconnecting" would only say it again.
-    let hold: SharedHold =
-        Rc::new(move |cx| delete::in_flight(&held, cx).is_some() || unavailable::shows(&held, cx));
+    // with its own), so the stores it reads are always the ones its Delete or Restart went through and its row arrives
+    // in. Everything is held while a Delete runs (see the module docs) and while the unavailable card shows over the
+    // terminals, which says why they are not live, so their own reconnect card would only say it again; the reconnect
+    // card alone while this window's Restart is in flight. A Delete and a Restart never overlap: one request per
+    // session at a time.
+    let hold: SharedHold = Rc::new(move |cx| {
+        if delete::in_flight(&held, cx).is_some() || unavailable::shows(&held, cx) {
+            Hold::Everything
+        } else if restart::in_flight(&held, cx) {
+            Hold::ReconnectCard
+        } else {
+            Hold::Nothing
+        }
+    });
     Some(cx.new(|cx| TerminalSet::new(session, key.to_owned(), metrics, hold, cx)))
 }
 
@@ -648,29 +669,12 @@ impl SessionPane {
 
 /// The scrim over the open session's terminal while its Delete is in flight with `guard`, its spinner at `step`: the
 /// old `.terminal-delete-overlay`, a black veil over the whole terminal with the row's words beside a 16-pixel spinner,
-/// centered on a floating card with an accent edge, in the accent. Visible to the crate for the screenshot goldens.
+/// centered on the floating accent card ([`status_card`]). Visible to the crate for the screenshot goldens.
 pub(crate) fn delete_scrim(guard: DeleteGuard, step: u8, cx: &App) -> Stateful<Div> {
-    let palette = theme::palette(cx);
-    let ink = theme::color(palette.accent);
     let label = delete::progress_label(guard);
-    let card = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(10.))
-        .py(px(14.))
-        .px(px(20.))
-        .bg(theme::color(palette.bg_2))
-        .border_1()
-        .border_color(ink)
-        .rounded(metrics::RADIUS_MD)
-        // `--shadow-menu`, as the old card had.
-        .shadow(layers::menu_shadow(palette))
-        .text_size(px(15.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(ink)
-        .child(spinner_icon(step, px(16.), ink))
-        .child(label);
+    // The component layer's status card, which the terminal's reconnect card shares, as the old stylesheet's two
+    // cards shared one look.
+    let card = status_card(cx).child(status_heading(step, label, cx));
     // No listener, no focus tracking and no occlusion, so GPUI gives it no hitbox: the terminal below keeps every
     // press, and with it focus (see the module docs).
     div()
@@ -686,7 +690,7 @@ pub(crate) fn delete_scrim(guard: DeleteGuard, step: u8, cx: &App) -> Stateful<D
         .flex()
         .items_center()
         .justify_center()
-        .bg(theme::color(palette.scrim))
+        .bg(theme::color(theme::palette(cx).scrim))
         .child(card)
 }
 
