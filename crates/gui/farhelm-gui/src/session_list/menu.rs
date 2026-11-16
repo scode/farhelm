@@ -575,9 +575,8 @@ pub(crate) fn launch_wait(cx: &App) -> Option<&'static str> {
 /// explain the specific reason").
 ///
 /// It takes `&mut App` because the launcher reads its pending launch through `session::PerSession::current`, which
-/// starts the state over when the UI session changed and so needs `&mut`; `PerSession` has no read-only form. A surface
-/// that draws with `&App` reads this where its caller still has `&mut App` (the pane's render, for the card and the
-/// header).
+/// starts the state over when the UI session changed and so needs `&mut`. A surface that draws with `&App` reads this
+/// where its caller still has `&mut App` (the pane's render, for the card and the header).
 pub(crate) fn launcher_wait(cx: &mut App) -> Option<&'static str> {
     if entry::new_available(cx) {
         return None;

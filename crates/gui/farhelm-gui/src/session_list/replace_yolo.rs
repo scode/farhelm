@@ -34,9 +34,10 @@
 //!   a Stop or Delete on the session's key. Open is the prompt's own `Inline::is_open`, never whether an entry is kept
 //!   here: a question dropped unanswered stays open for any clone.
 //! - **One UI session, and pruned once closed.** The questions are kept with the UI session they were asked under and
-//!   are neither drawn nor open under another; the next question asked after a reset starts the map over. A reset drops
-//!   the host write's reply, so a question in flight then would otherwise stay open, refusing its session's actions,
-//!   for good. A closed question draws nothing and refuses nothing, and the next question asked prunes it.
+//!   are neither drawn nor open under another; the next question asked after a reset, or the list's next frame, starts
+//!   the map over. A reset drops the host write's reply, so a question in flight then would otherwise stay open,
+//!   refusing its session's actions, for good. A closed question draws nothing and refuses nothing, and the next
+//!   question asked prunes it.
 //!
 //! NOTE: A question on a row the list's query leaves out waits there unseen until the row is drawn again, as any
 //! refusal on that row would.
@@ -48,7 +49,7 @@ use std::collections::HashMap;
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Entity, EntityId, Global, IntoElement,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Entity, Global, IntoElement,
     ParentElement as _, Styled as _, Window, div, px,
 };
 
@@ -56,8 +57,9 @@ use crate::focus::{self, Mark};
 use crate::host_text::HostText;
 use crate::hosts::identity;
 use crate::launcher::entry::{self, YoloAsk};
+use crate::local_state;
 use crate::prompt::Inline;
-use crate::{local_state, session};
+use crate::session::{self, PerSession};
 
 use super::replace;
 use crate::theme::{self, metrics};
@@ -93,9 +95,9 @@ struct Asked {
 /// row and the header, which read it while they draw, redraw when a question is asked (as the wait clocks in
 /// [`super::outcome`] do).
 pub(crate) struct Questions {
-    /// The UI session they were asked under; reads under any other find nothing.
-    session: Option<EntityId>,
-    asked: HashMap<String, Asked>,
+    /// The questions by the source session's key, kept with the UI session they were asked under: reads under any
+    /// other find nothing, and the next change under another starts the map over.
+    asked: PerSession<HashMap<String, Asked>>,
 }
 
 /// Where the [`Questions`] are kept: a global, because the list and the header read the same ones.
@@ -104,53 +106,31 @@ struct Kept(Option<Entity<Questions>>);
 
 impl Global for Kept {}
 
-/// The current UI session's id, `None` while the window is inert.
-fn ui_session(cx: &App) -> Option<EntityId> {
-    session::connection(cx).and_then(|connection| {
-        connection
-            .read(cx)
-            .session()
-            .map(|session| session.entity_id())
-    })
-}
-
-/// `key`'s question under the current UI session, if one was asked. The comparison with the UI session is done here
-/// rather than through [`session::PerSession`], whose `current` takes the state mutably: the row and the header read
-/// this while they draw, with only `&App`.
+/// `key`'s question under the current UI session, if one was asked. Read through [`PerSession::read`], never
+/// `current`, because the row and the header read this while they draw, with only `&App`.
 fn asked<'a>(key: &str, cx: &'a App) -> Option<&'a Asked> {
-    let now = ui_session(cx)?;
     let questions = cx.try_global::<Kept>()?.0.as_ref()?.read(cx);
-    if questions.session != Some(now) {
-        return None;
-    }
-    questions.asked.get(key)
+    questions.asked.read(cx)?.get(key)
 }
 
-/// Change the questions with `change`, after starting them over if they were kept for another UI session and pruning
-/// the closed ones, and redraw whoever draws them.
-fn update(cx: &mut App, change: impl FnOnce(&mut Questions)) {
-    let now = ui_session(cx);
+/// Change the current UI session's questions with `change`, after starting them over if they were kept for another
+/// UI session and pruning the closed ones, and redraw whoever draws them.
+fn update(cx: &mut App, change: impl FnOnce(&mut HashMap<String, Asked>)) {
     let questions = match cx.try_global::<Kept>().and_then(|kept| kept.0.clone()) {
         Some(questions) => questions,
         None => {
             let questions = cx.new(|_| Questions {
-                session: now,
-                asked: HashMap::new(),
+                asked: PerSession::default(),
             });
             cx.set_global(Kept(Some(questions.clone())));
             questions
         }
     };
     questions.update(cx, |questions, cx| {
-        if questions.session != now {
-            questions.session = now;
-            questions.asked.clear();
-        }
+        let asked = questions.asked.current(cx);
         // A closed question draws nothing and refuses nothing, so it goes at the next change.
-        questions
-            .asked
-            .retain(|_, asked| asked.question.is_open(cx));
-        change(questions);
+        asked.retain(|_, asked| asked.question.is_open(cx));
+        change(asked);
         cx.notify();
     });
 }
@@ -184,14 +164,13 @@ pub(crate) fn open(key: &str, cx: &App) -> bool {
 /// The list calls it at the top of each frame and scrolls that row wholly into view; it asks for one more frame while
 /// this returns a key. Nothing redraws for the count itself.
 pub(super) fn take_reveal(cx: &mut App) -> Option<String> {
-    let now = ui_session(cx)?;
     let questions = cx.try_global::<Kept>()?.0.clone()?;
-    questions.update(cx, |questions, _| {
-        if questions.session != Some(now) {
-            return None;
-        }
+    questions.update(cx, |questions, cx| {
+        // Under another UI session (or none) this starts the map over, which drops only questions no read could find,
+        // so it finds nothing to reveal, as it should.
         let (key, asked) = questions
             .asked
+            .current(cx)
             .iter_mut()
             .find(|(_, asked)| asked.surface == Surface::Row && asked.reveal > 0)?;
         asked.reveal -= 1;
@@ -238,8 +217,8 @@ pub(super) fn ask(
     } else {
         0
     };
-    update(cx, |questions| {
-        questions.asked.insert(
+    update(cx, |asked| {
+        asked.insert(
             source.to_owned(),
             Asked {
                 surface,
