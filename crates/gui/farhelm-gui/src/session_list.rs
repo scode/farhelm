@@ -95,6 +95,9 @@
 //! drawn, so a menu whose row scrolls well out of view closes, and a question about a row out of view is asked
 //! centered.
 //!
+//! A row's hover help is its summary card ([`summary`]), a view the row hands the layer manager, which draws it beside
+//! the sidebar while it shows; every mark in the row places its own help there too ([`row_marks::HelpPlace`]).
+//!
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
 //! moves its field.
 //!
@@ -151,6 +154,7 @@ pub(crate) mod seen;
 pub(crate) mod selection;
 pub(crate) mod status;
 pub(crate) mod stop;
+pub(crate) mod summary;
 
 /// The home-folding rule the rows' last line uses, shared with the details bar's directory field so the two fold a path
 /// alike.
@@ -182,6 +186,9 @@ mod row_marks_tests;
 
 #[cfg(test)]
 mod seen_tests;
+
+#[cfg(test)]
+mod summary_tests;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -968,6 +975,7 @@ fn draw_row(
     let row_active = hover.hovered(cx) || focus.contains_focused(window, cx);
     let menu = menu::menu_button(shared, weak, key, &title, selected, row_active, window, cx);
     let bell = crate::notices_bell::bell(key, selected, window, cx);
+    let card = summary::SummaryCard::of(key, steps, window, cx);
     let collections = store.read(cx).collections();
     let Some(row) = collections.get::<SessionRow>(key) else {
         return div().into_any_element();
@@ -981,6 +989,7 @@ fn draw_row(
         steps,
         menu,
         bell,
+        card,
         focus,
         hover,
         // A plain click opens the session and clears the marks; Shift or Cmd or Ctrl marks instead ([`marking`]).

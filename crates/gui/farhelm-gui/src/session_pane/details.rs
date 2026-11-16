@@ -75,7 +75,7 @@ use crate::hosts::identity;
 use crate::layers;
 use crate::session_list::abbreviate_home;
 use crate::session_list::age::{self, Age};
-use crate::session_list::row_marks::{self, HostMark, Locality};
+use crate::session_list::row_marks::{self, HelpPlace, HostMark, Locality};
 use crate::session_list::status::{self, EndedWords, Live};
 use crate::theme::{self, Palette, metrics};
 
@@ -607,7 +607,12 @@ fn host_part(host: Host, palette: &Palette) -> Div {
                 .flex_none()
                 .flex()
                 .items_center()
-                .child(row_marks::host_mark(BAR_ID, mark, palette))
+                .child(row_marks::host_mark(
+                    BAR_ID,
+                    mark,
+                    palette,
+                    HelpPlace::Ordinary,
+                ))
         }))
         .child(
             StatusMark::new(

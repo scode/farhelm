@@ -2436,6 +2436,139 @@ fn session_lists_then(state: &SceneState, window: &mut Window, cx: &mut App) -> 
     session_lists(state, window, cx)
 }
 
+// ---- Session-row hovers beside the sidebar --------------------------------------------------------------------------
+
+/// The width of the session-row hover scenes' content: the sidebar's column, then room for the 310-pixel summary card 6
+/// pixels past the column's edge and 4 inside the window's, which beside placement needs or it falls back above the row.
+const BESIDE_SCENE_WIDTH: f32 = 776.;
+
+/// [`session_lists_then`] in a sidebar column the way the sidebar draws it for hover help: the list on the sidebar's
+/// surface with its 1-pixel edge, and the edge that beside placement sits against ([`layers::beside_edge`]) drawn on a
+/// box around that border, with room to the column's right for the help.
+fn session_lists_beside(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    defer_after(state, window, cx);
+    let palette = theme::palette(cx);
+    let column = div()
+        .w(theme::metrics::SIDEBAR_WIDTH)
+        .h_full()
+        .bg(theme::color(palette.bg_1))
+        .border_r_1()
+        .border_color(theme::color(palette.border_sidebar_edge))
+        .text_color(theme::color(palette.fg_0))
+        .children(state.lists.borrow().iter().cloned());
+    div()
+        .w(px(BESIDE_SCENE_WIDTH))
+        .h(px(394.))
+        .flex()
+        .child(
+            div()
+                .relative()
+                .h_full()
+                .child(column)
+                .child(layers::beside_edge(window, cx)),
+        )
+        .into_any_element()
+}
+
+/// The idle row's age, its hover help beside the sidebar with the notch and the accent ring on the age (reference
+/// `tooltip-last-activity`). The setup turns on GPUI's driver record, which [`rest_pointer_on`] finds the age in.
+fn session_row_hover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    session_list_then(state, rest_on_idle_age, cx);
+}
+
+/// [`rest_pointer_on`] row `c`'s age.
+fn rest_on_idle_age(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    rest_pointer_on(
+        state,
+        "session-row-c-age",
+        gpui::Bounds::center,
+        rest_on_idle_age,
+        window,
+        cx,
+    );
+}
+
+/// The summary card of the idle local row `Update dependencies`, beside the sidebar with the notch and the accent ring
+/// around the row's open control (reference `tooltip-session-summary`): its status, its Cursor launch, the local host,
+/// the managed checkout, the directory and the two times. Shown from the row's last line, an unmarked part of the row,
+/// as the old e2e case reached it from the open area's lower part. The row was created a day before it was last active,
+/// so its Started is a real time: the shared fleet's rows keep the helm fixture's creation stamp of 100 seconds, which
+/// the card would show as a moment in 1970.
+fn session_summary_card_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    let rows = fleet().map(|row| {
+        if row.key == "d" {
+            row.created(TEST_NOW - 3 * 3_600 - 86_400)
+        } else {
+            row
+        }
+    });
+    session_list_scene(state, &rows, cx);
+    state.after.set(Some(rest_on_idle_row));
+}
+
+/// [`rest_pointer_on`] row `d`'s open control, on its last line.
+fn rest_on_idle_row(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    rest_pointer_on(
+        state,
+        "session-row-d",
+        |bounds| point(bounds.center().x, bounds.bottom() - px(9.)),
+        rest_on_idle_row,
+        window,
+        cx,
+    );
+}
+
+/// Move the pointer to `at` of the bounds of the element the last frame drew under `id`, as a pointer coming to rest
+/// there, so its hover help shows through the row's own wiring rather than a copy of it. A scene's frames do not wait
+/// out the hover delay, so a tooltip of the scene's own is shown first: help shows at once while another shows, and
+/// the control's then replaces it. Until a frame has drawn the element (the store's first snapshot reaches the list a
+/// frame or more after the list first draws, see [`press_bell_b`]), this waits for the next frame as `retry`.
+fn rest_pointer_on(
+    state: &SceneState,
+    id: &str,
+    at: fn(&gpui::Bounds<Pixels>) -> gpui::Point<Pixels>,
+    retry: AfterDrawn,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(target) = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| at(&node.bounds))
+    else {
+        state.after.set(Some(retry));
+        return;
+    };
+    layers::show_tooltip_at(
+        &state.tooltip_owner,
+        "Warming".into(),
+        point(px(0.), px(0.)),
+        window,
+        cx,
+    );
+    window.dispatch_event(
+        gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+            position: target,
+            pressed_button: None,
+            modifiers: gpui::Modifiers::default(),
+        }),
+        cx,
+    );
+}
+
 /// Run the scene's [`AfterDrawn`], if it has one left, after this frame: by then the list has drawn under its UI
 /// session, with rows to anchor to.
 fn defer_after(state: &SceneState, window: &mut Window, cx: &mut App) {
@@ -5046,6 +5179,18 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_setup,
+    },
+    Scene {
+        name: "session-row-hover-beside",
+        size: (800., 418.),
+        draw: session_lists_beside,
+        setup: session_row_hover_setup,
+    },
+    Scene {
+        name: "session-summary-card",
+        size: (800., 418.),
+        draw: session_lists_beside,
+        setup: session_summary_card_setup,
     },
     Scene {
         name: "session-list-selected-stale",

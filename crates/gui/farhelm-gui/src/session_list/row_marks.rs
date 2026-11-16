@@ -327,6 +327,39 @@ impl RowMarks {
     }
 }
 
+// ---- Where a mark's help shows ---------------------------------------------------------------------------------------
+
+/// Where a mark's hover help shows. SPEC.md, "Session list": "Every session-row hover, including the summary card and
+/// notification bell, sits just right of the sidebar", with a notch pointing back at its control and a thin ring on it,
+/// while "tooltips outside session rows ... keep their placement without these cues". The host mark is drawn in a row,
+/// in the session pane's details bar and in the quick switcher's rows, so whoever draws it says which it is.
+///
+/// The old app opted each row target in by hand (`data-tooltip-anchor="session-row"` on the open button, the dot, the
+/// host, agent and permission marks, the pin, the age, the stale and ended marks, the bell and the actions button);
+/// every one of those that is ported asks through here, so a mark added to the row later has one place to look. The
+/// bell is the exception: its help is built in [`crate::notices_bell`], which asks for the same placement itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HelpPlace {
+    /// Anywhere but a session row: the ordinary placement, no cues.
+    Ordinary,
+    /// In a session row, `selected` or not: beside the sidebar ([`HoverHelp::beside`]), the ring in the on-fill ink on
+    /// the selected row's accent fill ([`HoverHelp::ring_on_fill`]), as the old `.session-row.selected
+    /// .tooltip-target-ring` drew it.
+    Row { selected: bool },
+}
+
+impl HelpPlace {
+    /// `help`, asking for this placement. A round control adds its own radius after this
+    /// ([`HoverHelp::ring_radius`]), which only matters beside the sidebar.
+    pub(crate) fn place(self, help: HoverHelp) -> HoverHelp {
+        match self {
+            HelpPlace::Ordinary => help,
+            HelpPlace::Row { selected: false } => help.beside(),
+            HelpPlace::Row { selected: true } => help.ring_on_fill(),
+        }
+    }
+}
+
 // ---- Drawing --------------------------------------------------------------------------------------------------------
 
 /// The debug selector a drawn mark's picture carries: the mark's id and what it draws
@@ -339,8 +372,13 @@ pub(super) fn picture_selector(mark_id: &str, picture: &str) -> String {
 }
 
 /// The locality slot's mark: the host's shape at the slot's size, named `Local` or `Remote` with what that means as
-/// its hover help.
-pub(crate) fn host_mark(row_id: &str, mark: HostMark, palette: &Palette) -> impl IntoElement {
+/// its hover help, shown where `place` says (beside the sidebar in a session row).
+pub(crate) fn host_mark(
+    row_id: &str,
+    mark: HostMark,
+    palette: &Palette,
+    place: HelpPlace,
+) -> impl IntoElement {
     let id = SharedString::from(format!("{row_id}{HOST_ID_SUFFIX}"));
     let drawn = identity::host_mark(mark.icon, mark.color, metrics::ROW_SLOT, palette);
     // The identity tint gives way to the inverse ink on the selected row's fill (the old `.host-kind-icon` rule's
@@ -354,7 +392,7 @@ pub(crate) fn host_mark(row_id: &str, mark: HostMark, palette: &Palette) -> impl
     StatusMark::new(
         id,
         mark.locality.word(),
-        HoverHelp::tooltip(mark.locality.help()),
+        place.place(HoverHelp::tooltip(mark.locality.help())),
         Role::Image,
         mark.locality.word(),
     )
@@ -362,14 +400,16 @@ pub(crate) fn host_mark(row_id: &str, mark: HostMark, palette: &Palette) -> impl
 }
 
 /// The first line's agent track (`.session-agent`): the agent mark, then the shield, each in its own 10-pixel cell, as
-/// one status mark named by the pair's description and helped by it. As wide as its two cells, so every row's track
-/// lines up.
-pub(super) fn agent_track(row_id: &str, marks: &RowMarks) -> impl IntoElement {
+/// one status mark named by the pair's description and helped by it, shown where `place` says. As wide as its two
+/// cells, so every row's track lines up.
+pub(super) fn agent_track(row_id: &str, marks: &RowMarks, place: HelpPlace) -> impl IntoElement {
     let id = SharedString::from(format!("{row_id}{AGENT_ID_SUFFIX}"));
     let (glyph, agent_ink) = marks.agent;
     let (shield, shield_ink) = marks.permission;
     let name = marks.description.name();
-    let help = HoverHelp::paragraphs(marks.description.help(&format!("{id}-help")));
+    let help = place.place(HoverHelp::paragraphs(
+        marks.description.help(&format!("{id}-help")),
+    ));
     let pair = div()
         .flex()
         .flex_row()

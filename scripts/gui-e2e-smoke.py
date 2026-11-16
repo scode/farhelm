@@ -22,10 +22,10 @@ other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's r
 67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings; 69, the session
 header's Replace with… and Clone; 70, the session list's Pin to top, Move up and Unpin; 71, a row's actions button
 opening its menu on Up; 72 and 73, the terminal: a reopened terminal's replay and live input, and a text size step
-reaching the program's terminal size). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`,
-`hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`,
-`notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
+reaching the program's terminal size; 75, a row's summary card on hover). The behavior itself is specified and tested
+in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
+`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
+`shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
 session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match
 in drawing order, which is the header's.
 
@@ -176,6 +176,9 @@ REPLACE_WITH_SUMMARY = "Start a new session, then delete the source"
 
 # A row only the open Keyboard shortcuts overview draws: the oracle for it open and closed (step 65).
 SHORTCUTS_ROW = "Begin launch sequence"
+
+# The left half of a session row's summary card's footer: drawn only while a row's card shows (step 75).
+SUMMARY_CLICK_HINT = "Click to open"
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -2318,6 +2321,29 @@ class Smoke(unittest.TestCase):
                 if not failing:
                     raise
                 print(f"gui-e2e-smoke: step 74 left {destination} behind: {error}", file=sys.stderr)
+
+    # ---- The sidebar area's summary card (75), on a session of its own ------------------------------------------------
+
+    def test_75_resting_on_a_rows_title_shows_its_summary_card(self) -> None:
+        """A row's summary card is drawn by the layer manager from a view the row hands it, only while it shows, so the
+        in-process tests that pin its words and placement say nothing about the real app's wiring of the two. SPEC.md,
+        "Session list": the card appears from the title, naming what a click does. Specified, on a basic session this
+        step seeds under a title of its own: with the pointer on the list's count, off the rows, the card's `Click to
+        open` is not in the window; resting the pointer on the session's title brings it in, beside its `⋯ For
+        actions`; and moving the pointer back to the count takes it away again, so later steps meet no card."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"Summary {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        self.ok("hover", "id:session-count")
+        self.ok("wait", "--gone", SUMMARY_CLICK_HINT)
+        self.ok("hover", f"text:{title}")
+        self.ok("wait", "--text", SUMMARY_CLICK_HINT)
+        self.ok("wait", "--text", "⋯ For actions")
+        self.ok("hover", "id:session-count")
+        self.ok("wait", "--gone", SUMMARY_CLICK_HINT)
 
 
 def seed_stamped_basic(title: str, origin: str) -> None:

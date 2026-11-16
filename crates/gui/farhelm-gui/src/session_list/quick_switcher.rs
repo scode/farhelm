@@ -117,7 +117,7 @@ use gpui::{
 };
 
 use super::menu::{self, AgentName};
-use super::row_marks::{self, HostMark};
+use super::row_marks::{self, HelpPlace, HostMark};
 use super::selection;
 use super::status::{self, Badge};
 use crate::components::{
@@ -1395,7 +1395,12 @@ fn result_row(
                 .flex_none()
                 .flex()
                 .items_center()
-                .child(row_marks::host_mark(&mark_id, mark, palette))
+                .child(row_marks::host_mark(
+                    &mark_id,
+                    mark,
+                    palette,
+                    HelpPlace::Ordinary,
+                ))
         }))
         .child(
             marked(host_name, &HostText::from_host(host_name))

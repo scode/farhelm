@@ -46,6 +46,7 @@ use gpui::{
 use serde_json::json;
 
 use super::SessionList;
+use super::row_marks::HelpPlace;
 use super::selection::Listed;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, MenuItem, StatusMark};
@@ -351,13 +352,18 @@ const GLYPH_GAP: f32 = 4.;
 /// A pinned row's glyph, drawn just before its title in the row's secondary ink (`--fg-1`, or `--on-accent-dim` on the
 /// selected row): a status mark named and helped "Pinned", with nothing to press, so a press on it opens the row as a
 /// press on the title does. `row_id` is the row's open control id and `gap` the identity line's gap after it, which the
-/// glyph takes back down to the old one.
-pub(super) fn glyph(row_id: &SharedString, ink: Token, gap: gpui::Pixels) -> impl IntoElement {
+/// glyph takes back down to the old one. Its help shows where `place` says: beside the sidebar, as every row hover.
+pub(super) fn glyph(
+    row_id: &SharedString,
+    ink: Token,
+    gap: gpui::Pixels,
+    place: HelpPlace,
+) -> impl IntoElement {
     div().flex_none().mr(px(GLYPH_GAP) - gap).child(
         StatusMark::new(
             format!("{row_id}{GLYPH_ID_SUFFIX}"),
             "Pinned",
-            HoverHelp::tooltip("Pinned"),
+            place.place(HoverHelp::tooltip("Pinned")),
             Role::Image,
             PIN_GLYPH,
         )
