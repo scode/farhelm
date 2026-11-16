@@ -114,15 +114,35 @@ class Source:
         version(tag)
         return self.git('rev-parse', '--verify', tag + '^{commit}').strip()
 
+    # Where the desktop updater's source has lived, newest layout first. The GPUI
+    # cutover moved it from the webview shell's UI crate into farhelm-desktop in one
+    # commit, so a real release tag carries one of these, depending on when it was
+    # cut; were a tag to carry both, the first (newest) would be read.
+    UPDATER_SOURCES = ('crates/farhelm-desktop/src/updater.rs',
+                       'crates/farhelm-ui/src/desktop/updater.rs')
+
     def override(self, tag):
         """Select the recipe branch from old source, not the candidate's support.
 
 This is source support only. Native launch forwarding and override removal still
 require the recipe's actual startup-log and GUI observations.
+
+The tag's updater source is read at the first of UPDATER_SOURCES it contains. A
+tag with none of them is refused rather than reported as lacking the override:
+every release from the upgrade floor onward has an updater, so a missing file
+means the source moved again, and silently choosing the manual branch would
+turn P0's updater check into an unavailable one for the wrong reason.
 """
         version(tag)
-        return 'FARHELM_DESKTOP_UPDATE_LATEST' in self.git(
-            'show', tag + ':crates/farhelm-ui/src/desktop/updater.rs')
+        # --full-tree: ls-tree paths are otherwise relative to where Git runs, unlike
+        # the `tag:path` read below, which is always from the repository root.
+        present = set(self.git('ls-tree', '--full-tree', '--name-only', tag + '^{commit}', '--',
+                               *self.UPDATER_SOURCES).splitlines())
+        for path in self.UPDATER_SOURCES:
+            if path in present:
+                return 'FARHELM_DESKTOP_UPDATE_LATEST' in self.git('show', tag + ':' + path)
+        raise Refused(f'{tag} has no desktop updater source at a known path; '
+                      'add its location to Source.UPDATER_SOURCES')
 
 
 def download(url):

@@ -17,5 +17,6 @@ between attempts. A release attempt therefore starts and ends with `cargo clean`
 - When the attempt is over: the release is published and verified, or the attempt is abandoned. Not while a gate failure
   is still being reproduced in that checkout, since the reproduction wants its warm build.
 
-`cargo clean` removes the checkout's whole `target/`, including the dx bundle and any earlier development build there.
-The pinned nextest (`.ci-nextest`) lives outside it and stays.
+`cargo clean` removes the checkout's whole `target/`: every crate's build outputs, the desktop binary staged for the
+release archive under `target/dist-desktop`, and any earlier development build there. The pinned nextest (`.ci-nextest`)
+lives outside it and stays.
