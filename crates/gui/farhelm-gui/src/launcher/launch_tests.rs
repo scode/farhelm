@@ -7,7 +7,7 @@
 //! test holds the create's reply until it has set up the moment the reply arrives in.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::ui_channel::{CollectionChanges, CollectionState};
+use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, HostView};
 use gpui::{Keystroke, VisualTestContext};
 use serde_json::json;
 
@@ -223,6 +223,65 @@ fn a_refused_launch_brings_the_launcher_back_with_the_helms_words(cx: &mut gpui:
     test_support::click(cx, "launcher-name-row");
     keys(cx, "n");
     assert_eq!(shown_refusal(cx), None, "an edit takes the refusal away");
+}
+
+/// A create that fails after the host's registry row moved to another installation while it was out comes back with
+/// the old launcher's generic words, not the helm's own. Why: those words came from the earlier installation and could
+/// describe a machine the draft no longer targets (launcher-enter.spec's "launcher shows a generic refusal after its
+/// target changes"). Specified: host1 is retargeted (a new recorded identity) while the create is out, then the create
+/// is refused; the launcher returns saying "A launch for an earlier setup was refused" after "Not launched.", never the
+/// helm's text.
+#[gpui::test]
+fn a_refusal_after_the_host_moved_installation_is_generic(cx: &mut gpui::TestAppContext) {
+    assert_eq!(
+        after_the_host_moved(cx, 409).as_deref(),
+        Some("Not launched. A launch for an earlier setup was refused")
+    );
+}
+
+/// The timeout half of [`a_refusal_after_the_host_moved_installation_is_generic`]: the helm's host-reply bound cut the
+/// create off, so it may still start, and the generic words must say its outcome is unknown rather than "refused" (the
+/// old launcher's words for this case). Specified: host1 retargeted while the create is out, then the helm's timeout;
+/// the launcher returns saying "A launch for an earlier setup timed out; its outcome is unknown", with no "Not
+/// launched." lead.
+#[gpui::test]
+fn a_timeout_after_the_host_moved_installation_is_generic(cx: &mut gpui::TestAppContext) {
+    assert_eq!(
+        after_the_host_moved(cx, 504).as_deref(),
+        Some("A launch for an earlier setup timed out; its outcome is unknown")
+    );
+}
+
+/// Launch, retarget host1 onto another installation while the create is out (checked in the store), then answer the
+/// create with `status` and the helm's own words; returns the refusal the launcher shows once it is back.
+fn after_the_host_moved(cx: &mut gpui::TestAppContext, status: u16) -> Option<String> {
+    let (mut helm, cx, create) = launched(cx);
+    let mut state = super::view_tests::fixture_hosts(&[0]);
+    state.entries[0].value["identity"] = json!("replacement-install");
+    helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    let identity = cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).expect("a store");
+        store
+            .read(cx)
+            .collections()
+            .get::<HostView>(&HostView::key(1))
+            .and_then(|host| host.identity.clone())
+    });
+    assert_eq!(
+        identity.as_deref(),
+        Some("replacement-install"),
+        "the premise: host1 names another installation"
+    );
+    helm.reply(create.id, status, Some(json!("old-target private words")));
+    settle(cx);
+    assert!(any_open(cx), "the launcher came back");
+    shown_refusal(cx)
 }
 
 /// SPEC.md, "Creation": after a refusal the user moved on from, "a notice offers it, and the launcher returns when the

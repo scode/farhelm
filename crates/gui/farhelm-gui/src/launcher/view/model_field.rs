@@ -13,9 +13,10 @@
 //!   tall; a click on a row picks it.
 //! - **Enter** applies the highlighted row, or else what was typed ([`super::super::model::model_enter_target`]), and
 //!   closes the list; a typed id another agent type owns, or one with no agent type to own it, is said under the field
-//!   instead, until the next completed choice. In Restart with, Enter then presses the main action, as the old
-//!   launcher did there; in the other modes it only chooses, so a typed model is never launched by the key that
-//!   entered it. Restart with holds the agent type, so its list offers no other agent's models.
+//!   instead, until the next completed choice. In every mode, Restart with included, Enter only chooses, with the
+//!   list open or closed: a typed model is never launched by the key that entered it, and Launch (or Restart) is a
+//!   separate press (the old launcher's "choosing a model must not submit the launcher"; SPEC.md gives the model field
+//!   its own Enter rule). Restart with holds the agent type, so its list offers no other agent's models.
 //! - **Leaving the field**, Escape or a press outside closes the list and puts the chosen model back in the field.
 //!
 //! The rows are drawn from the launcher's own state by the launcher's shared floating-list view (`field_list`); the
@@ -34,7 +35,7 @@ use super::field_list::{Drawn, FieldList};
 use super::{Launcher, choices::status_line, row};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::host_text::{HostSentence, HostText};
-use crate::launcher::draft::{Field, Mode, harness_label};
+use crate::launcher::draft::{Field, harness_label};
 use crate::launcher::model::{
     ModelEnterTarget, ModelOption, NEEDS_HARNESS, model_enter_target, model_options,
     owned_elsewhere_message,
@@ -138,9 +139,9 @@ impl Launcher {
         }
     }
 
-    /// Enter in the field: apply what the open list's highlighted row or the typed text means, then, in Restart with,
-    /// press the main action, unless the Enter is `held` (an auto-repeat): "A held Enter never launches" (SPEC.md).
-    pub(super) fn model_enter(&mut self, held: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Enter in the field: apply what the open list's highlighted row or the typed text means. It never presses the
+    /// main action, in any mode (the module docs).
+    pub(super) fn model_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.model_list_open(window, cx) {
             let typed = self.model_input.text(cx);
             let target = model_enter_target(
@@ -166,9 +167,6 @@ impl Launcher {
                     self.model_field.error = Some(owned_elsewhere_message(&id, &owners));
                 }
             }
-        }
-        if matches!(self.draft.mode, Mode::RestartWith(_)) && !held {
-            self.press(window, cx);
         }
         cx.notify();
     }

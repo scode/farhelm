@@ -1176,11 +1176,15 @@ fn leaving_the_model_field_closes_its_list(cx: &mut TestAppContext) {
     assert_eq!(model_text(cx), "Harness default");
 }
 
-/// In Restart with, which holds the agent type, the list offers no other agents' models, and Enter in the field
-/// chooses and then presses Restart, as the old launcher did there. Specified: no show-all row; a typed custom id and
-/// Enter choose it and show Restart's reason beside it (the source session is not in the store, so the press is refused).
+/// In Restart with, which holds the agent type, the list offers no other agents' models, and Enter in the field only
+/// chooses, open or closed: Restart is a separate press. Why: the old launcher's "choosing a model must not submit the
+/// launcher" (restart-with.spec's "restart with model Enter chooses before a separate restart action"), and a restart
+/// stops a running agent, so a key that only meant "this model" must not do it. Specified: no show-all row; a typed
+/// custom id and Enter choose it and show no Restart error; Enter again in the closed field still presses nothing; an
+/// id another agent type owns, typed and entered, applies nothing and presses nothing; the separate press of Restart
+/// then refuses, since that typed model was not applied.
 #[gpui::test]
-fn restart_with_model_enter_chooses_then_presses_restart(cx: &mut TestAppContext) {
+fn restart_with_model_enter_chooses_without_restarting(cx: &mut TestAppContext) {
     let mut source = super::draft_tests::session(codex(None, None, None));
     source.restart_offer = RestartOffer::Resume;
     let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
@@ -1197,13 +1201,21 @@ fn restart_with_model_enter_chooses_then_presses_restart(cx: &mut TestAppContext
     );
     keys(cx, "m y - m o d e l enter");
     assert_eq!(draft(cx).agent.model.as_deref(), Some("my-model"));
-    let refusal = shown_refusal(cx).unwrap_or_default();
+    assert_eq!(shown_refusal(cx), None, "Enter chose and pressed nothing");
     assert!(
-        refusal.starts_with("Restart error. "),
-        "Enter pressed Restart: {refusal}"
+        !has_node(cx, "launcher-model-list"),
+        "the premise: Enter closed the list"
     );
-    // A model that is not applied refuses the restart, so it cannot quietly keep the old model. The field shows the
-    // picked model now, and typing would add to it, so it is focused afresh first, which empties it.
+    keys(cx, "enter");
+    assert_eq!(
+        shown_refusal(cx),
+        None,
+        "nor does Enter in the closed field"
+    );
+    // A model that is not applied refuses the restart, so it cannot quietly keep the old model: `sonnet` belongs to
+    // another agent type, so Enter applies nothing. The
+    // field shows the picked model now, and typing would add to it, so focus leaves it (Tab) and comes back with a
+    // click, which empties it.
     keys(cx, "tab");
     test_support::click(cx, "launcher-model-row");
     assert_eq!(
@@ -1213,8 +1225,15 @@ fn restart_with_model_enter_chooses_then_presses_restart(cx: &mut TestAppContext
     );
     keys(cx, "s o n n e t enter");
     assert_eq!(
+        shown_refusal(cx),
+        None,
+        "the premise: Enter pressed nothing"
+    );
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
         shown_refusal(cx).as_deref(),
-        Some("Restart error. Choose a model before restarting")
+        Some("Restart error. Choose a model before restarting"),
+        "the separate press reached Restart"
     );
 }
 
