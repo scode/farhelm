@@ -27,9 +27,14 @@
 //! the row's help look changed on every frame. The view keeps only the session's key and the frame's animation steps; it
 //! reads the session from the store as it draws, so it never shows facts older than the row beside it.
 //!
-//! NOTE: SPEC.md and the old app also show the card when keyboard focus reaches the row's open control. The layer
-//! manager shows no hover help on keyboard focus for any control yet, so the card shows on hover only; that is the
-//! layer manager's to add, and the card needs nothing more for it.
+//! The card also shows when keyboard focus reaches the row's open control, as SPEC.md and the old app have it. The
+//! open control is a [`ListRow`](crate::components::ListRow), which hands its own focus stop to its hover help, so
+//! the layer manager shows the card for a keyboard landing as it does for every focusable control's help: after the
+//! same hover delay as the pointer's (or at once in the grace another tooltip left), beside the sidebar with its notch
+//! and ring, gone when focus leaves the control, and put away by Escape or a press until focus next lands. Nothing
+//! here asks for it, so a row that stopped drawing its open control as a `ListRow` would lose it silently;
+//! `summary_tests.rs` pins it. A mark that holds focus inside the row (the bell, the actions button) shows its own help
+//! instead, since only the open control's own stop counts.
 //!
 //! The card is for the eye only. A screen reader hears the row's own name and description (its title, then its status
 //! and what a click does, and on a compact row what its hidden lines said), as the old card's hidden source stayed out

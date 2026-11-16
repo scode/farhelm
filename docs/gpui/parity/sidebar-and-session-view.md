@@ -125,7 +125,7 @@ no piece has it yet
 
 Tests: 9. Covers: a session's title and open area share its summary card.
 
-partly: crates/gui/farhelm-gui/src/session_list/summary_tests.rs and the goldens.
+ported: crates/gui/farhelm-gui/src/session_list/summary_tests.rs and the goldens.
 `a session's title and open area share its summary card`:
 `a_rows_title_shows_its_summary_card_beside_the_sidebar_with_its_ring` (from the title, beside the sidebar with the
 notch and the ring on the open control, the card's words in order),
@@ -134,7 +134,10 @@ notch and the ring on the open control, the card's words in order),
 `an_exited_sessions_card_says_exited_and_names_its_commands_program`,
 `a_managed_checkouts_card_names_the_repository_and_the_checkouts_folder` and the `session-summary-card` golden (from the
 open area's lower part), the compact density by `a_compact_row_shows_the_same_card_with_its_hidden_folder`, and end to
-end scripts/gui-e2e-smoke.py `test_75_resting_on_a_rows_title_shows_its_summary_card`;
+end scripts/gui-e2e-smoke.py `test_75_resting_on_a_rows_title_shows_its_summary_card`, and its keyboard focus half (Tab
+onto the open control shows the same card beside the sidebar after the hover delay, the open row's with its on-fill
+ring, and focus moving on or Escape takes it away) by
+`tab_onto_a_rows_open_control_shows_its_card_until_focus_moves_on`;
 `a session summary falls back to ordinary placement when the window is too narrow`:
 crates/gui/farhelm-gui/src/layers/beside_tests.rs `card_help_falls_back_without_cues_in_a_window_too_narrow`;
 `a stale card is dim while row marks keep their own hover`: `a_card_leaves_out_what_the_session_does_not_say` (the stale
@@ -146,12 +149,13 @@ status still named; its grey is `CardStatus`'s ink, which no test pins) and
 ring and notch); `every visible session-row hover opts in, including the notification bell`:
 `every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring` (the dot, host, agent, age, pin, bell, actions button
 and stale cause, with the open row's on-fill ring) and `a_compact_row_shows_the_same_card_with_its_hidden_folder` (the
-compact ended mark and clock); `moving to the next mark while a tooltip shows replaces it at once`: the layer manager's
+compact ended mark and clock), and on keyboard focus the marks that hold focus, the bell and the actions button, by
+`a_focused_row_mark_shows_its_own_help_beside_the_sidebar_not_the_card` (each its own help beside the sidebar with its
+ring, not the card); `moving to the next mark while a tooltip shows replaces it at once`: the layer manager's
 crates/gui/farhelm-gui/src/components/tests/hover_help.rs
 `moving_between_a_mark_and_its_row_shows_the_help_under_the_pointer` and
 `one_controls_leave_never_hides_anothers_tooltip`; `a card target clones its hidden source into the shared tooltip`:
-superseded (the card is a view the layer manager draws, `HoverHelp::card`). Waiting: the card on keyboard focus of the
-open control (the layer manager shows no hover help on keyboard focus yet)
+superseded (the card is a view the layer manager draws, `HoverHelp::card`).
 
 ### `tests/sort.spec.ts`
 
@@ -1092,8 +1096,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   button, which joined its accessible name; here the name stays the title. Tested by `session_list/compact_tests.rs`
   `a_compact_rows_help_says_what_its_hidden_lines_would` and `session_list/summary_tests.rs`
   `a_compact_row_shows_the_same_card_with_its_hidden_folder`.
-- The summary card shows on hover only, not on keyboard focus of the row's open control as SPEC.md and the old app had
-  it: the layer manager shows no hover help on keyboard focus for any control yet, and that is its change to make.
 - Every row hover the old app placed beside the list is placed there, the notification bell's included
   (`session_list/summary_tests.rs` `every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring`), the pin grip's
   included; the managed-checkout mark is not ported, so it has no help to place.
