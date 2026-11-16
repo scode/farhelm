@@ -99,15 +99,16 @@ pub(super) fn dimmed(host: &HostView) -> bool {
 }
 
 /// The avatar's icon box, for its button's content: the host's `mark` (dimmed when [`dimmed`]) with its status marks
-/// over it ([`avatar_marks`]). The marks are anchored to this box, not to the button, as the old sheet anchored them
-/// ("Only the inner icon box anchors corner marks and host menus"), so they keep their places when the rail's rows
-/// widen to the expanded rail's labels.
+/// over it ([`avatar_marks`]) and `tracker`, the anchor tracker of the host menu the avatar opens. The marks and the
+/// menu are anchored to this box, not to the button, as the old sheet anchored them ("Only the inner icon box anchors
+/// corner marks and host menus"), so they keep their places when the rail's rows widen to the expanded rail's names.
 pub(super) fn icon_box(
     mark: AnyElement,
     host: &HostView,
     status: &HostStatus,
     pressed: bool,
     quiet: bool,
+    tracker: AnyElement,
     palette: &Palette,
 ) -> AnyElement {
     div()
@@ -124,6 +125,7 @@ pub(super) fn icon_box(
             mark
         })
         .child(avatar_marks(host, status, pressed, quiet, palette))
+        .child(tracker)
         .into_any_element()
 }
 

@@ -15,9 +15,9 @@
 //! read from the store when it draws. It fills the box it is given and scrolls its rows inside it, so the box needs a
 //! definite height.
 //!
-//! [`open_menu`] opens a host's actions menu at an anchor ([`menu`]): the panel's row toggle calls it, and the host
-//! rail's avatar menu will. [`open_settings`] opens a host's settings dialog ([`settings`]), which the menu's Settings
-//! calls.
+//! [`open_menu`] opens a host's actions menu at an anchor ([`menu`]): the panel's row toggle calls it, and so does the
+//! host rail's avatar on a secondary click or Shift+F10. [`open_settings`] opens a host's settings dialog
+//! ([`settings`]), which the menu's Settings calls.
 //!
 //! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button (`+`) call, each
 //! naming itself as where closing the dialog returns focus. A new host without Farhelm goes on to the setup

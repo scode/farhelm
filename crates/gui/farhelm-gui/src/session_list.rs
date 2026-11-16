@@ -112,7 +112,8 @@
 //! sessions, a sentence that names its filters. The heading and the segments are drawn from the first frame on, also
 //! while the first listing has not arrived, as the old app kept them usable before its first read. The rail's foot,
 //! which the list draws after its column, holds Hosts, which swaps that column for the Hosts panel ([`crate::hosts`]),
-//! and the Settings gear.
+//! the Settings gear, and the Expand control, which widens the whole rail to show its hosts' names and the foot's
+//! labels; the sidebar widens by as much, so the list's column keeps its width ([`host_rail`], "Expansion").
 //!
 //! Above the heading, while Hosts does not show, the list's column draws the Hosts attention list ([`attention`]): one
 //! row per host with a problem, work going on or an update, whose Details opens Hosts at that host. Its rows scroll on
@@ -136,10 +137,9 @@
 //! A retired containerized session supports Delete only, so its row, its menu and its open view withdraw everything
 //! else ([`retired`]).
 //!
-//! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, the row menu's other commands, and
-//! the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
-//! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
-//! terminal is on screen.
+//! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, and the row menu's other commands. New
+//! is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home; that
+//! comes with the session pane's status-card work (M2.12), which decides home when no terminal is on screen.
 
 pub(crate) mod age;
 mod attention;
@@ -332,8 +332,9 @@ pub struct SessionList {
     /// Where the order title was last drawn, for its menu to open below; recorded by every frame that draws the title.
     /// It refers to the title's element weakly, so a title no longer drawn (the Hosts panel shown) opens nothing.
     order_anchor: Option<Anchor>,
-    /// What the host rail keeps across frames (Add host's focus handle, its scroll position): kept here, since the rail
-    /// is rebuilt on every draw ([`host_rail::Kept`]).
+    /// What the host rail keeps across frames (Add host's and the Expand control's focus handles, its scroll position,
+    /// its expansion, its avatars' menu anchors): kept here, since the rail is rebuilt on every draw
+    /// ([`host_rail::Kept`]).
     rail: host_rail::Kept,
     /// The Hosts attention list's rows' scroll state ([`attention`]), kept for the window's life: a fresh handle per
     /// frame would put the rows back at their top on every draw.
@@ -435,6 +436,9 @@ impl SessionList {
         let following = session::observe_current(cx, |list: &mut Self, cx| list.settle(cx));
         let trash = cx.new(TrashButton::new);
         let weak_trash = trash.downgrade();
+        // First, so the foot's bell and Help button can read the rail's expansion from the entity it holds.
+        let rail = host_rail::Kept::new(cx);
+        let expansion = rail.expansion().clone();
         let mut list = SessionList {
             current: PerSession::default(),
             _following: following,
@@ -453,12 +457,12 @@ impl SessionList {
             all_focus: cx.focus_handle().tab_stop(true),
             settings_focus: cx.focus_handle().tab_stop(true),
             hosts_focus: cx.focus_handle().tab_stop(true),
-            help: cx.new(HelpButton::new),
+            help: cx.new(|cx| HelpButton::new(expansion.clone(), cx)),
             trash,
-            notices: cx.new(|cx| NoticesButton::new(weak_trash, cx)),
+            notices: cx.new(|cx| NoticesButton::new(weak_trash, expansion, cx)),
             order_focus: cx.focus_handle().tab_stop(true),
             order_anchor: None,
-            rail: host_rail::Kept::new(cx),
+            rail,
             attention_scroll: ScrollHandle::new(),
             hosts_panel: cx.new(HostsPanel::new),
             moves: HashMap::new(),
@@ -850,25 +854,37 @@ impl Render for SessionList {
         let attention = self.attention_frame(hosts_shown, window, cx);
         // Read before the store is borrowed too: answering it needs the app mutably.
         let new_available = launcher::entry::new_available(cx);
+        // The rail's avatars' anchors and focus handles are element state, made with the window, so before the store is
+        // borrowed as well.
+        let menu = self.prepare_rail(window, cx);
+        let expanded = self.rail_expanded(cx);
         let collections = store.read(cx).collections();
         let palette = theme::palette(cx);
         let body_row = body_row.child(host_rail::rail(
             collections,
-            choice.chosen().host,
             &weak,
             &self.all_focus,
             &self.rail,
-            hosts_shown,
+            host_rail::Look {
+                chosen: choice.chosen().host,
+                quiet: hosts_shown,
+                expanded,
+                menu,
+            },
             cx,
         ));
         // Drawn after the list's column, so Tab reaches the list's controls before the foot (`host_rail`'s docs).
         let foot = host_rail::foot(
             &weak,
-            &self.hosts_focus,
+            host_rail::FootParts {
+                hosts_focus: &self.hosts_focus,
+                settings_focus: &self.settings_focus,
+                notices: &self.notices,
+                help: &self.help,
+            },
+            &self.rail,
             hosts_shown,
-            &self.settings_focus,
-            &self.notices,
-            &self.help,
+            expanded,
             cx,
         );
         if hosts_shown {
@@ -885,7 +901,7 @@ impl Render for SessionList {
                 .child(foot);
         }
         // The heading and the segments row are drawn before the first listing too (the module docs).
-        let filter_row = filters::row(collections, choice.chosen(), &weak, palette);
+        let filter_row = filters::row(collections, choice.chosen(), &weak, expanded, palette);
         let refused = choice
             .refusal()
             .map(|refusal| failure_line(filters::refusal_sentence(refusal), palette));
@@ -1064,7 +1080,8 @@ fn draw_row(
 /// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
 /// the heading's actions at its right edge (`.session-heading-actions`), in SPEC.md's order: Trash (`owner.trash`, a
 /// view of its own), Templates, then New, drawn disabled unless `new_available` ([`launcher::entry::new_available`],
-/// read by the caller). Templates and New track the focus handles `owner` keeps for them. While marks are shown,
+/// read by the caller). The band wraps, so in a narrow column the actions take a line of their own under the title.
+/// Templates and New track the focus handles `owner` keeps for them. While marks are shown,
 /// `bar`, the marked bar the caller drew ([`marking`]), is the band instead, and the caller draws no `title`: the bar
 /// replaces the title, the count and the actions, and Trash's view stays alive undrawn.
 fn heading(
@@ -1119,6 +1136,10 @@ fn heading(
     div()
         .flex()
         .flex_row()
+        // The old `.session-heading { flex-wrap: wrap }`: in a column too narrow for the title, the count and the
+        // actions on one line (beside the expanded rail in a minimum window), the actions wrap below the title rather
+        // than covering it.
+        .flex_wrap()
         .items_center()
         .gap(px(6.))
         .py(metrics::LIST_HEADING_PAD.0)

@@ -29,6 +29,15 @@
 //!   is moving, only until its write's reply. The helm refuses a width outside the range rather than clamping it, which
 //!   is why every width is clamped before it is sent.
 //!
+//! - **Expanding the rail widens what is shown, never what is stored.** While the host rail is expanded
+//!   ([`SessionList::rail_expanded`]), the sidebar shows its width plus the expanded rail's extra 164 pixels, taken from
+//!   the main pane, so the session list beside the rail keeps its width ([`shown_width`], the old `shownWidth`). In a
+//!   window too narrow for that, the sidebar grows only as far as leaves the pane its floor, and the session list gives
+//!   up the rest; collapsing gives the width back. The width preference, the divider's value, a drag, a step and a
+//!   double-click all keep working on the stored width, whatever the rail does (SPEC.md: "The stored resize width and its
+//!   range keep their meaning, independent of rail expansion"), so a drag moves the shown edge by as much as the
+//!   pointer moves while there is room.
+//!
 //! The drag and the hold belong to the UI session ([`PerSession`]): a reset forgets both, and the sidebar draws what
 //! the new snapshot holds.
 //!
@@ -50,10 +59,9 @@
 //! the pointer.
 //!
 //! NOTE: Not built here, each with its own area: the macOS title band (the 48-pixel app bar with room for the window
-//! buttons and the window drag on its empty background, the desktop-integration area's), the updater's states and
-//! actions in the version readout (the same area's), and the rail's expansion, which widens the shown sidebar by 164
-//! pixels without changing the stored width. The version readout shows this window's build: the GUI does not learn the
-//! helm's build, so it cannot yet say when the two differ (the parity file records the wording that waits).
+//! buttons and the window drag on its empty background, the desktop-integration area's) and the updater's states and
+//! actions in the version readout (the same area's). The version readout shows this window's build: the GUI does not
+//! learn the helm's build, so it cannot yet say when the two differ (the parity file records the wording that waits).
 
 mod header;
 
@@ -69,9 +77,10 @@ use gpui::{
 };
 
 use crate::components::{Divider, DividerDrag, DividerStep, HoverHelp, Role};
-use crate::desktop::{title_band, updates};
+use crate::desktop::{linux_title_bar, title_band, updates};
 use crate::session::{self, PerSession};
 use crate::session_list::SessionList;
+use crate::session_list::host_rail::expansion;
 use crate::theme::{self, metrics};
 use crate::update_readout::view::VersionReadout;
 use crate::{layers, operations, render_count};
@@ -92,6 +101,25 @@ pub const MAIN_PANE_MIN_WIDTH: Pixels = px(320.);
 
 /// How far the divider reaches over the pane beside the sidebar (the old handle's `margin-right: -4px`).
 const DIVIDER_REACH: Pixels = px(4.);
+
+/// The width the sidebar shows for a stored `width`, with the host rail `expanded` or not, in a window whose content is
+/// `viewport` wide ([`linux_title_bar::content_width`]): the old `shownWidth`. Collapsed, the stored width. Expanded, the stored width
+/// plus the expanded rail's extra pixels ([`expansion::EXTRA`]) when the window has room, else as much of them as
+/// leaves the main pane its floor and the sidebar's edge a pixel more, but never less than the stored width: a window
+/// already too narrow for the stored width keeps it and scrolls sideways, as it would collapsed.
+///
+/// The extra pixel keeps the shown width below the narrow-window cutoff ([`header_floats`]: the pane's floor and the
+/// edge) whenever the stored width alone is below it, so expanding never by itself moves the macOS app header into the
+/// window's top row, which the old script promised too ("Expansion alone must not turn on either narrow-window class").
+pub(crate) fn shown_width(width: u32, expanded: bool, viewport: Pixels) -> u32 {
+    if !expanded {
+        return width;
+    }
+    let room = (f32::from(viewport - MAIN_PANE_MIN_WIDTH) - 2.)
+        .floor()
+        .max(0.) as u32;
+    width.max((width + expansion::EXTRA).min(room))
+}
 
 /// The divider's width: the old handle's 5-pixel strip, one pixel over the sidebar's edge and the rest over the pane.
 const DIVIDER_WIDTH: Pixels = px(5.);
@@ -149,7 +177,8 @@ impl Sidebar {
         }
     }
 
-    /// The width to draw now: the drag's, else the width held until the helm answers, else the stored one.
+    /// The width the sidebar is set to now, which the divider reports and a drag or step starts from: the drag's, else
+    /// the width held until the helm answers, else the stored one. The rail's expansion is not in it ([`Self::shown`]).
     fn width(&mut self, cx: &App) -> u32 {
         let current = self.current.current(cx);
         current
@@ -157,6 +186,17 @@ impl Sidebar {
             .map(|drag| drag.width)
             .or(current.held.map(|(_, width)| width))
             .unwrap_or_else(|| stored(cx))
+    }
+
+    /// The width the sidebar's column is drawn at now in `window`: [`Self::width`] widened for an expanded rail
+    /// ([`shown_width`]).
+    fn shown(&mut self, window: &Window, cx: &App) -> u32 {
+        let expanded = self.session_list.read(cx).rail_expanded(cx);
+        shown_width(
+            self.width(cx),
+            expanded,
+            linux_title_bar::content_width(window),
+        )
     }
 
     /// What a drag on the divider did.
@@ -280,18 +320,18 @@ impl Sidebar {
     /// The divider's grip, for the main view to draw after the pane, in the row that holds the sidebar and the pane
     /// (which must be its positioned ancestor): over the strip's box, from the column's edge to 4 pixels into the pane.
     ///
-    /// NOTE: Its position is worked out here, from the width, rather than from where the strip was drawn, so it stays
-    /// over the strip only while two things hold: the sidebar starts at the row's left edge, and the window redraws
-    /// whenever the sidebar's width changes (it does: the main view and the sidebar are uncached views, redrawn on
-    /// every frame, and a width change notifies). The rail's expansion, which widens the shown sidebar, must keep both
-    /// true or move the grip with it.
-    pub fn grip(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    /// NOTE: Its position is worked out here, from the shown width ([`Self::shown`]), rather than from where the strip
+    /// was drawn, so it stays over the strip only while two things hold: the sidebar starts at the row's left edge, and
+    /// the window redraws whenever the shown width changes (it does: the main view and the sidebar are uncached views,
+    /// redrawn on every frame, and a width change, an expansion's write and its push all notify).
+    pub fn grip(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let width = self.width(cx);
+        let shown = self.shown(window, cx);
         div()
             .absolute()
             .top_0()
             .bottom_0()
-            .left(px(width as f32) - px(1.))
+            .left(px(shown as f32) - px(1.))
             .w(DIVIDER_WIDTH)
             .child(self.divider(width, cx).grip())
             .into_any_element()
@@ -308,16 +348,16 @@ impl Sidebar {
     /// traffic lights. The cutoff is the old app's `sidebar-narrow-window` class (`window width <= sidebar width + 321`
     /// in `assets/sidebar-width.js` at reference commit `24bc0580`): the pane's floor and the sidebar's 1-pixel edge.
     pub fn floating_header(&mut self, window: &Window, cx: &App) -> Option<AnyElement> {
-        let width = self.width(cx);
+        let width = self.shown(window, cx);
         header_floats(width, window)
             .then(|| header::header(self.readout.clone(), window, cx).into_any_element())
     }
 }
 
-/// Whether the app header floats above both panes ([`Sidebar::floating_header`]) for a sidebar `width` wide.
+/// Whether the app header floats above both panes ([`Sidebar::floating_header`]) for a sidebar shown `width` wide.
 fn header_floats(width: u32, window: &Window) -> bool {
     title_band::ON
-        && window.viewport_size().width <= px(width as f32) + MAIN_PANE_MIN_WIDTH + px(1.)
+        && linux_title_bar::content_width(window) <= px(width as f32) + MAIN_PANE_MIN_WIDTH + px(1.)
 }
 
 impl Render for Sidebar {
@@ -325,9 +365,10 @@ impl Render for Sidebar {
         render_count::record("sidebar", cx);
         let palette = theme::palette(cx);
         let width = self.width(cx);
+        let shown = self.shown(window, cx);
         let column = div()
             .id("sidebar")
-            .w(px(width as f32))
+            .w(px(shown as f32))
             .flex_none()
             .h_full()
             .overflow_hidden()
@@ -336,7 +377,7 @@ impl Render for Sidebar {
             .bg(theme::color(palette.bg_1))
             .border_r_1()
             .border_color(theme::color(palette.border_sidebar_edge))
-            .when(!header_floats(width, window), |column| {
+            .when(!header_floats(shown, window), |column| {
                 column.child(header::header(self.readout.clone(), window, cx))
             })
             .child(div().flex_1().min_h_0().child(self.session_list.clone()));
