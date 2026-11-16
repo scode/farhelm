@@ -122,6 +122,40 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
     assert!(helm.commands().is_empty(), "nothing was sent");
 }
 
+/// Why this matters: on macOS a click focuses no button, so the press on Keep editing falls through to the Templates
+/// dialog, whose empty-space press focuses the dialog itself, and the question once closed with focus left there
+/// instead of in the name field. [`every_departure_from_an_unsaved_draft_asks_first`] runs the harness's Linux click
+/// rule, where the click focuses Keep editing first, so it never saw this. Specified, under the macOS click rule: with
+/// an unsaved draft and focus in the name field, the leave question asked by a click on another row, focus on Save, a
+/// click on Keep editing closes the question, puts focus back in the name field and sends nothing.
+#[gpui::test]
+fn keep_editing_by_pointer_returns_to_the_name_field_on_a_mac(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_unsaved(&mut helm, cx);
+    click(cx, "templates-name");
+    assert!(
+        name_focused(cx),
+        "the premise: the user is in the name field"
+    );
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    click(cx, "template-open-webbuilder");
+    settle(cx);
+    assert!(
+        painted(cx).contains(QUESTION),
+        "the premise: the question is up"
+    );
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: focus is on Save"
+    );
+    click(cx, "prompt-cancel");
+    settle(cx);
+    assert!(!painted(cx).contains(QUESTION), "Keep editing closed it");
+    assert!(name_focused(cx), "Keep editing returns to the name field");
+    assert!(helm.commands().is_empty(), "nothing was sent");
+}
+
 /// Discard must carry out the departure the user chose, not a generic one. Specified: Discard on another row opens
 /// that row's template clean; asked again and discarded for the header Close, the dialog closes.
 #[gpui::test]

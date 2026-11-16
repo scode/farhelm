@@ -1257,8 +1257,18 @@ struct OpenLauncher {
 }
 
 /// Open the harness with a [`Launcher`] dialog over an empty page, focus on its Launch button. The dialog has no
-/// dismissal hook, so Escape that reaches it closes it: a test can tell whether the question took the key.
+/// dismissal hook, so Escape that reaches it closes it: a test can tell whether the question took the key. A press on
+/// its empty space keeps focus on the control in use, as the real launcher's does.
 fn open_launcher(cx: &mut TestAppContext) -> (&mut VisualTestContext, OpenLauncher) {
+    open_launcher_with(cx, true)
+}
+
+/// [`open_launcher`], with `keeps_focus_on_empty_click` as the dialog's empty-space rule: `false` is the rule of the
+/// Templates and Trash dialogs, where a press on the dialog's empty space focuses the dialog itself.
+fn open_launcher_with(
+    cx: &mut TestAppContext,
+    keeps_focus_on_empty_click: bool,
+) -> (&mut VisualTestContext, OpenLauncher) {
     let cx = open(cx, |_, _| div().into_any_element());
     let (launch, reset, container) = (handle(cx), handle(cx), handle(cx));
     let question: InlineCell = Rc::default();
@@ -1277,7 +1287,7 @@ fn open_launcher(cx: &mut TestAppContext) -> (&mut VisualTestContext, OpenLaunch
                 start,
                 subject: None,
                 main_action: None,
-                keeps_focus_on_empty_click: true,
+                keeps_focus_on_empty_click,
                 returns_to: focus::ReturnTo::Opener,
                 on_dismiss: None,
                 placement: layers::DialogPlacement::Centered,
@@ -1516,10 +1526,10 @@ fn an_inline_question_answers_once_and_returns_focus_inside_its_dialog(cx: &mut 
 /// [`prompt::Inline::is_open`] for both, while drawing, and nothing notifies the owner itself when the question closes:
 /// the question notifies only its own entity, and that must be enough to redraw the owner.
 ///
-/// Specified: while the question is open its owner draws its place. With focus moved to Reset, a Cancel that does not
-/// take focus (a macOS click) closes the question and leaves focus on Reset, so no focus move redraws the window (a
-/// focus return would, and would hide a missing notification); the next frame still has no place, and `is_open` is
-/// false.
+/// Specified: while the question is open its owner draws its place. With focus moved to Reset, a Cancel run through the
+/// test's handle (neither a key on it nor a click, so it returns no focus) closes the question and leaves focus on
+/// Reset, so no focus move redraws the window (a focus return would, and would hide a missing notification); the next
+/// frame still has no place, and `is_open` is false.
 #[gpui::test]
 fn an_owner_reading_is_open_while_drawing_stops_drawing_a_closed_questions_place(
     cx: &mut TestAppContext,
@@ -1562,12 +1572,13 @@ fn an_owner_reading_is_open_while_drawing_stops_drawing_a_closed_questions_place
 
 /// Why this matters: SPEC.md, "Who may move focus": a question that arrives after the user moved on (a plain Replace's
 /// YOLO question, after they typed elsewhere) shows where it belongs and waits; it must not take focus from what they
-/// are doing. And an answer that runs while focus is elsewhere leaves focus there: the question returns focus only when
-/// it held it, so it never pulls focus away from a control the user moved to.
+/// are doing. And an answer that runs while focus is elsewhere, with no click on it, leaves focus there (an attempt
+/// that succeeds after the user moved on): the question returns focus only when it held it or a click ran the answer,
+/// so it never pulls focus away from a control the user moved to.
 ///
 /// Specified: asked inline with a mark the user has moved on from (a key pressed since), the question is drawn and
-/// open, and focus stays on the launcher's Launch button. With focus then moved to Reset, a Cancel pressed without
-/// taking focus (a macOS click) closes the question and leaves focus on Reset.
+/// open, and focus stays on the launcher's Launch button. With focus then moved to Reset, a Cancel run through the
+/// test's handle (neither a key on it nor a click) closes the question and leaves focus on Reset.
 #[gpui::test]
 fn an_inline_question_that_arrives_after_the_user_moved_on_waits(cx: &mut TestAppContext) {
     let (cx, launcher) = open_launcher(cx);
@@ -1762,6 +1773,131 @@ fn an_inline_question_on_the_page_takes_and_returns_focus(cx: &mut TestAppContex
         "Escape closed the question"
     );
     assert!(focused(cx, &replace), "focus went back to Replace");
+}
+
+/// Why this matters: on macOS a click focuses no button, so the press on an inline question's answer falls through to
+/// the owning dialog's empty-space rule, and in a dialog that takes focus on an empty-space press (Templates, Trash)
+/// focus is on the dialog itself by the time the answer runs. The question used to return focus only from an answer
+/// that held it, so a pointer answer there left focus on the dialog: the Templates leave question's Keep editing did
+/// not return to the name field, which SPEC.md asks for, and the Trash dialog's own test reached its Cancel by keyboard
+/// to get around the same loss. The Linux suite never saw it, since a Linux click focuses the answer first. The dialog
+/// whose empty space takes focus is the case the fix is for; the one whose empty space keeps it is a regression guard.
+///
+/// Specified, under the macOS click rule, in a dialog whose empty-space press focuses the dialog and in one where it
+/// keeps focus on the control in use: a pointer click on Cancel, the guarded option or the one-time answer closes the
+/// question and returns focus to Launch, which held it when the question opened, as Enter on the same answer does. A
+/// click on the answer that can fail leaves the question open until its attempt settles; success then returns focus to
+/// Launch too. In the dialog whose empty-space press focuses it, a press on Reset while an attempt is in flight is the
+/// user moving on (it focuses the dialog), and success then leaves focus there.
+fn a_pointer_answer_returns_focus_under_the_macos_click_rule(
+    cx: &mut TestAppContext,
+    keeps_focus_on_empty_click: bool,
+) {
+    let (cx, launcher) = open_launcher_with(cx, keeps_focus_on_empty_click);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    let rule = if keeps_focus_on_empty_click {
+        "empty space keeps focus"
+    } else {
+        "empty space focuses the dialog"
+    };
+    let ask = |cx: &mut VisualTestContext, ran: &Ran, attempts: &Attempts| {
+        let inline = ask_inline_in(cx, &launcher, yolo(ran, attempts), ran);
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("prompt-cancel"),
+            "{rule}: the premise: the question took focus on Cancel"
+        );
+        inline
+    };
+    for (answer, expected) in [
+        ("prompt-cancel", None),
+        ("prompt-alternative-0", Some("guarded")),
+        ("prompt-alternative-1", Some("always")),
+        ("prompt-confirm", Some("confirmed")),
+    ] {
+        let (ran, attempts): (Ran, Attempts) = Default::default();
+        let inline = ask(cx, &ran, &attempts);
+        click(cx, answer);
+        if !attempts.borrow().is_empty() {
+            assert!(
+                cx.update(|_, cx| inline.is_open(cx)),
+                "{rule}: the question stays up while {answer}'s attempt is in flight"
+            );
+            settle_attempt(cx, &attempts, None);
+        }
+        let expected: Vec<String> = expected
+            .map(|ran| format!("{ran} codex on build-box"))
+            .into_iter()
+            .collect();
+        assert_eq!(
+            *ran.borrow(),
+            expected,
+            "{rule}: a click on {answer} ran it once"
+        );
+        assert!(
+            !cx.update(|_, cx| inline.is_open(cx)),
+            "{rule}: a click on {answer} closed the question"
+        );
+        assert!(
+            focused(cx, &launcher.launch),
+            "{rule}: after a click on {answer}, focus went back to Launch; focused: {:?}",
+            focused_id(cx)
+        );
+        assert!(
+            is_open(cx, launcher.layer),
+            "{rule}: the launcher stayed open"
+        );
+    }
+
+    // Where empty space keeps focus, a macOS press on Reset leaves focus on the question's Cancel, and success returns
+    // it from there by the answer-holds-focus rule, so only the dialog that takes focus shows the press moving on.
+    if keeps_focus_on_empty_click {
+        return;
+    }
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let inline = ask(cx, &ran, &attempts);
+    click(cx, "prompt-alternative-1");
+    assert_eq!(
+        attempts.borrow().len(),
+        1,
+        "{rule}: the premise: an attempt is in flight"
+    );
+    click(cx, "reset");
+    let moved_to = cx.update(|window, cx| window.focused(cx));
+    // The last assertion tells "the moved-on click no longer counts" from "the click still returns focus" only because
+    // the press left focus somewhere other than Launch (the dialog, under the macOS rule).
+    assert!(
+        !focused(cx, &launcher.launch),
+        "{rule}: the premise: the press on Reset left focus off Launch"
+    );
+    settle_attempt(cx, &attempts, None);
+    assert!(
+        !cx.update(|_, cx| inline.is_open(cx)),
+        "{rule}: success closed the question"
+    );
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        moved_to,
+        "{rule}: success after the user pressed elsewhere left focus where that press put it"
+    );
+}
+
+/// [`a_pointer_answer_returns_focus_under_the_macos_click_rule`] in a dialog whose empty-space press focuses the
+/// dialog, as the Templates and Trash dialogs' does: the case that left focus on the dialog.
+#[gpui::test]
+fn a_pointer_answer_returns_focus_on_a_mac_where_empty_space_focuses_the_dialog(
+    cx: &mut TestAppContext,
+) {
+    a_pointer_answer_returns_focus_under_the_macos_click_rule(cx, false);
+}
+
+/// [`a_pointer_answer_returns_focus_under_the_macos_click_rule`] in a dialog whose empty-space press keeps focus on the
+/// control in use, as the launcher's and Settings' do. A regression guard for those dialogs, not a guard of the fix:
+/// there a macOS click leaves focus on the answer in use, so this passed before clicks counted, and it is here so the
+/// click path cannot break the dialogs that already worked.
+#[gpui::test]
+fn a_pointer_answer_returns_focus_on_a_mac_where_empty_space_keeps_focus(cx: &mut TestAppContext) {
+    a_pointer_answer_returns_focus_under_the_macos_click_rule(cx, true);
 }
 
 // ---- Stays up with the reason ----------------------------------------------------------------------------------------

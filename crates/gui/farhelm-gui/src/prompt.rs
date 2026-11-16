@@ -94,16 +94,18 @@
 //! foot. It is not a layer: no veil, no header Close, no subject (it goes when its owner stops drawing it), and Tab
 //! passes through it as through the rest of the owner's dialog. Where it is drawn is the owner's; how it looks and
 //! answers are the prompt's. Focus moves into it when it opens, onto its starting answer, unless the user has moved on
-//! since `mark` (then it shows and waits), and an answer pressed while focus is inside it returns focus to what held it
-//! when it opened, inside the owner's dialog. Inside a dialog both moves go through the focus coordinator's
-//! [`focus::focus_in_layer`], which waits for the frame that first draws the starting answer and scrolls it into view
-//! as Tab would, so the owner scrolls nothing itself; on the page they go through [`focus::focus_control`]. Escape
-//! while focus is in it means Cancel and is taken there, so the owning dialog stays open; Escape anywhere else in the
-//! dialog is the dialog's. Enter presses the focused answer; the question holds no focus of its own, so a press on its
-//! empty space does what the owning dialog's empty-space rule says. It draws in one of two looks: plain, the old leave
-//! question's text and answers (`.templates-departure`), on whatever band its owner puts it in, or loud
-//! ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its title as a red heading
-//! (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
+//! since `mark` (then it shows and waits), and an answer pressed while focus is inside it, or clicked, returns focus to
+//! what held it when it opened, inside the owner's dialog. A click counts wherever focus is when the answer runs: on
+//! macOS a click focuses no button, so its press falls through to the owning dialog's empty-space rule, and in a dialog
+//! whose empty space takes focus (Templates, Trash) focus is on the dialog itself by then. Inside a dialog both moves
+//! go through the focus coordinator's [`focus::focus_in_layer`], which waits for the frame that first draws the
+//! starting answer and scrolls it into view as Tab would, so the owner scrolls nothing itself; on the page they go
+//! through [`focus::focus_control`]. Escape while focus is in it means Cancel and is taken there, so the owning dialog
+//! stays open; Escape anywhere else in the dialog is the dialog's. Enter presses the focused answer; the question holds
+//! no focus of its own, so a press on its empty space does what the owning dialog's empty-space rule says. It draws in
+//! one of two looks: plain, the old leave question's text and answers (`.templates-departure`), on whatever band its
+//! owner puts it in, or loud ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its
+//! title as a red heading (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
 //!
 //! Some options belong to some presentations only: the body, tile, note, width and scroll stop to the centered
 //! question, the loud look to the inline one, and the empty-click rule and the Escape-home and named-control returns
@@ -648,6 +650,10 @@ pub struct Prompt<T: 'static> {
     reason: Option<Line>,
     /// What held focus when an inline question opened, where an answer returns it. Layers keep their own.
     opener: Option<WeakFocusHandle>,
+    /// The user's input as of the click that ran the last answer (or started the attempt in flight), or `None` when a
+    /// key or the test handle ran it. An inline question returns focus after a click it has not moved on from, as
+    /// after an answer that holds focus: on macOS the click leaves focus off the answer ([`Prompt::close`]).
+    clicked: Option<Mark>,
     /// How many times the question has been reworded ([`Open::reword`]), and the count as of the last frame shown on
     /// screen. While the two differ, the user has not yet seen the words the answers would act on, and only Cancel
     /// answers.
@@ -702,8 +708,15 @@ impl<T: Clone + 'static> Prompt<T> {
     /// Run `which`, if no answer has run yet and no attempt is in flight: close the question (returning focus to its
     /// opener), then, for Confirm or an extra answer, hand the frozen value to its action. A fallible answer instead
     /// starts an attempt and leaves the question open, frozen, until the attempt settles. Every answer but Cancel does
-    /// nothing between a reword and the frame that shows it (see the module docs).
-    fn answer(&mut self, which: Which, window: &mut Window, cx: &mut Context<Self>) {
+    /// nothing between a reword and the frame that shows it (see the module docs). `clicked` is the mark of the click
+    /// that pressed the answer, `None` for a key.
+    fn answer(
+        &mut self,
+        which: Which,
+        clicked: Option<Mark>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let unseen = self.wording != self.drawn_wording;
         if self.answered
             || self.in_flight
@@ -712,6 +725,7 @@ impl<T: Clone + 'static> Prompt<T> {
         {
             return;
         }
+        self.clicked = clicked;
         if let Some(Some(Action::Fallible(action))) = self.action_of(which) {
             let action = action.clone();
             self.in_flight = true;
@@ -776,7 +790,7 @@ impl<T: Clone + 'static> Prompt<T> {
     }
 
     /// Take the question down: close its layer, or, inline, stop drawing it and return focus to what held it when it
-    /// opened, if focus is on one of its answers.
+    /// opened, if focus is on one of its answers or a click ran the answer and the user has not moved on since.
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
@@ -788,8 +802,18 @@ impl<T: Clone + 'static> Prompt<T> {
                 .chain(&self.alternative_focus)
                 .chain(std::iter::once(&self.confirm_focus))
                 .any(|answer| answer.is_focused(window));
-            if holds && let Some(opener) = self.opener.as_ref().and_then(WeakFocusHandle::upgrade) {
-                move_for_question(&opener, &Mark::take(cx), window, cx);
+            // A click on an answer is an answer from inside the question wherever it left focus. The macOS click rule
+            // focuses no button, and the press goes on to the owner's empty-space rule, which in a dialog that takes
+            // focus there has put focus on the dialog: reading only `holds`, Keep editing on a Mac left focus on the
+            // Templates dialog rather than in the name field. The click's own mark goes to the focus coordinator, which
+            // refuses the move once the user has moved on since the click (a press elsewhere while the answer's
+            // attempt ran), as it refuses any move for an action the user has left behind.
+            let clicked = self.clicked.take();
+            let mark = if holds { Some(Mark::take(cx)) } else { clicked };
+            if let Some(mark) = mark
+                && let Some(opener) = self.opener.as_ref().and_then(WeakFocusHandle::upgrade)
+            {
+                move_for_question(&opener, &mark, window, cx);
             }
             cx.notify();
         }
@@ -860,9 +884,12 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         let question = &self.question;
         let answer = |which: Which, cx: &mut Context<Self>| {
             let prompt: WeakEntity<Self> = cx.weak_entity();
-            move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+            move |event: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+                // A button hands Enter and Space here too, as GPUI's default click, which is a keyboard one; anything
+                // else is the pointer's.
+                let clicked = (!event.is_keyboard()).then(|| Mark::take(cx));
                 // The prompt may already be gone (answered and closed); then there is nothing to answer.
-                let _ = prompt.update(cx, |prompt, cx| prompt.answer(which, window, cx));
+                let _ = prompt.update(cx, |prompt, cx| prompt.answer(which, clicked, window, cx));
             }
         };
         let cancel = Button::new(
@@ -1004,9 +1031,9 @@ fn inline<T: Clone + 'static>(
             Role::Status
         })
         .aria_label(question.title.accessible_text())
-        .on_action(
-            cx.listener(|prompt, _: &Dismiss, window, cx| prompt.answer(Which::Cancel, window, cx)),
-        )
+        .on_action(cx.listener(|prompt, _: &Dismiss, window, cx| {
+            prompt.answer(Which::Cancel, None, window, cx)
+        }))
         .flex()
         .flex_col()
         .text_color(theme::color(palette.fg_0))
@@ -1063,23 +1090,24 @@ pub(crate) struct Asked<T: 'static> {
 
 #[cfg(test)]
 impl<T: Clone + 'static> Asked<T> {
-    /// Press Confirm, as its button does.
+    /// Press Confirm, as its button does for a key ([`press`]).
     pub fn confirm(&self, window: &mut Window, cx: &mut App) {
         press(&self.prompt, Which::Confirm, window, cx);
     }
 
-    /// Press Cancel, as its button does.
+    /// Press Cancel, as its button does for a key ([`press`]).
     pub fn cancel(&self, window: &mut Window, cx: &mut App) {
         press(&self.prompt, Which::Cancel, window, cx);
     }
 
-    /// Press the extra answer at `index`, as its button does.
+    /// Press the extra answer at `index`, as its button does for a key ([`press`]).
     pub fn alternative(&self, index: usize, window: &mut Window, cx: &mut App) {
         press(&self.prompt, Which::Alternative(index), window, cx);
     }
 }
 
-/// Press `which` on `prompt`, as its button does, for tests that answer without drawing in between.
+/// Press `which` on `prompt`, as its button does for a key, for tests that answer without drawing in between. It is no
+/// click, so an inline question returns focus afterwards only if focus is on one of its answers ([`Prompt::close`]).
 #[cfg(test)]
 fn press<T: Clone + 'static>(
     prompt: &Entity<Prompt<T>>,
@@ -1087,7 +1115,7 @@ fn press<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) {
-    prompt.update(cx, |prompt, cx| prompt.answer(which, window, cx));
+    prompt.update(cx, |prompt, cx| prompt.answer(which, None, window, cx));
 }
 
 /// A question its owner draws inside its own surface ([`ask_inline`]). The owner keeps it and draws it as a child where
@@ -1127,19 +1155,19 @@ impl<T: Clone + 'static> Inline<T> {
         self.prompt.read(cx).in_flight
     }
 
-    /// Press Confirm, as its button does.
+    /// Press Confirm, as its button does for a key ([`press`]).
     #[cfg(test)]
     pub(crate) fn confirm(&self, window: &mut Window, cx: &mut App) {
         press(&self.prompt, Which::Confirm, window, cx);
     }
 
-    /// Press Cancel, as its button does.
+    /// Press Cancel, as its button does for a key ([`press`]).
     #[cfg(test)]
     pub(crate) fn cancel(&self, window: &mut Window, cx: &mut App) {
         press(&self.prompt, Which::Cancel, window, cx);
     }
 
-    /// Press the extra answer at `index`, as its button does.
+    /// Press the extra answer at `index`, as its button does for a key ([`press`]).
     #[cfg(test)]
     pub(crate) fn alternative(&self, index: usize, window: &mut Window, cx: &mut App) {
         press(&self.prompt, Which::Alternative(index), window, cx);
@@ -1381,7 +1409,9 @@ fn ask_inner<T: Clone + 'static>(
     let main_action: Option<layers::MainAction> = enabled.then(|| {
         let weak = weak.clone();
         Rc::new(move |window: &mut Window, cx: &mut App| {
-            let _ = weak.update(cx, |prompt, cx| prompt.answer(Which::Confirm, window, cx));
+            let _ = weak.update(cx, |prompt, cx| {
+                prompt.answer(Which::Confirm, None, window, cx)
+            });
         }) as layers::MainAction
     });
     // Every dismissal (Escape, a control routed through `layers::dismiss`) waits while an attempt is in flight, as the
@@ -1487,6 +1517,7 @@ fn build<T: Clone + 'static>(
         in_flight: false,
         reason: None,
         opener: None,
+        clicked: None,
         wording: 0,
         drawn_wording: 0,
         confirm_focus,
