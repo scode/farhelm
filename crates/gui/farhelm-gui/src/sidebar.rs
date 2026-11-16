@@ -103,8 +103,8 @@ pub const MAIN_PANE_MIN_WIDTH: Pixels = px(320.);
 const DIVIDER_REACH: Pixels = px(4.);
 
 /// The width the sidebar shows for a stored `width`, with the host rail `expanded` or not, in a window whose content is
-/// `viewport` wide ([`linux_title_bar::content_width`]): the old `shownWidth`. Collapsed, the stored width. Expanded, the stored width
-/// plus the expanded rail's extra pixels ([`expansion::EXTRA`]) when the window has room, else as much of them as
+/// `viewport` wide (the width of [`linux_title_bar::content_area`]): the old `shownWidth`. Collapsed, the stored
+/// width. Expanded, the stored width plus the expanded rail's extra pixels ([`expansion::EXTRA`]) when the window has room, else as much of them as
 /// leaves the main pane its floor and the sidebar's edge a pixel more, but never less than the stored width: a window
 /// already too narrow for the stored width keeps it and scrolls sideways, as it would collapsed.
 ///
@@ -195,7 +195,7 @@ impl Sidebar {
         shown_width(
             self.width(cx),
             expanded,
-            linux_title_bar::content_width(window),
+            linux_title_bar::content_area(window).size.width,
         )
     }
 
@@ -357,7 +357,8 @@ impl Sidebar {
 /// Whether the app header floats above both panes ([`Sidebar::floating_header`]) for a sidebar shown `width` wide.
 fn header_floats(width: u32, window: &Window) -> bool {
     title_band::ON
-        && linux_title_bar::content_width(window) <= px(width as f32) + MAIN_PANE_MIN_WIDTH + px(1.)
+        && linux_title_bar::content_area(window).size.width
+            <= px(width as f32) + MAIN_PANE_MIN_WIDTH + px(1.)
 }
 
 impl Render for Sidebar {

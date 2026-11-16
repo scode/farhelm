@@ -40,8 +40,9 @@
 
 use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Pixels, RenderOnce, Role, ScrollHandle, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Window, div, point, prelude::FluentBuilder as _, px,
+    IntoElement, ParentElement, Pixels, RenderOnce, Role, ScrollHandle, SharedString, Size,
+    Stateful, StatefulInteractiveElement, Styled, Window, div, point, prelude::FluentBuilder as _,
+    px,
 };
 
 use super::{
@@ -321,26 +322,9 @@ impl RenderOnce for DialogFrame {
                 metrics::DIALOG_FOOTER_PAD,
             )
         };
-        let viewport = window.viewport_size();
-        // `max-height: calc(100dvh - 2 * var(--dialog-vertical-margin))`, with the margin `max(24px, 5dvh)`: on a tall
-        // window a dialog that fills the cap (Settings, say) keeps 5% of the height above and below it, not a flat 24
-        // pixels, except in a frame that asks for the old launcher's flat margin in a wide window
-        // ([`Self::flat_margin_when_wide`]). (The old `max-width: 620px` rule, which shrank the margin to
-        // `max(12px, 3dvh)`, never applies: the window is at least 720 pixels wide.)
-        let vertical_margin =
-            if self.flat_margin_when_wide && viewport.width >= FLAT_MARGIN_MIN_WIDTH {
-                metrics::DIALOG_VERTICAL_MARGIN
-            } else {
-                metrics::DIALOG_VERTICAL_MARGIN.max(viewport.height * 0.05)
-            };
-        let max_height = viewport.height - vertical_margin * 2.;
-        // The old `width: min(Npx, 100%)` inside a backdrop padded 20 pixels each side. The layer manager centers a
-        // dialog without padding or constraining it, so `max_w_full` here would be relative to a parent as wide as the
-        // card itself and cap nothing; the frame caps its own width against the window instead.
-        let width = self
-            .width
-            .unwrap_or(metrics::DIALOG_WIDTH)
-            .min(viewport.width - metrics::DIALOG_SIDE_MARGIN * 2.);
+        let area = crate::desktop::linux_title_bar::content_area(window).size;
+        let limits = frame_limits(area, self.width, self.flat_margin_when_wide);
+        let (width, max_height) = (limits.width, limits.height);
 
         let mut heading = div().flex_1().min_w_0();
         heading = match self.heading {
@@ -501,7 +485,7 @@ impl RenderOnce for DialogFrame {
             let region = div()
                 .id(ElementId::Name(format!("{}-notices", self.id).into()))
                 .debug_selector(|| format!("{}-notices", self.id))
-                .max_h(window.viewport_size().height * NOTICES_MAX_SHARE)
+                .max_h(area.height * NOTICES_MAX_SHARE)
                 .overflow_y_scroll()
                 .when(self.notices_rule, |region| {
                     region
@@ -626,4 +610,36 @@ pub(crate) fn dialog_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
         spread_radius: px(0.),
         inset: false,
     }]
+}
+
+/// The widest and tallest a frame may be in a window whose content area is `area`
+/// ([`crate::desktop::linux_title_bar::content_area`]): the frame's own `width` (or the ordinary dialog width) kept 20
+/// pixels inside each side, and the old height cap. The old app measured both against its page, which is the content
+/// area here.
+///
+/// The height cap is `max-height: calc(100dvh - 2 * var(--dialog-vertical-margin))`, with the margin
+/// `max(24px, 5dvh)`: on a tall window a dialog that fills the cap (Settings, say) keeps 5% of the height above and
+/// below it, not a flat 24 pixels, except in a frame that asks for the old launcher's flat margin in a wide window
+/// (`flat_margin_when_wide`, [`DialogFrame::flat_margin_when_wide`]). (The old `max-width: 620px` rule, which shrank
+/// the margin to `max(12px, 3dvh)`, never applies: the window is at least 720 pixels wide.)
+///
+/// The width cap is the old `width: min(Npx, 100%)` inside a backdrop padded 20 pixels each side. The layer manager
+/// centers a dialog without constraining it, so `max_w_full` in the frame would be relative to a parent as wide as the
+/// card itself and cap nothing; the frame caps its own width instead.
+pub(super) fn frame_limits(
+    area: Size<Pixels>,
+    width: Option<Pixels>,
+    flat_margin_when_wide: bool,
+) -> Size<Pixels> {
+    let vertical_margin = if flat_margin_when_wide && area.width >= FLAT_MARGIN_MIN_WIDTH {
+        metrics::DIALOG_VERTICAL_MARGIN
+    } else {
+        metrics::DIALOG_VERTICAL_MARGIN.max(area.height * 0.05)
+    };
+    Size {
+        width: width
+            .unwrap_or(metrics::DIALOG_WIDTH)
+            .min(area.width - metrics::DIALOG_SIDE_MARGIN * 2.),
+        height: area.height - vertical_margin * 2.,
+    }
 }

@@ -81,11 +81,11 @@ use crate::ticker;
 /// `width: min(310px, 100vw - 8px)` (the layer manager keeps it inside a narrower window).
 pub(crate) const WIDTH: Pixels = px(310.);
 
-/// `.host-progress-card`'s `max-height: calc(100vh - 10px)`: room kept below the window's height. The chrome around
-/// the card clips it at the window's height less 8 pixels, inside its one-pixel border on each side, so this is the
-/// most the card's own content may take. The card applies it itself rather than leaving it to that clip: the cap is
-/// what makes its step list shrink around the current step, and what the fit's room is counted from, where a clip
-/// would cut off the card's end, notice included.
+/// `.host-progress-card`'s `max-height: calc(100vh - 10px)`: room kept below the height of the window's content area
+/// (the old page). The chrome around the card clips it at that height less 8 pixels, inside its one-pixel border on
+/// each side, so this is the most the card's own content may take. The card applies it itself rather than leaving it to
+/// that clip: the cap is what makes its step list shrink around the current step, and what the fit's room is counted
+/// from, where a clip would cut off the card's end, notice included.
 const WINDOW_ROOM: f32 = 10.;
 
 /// The sections' side padding (`padding: ... 10px`).
@@ -333,14 +333,15 @@ impl Card {
         if pivot.is_none() {
             measured.pivot.set(px(0.));
         }
+        // The card's limit ([`WINDOW_ROOM`]), against the content area the layer manager fits the card into.
+        let limit = crate::desktop::linux_title_bar::content_area(window)
+            .size
+            .height
+            - px(WINDOW_ROOM);
         // The room the diagnostics may take, before the notice: the card's limit less the header, the list kept down
         // to its one whole step, and what each diagnostic section takes besides its text.
-        let mut room = f32::from(
-            window.viewport_size().height
-                - px(WINDOW_ROOM)
-                - measured.header.get()
-                - measured.pivot.get(),
-        ) - 2. * LIST_PAD_Y;
+        let mut room =
+            f32::from(limit - measured.header.get() - measured.pivot.get()) - 2. * LIST_PAD_Y;
         let mut heights = Vec::new();
         for (drawn, diagnostic) in [
             (self.connection.is_some(), &measured.connection),
@@ -392,7 +393,7 @@ impl Card {
         div()
             .id(SharedString::from(format!("host-card-{id}")))
             .w_full()
-            .max_h(window.viewport_size().height - px(WINDOW_ROOM))
+            .max_h(limit)
             .flex()
             .flex_col()
             .overflow_hidden()
