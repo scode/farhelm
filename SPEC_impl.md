@@ -268,26 +268,38 @@ host that is not an environment, no account key) are local and answer as before;
 over SSH first, inside the bound. Stop and suspend is one command with one reply, so one bound covers its Stop and its
 Suspend together; its reply at the bound says only that the environment is suspended once the agent has stopped cleanly,
 which holds whichever half is still running, and a Stop that fails or leaves cleanup undone after the reply leaves the
-environment running. A session's Delete of its environment is not bounded yet and is bounded, or takes the accepted
-form, when the work that ports it needs it. A credential replacement waits the same bound, counted from its handler's
-start, for delivery to its hosts (decided by the migration's orchestrator on 2026-11-15); being already saved, it is not
-refused, and the hosts still being delivered to are reported as not delivered (see "Named credential catalog"). The
-Tensorlake settings routes, which wait on Tensorlake's API rather than on a host, answer within the same bound, counted
-from their handler's start (decided by the migration's orchestrator on 2026-11-15): the API key's Test and the list of
-Sandboxes not on this helm stop listing and answer the 502 of an unanswered Tensorlake call, the list still showing any
-unfinished cleanup, and a leftover sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup
-carries on, which that list then shows (see "Tensorlake account"). Settings' Create SSH key
-(`POST /api/tensorlake/ssh-key`) answers within the same bound, counted from its handler's start (decided by the GPUI
-migration's orchestrator on 2026-11-15, under its rule that every host-waiting route the GUI sends is bounded):
-`ssh-keygen` may run for up to its own 30 seconds, so a generation still running at the bound replies 504 that the
-creation carries on, and the settings read reports the key once it is written; a Create sent again meanwhile waits for
-that generation and answers its key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same
-bound, counted from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15): an unknown recipe,
-one a host uses and one already being deleted are refused at once from local state, before anything is cancelled; once
-its cleanup has started, a deletion still running at the bound replies that it carries on, and the recipe leaves the
-recipe list once it is deleted, or, if the cleanup fails, stays listed with the reason only in the helm's log until a
-second Delete runs the cleanup again and answers it. While the deletion runs, the recipe's save (`PUT`) and Build are
-refused with 409, so a save cannot be accepted and then lost with the row.
+environment running. A session's environment Delete (`DELETE /api/sessions/{id}?delete_environment_session=true`), the
+warned whole-environment Delete (`?delete_sandbox=true`) and the Retry of a failed destruction
+(`POST /api/hosts/{id}/retry-delete`) answer within the same bound, counted from their handler's start (decided by the
+GPUI migration's orchestrator on 2026-11-16, under the maintainer's preference for bounded replies, in place of the
+accepted form). The first can wait 60 seconds for its host's turn among environment Deletes and 240 for the
+environment's supervisor, and the other two make host removal's provider calls, so each answers 504 at the bound and
+carries on. Refusals before anything is asked (not an environment session, a guarded or two-flag request, a busy
+provisioning lock once the Delete has its turn, a Retry for a host whose deletion has not failed) and a "nothing
+decided" decided in time, chiefly the one for a host the helm is not connected to, answer as before with their markers.
+Past the bound, a late `Deleted` removes the session from the pushed list without its count, a late seal shows through
+the seal record (the host `Deleting`, then gone or failed with Retry), as does a late Retry, and a late "nothing
+decided" or refusal leaves the session listed, the next Delete taking the warned lane once the host shows as not
+connected. A late failure of the whole-environment Delete reaches only the helm's log, as host removal's does. A
+credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts (decided by the
+migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still being delivered to
+are reported as not delivered (see "Named credential catalog"). The Tensorlake settings routes, which wait on
+Tensorlake's API rather than on a host, answer within the same bound, counted from their handler's start (decided by the
+migration's orchestrator on 2026-11-15): the API key's Test and the list of Sandboxes not on this helm stop listing and
+answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover sandbox's
+Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then shows (see
+"Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same bound, counted
+from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15, under its rule that every
+host-waiting route the GUI sends is bounded): `ssh-keygen` may run for up to its own 30 seconds, so a generation still
+running at the bound replies 504 that the creation carries on, and the settings read reports the key once it is written;
+a Create sent again meanwhile waits for that generation and answers its key. A recipe's Delete
+(`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from its handler's start (decided by
+the GPUI migration's orchestrator on 2026-11-15): an unknown recipe, one a host uses and one already being deleted are
+refused at once from local state, before anything is cancelled; once its cleanup has started, a deletion still running
+at the bound replies that it carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup
+fails, stays listed with the reason only in the helm's log until a second Delete runs the cleanup again and answers it.
+While the deletion runs, the recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then
+lost with the row.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -5887,8 +5899,9 @@ lock without waiting (a setup, update, suspend or whole-environment removal answ
 requires it session-owned and machine-deleting, and sends the request only while the host is connected, with a reply
 deadline derived from the supervisor's wait bound and teardown's own bounds. Not connected, not sent, sent without an
 answer, or past the deadline: the helm answers with a marker that nothing was decided, and the page offers the warned
-whole-environment Delete. `Deleted` runs the ordinary local forgetting and reports the supervisor's count; `Sealed`
-destroys the environment through the same removal path as host removal, under the lock already held.
+whole-environment Delete. The route itself answers within the host reply bound ("The UI channel"), so only a marker
+decided within it reaches the page. `Deleted` runs the ordinary local forgetting and reports the supervisor's count;
+`Sealed` destroys the environment through the same removal path as host removal, under the lock already held.
 
 Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
 finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is
@@ -5924,8 +5937,8 @@ owning helm.
 
 A confined Delete of another session in the same environment goes to that host's supervisor as a session-only delete,
 the same supervisor operation Replace uses for its source, which never seals. It does not pass through the user's
-environment Delete (`sessions::sandbox::delete_if_owned`), which only an explicit user confirmation reaches. From
-elsewhere, Delete of a session-owned target is still refused, and session-owned rows stay out of `resolve_host` and
+environment Delete (`sessions::sandbox::delete_whole_environment`), which only an explicit user confirmation reaches.
+From elsewhere, Delete of a session-owned target is still refused, and session-owned rows stay out of `resolve_host` and
 template host identities.
 
 An environment launch for an agent is `AgentVerb::CreateEnvironment`, naming a recipe and, for a container, the

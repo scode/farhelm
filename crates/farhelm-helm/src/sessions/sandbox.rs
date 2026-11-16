@@ -7,7 +7,10 @@
 //! Delete, which destroys the resource without any count. Replace's internal
 //! source removal remains a supervisor session operation that never seals.
 //! Stop and suspend chains the ordinary Stop and the host's Suspend under one
-//! reply bound ([`stop_and_suspend`]).
+//! reply bound ([`stop_and_suspend`]). Both environment Deletes and the Retry
+//! of a failed destruction answer within the same bound, their work carrying
+//! on past it ([`environment_session_delete_carries_on`],
+//! [`whole_environment_delete_carries_on`], [`retry_environment_delete`]).
 
 use super::*;
 
@@ -127,6 +130,13 @@ pub(crate) async fn create_environment_session(
 /// The text says what is known: an unanswered request may still have been
 /// acted on, which the next listing shows (a seal included, which the helm
 /// then finishes).
+///
+/// The route answers within the host reply bound, so the marker reaches the
+/// caller only when this is decided in time: at once when the helm is not
+/// connected, which is the common case, or when the connection ends early.
+/// One decided later (a connection that ends after the bound, or the reply
+/// deadline below) reaches only the helm's log, and the caller has the
+/// bound's 504 instead ([`environment_session_delete_carries_on`]).
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub(crate) struct EnvironmentUnasked(String);
@@ -134,8 +144,10 @@ pub(crate) struct EnvironmentUnasked(String);
 /// How long the helm waits for its turn among a host's environment session
 /// Deletes before answering "busy" (`ConnectionManager::environment_delete_turn`).
 /// A turn lasts one supervisor request, so a whole queue of a bulk Delete's
-/// sessions fits; a turn held longer means something is wrong, and the user
-/// should hear so rather than wait without a bound.
+/// sessions fits; a turn held longer means something is wrong, and the Delete
+/// gives up rather than wait without a bound. The route's own reply comes
+/// sooner, at the host reply bound, so a "busy" decided here reaches only the
+/// helm's log and the session stays listed.
 pub(crate) const ENVIRONMENT_DELETE_TURN_WAIT: std::time::Duration =
     std::time::Duration::from_secs(60);
 
@@ -171,6 +183,10 @@ pub(crate) const ENVIRONMENT_DELETE_REPLY_DEADLINE: std::time::Duration =
 /// success. Not connected, not sent, unanswered or past the deadline is
 /// [`EnvironmentUnasked`]. Any other refusal from the supervisor (its own
 /// "busy, nothing was deleted") is passed on as it is.
+///
+/// Unbounded itself: the route runs it on a task of its own under the host
+/// reply bound, so it finishes, seal and destruction included, whether or not
+/// anyone still waits ([`environment_session_delete_carries_on`]).
 pub(super) async fn delete_environment_session(
     state: &AppState,
     key: &store::SessionKey,
@@ -319,28 +335,62 @@ async fn finish_seal_locked(
 /// (`HostState::Deleting` with a reason): a seal is what authorizes this
 /// destruction without a fresh confirmation, so a stale or forged click must
 /// never reach an environment that is not sealed. Answers once the attempt
-/// is over; a new failure shows on the host again.
+/// is over, or at the host reply bound (below); a new failure shows on the
+/// host either way.
+///
+/// ## Answering within the host reply bound
+///
+/// The destruction makes the same provider calls as host removal, so it can
+/// outlast the GUI's channel watchdog. Its two refusals (not a failed
+/// deletion, a busy host) come from local state and answer as before; an
+/// attempt still running at the host reply bound answers
+/// [`retry_delete_carries_on`]'s 504 and carries on, on a task of its own,
+/// which also keeps a dropped caller from cancelling it partway (the route
+/// sits in the router's cancellable group). Unlike host removal's, its late
+/// outcome is fully pushed: the seal record shows the host as being deleted
+/// during the attempt, then either takes it out of the lists or shows the new
+/// failure with Retry (see `HOST_REPLY_BOUND` for the decision).
 pub(crate) async fn retry_environment_delete(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<store::HostId>,
 ) -> axum::response::Response {
-    let result = crate::run_owned(async move {
-        if !state.manager.sealed_failed(host) {
-            return Err(anyhow::Error::new(SupervisorError::helm(
-                ErrorKind::Conflict,
-                "this host is not an environment whose deletion failed; nothing was retried".into(),
-            )));
-        }
-        if !finish_seal(&state, host).await? {
-            return Err(anyhow::Error::new(crate::environment::lifecycle::HostBusy));
-        }
-        Ok(())
-    })
-    .await;
-    match result {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
-        Err(error) => http_error(error),
+    within_host_reply_bound_saying(
+        async move {
+            match retry_failed_seal(&state, host).await {
+                Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+                Err(error) => http_error(error),
+            }
+        },
+        retry_delete_carries_on(),
+    )
+    .await
+}
+
+/// The body of [`retry_environment_delete`], unbounded: refuse a host whose
+/// record holds no failed deletion, or whose provisioning lock is busy, and
+/// otherwise destroy the sealed environment again.
+async fn retry_failed_seal(state: &AppState, host: store::HostId) -> anyhow::Result<()> {
+    if !state.manager.sealed_failed(host) {
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "this host is not an environment whose deletion failed; nothing was retried".into(),
+        )));
     }
+    if !finish_seal(state, host).await? {
+        return Err(anyhow::Error::new(crate::environment::lifecycle::HostBusy));
+    }
+    Ok(())
+}
+
+/// The text of the 504 [`retry_environment_delete`] answers when its attempt
+/// is still running at the host reply bound. The seal record makes it true
+/// whichever way the attempt ends.
+fn retry_delete_carries_on() -> String {
+    format!(
+        "retrying the deletion did not finish within {} seconds; it carries on, and the host's \
+         state in the hosts list will show the result",
+        HOST_REPLY_BOUND.as_secs()
+    )
 }
 
 /// Start the helm's finisher of sealed environments: whenever a listing
@@ -377,26 +427,70 @@ pub(super) fn user_only_delete() -> anyhow::Error {
     ))
 }
 
-/// Return None for an ordinary host; an owned host requires explicit consent
-/// to end every process and discard every file, including unlisted leftovers.
-/// Reuse host removal's lock, bounded vendor cleanup and cascading local cleanup.
-pub(super) async fn delete_if_owned(
+/// The text of the 504 the environment Delete of one session
+/// ([`delete_environment_session`]) answers when it is still running at the
+/// host reply bound.
+///
+/// It is true whichever way the Delete ends, and wherever it stalled: still
+/// waiting for this host's turn among environment Deletes (when the
+/// environment's own Farhelm has not even been asked yet, which is why the
+/// words name the Delete rather than an unanswered Farhelm), or for that
+/// Farhelm to answer. A late `Deleted` takes the session out of the session
+/// list, and a late `Sealed` shows the host being deleted and then gone (or
+/// its failure, with Retry); a late "unasked", "busy" or other refusal decided
+/// nothing, which "may" covers, and leaves the session listed to delete again.
+/// What the bound loses is the count of sessions left and the "unasked"
+/// marker, so the warned whole-environment Delete is no longer offered at
+/// once; the next Delete offers it from the pushed host state once the host
+/// shows as not connected (see `HOST_REPLY_BOUND` for the decision).
+pub(super) fn environment_session_delete_carries_on() -> String {
+    format!(
+        "deleting this session did not finish within {} seconds; it may still delete the session, \
+         along with the environment if this was its last session, and the session list will show \
+         the result",
+        HOST_REPLY_BOUND.as_secs()
+    )
+}
+
+/// The text of the 504 the warned whole-environment Delete
+/// ([`delete_whole_environment`]) answers when it is still running at the
+/// host reply bound.
+///
+/// The destruction carries on under the host's provisioning lock, with the
+/// host shown as being deleted meanwhile. A late success takes the host and its
+/// sessions out of the lists; a late failure leaves the host listed in its
+/// ordinary state with the reason only in the helm's log, as host removal's
+/// does (`crate::hosts::remove_host`).
+pub(super) fn whole_environment_delete_carries_on() -> String {
+    format!(
+        "deleting the environment did not finish within {} seconds; the deletion carries on, and \
+         the hosts list will show the result",
+        HOST_REPLY_BOUND.as_secs()
+    )
+}
+
+/// The user's warned whole-environment Delete, sent from a session of the
+/// environment (`?delete_sandbox=true`): end every process and discard every
+/// file, including unlisted leftovers. The confirmation it needs is the
+/// warned one, so a guard flag beside it, which asks for something that
+/// confirmation never promised, is refused.
+///
+/// Reuses host removal's lock, bounded vendor cleanup and cascading local
+/// cleanup. The route runs it under the host reply bound
+/// ([`whole_environment_delete_carries_on`]).
+pub(super) async fn delete_whole_environment(
     state: &AppState,
     key: &store::SessionKey,
-    confirmed: bool,
     guard: farhelm_proto::DeleteGuard,
-) -> anyhow::Result<Option<farhelm_proto::SessionDeleteOutcome>> {
+) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
     let row = crate::hosts::registry_row(state, key.host).await?;
     if !row.is_session_owned() {
-        if confirmed {
-            return Err(anyhow::Error::new(SupervisorError::helm(
-                ErrorKind::Conflict,
-                "this session no longer belongs to a disposable environment".into(),
-            )));
-        }
-        return Ok(None);
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "this session no longer belongs to a disposable environment".into(),
+        )));
     }
-    if !confirmed || guard != farhelm_proto::DeleteGuard::Unconditional {
+    if guard != farhelm_proto::DeleteGuard::Unconditional {
         return Err(user_only_delete());
     }
     // Resolve the selected session's existing reference, without contacting a
@@ -410,7 +504,7 @@ pub(super) async fn delete_if_owned(
         }
     })
     .await?;
-    Ok(Some(farhelm_proto::SessionDeleteOutcome::default()))
+    Ok(farhelm_proto::SessionDeleteOutcome::default())
 }
 
 /// `POST /api/sessions/{id}/stop-and-suspend`: the ordinary Stop of an

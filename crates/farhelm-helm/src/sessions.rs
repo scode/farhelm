@@ -3712,6 +3712,20 @@ pub(crate) async fn rename_session(
 /// the host's state in the hosts and session lists shows how it ended. Stop
 /// and suspend takes one bound over both of its halves.
 ///
+/// So are both of the user's environment Deletes and the Retry of a failed
+/// destruction (`DELETE /api/sessions/{id}` with `delete_environment_session`
+/// or `delete_sandbox`, `sandbox::retry_environment_delete`; decided by the
+/// GPUI migration's orchestrator on 2026-11-16, under the maintainer's
+/// preference for bounded replies). The environment Delete of one session
+/// can wait a minute for its host's turn and four for the environment's own
+/// Farhelm, and the other two make host removal's provider calls. Each
+/// carries on past the bound: the session list shows a late `Deleted`, and
+/// the host's state a late seal, destruction or Retry. What the bound gives up
+/// is a late reply's own content, such as the count of sessions an environment
+/// keeps, a late "nothing decided" marker, and a late failure of the
+/// whole-environment Delete, which reaches only the log, as host removal's
+/// does.
+///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
 /// `do_replace_session`, the restart's, `create_session_request`,
@@ -3935,23 +3949,42 @@ pub(crate) async fn delete_session(
         if guard != farhelm_proto::DeleteGuard::Unconditional {
             return http_error(sandbox::user_only_delete());
         }
-        return match sandbox::delete_environment_session(&state, &key).await {
-            Ok(outcome) => axum::Json(outcome).into_response(),
-            Err(error) => http_error(error),
-        };
+        // Bounded like every other host-waiting route the GUI sends (see
+        // `HOST_REPLY_BOUND`): the turn among this host's environment Deletes
+        // and the supervisor's answer can each take minutes. An "unasked"
+        // answer that arrives in time keeps its marker; one that would have
+        // come later is what the bound gives up (see the 504's words).
+        return within_host_reply_bound_saying(
+            async move {
+                match sandbox::delete_environment_session(&state, &key).await {
+                    Ok(outcome) => axum::Json(outcome).into_response(),
+                    Err(error) => http_error(error),
+                }
+            },
+            sandbox::environment_session_delete_carries_on(),
+        )
+        .await;
     }
-    match sandbox::delete_if_owned(&state, &key, query.delete_sandbox, guard).await {
-        Ok(Some(outcome)) => return axum::Json(outcome).into_response(),
-        Ok(None) => {}
-        Err(error) => return http_error(error),
+    if query.delete_sandbox {
+        // The warned whole-environment Delete destroys the machine through
+        // host removal's path, which is as slow as host removal and bounded
+        // the same way, with the same late-failure caveat.
+        return within_host_reply_bound_saying(
+            async move {
+                match sandbox::delete_whole_environment(&state, &key, guard).await {
+                    Ok(outcome) => axum::Json(outcome).into_response(),
+                    Err(error) => http_error(error),
+                }
+            },
+            sandbox::whole_environment_delete_carries_on(),
+        )
+        .await;
     }
-    // Only the ordinary session Delete is bounded like rename (see
+    // The ordinary session Delete is bounded like rename (see
     // `HOST_REPLY_BOUND`), so a slow host cannot hold every later GUI command
-    // behind it. The environment and whole-sandbox Deletes above keep their
-    // own deadlines: their refusals carry meaning (a lost answer is "nothing
-    // decided", which offers the warned whole-environment Delete), and an
-    // early timeout would replace that answer. They become accepted work when
-    // the area that ports them converts them.
+    // behind it. `do_delete_session` refuses a plain Delete of a session in a
+    // disposable environment first, which only the two warned Deletes above
+    // may remove.
     within_host_reply_bound(async move {
         match do_delete_session(&state, &key, guard, None).await {
             Ok(outcome) => axum::Json(outcome).into_response(),
@@ -3990,7 +4023,7 @@ pub(crate) async fn do_delete_session(
 /// `key.host`, so the environment keeps at least one session and destroying
 /// it would end the asker. This therefore never reaches the user's
 /// environment Deletes (`sandbox::delete_environment_session`, which can seal
-/// the environment, and `sandbox::delete_if_owned`); it is the ordinary
+/// the environment, and `sandbox::delete_whole_environment`); it is the ordinary
 /// supervisor teardown, the same one Replace uses for its source, with every
 /// guard and connection check [`do_delete_session`] applies.
 pub(crate) async fn delete_session_within_environment(
