@@ -318,3 +318,120 @@ fn restart_with_marks_an_edited_command(cx: &mut TestAppContext) {
     assert_eq!(name_of(cx, "launcher-changed-resume"), None);
     assert_eq!(name_of(cx, "launcher-changed-yolo"), None);
 }
+
+// ---- Stored command values shown escaped ---------------------------------------------------------------------------
+
+/// `e`'s stored command and resume command for the escaped-display tests: an invisible character in each, a doubled
+/// space and trailing spaces (the bytes most easily lost to a trim), which must all reach the helm exactly as stored.
+const RAW_COMMAND: &str = "make\u{200b}  watch {farhelm_args}  ";
+const RAW_RESUME: &str = "make\u{202e} watch --resume {conversation} {farhelm_args}  ";
+
+/// The helm lists `e` idle (so Restart with asks no consent) with [`RAW_COMMAND`] and [`RAW_RESUME`] as its stored
+/// command launch, keeping its recorded install.
+fn e_stores_invisible_characters(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    let e = session("e")
+        .host(9)
+        .title("fix login")
+        .unmanaged()
+        .not_launched_as_checkout()
+        .status(json!({"state": "idle"}))
+        .launch(json!({
+            "kind": "command",
+            "command": RAW_COMMAND,
+            "yolo": false,
+            "agent": "codex",
+            "resume": RAW_RESUME,
+        }));
+    let mut changes = change(listing_meta(&["a", "b", "c", "d"], 5, false), &[e], &[]);
+    changes.upsert[0].value["host_identity"] = json!("identity9");
+    helm.push(changes);
+    settle(cx);
+}
+
+/// Restart with shows a stored command line and resume command holding invisible characters escaped and read-only,
+/// each with its own Clear (the old launcher's Clear agent command and Clear resume command), so a stored command that
+/// came from elsewhere cannot hide what it runs. Specified: both fields show their `<U+…>` spellings and refuse typing
+/// until their Clear empties them; the stored command pasted back in is shown escaped again at once, with its Clear.
+#[gpui::test]
+fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    e_stores_invisible_characters(&mut helm, cx);
+    assert!(restart_with(cx, "e"));
+    super::view_tests::escaped_until_cleared(
+        cx,
+        "launcher-command-row",
+        "launcher-clear-command",
+        "make<U+200B>  watch {farhelm_args}  ",
+        |launcher| &launcher.command,
+    );
+    super::view_tests::escaped_until_cleared(
+        cx,
+        "launcher-resume-command-row",
+        "launcher-clear-resume",
+        "make<U+202E> watch --resume {conversation} {farhelm_args}  ",
+        |launcher| &launcher.resume,
+    );
+    test_support::click(cx, "launcher-command-row");
+    test_support::keys(cx, "backspace");
+    cx.simulate_input(RAW_COMMAND);
+    settle(cx);
+    assert_eq!(
+        cx.update(|_, cx| {
+            let launcher =
+                layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
+            launcher.read(cx).command.text(cx).to_string()
+        }),
+        "make<U+200B>  watch {farhelm_args}  "
+    );
+    assert!(
+        cx.debug_bounds("launcher-clear-command").is_some(),
+        "with its Clear"
+    );
+}
+
+/// What is shown escaped is still sent as stored (restart-with.spec's "restart with preserves raw command bytes for a
+/// YOLO-only edit"): the escaped spelling never reaches the draft. Specified: with only the YOLO assertion changed, the
+/// restart carries the command and resume command byte for byte as stored.
+#[gpui::test]
+fn restart_with_sends_stored_command_bytes_for_a_yolo_only_edit(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    e_stores_invisible_characters(&mut helm, cx);
+    assert!(restart_with(cx, "e"));
+    test_support::click(cx, "launcher-yolo-Yes (YOLO)");
+    let body = pressed(&mut helm, cx)
+        .body
+        .expect("a restart carries a body");
+    assert_eq!(
+        body["with_command"]["yolo"],
+        json!(true),
+        "the premise: the edit went out"
+    );
+    assert_eq!(
+        body["with_command"]["command"],
+        json!(RAW_COMMAND),
+        "{body}"
+    );
+    assert_eq!(body["with_command"]["resume"], json!(RAW_RESUME), "{body}");
+}
+
+/// The other half of restart-with.spec's raw-bytes case ("beside an edited command"): replacing the command leaves the
+/// untouched resume command as stored. Specified: Clear agent command, a new command typed, Restart pressed: the
+/// restart carries the new command and the stored resume command byte for byte.
+#[gpui::test]
+fn restart_with_sends_the_stored_resume_beside_an_edited_command(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    e_stores_invisible_characters(&mut helm, cx);
+    assert!(restart_with(cx, "e"));
+    test_support::click(cx, "launcher-clear-command");
+    test_support::click(cx, "launcher-command-row");
+    test_support::keys(cx, "r u n space { f a r h e l m _ a r g s }");
+    let body = pressed(&mut helm, cx)
+        .body
+        .expect("a restart carries a body");
+    assert_eq!(
+        body["with_command"]["command"],
+        json!("run {farhelm_args}"),
+        "{body}"
+    );
+    assert_eq!(body["with_command"]["resume"], json!(RAW_RESUME), "{body}");
+}

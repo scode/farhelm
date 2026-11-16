@@ -33,7 +33,9 @@ ordinary buttons, whose Enter is the component's); the refusal cases wait for th
 Tests: 6. Covers: New opens on the agent tab, and each tab keeps its own fields and draft.
 
 partly: `launcher::view_tests::the_tabs_switch_fields_and_keep_each_draft`,
-`launcher::draft_tests::each_tab_keeps_its_own_draft_across_switches`; search moving to the Agent tab in
+`launcher::draft_tests::each_tab_keeps_its_own_draft_across_switches`; the remembered wrapper prefix on an agent switch,
+shown escaped when it holds an invisible character, in
+`launcher::view_tests::an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`; search moving to the Agent tab in
 `launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`
 
 ### `tests/launch-button-alignment.spec.ts`
@@ -339,7 +341,11 @@ launch's command, resume command and YOLO answer", "compares an older omitted pe
 `launcher::draft_tests::{restart_with_refuses_to_switch_agents, restart_with_shows_the_stored_permission_and_resets_to_it}`
 and
 `launcher::restart_with_tests::{restart_with_stops_a_working_agent_with_consent, restart_with_an_idle_agent_asks_no_consent}`
-(with the changed markers); focus on Cancel, "Restart error.", the held host, the stored effort and model Enter in
+(with the changed markers); the escaped stored values ("shows an unsafe stored wrapper prefix without editing its escape
+text", "preserves raw command bytes" in both variants) in
+`launcher::view_tests::restart_with_shows_an_unsafe_stored_wrapper_prefix_escaped` and
+`launcher::restart_with_tests::{restart_with_shows_stored_command_values_escaped, restart_with_sends_stored_command_bytes_for_a_yolo_only_edit, restart_with_sends_the_stored_resume_beside_an_edited_command}`;
+focus on Cancel, "Restart error.", the held host, the stored effort and model Enter in
 `launcher::view_tests::{restart_with_starts_on_cancel_and_says_restart_error, restart_with_shows_its_held_host_as_text, restart_with_keeps_its_stored_effort_offered, restart_with_model_enter_chooses_without_restarting}`;
 settling, refusal and the pending row in `launcher::restart_with_tests::restart_with_settles_as_plain_restart_does`;
 "hides guarded when it would restore the unchanged launch" in
@@ -348,7 +354,7 @@ settling, refusal and the pending row in `launcher::restart_with_tests::restart_
 the backdrop, stray-focus, inert-page and tab-gone focus cases; waiting: the template, shortcut, bolt, search and
 recent-setup cases (the templates area's and the composer search and recent setups), the YOLO-question-in-dialog cases
 beyond the guarded rule, "withdraws working-agent consent when its source exits" beyond the label (the consent is read
-at the press), and the escaped stored values (with the escaped display piece)
+at the press)
 
 ### `tests/host-picker.spec.ts`
 
@@ -528,7 +534,9 @@ not yet ported (environments, milestone M3)
   `aria-live="polite"` line did. The main action's accessible name carries the target.
 - The permission help "?" is drawn as a neutral button; the old one was the bare `.btn` at 30 by 36 pixels.
 - Custom flags carried from a source session show hidden characters as they are in the flags field; the old launcher
-  showed them escaped. The escaped read-only display comes with the prompt's and wrapper prefix's.
+  showed them escaped in the field, and an edit there replaced them with the edited text. The same goes for a command
+  line and resume command that Clone or Replace with copies from its source; Restart with shows its stored ones escaped
+  and read-only, as the old launcher did.
 - The model list's rows are drawn in the shared option-row style (the quick switcher's, 9 by 10 pixels of padding); the
   old list's buttons were 32 pixels high with a 1.5-pixel edge.
 - The model field does not report the old combobox states to assistive technology (expanded, the highlighted row as its
