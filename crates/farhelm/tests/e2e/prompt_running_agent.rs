@@ -333,9 +333,8 @@ async fn prove_prompt(agent: LaunchHarness, expect: Expect) {
     let work = farhelm_teststate::tempdir().expect("prompt recorder workdir");
     std::fs::write(work.path().join("recorder.py"), RECORDER).expect("write the raw recorder");
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
-    let client = client_with_secret(&secret);
+    let helm = start_helm(supervisor.state.path()).await;
+    let client = helm.client();
     trust_local_commands(&client, &helm.base).await;
     let asking = create_recorder(&client, &helm.base, work.path(), "asking", Some(agent)).await;
     let target = create_recorder(&client, &helm.base, work.path(), "target", Some(agent)).await;

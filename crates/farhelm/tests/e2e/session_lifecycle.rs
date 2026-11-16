@@ -1376,47 +1376,47 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
 /// running — and it is retryable, so it has to happen before any durable
 /// side effect. This test's subject moved with PLAN_M6.md item 5: the argv
 /// startup session it used to guard is gone, and what a premature failure
-/// would now strand is helm.db and whatever `--ensure-hosts` was about to
-/// register into it. The ordering rule is the same one, and it is asserted
-/// against the strongest observable there is — the database file must not
-/// exist at all. The helm here is `farhelm-fixtures helm`, which runs the
-/// helm library's standalone entry, where that startup order lives.
+/// would now strand is helm.db and anything registered into it. The
+/// ordering rule is the same one, and it is asserted against the strongest
+/// observable there is — the database file must not exist at all.
+///
+/// The helm runs through the desktop app's embedded entry, and the failure
+/// is read from the error that entry returns, which must keep the bind's
+/// context. What a command-line helm prints on stderr for it is not shown
+/// here: the standalone helm is being removed (decided 2026-11-16).
 #[farhelm_testtrace::test]
 async fn helm_bind_failure_happens_before_any_durable_setup() {
     let state = farhelm_teststate::tempdir().expect("state");
-    let ensure = state.path().join("ensure-hosts.json5");
-    tokio::fs::write(&ensure, r#"{ hosts: [{ ssh: "user@never-registered" }] }"#)
-        .await
-        .expect("write the ensure-hosts file");
     let occupied = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("reserve loopback port");
     let port = occupied.local_addr().unwrap().port();
-
-    let output = tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::process::Command::new(fixtures_bin())
-            .args(["helm", "--state-dir"])
-            .arg(state.path())
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--ensure-hosts")
-            .arg(&ensure)
-            .output(),
-    )
-    .await
-    .expect("helm did not fail promptly on occupied port")
-    .expect("run helm");
-    assert!(!output.status.success(), "occupied port must fail startup");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("binding"),
-        "bind failure should retain its context: {}",
-        String::from_utf8_lossy(&output.stderr)
+        !state.path().join("helm.db").exists(),
+        "premise: the fresh state directory holds no helm.db"
+    );
+
+    // The readiness bound is the promptness bound: a helm that neither fails
+    // nor becomes ready within it fails the test there.
+    let started = try_start_helm(
+        farhelm_helm::HelmArgs {
+            port,
+            ..helm_args(state.path())
+        },
+        Duration::from_secs(10),
+    )
+    .await;
+    let Err(error) = started else {
+        panic!("occupied port must fail startup");
+    };
+    assert!(
+        format!("{error:#}").contains("binding"),
+        "bind failure should retain its context: {error:#}"
     );
     assert!(
         !state.path().join("helm.db").exists(),
-        "the bind must fail before helm.db is created, and therefore before --ensure-hosts \
-         registers anything into it"
+        "the bind must fail before helm.db is created, and therefore before any host could be \
+         registered into it"
     );
 }
 

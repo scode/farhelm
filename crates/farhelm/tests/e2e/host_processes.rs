@@ -10,8 +10,9 @@
 //! socket paths it binds stay within the bound every state directory
 //! already lives under, and that a helm relays a host terminal's grid stream
 //! and its input over the browser's WebSocket. So these tests start the
-//! products as processes, as `prompt_running_agent` and
-//! `agent_listing_real_stack` do, and look only through what a viewer sees:
+//! supervisor as a process, and the helm through the desktop app's embedded
+//! entry, as `prompt_running_agent` and `agent_listing_real_stack` do, and
+//! look only through what a viewer sees:
 //! the session's grid stream (screen rows) and the input it sends, plus the
 //! host's process found by its command line and the session's durable row.
 //!
@@ -751,7 +752,7 @@ type ServerMessage = Option<(u8, Vec<u8>)>;
 impl BrowserSocket {
     /// Open `path` on the helm with `secret` as the browser's credential,
     /// which a browser can only carry in `Sec-WebSocket-Protocol`.
-    async fn open(helm: &HelmProcess, secret: &str, path: &str) -> Self {
+    async fn open(helm: &EmbeddedHelm, secret: &str, path: &str) -> Self {
         let addr = helm.addr();
         let mut stream = tokio::net::TcpStream::connect(addr)
             .await
@@ -895,11 +896,13 @@ impl BrowserSocket {
 /// as a grid stream, and the browser's typing reaches the program.
 ///
 /// Why: this is the whole path a user's browser takes to a terminal in a
-/// host, with nothing in-process: the helm relays the supervisor's grid
-/// messages unread, and carries each grid input message up as one frame. The helm's own tests
-/// run against stand-in supervisors and the supervisor's against its own
-/// client; only here do the real processes meet. Spec: with a supervisor
-/// and a helm on its state directory, a
+/// host: the helm relays the supervisor's grid messages unread, and carries
+/// each grid input message up as one frame. The helm's own tests run
+/// against stand-in supervisors and the supervisor's against its own
+/// client; only here do the real pieces meet, the supervisor as a process of
+/// its own and the helm through the desktop app's embedded entry, inside
+/// the test process. Spec: with a supervisor and a helm on its state
+/// directory, a
 /// session created through the helm's API is a host row; its terminal
 /// socket's binary frames are grid messages whose screen shows the agent's
 /// ready line, and a line sent as `text` and `key` messages is echoed by the
@@ -908,9 +911,9 @@ impl BrowserSocket {
 async fn a_host_terminal_reaches_a_browser_through_the_helm_as_a_grid() {
     let mut stack = HostStack::new().await;
     stack.start().await;
-    let helm = helm_process(&stack.state, None).await;
-    let secret = device_secret(&stack.state).await;
-    let http = client_with_secret(&secret);
+    let helm = start_helm(&stack.state).await;
+    let secret = helm.secret.clone();
+    let http = helm.client();
     await_local_host(&http, &helm.base).await;
     let (status, body) = post(
         &http,
@@ -953,6 +956,6 @@ async fn a_host_terminal_reaches_a_browser_through_the_helm_as_a_grid() {
         })
         .await;
     drop(socket);
-    helm.stop_and_reap().await;
+    helm.stop().await;
     stack.finish().await;
 }

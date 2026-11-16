@@ -51,7 +51,7 @@ filter = "package(farhelm) & binary(e2e) & test(/^podman_environments::/)"
 threads-required = 4
 slow-timeout = { period = "60s", terminate-after = 40, grace-period = "5s" }
 
-# The e2e tests run `farhelm-fixtures` (the fake agent and the test helm), a
+# The e2e tests run `farhelm-fixtures` (the fake agent and other stand-ins), a
 # binary from another package, which Cargo neither builds for them nor gives
 # them a path to. Build it before any e2e test runs, into the same target
 # directory, where the harness finds it beside the `farhelm` binary

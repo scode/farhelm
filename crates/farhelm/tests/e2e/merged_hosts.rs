@@ -5,21 +5,26 @@
 //! REST tests merge scripted hosts behind the real router, and its manager
 //! tests drive the state machine against scripted peers. Both are the right
 //! shape for what they cover, and neither can tell you that the whole thing
-//! works when the pieces are actually separate processes talking over real
-//! transports. That is what this file is for, and it is why it runs real
-//! processes rather than assembling a helm in-process:
+//! works when the hosts are actually separate processes talking over real
+//! transports. That is what this file is for:
 //!
-//! - a real standalone helm (`farhelm-fixtures helm`, the helm library's
-//!   standalone entry), with no session flags, on a real loopback port,
-//!   driven over real HTTP;
-//! - two real supervisors, each with the terminal hosts of its sessions — one
-//!   reached over the unix socket in the helm's own state directory (the
-//!   reserved local row), one over the user's own `ssh` to `localhost`
-//!   running `farhelm internal stdio` (an ssh row);
-//! - the ssh row registered by `--ensure-hosts`, so the startup file is
-//!   exercised as the feature it is rather than only as a parser;
+//! - a real helm started through the desktop app's embedded entry
+//!   (`run_embedded`, so the app's own startup assembles it), on a real
+//!   loopback port, driven over real HTTP;
+//! - two real supervisor processes, each with the terminal hosts of its
+//!   sessions — one reached over the unix socket in the helm's own state
+//!   directory (the reserved local row), one over the user's own `ssh` to
+//!   `localhost` running `farhelm internal stdio` (an ssh row);
+//! - the ssh row registered through `POST /api/hosts`, the helm's own
+//!   registration route;
 //! - sessions created, listed, and operated on across both hosts through
 //!   `POST /api/sessions` and the lifecycle routes.
+//!
+//! NOTE: The helm runs inside the test process, as it runs inside the
+//! desktop app's. This file used to run it as a process of its own; that
+//! went with the decision to remove the standalone helm (2026-11-16), and
+//! what is no longer shown is only the helm's own process boundary. Every
+//! transport between the helm and the hosts is still real.
 //!
 //! The "remote" supervisor runs on this same machine with an ISOLATED state
 //! directory, passed as the registry row's `remote_state_dir` — the field
@@ -31,9 +36,9 @@
 //! unavailable: that is a property of the host, not of the code, and CI
 //! provisions self-ssh so the skip never hides this path there.
 //!
-//! The machinery for starting those processes and talking HTTP to them
-//! lives in `harness` (`supervisor_process`, `helm_process`,
-//! `authenticated_client`, `get_json`, `post`) rather than here: a second
+//! The machinery for starting those pieces and talking HTTP to them
+//! lives in `harness` (`supervisor_process`, `start_helm`,
+//! `register_self_ssh_host`, `get_json`, `post`) rather than here: a second
 //! real-stack module now needs the same fixtures, and one copy is what
 //! keeps them from drifting into two subtly different stacks.
 
@@ -121,8 +126,8 @@ async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> ser
 /// its host and sessions on both hosts operable.
 ///
 /// This is M6's first acceptance criterion reduced to what one test can
-/// prove without a browser: the registry is populated by `--ensure-hosts`
-/// before serving begins, both hosts connect over their genuinely different
+/// prove without a browser: a host registered through the helm's API joins
+/// the reserved local one, both hosts connect over their genuinely different
 /// transports, creates route to the host the body names, the list is one
 /// order across both, and a lifecycle operation reaches the right
 /// supervisor on either side. The UI half — chips, notices, the create
@@ -151,23 +156,9 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     let local = supervisor_process().await;
     let remote = supervisor_process().await;
 
-    let ensure = local.state.path().join("ensure-hosts.json5");
-    tokio::fs::write(
-        &ensure,
-        serde_json::json!({
-            "hosts": [{
-                "ssh": "localhost",
-                "remote_farhelm": farhelm_bin(),
-                "remote_state_dir": remote.state.path().to_string_lossy(),
-            }],
-        })
-        .to_string(),
-    )
-    .await
-    .expect("write the ensure-hosts file");
-
-    let helm = helm_process(local.state.path(), Some(&ensure)).await;
-    let client = authenticated_client(local.state.path()).await;
+    let helm = start_helm(local.state.path()).await;
+    let client = helm.client();
+    let registered = register_self_ssh_host(&helm, remote.state.path()).await;
 
     let hosts = await_fleet_connected(&client, &helm.base).await;
     let rows = hosts["hosts"].as_array().unwrap();
@@ -178,7 +169,7 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     let ssh_row = rows
         .iter()
         .find(|row| row["kind"] == "ssh")
-        .expect("--ensure-hosts registered the remote before serving began");
+        .expect("the registered remote is listed");
     assert_eq!(local_row["name"], "this machine");
     assert_eq!(ssh_row["destination"], "localhost");
     assert_ne!(
@@ -187,6 +178,10 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     );
     let local_id = local_row["id"].as_i64().expect("host id");
     let ssh_id = ssh_row["id"].as_i64().expect("host id");
+    assert_eq!(
+        ssh_id, registered,
+        "the listed ssh row is the one the registration created"
+    );
 
     // One session per host, created the only way sessions are created now.
     let work = farhelm_teststate::tempdir().expect("work dir");
