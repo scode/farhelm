@@ -512,11 +512,12 @@ several UIs, or for several viewers of one session through one helm: the window 
 only viewer (SPEC.md, "One GUI at a time"), and a displaced window keeps no terminal screen. The one way a terminal can
 still be taken from the window holding the seat is a race: a window that was just displaced can have a terminal
 reconnect land before its Displaced notice. The migration's orchestrator decided on 2026-11-15 that the window holding
-the seat then reattaches through the same path as for a replaced attachment, with no state, flag or branch of its own
-for the case; until that change lands, the terminal waits for Take control instead. The supervisor's lease sweep stays
-all the same: it serves several helm connections (older helms among them) and lets a view's agent terminal and tabs
-share one lease, and when a window that takes the seat opens a session whose terminals the displaced window has not
-closed yet, it is what detaches them; none of that is support for several UIs.
+the seat then reattaches through the same path as for a replaced attachment, after the same reconnect wait, with no
+state, flag or branch of its own for the case. The displaced window's terminal is then taken over in turn and would
+reattach the same way a wait later, until its Displaced notice arrives and tears its terminals down. The supervisor's
+lease sweep stays all the same: it serves several helm connections (older helms among them) and lets a view's agent
+terminal and tabs share one lease, and when a window that takes the seat opens a session whose terminals the displaced
+window has not closed yet, it is what detaches them; none of that is support for several UIs.
 
 Whether a window is open, for agent approvals, is the live seat, released on disconnect and on takeover. It is not a
 count of feed subscribers: the helm's own internal subscriptions to the feed never count as windows.
@@ -2614,10 +2615,10 @@ it, and a hook older than its supervisor during an upgrade is the accepted gap t
 Protocol version 31 gives every terminal detach a code beside its reason. `ControlMsg::Detached` carries a `DetachCode`
 (`taken_over`, `stalled`, `tab_closed`, `replaced`, `other`), a non-displacing attach refused because another client
 holds the terminal is `ErrorKind::TakenOver` rather than a `Conflict` recognized by its message, and the helm forwards
-the code in the browser's `detached` notice. Clients decide behavior from the code only (the browser latches a takeover,
-holds a stall, and hides a closed tab) and show the reason as text, so reason wording is free to change. Before 31 the
-helm and `terminal.js` compared English sentences they each kept a copy of, and only the disabled browser suite would
-have noticed a rewording.
+the code in the terminal stream's `detached` notice. Clients decide behavior from the code only (the desktop app's
+terminal attaches again after `replaced` or `taken_over` and stops on a stall or a closed tab) and show the reason as
+text, so reason wording is free to change. Before 31 the helm and `terminal.js` compared English sentences they each
+kept a copy of, and only the disabled browser suite would have noticed a rewording.
 
 The helm also uses `tab_closed` for a tab attach refused as `NotFound`. That refusal describes current state, not a
 passing condition: the supervisor looks the tab up among its live tabs, and a session or host that cannot be found has

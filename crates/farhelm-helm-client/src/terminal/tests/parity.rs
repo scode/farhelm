@@ -101,9 +101,9 @@ fn script() -> Vec<Step> {
         Undecodable,
         Accept,
         ReplayComplete,
-        // A takeover waits for the user. Input is dropped and reconnect-now ignored; take-control attaches at the size
+        // A stall waits for the user. Input is dropped and reconnect-now ignored; take-control attaches at the size
         // held when it was asked, and a resize while that attach connects is sent as soon as its socket opens.
-        Detach(Some(DetachCode::TakenOver)),
+        Detach(Some(DetachCode::Stalled)),
         Input("while detached"),
         ReconnectNow,
         Resize(120, 40),
@@ -112,7 +112,7 @@ fn script() -> Vec<Step> {
         Accept,
         ReplayComplete,
         Input("live again"),
-        // Typed for the attachment before the takeover: dropped, although the stream is live.
+        // Typed for the attachment before the stall: dropped, although the stream is live.
         StaleInput("for the old screen"),
         // A refused reconnect waits for the user as well and ends the outage it was part of: after take-control, a
         // failed attempt announces a new one.
@@ -133,9 +133,11 @@ fn script() -> Vec<Step> {
         Accept,
         ReplayComplete,
     ];
-    // Each remaining detach code, followed by a take-control that only a stopped stream acts on.
+    // Each remaining detach code, followed by a take-control that only a stopped stream acts on. `taken_over`
+    // reattaches through the same path as `replaced`, so both sides show the same wait and attempt for each.
     for code in [
         Some(DetachCode::Replaced),
+        Some(DetachCode::TakenOver),
         Some(DetachCode::Other),
         None,
         Some(DetachCode::TabClosed),
@@ -154,7 +156,7 @@ fn script() -> Vec<Step> {
         ReplayComplete,
     ]);
     // A close while the stream waits for the user still ends in `Closed`.
-    steps.extend([Detach(Some(DetachCode::TakenOver)), Close]);
+    steps.extend([Detach(Some(DetachCode::TabClosed)), Close]);
     steps
 }
 

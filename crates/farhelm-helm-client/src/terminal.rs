@@ -17,16 +17,21 @@
 //! - A 5xx answer is retried because a helm restarting usually gives one for a moment (the migration's orchestrator
 //!   decided this on 2026-11-15). Any other status the helm answers the upgrade with (401 credential, 404 session or
 //!   tab gone, 400, 403, 409, a 3xx) cannot fix itself and stops the stream in [`StreamState::Refused`].
-//! - A `replaced` or `other` detach waits its rung and reattaches: `other` carries transport trouble (a lost
-//!   supervisor, an unreachable host) that keeps recovering. `replaced` means a newer attachment with this stream's
-//!   own lease took the terminal; the supervisor lets a same-lease attach replace the incumbent rather than defer to
-//!   it, so the reattach takes the terminal back. Two live streams of one lease on one terminal would therefore keep
-//!   replacing each other, each time with a full replay: a caller keeps at most one live stream per terminal per
-//!   lease (see [`AttachmentLease`]).
-//! - `taken_over`, `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: an attach under another
-//!   lease took the terminal (in the single-UI app, only a just-displaced window's reconnect landing before its
-//!   Displaced notice), it is gone, or this client fell behind and attaching again would walk back into the same
-//!   wedge. [`TerminalHandle::take_control`] attaches again.
+//! - A `replaced`, `taken_over` or `other` detach waits its rung and reattaches: `other` carries transport trouble (a
+//!   lost supervisor, an unreachable host) that keeps recovering. `replaced` means a newer attachment with this
+//!   stream's own lease took the terminal; the supervisor lets a same-lease attach replace the incumbent rather than
+//!   defer to it, so the reattach takes the terminal back. Two live streams of one lease on one terminal would
+//!   therefore keep replacing each other, each time with a full replay.
+//! - `taken_over` goes through exactly that path. It means an attach under another lease took the terminal, and in the
+//!   single-UI app its only source is a window that was just displaced reconnecting a terminal before its Displaced
+//!   notice arrives (SPEC_impl.md, "The seat: one UI per helm"). Attaching again gives the terminal back to the window
+//!   that holds the seat; the migration's orchestrator decided on 2026-11-15 that it does so through the `replaced`
+//!   path, with nothing of its own. The displaced window's stream is then taken over in turn and would do the same a
+//!   rung later, until its Displaced notice arrives and the window tears its terminals down. Two live streams for
+//!   one terminal under different leases would do the same forever, so a caller keeps at most one live stream per
+//!   terminal, under any lease (see [`AttachmentLease`]).
+//! - `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: the tab is gone, or this client fell
+//!   behind and attaching again would walk back into the same wedge. [`TerminalHandle::take_control`] attaches again.
 //! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing.
 //!
 //! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`].
@@ -68,11 +73,12 @@ const EVENT_QUEUE: usize = 256;
 
 /// The identity every terminal of one session view shares, so the supervisor can tell this view's own reconnect
 /// (which replaces quietly) from an attach under another lease, which it reports as a takeover. Mint one per session
-/// view and reuse it for its agent terminal, tabs and reconnects; sharing one between views would hide a takeover.
+/// view and reuse it for its agent terminal, tabs and reconnects: the supervisor detaches every terminal held under
+/// any other lease when one attaches, so a view whose terminals did not share one would detach its own.
 ///
-/// Keep at most one live stream per terminal per lease: close or drop the old stream before opening another for the
-/// same terminal. The supervisor replaces a same-lease attachment instead of deferring to it, so two such streams take
-/// the terminal from each other on every reconnect, each time with a full replay.
+/// Keep at most one live stream per terminal, under any lease: close or drop the old stream before opening another for
+/// the same terminal. A same-lease attachment replaces the incumbent and an other-lease one takes it over, and both
+/// reattach, so two such streams take the terminal from each other on every reconnect, each time with a full replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentLease(String);
 
@@ -115,7 +121,7 @@ pub enum StreamState {
     /// The stream dropped and is coming back by itself: shown when each wait begins and again when its attempt starts,
     /// so the status is always the current one. The outage ends at the next `Attached`, or when the stream stops.
     Reconnecting(ReconnectStatus),
-    /// Stopped by a `taken_over`, `tab_closed` or `stalled` detach notice. Waits for
+    /// Stopped by a `tab_closed` or `stalled` detach notice. Waits for
     /// [`TerminalHandle::take_control`].
     Detached {
         code: Option<DetachCode>,
@@ -312,15 +318,15 @@ pub(crate) fn attach_path(attach: &TerminalAttach) -> Result<ApiPath, crate::Pat
 /// How one socket ended.
 enum Ended {
     /// The socket dropped, its watchdog fired, or the helm detached it for a reason that keeps recovering
-    /// (`replaced`, `other`); also an attempt that failed before its socket opened. Two separate facts decide what
-    /// happens next: `attached` (the socket got as far as an attachment, so the ladder starts over) and `skip_wait`
-    /// (the attachment answered a ping and then lost its socket, so the link was working and an immediate reconnect
-    /// is earned). A detach notice never skips the wait.
+    /// (`replaced`, `taken_over`, `other`); also an attempt that failed before its socket opened. Two separate facts
+    /// decide what happens next: `attached` (the socket got as far as an attachment, so the ladder starts over) and
+    /// `skip_wait` (the attachment answered a ping and then lost its socket, so the link was working and an immediate
+    /// reconnect is earned). A detach notice never skips the wait.
     Dropped {
         attached: bool,
         skip_wait: bool,
     },
-    /// A detach that waits for the user: `taken_over`, `tab_closed` or `stalled`.
+    /// A detach that waits for the user: `tab_closed` or `stalled`.
     Detached {
         code: Option<DetachCode>,
         reason: String,
@@ -328,13 +334,18 @@ enum Ended {
     Closed,
 }
 
-/// Whether a detach notice stops the stream until the user takes control. The match is exhaustive so a new code is
-/// a decision someone has to make here. A missing code comes only from a helm older than the codes and is treated
-/// like `other`.
+/// Whether a detach notice stops the stream until the user takes control; every other detach waits its rung and
+/// reattaches. The match is exhaustive so a new code is a decision someone has to make here. A missing code comes
+/// only from a helm older than the codes and is treated like `other`.
+///
+/// `taken_over` reattaches exactly as `replaced` does, by sharing its arm. Its only source in the single-UI app is a
+/// window that was just displaced reconnecting a terminal before its Displaced notice arrives, and the window that
+/// holds the seat answers that by attaching again (the migration's orchestrator decided on 2026-11-15). The module
+/// docs say why this cannot keep going back and forth.
 pub(crate) fn detach_stops(code: Option<DetachCode>) -> bool {
     match code {
-        Some(DetachCode::TakenOver | DetachCode::TabClosed | DetachCode::Stalled) => true,
-        Some(DetachCode::Replaced | DetachCode::Other) | None => false,
+        Some(DetachCode::TabClosed | DetachCode::Stalled) => true,
+        Some(DetachCode::Replaced | DetachCode::TakenOver | DetachCode::Other) | None => false,
     }
 }
 
