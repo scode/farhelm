@@ -151,11 +151,11 @@ pub(crate) fn settle(
     }
 }
 
-/// `change`, held back while `deleting` (any Delete the list sent is still in flight): an automatic choice becomes
-/// [`Change::Clear`], so a selection proven gone is dropped with nothing opened in its place (and with nothing
-/// selected, clearing changes nothing). The list settles again when the operation store changes, so the choice is made
-/// once the last Delete has settled. The old app likewise dropped the deleted session at once and deferred its pick
-/// while any delete was pending. Keeping and clearing pass through unchanged.
+/// `change`, held back while `deleting` (any Delete is still in flight, or a bulk Delete still has a row queued,
+/// `super::bulk`): an automatic choice becomes [`Change::Clear`], so a selection proven gone is dropped with nothing
+/// opened in its place (and with nothing selected, clearing changes nothing). The list settles again when the operation
+/// store changes, so the choice is made once the last Delete has settled. The old app likewise dropped the deleted
+/// session at once and deferred its pick while any delete was pending. Keeping and clearing pass through unchanged.
 pub(crate) fn hold_for_deletes(change: Change, deleting: bool) -> Change {
     match change {
         Change::Select(_) if deleting => Change::Clear,

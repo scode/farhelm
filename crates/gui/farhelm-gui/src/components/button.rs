@@ -35,7 +35,8 @@
 //!
 //! A button with words in the session list's heading band (its order title) takes that band's padding
 //! ([`Button::heading`]), as the old sheet's `.session-heading .sort-title` rule gave it; the band's icon buttons are
-//! fixed squares ([`Button::square`]).
+//! fixed squares ([`Button::square`]). The marked bar that takes the band's place while sessions are marked draws its
+//! Stop and Delete a little smaller than an ordinary button ([`Button::toolbar`]), as the old `.marked-bar` rule did.
 //!
 //! The focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only
 //! after keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost
@@ -224,6 +225,11 @@ const COLOR_CHOICE_PAD: f32 = 3.;
 /// so the order title's words start at the band's own edge.
 const HEADING_WORDS_PAD: (f32, f32) = (2., 0.);
 
+/// A marked bar button's padding, vertical then horizontal, and its height, edge included (`.marked-bar .marked-stop`:
+/// `height: 26px; padding: 3px 7px`). Its 12-pixel text is every button's.
+const TOOLBAR_PAD: (f32, f32) = (3., 7.);
+const TOOLBAR_HEIGHT: f32 = 26.;
+
 /// A compact button's padding, vertical then horizontal: `.titlebar-actions .btn`'s `padding: 2px 8px`, the session
 /// header's actions.
 const COMPACT_PAD: (f32, f32) = (2., 8.);
@@ -272,6 +278,8 @@ pub struct Button {
     compact: bool,
     /// The list heading band's padding for a button with words ([`Button::heading`]).
     heading: bool,
+    /// The marked bar's geometry ([`Button::toolbar`]).
+    toolbar: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
     /// Whether the button's choice is the one in force; `None` for a button that is not a choice.
@@ -332,6 +340,7 @@ impl Button {
             refused: false,
             compact: false,
             heading: false,
+            toolbar: false,
             expanded: None,
             pressed: None,
             quiet: false,
@@ -419,6 +428,14 @@ impl Button {
     /// Templates and New) are 24-pixel squares instead ([`Button::square`]).
     pub fn heading(mut self) -> Self {
         self.heading = true;
+        self
+    }
+
+    /// The session list's marked bar geometry for a button with words (its Stop and Delete): 3 by 7 pixels of padding in
+    /// a 26-pixel box, the old `.marked-bar .marked-stop` and `.marked-delete` rule, so the bar's words fit beside "N
+    /// marked" and its icon buttons in a narrow sidebar. Only the box changes: the tier still gives the colors.
+    pub fn toolbar(mut self) -> Self {
+        self.toolbar = true;
         self
     }
 
@@ -751,6 +768,7 @@ impl RenderOnce for Button {
         // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.
         let (pad_y, pad_x) = match self.tier {
             _ if self.heading => (px(HEADING_WORDS_PAD.0), px(HEADING_WORDS_PAD.1)),
+            _ if self.toolbar => (px(TOOLBAR_PAD.0), px(TOOLBAR_PAD.1)),
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
             _ if self.compact && matches!(self.split, Some(SplitPart::Caret { .. })) => {
@@ -824,6 +842,7 @@ impl RenderOnce for Button {
         // old toggle's, set by its text line and its own side padding; a rail entry is a fixed square.
         let (pad_x, height) = match self.tier {
             _ if self.side.is_some() => (pad_x, self.side),
+            _ if self.toolbar => (pad_x, Some(px(TOOLBAR_HEIGHT))),
             Tier::RowMenu { .. } => (pad_x, Some(px(ROW_MENU_HEIGHT))),
             Tier::Rail => (pad_x, Some(px(RAIL_SIZE))),
             // The bolt keeps its tall, narrow box (`padding: 10px 5px`), not the square an icon-only button gets.

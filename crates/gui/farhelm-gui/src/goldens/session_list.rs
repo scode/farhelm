@@ -173,7 +173,8 @@ pub(super) fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: 
 
 /// The fleet with two rows marked as a Cmd-click marks them: the open row, which keeps its accent fill under a marker
 /// in the fill's ink, and an unselected row, tinted under an accent marker. The heading's band is the marked bar, "2
-/// marked" with the marked menu's ⋯ and Clear, in place of the title, the count, Trash, Templates and New.
+/// marked" with Stop, Delete, the marked menu's ⋯ and Clear, in place of the title, the count, Trash, Templates and
+/// New.
 pub(super) fn session_list_marked_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_then(
         state,

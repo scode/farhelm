@@ -314,7 +314,7 @@ fn a_frame_counts_and_offers_only_the_marks_it_shows() {
 
 /// The main view over the fake helm, connected with `snapshot` in an active window, and the window's session list,
 /// which the tests read the stored marks from.
-fn open_list(
+pub(super) fn open_list(
     cx: &mut TestAppContext,
     snapshot: Vec<CollectionState>,
 ) -> (FakeHelm, Entity<SessionList>, &mut VisualTestContext) {
@@ -327,17 +327,17 @@ fn open_list(
 }
 
 /// A snapshot of unpinned, running sessions `keys` (each with no tabs) in that order, the first one open.
-fn fleet(keys: &[&'static str]) -> Vec<CollectionState> {
+pub(super) fn fleet(keys: &[&'static str]) -> Vec<CollectionState> {
     rows(keys.iter().map(|&key| session(key)).collect())
 }
 
 /// A snapshot of `fixtures` (each with no tabs) in that order, the first one open.
-fn rows(fixtures: Vec<Fixture>) -> Vec<CollectionState> {
+pub(super) fn rows(fixtures: Vec<Fixture>) -> Vec<CollectionState> {
     let rows: Vec<(Fixture, usize)> = fixtures.into_iter().map(|fixture| (fixture, 0)).collect();
     snapshot(&rows, false)
 }
 
-fn ctrl() -> Modifiers {
+pub(super) fn ctrl() -> Modifiers {
     Modifiers {
         control: true,
         ..Modifiers::default()
@@ -359,14 +359,14 @@ fn shift() -> Modifiers {
 }
 
 /// Click the middle of what is drawn under `selector` with `modifiers` held, and let the window settle.
-fn click_with(cx: &mut VisualTestContext, selector: &'static str, modifiers: Modifiers) {
+pub(super) fn click_with(cx: &mut VisualTestContext, selector: &'static str, modifiers: Modifiers) {
     let at = test_support::center(cx, selector);
     cx.simulate_click(at, modifiers);
     test_support::settle(cx);
 }
 
 /// The rows of a to e, p, u and v that the last frame drew marked, by their marker, in that order.
-fn markers(cx: &mut VisualTestContext) -> Vec<&'static str> {
+pub(super) fn markers(cx: &mut VisualTestContext) -> Vec<&'static str> {
     [
         ("a", "session-marked-a"),
         ("b", "session-marked-b"),
@@ -384,17 +384,17 @@ fn markers(cx: &mut VisualTestContext) -> Vec<&'static str> {
 }
 
 /// Whether `key` is marked in the list's stored marks, shown or not.
-fn stored(list: &Entity<SessionList>, key: &str, cx: &mut VisualTestContext) -> bool {
+pub(super) fn stored(list: &Entity<SessionList>, key: &str, cx: &mut VisualTestContext) -> bool {
     cx.update(|_, cx| list.update(cx, |list, cx| list.current.current(cx).marks.contains(key)))
 }
 
 /// The bar's count as it names itself ("2 marked"), or `None` while the bar is not drawn.
-fn count(cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn count(cx: &mut VisualTestContext) -> Option<String> {
     label_of(cx, COUNT_ID)
 }
 
 /// Every command the window sent since the last look, answered with success, as (method, path, body).
-fn requests(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
+pub(super) fn requests(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
     fake.commands()
         .into_iter()
         .map(|command| {
@@ -451,7 +451,7 @@ fn focus_row(list: &Entity<SessionList>, key: &str, cx: &mut VisualTestContext) 
 
 /// Start a Rename of `key` through the operation store and leave it in flight, so `key` has a request out (its commands
 /// are refused, as the row menu draws them).
-fn start_rename(key: &str, cx: &mut VisualTestContext) {
+pub(super) fn start_rename(key: &str, cx: &mut VisualTestContext) {
     cx.update(|_, cx| {
         let operations = session::current_operations(cx).unwrap();
         let rename = super::rename::command(key, "renamed").unwrap();
@@ -840,9 +840,9 @@ fn metadata_writes_go_once_per_eligible_row_and_clear_the_marks(cx: &mut TestApp
 /// Why this matters: SPEC.md: a refused row "gets the ordinary action-specific not-started message, including a row
 /// engaged by its own question or rename", and the line lasts as the row's refusals do, until the session's next
 /// operation starts (`outcome`'s rule). Without it a marked row with a request in flight would silently be left out.
-/// Specified: with b's Rename in flight and a and b marked, Pin sends a's pin alone and b's row says "Pin: not started,
-/// another operation was in progress. Try again."; the line stays once the Rename is answered, and goes when b's next
-/// request (its seen toggle) starts.
+/// Specified: with b's Rename in flight and a and b marked, Pin sends a's pin alone and b's row line says "Pin: not
+/// started, another operation was in progress. Try again."; the line stays once the Rename is answered (a success
+/// leaves the row's line alone), and goes when b's next request (its seen toggle) starts.
 #[gpui::test]
 fn a_busy_row_gets_the_not_started_line_until_its_next_operation(cx: &mut TestAppContext) {
     let (mut fake, _list, cx) = open_list(cx, fleet(&["a", "b"]));
@@ -867,16 +867,13 @@ fn a_busy_row_gets_the_not_started_line_until_its_next_operation(cx: &mut TestAp
         .collect();
     assert_eq!(sent, [pin_put("a", true)]);
     let line = "Pin: not started, another operation was in progress. Try again.";
-    assert_eq!(
-        label_of(cx, "session-outcome-b-not-started").as_deref(),
-        Some(line)
-    );
+    assert_eq!(label_of(cx, "session-outcome-b").as_deref(), Some(line));
 
     fake.reply(rename[0].id, 200, None);
     fake.reply(pins[0].id, 200, None);
     test_support::settle(cx);
     assert_eq!(
-        label_of(cx, "session-outcome-b-not-started").as_deref(),
+        label_of(cx, "session-outcome-b").as_deref(),
         Some(line),
         "a settle is not a start"
     );
@@ -889,7 +886,7 @@ fn a_busy_row_gets_the_not_started_line_until_its_next_operation(cx: &mut TestAp
             .any(|(_, path, _)| path == "/api/sessions/b/seen"),
         "the premise: b's next request started"
     );
-    assert_eq!(label_of(cx, "session-outcome-b-not-started"), None);
+    assert_eq!(label_of(cx, "session-outcome-b"), None);
 }
 
 /// Why this matters: marks belong to the UI session (the old app lost them on a reload), and a not-started line to the
@@ -912,7 +909,7 @@ fn a_reset_forgets_the_marks_and_the_not_started_lines(cx: &mut TestAppContext) 
     test_support::click(cx, "session-marked-menu-pin");
     test_support::settle(cx);
     assert!(
-        label_of(cx, "session-outcome-b-not-started").is_some(),
+        label_of(cx, "session-outcome-b").is_some(),
         "the premise: b has its not-started line"
     );
     click_with(cx, "session-row-b", ctrl());
@@ -924,7 +921,7 @@ fn a_reset_forgets_the_marks_and_the_not_started_lines(cx: &mut TestAppContext) 
     test_support::settle(cx);
     assert!(!stored(&list, "b", cx));
     assert_eq!(count(cx), None);
-    assert_eq!(label_of(cx, "session-outcome-b-not-started"), None);
+    assert_eq!(label_of(cx, "session-outcome-b"), None);
 }
 
 /// Why this matters: the old menu closed when what it offered changed under it, so its items never act on an offer

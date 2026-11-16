@@ -130,16 +130,17 @@
 //!
 //! Shift-click and Cmd-click (Ctrl-click on Linux) on a row mark sessions without opening them ([`marking`]). The marks
 //! belong to the UI session, and every frame projects them onto the rows it shows; while any is shown, the heading's
-//! band is the marked bar ("N marked", the marked menu's ⋯ and Clear) in place of the title, the count and the
-//! heading's actions, and Escape anywhere in the list's column clears them. A bulk action's not-started line on a row
-//! is [`bulk`]'s.
+//! band is the marked bar ("N marked", Stop, Delete, the marked menu's ⋯ and Clear) in place of the title, the count
+//! and the heading's actions, and Escape anywhere in the list's column clears them. Bulk Stop and Delete, their
+//! question and their per-host pacing are [`bulk`]'s; a bulk Delete's queued rows hold the automatic selection back as
+//! the Deletes in flight do.
 //!
 //! A retired containerized session supports Delete only, so its row, its menu and its open view withdraw everything
-//! else ([`retired`]).
+//! else, and the marked bar's Stop leaves it out ([`retired`]).
 //!
-//! NOTE: Not ported yet, each with the area that brings it: bulk Stop and Delete, and the row menu's other commands. New
-//! is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home; that
-//! comes with the session pane's status-card work (M2.12), which decides home when no terminal is on screen.
+//! NOTE: Not ported yet, with the area that brings it: the row menu's other commands. New is not yet where focus rests
+//! when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home; that comes with the session pane's
+//! status-card work (M2.12), which decides home when no terminal is on screen.
 
 pub(crate) mod age;
 mod attention;
@@ -171,6 +172,9 @@ pub(crate) mod summary;
 /// The home-folding rule the rows' last line uses, shared with the details bar's directory field so the two fold a path
 /// alike.
 pub(crate) use row::abbreviate_home;
+
+#[cfg(test)]
+mod bulk_tests;
 
 #[cfg(test)]
 mod compact_tests;
@@ -390,6 +394,9 @@ struct Current {
     marks: marking::Marks,
     /// The marked menu the bar's ⋯ opened, checked with the layer manager when read, as the order menu's is.
     marked_menu: Option<crate::layers::LayerId>,
+    /// The bulk Stop and Delete batches and the open bulk question ([`bulk::Bulk`]). Per UI session, so a reset drops
+    /// the queues with the operation store's waiting.
+    bulk: bulk::Bulk,
     /// The Hosts attention list's dismissal and the layout it last drew ([`attention::Memory`]). Per UI session, so a
     /// reset shows dismissed reminders again (SPEC.md: "a reset after a lost connection shows optional reminders
     /// again").
@@ -478,8 +485,8 @@ impl SessionList {
     /// when it does not yet name the session now open ([`Self::name_open_session`]), and send the open session's seen
     /// mark when one is due. Nothing happens while the window is inert.
     fn settle(&mut self, cx: &mut Context<Self>) {
-        // A bulk action's not-started line goes once its session's next operation starts.
-        bulk::prune(cx);
+        // A bulk Delete's rows not sent yet are held in the store as Deletes (`bulk`'s module docs), so they count here
+        // as the Deletes in flight do, and the selection never opens one of them before its request goes out.
         let deleting = session::current_operations(cx).is_some_and(|operations| {
             operations
                 .read(cx)
@@ -554,6 +561,7 @@ impl SessionList {
         }
         // Read after the change above, which took effect at once: the query names the session open from here on.
         self.name_open_session(cx);
+        self.reconcile_bulk_question(cx);
         if let Some((stamped, send)) = seen {
             self.current.current(cx).stamped = stamped;
             if let Some((key, activity)) = send {

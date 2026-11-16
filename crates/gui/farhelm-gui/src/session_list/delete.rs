@@ -28,7 +28,8 @@
 //!
 //! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
-//! with nothing alive, as SPEC.md's header Delete does.
+//! with nothing alive, as SPEC.md's header Delete does. A bulk Delete of the marked sessions (`super::bulk`) sends each
+//! of them the request its row would, through [`start`], with its guard and consequence from the same functions.
 //!
 //! **This window's own Delete is evidence.** The selection rules drop a selected session once a complete, unfiltered
 //! listing proves it gone (`session::listing_proves_gone`), or once an available listing without it answers a query
@@ -56,7 +57,7 @@ use super::{SessionList, menu};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
@@ -164,13 +165,15 @@ pub(super) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
     // Whether the checkout moves is decided by the supervisor from every session that uses it, so this says what
     // happens in either case rather than counting sessions the client may have stale.
     if row.info.working_copy.is_some() {
-        question = question.line(
-            "The managed checkout stays while another session uses it. When its last session is deleted, its folder \
-             moves to the trash; no files are deleted.",
-        );
+        question = question.line(MANAGED_CHECKOUT);
     }
     question
 }
+
+/// What a Delete question says about a session in a managed checkout, the row's and the bulk question's alike
+/// (`super::bulk`).
+pub(super) const MANAGED_CHECKOUT: &str = "The managed checkout stays while another session uses it. When its last \
+                                           session is deleted, its folder moves to the trash; no files are deleted.";
 
 // ---- Starting a Delete -----------------------------------------------------------------------------------------------
 
@@ -256,15 +259,30 @@ pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, Path
 /// Send `key`'s Delete with `guard` through the operation store. A session that already has a request in flight sends
 /// nothing: SPEC.md lets each session exclude its own competing actions.
 fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
+    if let Err(refused) = start(key, guard, |_| {}, cx) {
+        tracing::debug!(?refused, "a Delete was not sent");
+    }
+}
+
+/// [`send_delete`] for a caller that has to know what happened: the bulk Delete (`super::bulk`), which shows a refused
+/// start on the row and moves its host's queue on when each Delete settles. Says why nothing was sent, and otherwise
+/// runs `then` once the Delete has settled, after a success was recorded as this window's own ([`deleted_here`]) and
+/// its trash cue played; a reset drops `then` with the Delete's own waiting.
+pub(super) fn start(
+    key: &str,
+    guard: DeleteGuard,
+    then: impl FnOnce(&mut App) + 'static,
+    cx: &mut App,
+) -> Result<(), NotStarted> {
     let Some(operations) = session::current_operations(cx) else {
-        return;
+        return Err(NotStarted::Retired);
     };
-    let Ok(command) = command(key, guard) else {
+    let command = command(key, guard).map_err(|error| {
         tracing::warn!("a session key that cannot be a path segment was not deleted");
-        return;
-    };
+        NotStarted::Path(error)
+    })?;
     let deleted = key.to_owned();
-    let started = operations.update(cx, |operations, cx| {
+    operations.update(cx, |operations, cx| {
         operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
             if let Outcome::Done(reply) = &settled.outcome {
                 cx.update_default_global::<DeletedHere, _>(|here, cx| {
@@ -272,11 +290,9 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
                 });
                 crate::trash::cue::archived(reply.as_ref(), cx);
             }
+            then(cx);
         })
-    });
-    if let Err(refused) = started {
-        tracing::debug!(?refused, "a Delete was not sent");
-    }
+    })
 }
 
 /// The sessions this window deleted under the current UI session: every Delete it sent that the helm did (a 2xx other
@@ -301,9 +317,10 @@ pub(crate) fn deleted_here(key: &str, cx: &mut App) -> bool {
 
 // ---- What the row shows ----------------------------------------------------------------------------------------------
 
-/// Whether `key` has any request in flight, whatever its kind: then every lifecycle command of the session (Rename,
-/// Replace, Stop and Delete) is refused ([`super::menu::actionable`]) and its menu draws them unavailable, as SPEC.md's
-/// "a pending request refuses another lifecycle action" asks.
+/// Whether `key` has any request in flight, whatever its kind, or is held for a bulk Stop or Delete not sent yet
+/// ([`crate::operations::Operations::hold`]): then every lifecycle command of the session (Rename, Replace, Stop and
+/// Delete) is refused ([`super::menu::actionable`]) and its menu draws them unavailable, as SPEC.md's "a pending
+/// request refuses another lifecycle action" asks.
 pub(crate) fn busy(key: &str, cx: &App) -> bool {
     session::current_operations(cx).is_some_and(|operations| {
         operations
@@ -313,8 +330,9 @@ pub(crate) fn busy(key: &str, cx: &App) -> bool {
     })
 }
 
-/// The guard of `key`'s Delete while it is in flight, as the request carries it; `None` when no Delete is. For the
-/// row's progress, and for the open session's pane once it draws the Delete over its terminal.
+/// The guard of `key`'s Delete while it is in flight, as the request carries it, or while it is held for a bulk Delete
+/// not sent yet, as the request will carry it; `None` when no Delete is. For the row's progress, and for the open
+/// session's pane once it draws the Delete over its terminal.
 pub(crate) fn in_flight(key: &str, cx: &App) -> Option<DeleteGuard> {
     let operations = session::current_operations(cx)?;
     let Work::Delete(guard) = operations.read(cx).in_flight(&OpKey::session(key))? else {
