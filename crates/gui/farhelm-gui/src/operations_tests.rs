@@ -1771,3 +1771,225 @@ fn work_that_changes_the_host_registry_is_probe_setup_and_remove_host() {
         assert_eq!(work.changes_host_registry(), changes, "{work:?}");
     }
 }
+
+// ---- Holds ---------------------------------------------------------------------------------------------------------
+
+/// Hold `key` for `work` in `operations`.
+fn hold(
+    operations: &Entity<Operations>,
+    key: &OpKey,
+    work: Work,
+    cx: &mut TestAppContext,
+) -> Result<(), NotStarted> {
+    cx.update(|cx| operations.update(cx, |operations, cx| operations.hold(key, work, cx)))
+}
+
+/// Release `key`'s hold in `operations`.
+fn release(operations: &Entity<Operations>, key: &OpKey, cx: &mut TestAppContext) {
+    cx.update(|cx| operations.update(cx, |operations, cx| operations.release(key, cx)));
+}
+
+/// What `operations` reports in flight on `key`.
+fn in_flight(
+    operations: &Entity<Operations>,
+    key: &OpKey,
+    cx: &mut TestAppContext,
+) -> Option<Work> {
+    cx.update(|cx| operations.read(cx).in_flight(key))
+}
+
+/// Why this matters: a bulk Stop or Delete row queued behind its host's other rows must read as pending everywhere the
+/// store is read (SPEC.md: "Accepted queued rows remain pending until their completions finish"), or another action
+/// could start on it before its turn. Specified: a held Delete is reported by `in_flight` and `any_in_flight` as that
+/// Delete, guard included, a start on the key is refused as busy with it, and nothing is sent.
+#[gpui::test]
+fn a_hold_reads_as_its_work_in_flight_and_refuses_a_start(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a"], cx);
+    let operations = operations(cx);
+    let key = OpKey::session("a");
+    let work = Work::Delete(DeleteGuard::NothingAlive);
+    hold(&operations, &key, work, cx).unwrap();
+    assert_eq!(in_flight(&operations, &key, cx), Some(work));
+    assert!(cx.update(|cx| {
+        operations
+            .read(cx)
+            .any_in_flight(|running| matches!(running, Work::Delete(_)))
+    }));
+    let delivered = Delivered::default();
+    assert_eq!(
+        start(
+            &operations,
+            ("a", rename("a", "x")),
+            "rename a",
+            &delivered,
+            cx
+        ),
+        Err(NotStarted::Busy(work))
+    );
+    cx.run_until_parked();
+    assert!(fake.commands().is_empty(), "a hold sends nothing");
+}
+
+/// Why this matters: a hold is a reservation like a start, so it must obey the same exclusion and never outlive a
+/// retired store, or a queued row could take a key that another request owns. Specified: holding a key with a Rename in
+/// flight is refused as busy with it and leaves the Rename in flight; holding on a store a reset retired is refused as
+/// retired and holds nothing.
+#[gpui::test]
+fn a_hold_is_refused_on_a_busy_key_and_by_a_retired_store(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a", "b"], cx);
+    let first = operations(cx);
+    let delivered = Delivered::default();
+    let key = OpKey::session("a");
+    start(&first, ("a", rename("a", "x")), "rename a", &delivered, cx).unwrap();
+    assert_eq!(
+        hold(&first, &key, Work::Stop, cx),
+        Err(NotStarted::Busy(Work::Rename))
+    );
+    assert_eq!(in_flight(&first, &key, cx), Some(Work::Rename));
+
+    fake.break_channel();
+    cx.run_until_parked();
+    let b = OpKey::session("b");
+    assert_eq!(hold(&first, &b, Work::Stop, cx), Err(NotStarted::Retired));
+    assert_eq!(in_flight(&first, &b, cx), None);
+}
+
+/// Why this matters: a hold starts the row's new work as far as the user can see, and the old app cleared a row's error
+/// when it admitted a bulk row, as a start clears the key's last failure. Specified: with a partial result recorded on
+/// a, holding a clears it.
+#[gpui::test]
+fn holding_clears_the_keys_last_failure(cx: &mut TestAppContext) {
+    let (_fake, _connection) = connected(&["a"], cx);
+    let operations = operations(cx);
+    let key = OpKey::session("a");
+    cx.update(|cx| {
+        operations.update(cx, |operations, cx| {
+            operations.note(
+                &key,
+                Work::Stop,
+                HostText::from_host("a tab stayed open"),
+                cx,
+            )
+        })
+    });
+    assert!(
+        cx.update(|cx| operations.read(cx).failure(&key).is_some()),
+        "the premise"
+    );
+    hold(&operations, &key, Work::Stop, cx).unwrap();
+    assert_eq!(
+        cx.update(|cx| operations.read(cx).failure(&key).cloned()),
+        None
+    );
+}
+
+/// Why this matters: the holder releases a row right before its turn's request, which must then start; and a release
+/// that came late (after the hold already gave way to the real request) must not drop the live request's entry, or the
+/// row would read idle and refuse nothing while its Stop is out. Specified: releasing a held Stop leaves nothing in
+/// flight and a Stop then starts and is sent; a second release of the same work leaves that Stop in flight.
+#[gpui::test]
+fn release_ends_only_a_hold_never_a_started_request(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a"], cx);
+    let operations = operations(cx);
+    let key = OpKey::session("a");
+    hold(&operations, &key, Work::Stop, cx).unwrap();
+    release(&operations, &key, cx);
+    assert_eq!(in_flight(&operations, &key, cx), None);
+
+    let stop = Command::new(
+        Work::Stop,
+        Method::Post,
+        ApiPath::api(&["sessions", "a", "stop"]).unwrap(),
+        Some(json!({})),
+        "POST /api/sessions/[session]/stop",
+    );
+    let delivered = Delivered::default();
+    start(&operations, ("a", stop), "stop a", &delivered, cx).unwrap();
+    cx.run_until_parked();
+    assert_eq!(fake.commands().len(), 1, "the Stop was sent");
+    release(&operations, &key, cx);
+    assert_eq!(
+        in_flight(&operations, &key, cx),
+        Some(Work::Stop),
+        "the started Stop stays in flight"
+    );
+}
+
+/// Why this matters: holds belong to their UI session; one that outlived a reset would leave a row pending for good
+/// and, as a Delete, hold the automatic selection back forever. Specified: a held Delete on a is gone from the store a
+/// reset retired.
+#[gpui::test]
+fn a_reset_drops_holds(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a"], cx);
+    let first = operations(cx);
+    let key = OpKey::session("a");
+    let work = Work::Delete(DeleteGuard::NothingAlive);
+    hold(&first, &key, work, cx).unwrap();
+
+    fake.break_channel();
+    cx.run_until_parked();
+    assert_eq!(in_flight(&first, &key, cx), None);
+}
+
+/// Why this matters: a held key must refuse exactly what a started one does, or a queued bulk row could be taken by
+/// another action, or hold a key a start could not. This pins that holds and starts refuse alike today, including the
+/// two cases no other test covers: holding a key already held, and a refused start leaving the hold in place. A new
+/// admission rule needs its own case here. Specified: on a key with a Rename in flight, on a key already held for a
+/// Stop, and on a store a reset retired, a hold and a start are refused with the same reason (busy with that Rename,
+/// busy with that Stop, retired), and the key's work is left as it was.
+#[gpui::test]
+fn a_hold_and_a_start_are_refused_alike(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a", "b", "c"], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    let (a, b, c) = (
+        OpKey::session("a"),
+        OpKey::session("b"),
+        OpKey::session("c"),
+    );
+    start(
+        &operations,
+        ("a", rename("a", "x")),
+        "rename a",
+        &delivered,
+        cx,
+    )
+    .unwrap();
+    hold(&operations, &b, Work::Stop, cx).unwrap();
+
+    for (key, session, busy) in [(&a, "a", Work::Rename), (&b, "b", Work::Stop)] {
+        assert_eq!(
+            hold(&operations, key, Work::Stop, cx),
+            Err(NotStarted::Busy(busy)),
+            "a hold on {session}"
+        );
+        let again = (session, rename(session, "y"));
+        assert_eq!(
+            start(&operations, again, "again", &delivered, cx),
+            Err(NotStarted::Busy(busy)),
+            "a start on {session}"
+        );
+        assert_eq!(
+            in_flight(&operations, key, cx),
+            Some(busy),
+            "{session} is unchanged"
+        );
+    }
+
+    fake.break_channel();
+    cx.run_until_parked();
+    assert_eq!(
+        hold(&operations, &c, Work::Stop, cx),
+        Err(NotStarted::Retired)
+    );
+    assert_eq!(
+        start(
+            &operations,
+            ("c", rename("c", "z")),
+            "rename c",
+            &delivered,
+            cx
+        ),
+        Err(NotStarted::Retired)
+    );
+}

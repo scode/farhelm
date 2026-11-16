@@ -446,7 +446,8 @@ not yet ported
 
 Tests: 14. Covers: marking retains New dispatch and launcher cancellation focus.
 
-partly: crates/gui/farhelm-gui/src/session_list/marking_tests.rs ports the cases that need no batch.
+partly: crates/gui/farhelm-gui/src/session_list/marking_tests.rs ports the cases that need no batch, and
+crates/gui/farhelm-gui/src/session_list/bulk_tests.rs the batch cases.
 `marking retains New dispatch and launcher cancellation focus` (`the_new_action_opens_the_launcher_while_marked`, which
 also cancels it back to the ⋯; the launcher's return rule in general is the launcher deviation below);
 `retained mark keeps the open Trash dialog` (`the_trash_dialog_survives_marks_appearing`; focus after closing it is a
@@ -463,18 +464,40 @@ list's Escape, and is not driven here); `metadata acts only on displayed eligibl
 `row_controls_neither_mark_nor_clear`, `a_failed_listing_offers_nothing_and_forgets_nothing`,
 `only_a_complete_listing_forgets_a_vanished_mark`, `the_bar_replaces_the_heading_and_the_cut_band_stays`,
 `the_count_is_focusable_but_not_a_tab_stop`, `a_busy_row_gets_the_not_started_line_until_its_next_operation` and
-`the_marked_menu_closes_when_its_offers_change`. Not yet ported: `archive cues need a visible Trash` (the cue already
-skips a Trash button not drawn, `trash/cue.rs`, but no test drives it while marked); the batch cases, which come with
-bulk Stop and Delete: `Stop reports an engaged row and runs its sibling`,
-`Delete rewords and shrinks without gaining targets`, `completion preserves a later intent` (four variants),
-`Stop paces nine rows on one host while another progresses`,
-`Delete keeps guards, row errors and cross-host selection exclusion` and `direct Delete with and without skip`; and
-`host attention movement closes the marked menu and reopening remeasures`, which the bulk work and the Hosts attention
-list share, is crates/gui/farhelm-gui/src/session_list/attention/tests.rs
-`menus_below_close_when_the_list_moves_and_stay_through_progress`. Environment rows (Delete-only and environment-wide
-cases) wait for the environments work. On main every row is pinned or not, so Pin or Unpin always applies and the ⋯ is
-always drawn with the bar; the old case of a ⋯ omitted for marks no action applies to has no rows to reach it yet. No
-end-to-end smoke step: the bridge's click sends no modifier keys, so nothing can mark a row in the running app.
+`the_marked_menu_closes_when_its_offers_change`. The batch cases: `Stop reports an engaged row and runs its sibling`
+(`a_refused_row_keeps_its_line_and_its_siblings_go_on`, with an in-flight Rename as the engaged row, and
+`a_press_on_the_bar_closes_a_rows_own_question_and_takes_the_row`: the old spec's scripted click left the row's own
+Delete question open, but in the app a press on the bar closes it first, so the row is taken like any other);
+`Delete rewords and shrinks without gaining targets` (`a_changed_target_rewords_the_question_which_never_gains_one`,
+which also checks that the reword keeps focus in the question, `a_status_word_change_does_not_reword_the_question`,
+`after_the_user_moved_on_a_change_leaves_the_question_as_drawn`, `the_question_closes_once_no_target_is_left`, and
+`a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks` for the rows, the full host, the managed
+checkout's line and Cancel's focus on the ⋯; the hostile title's escaping is the host-text element's, tested there; the
+marked bar's Stop and Delete are in the `session-list-marked` golden); `completion preserves a later intent`, four
+variants (`completion_keeps_the_marks_of_a_later_question`, `completion_keeps_a_target_marked_again`,
+`completion_keeps_the_marks_under_a_later_menu`, `completion_keeps_the_marks_of_a_later_question_about_them`);
+`Stop paces nine rows on one host while another progresses`
+(`a_batch_sends_one_request_per_host_and_a_second_batch_keeps_its_own_pace`, with three rows on one host and two on
+another, Clear and a second batch while the first runs);
+`Delete keeps guards, row errors and cross-host selection exclusion`
+(`automatic_selection_waits_for_every_admitted_delete` for the selection across hosts, the guards in
+`a_bulk_stop_asks_about_tabs_and_freezes_each_rows_preconditions` and the Delete tests, and the focus handback to the
+order's title when a finished batch empties the bar); `direct Delete with and without skip`
+(`a_second_batch_skips_the_rows_the_first_still_holds` for ended rows deleted unasked and a second press refusing the
+rows the first batch holds, `skip_session_confirmations_runs_bulk_stop_and_delete_unasked`). Also
+`a_queued_row_is_pending_until_its_turn_and_free_after_it` (a queued row shows its Stop pending and its own menu refuses
+it, as the old app's reservation at acceptance did), `a_stop_batch_holds_no_automatic_selection_back`,
+`a_reset_drops_the_queued_rows` and `a_batch_acts_only_on_the_marks_shown`. Retired containerized sessions:
+`a_bulk_stop_leaves_a_retired_session_out_and_delete_takes_it`,
+`with_only_retired_sessions_marked_the_bar_draws_delete_and_no_stop` and
+`with_no_menu_toggle_cancel_returns_focus_to_the_pressed_button`. Not yet ported: a golden of the bulk question;
+`archive cues need a visible Trash` (the cue already skips a Trash button not drawn, `trash/cue.rs`, but no test drives
+it while marked); and `host attention movement closes the marked menu and reopening remeasures`, which the bulk work and
+the Hosts attention list share, is crates/gui/farhelm-gui/src/session_list/attention/tests.rs
+`menus_below_close_when_the_list_moves_and_stay_through_progress`. Sandbox and recipe container rows' environment-wide
+cases wait for the environments work. No end-to-end smoke step, and no app scene of the bulk question: the bridge's
+command line (`scripts/gui-agent.py`'s `click`) sends no modifier keys, so neither can mark a row. The bridge's protocol
+does carry modifiers on a mouse-down, so a modifier option on its `click` would make both possible.
 
 ### `tests/menu-highlight.spec.ts`
 
@@ -507,13 +530,15 @@ row), `a_row_that_turns_out_retired_drops_its_terminal`,
 `an_unreachable_retired_session_shows_the_unavailable_card_alone` and
 `an_ordinary_container_session_keeps_its_terminal_and_header` (its stream, tab strip and five actions);
 crates/farhelm-proto/src/session_launch.rs `only_a_stored_container_choice_marks_a_launch_retired`. Waiting: the
-ordinary container session's Suspend and the rest of its environment controls (the environment sessions' rows), and
-leaving retired sessions out of a pin drag and the marked bar's Stop and Delete, which are not ported yet. No screenshot
-scene and no smoke step: the bridge seeds sessions only through the helm's create, which refuses the retired launch, so
-no app run can show one. Recorded deviations: the card is a keyboard stop where focus rests, where the old card was no
-stop; SPEC.md, "Where focus rests", names no home for a retired session, so the card was made home by analogy with the
-other cards that stand where a terminal would be (the migration's orchestrator's brief of 2026-11-15); and on an
-unreachable host the unavailable card stands alone in its place.
+ordinary container session's Suspend and the rest of its environment controls (the environment sessions' rows). Leaving
+retired sessions out of a pin drag is crates/gui/farhelm-gui/src/session_list/pin_drag_tests.rs
+`a_retired_pin_has_no_grip_but_is_a_drop_target`, and leaving them out of the marked bar's Stop (Delete keeps them) is
+in `tests/bulk-session-actions.spec.ts`'s tests above. No screenshot scene and no smoke step: the bridge seeds sessions
+only through the helm's create, which refuses the retired launch, so no app run can show one. Recorded deviations: the
+card is a keyboard stop where focus rests, where the old card was no stop; SPEC.md, "Where focus rests", names no home
+for a retired session, so the card was made home by analogy with the other cards that stand where a terminal would be
+(the migration's orchestrator's brief of 2026-11-15); and on an unreachable host the unavailable card stands alone in
+its place.
 
 ### `tests/ui-plan-regressions.spec.ts`
 
@@ -1128,13 +1153,35 @@ Where the port does not match the old app, and why. Each stays until the work na
 - Closing the Trash dialog while sessions are marked returns focus where the dialog's own rule sends it when its button
   is not drawn (what held focus when it opened, else home), where the old app focused the marked bar's ⋯ toggle. The
   Trash dialog names its button as where closing returns focus, and the button is not drawn while the bar is.
-- A marked row a bulk action skipped because its own commands were refused says "Pin: not started, another operation was
-  in progress. Try again." (the action's label, then the operation store's shared reason), where the old app said "Pin:
-  not started, another operation is in progress; try again". The line goes when the session's next operation starts, as
-  the old error slot did, but it is kept beside that slot rather than in it, so a refusal the busy request settles with
-  shows above it instead of replacing it. A marked row with a request in flight is skipped with that line too, where the
-  old bulk metadata sent its write anyway and skipped only a row whose question or Rename was open: the port's row menu
-  refuses Pin and the seen toggle while a request is in flight, and the bulk action follows it.
+- A marked row a bulk action skipped because its own commands were refused says "Stop: not started, another operation
+  was in progress. Try again." (the row's ordinary name for the work, then the operation store's shared reason), where
+  the old app said "Stop: not started, another operation is in progress; try again". The name is the row's own line's:
+  "Stop", "Delete" and "Pin" as before, but Unpin's line also says "Pin" and Mark read's and Mark unread's say "Seen",
+  where the old app named the menu item. The line is the row's one line (the operation store's slot), so it goes when
+  the session's next operation starts, and a refusal the busy request settles with replaces it, as the old error slot
+  did. A marked row with a request in flight is skipped with that line too, where the old bulk metadata sent its write
+  anyway and skipped only a row whose question or Rename was open: the port's row menu refuses Pin and the seen toggle
+  while a request is in flight, and the bulk action follows it.
+- The bulk question's rows show the status in words in the body's ink, where the old ones drew the colored status badge.
+- The bulk question's body scrolls with the wheel only: the prompt gives a question's body no keyboard scroll stop,
+  where the old body was a scroll region of its own ("Sessions affected"), so with more targets than fit, a keyboard
+  user cannot bring every row into view. This waits for a prompt request (a scroll stop for a question's body).
+- A bulk question reworded by a listing is closed and asked again, starting on Cancel as a question that arrives later
+  does, so focus on its Confirm moves to the replacement's Cancel; the old one replaced its opening in place and
+  remembered where focus was. The old question also replaced itself on any change it drew, its status words included;
+  here only what the answer would authorize counts (a title, host, consequence, checkout line or precondition), so a
+  status word can go stale while the question is open, because each reword moves focus. Once the user has pressed a key
+  or clicked since the question opened (in it, or in an agent approval card beside it), a change no longer rewords it:
+  the replacement asks under the question's own opening, which may not take focus then, so the question stays as drawn,
+  and its answer still authorizes only what it drew. A question whose every target is proven gone still closes then, and
+  closing it also closes any dialog raised above it (an approval card's tunnel warning, say). All of this waits for the
+  prompt's replace-in-place, which the area owner has requested. Cancel returns focus to the ⋯ because the bar moves
+  focus there before asking (the prompt returns focus to what held it when the question opened, and has no way to name
+  another control). While the bar draws no ⋯ (every mark shown a retired session, which no metadata action takes),
+  Cancel returns focus to the bar's Delete (the only lifecycle control it draws then), where the old app named the
+  order's title, which is not drawn while the bar is, so it focused nothing.
+- The bulk question has no header Close (the prompt's centered question draws none), where the old one had a "×" named
+  "Cancel bulk stop" or "Cancel bulk delete". Cancel and Escape do what it did.
 - Escape clears the marks from anywhere in the list's column, where the old app cleared them only from a row, the status
   segments and the marked bar, and not from a row whose own question was open. So Escape on the order title, Trash,
   Templates or New (drawn while every mark is hidden) clears the hidden marks, and so does Escape on a row's control

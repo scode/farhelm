@@ -18,10 +18,10 @@
 //!   carries its operation's name in front of the words, as that slot did, and a Rename or Delete refusal shows the
 //!   words alone, as before. The open session's header shows the same line below its top row ([`pane_line`]), as the
 //!   old header's error lines did.
-//! - **A bulk action's not-started line joins it.** A marked row a bulk action skipped because its commands were refused
-//!   says so ("Pin: not started, …"), kept by [`super::bulk`] with the same lifetime as the store's slot. The row, its
-//!   menu, and the open session's header and interrupted card draw it here, after the store's line when the session
-//!   has both, so every one of them shows what the session's operations said through this one path.
+//! - **A bulk action's not-started line is one of them.** A marked row a bulk action skipped because its commands were
+//!   refused says so ("Pin: not started, …", "Delete: not started, …"), and [`super::bulk`] records that line in the
+//!   same slot with [`crate::operations::Operations::note`], so it lasts until the session's next operation starts and a
+//!   refusal the busy request settles with replaces it, as the old app's one error slot did.
 //! - **The wait clock is the ticker's, never a timer of its own.** One clock serves Replace and Restart, the two
 //!   requests SPEC.md gives this line, and a session has at most one, since it has at most one request in flight. A
 //!   [`ticker::after`] deadline shows the line two seconds after the request; from then the line counts the whole
@@ -64,7 +64,7 @@ pub(crate) const PROGRESS_SHOWS_AFTER: Duration = Duration::from_secs(2);
 /// unread (the old app's `seen_toggle_report`), and "Pin: " and "Move pin: " for a refused pin and move. A Rename or a
 /// Delete refusal shows the words alone, as it did before Stop and Replace came, and a save belongs to an editor, which
 /// shows its own refusal. Exhaustive, so a new kind of work decides.
-fn prefix(work: Work) -> Option<&'static str> {
+pub(super) fn prefix(work: Work) -> Option<&'static str> {
     match work {
         Work::Stop => Some("Stop: "),
         Work::Replace => Some("Replace: "),
@@ -110,12 +110,13 @@ pub(crate) fn current_line(key: &str, cx: &App) -> Option<Failure> {
 
 // ---- The lines -------------------------------------------------------------------------------------------------------
 
-/// `key`'s line under its row: [`current_line`] and any not-started line in `.action-error`'s 12-pixel red, or in the
-/// fill's ink on the selected row (`.session-row.selected .action-error`). Each is named, as one label, by its words,
-/// the store's line under `session-outcome-<key>` and the not-started one under `session-outcome-<key>-not-started`.
+/// `key`'s line under its row: [`current_line`] in `.action-error`'s 12-pixel red, or in the fill's ink on the selected
+/// row (`.session-row.selected .action-error`). Named, as one label, by the operation and the escaped words.
 pub(super) fn row_line(key: &str, selected: bool, cx: &App) -> Option<Div> {
+    let line = current_line(key, cx)?;
     Some(line_text(
-        sentences(&format!("session-outcome-{key}"), key, cx)?,
+        SharedString::from(format!("session-outcome-{key}")),
+        &line,
         refusal_ink(selected, theme::palette(cx)),
     ))
 }
@@ -123,8 +124,10 @@ pub(super) fn row_line(key: &str, selected: bool, cx: &App) -> Option<Div> {
 /// `key`'s line inside its open menu, which covers the row's own copy: the same words on the menu's own surface, so in
 /// the ordinary red whatever the row's fill.
 pub(super) fn menu_line(key: &str, cx: &App) -> Option<Div> {
+    let line = current_line(key, cx)?;
     Some(line_text(
-        sentences(&format!("session-menu-outcome-{key}"), key, cx)?,
+        SharedString::from(format!("session-menu-outcome-{key}")),
+        &line,
         theme::palette(cx).danger,
     ))
 }
@@ -132,31 +135,18 @@ pub(super) fn menu_line(key: &str, cx: &App) -> Option<Div> {
 /// `key`'s line in the open session's header, below its top row: the same words in the old header's error lines'
 /// look (`.restart-error`, `.stop-error`, `.replace-error`: 12 pixels of `--danger`, padded 4 by 10 pixels).
 pub(crate) fn pane_line(key: &str, cx: &App) -> Option<Div> {
-    let sentences = sentences(&format!("session-header-outcome-{key}"), key, cx)?;
-    // Block layout: a second sentence goes under the first.
+    let line = current_line(key, cx)?;
     Some(
         div()
             .py(px(4.))
             .px(px(10.))
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(theme::palette(cx).danger))
-            .children(sentences),
+            .child(sentence(
+                SharedString::from(format!("session-header-outcome-{key}")),
+                &line,
+            )),
     )
-}
-
-/// What `key`'s session says about its operations now, as sentences named from `id`: the store's slot
-/// ([`current_line`]) under `id` itself, then a bulk action's not-started line ([`super::bulk`]) under
-/// `<id>-not-started`. `None` while it says nothing.
-fn sentences(id: &str, key: &str, cx: &App) -> Option<Vec<HostSentence>> {
-    let mut sentences = Vec::new();
-    if let Some(line) = current_line(key, cx) {
-        sentences.push(sentence(SharedString::from(id.to_owned()), &line));
-    }
-    if let Some(words) = super::bulk::not_started_line(key, cx) {
-        sentences
-            .push(HostSentence::new(SharedString::from(format!("{id}-not-started"))).text(words));
-    }
-    (!sentences.is_empty()).then_some(sentences)
 }
 
 /// The ink of the row's line: `.action-error`'s red, or the fill's ink on the selected row, where red on the accent
@@ -169,20 +159,20 @@ pub(super) fn refusal_ink(selected: bool, palette: &theme::Palette) -> theme::To
     }
 }
 
-/// `sentences` (see [`sentences`]) in `.action-error`'s look and `ink`, one under the other (the div's block layout),
-/// for the row and its menu alike.
-fn line_text(sentences: Vec<HostSentence>, ink: theme::Token) -> Div {
+/// `line` in `.action-error`'s look and `ink`, for the row and its menu alike: the operation's name as the app's words
+/// and the host's words as their own element, so a direction override in them reorders nothing around them.
+fn line_text(id: SharedString, line: &Failure, ink: theme::Token) -> Div {
     div()
         .pt(px(2.))
         .pb(px(8.))
         .px(px(14.))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(ink))
-        .children(sentences)
+        .child(sentence(id, line))
 }
 
 /// `line`'s words as one sentence named `id`: the operation's name, where it has one, as the app's words, then the
-/// host's words as their own element, so a direction override in them reorders nothing around them.
+/// host's words as their own element.
 fn sentence(id: SharedString, line: &Failure) -> HostSentence {
     let mut sentence = HostSentence::new(id);
     if let Some(prefix) = prefix(line.work) {

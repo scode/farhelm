@@ -20,16 +20,19 @@
 //!   gone (`session::listing_proves_gone`) forgets its mark.
 //! - **Targets never grow.** An action takes the targets as they were drawn, keeps only those still shown and marked
 //!   when it runs, and never adds one ([`admitted`]).
-//! - **The marked bar.** While any mark is effective, the heading's band holds "N marked", the marked menu's ⋯ (drawn
-//!   only while one of its actions applies to a marked row) and Clear, in place of the order's title, the count, Trash,
-//!   Templates and New. The cut listing's warning and the failure line stay under it. Trash's view and any dialog it
-//!   opened stay alive; only its button is not drawn. New's shortcut still opens the launcher.
+//! - **The marked bar.** While any mark is effective, the heading's band holds "N marked", Stop (drawn only while some
+//!   mark shown is not a retired session, which supports Delete only) and Delete (their batches and question are
+//!   [`super::bulk`]'s), the marked menu's ⋯ (drawn only while one of its actions applies to a marked row) and Clear,
+//!   in place of the order's title, the count, Trash, Templates and New. The cut listing's warning and the failure line
+//!   stay under it. Trash's view and any dialog it opened stay alive; only its button is not drawn. New's shortcut
+//!   still opens the launcher.
 //! - **The metadata actions** ([`MetadataAction`]): Pin for marked rows that are not pinned, Unpin for those that are,
 //!   Mark read and Mark unread for the rows whose own menu offers it, none of them for a retired containerized session,
 //!   which supports Delete only (`super::retired`). Each sends the row's ordinary request, so its refusal shows on the
 //!   row as the row menu's would. A row whose own commands are refused at that moment (`menu::refused`: a request in
-//!   flight, its YOLO question or its interrupted card's Replace question open) is skipped and shows "<action>: not
-//!   started, …" ([`super::bulk`]). The marks are cleared once the writes are sent, not when they are answered.
+//!   flight or held for a bulk Stop or Delete, its YOLO question or its interrupted card's Replace question open) is
+//!   skipped and shows its work's "not started" line ([`super::bulk`]). The marks are cleared once the writes are sent,
+//!   not when they are answered.
 //! - **Escape** in the list's column clears the marks and lets the key go on, so the window's own Escape (a tooltip
 //!   put away) still happens. A menu, a dialog, an inline question or the terminal that holds focus takes Escape before
 //!   it reaches the list, and keeps the marks.
@@ -38,13 +41,11 @@
 //!   focus alone. Marks that go for another reason (a filter hides them all) move no focus; the focus coordinator's
 //!   recovery takes over.
 //!
-//! An interaction counter ([`Marks::revision`]) moves with every marking choice, so work started earlier can tell
-//! whether the user has made a newer one since.
+//! An interaction counter ([`Marks::revision`]) moves with every marking choice, so a bulk Stop or Delete accepted
+//! earlier can tell whether the user has made a newer one since, and clears its own targets only if not.
 //!
-//! NOTE: Stop and Delete join the bar with their batches (one request at a time per host, the bulk question, the
-//! selection held back for a bulk Delete), which come later in `super::bulk`. Sandbox and recipe container rows get
-//! nothing special here yet: their environment-wide cases come with the environments work. GPUI cannot report
-//! `aria-haspopup`.
+//! NOTE: Sandbox and recipe container rows get nothing special here yet: their environment-wide cases come with the
+//! environments work. GPUI cannot report `aria-haspopup`.
 //!
 //! A change of the Hosts attention list above the heading closes the marked menu, as it closes the rows' menus
 //! ([`super::attention`]).
@@ -61,14 +62,16 @@ use gpui::{
 
 use super::seen::{self, Toggle};
 use super::selection::Listed;
-use super::{HEADING_ICON_SIDE, SessionList, bulk, menu, pins};
+use super::{HEADING_ICON_SIDE, SessionList, bulk, menu, pins, retired};
 use crate::assets::Icon;
 use crate::components::{
-    HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Tier, home_end_keys, toggle_arrow_keys,
+    Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Tier, home_end_keys,
+    toggle_arrow_keys,
 };
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::local_state;
+use crate::operations::Work;
 use crate::theme::{self, metrics};
 
 /// What a click on a row's open button asks for, read from the modifiers held (the old `Gesture::from_modifiers`).
@@ -105,9 +108,9 @@ impl Gesture {
 pub(super) struct Marks {
     /// The marked sessions' keys, shown or hidden.
     stored: HashSet<String>,
-    /// How many marking choices this UI session made: each gesture, Clear, plain-click clear, opening the marked menu
-    /// and dispatching a metadata action counts one. Work that clears its own targets when it finishes compares it
-    /// with the value it started under.
+    /// How many marking choices this UI session made: each gesture, Clear, plain-click clear, opening the marked menu or
+    /// a bulk question, and dispatching a metadata action counts one. A bulk batch, which clears its own targets when it
+    /// finishes, compares it with the value it was accepted under.
     revision: u64,
 }
 
@@ -156,12 +159,13 @@ impl Marks {
         self.stored.clear();
     }
 
-    /// Count a choice that changes no mark: opening the marked menu.
+    /// Count a choice that changes no mark: opening the marked menu or a bulk question.
     pub(super) fn touch(&mut self) {
         self.revision += 1;
     }
 
-    /// Forget the marks of sessions `gone` says are gone. Not a choice: work waiting on the revision is not disturbed.
+    /// Forget the marks `gone` names: sessions a listing proves gone, or a finished batch's own targets. Not a choice:
+    /// work waiting on the revision is not disturbed.
     pub(super) fn prune(&mut self, gone: impl Fn(&str) -> bool) {
         self.stored.retain(|key| !gone(key));
     }
@@ -171,9 +175,7 @@ impl Marks {
         self.stored.contains(key)
     }
 
-    /// The current choice's number (see the field). Only the tests read it so far: the bulk Stop and Delete batches,
-    /// which clear their own targets when they finish, are its first readers.
-    #[cfg_attr(not(test), expect(dead_code))]
+    /// The current choice's number (see the field).
     pub(super) fn revision(&self) -> u64 {
         self.revision
     }
@@ -318,6 +320,9 @@ pub(super) struct Projection {
     /// The metadata actions at least one of them offers, in the menu's order, each with its targets as this frame
     /// draws them: what the bar's ⋯ and the marked menu offer, and what a chosen item acts on.
     pub(super) offers: Vec<Offer>,
+    /// Whether some mark shown is not a retired containerized session, which supports Delete only
+    /// ([`super::retired`]): the bar draws Stop only then, as the old bar did.
+    pub(super) stop: bool,
 }
 
 /// One metadata action the marks shown offer, and its targets as drawn.
@@ -344,9 +349,13 @@ pub(super) fn project(listed: &[Listed], marks: &Marks) -> Projection {
             (!targets.is_empty()).then_some(Offer { action, targets })
         })
         .collect();
+    let stop = listed
+        .iter()
+        .any(|session| marks.contains(session.key) && !retired::is(session.row));
     Projection {
         shown: shown.into_iter().map(str::to_owned).collect(),
         offers,
+        stop,
     }
 }
 
@@ -355,9 +364,12 @@ pub(super) fn project(listed: &[Listed], marks: &Marks) -> Projection {
 /// opens beside, and what the last frame projected ([`project`]), which the row callback, the bar, the menu and a
 /// chosen action read.
 pub(super) struct Kept {
-    /// "N marked"'s handle. Not a tab stop: Tab skips the count, as the old `tabindex="-1"` did, but the app can move
-    /// focus there (the bulk question's Confirm will).
+    /// "N marked"'s handle. Not a tab stop: Tab skips the count, as the old `tabindex="-1"` did, but the app moves
+    /// focus there when the bulk question is confirmed.
     count_focus: FocusHandle,
+    /// Stop's and Delete's handles, tab stops, owned here so that the bar knows when focus is on them.
+    stop_focus: FocusHandle,
+    delete_focus: FocusHandle,
     /// The ⋯ toggle's handle, a tab stop.
     menu_focus: FocusHandle,
     /// Clear's handle, a tab stop.
@@ -375,10 +387,28 @@ impl Kept {
     pub(super) fn new(cx: &mut App) -> Kept {
         Kept {
             count_focus: cx.focus_handle(),
+            stop_focus: cx.focus_handle().tab_stop(true),
+            delete_focus: cx.focus_handle().tab_stop(true),
             menu_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             anchor: None,
             projection: None,
+        }
+    }
+
+    /// Whether the last frame offered Stop: some mark shown is not a retired session ([`Projection::stop`]).
+    fn offers_stop(&self) -> bool {
+        self.projection
+            .as_ref()
+            .is_some_and(|projection| projection.stop)
+    }
+
+    /// The bar's own button for `action`, Stop's or Delete's focus handle: where a bulk question returns focus on
+    /// Cancel when the bar draws no ⋯ ([`super::bulk`]).
+    pub(super) fn button_focus(&self, action: bulk::Lifecycle) -> &FocusHandle {
+        match action {
+            bulk::Lifecycle::Stop => &self.stop_focus,
+            bulk::Lifecycle::Delete => &self.delete_focus,
         }
     }
 
@@ -397,17 +427,27 @@ impl Kept {
     }
 
     /// Whether one of the bar's own controls holds focus, which then goes to the order's title when the bar goes
-    /// (the module docs, "Focus").
-    fn holds_focus(&self, window: &Window) -> bool {
-        [&self.count_focus, &self.menu_focus, &self.clear_focus]
-            .into_iter()
-            .any(|handle| handle.is_focused(window))
+    /// (the module docs, "Focus"), whichever way the bar goes: Clear, Escape, or a bulk batch clearing its targets.
+    pub(super) fn holds_focus(&self, window: &Window) -> bool {
+        [
+            &self.count_focus,
+            &self.stop_focus,
+            &self.delete_focus,
+            &self.menu_focus,
+            &self.clear_focus,
+        ]
+        .into_iter()
+        .any(|handle| handle.is_focused(window))
     }
 
-    /// "N marked"'s focus handle, for a test that moves focus there as the app will.
-    #[cfg(test)]
+    /// "N marked"'s focus handle, where a confirmed bulk question sends focus.
     pub(super) fn count_focus(&self) -> &FocusHandle {
         &self.count_focus
+    }
+
+    /// The ⋯ toggle's focus handle while the last frame drew the toggle, where a cancelled bulk question returns focus.
+    pub(super) fn menu_toggle_drawn(&self) -> Option<&FocusHandle> {
+        self.anchor.as_ref().map(|_| &self.menu_focus)
     }
 
     /// The ⋯ toggle's focus handle, for a test that starts from it.
@@ -514,9 +554,10 @@ const MENU_NAME: &str = "Marked session actions";
 const PANEL_WIDTH: f32 = 246.;
 
 impl SessionList {
-    /// The heading's band while marks are effective (`.marked-bar`): "N marked", the ⋯ toggle when an action applies,
-    /// and Clear, on the heading's ground. `None` while no mark is effective, when the heading is drawn instead. Drawn
-    /// before the store is borrowed for the rest of the frame: the toggle's anchor needs the window's element state.
+    /// The heading's band while marks are effective (`.marked-bar`): "N marked", Stop, Delete, the ⋯ toggle when an
+    /// action applies, and Clear, on the heading's ground. `None` while no mark is effective, when the heading is drawn
+    /// instead. Drawn before the store is borrowed for the rest of the frame: the toggle's anchor needs the window's
+    /// element state.
     pub(super) fn marked_bar(
         &mut self,
         window: &mut Window,
@@ -543,6 +584,38 @@ impl SessionList {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::color(palette.fg_0))
         .child(words);
+        // The old `.marked-stop` and `.marked-delete`, with their help. Stop is left out while every mark shown is a
+        // retired session, which supports Delete only, as the old bar left it out.
+        let offers_stop = self.marking.offers_stop();
+        let lifecycle = [
+            (
+                bulk::Lifecycle::Stop,
+                bulk::STOP_ID,
+                "Stop the agents and close terminal tabs in the marked sessions currently shown",
+                Tier::Neutral,
+                &self.marking.stop_focus,
+            ),
+            (
+                bulk::Lifecycle::Delete,
+                bulk::DELETE_ID,
+                "Delete the marked sessions currently shown",
+                Tier::Danger,
+                &self.marking.delete_focus,
+            ),
+        ]
+        .into_iter()
+        .filter(|(action, ..)| offers_stop || *action != bulk::Lifecycle::Stop)
+        .map(|(action, id, help, tier, focus)| {
+            let list = cx.weak_entity();
+            Button::new(id, action.label(), HoverHelp::tooltip(help), Role::Button)
+                .tier(tier)
+                .toolbar()
+                .focus(focus)
+                .on_click(move |_, window, cx| {
+                    let _ = list.update(cx, |list, cx| list.bulk_lifecycle(action, window, cx));
+                })
+        })
+        .collect::<Vec<_>>();
         let toggle = (!self.marking.offers().is_empty()).then(|| {
             // Beside the toggle, as the row menu opens and as the old flyout stood out past the sidebar's edge, so the
             // menu covers the session pane rather than the rows it acts on.
@@ -601,6 +674,7 @@ impl SessionList {
                 .px(metrics::LIST_HEADING_PAD.1)
                 .bg(theme::color(palette.bg_2))
                 .child(count)
+                .children(lifecycle)
                 .children(toggle)
                 .child(clear)
                 .into_any_element(),
@@ -675,18 +749,12 @@ impl SessionList {
         cx.notify();
     }
 
-    /// `action` was chosen in the marked menu, which drew `drawn` as its targets: close the menu, send each admitted
+    /// A marked menu action was chosen, whose targets the menu drew as `drawn`: close the menu, send each admitted
     /// target's own request ([`admitted`]: still shown and still marked, with the values drawn), give a row whose
     /// commands are refused now its not-started line instead, clear the marks, and hand focus to the order's title,
     /// since the toggle the menu returns focus to goes with the bar. Replies are not waited for: a refusal shows on its
     /// row as the row menu's would.
-    fn apply_metadata(
-        &mut self,
-        action: MetadataAction,
-        drawn: &[Target],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn apply_metadata(&mut self, drawn: &[Target], window: &mut Window, cx: &mut Context<Self>) {
         let mark = Mark::take(cx);
         if let Some(menu) = self.marked_menu_open(window, cx) {
             layers::close(menu, window, cx);
@@ -696,7 +764,11 @@ impl SessionList {
         for target in targets {
             // The row menu draws these items unavailable then (`menu::refused`); the bulk action says so on the row.
             if menu::refused(&target.key, cx) {
-                bulk::record_not_started(&target.key, action.label(), cx);
+                let (work, label) = match target.write {
+                    Write::Pin(_) => (Work::Pin, "Pin"),
+                    Write::Seen(_) => (Work::Seen, "Seen"),
+                };
+                bulk::not_started(&target.key, work, label, cx);
                 continue;
             }
             match target.write {
@@ -754,9 +826,7 @@ impl Render for MarkedMenu {
                 .focus(focus)
                 // `targets` are the drawn ones, with the activity each row shows for Mark read.
                 .on_click(move |_, window, cx| {
-                    let _ = list.update(cx, |list, cx| {
-                        list.apply_metadata(action, &targets, window, cx)
-                    });
+                    let _ = list.update(cx, |list, cx| list.apply_metadata(&targets, window, cx));
                 })
             })
             .collect();

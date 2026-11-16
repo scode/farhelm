@@ -29,9 +29,10 @@
 //! - **No pin drag.** A retired pin's row draws no grip and no drag of it starts (`super::pin_drag`), as the old app
 //!   disabled that grip. It stays a drop target for another pin's drag, as it was in the old app and as the helm takes
 //!   it as a neighbor.
-//!
-//! NOTE: The marked bar's Stop and Delete are not here, since they do not exist yet. The old app left retired sessions
-//! out of bulk Stop; whoever ports it reads [`is`].
+//! - **Bulk Stop leaves it out, bulk Delete keeps it.** A marked retired session is never a target of the marked bar's
+//!   Stop, which says nothing about it and leaves its mark alone, and the bar draws Stop only while some shown mark is
+//!   not retired (`super::bulk`, `super::marking`); the bar's Delete takes it with every other mark, as the old bar's
+//!   batches did.
 
 use farhelm_proto::ui_channel::SessionRow;
 
