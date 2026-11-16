@@ -53,7 +53,9 @@ pub struct StepView {
 }
 
 /// Where a host's retained run stands as a whole. `Completed` and `Failed` are final for that run; the view stays
-/// readable until a later run replaces it. An idle view (no run) also says `Completed`, with no run id.
+/// readable until a later run replaces it. A failed environment launch whose cleanup removed its host is never
+/// replaced: the helm keeps listing it under the removed host's id until a bounded list of such runs pushes it out or
+/// the helm restarts. An idle view (no run) also says `Completed`, with no run id.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RunStatus {
@@ -72,7 +74,14 @@ pub struct ProvisioningView {
     pub operation: Option<ProvisioningOperation>,
     pub status: RunStatus,
     pub steps: Vec<StepView>,
+    /// The run's own words about how it ended, for a person. A failed environment launch's message is the whole text
+    /// to show, its "Not launched." lead included, so a client shows it as it is and adds no lead of its own.
     pub message: Option<String>,
+    /// Set on a failed run whose outcome the helm does not know: an environment launch whose task panicked, which may
+    /// have left its environment or even its session behind. A client branches on this marker, never on the message's
+    /// words, to tell "may still exist" from "not launched". Absent on the wire, and so false, on every other run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outcome_unknown: bool,
 }
 
 /// One frozen action of a plan as the user sees it before and during a run. The id remains the executor's stable label;
@@ -134,6 +143,34 @@ pub enum ProbeReply<Plan> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A failed run whose outcome is unknown says so in its own field, which every other run leaves off the wire. Why:
+    /// a client must tell a panicked environment launch (it may have left an environment behind) from one that was
+    /// not launched without reading words written for people, and adding the field must not change what any other
+    /// run looks like to a client that never heard of it. Specified: false is absent from the JSON and reads back as
+    /// false, true is written and read back.
+    #[test]
+    fn a_run_marks_an_unknown_outcome_only_when_it_has_one() {
+        let run = |outcome_unknown| ProvisioningView {
+            host_id: 7,
+            run_id: Some("run-7".into()),
+            operation: Some(ProvisioningOperation::Add),
+            status: RunStatus::Failed,
+            steps: Vec::new(),
+            message: Some("ended".into()),
+            outcome_unknown,
+        };
+        for unknown in [false, true] {
+            let wire = serde_json::to_value(run(unknown)).unwrap();
+            assert_eq!(
+                wire.get("outcome_unknown"),
+                unknown.then_some(&serde_json::Value::Bool(true)),
+                "{wire}"
+            );
+            let read: ProvisioningView = serde_json::from_value(wire).unwrap();
+            assert_eq!(read, run(unknown));
+        }
+    }
 
     /// The GUI decodes the probe's reply through [`ProbeReply`] with the plan ignored, while the helm sends its own
     /// plan in that field; a reply the helm writes that the GUI cannot read would leave Add host stuck on an unreadable

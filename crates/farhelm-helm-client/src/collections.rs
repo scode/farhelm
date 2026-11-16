@@ -680,6 +680,7 @@ mod tests {
             status: RunStatus::Running,
             steps: vec![],
             message: None,
+            outcome_unknown: false,
         };
         let snapshot = [
             (

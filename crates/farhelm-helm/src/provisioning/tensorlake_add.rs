@@ -92,8 +92,10 @@ impl crate::environment::PreparationProgress for CreationProgress<'_> {
     }
 }
 
-/// The initial session belongs to the existing provisioning task. Its caller
-/// waits for the result, but dropping that waiter never cancels resource cleanup.
+/// The initial session belongs to the existing provisioning task. The launch's
+/// end is published on its run either way; `result` is for an in-process caller
+/// that waits for it (an agent's request), and the HTTP route drops it at once.
+/// Dropping that waiter never cancels resource cleanup.
 struct SessionLaunch {
     state: Arc<crate::AppState>,
     request: crate::sessions::CreateReq,
@@ -315,8 +317,15 @@ fn progress(host: HostId, run_id: String, steps: &PlanSteps) -> ProvisioningView
                 message: None,
             })
             .collect(),
+        outcome_unknown: false,
     }
 }
+
+/// What a launch run says when its task panicked and left no result
+/// (`ProvisioningService::end_panicked_launch`): the words the streamed reply
+/// of an environment create used for that case before the route took the
+/// accepted form.
+pub(super) const LAUNCH_ENDED_WITHOUT_A_RESULT: &str = "The launch task ended without a result. Check Hosts for the named environment before launching again.";
 
 /// Typed form refusal; messages here contain no endpoint settings or tokens.
 fn refused(message: impl Into<String>) -> anyhow::Error {
@@ -342,7 +351,8 @@ impl ProvisioningService {
 
     /// One owned provisioning task creates a fresh environment and its first
     /// session. The row and reserved name precede provider I/O; client loss
-    /// does not cancel setup or confirmed cleanup of this new resource.
+    /// does not cancel setup or confirmed cleanup of this new resource. The
+    /// task ends its run even if it panics ([`Self::end_panicked_launch`]).
     pub(crate) async fn start_session_environment(
         self: Arc<Self>,
         state: Arc<crate::AppState>,
@@ -469,20 +479,51 @@ impl ProvisioningService {
             result,
         };
         let service = self.clone();
+        let task_run = run_id.clone();
         let task = tokio::spawn(async move {
+            use futures_util::FutureExt as _;
             let _slot = service
                 .run_slots
                 .clone()
                 .acquire_owned()
                 .await
                 .expect("run slots stay open");
-            let mut index = 0;
-            let result = service
-                .environment_session_steps(host, &recipe, &definition, place, binding, &mut index)
-                .await;
-            service
-                .finish_session_launch(host, &name, launch, result, index, setup_state, host_write)
-                .await;
+            let launched = std::panic::AssertUnwindSafe(async {
+                #[cfg(test)]
+                if service
+                    .panic_session_launch
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    panic!("injected session launch panic");
+                }
+                let mut index = 0;
+                let result = service
+                    .environment_session_steps(
+                        host,
+                        &recipe,
+                        &definition,
+                        place,
+                        binding,
+                        &mut index,
+                    )
+                    .await;
+                service
+                    .finish_session_launch(
+                        host,
+                        &name,
+                        launch,
+                        result,
+                        index,
+                        setup_state,
+                        host_write,
+                    )
+                    .await;
+            })
+            .catch_unwind()
+            .await;
+            if launched.is_err() {
+                service.end_panicked_launch(host, &task_run).await;
+            }
         });
         self.memory.lock().await.tasks.insert(host, task);
         Ok((
@@ -492,6 +533,59 @@ impl ProvisioningService {
             },
             receiver,
         ))
+    }
+
+    /// End the run of a launch whose task panicked, which would otherwise stay
+    /// running for good: nothing else ends it, and a client waiting on the run
+    /// (the accepted environment create's only outcome) would wait forever.
+    /// The words are the ones the streamed reply used for a task that ended
+    /// without a result ([`LAUNCH_ENDED_WITHOUT_A_RESULT`]); the run and each
+    /// step it was still running are marked failed with them, and the run is
+    /// marked `outcome_unknown`, since the environment, or even its session,
+    /// may be left behind. The run may be the host's own or, when the panic
+    /// came after cleanup removed the host, its kept copy. The unwind has
+    /// already let go of the provisioning lock; the busy marker goes here, and
+    /// so does the "setting up" hold on a host that is still registered, which
+    /// would otherwise show the environment as being set up for good.
+    ///
+    /// Only a run still running is touched. A panic after the launch published
+    /// its end must not overwrite that outcome, nor clear a busy marker that
+    /// by then belongs to a later run of the host.
+    async fn end_panicked_launch(&self, host: HostId, run_id: &str) {
+        let mut memory = self.memory.lock().await;
+        let Some(run) = memory
+            .launch_run_mut(host, run_id)
+            .filter(|run| run.status == RunStatus::Running)
+        else {
+            return;
+        };
+        for step in &mut run.steps {
+            if step.status == StepStatus::Running {
+                step.status = StepStatus::Failed;
+                step.message = Some(LAUNCH_ENDED_WITHOUT_A_RESULT.into());
+            }
+        }
+        run.status = RunStatus::Failed;
+        run.message = Some(LAUNCH_ENDED_WITHOUT_A_RESULT.into());
+        run.outcome_unknown = true;
+        let registered = memory
+            .runs
+            .get(&host)
+            .is_some_and(|own| own.run_id.as_deref() == Some(run_id));
+        // A panic after the launch kept a copy of its run, but before cleanup
+        // removed the host, leaves both; the host's own run carries the end,
+        // and a copy left running would never be evicted.
+        if registered {
+            memory
+                .ended_launches
+                .retain(|kept| !(kept.host_id == host && kept.run_id.as_deref() == Some(run_id)));
+        }
+        memory.busy.remove(&host);
+        drop(memory);
+        if registered {
+            self.manager.release_hold(host, true);
+        }
+        self.manager.events().bump();
     }
 
     /// A prepared create's durable facts certify the common installer's
@@ -1016,6 +1110,13 @@ impl ProvisioningService {
     /// Finish under the same resource admission used by setup. Failure may
     /// remove only this launch's fresh environment, never a Replace source.
     /// A lost reply does not cancel the owned task or weaken deletion proof.
+    ///
+    /// The end is published on the launch's run, after the provisioning lock
+    /// is let go: completed once the session is cached under the host, or
+    /// failed with the "Not launched." reason. A failure whose cleanup removed
+    /// the host publishes on the run's kept copy
+    /// ([`super::ProvisioningMemory::ended_launches`]), since the
+    /// host's own entry went with it.
     #[allow(
         clippy::too_many_arguments,
         reason = "the owned launch keeps its result, progress position and provisioning hold through confirmed cleanup"
@@ -1072,6 +1173,16 @@ impl ProvisioningService {
                 Ok(session)
             }
             Err(error) => {
+                // A cleanup that removes the host forgets its run with it, and
+                // the run is where this launch's failure is published. Keep a
+                // copy first, so the listing goes on showing the run while the
+                // cleanup runs and once the host is gone.
+                {
+                    let mut memory = self.memory.lock().await;
+                    if let Some(run) = memory.runs.get(&host).cloned() {
+                        memory.keep_ended_launch(run);
+                    }
+                }
                 // This is the fresh environment created for this launch, never
                 // a Replace source. A lost create reply may have started an
                 // agent; the accepted cleanup rule still discards it.
@@ -1089,10 +1200,28 @@ impl ProvisioningService {
                         resource
                     ),
                 };
-                self.set_step(host, index, StepStatus::Failed, Some(message.clone()))
-                    .await;
                 let mut memory = self.memory.lock().await;
-                if let Some(run) = memory.runs.get_mut(&host) {
+                let kept = memory
+                    .ended_launches
+                    .iter()
+                    .position(|run| run.host_id == host);
+                // A failed cleanup keeps the host and its own run, which then
+                // carries the failure; the copy is not needed.
+                let run = if memory.runs.contains_key(&host) {
+                    if let Some(kept) = kept {
+                        memory.ended_launches.remove(kept);
+                    }
+                    memory.runs.get_mut(&host)
+                } else if let Some(kept) = kept {
+                    memory.ended_launches.get_mut(kept)
+                } else {
+                    None
+                };
+                if let Some(run) = run {
+                    if let Some(step) = run.steps.get_mut(index) {
+                        step.status = StepStatus::Failed;
+                        step.message = Some(message.clone());
+                    }
                     run.status = RunStatus::Failed;
                     run.message = Some(message.clone());
                 }

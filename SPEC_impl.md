@@ -322,6 +322,23 @@ Serial admission only works if every handler replies promptly, so every handler 
   Reuse existing domain progress where it exists; otherwise the outcome goes in one bounded operation-result collection
   keyed by envelope id, with explicit completion and removal rules. "Accepted" settles the transport watchdog. It does
   not mean the work succeeded.
+- An environment session create (`POST /api/environment-sessions`, and its legacy Tensorlake spelling
+  `POST /api/sandbox-sessions`) answers 202 with `{host_id, run_id}` once admitted, and its outcome lands on that run in
+  the pushed host progress: completed, or failed with the "Not launched." reason. A failed run's message is the whole
+  text to show, its "Not launched." lead included, so a client adds no lead of its own. On completed, the client finds
+  the new session by reading `GET /api/sessions?host=<host_id>`, which answers from the helm's cache without waiting on
+  a host, and not from the pushed session list, the channel's filtered and capped query, which can leave a session on a
+  new host out and can bring it a push after the run's end. That read holds exactly the one session: the new environment
+  starts with none, and any other session there needs an agent's spawn, which a new host has no grant to let through
+  without the user's approval. A failed launch's cleanup removes its host, but the helm goes on listing the failed run
+  under the removed host's id, since that run is the only place the reason is published; it keeps a bounded number of
+  the most recent such runs, never dropping one whose cleanup is still running, until it restarts, and host ids are
+  never reused. A launch task that panics ends its run failed, saying it ended without a result, and marks it
+  `outcome_unknown`, since its environment or even its session may be left behind; a client branches on that marker, not
+  on the words. A run the client waits for that is no longer listed means the client cannot learn how the launch ended;
+  Hosts shows whatever environment it left. What is refused before admission (an unconfirmed billed create, a body the
+  route cannot read, a recipe or place that is missing or cannot run the launch) is an ordinary reply, with nothing
+  registered.
 - Routes are converted as the work that first ports them needs them, not in a sweep.
 
 Every change a command causes is pushed before that command's reply. When the GUI sees "done", its store already shows
@@ -353,7 +370,8 @@ local and ssh host's entry so its start and end reach the GUI (see "Podman place
 catalog and recipe places, so a recipe build's steps reach Settings → Recipes as they move (decided by the migration's
 orchestrator on 2026-11-15). A pushed read must start nothing, because it runs after every bump; that is why
 `/api/environment-places`, whose read schedules Podman checks, stays a query. Neither recipe collection follows the
-clock: a prepared artifact that passes its freshness window reads stale at the next re-read, not when it passes.
+clock: a prepared artifact that passes its freshness window reads stale at the next re-read, not when it passes. Host
+progress also lists the failed environment launches kept after their host was removed (see "The UI channel").
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -935,10 +953,11 @@ preferences, or a launch or a host being added, neither of which has its id yet.
 keys of different kinds never collide, so a host and a session that share an id string stay independent. The command
 itself is built by the feature that sends it, with its route's API semantics; the store knows no routes. A reply settles
 as done, refused, or accepted (202: long work the helm carries on with; the store keeps no result for it, and for host
-setup, Update and Uninstall the result arrives in the hosts' pushed progress). A refusal reaches its completion with the
-reply's status and helm markers beside its words, so a feature that answers a refusal (the YOLO question, a wait for a
-busy host, a launch whose host timed out while the work goes on) branches on those, never on words written for people;
-the key keeps only the words. An accepted save leaves its draft touched, since the stored value has not changed yet.
+setup, Update, Uninstall and an environment session create the result arrives in the hosts' pushed progress). A refusal
+reaches its completion with the reply's status and helm markers beside its words, so a feature that answers a refusal
+(the YOLO question, a wait for a busy host, a launch whose host timed out while the work goes on) branches on those,
+never on words written for people; the key keeps only the words. An accepted save leaves its draft touched, since the
+stored value has not changed yet.
 
 A read (a GET for something the helm does not push) is not work on a key: it changes nothing, so it has no busy state
 and leaves no refusal on a key. A feature's read goes through the store's one read helper, which words a refusal exactly
