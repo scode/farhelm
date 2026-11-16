@@ -5,9 +5,10 @@
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
 //! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
 //! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status card
-//! stands over ([`AttachedTerminal::set_inert`]), and the reconnect card with its phase and attempt line and its
-//! Reconnect now (below) since. File links come later in that work. The session pane ([`crate::session_pane`]) mounts
-//! one for the selected session.
+//! stands over ([`AttachedTerminal::set_inert`]), the reconnect card with its phase and attempt line and its
+//! Reconnect now (below), and a pasted file or image, which is uploaded and its host path typed
+//! ([`super::attachments`]), since. Dropped files come later in that work. The session pane
+//! ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -183,8 +184,8 @@ use farhelm_proto::grid::{GridInput, MouseEventKind};
 use farhelm_proto::host_appearance::HostColor;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
-    DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
+    AnyElement, AnyView, App, AppContext as _, Bounds, ClipboardItem, Context, DispatchPhase,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
     InteractiveElement, IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render,
     ScrollDelta, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
@@ -192,6 +193,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
+use super::attachments::{self, Attachments, Paste, Uploaded};
 use super::files::{FileLinks, StatusShown};
 use super::tunnels::{self, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
@@ -414,6 +416,12 @@ pub struct AttachedTerminal {
     /// Puts a refused click's explanation away when the file status line shows something newer
     /// ([`AttachedTerminal::file_status_shown`]).
     _file_status: Subscription,
+    /// The terminal's attachments: the uploads a pasted file or image starts, and their failure lines
+    /// ([`super::attachments`]).
+    attachments: Entity<Attachments>,
+    /// Redraws the terminal when its attachment lines change, and types each finished upload's path
+    /// ([`AttachedTerminal::attachment_uploaded`]).
+    _attachments: [Subscription; 2],
     /// The platform the tunnel offer, a file display's opening hint and a file click's opening modifier are decided
     /// for: this one, except in tests, which decide them for either platform on any machine
     /// ([`AttachedTerminal::set_platform`]).
@@ -539,11 +547,16 @@ impl AttachedTerminal {
             tunnels.unwrap_or_else(|| cx.new(|cx| Tunnels::new(target.session.clone(), cx)));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
         let transfers = session.read(cx).transfers().cloned();
-        let files = cx.new(|_| FileLinks::new(target.session.clone(), transfers));
+        let files = cx.new(|_| FileLinks::new(target.session.clone(), transfers.clone()));
         let files_watch = cx.observe(&files, |_, _, cx| cx.notify());
         let file_status = cx.subscribe(&files, |owner, _, _: &StatusShown, cx| {
             owner.file_status_shown(cx)
         });
+        let attachments = cx.new(|_| Attachments::new(target.session.clone(), transfers.clone()));
+        let attachment_watch = [
+            cx.observe(&attachments, |_, _, cx| cx.notify()),
+            cx.subscribe(&attachments, Self::attachment_uploaded),
+        ];
         let tunnel_reads =
             session::observe_current(cx, |owner: &mut Self, cx| owner.follow_store(cx));
         // A text size step this client sent is held before the helm answers, outside the store, so the store observer
@@ -585,6 +598,8 @@ impl AttachedTerminal {
             files,
             _files: files_watch,
             _file_status: file_status,
+            attachments,
+            _attachments: attachment_watch,
             platform: actions::THIS_PLATFORM,
             reporting: 0,
             mouse_dedupe: MouseDeduper::default(),
@@ -1383,16 +1398,17 @@ impl AttachedTerminal {
     }
 
     /// The user's Paste ([`actions::Paste`], from a key or a menu): send the clipboard's text to the program as one
-    /// paste. Nothing happens unless the terminal is live.
+    /// paste, or attach the files or the image it holds. Text goes nowhere unless the terminal is live; files and an
+    /// image pasted while it is not are refused visibly ([`AttachedTerminal::pasted`]).
     ///
-    /// The paste is the clipboard's plain text, and nothing at all when the read reports a file or an image (see
-    /// [`clipboard_text`]); those are for the attachment work. The vendored macOS read reports a copied file, so a
-    /// Finder copy pastes nothing. The vendored Wayland read never reports a file list, only an image or text, so a
-    /// file copied on Linux still pastes whatever text its file manager offers (usually its path) until the attachment
-    /// work. The paste goes out as one group of the input mapping's paste parts, so a paste of any size (the old app's
-    /// test pasted over a megabyte) arrives whole and in order or not at all. Bracketed paste, its markers, line endings
-    /// and the sanitizing that strips an embedded end marker so the paste cannot end early are all the supervisor's
-    /// (`grid_input.rs`), so nothing here rewrites the text.
+    /// Which it is, is the attachments' rule ([`attachments::classify`]): files first, then images, then text, so a
+    /// Finder copy on macOS, which carries the file's path as text too, attaches the file and types no path. An attached
+    /// file's host path is typed once its upload completes ([`AttachedTerminal::attachment_uploaded`]). The vendored
+    /// Wayland read never reports a file list, only an image or text, so a file copied on Linux pastes whatever text
+    /// its file manager offers (usually its path). Text goes out as one group of the input mapping's paste parts, so a
+    /// paste of any size (the old app's test pasted over a megabyte) arrives whole and in order or not at all.
+    /// Bracketed paste, its markers, line endings and the sanitizing that strips an embedded end marker so the paste
+    /// cannot end early are all the supervisor's (`grid_input.rs`), so nothing here rewrites the text.
     ///
     /// The clipboard is read asynchronously, because SPEC.md has nothing in Farhelm stall on a slow or hung clipboard
     /// and Wayland's synchronous read blocks the main thread on another program's pipe. Only Wayland's read is really
@@ -1402,9 +1418,11 @@ impl AttachedTerminal {
     /// text arrives. Each paste waits for the one before it, so two quick pastes reach the program in the order asked
     /// even if their reads finish the other way round.
     fn paste(&mut self, _: &actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
-        let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
+        if self.retired {
             return;
-        };
+        }
+        // Read even when nothing is live: text then goes nowhere, but a file or an image must be refused visibly.
+        let attachment = self.attachment.filter(|_| self.is_live());
         let read = cx.read_from_clipboard_async();
         let earlier = self.paste.take();
         self.paste = Some(cx.spawn(async move |owner, cx| {
@@ -1415,13 +1433,53 @@ impl AttachedTerminal {
             let Ok(Some(item)) = read.await else {
                 return;
             };
-            let Some(text) = clipboard_text(&item).filter(|text| !text.is_empty()) else {
-                return;
-            };
-            let _ = owner.update(cx, |owner, cx| {
-                owner.send_user(attachment, pasted_text(&text), cx)
-            });
+            let _ = owner.update(cx, |owner, cx| owner.pasted(attachment, &item, cx));
         }));
+    }
+
+    /// The paste hook: `item`, read for a paste the user made while `attachment` was live (`None` when none was),
+    /// typed as text or handed to the attachments ([`attachments::classify`]). Text keeps the paste's stamp, so it goes
+    /// nowhere if another attachment is live by now, or if none was; an attachment's path is typed into whichever is
+    /// live when its upload completes. Files or an image offered to a terminal that is not live, or is inert, are
+    /// refused on the refusal line ([`attachments::DETACHED_TEXT`]) rather than uploaded, since nothing could take
+    /// their path (the old app's refusal); like a refused click's explanation, it goes at the next press.
+    fn pasted(
+        &mut self,
+        attachment: Option<Attachment>,
+        item: &ClipboardItem,
+        cx: &mut Context<Self>,
+    ) {
+        match attachments::classify(item) {
+            Paste::Text(text) => {
+                if let Some(attachment) = attachment {
+                    self.send_user(attachment, pasted_text(&text), cx);
+                }
+            }
+            Paste::Attach(offered) if self.is_live() && !self.inert => self
+                .attachments
+                .update(cx, |attachments, cx| attachments.attach(offered, cx)),
+            Paste::Attach(_) => {
+                self.refusal = Some(attachments::DETACHED_TEXT.into());
+                cx.notify();
+            }
+            Paste::Nothing => {}
+        }
+    }
+
+    /// An attachment's upload finished: type its host path, shell-quoted, at the program's cursor as it is now, as a
+    /// paste the supervisor brackets for a program that asked, through the attachment live now (SPEC.md: "the path is
+    /// inserted at whatever cursor position is current when the transfer completes"). With none live, or the terminal
+    /// inert, nothing could take it, so the attachments show the path instead of it going missing.
+    fn attachment_uploaded(
+        &mut self,
+        attachments: Entity<Attachments>,
+        uploaded: &Uploaded,
+        cx: &mut Context<Self>,
+    ) {
+        match self.attachment.filter(|_| self.is_live() && !self.inert) {
+            Some(attachment) => self.send_user(attachment, pasted_text(&uploaded.typed()), cx),
+            None => attachments.update(cx, |attachments, cx| attachments.not_typed(uploaded, cx)),
+        }
     }
 
     /// The cursor as it should be drawn now, and the blink's ticks held or dropped to match. Called from `render`:
@@ -1578,24 +1636,6 @@ fn fit(metrics: CellMetrics, width: f32, height: f32, scale: f32) -> Option<(u16
         cols.clamp(2., f64::from(MAX_DIMENSION)) as u16,
         rows.clamp(1., f64::from(MAX_DIMENSION)) as u16,
     ))
-}
-
-/// The text a paste sends from clipboard `item`: its plain-text entries, joined, or `None` when it holds a file or an
-/// image at all.
-///
-/// SPEC.md's "Attachments" ranks a paste's flavors files first, then images, then plain text, so a clipboard holding a
-/// file is a file paste even when it carries text too: a Finder copy on macOS adds the file's path as text, and GPUI's
-/// own `ClipboardItem::text` falls back to the path. Turning file and image pastes into uploads is the attachment
-/// work's; until then they paste nothing, rather than a path or label the user did not mean to type.
-fn clipboard_text(item: &ClipboardItem) -> Option<String> {
-    let mut text = String::new();
-    for entry in item.entries() {
-        match entry {
-            ClipboardEntry::String(string) => text.push_str(string.text()),
-            ClipboardEntry::Image(_) | ClipboardEntry::ExternalPaths(_) => return None,
-        }
-    }
-    Some(text)
 }
 
 /// The reconnect card's phase line for `status`, in the old card's templates word for word (see "The phase line" in
@@ -2024,12 +2064,15 @@ impl Render for AttachedTerminal {
             .refusal_line(cx)
             .or_else(|| self.files.read(cx).status_line(cx));
         let tunnel_notice = tunnels::notice_line(&self.tunnels, window, cx);
-        // The refused click's explanation and the tunnel notice, stacked at the top of the grid's area so neither
-        // hides the other. Drawn outside the grid's element: a press on the notice's Dismiss must not also be a press
-        // on the terminal (a selection, a mouse report, a link under it), and its button must not sit inside the
-        // terminal's key context, where Tab and Escape are the program's.
+        // Until the attachments get their status strip, their failure lines sit here with the refusal line.
+        let attachment_status = self.attachments.read(cx).status_line(cx);
+        // The refused click's explanation, the tunnel notice and the attachment failures, stacked at the top of the
+        // grid's area so none hides another. Drawn outside the grid's element: a press on the notice's Dismiss must not
+        // also be a press on the terminal (a selection, a mouse report, a link under it), and its button must not sit
+        // inside the terminal's key context, where Tab and Escape are the program's.
         // Neither the refusal line nor the tunnel notice (whose Dismiss Tab could reach) is drawn under the veil.
-        let overlay = (!self.inert && (refusal.is_some() || tunnel_notice.is_some())).then(|| {
+        let notices = refusal.is_some() || tunnel_notice.is_some() || attachment_status.is_some();
+        let overlay = (!self.inert && notices).then(|| {
             div()
                 .absolute()
                 .top(px(PANE_PADDING + 4.))
@@ -2040,6 +2083,7 @@ impl Render for AttachedTerminal {
                 .gap(px(4.))
                 .children(refusal)
                 .children(tunnel_notice)
+                .children(attachment_status)
         });
         let hovering_link = self.points_at_link(cx);
         // The grid's area is what takes focus and keys, not the whole pane: the status line above it holds a Take
@@ -2677,6 +2721,12 @@ impl AttachedTerminal {
     /// terminal's to its tabs.
     pub(crate) fn tunnels(&self) -> &Entity<Tunnels> {
         &self.tunnels
+    }
+
+    /// The terminal's attachments, for tests: they read the lines shown.
+    #[cfg(test)]
+    pub(crate) fn attachments(&self) -> &Entity<Attachments> {
+        &self.attachments
     }
 
     /// Keep the destination display in step with the hovered link, as the owner draws, and return the anchor to draw.
@@ -3519,12 +3569,8 @@ impl AttachedTerminal {
     /// is here so that the input handler's default, which would type a paste as text, can never apply to a terminal.
     /// It does not wait behind the app's own pastes still reading the clipboard.
     fn paste_item(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) {
-        let Some(text) = clipboard_text(item).filter(|text| !text.is_empty()) else {
-            return;
-        };
-        if let Some(attachment) = self.attachment {
-            self.send_user(attachment, pasted_text(&text), cx);
-        }
+        let attachment = self.attachment.filter(|_| self.is_live());
+        self.pasted(attachment, item, cx);
     }
 }
 
