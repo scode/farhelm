@@ -5268,12 +5268,14 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   "The UI channel"), and a WebSocket per attached terminal. The helm serves no page; the desktop's embedded helm uses a
   fresh kernel-selected loopback port. Loopback bind enforced — refuses non-loopback per SPEC.md.
 - The desktop app's credential is the only credential the helm accepts in production; there is no browser sign-in. The
-  one other credential is the test hook `farhelm helm run --test-credential-file PATH` (hidden): a standalone helm mints
-  one in memory the same way and writes it to a new 0600 file, so end-to-end tests can reach the real binary's API. The
-  embedded helm mints the desktop's in memory at startup and hands it to the desktop process through `run_embedded`'s
-  readiness channel; it keeps only its SHA-256 digest, in memory, so only the current launch can authenticate. No HTTP
-  route mints one. It dies with the process, so nothing persists or accumulates across launches, and the app keeps none
-  on disk. With nothing to revoke, the desktop has no re-authentication path: a 401 is reported as an error.
+  one other credential is the standalone helm's hidden test hook `--test-credential-file PATH`: the helm mints one in
+  memory the same way and writes it to a new 0600 file, so end-to-end tests can reach a real helm process's API. The
+  tests start that helm with the never-shipped `farhelm-fixtures helm`, which runs the helm library's standalone entry
+  with its own argument struct. The embedded helm mints the desktop's in memory at startup and hands it to the desktop
+  process through `run_embedded`'s readiness channel; it keeps only its SHA-256 digest, in memory, so only the current
+  launch can authenticate. No HTTP route mints one. It dies with the process, so nothing persists or accumulates across
+  launches, and the app keeps none on disk. With nothing to revoke, the desktop has no re-authentication path: a 401 is
+  reported as an error.
 - The loopback guard accepts a request only when its `Host` is the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on
   port 80, where clients omit the default port), it carries no `Origin` header, and its `Sec-Fetch-Site`, if any, is
   neither `cross-site` nor `same-site`. Farhelm's own clients never send `Origin`, so any request that carries one came

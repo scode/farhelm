@@ -8,7 +8,9 @@
 //! terminal hosts from a shell (`spawn-terminal-host`). The first two used
 //! to be hidden `farhelm internal` subcommands, which shipped several
 //! thousand lines of test fixtures in every release and made the product
-//! binary depend on `farhelm-teststate`.
+//! binary depend on `farhelm-teststate`. The e2e suite's standalone helm
+//! (`helm`) is here for the same reason: the tests need a helm in a process
+//! of its own, and it stays out of the shipped `farhelm`.
 //! This package is never shipped (`dist = false`).
 //!
 //! The e2e tests find this binary next to the `farhelm` binary they test,
@@ -128,6 +130,23 @@ enum Cmd {
         #[arg(long)]
         state_dir: PathBuf,
     },
+    /// Run a standalone helm for tests: the helm library's standalone entry
+    /// (`farhelm_helm::run`) with its own argument struct (`HelmArgs`).
+    ///
+    /// The e2e suite starts its helms this way (`harness::helm_process`).
+    ///
+    /// `--state-dir` is required here, unlike in `HelmArgs` itself: without
+    /// it the helm defaults to the user's real state directory, where a
+    /// development build could open and migrate the live install's helm.db.
+    ///
+    /// Two things the library does not cover. No log subscriber is
+    /// installed, so the helm logs nothing; the harness discards its stderr
+    /// anyway, and a fatal error still reaches stderr through `main`'s
+    /// return. And the helm takes its own executable as the local `farhelm`
+    /// for a probe of the local host, which here is this binary, so such a
+    /// probe cannot work. The embedded desktop helm is in the same position.
+    #[command(mut_arg("state_dir", |arg| arg.required(true)))]
+    Helm(farhelm_helm::HelmArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -162,6 +181,7 @@ fn main() -> anyhow::Result<()> {
             )
         }
         Cmd::SpawnTerminalHost { farhelm, state_dir } => spawn_host::run(&farhelm, &state_dir),
+        Cmd::Helm(args) => farhelm_helm::run(args),
     }
 }
 
@@ -190,6 +210,47 @@ mod tests {
             }
             _ => panic!("expected spawn-terminal-host"),
         }
+    }
+
+    /// The harness's helm invocation parses, hidden test flags included.
+    /// Pinned because those flags are hidden from `--help`, and the e2e
+    /// tests that rely on them would otherwise fail only once a helm they
+    /// started never printed its address.
+    #[farhelm_testtrace::test]
+    fn helm_parses_the_harness_invocation() {
+        let cli = Cli::try_parse_from([
+            "farhelm-fixtures",
+            "helm",
+            "--port",
+            "0",
+            "--state-dir",
+            "/x/state",
+            "--test-credential-file",
+            "/x/state/credential",
+            "--ensure-hosts",
+            "/x/hosts.json5",
+            "--backstop-refresh-secs",
+            "3600",
+        ])
+        .unwrap();
+        let Cmd::Helm(args) = cli.command else {
+            panic!("expected helm");
+        };
+        assert_eq!(
+            args.test_credential_file,
+            Some(PathBuf::from("/x/state/credential"))
+        );
+    }
+
+    /// `helm` without `--state-dir` is a usage error, so no helm starts.
+    /// Why: without it the helm defaults to the user's real state directory
+    /// and could open the live install's helm.db.
+    #[farhelm_testtrace::test]
+    fn helm_without_a_state_dir_is_refused() {
+        let error = Cli::try_parse_from(["farhelm-fixtures", "helm", "--port", "0"])
+            .err()
+            .map(|error| error.kind());
+        assert_eq!(error, Some(clap::error::ErrorKind::MissingRequiredArgument));
     }
 
     /// A supervisor that injects real-vendor hook flags past `--script`/

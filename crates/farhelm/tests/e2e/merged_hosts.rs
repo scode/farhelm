@@ -6,11 +6,12 @@
 //! tests drive the state machine against scripted peers. Both are the right
 //! shape for what they cover, and neither can tell you that the whole thing
 //! works when the pieces are actually separate processes talking over real
-//! transports. That is what this file is for, and it is why it runs the
-//! SHIPPED binary rather than assembling a helm in-process:
+//! transports. That is what this file is for, and it is why it runs real
+//! processes rather than assembling a helm in-process:
 //!
-//! - a real `farhelm helm run`, with no session flags, on a real loopback
-//!   port, driven over real HTTP the way a browser drives it;
+//! - a real standalone helm (`farhelm-fixtures helm`, the helm library's
+//!   standalone entry), with no session flags, on a real loopback port,
+//!   driven over real HTTP;
 //! - two real supervisors, each with the terminal hosts of its sessions — one
 //!   reached over the unix socket in the helm's own state directory (the
 //!   reserved local row), one over the user's own `ssh` to `localhost`
