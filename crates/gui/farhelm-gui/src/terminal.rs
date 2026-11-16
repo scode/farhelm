@@ -21,6 +21,7 @@
 pub mod attached;
 mod attachments;
 mod disclosure;
+mod drag_notice;
 pub(crate) mod files;
 pub(crate) mod set;
 mod style;

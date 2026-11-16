@@ -6,7 +6,8 @@
 //!
 //! - **Who opened what.** Opening a layer returns its [`LayerId`], and only that id closes it ([`close`]): nothing
 //!   closes a dialog, menu or confirmation it did not open. The user closes the topmost layer with Escape
-//!   ([`dismiss_top`]) or, for a popover, by clicking outside it. A dialog's own hook decides each dismissal
+//!   ([`dismiss_top`]) or, for a popover, by clicking outside it; a popover that lets the pointer through is not one
+//!   the user answers, so both pass over it ([`Popover::passes_pointer`]). A dialog's own hook decides each dismissal
 //!   ([`Dialog::on_dismiss`]): it may keep the dialog open, as an editor with a save in flight does, or keep it open
 //!   and ask first, as an editor with an unsaved draft will. The one exception is a reset of the connection to the
 //!   helm, which closes everything ([`close_all`]) without asking.
@@ -54,7 +55,10 @@
 //!   (a click into a text field) is not a press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
 //! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
 //!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
-//!   question's answer over a terminal must not also focus the terminal or click a control there.
+//!   question's answer over a terminal must not also focus the terminal or click a control there. The one exception
+//!   is a popover opened to let the pointer through ([`Popover::passes_pointer`]), which is display only: a press,
+//!   hover or wheel turn on it reaches what it covers, except on a control inside it that occludes itself, as long as
+//!   its view keeps to the rules the [`Pill`] NOTE lists. Escape and a press outside it never close it.
 //! - **A popover may leave focus alone.** One opened through [`Popover::floating`] (no [`Popover::start`]) never takes
 //!   focus: opening it moves none, Tab is not trapped in it, closing it returns none, and a press on it leaves focus
 //!   where it was. It is for a list that floats beside the control the user keeps typing in or pointing at, as the old
@@ -154,9 +158,9 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, AvailableSpace, Bounds, BoxShadow,
     Context, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId,
-    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Style,
-    Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point,
-    prelude::FluentBuilder as _, px,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point,
+    Size, Style, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div,
+    point, prelude::FluentBuilder as _, px,
 };
 
 use crate::actions;
@@ -296,12 +300,29 @@ enum Kind {
         placement: Placement,
         /// Whether it is exactly as wide as its anchor ([`Anchor::matching_width`]).
         matches_width: bool,
+        /// Whether a press on it reaches what it covers ([`Popover::passes_pointer`]): `false` for every anchored
+        /// layer but a popover opened that way, which never takes focus ([`open_popover`] makes sure).
+        passes_pointer: bool,
     },
 }
 
-/// Where a popover sits against its anchor. Each is the old app's placement for the overlays that used it, and each is
-/// kept inside the window by the same clamp.
-#[derive(Clone, Copy)]
+impl Kind {
+    /// Whether this is a popover that lets the pointer through ([`Popover::passes_pointer`]): what drawing, Escape, a
+    /// dismissible veil and the tooltip ask before treating the layer as one the user is pointing at or answering.
+    fn passes_pointer(&self) -> bool {
+        matches!(
+            self,
+            Kind::Popover {
+                passes_pointer: true,
+                ..
+            }
+        )
+    }
+}
+
+/// Where a popover sits against its anchor. Each but [`Placement::By`] is the old app's placement for the overlays that
+/// used it, and each is kept inside the window by the same clamp.
+#[derive(Clone)]
 pub enum Placement {
     /// Below the anchor, left edges aligned, or above it when it would run off the bottom and there is more room above:
     /// the old menus and popup lists.
@@ -318,7 +339,28 @@ pub enum Placement {
     /// moved up further than it does here), and it capped the menu's height and scrolled it, where this one would run
     /// past the bottom of a window shorter than the menu (the full row menu fits in the minimum window).
     Beside,
+    /// Wherever the anchor's owner says ([`Anchor::placed_by`]), asked as each frame is laid out ([`PlaceBy`] has the
+    /// rule's inputs and what it may do). For an overlay whose rule needs its own measured size and facts only its
+    /// owner knows. Its one caller is the terminal's drag-copy notice, which sits three terminal rows above or below
+    /// the pointer, by the room its pane leaves, centred on the pointer (SPEC.md, "Terminal experience"). Every other
+    /// placement here is a named rule from the old app, so a second caller is a decision for the layer manager's
+    /// owner, not a use of this one.
+    By(PlaceBy),
 }
+
+/// A popover's own placement rule ([`Placement::By`]): from the anchor's bounds in this frame, the popover's measured
+/// size and `area`, the area the window's content is laid out in (all in window coordinates), the popover's top-left
+/// corner.
+///
+/// The rule keeps the popover inside `area` itself. The shared clamp that follows it is the window's, as for every
+/// popover: a point inside `area` is inside the window, so the clamp leaves a rule's answer as it was, and it only
+/// catches a rule that does not keep inside.
+///
+/// It is called while the frame is laid out, with no app access, once per frame for as long as the popover shows: it
+/// must be cheap and pure, and read only cells or anchors ([`Anchor::drawn_bounds`] gives this frame's bounds there).
+/// It lives as long as the layer, so it captures cells, weak handles or anchors, never a strong `Entity`: that entity
+/// would be kept alive until the layer closes, and if it holds the anchor too, each keeps the other alive until then.
+pub type PlaceBy = Rc<dyn Fn(Bounds<Pixels>, Size<Pixels>, Bounds<Pixels>) -> Point<Pixels>>;
 
 /// Where an anchor element was last drawn, written by its tracker as frames are prepared.
 type AnchorBounds = Rc<Cell<Option<Bounds<Pixels>>>>;
@@ -473,6 +515,23 @@ impl Anchor {
         }
     }
 
+    /// This anchor, with the layer opened on it placed by `place` ([`Placement::By`]) instead of below. Like
+    /// [`Anchor::beside`], the placement travels with the anchor, and it is asked again in every frame, so the layer
+    /// follows the anchor, its own size and the window as each changes. [`PlaceBy`] says what `place` gets and what it
+    /// must not do.
+    ///
+    /// Only for the terminal's drag-copy notice: a second caller is a decision for the layer manager's owner, since
+    /// every other placement here is a named rule from the old app.
+    pub fn placed_by(
+        self,
+        place: impl Fn(Bounds<Pixels>, Size<Pixels>, Bounds<Pixels>) -> Point<Pixels> + 'static,
+    ) -> Anchor {
+        Anchor {
+            placement: Placement::By(Rc::new(place)),
+            ..self
+        }
+    }
+
     /// This anchor, with the layer opened on it exactly as wide as the anchor element, whatever its content would take:
     /// a select's list matching its control, a floating list matching its field. Like the placement, the width follows
     /// the anchor in the very frame the anchor changes size. The content fills that width and must fit it (clip or
@@ -582,10 +641,9 @@ pub struct Dialog {
 /// A popover to open: a menu or a popup list.
 ///
 /// Build one through its presets, [`Popover::menu`] for a popover that takes focus and [`Popover::floating`] for one
-/// that never does, and change a default through a builder ([`Popover::returns_to`], [`Popover::tab_through`]). The
-/// fields are still public, but a new field gets its default in the presets rather than in every opener's file, so a
-/// struct literal is not the way to open one. Every opener but one uses the presets: the notices bell's list
-/// (`notices_bell`) is still a struct literal, and its owner, the other-dialogs area, is moving it onto them.
+/// that never does, and change a default through a builder ([`Popover::returns_to`], [`Popover::tab_through`],
+/// [`Popover::passes_pointer`]). The fields are still public, but a new field gets its default in the presets rather
+/// than in every opener's file, so a struct literal is not the way to open one.
 pub struct Popover {
     /// What the popover draws.
     pub view: AnyView,
@@ -629,6 +687,13 @@ pub struct Popover {
     ///
     /// Ignored for a popover that never takes focus ([`Popover::start`] `None`), which traps nothing anyway.
     pub traps_tab: bool,
+    /// Whether a press, hover or wheel turn on the popover reaches what it covers, as if it were not there
+    /// ([`Popover::passes_pointer`]); `false` for every popover but one opened that way.
+    ///
+    /// Ignored, and a debug build panics, for a popover with a start ([`Popover::start`] `Some`): one that takes focus
+    /// needs the focus tracking and the outside-press close that letting the pointer through leaves out, so it opens
+    /// as an ordinary popover instead.
+    pub passes_pointer: bool,
 }
 
 impl Popover {
@@ -652,6 +717,7 @@ impl Popover {
             anchor,
             returns_to: focus::ReturnTo::Opener,
             traps_tab: true,
+            passes_pointer: false,
         }
     }
 
@@ -670,6 +736,7 @@ impl Popover {
             anchor,
             returns_to: focus::ReturnTo::Opener,
             traps_tab: true,
+            passes_pointer: false,
         }
     }
 
@@ -687,6 +754,36 @@ impl Popover {
     /// (the module docs, "A popover may let Tab through"). Unused for a popover that never takes focus.
     pub fn tab_through(mut self) -> Self {
         self.traps_tab = false;
+        self
+    }
+
+    /// Let the pointer through to what the popover covers: the exception to "A popover's card takes the pointer from
+    /// what it covers" (the module docs). A press, a hover or a wheel turn on it reaches the element under it as if the
+    /// popover were not drawn, except on a control inside it that occludes itself (`occlude`), which takes the pointer
+    /// alone. Only for a popover that never takes focus ([`Popover::floating`]); on one with a start it is ignored, and
+    /// a debug build panics (the field of the same name says why).
+    ///
+    /// The layer manager registers no hit area for the popover's own wrapper, but it cannot see inside the view. What
+    /// else breaks pass-through is what the [`Pill`] NOTE lists, among them a listener, a hover style, a cursor style,
+    /// a scrolling container and interactive text. The view keeps to every rule there everywhere but on its occluding
+    /// controls.
+    ///
+    /// What closes it: its owner ([`close`]), its anchor no longer drawn, a reset ([`close_all`]), and a layer below it
+    /// that takes focus closing, which takes every layer above it. What never does: a press outside it, and Escape,
+    /// which go to the topmost layer the user answers, passing over this one ([`dismiss_top`]). Opening it leaves the
+    /// tooltip up, as the pill does, since it covers nothing the user is pointing at.
+    ///
+    /// It is an ordinary layer on rung 2 of the module docs' z-order ladder (rung 6 over a raised one), in stack order,
+    /// not a slot of its own like the pill: a dialog opened while it shows covers it, its veil taking even the presses
+    /// on its controls, and one opened over a dialog passes the pointer to that dialog or its veil, never to the page
+    /// beneath.
+    ///
+    /// Its one caller is the terminal's drag-copy notice: SPEC.md has the notice pointer-transparent apart from its ×,
+    /// so a press on its words is the terminal's next press, and has it go only on its ×, that press, or its time
+    /// running out. A second caller is a decision for the layer manager's owner, as a second display-only popover is a
+    /// z-order question too.
+    pub fn passes_pointer(mut self) -> Self {
+        self.passes_pointer = true;
         self
     }
 }
@@ -798,14 +895,27 @@ fn drawn(anchor: &Anchor) -> Option<Subject> {
 }
 
 impl Anchor {
-    /// The kind of an anchored layer opened on this anchor: placed and sized as the anchor asks.
-    fn kind(&self) -> Kind {
+    /// The kind of an anchored layer opened on this anchor: placed and sized as the anchor asks, and letting the
+    /// pointer through when `passes_pointer` says so (only ever for a popover that never takes focus).
+    fn kind(&self, passes_pointer: bool) -> Kind {
         Kind::Popover {
             anchor: self.bounds.clone(),
-            placement: self.placement,
+            placement: self.placement.clone(),
             matches_width: self.matches_width,
+            passes_pointer,
         }
     }
+}
+
+/// Whether a popover asked to let the pointer through (`asked`, [`Popover::passes_pointer`]) does: only when it never
+/// takes focus. One that does take focus fails closed and opens as an ordinary popover, since letting the pointer
+/// through drops the focus tracking its container needs (Tab's trap, focus recovery and the focus return on close
+/// all look for focus inside it) and the outside-press close a menu depends on.
+///
+/// Crate-visible only for its truth-table test in `layers_tests.rs`; that [`open_popover`] applies it is tested through
+/// [`open_popover_as_a_release_build`].
+pub(crate) fn lets_pointer_through(asked: bool, takes_focus: bool) -> bool {
+    asked && !takes_focus
 }
 
 /// Open `dialog` beside its anchor, on top of everything else, unless the user has moved on since `mark` or the anchor
@@ -828,7 +938,7 @@ pub fn open_anchored(
     } = dialog;
     let drawn = drawn(&anchor)?;
     open(
-        anchor.kind(),
+        anchor.kind(false),
         view,
         container,
         Some(start),
@@ -851,6 +961,34 @@ pub fn open_popover(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    debug_assert!(
+        !popover.passes_pointer || popover.start.is_none(),
+        "a popover that lets the pointer through never takes focus (Popover::passes_pointer)"
+    );
+    open_popover_unasserted(popover, mark, window, cx)
+}
+
+/// [`open_popover`] as a release build runs it, without the debug assertion, so a test can reach the fallback a
+/// release build relies on for a popover that takes focus and asks to let the pointer through: it opens as an ordinary
+/// popover ([`lets_pointer_through`]).
+#[cfg(test)]
+pub(crate) fn open_popover_as_a_release_build(
+    popover: Popover,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    open_popover_unasserted(popover, mark, window, cx)
+}
+
+/// What [`open_popover`] does once its debug assertion has passed. Split out so that a release build's fallback is
+/// tested through the same code that opens every popover, not only through [`lets_pointer_through`] on its own.
+fn open_popover_unasserted(
+    popover: Popover,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     let Popover {
         view,
         container,
@@ -858,10 +996,12 @@ pub fn open_popover(
         anchor,
         returns_to,
         traps_tab,
+        passes_pointer,
     } = popover;
+    let passes_pointer = lets_pointer_through(passes_pointer, start.is_some());
     let drawn = drawn(&anchor)?;
     open(
-        anchor.kind(),
+        anchor.kind(passes_pointer),
         view,
         container,
         start,
@@ -915,6 +1055,12 @@ fn open(
             .into_iter()
             .map(|subject| (subject.0)(cx, window, id))
             .collect();
+        // A layer covers the tooltip of whatever is under it, and the next tooltip waits the full delay again. A
+        // popover that lets the pointer through covers nothing the user points at (the drag-copy notice appears well
+        // after the release), so, like the pill, it leaves the tooltip and its warm-up alone.
+        if !kind.passes_pointer() {
+            stack.put_tooltip_away();
+        }
         stack.layers.push(Layer {
             id,
             kind,
@@ -930,8 +1076,6 @@ fn open(
             _watches: watches,
             above_region: false,
         });
-        // A layer covers the tooltip of whatever is under it, and the next tooltip waits the full delay again.
-        stack.put_tooltip_away();
         cx.notify();
         id
     });
@@ -1010,6 +1154,11 @@ fn close_if_left(id: LayerId, window: &mut Window, cx: &mut App) {
 }
 
 impl Layer {
+    /// Whether this layer is a popover that lets the pointer through ([`Popover::passes_pointer`]).
+    fn passes_pointer(&self) -> bool {
+        self.kind.passes_pointer()
+    }
+
     /// Where a popover that lets Tab through sits in the page's Tab order: the control its opener named for focus to
     /// return to, its toggle ([`Popover::traps_tab`]). `None` for any other layer.
     fn place(&self) -> Option<&FocusHandle> {
@@ -1168,15 +1317,15 @@ pub fn close_all(cx: &mut App) {
     }
 }
 
-/// The user closes the topmost layer (Escape), or the tooltip if no layer is open. Returns whether Escape was taken, so
-/// the key can go on to whatever else wants it when nothing is open: a topmost dialog whose hook keeps it open
-/// ([`Dialog::on_dismiss`]) takes it too.
+/// The user closes the topmost layer they answer (Escape, [`top_layer`]), or the tooltip if no such layer is open.
+/// Returns whether Escape was taken, so the key can go on to whatever else wants it when nothing is open: a topmost
+/// dialog whose hook keeps it open ([`Dialog::on_dismiss`]) takes it too. A popover that lets the pointer through is
+/// passed over, so with only such a popover open Escape goes on as if it were not there.
 pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
     let Some(stack) = stack(window, cx) else {
         return false;
     };
-    let top = stack.read(cx).layers.last().map(|layer| layer.id);
-    if let Some(top) = top {
+    if let Some(top) = top_layer(window, cx) {
         dismiss(top, window, cx);
         return true;
     }
@@ -1217,12 +1366,17 @@ pub fn dismiss(id: LayerId, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// The topmost layer in `window`, if any is open.
+/// The topmost layer the user answers in `window` (Escape, a dismissible veil's outside press), if any is open: any but
+/// a popover that lets the pointer through, which its owner alone closes ([`Popover::passes_pointer`]). Both callers
+/// ask this one question, so a display-only popover above the quick switcher neither takes Escape from it nor keeps a
+/// press on its veil from dismissing it.
 fn top_layer(window: &Window, cx: &App) -> Option<LayerId> {
     stack(window, cx)?
         .read(cx)
         .layers
-        .last()
+        .iter()
+        .rev()
+        .find(|layer| !layer.passes_pointer())
         .map(|layer| layer.id)
 }
 
@@ -1732,9 +1886,18 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         let content = div()
             .id(ElementId::Name(format!("layer-{}", id.0).into()))
             .debug_selector(move || format!("layer-{}", id.0));
-        // A press that no control inside the layer took (empty space, a label) keeps focus on the control in use, or
-        // moves it to the layer itself, as the layer was opened to do (SPEC.md, "Opening and closing").
-        let content = focus::track(content, &layer.container, layer.empty_press)
+        let passes = layer.passes_pointer();
+        let content = content
+            // A press that no control inside the layer took (empty space, a label) keeps focus on the control in use,
+            // or moves it to the layer itself, as the layer was opened to do (SPEC.md, "Opening and closing"). A layer
+            // that lets the pointer through is not tracked: it never takes focus, and the tracker's press handler calls
+            // `window.prevent_default()`. Drawn over the page, the wrapper's handler runs before every handler under
+            // it, so that would suppress GPUI's focus-on-press for an element under it tracked with plain
+            // `track_focus` (Kit's text input) and the root's recovery of focus after a press no control takes: a
+            // press through the popover would leave focus where the same press without it would not.
+            .when(!passes, |content| {
+                focus::track(content, &layer.container, layer.empty_press)
+            })
             // Enter on the dialog itself presses its main action; a held or modified Enter does not.
             .on_key_down(move |event, window, cx| {
                 if event.keystroke.key == "enter"
@@ -1766,9 +1929,10 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                     .occlude()
                     .bg(theme::color(palette.scrim_dialog));
                 let veil = veil.when(dismissible, |veil| {
-                    // Only while this dialog is the top layer: a press beside a menu opened over it is outside that
-                    // menu, which closes, and the press is the menu's alone. Read before any handler acts (capture
-                    // runs bottom layer up, before every bubble handler), since the menu's own close runs in capture.
+                    // Only while this dialog is the top layer the user answers ([`top_layer`]): a press beside a menu
+                    // opened over it is outside that menu, which closes, and the press is the menu's alone. Read before
+                    // any handler acts (capture runs bottom layer up, before every bubble handler), since the menu's
+                    // own close runs in capture.
                     let was_top = Rc::new(Cell::new(false));
                     let noted = was_top.clone();
                     veil.capture_any_mouse_down(move |_, window, cx| {
@@ -1815,35 +1979,42 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 anchor,
                 placement,
                 matches_width,
+                ..
             } => {
-                let pressed = anchor.clone();
-                // A popover that lets Tab through closes on an outside press as when focus leaves it, returning none:
-                // the press puts focus where it lands ([`CloseCause::Left`]).
-                let why = if layer.takes_focus && !layer.traps_tab {
-                    CloseCause::Left
-                } else {
-                    CloseCause::Closed
-                };
-                // The card takes the pointer from whatever it covers, as the old app's cards did (a web page hands a press
-                // to the topmost element only). A popover has no veil, and GPUI hands a press, a click and a wheel to
-                // every element under the pointer up to the first that blocks them, so without this a click on a menu
-                // item or a question's answer also reached the page below: it clicked a control there, and a terminal
-                // there took focus before the answer ran, so the question closed with focus outside it. The card's own
-                // scrolling content still takes the wheel; nothing behind it does.
-                let content = content.occlude();
-                let content = content.on_mouse_down_out(move |event, window, cx| {
-                    // A press on the anchor itself is left to the anchor, which toggles its popover: closing here first
-                    // would let the same click reopen it.
-                    let on_anchor = pressed
-                        .get()
-                        .is_some_and(|bounds| bounds.contains(&event.position));
-                    if !on_anchor {
-                        close_as(id, why, window, cx);
-                    }
+                // A popover that lets the pointer through gets neither part: its wrapper registers no hit area, so
+                // every press, hover and wheel turn reaches what it covers, except on a control inside that occludes
+                // itself, and a press outside it is not the user answering it ([`Popover::passes_pointer`]).
+                let content = content.when(!passes, |content| {
+                    let pressed = anchor.clone();
+                    // A popover that lets Tab through closes on an outside press as when focus leaves it, returning
+                    // none: the press puts focus where it lands ([`CloseCause::Left`]).
+                    let why = if layer.takes_focus && !layer.traps_tab {
+                        CloseCause::Left
+                    } else {
+                        CloseCause::Closed
+                    };
+                    // The card takes the pointer from whatever it covers, as the old app's cards did (a web page hands
+                    // a press to the topmost element only). A popover has no veil, and GPUI hands a press, a click and
+                    // a wheel to every element under the pointer up to the first that blocks them, so without this a
+                    // click on a menu item or a question's answer also reached the page below: it clicked a control
+                    // there, and a terminal there took focus before the answer ran, so the question closed with focus
+                    // outside it. The card's own scrolling content still takes the wheel; nothing behind it does.
+                    content
+                        .occlude()
+                        .on_mouse_down_out(move |event, window, cx| {
+                            // A press on the anchor itself is left to the anchor, which toggles its popover: closing
+                            // here first would let the same click reopen it.
+                            let on_anchor = pressed
+                                .get()
+                                .is_some_and(|bounds| bounds.contains(&event.position));
+                            if !on_anchor {
+                                close_as(id, why, window, cx);
+                            }
+                        })
                 });
                 PlacedPopover {
                     anchor: anchor.clone(),
-                    placement: *placement,
+                    placement: placement.clone(),
                     matches_width: *matches_width,
                     child: content.into_any_element(),
                 }
@@ -2010,7 +2181,7 @@ impl Element for PlacedPopover {
             }
         };
         let viewport = window.viewport_size();
-        let mut origin = match (self.anchor.get(), self.placement) {
+        let mut origin = match (self.anchor.get(), &self.placement) {
             (Some(anchor), Placement::Beside) => {
                 point(anchor.right() + BESIDE_GAP, anchor.top() - BESIDE_RISE)
             }
@@ -2025,6 +2196,13 @@ impl Element for PlacedPopover {
                 };
                 point(anchor.left(), y)
             }
+            // The rule gets the area the window's content is laid out in ([`PlaceBy`]): on Linux, inside the frame
+            // Kit draws and below the title bar. The clamp below stays the window's whatever area the rule gets.
+            (Some(anchor), Placement::By(place)) => place(
+                anchor,
+                size,
+                crate::desktop::linux_title_bar::content_area(window),
+            ),
             (None, _) => point(px(0.), px(0.)),
         };
         // Keep it inside the window: shift left when it overflows the right edge, down from the top as a last resort.

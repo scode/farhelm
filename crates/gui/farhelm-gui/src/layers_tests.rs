@@ -1055,8 +1055,9 @@ fn a_dialog_can_ask_before_it_closes_and_each_answer_does_its_part(cx: &mut Test
 /// builders. This one pins the values, so a preset that drifts fails under its own name.
 ///
 /// What: [`Popover::menu`] starts on the handle it was given, returns focus to its opener and traps Tab;
-/// [`Popover::floating`] has no start; [`Popover::returns_to`] changes only where focus returns, and
-/// [`Popover::tab_through`] only turns the trap off.
+/// [`Popover::floating`] has no start; neither lets the pointer through; [`Popover::returns_to`] changes only where
+/// focus returns, [`Popover::tab_through`] only turns the trap off, and [`Popover::passes_pointer`] only lets the
+/// pointer through.
 #[gpui::test]
 fn the_popover_presets_carry_their_documented_defaults(cx: &mut TestAppContext) {
     let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
@@ -1087,6 +1088,7 @@ fn the_popover_presets_carry_their_documented_defaults(cx: &mut TestAppContext) 
             "a menu returns focus to its opener"
         );
         assert!(menu.traps_tab, "a menu keeps Tab inside it");
+        assert!(!menu.passes_pointer, "a menu takes the pointer");
 
         let named = menu.returns_to(focus::ReturnTo::Control(toggle.clone()));
         assert_eq!(
@@ -1111,6 +1113,15 @@ fn the_popover_presets_carry_their_documented_defaults(cx: &mut TestAppContext) 
         assert!(
             floating.start.is_none(),
             "a floating list never takes focus"
+        );
+        assert!(
+            !floating.passes_pointer,
+            "a floating list takes the pointer"
+        );
+        let passing = floating.passes_pointer();
+        assert!(
+            passing.passes_pointer && passing.start.is_none(),
+            "passes_pointer lets the pointer through and leaves the start alone"
         );
     });
 }
@@ -1401,6 +1412,734 @@ fn focus_moves_go_on_under_a_popover_that_never_takes_focus(cx: &mut TestAppCont
     move_to(&first, cx);
     assert!(focused(cx, &item), "under a menu, the move did nothing");
     assert!(is_open(cx, menu), "and the menu stayed open");
+}
+
+// ---- Layers: a popover that lets the pointer through -----------------------------------------------------------------
+
+/// A display-only card for a popover that lets the pointer through, shaped like the drag-copy notice: a body that asks
+/// for no pointer input, and one control at its right end that occludes itself and counts the primary presses it takes.
+struct PassingCard {
+    presses: Rc<Cell<usize>>,
+}
+
+impl Render for PassingCard {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let presses = self.presses.clone();
+        div()
+            .debug_selector(|| "passing-card".into())
+            .w(px(200.))
+            .h(px(60.))
+            .flex()
+            .justify_end()
+            .items_center()
+            .child(
+                div()
+                    .id("passing-control")
+                    .debug_selector(|| "passing-control".into())
+                    .size(px(24.))
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, move |_, _, _| {
+                        presses.set(presses.get() + 1)
+                    }),
+            )
+    }
+}
+
+/// What reached the page element a [`PassingPage`] draws under its popover: clicks, wheel turns, and whether the
+/// pointer is over it now.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Reached {
+    clicks: usize,
+    wheels: usize,
+    hovered: bool,
+}
+
+/// A page for a popover that lets the pointer through: an anchor at the top left (`opener`) and right below it a
+/// 400-pixel element (`covered`) that takes focus on a press, as the terminal does, and counts what reaches it. A
+/// popover opened below the anchor lies over that element.
+struct PassingPage {
+    anchor: Rc<RefCell<Option<Anchor>>>,
+    /// Whether the page draws the anchor; turned off to take the anchor away.
+    anchor_shown: Rc<Cell<bool>>,
+    covered: FocusHandle,
+    reached: Rc<Cell<Reached>>,
+    /// The presses the popover's own control took ([`PassingCard`]).
+    presses: Rc<Cell<usize>>,
+}
+
+impl PassingPage {
+    /// The anchor as the page last drew it.
+    fn anchor(&self) -> Anchor {
+        self.anchor
+            .borrow()
+            .clone()
+            .expect("the page drew its anchor")
+    }
+}
+
+/// Open a [`PassingPage`] and draw it once with its element's focus handle.
+fn open_passing_page(cx: &mut TestAppContext) -> (&mut VisualTestContext, PassingPage) {
+    let anchor: Rc<RefCell<Option<Anchor>>> = Rc::default();
+    let anchor_shown = Rc::new(Cell::new(true));
+    let reached = Rc::new(Cell::new(Reached::default()));
+    let covered: Rc<RefCell<Option<FocusHandle>>> = Rc::default();
+    let (out, shown, seen, drawn) = (
+        anchor.clone(),
+        anchor_shown.clone(),
+        reached.clone(),
+        covered.clone(),
+    );
+    let cx = open(cx, move |window, cx| {
+        let Some(focus) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let opener = if shown.get() {
+            anchor_element("opener", &out, window, cx)
+        } else {
+            div().h(px(24.))
+        };
+        let (clicked, scrolled, hovered) = (seen.clone(), seen.clone(), seen.clone());
+        let covered = focus::track(
+            div()
+                .id("covered")
+                .debug_selector(|| "covered".into())
+                .size(px(400.))
+                .on_click(move |_, _, _| {
+                    let now = clicked.get();
+                    clicked.set(Reached {
+                        clicks: now.clicks + 1,
+                        ..now
+                    });
+                })
+                .on_scroll(move |_, _, _| {
+                    let now = scrolled.get();
+                    scrolled.set(Reached {
+                        wheels: now.wheels + 1,
+                        ..now
+                    });
+                })
+                .on_hover(move |over: &bool, _, _| {
+                    hovered.set(Reached {
+                        hovered: *over,
+                        ..hovered.get()
+                    });
+                }),
+            &focus,
+            focus::OnPress::Focus,
+        );
+        div()
+            .flex()
+            .flex_col()
+            .child(opener)
+            .child(covered)
+            .into_any_element()
+    });
+    let focus = handle(cx);
+    covered.replace(Some(focus.clone()));
+    redraw(cx);
+    let page = PassingPage {
+        anchor,
+        anchor_shown,
+        covered: focus,
+        reached,
+        presses: Rc::new(Cell::new(0)),
+    };
+    (cx, page)
+}
+
+/// Open a [`PassingCard`] counting into `presses` as a floating popover on `anchor` that lets the pointer through, for
+/// a mark taken now, and check.
+fn open_passing(cx: &mut VisualTestContext, anchor: Anchor, presses: &Rc<Cell<usize>>) -> LayerId {
+    let presses = presses.clone();
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| PassingCard { presses });
+        let mark = Mark::take(cx);
+        let popover = Popover::floating(view, cx.focus_handle(), anchor).passes_pointer();
+        layers::open_popover(popover, &mark, window, cx)
+    });
+    cx.run_until_parked();
+    check(cx);
+    match id {
+        Some(id) => id,
+        None => panic!("the premise: the popover that lets the pointer through opened"),
+    }
+}
+
+/// Why this matters: SPEC.md has the drag-copy notice pointer-transparent apart from its ×, so a press on its words is
+/// the terminal's next press. An ordinary popover's card takes the pointer from what it covers and closes on a press
+/// outside it; a notice that did either would block the program under it for 30 seconds, or go on presses SPEC.md
+/// does not list. Its × must still be its own, or dismissing it would also click the program.
+///
+/// Spec: with a popover that lets the pointer through drawn over a page element that takes focus on a press, a hover,
+/// a click and a wheel turn on the popover's card reach that element as if the popover were not drawn, the click
+/// focusing it; a press elsewhere on the page leaves the popover open; and a press on the occluding control inside the
+/// popover is that control's alone, with the element under it seeing nothing.
+#[gpui::test]
+fn a_popover_that_lets_the_pointer_through_hands_press_hover_and_wheel_to_the_page(
+    cx: &mut TestAppContext,
+) {
+    let (cx, page) = open_passing_page(cx);
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    let (card, covered, control) = (
+        bounds(cx, "passing-card"),
+        bounds(cx, "covered"),
+        bounds(cx, "passing-control"),
+    );
+    assert!(
+        covered.contains(&card.center())
+            && covered.contains(&control.center())
+            && !control.contains(&card.center()),
+        "the premise: the card's middle and its control both lie over the page element ({card:?}, {control:?} over \
+         {covered:?})"
+    );
+    // The window's corner is inside the scene's padding, where nothing is drawn.
+    cx.simulate_mouse_move(point(px(4.), px(4.)), None, Modifiers::none());
+    check(cx);
+    assert!(
+        !page.reached.get().hovered,
+        "the premise: the pointer starts off the page element"
+    );
+
+    cx.simulate_mouse_move(card.center(), None, Modifiers::none());
+    check(cx);
+    assert!(
+        page.reached.get().hovered,
+        "the pointer over the card is over the element under it"
+    );
+    assert!(
+        !focused(cx, &page.covered),
+        "the premise: the page element does not hold focus before the click"
+    );
+    cx.simulate_click(card.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.reached.get().clicks,
+        1,
+        "the click on the card clicked the element under it"
+    );
+    assert!(
+        focused(cx, &page.covered),
+        "and focused it, as without the popover"
+    );
+    cx.simulate_event(gpui::ScrollEvent {
+        position: card.center(),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
+        ..Default::default()
+    });
+    check(cx);
+    assert_eq!(
+        page.reached.get().wheels,
+        1,
+        "the wheel turned over the card reached the element under it"
+    );
+    assert!(is_open(cx, id), "none of that closed the popover");
+
+    let elsewhere = point(covered.right() - px(10.), covered.bottom() - px(10.));
+    assert!(
+        !card.contains(&elsewhere),
+        "the premise: the second press lands outside the popover"
+    );
+    cx.simulate_click(elsewhere, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.reached.get().clicks,
+        2,
+        "the premise: the press outside reached the page"
+    );
+    assert!(
+        is_open(cx, id),
+        "a press outside the popover leaves it open"
+    );
+
+    cx.simulate_click(control.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(page.presses.get(), 1, "the control inside took the press");
+    assert_eq!(
+        page.reached.get().clicks,
+        2,
+        "and the element under the control saw nothing of it"
+    );
+}
+
+/// Why this matters: a popover that lets the pointer through must not become a way around a modal dialog. It only
+/// gives up its own hit area, so a press on it goes to whatever is next under the pointer: over a dialog that is the
+/// dialog or its veil, never the page the veil covers. And as an ordinary layer in stack order (not a slot above the
+/// dialogs, as the pill is), it is covered by a dialog opened while it shows, as Settings can be from a shortcut during
+/// the drag-copy notice's 30 seconds.
+///
+/// Spec: with a dialog open and a popover that lets the pointer through opened on the page under it, the popover is
+/// drawn over the dialog's veil (a press on its control is the control's), a press on its card reaches neither the
+/// page element under it nor the control and leaves the dialog open with focus inside it; once a second dialog opens,
+/// a press on the popover's control is that dialog's veil's.
+#[gpui::test]
+fn a_popover_that_lets_the_pointer_through_never_reaches_past_a_dialog(cx: &mut TestAppContext) {
+    let (cx, page) = open_passing_page(cx);
+    let only = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    let (card, control) = (bounds(cx, "passing-card"), bounds(cx, "passing-control"));
+    assert!(
+        !bounds(cx, "panel").intersects(&card),
+        "the premise: the popover lies over the dialog's veil, beside the dialog"
+    );
+
+    cx.simulate_click(control.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.presses.get(),
+        1,
+        "the popover is drawn over the dialog's veil: its control took the press"
+    );
+    cx.simulate_click(card.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.reached.get(),
+        Reached::default(),
+        "no press reached the page under the veil"
+    );
+    assert!(
+        is_open(cx, dialog),
+        "the veil took the press; the dialog stays"
+    );
+    assert!(focused(cx, &only), "and keeps focus");
+    assert!(is_open(cx, id), "the premise: the popover is still open");
+
+    let other = handle(cx);
+    let (above, _, _) = open_dialog(cx, vec![("other", other.clone())], &other);
+    cx.simulate_click(control.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.presses.get(),
+        1,
+        "under a dialog opened later, a press on the popover's control is that dialog's veil's"
+    );
+    assert!(is_open(cx, above) && is_open(cx, id), "and nothing closed");
+}
+
+/// Why this matters: SPEC.md lists exactly what closes the drag-copy notice (its time, its ×, the next press in its
+/// terminal), and Escape is not on it. Escape goes to the topmost layer the user answers; counted as that layer, a
+/// popover that lets the pointer through would close on an Escape meant for something else, and take it from whatever
+/// should have had it: the menu under it, or the tooltip.
+///
+/// Spec: with only a popover that lets the pointer through open, Escape from a page control leaves it open, and the
+/// layer manager's dismissal answers that it took no Escape. With a menu open under it, Escape closes the menu, and the
+/// popover above the menu with it, as closing a layer that takes focus takes everything opened over it.
+#[gpui::test]
+fn escape_passes_over_a_popover_that_lets_the_pointer_through(cx: &mut TestAppContext) {
+    let (cx, page) = open_passing_page(cx);
+    let covered = center(cx, "covered");
+    cx.simulate_click(point(covered.x, covered.y + px(150.)), Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &page.covered),
+        "the premise: a page control holds focus"
+    );
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    keys(cx, "escape");
+    assert!(is_open(cx, id), "Escape left the popover open");
+    assert!(
+        !cx.update(layers::dismiss_top),
+        "with nothing else open, Escape is not taken"
+    );
+    assert!(is_open(cx, id), "and still open");
+    cx.update(|window, cx| layers::close(id, window, cx));
+    settle(cx);
+
+    let item = handle(cx);
+    let menu = open_menu(cx, page.anchor(), vec![("item", item.clone())]);
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    assert!(
+        focused(cx, &item),
+        "the premise: the menu under it holds focus"
+    );
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, menu),
+        "Escape closed the menu under the popover"
+    );
+    assert!(
+        !is_open(cx, id),
+        "and the popover opened over the menu went with it"
+    );
+}
+
+/// Why this matters: the quick switcher closes on a press on its veil, but only while it is the layer the user is
+/// answering, so a press beside a menu opened over it closes just the menu. A popover that lets the pointer through is
+/// not a layer the user answers, so one shown over the switcher must not keep a press on the veil from dismissing it.
+///
+/// Spec: with a popover that lets the pointer through open over a dialog that closes on an outside press, a press on
+/// the veil outside both dismisses the dialog.
+#[gpui::test]
+fn a_press_on_the_veil_under_a_popover_that_lets_the_pointer_through_dismisses_the_switcher(
+    cx: &mut TestAppContext,
+) {
+    let OptionDialog {
+        cx,
+        dialog,
+        menu_anchor,
+        corner_presses,
+        ..
+    } = open_option_dialog(cx, SWITCHER, None, Tall::No);
+    let id = open_passing(cx, menu_anchor, &Rc::new(Cell::new(0)));
+    assert!(
+        !bounds(cx, "passing-card").intersects(&bounds(cx, "page-corner"))
+            && !bounds(cx, "panel").intersects(&bounds(cx, "page-corner")),
+        "the premise: the press lands on the veil, outside the switcher and the popover"
+    );
+    click(cx, "page-corner");
+    assert!(
+        !is_open(cx, dialog),
+        "the press on the veil dismissed the switcher"
+    );
+    assert_eq!(corner_presses.get(), 0, "and the veil took it");
+    assert!(
+        !is_open(cx, id),
+        "the popover, opened over the switcher, went with it"
+    );
+}
+
+/// Why this matters: with Escape and outside presses passed over, what is left must still close a popover that lets
+/// the pointer through, or a notice could outlive what it was about: a reset of the connection closes every layer
+/// without asking, and a popover whose anchor element is no longer drawn has nowhere to be.
+///
+/// Spec: a popover that lets the pointer through closes on a reset ([`layers::close_all`]), and closes when its anchor
+/// element is no longer drawn.
+#[gpui::test]
+fn a_reset_or_its_anchor_going_closes_a_popover_that_lets_the_pointer_through(
+    cx: &mut TestAppContext,
+) {
+    let (cx, page) = open_passing_page(cx);
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    // Deferred to after this update, as the reset runs from the channel's events: `close_all` updates each window to
+    // close its layers, and a window cannot be updated from inside its own update.
+    cx.update(|_, cx| cx.defer(layers::close_all));
+    settle(cx);
+    assert!(!is_open(cx, id), "a reset closed it");
+
+    let id = open_passing(cx, page.anchor(), &page.presses);
+    page.anchor_shown.set(false);
+    redraw(cx);
+    assert!(!is_open(cx, id), "its anchor going closed it");
+}
+
+/// Why this matters: a popover that takes focus and lets the pointer through would open with a container no element
+/// tracks, so Tab's trap would hold nothing, focus recovery could not find it and closing it would return no focus,
+/// and it would lose the outside-press close a menu depends on. Nothing in the types stops the pairing, so a debug
+/// build stops at the open that asks for it.
+///
+/// Spec: opening a menu (a popover with a start) built with [`Popover::passes_pointer`] panics in a debug build.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(expected = "a popover that lets the pointer through never takes focus")]
+fn a_menu_that_asks_to_let_the_pointer_through_panics_in_a_debug_build(cx: &mut TestAppContext) {
+    let (cx, page) = open_passing_page(cx);
+    let start = handle(cx);
+    let anchor = page.anchor();
+    cx.update(move |window, cx| {
+        let view = cx.new(|_| PassingCard {
+            presses: Rc::new(Cell::new(0)),
+        });
+        let mark = Mark::take(cx);
+        let menu = Popover::menu(view, cx.focus_handle(), anchor, start).passes_pointer();
+        layers::open_popover(menu, &mark, window, cx)
+    });
+}
+
+/// Why this matters: a release build has no assertion, so the same mistake must fail closed there: the popover opens as
+/// an ordinary one, which keeps its focus tracking and outside-press close, rather than one whose focus rules are
+/// broken. A debug build panics before [`layers::open_popover`] reaches this decision, so it is checked directly.
+///
+/// Spec: a popover lets the pointer through only when it asked to and never takes focus.
+#[test]
+fn a_popover_that_takes_focus_never_lets_the_pointer_through() {
+    assert!(layers::lets_pointer_through(true, false));
+    assert!(
+        !layers::lets_pointer_through(true, true),
+        "one that takes focus fails closed"
+    );
+    assert!(!layers::lets_pointer_through(false, false));
+    assert!(!layers::lets_pointer_through(false, true));
+}
+
+/// Why this matters: the truth table above shows the rule, not that the code opening every popover applies it. A debug
+/// build panics before reaching it, so it is opened here as a release build opens it, where the mistake must fail
+/// closed: as an ordinary menu that takes the pointer and closes on a press outside it, not one a press passes through
+/// and only its owner closes.
+///
+/// Spec: opened as a release build opens it ([`layers::open_popover_as_a_release_build`]), a menu (a popover with a
+/// start) built with [`Popover::passes_pointer`] starts focus on its item, a press on its empty space reaches nothing
+/// on the page under it and leaves it open with focus on the item, and a press on the page outside it closes it.
+#[gpui::test]
+fn a_menu_that_asks_to_let_the_pointer_through_opens_as_an_ordinary_menu_in_a_release_build(
+    cx: &mut TestAppContext,
+) {
+    let (cx, page) = open_passing_page(cx);
+    let item = handle(cx);
+    let (anchor, start) = (page.anchor(), item.clone());
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| Panel {
+            controls: vec![("item", start.clone())],
+            shown: Rc::new(Cell::new(true)),
+        });
+        let mark = Mark::take(cx);
+        let menu = Popover::menu(view, cx.focus_handle(), anchor, start).passes_pointer();
+        layers::open_popover_as_a_release_build(menu, &mark, window, cx)
+    });
+    settle(cx);
+    let id = id.expect("the premise: the menu opened");
+    assert!(focused(cx, &item), "the menu starts on its item");
+    let (panel, covered) = (bounds(cx, "panel"), bounds(cx, "covered"));
+    // The panel's padding: empty space of the menu's own, over the page element.
+    let empty = panel.origin + point(px(5.), px(5.));
+    assert!(
+        covered.contains(&empty) && !bounds(cx, "item").contains(&empty),
+        "the premise: the press lands on the menu's empty space, over the page element"
+    );
+    cx.simulate_click(empty, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        page.reached.get().clicks,
+        0,
+        "the menu took the press from the page element under it"
+    );
+    assert!(
+        is_open(cx, id) && focused(cx, &item),
+        "and stays open, with focus on its item"
+    );
+
+    let outside = point(covered.right() - px(10.), covered.bottom() - px(10.));
+    assert!(
+        !panel.contains(&outside),
+        "the premise: the second press lands outside the menu"
+    );
+    cx.simulate_click(outside, Modifiers::none());
+    check(cx);
+    assert!(!is_open(cx, id), "a press outside the menu closed it");
+}
+
+/// Why this matters: a press through a popover that lets the pointer through must do to focus what it would do with
+/// no popover there, not only reach the press listeners under it. The drag-copy notice is kept inside the window's
+/// content area, not its terminal's pane, so part of it can lie over the sidebar or other page space. Tracking the
+/// popover's wrapper for focus, as every other layer's is, would add a press handler that prevents the default before
+/// any handler under it runs: a press on page space no control takes would no longer send focus to its resting place,
+/// and an element under it that GPUI focuses on its own would not be focused.
+///
+/// Spec: with a page control focused, a press on a popover that lets the pointer through, where it lies over page
+/// space no control takes, leaves focus where the same press at the same point leaves it with no popover open, which
+/// is off that control.
+#[gpui::test]
+fn a_press_through_a_popover_that_lets_the_pointer_through_moves_focus_as_without_it(
+    cx: &mut TestAppContext,
+) {
+    let anchor: Rc<RefCell<Option<Anchor>>> = Rc::default();
+    let control: Rc<RefCell<Option<FocusHandle>>> = Rc::default();
+    let (out, drawn) = (anchor.clone(), control.clone());
+    let cx = open(cx, move |window, cx| {
+        let Some(focus) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        div()
+            .flex()
+            .flex_col()
+            .child(anchor_element("opener", &out, window, cx))
+            // Plain page space under the popover: no listener, so nothing on the page takes a press there.
+            .child(
+                div()
+                    .debug_selector(|| "plain-space".into())
+                    .w(px(300.))
+                    .h(px(120.)),
+            )
+            .child(focus::track(
+                div()
+                    .id("page-control")
+                    .debug_selector(|| "page-control".into())
+                    .size(px(40.)),
+                &focus,
+                focus::OnPress::Focus,
+            ))
+            .into_any_element()
+    });
+    let page_control = handle(cx);
+    control.replace(Some(page_control.clone()));
+    redraw(cx);
+    let anchor = anchor
+        .borrow()
+        .clone()
+        .expect("the premise: the page drew its anchor");
+
+    // The focus a press at `at` leaves behind, the page control having held focus just before it.
+    let focus_after_press = |cx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>| {
+        click(cx, "page-control");
+        assert!(
+            focused(cx, &page_control),
+            "the premise: the page control holds focus"
+        );
+        cx.simulate_click(at, Modifiers::none());
+        check(cx);
+        cx.update(|window, cx| window.focused(cx))
+    };
+
+    let id = open_passing(cx, anchor, &Rc::new(Cell::new(0)));
+    let (card, plain) = (bounds(cx, "passing-card"), bounds(cx, "plain-space"));
+    let at = point(card.left() + px(20.), card.center().y);
+    assert!(
+        plain.contains(&at)
+            && !bounds(cx, "passing-control").contains(&at)
+            && !bounds(cx, "page-control").intersects(&card),
+        "the premise: the press lands on the card's body over plain page space ({card:?} over {plain:?})"
+    );
+    let through = focus_after_press(cx, at);
+    assert!(is_open(cx, id), "the premise: the popover is still open");
+    cx.update(|window, cx| layers::close(id, window, cx));
+    settle(cx);
+
+    let without = focus_after_press(cx, at);
+    assert!(
+        without.as_ref() != Some(&page_control),
+        "the premise: without the popover, the press on plain page space takes focus off the page control"
+    );
+    assert!(
+        through == without,
+        "the press through the popover left focus where the same press without it does (through the popover the page \
+         control kept it: {})",
+        through.as_ref() == Some(&page_control)
+    );
+}
+
+/// Why this matters: the drag-copy notice places itself by a rule of its own (three terminal rows from the release),
+/// asked by the layer manager as each frame is laid out. It must get this frame's anchor bounds and its own measured
+/// size, so it follows a moved anchor in the frame that moves it, as every popover does, and the area the window's
+/// content is laid out in, which it keeps inside. The shared clamp after it still keeps a rule that answers past the
+/// window's edges inside the window.
+///
+/// The test platform draws no client-side decorations, so there the content area is the whole window: this test
+/// cannot tell the two apart and does not pin that the rule gets the content area rather than the window. The
+/// notice's own rule is tested against an area apart from the window (`drag_notice::place`, in the terminal's tests).
+///
+/// Spec: a rule that places the popover 50 pixels right of and below its anchor's bottom-right corner is handed the
+/// anchor's drawn bounds, the popover's drawn size and the window's content area (the whole window on the test
+/// platform), and the popover is drawn where it said; after the anchor moves down 60 pixels, the one redraw that moves
+/// it draws the popover 60 pixels lower; and a rule that answers a point past the window's right and bottom edges has
+/// the popover drawn flush inside them.
+#[gpui::test]
+fn a_popover_placed_by_its_owners_rule_follows_it_each_frame_and_is_kept_inside(
+    cx: &mut TestAppContext,
+) {
+    let pushed_down = Rc::new(Cell::new(false));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::default();
+    let (down, out) = (pushed_down.clone(), anchor_out.clone());
+    let cx = open(cx, move |window, cx| {
+        div()
+            .flex()
+            .flex_col()
+            .when(down.get(), |column| column.child(div().h(px(60.))))
+            .child(anchor_element("opener", &out, window, cx))
+            .into_any_element()
+    });
+    type Asked = Option<(
+        gpui::Bounds<gpui::Pixels>,
+        gpui::Size<gpui::Pixels>,
+        gpui::Bounds<gpui::Pixels>,
+    )>;
+    let asked: Rc<Cell<Asked>> = Rc::default();
+    let past_the_edge = Rc::new(Cell::new(false));
+    let (noted, past) = (asked.clone(), past_the_edge.clone());
+    let anchor = anchor_out
+        .borrow()
+        .clone()
+        .expect("the premise: the anchor drew")
+        .placed_by(move |anchor, size, area| {
+            noted.set(Some((anchor, size, area)));
+            if past.get() {
+                point(area.right() + px(50.), area.bottom() + px(50.))
+            } else {
+                point(anchor.right() + px(50.), anchor.bottom() + px(50.))
+            }
+        });
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| PassingCard {
+            presses: Rc::new(Cell::new(0)),
+        });
+        let mark = Mark::take(cx);
+        layers::open_popover(
+            Popover::floating(view, cx.focus_handle(), anchor),
+            &mark,
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    assert!(
+        id.is_some_and(|id| is_open(cx, id)),
+        "the premise: the popover opened"
+    );
+    let (opener, card) = (bounds(cx, "opener"), bounds(cx, "passing-card"));
+    let viewport = cx.update(|window, _| window.viewport_size());
+    assert_eq!(
+        asked.get(),
+        Some((
+            opener,
+            card.size,
+            gpui::Bounds::new(point(px(0.), px(0.)), viewport)
+        )),
+        "the rule got the anchor's bounds, the popover's size and the window's content area, which is the whole \
+         window on the test platform"
+    );
+    assert_eq!(
+        card.origin,
+        point(opener.right() + px(50.), opener.bottom() + px(50.)),
+        "the popover is where the rule said"
+    );
+
+    pushed_down.set(true);
+    redraw(cx);
+    let moved = bounds(cx, "passing-card");
+    assert_eq!(
+        bounds(cx, "opener").top() - opener.top(),
+        px(60.),
+        "the premise: the anchor moved down"
+    );
+    assert_eq!(
+        moved.origin,
+        point(card.left(), card.top() + px(60.)),
+        "the rule was asked again in the frame that moved the anchor"
+    );
+
+    past_the_edge.set(true);
+    redraw(cx);
+    let clamped = bounds(cx, "passing-card");
+    assert_eq!(
+        (clamped.right(), clamped.bottom()),
+        (viewport.width, viewport.height),
+        "a point past the window's edges is clamped flush inside them: {clamped:?} in {viewport:?}"
+    );
+}
+
+/// Why this matters: a layer opening puts the tooltip away, and makes the next one wait the full delay, because it
+/// covers whatever the tooltip was about. A popover that lets the pointer through covers nothing the user is pointing
+/// at (the drag-copy notice appears a second and a half after the release), so taking the tooltip down would only
+/// cost the user the help they were reading. The pill leaves the tooltip alone for the same reason.
+///
+/// Spec: a tooltip showing when a popover that lets the pointer through opens is still showing after it opens; one
+/// showing when an ordinary floating popover opens is put away.
+#[gpui::test]
+fn opening_a_popover_that_lets_the_pointer_through_leaves_the_tooltip_up(cx: &mut TestAppContext) {
+    let (cx, page) = open_passing_page(cx);
+    let tooltip_shown = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| layers::shown_tooltip(window, cx).is_some())
+    };
+    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let at = center(cx, "covered");
+    cx.update(|window, cx| layers::show_tooltip_at(&owner, "Probe help".into(), at, window, cx));
+    settle(cx);
+    assert!(tooltip_shown(cx), "the premise: the tooltip shows");
+    open_passing(cx, page.anchor(), &page.presses);
+    assert!(tooltip_shown(cx), "opening the popover left the tooltip up");
+    open_floating_list(cx, page.anchor());
+    assert!(
+        !tooltip_shown(cx),
+        "the premise: an ordinary popover opening puts it away"
+    );
 }
 
 // ---- Layers: a popover that lets Tab through -------------------------------------------------------------------------

@@ -6047,6 +6047,694 @@ fn mouse_reporting_survives_a_reattach(cx: &mut TestAppContext) {
     assert_eq!(h.sent(), [report(Down, 0, (1, 0)), report(Up, 0, (1, 0))]);
 }
 
+// ---- The drag-copy notice --------------------------------------------------------------------------------------------
+
+/// The generic notice's words on this platform, as SPEC.md has them: the program handles selection itself, use its own
+/// copy command, or hold this platform's forcing modifier.
+fn generic_notice() -> String {
+    super::super::drag_notice::text(None, THIS_PLATFORM)
+}
+
+impl Harness<'_> {
+    /// Show "hello world" with the program's mouse reporting on in `mode`, and focus the terminal.
+    fn attach_reporting(&mut self, mode: &str) {
+        self.attach_showing("hello world");
+        self.fake().output(mouse_mode(mode));
+        settle(self.cx);
+        let owner = self.owner.clone();
+        self.choose(&owner);
+        let _ = self.sent();
+    }
+
+    /// A plain primary drag across row 15, from column 2 to column 30: deep enough in the pane for the notice to fit
+    /// three rows above its release, and well past the drag threshold. Returns the release point.
+    fn plain_drag(&mut self) -> Point<Pixels> {
+        let (from, to) = (self.at_cell(2, 15), self.at_cell(30, 15));
+        self.drag(from, to, Modifiers::none());
+        to
+    }
+
+    /// Let `duration` pass and draw the frames that follow (the notice's layer opens after the frame that draws its
+    /// anchor, and a put-away notice's layer closes after the next).
+    fn wait(&mut self, duration: std::time::Duration) {
+        advance(self.cx, duration);
+        redraw(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The notice's text, if its layer is open and drawn; `None` otherwise. Checks that the owner's state and what is
+    /// drawn agree.
+    fn notice(&mut self) -> Option<String> {
+        let owner = self.owner.clone();
+        let open = self
+            .cx
+            .update(|window, cx| owner.read(cx).drag_notice_open(window, cx));
+        let drawn = self
+            .cx
+            .debug_bounds(super::super::drag_notice::NOTICE_ID)
+            .is_some();
+        assert_eq!(
+            open, drawn,
+            "the notice's layer is open exactly while it is drawn"
+        );
+        open.then(|| {
+            self.read(|owner, _| {
+                owner
+                    .drag_notice
+                    .shown
+                    .as_ref()
+                    .map(|shown| shown.text.to_string())
+                    .unwrap_or_default()
+            })
+        })
+    }
+
+    /// A plain drag under mouse reporting, and the grace window after it, ending with the notice shown.
+    fn raise_notice(&mut self) -> Point<Pixels> {
+        let release = self.plain_drag();
+        self.wait(super::super::drag_notice::GRACE);
+        assert_eq!(
+            self.notice(),
+            Some(generic_notice()),
+            "the premise: the drag raised the notice"
+        );
+        release
+    }
+}
+
+/// Why this matters: a program under mouse reporting takes a plain drag itself, so Farhelm copies nothing; a program
+/// that only draws a highlight leaves the user with an unchanged clipboard and no clue why (SPEC.md, "Terminal
+/// experience").
+///
+/// Spec: after a plain primary drag under mouse reporting with no clipboard write, the notice appears once the
+/// 1.5-second grace window has passed, not before, with the generic words for this platform (their wording is
+/// `only_codex_has_its_own_copy_instruction`'s to pin).
+#[gpui::test]
+fn a_plain_drag_under_mouse_reporting_raises_the_notice_after_the_grace_window(
+    cx: &mut TestAppContext,
+) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    h.set_clipboard("someone else's");
+    h.plain_drag();
+    assert_eq!(
+        h.sent(),
+        [report(Down, 0, (2, 15)), report(Up, 0, (30, 15))],
+        "the premise: the program took the drag"
+    );
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "the premise: nothing was copied"
+    );
+    h.wait(super::super::drag_notice::GRACE - std::time::Duration::from_millis(1));
+    assert_eq!(h.notice(), None, "the program still has time to copy");
+    h.wait(std::time::Duration::from_millis(1));
+    let text = h
+        .notice()
+        .expect("the notice shows once the grace window is over");
+    assert_eq!(text, generic_notice());
+}
+
+/// Why this matters: the notice is only useful if it appears exactly when a drag copied nothing; one after a drag
+/// that made Farhelm's own selection, or after a click, is noise users learn to ignore. And a forced drag never raises
+/// it, even one that selected nothing: telling that user to hold the key they are holding would be wrong.
+///
+/// Spec: no notice after a drag with the forcing modifier under mouse reporting (which selects and copies), nor after
+/// a click, a forced drag past the drag threshold that stayed in its cell and selected nothing, a right-button drag, or
+/// a plain drag with mouse reporting off (which selects and copies).
+#[gpui::test]
+fn no_notice_after_a_forced_drag_a_click_or_a_drag_without_mouse_reporting(
+    cx: &mut TestAppContext,
+) {
+    let grace = super::super::drag_notice::GRACE;
+    let mut h = harness(cx);
+    h.attach_reporting("drag");
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, forcing());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello"),
+        "the premise: the forced drag selected and copied"
+    );
+    h.wait(grace);
+    assert_eq!(h.notice(), None, "a forced drag");
+
+    // The click also clears the forced drag's selection (a reported press does), so the forced press after it starts
+    // a selection of its own rather than extending that one, which Shift, the forcing key off a Mac, would do.
+    let click = h.at_cell(3, 15);
+    h.drag(click, click + point(px(3.), px(0.)), Modifiers::none());
+    assert!(
+        !h.sent().is_empty(),
+        "the premise: the program took the click"
+    );
+    h.wait(grace);
+    assert_eq!(
+        h.notice(),
+        None,
+        "a click (the pointer moved less than the drag threshold)"
+    );
+
+    // Straight down inside the row, so the drag passes the threshold without reaching another cell's boundary.
+    let still = h.at_cell(3, 15);
+    h.drag(still, still + point(px(0.), px(5.)), forcing());
+    assert!(
+        h.selection().is_none_or(|selection| selection.is_empty()),
+        "the premise: the forced drag selected nothing ({:?})",
+        h.selection()
+    );
+    h.wait(grace);
+    assert_eq!(
+        h.notice(),
+        None,
+        "a forced press is Farhelm's even when it selected nothing"
+    );
+
+    let (right_from, right_to) = (h.at_cell(2, 15), h.at_cell(30, 15));
+    h.cx.simulate_mouse_down(right_from, MouseButton::Right, Modifiers::none());
+    h.cx.simulate_mouse_move(right_to, MouseButton::Right, Modifiers::none());
+    h.cx.simulate_mouse_up(right_to, MouseButton::Right, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        !h.sent().is_empty(),
+        "the premise: the program took the right-button drag"
+    );
+    h.wait(grace);
+    assert_eq!(h.notice(), None, "a right-button drag");
+
+    h.fake().output(mouse_mode("off"));
+    settle(h.cx);
+    h.set_clipboard("someone else's");
+    h.drag(from, to, Modifiers::none());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello"),
+        "the premise: without reporting the drag copied"
+    );
+    h.wait(grace);
+    assert_eq!(h.notice(), None, "a drag without mouse reporting");
+}
+
+/// SPEC.md fixes where the notice sits so it stays clear of the row the user just dragged over and inside the window:
+/// its bottom edge three terminal rows above the release when that fits the pane and the window, else its top three
+/// rows below, else 6 pixels above, clamped; horizontally centred on the release and clamped. These are the old unit
+/// cases (`copy-on-select.test.js` at the reference commit): a 800 by 600 window, a pane from 100 to 500, rows of 20
+/// pixels and a notice of 200 by 50. SPEC.md's "the window" is the area the window's content is laid out in, which
+/// the layer manager hands the rule, so the last cases put that area's corner away from the window's: a notice kept
+/// inside the whole window instead would sit over whatever lies outside that area (a title bar).
+#[test]
+fn the_notice_sits_three_rows_from_the_release_with_its_fallbacks() {
+    use super::super::drag_notice::place;
+    let window = Bounds::new(point(px(0.), px(0.)), gpui::size(px(800.), px(600.)));
+    let size = gpui::size(px(200.), px(50.));
+    let pane = |top: f32, bottom: f32| {
+        Some(Bounds::from_corners(
+            point(px(0.), px(top)),
+            point(px(800.), px(bottom)),
+        ))
+    };
+    let at = |x: f32, y: f32, pane: Option<Bounds<Pixels>>, row_height: f32| {
+        let placed = place(point(px(x), px(y)), pane, row_height, size, window);
+        (f32::from(placed.x), f32::from(placed.y))
+    };
+    assert_eq!(
+        at(300., 400., pane(100., 500.), 20.),
+        (200., 290.),
+        "three rows above"
+    );
+    assert_eq!(
+        at(300., 210., pane(100., 500.), 20.),
+        (200., 100.),
+        "an exact fit at the pane's top is enough room"
+    );
+    assert_eq!(
+        at(300., 130., pane(100., 500.), 20.),
+        (200., 190.),
+        "three rows below when only that fits"
+    );
+    assert_eq!(
+        at(300., 140., pane(100., 180.), 20.),
+        (200., 84.),
+        "a pane too short for either: 6 pixels above, clamped"
+    );
+    for (row_height, top) in [(10., 320.), (20., 290.), (30., 260.)] {
+        assert_eq!(
+            at(300., 400., pane(100., 500.), row_height),
+            (200., top),
+            "the gap is three rows of {row_height}"
+        );
+    }
+    for (x, y) in [(0., 0.), (800., 600.), (300., 10.)] {
+        let (left, top) = at(x, y, pane(100., 500.), 20.);
+        assert!(
+            left >= 4. && left + 200. <= 796.,
+            "inside the window across at ({x}, {y})"
+        );
+        assert!(
+            top >= 4. && top + 50. <= 596.,
+            "inside the window down at ({x}, {y})"
+        );
+    }
+    let wide = place(
+        point(px(300.), px(400.)),
+        None,
+        20.,
+        gpui::size(px(900.), px(50.)),
+        window,
+    );
+    assert_eq!(
+        f32::from(wide.x),
+        4.,
+        "a notice wider than the window starts at its left edge"
+    );
+    assert_eq!(
+        at(300., 400., None, 20.),
+        (200., 344.),
+        "no pane drawn: the clamped fallback"
+    );
+
+    let content = Bounds::from_corners(point(px(100.), px(40.)), point(px(700.), px(560.)));
+    let inside = |x: f32, y: f32, pane: Option<Bounds<Pixels>>| {
+        let placed = place(point(px(x), px(y)), pane, 20., size, content);
+        (f32::from(placed.x), f32::from(placed.y))
+    };
+    assert_eq!(
+        inside(50., 50., pane(40., 80.)),
+        (104., 44.),
+        "the fallback is clamped 4 pixels inside the area's top left corner, not the window's"
+    );
+    assert_eq!(
+        inside(750., 590., pane(570., 600.)),
+        (496., 506.),
+        "and inside its bottom right corner"
+    );
+    assert_eq!(
+        inside(300., 130., pane(0., 600.)),
+        (200., 190.),
+        "room above counts only inside the area: three rows above would start at 20, over its top, so it goes below"
+    );
+}
+
+/// The placement rule above must be the one the drawn notice follows, with the terminal's own row height and pane.
+/// Specified: a notice raised by a drag released deep in the pane is drawn with its bottom edge three terminal rows
+/// above the release and centred on it; one released on the top row, where there is no room above, is drawn with its
+/// top edge three rows below.
+#[gpui::test]
+fn the_drawn_notice_sits_three_terminal_rows_from_its_release(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    let row = h.read(|owner, cx| {
+        let view = owner.committed.as_ref().unwrap().read(cx);
+        owner.placement(view, cx).unwrap().cell_height
+    });
+    let release = h.raise_notice();
+    let drawn =
+        h.cx.debug_bounds(super::super::drag_notice::NOTICE_ID)
+            .unwrap();
+    let close = |a: Pixels, b: f32| (f32::from(a) - b).abs() <= 1.;
+    assert!(
+        close(drawn.bottom(), f32::from(release.y) - 3. * row),
+        "bottom {:?} three {row}-pixel rows above {:?}",
+        drawn.bottom(),
+        release.y
+    );
+    assert!(
+        close(drawn.center().x, f32::from(release.x)),
+        "centred on the release"
+    );
+
+    let (from, to) = (h.at_cell(2, 0), h.at_cell(30, 0));
+    h.drag(from, to, Modifiers::none());
+    h.wait(super::super::drag_notice::GRACE);
+    assert!(
+        h.notice().is_some(),
+        "the premise: the second drag raised the notice"
+    );
+    let drawn =
+        h.cx.debug_bounds(super::super::drag_notice::NOTICE_ID)
+            .unwrap();
+    assert!(
+        close(drawn.top(), f32::from(to.y) + 3. * row),
+        "top {:?} three rows below {:?}",
+        drawn.top(),
+        to.y
+    );
+}
+
+/// Why this matters: SPEC.md has the notice stay for 30 seconds or until its × is clicked, and "Dismissal preserves
+/// terminal focus and sends no input to the program". A dismissal that sent the press on would click the program
+/// under it, and one that moved focus would leave the user typing nowhere.
+///
+/// Spec: with the terminal focused, the press on × is not a press in the terminal (the notice is still up while the
+/// button is held, where a terminal press would have put it away), its click hides the notice, the terminal keeps
+/// focus and the program hears nothing.
+#[gpui::test]
+fn the_notices_x_puts_it_away_keeping_focus_and_sending_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    h.raise_notice();
+    let _ = h.sent();
+    let dismiss = test_support::center(h.cx, super::super::drag_notice::DISMISS_ID);
+    let grid = h.read(|owner, _| owner.grid_origin.unwrap());
+    assert!(
+        dismiss.x > grid.x && dismiss.y > grid.y,
+        "the premise: × lies over the grid, where a press would otherwise be reported"
+    );
+    h.rest_on(dismiss);
+    let owner = h.owner.clone();
+    assert!(
+        h.focused(&owner),
+        "the premise: the terminal holds focus before the press"
+    );
+    h.cx.simulate_mouse_down(dismiss, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    redraw(h.cx);
+    assert!(
+        h.notice().is_some(),
+        "the press on × is the button's, not the terminal's"
+    );
+    h.cx.simulate_mouse_up(dismiss, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.notice(), None, "× puts it away");
+    assert_eq!(h.sent(), [], "the program heard nothing of the press");
+    assert!(h.focused(&owner), "the terminal keeps focus");
+}
+
+/// The notice is pointer-transparent apart from its × (SPEC.md), and "the next mouse press in that terminal" puts it
+/// away: a notice that ate presses would block the program under it for 30 seconds. Specified: a press on the
+/// notice's words reaches the program as a mouse report at the cell under it, and the notice goes.
+#[gpui::test]
+fn a_press_on_the_notice_reaches_the_terminal_and_puts_it_away(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    h.raise_notice();
+    let _ = h.sent();
+    let drawn =
+        h.cx.debug_bounds(super::super::drag_notice::NOTICE_ID)
+            .unwrap();
+    let on_words = drawn.origin + point(px(16.), px(12.));
+    let cell = h.read(|owner, cx| owner.cell_at(on_words, cx)).unwrap();
+    assert!(
+        h.cx.debug_bounds(super::super::drag_notice::DISMISS_ID)
+            .is_some_and(|dismiss| !dismiss.contains(&on_words)),
+        "the premise: the press lands on the words, not on ×"
+    );
+    h.cx.simulate_mouse_down(on_words, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(on_words, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(
+        h.sent(),
+        [report(Down, 0, cell), report(Up, 0, cell)],
+        "the press went through to the program"
+    );
+    assert_eq!(h.notice(), None, "and put the notice away");
+}
+
+/// The next press anywhere in the terminal puts the notice away, whatever it lands on and whichever button (the old
+/// "a new press dismisses old guidance"); it starts the next gesture, which may raise its own notice. Specified: a
+/// right click elsewhere in the grid hides the notice and reaches the program.
+#[gpui::test]
+fn the_next_press_in_the_terminal_puts_the_notice_away(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    h.raise_notice();
+    let _ = h.sent();
+    let elsewhere = h.at_cell(60, 2);
+    h.cx.simulate_mouse_down(elsewhere, MouseButton::Right, Modifiers::none());
+    h.cx.simulate_mouse_up(elsewhere, MouseButton::Right, Modifiers::none());
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.sent(), [report(Down, 2, (60, 2)), report(Up, 2, (60, 2))]);
+    assert_eq!(h.notice(), None);
+}
+
+/// Why this matters: SPEC.md has the notice stay for 30 seconds, long enough to read without watching for it, and
+/// appear on every qualifying drag, so every notice gets its full 30 seconds from when it appears, a notice raised
+/// while an earlier one shows included.
+///
+/// Spec: a notice raised 20 seconds after the first, which is still up then, is still up 30 seconds less a
+/// millisecond after it appeared (long past the first one's 30), and gone at 30 seconds.
+#[gpui::test]
+fn the_notice_goes_after_thirty_seconds(cx: &mut TestAppContext) {
+    use super::super::drag_notice::SHOWN_FOR;
+    let millisecond = std::time::Duration::from_millis(1);
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    h.raise_notice();
+    h.wait(std::time::Duration::from_secs(20));
+    assert!(
+        h.notice().is_some(),
+        "the premise: the first notice is still up"
+    );
+    h.raise_notice();
+    h.wait(SHOWN_FOR - millisecond);
+    assert!(
+        h.notice().is_some(),
+        "still up just before its own 30 seconds"
+    );
+    h.wait(millisecond);
+    assert_eq!(h.notice(), None, "gone at 30 seconds");
+}
+
+/// A program that copies by itself answers a drag with a clipboard write (OSC 52); telling its user that nothing was
+/// copied would be wrong. SPEC.md: "Any completed program clipboard write, including a primary-selection write,
+/// suppresses it during the grace window." Specified: a primary-selection write within the grace window after the
+/// release, or a clipboard write between the press and the release, means no notice.
+#[gpui::test]
+fn a_program_clipboard_write_in_the_grace_window_suppresses_the_notice(cx: &mut TestAppContext) {
+    let grace = super::super::drag_notice::GRACE;
+    let write = |target: &str| -> GridOutput {
+        serde_json::from_value(
+            serde_json::json!({"t":"clipboard","target":target,"text":"copied","last":true}),
+        )
+        .unwrap()
+    };
+    let mut h = harness(cx);
+    h.attach_reporting("drag");
+    h.set_clipboard("someone else's");
+    h.plain_drag();
+    h.wait(grace / 2);
+    h.fake().output(write("primary"));
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "the premise: a primary-selection write leaves the clipboard alone"
+    );
+    h.wait(grace);
+    assert_eq!(
+        h.notice(),
+        None,
+        "a primary-selection write in the grace window"
+    );
+
+    let (from, to) = (h.at_cell(2, 15), h.at_cell(30, 15));
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    h.fake().output(write("clipboard"));
+    settle(h.cx);
+    h.cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("copied"),
+        "the premise: the program copied"
+    );
+    h.wait(grace);
+    assert_eq!(h.notice(), None, "a write during the drag");
+
+    h.plain_drag();
+    h.wait(grace);
+    assert!(
+        h.notice().is_some(),
+        "the premise holds: a drag with no write still raises it"
+    );
+}
+
+/// Why this matters: a Codex session's user is told Codex's own copy key, since Codex in its prompt box highlights
+/// without copying and Ctrl+C there copies only while the highlight is up (SPEC.md: "For a Codex session's agent
+/// terminal the notice names Codex's own copy key instead").
+///
+/// Spec: the agent terminal of a session the helm lists with the Codex kind shows the notice with Codex's instruction
+/// for this platform (its wording is `only_codex_has_its_own_copy_instruction`'s to pin).
+#[gpui::test]
+fn a_codex_sessions_notice_names_codexs_own_copy_key(cx: &mut TestAppContext) {
+    let mut h = harness_connected(cx, false, vec![test_support::sessions(&["s1"])]);
+    let kind = h.cx.update(|_, cx| {
+        session::current_store(cx)
+            .unwrap()
+            .read(cx)
+            .collections()
+            .get::<SessionRow>("s1")
+            .map(|row| row.info.agent_kind)
+    });
+    assert_eq!(
+        kind,
+        Some(farhelm_proto::AgentKind::Codex),
+        "the premise: s1 is listed as Codex"
+    );
+    h.attach_reporting("click");
+    h.plain_drag();
+    h.wait(super::super::drag_notice::GRACE);
+    let text = h.notice().expect("the notice shows");
+    assert_eq!(
+        text,
+        super::super::drag_notice::text(
+            super::super::drag_notice::copy_hint(farhelm_proto::AgentKind::Codex),
+            THIS_PLATFORM
+        )
+    );
+}
+
+/// Why this matters: the instruction is only true of Codex (Ctrl+C while the text is highlighted; without a highlight
+/// Ctrl+C clears the draft), and telling another agent's user to press Ctrl+C could interrupt it. The terminal's tests
+/// compare the notice they see against [`text`](super::super::drag_notice::text), so this is where its words are
+/// pinned, words that carry SPEC.md's "use its own copy command, or hold the forcing modifier while dragging".
+///
+/// Spec: Codex alone has a copy instruction and every other kind gets the generic advice; the generic notice and
+/// Codex's read exactly as below, and the forcing key they name is Shift on Linux and Option on a Mac, as the
+/// terminal's forcing rule reads it.
+#[test]
+fn only_codex_has_its_own_copy_instruction() {
+    use super::super::drag_notice::{copy_hint, text};
+    use farhelm_proto::AgentKind;
+    for kind in AgentKind::ALL {
+        match copy_hint(*kind) {
+            Some(hint) => {
+                assert_eq!(*kind, AgentKind::Codex, "{kind:?}");
+                assert!(hint.contains("Ctrl+C") && hint.contains("still highlighted"));
+            }
+            None => assert_ne!(*kind, AgentKind::Codex),
+        }
+    }
+    assert_eq!(
+        text(None, Platform::Linux),
+        "This program handles mouse selection itself, so this drag did not copy anything. Use the program's own \
+         copy command. Or hold Shift while dragging to select and copy here."
+    );
+    assert_eq!(
+        text(None, Platform::Mac),
+        "This program handles mouse selection itself, so this drag did not copy anything. Use the program's own \
+         copy command. Or hold Option while dragging to select and copy here."
+    );
+    assert_eq!(
+        text(copy_hint(AgentKind::Codex), Platform::Mac),
+        "Codex handles mouse selection itself: to copy what you highlighted, press Ctrl+C while it is still \
+         highlighted (without a highlight, Ctrl+C clears your draft). Or hold Option while dragging to select and \
+         copy here."
+    );
+}
+
+/// Why this matters: in intercept mode a press on a web link is Farhelm's, withheld from the program with its drag and
+/// release, so the program never had the drag and a notice saying it handles mouse selection itself would be wrong
+/// (SPEC.md: "A withheld press dismisses the drag-copy notice and never raises it").
+///
+/// Spec: with mouse reporting on and the link choice on intercept, a primary drag pressed on a printed web address and
+/// released far from it reaches the program not at all, and no notice shows once the grace window has passed.
+#[gpui::test]
+fn a_withheld_press_on_a_web_link_never_raises_the_notice(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing(LINKED);
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.link_click("intercept");
+    let _ = h.sent();
+    let (on, far) = (h.at_cell(5, 0), h.at_cell(30, 15));
+    // The pointer comes to rest on the link first, as a real pointer does before a press.
+    h.cx.simulate_mouse_move(on, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some(LINKED_URL),
+        "the premise: the pointer rests on the link"
+    );
+    h.drag(on, far, Modifiers::none());
+    assert_eq!(
+        h.sent(),
+        [],
+        "the premise: the press was withheld from the program, its drag and release with it"
+    );
+    h.wait(super::super::drag_notice::GRACE);
+    assert_eq!(h.notice(), None, "a withheld press raises no notice");
+}
+
+/// Why this matters: a tab runs a shell, whatever the session's agent is, so telling its user Codex's copy key would be
+/// wrong, and Ctrl+C there would interrupt whatever the shell runs. The old app gave a tab the generic advice.
+///
+/// Spec: in a session the helm lists with the Codex kind, the words the agent terminal's notice gets name Codex's copy
+/// key, and the words a tab's notice gets are the generic advice.
+#[gpui::test]
+fn a_tabs_notice_gives_the_generic_advice_in_a_codex_session(cx: &mut TestAppContext) {
+    use super::super::drag_notice::{copy_hint, text};
+    let h = harness_connected(cx, false, vec![test_support::sessions(&["s1"])]);
+    let connection = h.connection.clone();
+    let tab = h.cx.update(|_, cx| {
+        let session = connection.read(cx).session().cloned().unwrap();
+        let target = TerminalTarget {
+            session: "s1".into(),
+            tab: Some("t1".into()),
+            lease: AttachmentLease::new(),
+        };
+        cx.new(|cx| AttachedTerminal::new(&session, target, metrics(), opener(Rc::default()), cx))
+    });
+    let words = |terminal: &Entity<AttachedTerminal>, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| text(terminal.read(cx).copy_hint(cx), THIS_PLATFORM))
+    };
+    assert_eq!(
+        words(&h.owner, h.cx),
+        text(copy_hint(farhelm_proto::AgentKind::Codex), THIS_PLATFORM),
+        "the premise: the session is listed as Codex, and its agent terminal names Codex's copy key"
+    );
+    assert_eq!(
+        words(&tab, h.cx),
+        generic_notice(),
+        "a tab gets the generic advice"
+    );
+}
+
+/// Why this matters: a click opens a program's hyperlink only while its destination display is fully visible and not
+/// covered (SPEC.md's links paragraph). The notice lets the pointer through, so drawn over the display it would hide
+/// the target that a click on the link then opens, and the display's cover check, a hit test, could not see it. The
+/// old app drew the display above the notice; here the notice does not open while the display is (a deviation the
+/// parity doc records).
+///
+/// Spec: with mouse reporting on, a plain drag released on a program's hyperlink, whose destination display opens at
+/// the release and is still open when the grace window ends, raises no notice.
+#[gpui::test]
+fn no_notice_opens_while_a_link_destination_display_is_open(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("click here", "https://example.com/page");
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (from, on) = (h.at_cell(2, 15), h.at_cell(2, 0));
+    h.drag(from, on, Modifiers::none());
+    redraw(h.cx);
+    assert!(
+        !h.sent().is_empty(),
+        "the premise: the program took the drag"
+    );
+    assert!(
+        h.disclosure_shown().0,
+        "the premise: the display opened at the release, on the link"
+    );
+    h.wait(super::super::drag_notice::GRACE);
+    assert!(
+        h.disclosure_shown().0,
+        "the premise: the display is still open as the grace window ends"
+    );
+    assert_eq!(h.notice(), None, "no notice opens over the display");
+}
+
 // ---- Paste ---------------------------------------------------------------------------------------------------------
 
 /// This platform's chords for the terminal action `action`, as the keymap binds them.
