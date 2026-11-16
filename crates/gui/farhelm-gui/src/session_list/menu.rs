@@ -88,8 +88,10 @@
 //! and ask beside the row's button when it says so, as any of the row's questions do. Both are unavailable while the
 //! environment changes or something is pending for it, saying so in the row. While the environment is frozen
 //! (suspended, stopped, changing or being deleted), Replace with…, Replace and Stop are unavailable, as in the old menu,
-//! and Stop's description says what plain Stop leaves running in the environment. The header's summary ends with " · "
-//! and the environment's name ("dev sandbox").
+//! and Stop's description says what plain Stop leaves running in the environment. While it is being deleted, every
+//! command is unavailable ([`refused`]), and Clone's and Delete's description and help say why
+//! ([`Environment::deleting`]), as the old menu's descriptions did. The header's summary ends with " · " and the
+//! environment's name ("dev sandbox").
 //!
 //! NOTE: The old row menu had no Restart, which the open session's header offers instead (`session_pane/header.rs`).
 //! Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
@@ -548,12 +550,12 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// Whether `key`'s lifecycle commands (Rename, Clone, Replace with, Replace, Stop and Delete here, and Restart, Restart
 /// with and Clone in the open session's header) are refused now, and drawn unavailable: SPEC.md's "an open lifecycle
 /// confirmation or a pending request refuses another lifecycle action". A request of the session in flight is one
-/// ([`delete::busy`]), and so is its host's Suspend or Resume, with its activity read and the provider's change after it
-/// ([`environment::held`]). The other two are the inline questions, which a press elsewhere does not close: the YOLO
-/// question a Replace of the session met ([`super::replace_yolo::open`]), and the Replace question the session's
-/// interrupted card asked ([`crate::session_pane::card::asks`]), each while it is open. The row's and the header's own
-/// questions are anchored, so a press elsewhere closes them, and they refuse through their buttons, which are inert
-/// while their question is open.
+/// ([`delete::busy`]), and so is its host's Suspend or Resume, with its activity read and the provider's change after
+/// it, and its environment being deleted ([`environment::held`]). The other two are the inline questions, which a press
+/// elsewhere does not close: the YOLO question a Replace of the session met ([`super::replace_yolo::open`]), and the
+/// Replace question the session's interrupted card asked ([`crate::session_pane::card::asks`]), each while it is open.
+/// The row's and the header's own questions are anchored, so a press elsewhere closes them, and they refuse through
+/// their buttons, which are inert while their question is open.
 pub(crate) fn refused(key: &str, cx: &App) -> bool {
     delete::busy(key, cx)
         || super::replace_yolo::open(key, cx)
@@ -719,6 +721,10 @@ impl Render for RowMenu {
         let environment_items = environment
             .map(|environment| self.environment_items(environment, cx))
             .unwrap_or_default();
+        // While the environment is being deleted, Clone and Delete say why everything is unavailable (the module docs).
+        let deleting = environment
+            .and_then(Environment::deleting)
+            .map(|deleting| deleting.help);
         let (list, key) = (self.list.clone(), self.key.clone());
         let rename = MenuItem::new(
             "session-menu-rename",
@@ -778,21 +784,23 @@ impl Render for RowMenu {
         // commands are refused, as Rename is, and while the launcher cannot open ([`launcher_wait`]: a launch pending,
         // a host change in flight), saying why then in place of their help and description.
         let launcher_busy = busy || launcher_wait.is_some();
+        // `reason` says why the item is unavailable, in place of its help and description.
         let launcher_item = |id: &'static str,
                              icon: Icon,
                              label: &'static str,
                              help: &'static str,
                              description: &'static str,
+                             reason: Option<&'static str>,
                              open: LauncherEntry| {
             let (list, key) = (self.list.clone(), self.key.clone());
             MenuItem::new(
                 id,
                 icon,
                 label,
-                HoverHelp::tooltip(launcher_wait.unwrap_or(help)),
+                HoverHelp::tooltip(reason.unwrap_or(help)),
                 Role::MenuItem,
             )
-            .description(launcher_wait.unwrap_or(description))
+            .description(reason.unwrap_or(description))
             .disabled(launcher_busy)
             .on_click(move |_, window, cx| {
                 // Closed first, which returns focus to the menu's button: the entry point refuses while a menu is open,
@@ -814,6 +822,7 @@ impl Render for RowMenu {
             "Clone",
             CLONE_HELP,
             "New session, keep this one",
+            deleting.or(launcher_wait),
             entry::open_clone,
         );
         let replace_with = launcher_item(
@@ -822,6 +831,7 @@ impl Render for RowMenu {
             "Replace with…",
             REPLACE_WITH_HELP,
             "Edit settings, then swap",
+            launcher_wait,
             entry::open_replace_with,
         )
         .disabled(launcher_busy || frozen);
@@ -850,8 +860,8 @@ impl Render for RowMenu {
             "session-menu-delete",
             Icon::Trash,
             "Delete",
-            "Delete: remove this session and its state",
-            "Removes the session and its state",
+            deleting.unwrap_or("Delete: remove this session and its state"),
+            deleting.unwrap_or("Removes the session and its state"),
             LifecycleCommand::Delete,
         )
         .focus(&self.delete_focus);

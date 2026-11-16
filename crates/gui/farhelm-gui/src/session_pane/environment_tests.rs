@@ -1,7 +1,9 @@
 //! Tests of an environment session in the open session's view: the header's Suspend or Resume left of Stop, with
 //! Stop, Restart and Replace withheld while the environment is frozen and Clone and Delete kept, a pending Resume
-//! refusing Delete, the header's Suspend asking under its button after the activity read; and the suspended card's
-//! words, its Resume (or Resume host for an ordinary host) and a refused Resume shown on the card.
+//! refusing Delete, the header's Suspend asking under its button after the activity read, and every action and the
+//! Delete shortcut refused while the environment is being deleted, with the reason in the help and the phase in the
+//! details bar; and the suspended card's words, its Resume (or Resume host for an ordinary host) and a refused Resume
+//! shown on the card.
 //!
 //! The window tests run the real main view over the helm client's fake with the session list's environment fixtures
 //! (`session_list/environment_tests.rs`): host 2 is the open session's sandbox or container. The card's words are a
@@ -14,16 +16,18 @@ use farhelm_proto::ui_channel::HostStateView;
 use gpui::TestAppContext;
 use serde_json::json;
 
+use super::details::{AGE_ID, DELETING_ID};
 use super::header::{Action, ENVIRONMENT_ID};
 use super::unavailable::{
     DETAIL_ID, EXPLANATION_ID, HEADING_ID, Notice, RESUME_FAILURE_ID, RESUME_ID, notice,
 };
+use crate::actions::DELETE_SESSION_CHORD;
 use crate::local_time::Zone;
 use crate::operations::{OpKey, Work};
 use crate::session as ui_session;
 use crate::session_list::environment_tests::{
-    Provider, changing, connected, environment_host, idle, listing, one, open, pending, push_host,
-    suspended_at,
+    Provider, changing, connected, deleting, environment_host, idle, listing, one, open, pending,
+    push_host, suspended_at,
 };
 use crate::session_list::host_rail::tests::hover_help;
 use crate::session_list::menu_tests::{any_layer, drawn, label_of};
@@ -219,6 +223,79 @@ fn a_caret_menu_opened_before_a_freeze_opens_no_launcher(cx: &mut TestAppContext
         !crate::session_list::tests::launcher_drawn(cx),
         "no launcher on a frozen environment"
     );
+}
+
+/// SPEC.md, "Sandbox sessions": a session whose environment is being deleted has its actions unavailable, Delete and
+/// Clone included, and the old header's disabled Stop, Clone and Delete said why in their tooltips, while its details
+/// bar showed the host's phase in the age's place. The Delete shortcut is the header's Delete, so it must refuse too, or
+/// it would send the helm a Delete it can only refuse. Specified: with idle a open on a container whose deletion failed,
+/// the hover help of Stop, Clone and Delete is "Deleting this session's container failed, so its actions are
+/// unavailable. Retry in Hosts finishes the deletion"; the details bar draws "Deleting failed" with the same help and
+/// no age; a click on Suspend, Stop, Restart, Replace, either caret, Clone or Delete, and the Delete shortcut, opens
+/// nothing and sends nothing; once the host is connected, the age is back and the Delete shortcut and the header's
+/// Delete each ask.
+#[gpui::test]
+fn every_header_action_is_refused_while_the_environment_is_being_deleted(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Container, deleting(Some("podman rm failed")));
+    let (mut fake, cx) = open(cx, &[(idle("a"), 0)], false, &host);
+    pending(&mut fake);
+    let reason = "Deleting this session's container failed, so its actions are unavailable. Retry in Hosts \
+                  finishes the deletion";
+    for action in [
+        "session-header-stop",
+        "session-header-clone",
+        "session-header-delete",
+    ] {
+        assert_eq!(
+            hover_help(cx, action).as_deref(),
+            Some(reason),
+            "{action} says why"
+        );
+    }
+    assert_eq!(
+        label_of(cx, DELETING_ID).as_deref(),
+        Some("Deleting failed")
+    );
+    assert_eq!(hover_help(cx, DELETING_ID).as_deref(), Some(reason));
+    assert!(!drawn(cx, AGE_ID), "the phase takes the age's place");
+
+    for control in [
+        ENVIRONMENT_ID,
+        "session-header-stop",
+        "session-header-restart",
+        "session-header-replace",
+        "session-header-restart-options",
+        "session-header-replace-options",
+        "session-header-clone",
+        "session-header-delete",
+    ] {
+        test_support::click(cx, control);
+        assert!(!any_layer(cx), "{control} opens nothing");
+        assert!(
+            !crate::session_list::tests::launcher_drawn(cx),
+            "{control} opens no launcher"
+        );
+    }
+    test_support::keys(cx, DELETE_SESSION_CHORD);
+    assert!(!any_layer(cx), "the Delete shortcut asks nothing");
+    let sent: Vec<_> = fake
+        .commands()
+        .into_iter()
+        .map(|command| (command.method, command.path))
+        .collect();
+    assert_eq!(sent, [], "nothing was sent");
+
+    push_host(
+        &mut fake,
+        &environment_host(Provider::Container, connected()),
+        cx,
+    );
+    assert!(drawn(cx, AGE_ID), "the age is back");
+    test_support::keys(cx, DELETE_SESSION_CHORD);
+    assert!(drawn(cx, "prompt"), "the Delete shortcut asks again");
+    test_support::click(cx, "prompt-cancel");
+    test_support::click(cx, "session-header-delete");
+    assert!(drawn(cx, "prompt"), "Delete asks again");
 }
 
 // ---- The suspended card --------------------------------------------------------------------------------------------

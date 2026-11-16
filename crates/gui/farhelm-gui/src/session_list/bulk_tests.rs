@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 
 use super::bulk::{DELETE_ID, STOP_ID};
 use super::delete::MANAGED_CHECKOUT;
+use super::environment_tests::{Provider, deleting, environment_host, registry};
 use super::host_rail::tests::filtered;
 use super::marking::{CLEAR_ID, COUNT_ID, MENU_ID, MENU_TOGGLE_ID};
 use super::marking_tests::{
@@ -1156,6 +1157,83 @@ fn a_bulk_stop_leaves_a_retired_session_out_and_delete_takes_it(cx: &mut TestApp
     for command in &first {
         done(&mut fake, command);
     }
+    test_support::settle(cx);
+    assert_eq!(
+        owned(&lifecycle(fake.commands()).0),
+        [delete("/api/sessions/b")]
+    );
+}
+
+/// Why this matters: SPEC.md, "Sandbox sessions": a session whose environment is being deleted has its actions
+/// unavailable, and the old batch left such a target out with "Delete: <reason>" on its row while its siblings went on.
+/// The ordinary not-started line ("another operation was in progress. Try again.") would send the user to retry what
+/// cannot run until the environment is gone. Specified: with Skip on, a on a sandbox being deleted and ordinary b on
+/// another host, both marked, Stop sends b's Stop alone and a's row says "Stop: This session's sandbox is being
+/// deleted, so its actions are unavailable"; once b's Stop is answered, b's mark is gone and a's stays, since a was
+/// never the batch's; with b marked again, Delete sends b's Delete alone and a's row says "Delete: " and the same
+/// reason.
+#[gpui::test]
+fn a_bulk_action_leaves_out_a_session_being_deleted_and_says_why(cx: &mut TestAppContext) {
+    let mut snapshot = snapshot(&[(session("a"), 0), (session("b").host(3), 0)], true);
+    snapshot.push(registry(&environment_host(
+        Provider::Sandbox,
+        deleting(None),
+    )));
+    let (mut fake, list, cx) = open_list(cx, snapshot);
+    requests(&mut fake);
+    let reason = "This session's sandbox is being deleted, so its actions are unavailable";
+
+    mark(cx, &["session-row-a", "session-row-b"]);
+    assert_eq!(count(cx).as_deref(), Some("2 marked"), "the premise");
+    test_support::click(cx, STOP_ID);
+    test_support::settle(cx);
+    let sent = fake.commands();
+    assert_eq!(owned(&sent), [stop("b")]);
+    assert_eq!(
+        label_of(cx, "session-outcome-a"),
+        Some(format!("Stop: {reason}"))
+    );
+    done(&mut fake, &sent[0]);
+    test_support::settle(cx);
+    assert!(!stored(&list, "b", cx), "b's mark was the batch's");
+    assert!(stored(&list, "a", cx), "a was never a target");
+
+    mark(cx, &["session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert_eq!(
+        owned(&lifecycle(fake.commands()).0),
+        [delete("/api/sessions/b")]
+    );
+    assert_eq!(
+        label_of(cx, "session-outcome-a"),
+        Some(format!("Delete: {reason}"))
+    );
+}
+
+/// Why this matters: the bulk question's answer authorizes what it draws, and the old batch left a session whose
+/// environment is being deleted out when the batch was drawn (`exclude_unavailable`), so the question never offers
+/// what cannot run. Specified: with running a on a sandbox being deleted and running b on another host, both marked,
+/// Delete leaves "Delete: This session's sandbox is being deleted, so its actions are unavailable" on a's row at once
+/// and asks about b alone; Confirm sends b's Delete alone.
+#[gpui::test]
+fn the_bulk_question_leaves_out_a_session_being_deleted(cx: &mut TestAppContext) {
+    let mut snapshot = snapshot(&[(session("a"), 0), (session("b").host(3), 0)], false);
+    snapshot.push(registry(&environment_host(
+        Provider::Sandbox,
+        deleting(None),
+    )));
+    let (mut fake, _list, cx) = open_list(cx, snapshot);
+    requests(&mut fake);
+    mark(cx, &["session-row-a", "session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert_eq!(question_rows(cx), ["b"], "a is left out of the question");
+    assert_eq!(
+        label_of(cx, "session-outcome-a").as_deref(),
+        Some("Delete: This session's sandbox is being deleted, so its actions are unavailable")
+    );
+    test_support::click(cx, "prompt-confirm");
     test_support::settle(cx);
     assert_eq!(
         owned(&lifecycle(fake.commands()).0),

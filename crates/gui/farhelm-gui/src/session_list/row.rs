@@ -75,7 +75,10 @@
 //! host mark (named `Sandbox` or `Container`, [`row_marks::environment_mark`]), and its last line names the host by its
 //! environment ("dev sandbox", "dev container on Build machine"). While its environment is suspended the pause-marked
 //! Suspended badge stands where a stale row's cause would ("Host suspended"), on the ended line or, compact, after the
-//! title; a stopped one keeps its cause ("Environment stopped"). A pending Suspend, Resume or Stop and suspend, or the
+//! title; a stopped one keeps its cause ("Environment stopped"). While its environment is being deleted, the host's
+//! phase words ("Deleting…" or "Deleting failed") stand in the cause's place on the ended line, helped by why every
+//! action is unavailable ([`row_marks::deleting_mark`]); a compact row keeps its stale clock and cause there, as the old
+//! compact row did, since it had no being-deleted mark. A pending Suspend, Resume or Stop and suspend, or the
 //! provider's change it asked for, shows its spinner and words before the title, as a pending Stop does.
 //!
 //! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
@@ -124,6 +127,10 @@ pub(super) const CAUSE_ID_SUFFIX: &str = "-cause";
 /// The id suffix of a suspended environment session's badge, after the row's open control id
 /// (`session-row-<key>-suspended`), in either density.
 pub(super) const SUSPENDED_ID_SUFFIX: &str = "-suspended";
+
+/// The id suffix of the being-deleted mark of a session whose environment is being deleted, after the row's open
+/// control id (`session-row-<key>-deleting`).
+pub(super) const DELETING_ID_SUFFIX: &str = "-deleting";
 
 /// The id suffix of a row's age track, the column the age is right-aligned in (`session-row-<key>-age-track`).
 pub(super) const AGE_TRACK_ID_SUFFIX: &str = "-age-track";
@@ -280,9 +287,11 @@ pub(crate) fn row(
     let marks = RowMarks::of(row, collections, selected, palette);
     let place = HelpPlace::Row { selected };
     // A session in its own environment draws its provider's mark in the locality slot, and a suspended one the
-    // Suspended badge where a stale row's cause would be ([`super::environment`]).
+    // Suspended badge where a stale row's cause would be ([`super::environment`]), as one being deleted draws its
+    // phase there on a noncompact row.
     let environment = Environment::of(row, collections);
     let suspended = environment.is_some_and(|environment| environment.suspended());
+    let deleting = environment.and_then(Environment::deleting);
     let cause = status::stale_cause(row, collections).filter(|_| !suspended);
     let slot_mark = match environment {
         Some(environment) => row_marks::environment_mark(
@@ -423,9 +432,11 @@ pub(crate) fn row(
     let mut control = ListRow::new(id.clone(), label, help, Role::Button)
         .selected(selected)
         .line(identity);
-    if !compact && (ended.is_some() || cause.is_some() || suspended) {
+    if !compact && (ended.is_some() || cause.is_some() || suspended || deleting.is_some()) {
+        // The being-deleted phase takes the cause's place, as the Suspended badge does.
+        let cause = cause.filter(|_| deleting.is_none());
         control = control.line(detail_line(
-            &id, ended, cause, suspended, palette, selected, inks,
+            &id, ended, cause, suspended, deleting, palette, selected, inks,
         ));
     }
     if !compact && let Some(meta) = meta_line(session, collections, inks) {
@@ -707,8 +718,10 @@ fn suspended_mark(
 }
 
 /// The line under the title that holds what the first line has no room for: an ended status in full, wrapping rather
-/// than truncating (`.session-row-detail`), then a stale row's cause, on the same wrapping line when it fits. Drawn
-/// only for a row that has either; a live row on a connected host keeps two lines.
+/// than truncating (`.session-row-detail`), then a stale row's cause, on the same wrapping line when it fits, or in
+/// the cause's place the Suspended badge (`suspended`) or the environment's being-deleted phase (`deleting`); the
+/// caller passes at most one of the three, as the old row's `if … else if` chain drew one. Drawn only for a row that
+/// has an ended status or one of them; a live row on a connected host keeps two lines.
 ///
 /// The cause is a status mark with its hover help (`<cause>: this is the session's last-known state`), the old
 /// `.stale-badge` capsule with the capsule's padding taken off inside this line, so it starts at the title's edge like
@@ -722,6 +735,7 @@ fn detail_line(
     ended: Option<(status::Ended, host_text::Line)>,
     cause: Option<&'static str>,
     suspended: bool,
+    deleting: Option<environment::Deleting>,
     palette: &Palette,
     selected: bool,
     inks: Inks,
@@ -756,6 +770,14 @@ fn detail_line(
             )
         }))
         .children(suspended.then(|| suspended_mark(row_id, true, selected, inks)))
+        .children(deleting.map(|deleting| {
+            row_marks::deleting_mark(
+                SharedString::from(format!("{row_id}{DELETING_ID_SUFFIX}")),
+                deleting,
+                inks.secondary,
+                HelpPlace::Row { selected },
+            )
+        }))
 }
 
 /// The `host:~/path` line: the host's short name (or the helm's name for a host the registry no longer lists), a
