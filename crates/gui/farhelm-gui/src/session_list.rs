@@ -92,9 +92,10 @@
 //! loses its open session to that Delete opens the next one only once every Delete has settled; a Stop or a Replace
 //! holds nothing back, with one exception for the open session's own Replace ([`selection`], "A Replace keeps its own
 //! source open until it answers"). Every pending Delete's, Stop's and long Replace's spinner turns from one handle the
-//! list holds, the way the pulse does ([`Spinner`]). A row's menu button and its anchor exist only while the row is
-//! drawn, so a menu whose row scrolls well out of view closes, and a question about a row out of view is asked
-//! centered.
+//! list holds, the way the pulse does ([`Spinner`]), and so does an environment session's Suspending… or Resuming…
+//! ([`environment`], whose Suspend, Resume and Stop and suspend the row's menu and the header offer). A row's menu
+//! button and its anchor exist only while the row is drawn, so a menu whose row scrolls well out of view closes, and a
+//! question about a row out of view is asked centered.
 //!
 //! A row's hover help is its summary card ([`summary`]), a view the row hands the layer manager, which draws it beside
 //! the sidebar while it shows; every mark in the row places its own help there too ([`row_marks::HelpPlace`]).
@@ -146,6 +147,7 @@ pub(crate) mod age;
 mod attention;
 pub(crate) mod bulk;
 pub(crate) mod delete;
+pub(crate) mod environment;
 pub(crate) mod filters;
 pub(crate) mod hold;
 pub(crate) mod host_rail;
@@ -178,6 +180,9 @@ mod bulk_tests;
 
 #[cfg(test)]
 mod compact_tests;
+
+#[cfg(test)]
+pub(crate) mod environment_tests;
 
 #[cfg(test)]
 pub(crate) mod lifecycle_tests;
@@ -805,6 +810,7 @@ impl Render for SessionList {
                 delete::in_flight(session.key, cx).is_some()
                     || stop::in_flight(session.key, cx)
                     || outcome::waited_seconds(session.key, operations::Work::Replace, cx).is_some()
+                    || environment::pending_of(session.key, cx).is_some()
             });
             let any_stamp = listed
                 .iter()

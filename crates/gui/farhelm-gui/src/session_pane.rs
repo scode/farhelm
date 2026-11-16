@@ -82,7 +82,9 @@
 //!   interrupted, so such a session never shows the interrupted card. The terminals the pane already shows stay, inert
 //!   beneath the card with their notices held back, and come back to life when the host answers; a session opened while
 //!   its host is away gets none until then. While the card shows it is home, and an inert terminal holds no focus, so
-//!   focus one of the session's terminals held goes home to the card through the focus coordinator.
+//!   focus one of the session's terminals held goes home to the card through the focus coordinator. For a suspended or
+//!   stopped host the card offers Resume, and a session's own suspended environment reads "Session suspended" in its
+//!   provider's words (`unavailable.rs`, "A suspended or stopped host offers Resume").
 //! - **The retired card.** A retired containerized session supports Delete only and has no terminal to attach to, so
 //!   the pane mounts none for it, ever, and draws the retired card ([`retired`]) where the terminals would be, with the
 //!   card as home, while its host is reachable; the unavailable card stands there alone while it is not. A set made
@@ -103,6 +105,8 @@ mod card_tests;
 mod carried_tests;
 #[cfg(test)]
 mod details_tests;
+#[cfg(test)]
+mod environment_tests;
 #[cfg(test)]
 mod header_tests;
 #[cfg(test)]
@@ -612,6 +616,7 @@ impl Render for SessionPane {
         let over = notice.map(|notice| {
             unavailable::draw(
                 unavailable::Drawn {
+                    key: &key,
                     notice,
                     focus: &card_focus,
                     scroll: &scroll,

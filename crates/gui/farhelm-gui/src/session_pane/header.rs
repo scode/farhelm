@@ -53,6 +53,13 @@
 //! - **A retired containerized session** supports Delete only (`session_list::retired`), so its row draws Delete
 //!   alone, with the ordinary question, and none of Stop, Restart, Replace, Clone or the terminal's text size controls
 //!   (it has no terminal: `super::retired`); a press or shortcut that reaches another action for it does nothing.
+//! - **An environment session** (`session_list::environment`) gets its own control immediately left of Stop: Suspend,
+//!   or Resume as the filled primary control while its environment is suspended or stopped, asking under itself when
+//!   the host's activity says so, and while that is under way turning a spinner in its glyph's slot, named
+//!   "Suspending…" or "Resuming…", at the same width, so the row still fits the 650-pixel floor. It is no [`Action`]
+//!   ([`Control`] says why). While the environment is frozen, Stop, Restart and Replace are unavailable, their carets
+//!   and "with…" choices included, and Clone and Delete stay (both wait while a Suspend or Resume runs); Stop's help says
+//!   what plain Stop leaves running there, and its question offers Stop and suspend (`session_list::stop`).
 //! - **The YOLO question.** A Replace from the header that the source's host refuses for YOLO asks the launcher's
 //!   question below the top row, among the header's lines, rather than at the source's row
 //!   ([`crate::session_list::replace_yolo`]). It is drawn only while the source is the open session.
@@ -67,6 +74,7 @@
 
 use std::collections::HashMap;
 
+use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, FontWeight, InteractiveElement as _,
@@ -83,6 +91,7 @@ use crate::components::{
     spinner_icon, toggle_arrow_keys,
 };
 use crate::desktop::title_band::{self, Row};
+use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
@@ -90,7 +99,7 @@ use crate::operations::Work;
 use crate::prompt::{self, Question};
 use crate::session;
 use crate::session_list::replace_yolo::{self, Surface};
-use crate::session_list::{delete, menu, outcome, replace, restart, retired, stop};
+use crate::session_list::{delete, environment, menu, outcome, replace, restart, retired, stop};
 use crate::theme::{self, metrics};
 
 /// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
@@ -198,6 +207,19 @@ pub(crate) fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> Str
             "Delete: remove this session and its state, after you confirm ({DELETE_SESSION_SHORTCUT_NAME})"
         ),
     }
+}
+
+/// The id of an environment session's own control, Suspend or Resume, immediately left of Stop ([`environment_button`]).
+pub(crate) const ENVIRONMENT_ID: &str = "session-header-environment";
+
+/// A control of the top row that can ask a question and has a button for it to hang under: one of the [`Action`]s, or
+/// an environment session's Suspend ([`environment_button`]). The environment control is no [`Action`] because it is
+/// drawn only for an environment session, with its label, glyph, tier and help from the environment's phase and
+/// provider, so none of the actions' fixed answers apply to it; it shares only their anchoring and pressed look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Control {
+    Action(Action),
+    Environment,
 }
 
 // ---- The split buttons' carets and their menus ----------------------------------------------------------------------
@@ -347,8 +369,8 @@ fn menu_line(text: &str) -> String {
 /// some other way needs no bookkeeping here.
 #[derive(Default)]
 pub(super) struct Header {
-    anchors: HashMap<Action, Anchor>,
-    asked: Option<(Action, LayerId)>,
+    anchors: HashMap<Control, Anchor>,
+    asked: Option<(Control, LayerId)>,
     /// Each caret as last drawn: the anchor its menu opens below, and its focus handle, which the menu names as where
     /// closing returns focus. Both are element state, made while the caret draws, so its handlers read them from here.
     carets: HashMap<Split, (Anchor, FocusHandle)>,
@@ -368,11 +390,11 @@ impl Header {
         }
     }
 
-    /// The action whose question is open now, if any.
-    pub(super) fn open_question(&mut self, window: &Window, cx: &App) -> Option<Action> {
-        let (action, layer) = self.asked?;
+    /// The control whose question is open now, if any.
+    pub(super) fn open_question(&mut self, window: &Window, cx: &App) -> Option<Control> {
+        let (control, layer) = self.asked?;
         if layers::is_open(layer, window, cx) {
-            Some(action)
+            Some(control)
         } else {
             self.asked = None;
             None
@@ -395,6 +417,38 @@ struct Shown<'a> {
     stopping: bool,
     /// The spinner's step, from the pane's spinner.
     step: u8,
+    /// An environment session's own control, `None` for any other session.
+    environment: Option<EnvironmentShown>,
+}
+
+/// What the header draws for an environment session's own control and what its environment withholds, read from the
+/// registry and the operation store now ([`environment::Environment`]), so nothing drawn borrows the store.
+#[derive(Clone, Copy)]
+struct EnvironmentShown {
+    ui: ProviderUi,
+    /// Suspended, stopped, changing or being deleted: Stop, Restart and Replace are unavailable.
+    frozen: bool,
+    /// The control reads Resume, in the primary tier, rather than Suspend.
+    resume: bool,
+    /// Stopped, so Resume's help says it starts the environment again rather than continuing its processes.
+    stopped: bool,
+    pending: Option<environment::Pending>,
+    unavailable: bool,
+}
+
+impl EnvironmentShown {
+    /// `row`'s, filed under `key`, from `collections`; `None` for a session that is not an environment session.
+    fn of(key: &str, row: &SessionRow, collections: &Collections, cx: &App) -> Option<Self> {
+        let shown = environment::Environment::of(row, collections)?;
+        Some(EnvironmentShown {
+            ui: shown.ui,
+            frozen: shown.frozen(),
+            resume: shown.resumable(),
+            stopped: shown.stopped(),
+            pending: environment::pending(key, shown, cx),
+            unavailable: environment::unavailable(key, shown, cx),
+        })
+    }
 }
 
 impl SessionPane {
@@ -465,6 +519,10 @@ impl SessionPane {
         let collections = store.read(cx).collections();
         let row_now = collections.get::<SessionRow>(key).cloned();
         let skipped = menu::skips_questions(collections);
+        let environment = row_now
+            .as_ref()
+            .filter(|row| !retired::is(row))
+            .and_then(|row| EnvironmentShown::of(key, row, collections, cx));
         if let Some(guard) = delete::in_flight(key, cx) {
             self.header.anchors.clear();
             self.header.carets.clear();
@@ -491,6 +549,7 @@ impl SessionPane {
             launcher_wait: menu::launcher_wait(cx),
             stopping: stop::in_flight(key, cx),
             step,
+            environment,
         };
         let open = self.header.open_question(window, cx);
         let menu_open = self.header.open_menu(window, cx);
@@ -506,13 +565,35 @@ impl SessionPane {
             &Action::ALL
         };
         for &action in actions {
+            // An environment session's Suspend or Resume, immediately left of Stop (SPEC.md, "Sandbox sessions").
+            if action == Action::Stop
+                && let Some(environment) = shown.environment
+            {
+                let anchor = Anchor::for_element(
+                    SharedString::from(format!("{ENVIRONMENT_ID}-anchor")),
+                    window,
+                    cx,
+                );
+                anchors.insert(Control::Environment, anchor.clone());
+                let asking = open == Some(Control::Environment);
+                let button = environment_button(environment, shown.step, asking, &pane, cx);
+                buttons.push(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .child(button)
+                        .child(anchor.track())
+                        .into_any_element(),
+                );
+            }
             let anchor = Anchor::for_element(
                 SharedString::from(format!("{}-anchor", action.id())),
                 window,
                 cx,
             );
-            anchors.insert(action, anchor.clone());
-            let button = action_button(action, &shown, open == Some(action), &pane, cx);
+            anchors.insert(Control::Action(action), anchor.clone());
+            let asking = open == Some(Control::Action(action));
+            let button = action_button(action, &shown, asking, &pane, cx);
             // Each action is its own anchor, exactly as wide as its button, as the old `.restart-offer`
             // wrappers were, so its question hangs under it.
             let main = div()
@@ -538,10 +619,15 @@ impl SessionPane {
                 cx,
             );
             carets.insert(split, (anchor.clone(), focus.clone()));
+            // A frozen environment withholds the whole split, its caret menu's choices included, as the old header's
+            // `busy: lifecycle.busy() || sandbox_frozen` did.
+            let frozen = shown
+                .environment
+                .is_some_and(|environment| environment.frozen);
             let caret = caret_button(
                 split,
                 &choices,
-                shown.busy,
+                shown.busy || frozen,
                 menu_open == Some(split),
                 &focus,
                 &pane,
@@ -605,7 +691,10 @@ impl SessionPane {
                 }
             }
         }
-        if let Some(line) = outcome::pane_line(key, cx) {
+        // A refused Resume from the unavailable card shows on the card, where it was pressed.
+        if let Some(line) = outcome::pane_line(key, cx)
+            && !super::unavailable::shows_resume_refusal(key, cx)
+        {
             lines.push(line.into_any_element());
         }
         lines.extend(replace_yolo::header_question(key, cx));
@@ -618,6 +707,7 @@ impl SessionPane {
         stop::in_flight(key, cx)
             || outcome::waited_seconds(key, Work::Restart, cx).is_some()
             || outcome::waited_seconds(key, Work::Replace, cx).is_some()
+            || environment::pending_of(key, cx).is_some()
     }
 
     /// The user activated `action` in the open session's header at `mark`. It goes as the row's menu goes for the same
@@ -646,8 +736,12 @@ impl SessionPane {
         if retired::is(row) && action != Action::Delete {
             return;
         }
+        // A frozen environment withholds Stop, Restart and Replace, drawn unavailable; a stale press does nothing.
+        if frozen(row, cx) && matches!(action, Action::Stop | Action::Restart | Action::Replace) {
+            return;
+        }
         let asking = Asking {
-            action,
+            control: Control::Action(action),
             key: &key,
             mark,
         };
@@ -698,7 +792,43 @@ impl SessionPane {
         }
     }
 
-    /// Ask the question `question` builds for `asking`'s action about its session, hung under the action's button as
+    /// The user activated an environment session's own control at `mark`: Resume goes at once, and Suspend reads the
+    /// host's activity first and may ask, under this control (`session_list::environment::begin`, which the row's menu
+    /// goes through too). Nothing happens while the control's question is open.
+    fn environment_action(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = self.open_key(cx) else {
+            return;
+        };
+        if self.header.open_question(window, cx).is_some() {
+            return;
+        }
+        let (pane, mark) = (cx.weak_entity(), *mark);
+        environment::begin(
+            &key,
+            false,
+            window.window_handle(),
+            cx,
+            move |asked, ui, window, cx| {
+                let key = asked.key.clone();
+                let asking = Asking {
+                    control: Control::Environment,
+                    key: &key,
+                    mark: &mark,
+                };
+                let _ = pane.update(cx, |pane, cx| {
+                    pane.ask(
+                        asking,
+                        || environment::question(&asked, ui),
+                        environment::confirm,
+                        window,
+                        cx,
+                    )
+                });
+            },
+        );
+    }
+
+    /// Ask the question `question` builds for `asking`'s control about its session, hung under the action's button as
     /// last drawn (centered if it was not drawn), returning focus home on Escape. Nothing opens when the user has moved
     /// on since `asking`'s mark. The question closes when the session is gone.
     fn ask<T: Clone + 'static>(
@@ -709,27 +839,27 @@ impl SessionPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Asking { action, key, mark } = asking;
+        let Asking { control, key, mark } = asking;
         let question = question().returns_home_on_escape();
         let subject = Subject::session(key, cx);
-        let asked = match self.header.anchors.get(&action).cloned() {
+        let asked = match self.header.anchors.get(&control).cloned() {
             Some(anchor) => {
                 prompt::ask_anchored(question, anchor, subject, mark, on_confirm, window, cx)
             }
             None => prompt::ask(question, subject, mark, on_confirm, window, cx),
         };
         if let Some(layer) = asked {
-            self.header.asked = Some((action, layer));
+            self.header.asked = Some((control, layer));
             cx.notify();
         }
     }
 }
 
-/// Which action asks a question, about which session, for which of the user's gestures: what [`SessionPane::ask`] needs
-/// besides the question itself.
+/// Which control asks a question, about which session, for which of the user's gestures: what [`SessionPane::ask`]
+/// needs besides the question itself.
 #[derive(Clone, Copy)]
 struct Asking<'a> {
-    action: Action,
+    control: Control,
     key: &'a str,
     mark: &'a Mark,
 }
@@ -751,6 +881,15 @@ fn action_button(
         _ => shown.launch_wait.filter(|_| action.would_launch(row)),
     };
     let help = wait.map_or_else(|| hover_help(action, row, shown.skipped), str::to_owned);
+    // An environment session's Stop says what plain Stop leaves running there, and its freeze withholds Stop, Restart
+    // and Replace (the old header's).
+    let help = match (action, shown.environment) {
+        (Action::Stop, Some(environment)) => environment.ui.stop_help().to_owned(),
+        _ => help,
+    };
+    let frozen = shown
+        .environment
+        .is_some_and(|environment| environment.frozen);
     let stopping = action == Action::Stop && shown.stopping;
     let label = if stopping {
         stop::PROGRESS_LABEL
@@ -789,13 +928,86 @@ fn action_button(
         Action::Restart => button
             .accessible_name(restart::offer_label(row.info.restart_offer))
             .busy(!restart::offered(row) || wait.is_some())
-            .disabled(shown.busy),
-        Action::Replace => button.busy(wait.is_some()).disabled(shown.busy),
-        Action::Stop => button.disabled(shown.busy || row.stale),
+            .disabled(shown.busy || frozen),
+        Action::Replace => button.busy(wait.is_some()).disabled(shown.busy || frozen),
+        Action::Stop => button.disabled(shown.busy || row.stale || frozen),
         // Clone opens the launcher, so it waits while the launcher cannot open, as Restart and Replace wait.
         Action::Clone => button.busy(wait.is_some()).disabled(shown.busy),
         Action::Delete => button.disabled(shown.busy),
     }
+}
+
+/// An environment session's own control, immediately left of Stop, activating through `pane`: Suspend with the pause
+/// glyph, or while the environment is suspended or stopped Resume with the play glyph as the filled primary control
+/// (SPEC.md, "Sandbox sessions"), each with its provider's help. While a request or the change it asked for is under
+/// way it is unavailable, the spinner turns in the glyph's slot, and its label names the direction ("Resume" while
+/// resuming, else "Suspend"), so the control keeps its width and the actions stay whole at the 650-pixel floor; its
+/// accessible name and hover help say what is under way ("Resuming…"). Unavailable too while the environment changes
+/// and while the session's commands are refused.
+fn environment_button(
+    environment: EnvironmentShown,
+    step: u8,
+    asking: bool,
+    pane: &WeakEntity<SessionPane>,
+    cx: &App,
+) -> Button {
+    let resume = match environment.pending {
+        Some(pending) => pending == environment::Pending::Resuming,
+        None => environment.resume,
+    };
+    let (label, icon, tier) = if resume {
+        ("Resume", Icon::Play, Tier::Primary)
+    } else {
+        ("Suspend", Icon::Pause, Tier::Neutral)
+    };
+    let help = match environment.pending {
+        Some(pending) => pending.label(),
+        None if environment.resume => environment.ui.resume_help(environment.stopped),
+        None => environment.ui.suspend_help(),
+    };
+    let pane = pane.clone();
+    let button = Button::new(
+        ENVIRONMENT_ID,
+        label,
+        HoverHelp::tooltip(help),
+        Role::Button,
+    )
+    .tier(tier)
+    .compact()
+    .expanded(asking)
+    .disabled(environment.unavailable)
+    .on_click(move |_, window, cx| {
+        let mark = Mark::take(cx);
+        let _ = pane.update(cx, |pane, cx| pane.environment_action(&mark, window, cx));
+    });
+    let Some(pending) = environment.pending else {
+        return button.icon(icon);
+    };
+    // The spinner in the glyph's slot, at the glyph's size and gap, before the unchanged label: the same width.
+    let ink = theme::color(theme::palette(cx).fg_0);
+    button.accessible_name(pending.label()).content(
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(COMPACT_GLYPH_GAP)
+            .child(spinner_icon(step, COMPACT_GLYPH, ink))
+            .child(label),
+    )
+}
+
+/// The compact button's glyph size and its gap before the label (`components::button`'s `.action-glyph` and the
+/// header's `gap: 4px`), which the environment control's spinner takes while pending so its width does not change.
+const COMPACT_GLYPH: gpui::Pixels = px(13.);
+const COMPACT_GLYPH_GAP: gpui::Pixels = px(4.);
+
+/// Whether `row`'s environment is frozen now (`session_list::environment::Environment::frozen`): Stop, Restart and
+/// Replace, with their carets' choices, are withheld. `false` for any other session.
+fn frozen(row: &SessionRow, cx: &App) -> bool {
+    session::current_store(cx).is_some_and(|store| {
+        environment::Environment::of(row, store.read(cx).collections())
+            .is_some_and(|shown| shown.frozen())
+    })
 }
 
 /// `split`'s caret, offering `choices`, drawn open while its menu is (`open`), tracking `focus`, and opening its menu
@@ -873,7 +1085,8 @@ impl SessionPane {
         let Some(key) = self.open_key(cx) else {
             return;
         };
-        if menu::refused(&key, cx) {
+        let frozen_now = menu::actionable(&key, cx).is_some_and(|target| frozen(&target.row, cx));
+        if menu::refused(&key, cx) || frozen_now {
             return;
         }
         let Some((anchor, caret)) = self.header.carets.get(&split).cloned() else {
@@ -931,9 +1144,11 @@ impl SessionPane {
         if self.open_key(cx).as_deref() != Some(key) {
             return;
         }
+        // A frozen environment withholds the variants too, as `header_action` withholds the plain choice.
+        let open = menu::actionable(key, cx).is_some_and(|target| !frozen(&target.row, cx));
         if !with {
             self.header_action(split.action(), mark, window, cx);
-        } else if menu::actionable(key, cx).is_some() && !split.open_with(key, window, cx) {
+        } else if open && !split.open_with(key, window, cx) {
             tracing::debug!(
                 ?split,
                 "the launcher refused to open from the header's menu"

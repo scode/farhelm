@@ -99,6 +99,12 @@
 //!
 //! The Clone glyph (a card in front of another) is the old app's `ActionGlyph::Clone`, in the 14-unit action box with
 //! the 1.2 stroke and round caps and joins.
+//!
+//! The two environment marks (`EnvironmentSandbox`, a cube, and `EnvironmentContainer`, a shipping box with two ribs)
+//! are the old app's `SandboxMark` (`icons.rs`) and `ContainerMark` (`environment_ui.rs`) at the reference commit, in
+//! the 16-unit host-mark box with the 1.3 stroke and round joins, unfilled: Farhelm's own drawings, never a provider's
+//! logo, so they need no third-party notice. The Pause and Play glyphs are the old `SandboxPause` drawings, filled in
+//! the same 16-unit box.
 
 use std::borrow::Cow;
 
@@ -346,6 +352,17 @@ pub enum Icon {
     /// A card in front of another: start a new session from this one's settings, keeping this one, on the session
     /// header's Clone and the row menu's Clone (the old app's `ActionGlyph::Clone`).
     Clone,
+    /// A cube: a session that runs in a disposable Tensorlake sandbox of its own, in its row's locality slot and the
+    /// details bar (the old app's `SandboxMark`, Farhelm's own drawing in the 16-unit host-mark box). Chosen per provider
+    /// by `environment_ui::ProviderUi::mark`, never by shared code.
+    EnvironmentSandbox,
+    /// A shipping box with two ribs, distinct from the sandbox cube: a session that runs in a disposable container of
+    /// its own (the old app's `ContainerMark`, Farhelm's own drawing).
+    EnvironmentContainer,
+    /// Two bars: Suspend, and a suspended environment's badge and card heading (the old app's `SandboxPause`).
+    Pause,
+    /// A right-pointing triangle: Resume of a suspended environment (the old `SandboxPause { resume: true }`).
+    Play,
 }
 
 impl Icon {
@@ -445,6 +462,10 @@ impl Icon {
         Icon::MoveUp,
         Icon::MoveDown,
         Icon::Clone,
+        Icon::EnvironmentSandbox,
+        Icon::EnvironmentContainer,
+        Icon::Pause,
+        Icon::Play,
     ];
 }
 
@@ -543,6 +564,10 @@ impl Icon {
             Icon::MoveUp => "icons/move-up.svg",
             Icon::MoveDown => "icons/move-down.svg",
             Icon::Clone => "icons/clone.svg",
+            Icon::EnvironmentSandbox => "icons/environment-sandbox.svg",
+            Icon::EnvironmentContainer => "icons/environment-container.svg",
+            Icon::Pause => "icons/pause.svg",
+            Icon::Play => "icons/play.svg",
         }
     }
 }
@@ -680,6 +705,14 @@ impl Assets {
             "icons/move-up.svg" => Some(include_bytes!("../assets/icons/move-up.svg")),
             "icons/move-down.svg" => Some(include_bytes!("../assets/icons/move-down.svg")),
             "icons/clone.svg" => Some(include_bytes!("../assets/icons/clone.svg")),
+            "icons/environment-sandbox.svg" => {
+                Some(include_bytes!("../assets/icons/environment-sandbox.svg"))
+            }
+            "icons/environment-container.svg" => {
+                Some(include_bytes!("../assets/icons/environment-container.svg"))
+            }
+            "icons/pause.svg" => Some(include_bytes!("../assets/icons/pause.svg")),
+            "icons/play.svg" => Some(include_bytes!("../assets/icons/play.svg")),
             _ => None,
         }
     }

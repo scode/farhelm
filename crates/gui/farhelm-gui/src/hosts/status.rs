@@ -191,7 +191,10 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         | Work::TabOpen
         | Work::TabClose
         | Work::Pin
-        | Work::MovePin => return None,
+        | Work::MovePin
+        | Work::Suspend
+        | Work::Resume
+        | Work::StopAndSuspend => return None,
     };
     Some(Live {
         activity,

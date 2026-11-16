@@ -77,6 +77,11 @@ pub(super) fn prefix(work: Work) -> Option<&'static str> {
         // told apart by their names.
         Work::Pin => Some("Pin: "),
         Work::MovePin => Some("Move pin: "),
+        // The old list's error slot for an environment's Suspend and Resume ("Sandbox: " for either provider, as the
+        // old `HeaderAction::Sandbox` wrote it), and Stop's for Stop and suspend, which the old list ran as a Stop
+        // with its suspend flag set.
+        Work::Suspend | Work::Resume => Some("Sandbox: "),
+        Work::StopAndSuspend => Some("Stop: "),
         // A probe, a setup, a host's removal, Update and uninstall are host work, never on a session's key, so no row
         // line ever names them; tunnel work has a key of its own, a launch is the launcher's, on a launch key, and an
         // approval answer is on its request's key, whose card shows its refusal. A tab's close is on the tab's key,
@@ -210,7 +215,10 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::TabOpen
         | Work::TabClose
         | Work::Pin
-        | Work::MovePin => None,
+        | Work::MovePin
+        | Work::Suspend
+        | Work::Resume
+        | Work::StopAndSuspend => None,
     }
 }
 
