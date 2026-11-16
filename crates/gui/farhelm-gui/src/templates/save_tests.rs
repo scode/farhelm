@@ -550,8 +550,9 @@ fn escape_closes_the_panel_and_keeps_the_launcher(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "launcher"));
 }
 
-/// Whether focus is in the open Save as template panel's name field.
-fn panel_name_focused(cx: &mut VisualTestContext) -> bool {
+/// Whether focus is in the open Save as template panel's name field. Shared with the dispatcher tests, whose shortcuts
+/// must not reach a draft under the panel.
+pub(super) fn panel_name_focused(cx: &mut VisualTestContext) -> bool {
     crate::launcher::view_tests::read(cx, |launcher, window, cx| {
         launcher
             .save_panel_for_tests()
