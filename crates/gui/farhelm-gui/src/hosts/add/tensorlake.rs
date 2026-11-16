@@ -28,12 +28,28 @@
 //!   with focus on Recipe, and a done Save chooses the new recipe. Closing Add host while the editor holds unsaved
 //!   changes asks the editor's "Save these changes before leaving?" first, and its Save or Discard then closes Add
 //!   host. The old dialog swapped its body and footer for the editor's the same way (`in_add_host`).
-//! - **Continue is unavailable here.** Continue leads to the creation confirmation and its billing callout, which are
-//!   not drawn yet, so the button shows but cannot be pressed, and Enter in Name does nothing.
+//! - **Continue asks the helm for a creation plan.** Continue, or Enter in Name, is unavailable until both Name and
+//!   Recipe are set; Enter with either missing says which. It refuses while a session launch is in flight, as Add
+//!   does, and otherwise sends `POST /api/hosts/probe` for the name (trimmed) and recipe under Add host's key, reading
+//!   "Checking…" meanwhile with the fields read-only. The helm's plan is free and local: nothing is created yet. A
+//!   refusal, or a reply that is not a Tensorlake plan, shows in Add host's error line with the fields kept.
+//! - **The plan is confirmed on the prompt.** Add host closes and the creation confirmation opens in its place,
+//!   through the Continue's mark, as an SSH plan's setup confirmation does; its answers, Back and what a refusal does
+//!   are `setup`'s (`crate::hosts::setup`'s module docs). Once the user moved on since Continue, the plan
+//!   is dropped and the error line says to press Continue again. With "Create Tensorlake sandboxes without asking" on
+//!   in Settings → Tensorlake (the account's `create_without_asking`, never the SSH setup preference), the plan is
+//!   submitted as it arrives instead, with Add host closed first, as an SSH plan is under "Set up new hosts without
+//!   asking"; a session launch started while the probe was out refuses it as it refuses Create sandbox. A reopened
+//!   Add host (Back, or a refused creation) starts on this form with the name and recipe as they were, the account as
+//!   it was read, and focus in Name.
 
-use farhelm_helm_client::ApiPath;
-use farhelm_proto::recipes::RecipeView;
+use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_proto::provisioning::{PlanSteps, ProbeReply};
+use farhelm_proto::recipes::{RecipeSize, RecipeView};
 use farhelm_proto::tensorlake::Settings;
+use serde::Deserialize as _;
+use serde::de::IgnoredAny;
+use serde_json::{Value, json};
 use std::rc::Rc;
 
 use gpui::{
@@ -42,11 +58,13 @@ use gpui::{
     WeakEntity, Window, div, px,
 };
 
-use super::{AddHostDialog, BODY_GAP, FIELD_HEIGHT, field, help};
+use super::{AddHostDialog, BODY_GAP, FIELD_HEIGHT, Problem, SandboxSeed, error_line, field, help};
 use crate::components::{Button, HoverHelp, Select, SelectOption, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
+use crate::hosts::{self, setup};
+use crate::operations::{Command, OpKey, Outcome, Settled, Work};
 use crate::session::{self, ObservingCurrent};
 use crate::settings::{self, RecipeDeparted, RecipeDeparture, RecipeEditor, Section};
 use crate::theme;
@@ -66,6 +84,9 @@ const NEW_RECIPE: &str = "__new__";
 const CONTINUE_HELP: &str =
     "Continue: show the sandbox's size and billing before anything is created";
 
+/// What the error line says when the plan arrived after the user moved on since Continue, so no confirmation opens.
+pub(super) const MOVED_ON: &str = "Press Continue again to see the sandbox's size and billing.";
+
 /// Where the account read stands.
 enum Account {
     /// The read is out, the first one or a Retry.
@@ -76,10 +97,19 @@ enum Account {
     Read(Settings),
 }
 
-/// The Tensorlake sandbox body of one choice of the kind: made each time the user chooses Tensorlake sandbox and
-/// dropped, with its draft, when SSH is chosen again (`Body`).
+/// The Tensorlake sandbox body of one choice of the kind: made each time the user chooses Tensorlake sandbox, or as a
+/// reopened Add host starts on it, and dropped, with its draft, when SSH is chosen again (`Body`).
 pub(super) struct TensorlakeForm {
     account: Account,
+    /// Add host's key, which the probe runs under and the creation continues under.
+    key: OpKey,
+    /// The control that opened Add host, which Back and a refusal reopen it for.
+    opener: FocusHandle,
+    /// The error line: why Continue refused or what the probe answered, or why a creation was refused. Cleared when a
+    /// probe starts.
+    problem: Option<HostSentence>,
+    /// The mark taken at the last Continue: the confirmation opens only through it.
+    probe_mark: Mark,
     /// The host's name, as typed.
     name: DraftInput,
     /// The chosen recipe's name, or `None` before a choice.
@@ -107,14 +137,28 @@ pub(super) struct TensorlakeForm {
 }
 
 impl TensorlakeForm {
-    /// The form for a new choice of the Tensorlake sandbox kind in `dialog`: empty, with the account read started.
+    /// The form for `dialog`, opened by `opener`, running under its `key`: empty with the account read started for a
+    /// new choice of the kind, or as `seed` left it, without a read, for a reopened Add host.
     pub(super) fn new(
         dialog: WeakEntity<AddHostDialog>,
+        key: OpKey,
+        opener: FocusHandle,
+        seed: Option<SandboxSeed>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let (typed, recipe, account, problem) = match seed {
+            Some(seed) => (
+                seed.name,
+                Some(SharedString::from(seed.recipe)),
+                Some(seed.account),
+                seed.problem,
+            ),
+            None => (String::new(), None, None, None),
+        };
+        let read = account.is_none();
         let name = DraftInput::new(
-            "",
+            &typed,
             TextInputState::new(window, cx),
             |form: &mut Self| &mut form.name,
             Self::proceed,
@@ -130,9 +174,13 @@ impl TensorlakeForm {
             }
         });
         let mut form = TensorlakeForm {
-            account: Account::Reading,
+            account: account.map_or(Account::Reading, Account::Read),
+            key,
+            opener,
+            problem,
+            probe_mark: Mark::take(cx),
             name,
-            recipe: None,
+            recipe,
             open_settings,
             settings_open: false,
             returned: None,
@@ -143,8 +191,28 @@ impl TensorlakeForm {
             _settings_closed: settings_closed,
             _store: session::observe_current(cx, |_, cx| cx.notify()),
         };
-        form.read_account(cx);
+        if read {
+            form.read_account(cx);
+        }
         form
+    }
+
+    /// The account as read, once it is.
+    fn settings(&self) -> Option<&Settings> {
+        match &self.account {
+            Account::Read(account) => Some(account),
+            Account::Reading | Account::Failed(_) => None,
+        }
+    }
+
+    /// Whether the account says an API key is saved, which the form needs before anything else.
+    fn key_saved(&self) -> bool {
+        self.settings().is_some_and(|account| account.api_key_set)
+    }
+
+    /// Name's focus handle, where a reopened Add host starts.
+    pub(super) fn name_handle(&self, cx: &App) -> FocusHandle {
+        self.name.input().focus_handle(cx)
     }
 
     /// Read the account. The first read and a Retry show "Loading Tensorlake settings…" until it answers; a read again
@@ -180,12 +248,12 @@ impl TensorlakeForm {
     /// The account read answered: show what it says, and after a return from Settings that brought a key, move focus to
     /// Name through the mark Settings' close took, unless the user moved on since.
     fn account_read(&mut self, read: Result<Settings, HostText>, cx: &mut Context<Self>) {
-        let had_key = matches!(&self.account, Account::Read(account) if account.api_key_set);
+        let had_key = self.key_saved();
         self.account = match read {
             Ok(settings) => Account::Read(settings),
             Err(words) => Account::Failed(words),
         };
-        let has_key = matches!(&self.account, Account::Read(account) if account.api_key_set);
+        let has_key = self.key_saved();
         if let Some(mark) = self.returned.take()
             && has_key
             && !had_key
@@ -255,17 +323,127 @@ impl TensorlakeForm {
                     }
                 }
             }
-            RecipeDeparture::Close => {
-                let handle = self.window;
-                let _ = self
-                    .dialog
-                    .update(cx, |dialog, cx| dialog.close_later(None, handle, cx));
-            }
+            RecipeDeparture::Close => self.close_dialog(None, self.window, cx),
         }
     }
 
-    /// Continue, from the button or Enter in Name: unavailable in this build (the module docs).
-    pub(super) fn proceed(&mut self, _: &mut Window, _: &mut Context<Self>) {}
+    /// Whether the probe or the creation is out under Add host's key.
+    fn busy(&self, cx: &App) -> bool {
+        super::key_busy(&self.key, cx)
+    }
+
+    /// The name as it is sent: as typed, trimmed.
+    fn name(&self) -> String {
+        self.name.draft().value().trim().to_owned()
+    }
+
+    /// Continue, from the button, Enter in Name or Enter on the dialog: refuse what can be refused here, else ask the
+    /// helm for a creation plan (the module docs). Nothing while the probe or the creation is out, while the recipe
+    /// editor is open, or before the account says a key is saved.
+    pub(super) fn proceed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.key_saved() || self.editor.is_some() || self.busy(cx) {
+            return;
+        }
+        let name = self.name();
+        let refused = if name.is_empty() {
+            Some("Enter a name for the host".to_owned())
+        } else if self.recipe.is_none() {
+            Some("Choose a recipe".to_owned())
+        } else {
+            hosts::launch_in_flight(cx).then(|| format!("Add host: {}", hosts::LAUNCH_IN_FLIGHT))
+        };
+        if let Some(refused) = refused {
+            self.problem = Some(error_line().text(refused));
+            cx.notify();
+            return;
+        }
+        let Some(recipe) = self.recipe.clone() else {
+            return;
+        };
+        let Some(operations) = session::current_operations(cx) else {
+            return;
+        };
+        let command = match probe_command(&name, &recipe) {
+            Ok(command) => command,
+            Err(error) => {
+                tracing::debug!(?error, "Tensorlake probe not built");
+                return;
+            }
+        };
+        let handle = window.window_handle();
+        self.probe_mark = Mark::take(cx);
+        let form = cx.weak_entity();
+        let started = operations.update(cx, |operations, cx| {
+            operations.start(&self.key, command, cx, move |settled, cx| {
+                let _ = form.update(cx, |form, cx| form.planned(settled, handle, cx));
+            })
+        });
+        match started {
+            Ok(()) => {
+                self.problem = None;
+                self.name.input().set_read_only(true, cx);
+                cx.notify();
+            }
+            Err(not_started) => tracing::debug!(?not_started, "Tensorlake probe not sent"),
+        }
+    }
+
+    /// The probe settled: free the fields, then confirm the plan on the prompt, submit it without asking, or say why
+    /// there is none (the module docs).
+    fn planned(&mut self, settled: &Settled, window: AnyWindowHandle, cx: &mut Context<Self>) {
+        self.name.input().set_read_only(false, cx);
+        cx.notify();
+        let plan = match read_plan(&settled.outcome) {
+            Ok(plan) => plan,
+            Err(problem) => {
+                self.problem = Some(problem.sentence(error_line()));
+                return;
+            }
+        };
+        let (Some(account), Some(recipe)) = (self.settings(), self.recipe.clone()) else {
+            return;
+        };
+        let skips = account.create_without_asking;
+        let mark = self.probe_mark;
+        let offer = setup::Offer {
+            key: self.key.clone(),
+            probe_id: plan.probe_id,
+            confirmation: plan.confirmation,
+            steps: plan.steps,
+            target: setup::Target::Sandbox(setup::Sandbox {
+                opener: self.opener.clone(),
+                name: self.name(),
+                recipe: recipe.to_string(),
+                account: account.clone(),
+                resources: plan.resources,
+            }),
+            // As an SSH plan's: the answer's own mark replaces it, and without asking the plan goes out on the strength
+            // of the Continue.
+            mark,
+        };
+        if skips {
+            // The close is queued first, as Add's is on its own path without asking: a submission refused at once (a
+            // launch started while the probe was out) reopens Add host on a later turn.
+            self.close_dialog(None, window, cx);
+            setup::submit(offer, window, cx);
+        } else if focus::has_moved_on(&mark, cx) {
+            self.problem = Some(error_line().text(MOVED_ON));
+        } else {
+            self.close_dialog(Some(offer), window, cx);
+        }
+    }
+
+    /// Close Add host from a completion, then ask `confirm`'s confirmation in its place ([`AddHostDialog::close_later`]).
+    fn close_dialog(
+        &self,
+        confirm: Option<setup::Offer>,
+        window: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self
+            .dialog
+            .update(cx, |dialog, cx| dialog.close_later(confirm, window, cx));
+    }
 
     /// The name as typed, for the tests to read back a kept draft.
     #[cfg(test)]
@@ -273,21 +451,23 @@ impl TensorlakeForm {
         self.name.draft().value().clone()
     }
 
-    /// Whether Continue can be pressed: never in this build (the module docs).
+    /// Whether Continue can be pressed: both Name and Recipe are set, as the old Continue required.
     fn can_continue(&self) -> bool {
-        false
+        !self.name().is_empty() && self.recipe.is_some()
     }
 
-    /// Continue, for Add host's footer in the place of Add.
-    pub(super) fn continue_button(&self, form: WeakEntity<Self>) -> Button {
+    /// Continue, for Add host's footer in the place of Add: "Checking…" and busy while the probe is out.
+    pub(super) fn continue_button(&self, form: WeakEntity<Self>, cx: &App) -> Button {
+        let busy = self.busy(cx);
         Button::new(
             "add-tensorlake-continue",
-            "Continue",
+            if busy { "Checking…" } else { "Continue" },
             HoverHelp::tooltip(CONTINUE_HELP),
             Role::Button,
         )
         .tier(Tier::Primary)
-        .disabled(!self.can_continue())
+        .busy(busy)
+        .disabled(!busy && !self.can_continue())
         .on_click(move |_, window, cx| {
             let _ = form.update(cx, |form, cx| form.proceed(window, cx));
         })
@@ -350,6 +530,7 @@ impl TensorlakeForm {
             HoverHelp::tooltip("New recipe…: make a recipe here, without leaving Add host"),
         )])
         .focus(&self.recipe_choice)
+        .disabled(self.busy(cx))
         .on_choose(move |value, window, cx| {
             let value = value.clone();
             let _ = form.update(cx, |form, cx| {
@@ -395,6 +576,12 @@ impl TensorlakeForm {
                 .text_color(theme::color(palette.fg_1))
                 .into_any_element()
         }));
+        // The helm's words, which may quote the name or the recipe, so they are host text.
+        fields.extend(
+            self.problem
+                .clone()
+                .map(|line| hosts::problem_line(line, palette)),
+        );
         fields
     }
 
@@ -435,6 +622,59 @@ impl TensorlakeForm {
     }
 }
 
+/// `POST /api/hosts/probe` for a new sandbox named `name` from the recipe `recipe`: the helm's free, local plan, kept
+/// under the one-use id it answers with.
+fn probe_command(name: &str, recipe: &str) -> Result<Command, PathError> {
+    Ok(Command::new(
+        Work::Probe,
+        Method::Post,
+        ApiPath::api(&["hosts", "probe"])?,
+        Some(json!({ "target": { "kind": "tensorlake", "name": name, "recipe": recipe } })),
+        "POST /api/hosts/probe",
+    ))
+}
+
+/// A Tensorlake creation plan as the probe answered it.
+struct Plan {
+    /// The helm's one-use id for the plan it kept.
+    probe_id: String,
+    /// The size the plan creates the sandbox with.
+    resources: RecipeSize,
+    /// The helm's plan as text, which Copy plan copies.
+    confirmation: String,
+    steps: PlanSteps,
+}
+
+/// Read a Tensorlake probe's reply: the plan, or why there is none to show. A reply of any other kind is the old app's
+/// "did not return a Tensorlake creation plan".
+fn read_plan(outcome: &Outcome) -> Result<Plan, Problem> {
+    let body = match outcome {
+        Outcome::Refused(refusal) => return Err(Problem::Helm(refusal.words.clone())),
+        Outcome::Done(body) | Outcome::Accepted(body) => body.as_ref().unwrap_or(&Value::Null),
+    };
+    match ProbeReply::<IgnoredAny>::deserialize(body) {
+        Ok(ProbeReply::TensorlakeProvisionable {
+            probe_id,
+            resources,
+            confirmation,
+            steps,
+            ..
+        }) => Ok(Plan {
+            probe_id,
+            resources,
+            confirmation,
+            steps: *steps,
+        }),
+        Ok(ProbeReply::Discovered { .. })
+        | Ok(ProbeReply::Manual { .. })
+        | Ok(ProbeReply::Provisionable { .. }) => Err(Problem::App(
+            "The helm did not return a Tensorlake creation plan",
+        )),
+        // The decoder's words quote the reply, so they are host text.
+        Err(error) => Err(Problem::Unreadable(HostText::from_host(error.to_string()))),
+    }
+}
+
 impl Render for TensorlakeForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
@@ -443,7 +683,7 @@ impl Render for TensorlakeForm {
             Account::Failed(words) => {
                 let form = cx.weak_entity();
                 vec![
-                    super::super::problem_line(
+                    hosts::problem_line(
                         HostSentence::new("add-tensorlake-account-error").host(words),
                         palette,
                     ),

@@ -1,5 +1,7 @@
 //! Tests of Add host's host kind choice and its Tensorlake sandbox body ([`super::tensorlake`]), over the helm client's
-//! fake, opened from the same stand-in rail as the SSH tests (`hosts/add/tests.rs`, whose helpers these share).
+//! fake, opened from the same stand-in rail as the SSH tests (`hosts/add/tests.rs`, whose helpers these share): the
+//! kind choice and the account read, the recipe editor opened from Recipe, and Continue's plan with the creation
+//! question it opens on the prompt (`hosts/setup.rs`), its answers, and where a refused creation shows.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
@@ -8,7 +10,11 @@ use gpui::{App, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::tests::{destination, open_dialog, open_rail_with, type_text};
-use crate::test_support::{any_open, click, focused_id, frame, keys, label, meta, one_command};
+use crate::hosts::tests::start_work;
+use crate::operations::{OpKey, Work};
+use crate::test_support::{
+    any_open, click, focused_id, frame, keys, label, meta, one_command, settle,
+};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -541,4 +547,582 @@ fn leaving_with_unsaved_changes_asks_and_discard_goes_where_it_was_asked(cx: &mu
     click(cx, "prompt-alternative-0");
     assert!(!any_open(cx), "Discard closed Add host");
     assert!(helm.commands().is_empty(), "nothing was saved");
+}
+
+// ---- Continue and the creation confirmation ------------------------------------------------------------------------
+
+/// The helm's Tensorlake creation plan as `POST /api/hosts/probe` answers it, with the one-use id `probe_id`.
+fn plan(probe_id: &str) -> Value {
+    json!({
+        "result": "tensorlake-provisionable",
+        "probe_id": probe_id,
+        "sandbox": "farhelm-host-fixture-gpubox",
+        "destination": "farhelm-host-fixture-gpubox",
+        "recipe": "rust-dev",
+        "resources": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },
+        "confirmation": "Create a Tensorlake sandbox\n1. Create the sandbox\n",
+        "steps": {
+            "lead": "Create a Tensorlake sandbox",
+            "kept": null,
+            "steps": [{ "id": "create-sandbox", "name": "Create the sandbox", "paths": [], "explanation": null }],
+        },
+    })
+}
+
+/// The helm's refusal of a creation whose recipe went away while the question was open.
+const RECIPE_GONE: &str =
+    "the recipe was deleted while confirmation was open; choose a recipe again";
+
+/// Open Add host on the Tensorlake sandbox kind with a key saved (and `create_without_asking` as given), then fill
+/// Name with `gpubox` and choose `rust-dev`, as a user does. The catalog must hold `rust-dev`.
+fn fill_form(cx: &mut VisualTestContext, helm: &mut FakeHelm, create_without_asking: bool) {
+    open_dialog(cx);
+    let read = choose_tensorlake(cx, helm);
+    let mut settings = account(true);
+    settings["create_without_asking"] = json!(create_without_asking);
+    helm.reply(read, 200, Some(settings));
+    cx.run_until_parked();
+    keys(cx, "tab");
+    type_text(cx, "gpubox");
+    click(cx, "add-tensorlake-recipe");
+    click(cx, "add-tensorlake-recipe-option-rust-dev");
+}
+
+/// The rail with `rust-dev` in the catalog (and `more` in the helm's first snapshot), and Add host filled by
+/// [`fill_form`].
+fn filled_form(
+    cx: &mut TestAppContext,
+    create_without_asking: bool,
+    more: Vec<CollectionState>,
+) -> (FakeHelm, &mut VisualTestContext) {
+    let mut snapshot = vec![catalog(&[recipe("rust-dev", "team/devbox")])];
+    snapshot.extend(more);
+    let (mut helm, cx, _) = open_rail_with(cx, snapshot);
+    fill_form(cx, &mut helm, create_without_asking);
+    (helm, cx)
+}
+
+/// Press Continue and take the probe it sends: its envelope id and body.
+fn continue_to_probe(cx: &mut VisualTestContext, helm: &mut FakeHelm) -> (u64, Value) {
+    click(cx, "add-tensorlake-continue");
+    one_command(helm, Method::Post, "/api/hosts/probe")
+}
+
+/// Press Continue and answer its probe with a plan under `probe_id`: the creation confirmation opens, unless the form
+/// creates without asking.
+fn confirm_plan(cx: &mut VisualTestContext, helm: &mut FakeHelm, probe_id: &str) {
+    let (probe, _) = continue_to_probe(cx, helm);
+    helm.reply(probe, 200, Some(plan(probe_id)));
+    settle(cx);
+}
+
+/// The open question's title, which the prompt draws under its own id.
+fn question_title(cx: &mut VisualTestContext) -> Option<String> {
+    label(cx, "prompt")
+}
+
+/// Whether Add host is open on the Tensorlake sandbox's fields, as a reopened Add host starts.
+fn sandbox_fields_open(cx: &mut VisualTestContext) -> bool {
+    any_open(cx) && drawn(cx, "add-tensorlake-name")
+}
+
+/// Why this matters: Continue is where the user asks what creating a sandbox would cost, and nothing may be created
+/// before they confirm; the plan they confirm must be the one for the name and recipe they typed, and its question is
+/// asked as every other question is, on the prompt, with the old dialog's answers in its order.
+///
+/// Specified: Continue is unavailable until Name and Recipe are both set; it then sends one `POST /api/hosts/probe`
+/// for the Tensorlake target with the name and recipe, reading "Checking…" meanwhile. The plan closes Add host and
+/// opens "Create Tensorlake sandbox · gpubox" with the size it bills for ("2 CPUs · 4 GB memory · 20 GB disk"), the
+/// helm's steps, Copy plan and the billing callout with its pricing link; the answers read Cancel, Back and Create
+/// sandbox in that order, focus is on Create sandbox, and nothing else is sent.
+#[gpui::test]
+fn continue_asks_for_the_plan_and_the_question_shows_its_size_steps_and_billing(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _) = open_rail_with(cx, vec![catalog(&[recipe("rust-dev", "team/devbox")])]);
+    open_dialog(cx);
+    let read = choose_tensorlake(cx, &mut helm);
+    helm.reply(read, 200, Some(account(true)));
+    cx.run_until_parked();
+    assert_eq!(
+        pressable(cx, "add-tensorlake-continue"),
+        Some(false),
+        "nothing typed yet"
+    );
+    keys(cx, "tab");
+    type_text(cx, "gpubox");
+    assert_eq!(
+        pressable(cx, "add-tensorlake-continue"),
+        Some(false),
+        "no recipe yet"
+    );
+    click(cx, "add-tensorlake-recipe");
+    click(cx, "add-tensorlake-recipe-option-rust-dev");
+    assert_eq!(pressable(cx, "add-tensorlake-continue"), Some(true));
+
+    let (probe, body) = continue_to_probe(cx, &mut helm);
+    assert_eq!(
+        body,
+        json!({ "target": { "kind": "tensorlake", "name": "gpubox", "recipe": "rust-dev" } })
+    );
+    assert_eq!(
+        label(cx, "add-tensorlake-continue").as_deref(),
+        Some("Checking…")
+    );
+    helm.reply(probe, 200, Some(plan("probe-1")));
+    settle(cx);
+    assert_eq!(
+        question_title(cx).as_deref(),
+        Some("Create Tensorlake sandbox · gpubox")
+    );
+    assert!(!drawn(cx, "add-tensorlake-name"), "Add host closed");
+    for words in [
+        "2 CPUs · 4 GB memory · 20 GB disk",
+        "Create a Tensorlake sandbox",
+        "Create the sandbox",
+        "Copy plan",
+        "This sandbox bills while running.",
+        "Tensorlake pricing",
+        "Farhelm never resumes it on its own.",
+    ] {
+        assert!(shows(cx, words), "{words:?} is drawn");
+    }
+    let answers: Vec<String> = frame(cx)
+        .into_iter()
+        .filter(|node| {
+            node.element_id.as_deref().is_some_and(|id| {
+                matches!(
+                    id,
+                    "prompt-cancel" | "prompt-alternative-0" | "prompt-confirm"
+                )
+            })
+        })
+        .filter_map(|node| node.label.map(|label| label.to_string()))
+        .collect();
+    assert_eq!(answers, ["Cancel", "Back", "Create sandbox"]);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    assert!(
+        helm.commands().is_empty(),
+        "nothing is created before Create sandbox"
+    );
+}
+
+/// Why this matters: the plan is for the name and recipe Continue sent, and Back or a refusal reopens Add host with the
+/// fields as they are when the plan arrives, so the fields must hold still while the probe is out, as Add's do.
+///
+/// Specified: with Continue's probe out (sent by Enter in Name, which keeps focus there), Recipe cannot be pressed and
+/// typing in Name changes nothing.
+#[gpui::test]
+fn the_fields_hold_still_while_the_probe_is_out(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    keys(cx, "shift-tab");
+    assert!(
+        focus_in(cx, "add-tensorlake-name"),
+        "the premise: focus back in Name"
+    );
+    keys(cx, "enter");
+    let _ = one_command(&mut helm, Method::Post, "/api/hosts/probe");
+    assert!(
+        focus_in(cx, "add-tensorlake-name"),
+        "the premise: focus still in Name"
+    );
+    assert_eq!(pressable(cx, "add-tensorlake-recipe"), Some(false));
+    type_text(cx, "x");
+    assert_eq!(sandbox_name(cx), "gpubox", "Name is read-only meanwhile");
+}
+
+/// Why this matters: the pricing link is how the user checks what a sandbox will cost before Create sandbox, so it
+/// must open Tensorlake's pricing page, the old callout's link.
+///
+/// Specified: pressing "Tensorlake pricing" in the question opens `https://www.tensorlake.ai/pricing`.
+#[gpui::test]
+fn the_pricing_link_opens_tensorlakes_pricing_page(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    click(cx, "sandbox-pricing");
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://www.tensorlake.ai/pricing")
+    );
+}
+
+/// Why this matters: the billing callout is the one warning between the user and a sandbox that bills by the hour,
+/// and the old suite checked its look on purpose: a warning wash and edge make it read as a callout rather than one
+/// more line of the plan.
+///
+/// Specified: over the callout's own bounds the palette's `warn_bg_dim` fill is painted, and an edge in `warn` that is
+/// three pixels on the left and nothing elsewhere. (GPUI paints a box's fill and its edges as two quads.)
+#[gpui::test]
+fn the_billing_callout_has_the_warning_wash_and_edge(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    let billing = crate::test_support::bounds(cx, "sandbox-billing");
+    let palette = cx.update(|_, cx| crate::theme::palette(cx));
+    let (scale, quads) = cx.update(|window, _| (window.scale_factor(), window.painted_quads()));
+    let wash = gpui::Background::from(crate::theme::color(palette.warn_bg_dim));
+    let own: Vec<_> = quads
+        .iter()
+        .filter(|quad| quad.bounds == billing.scale(scale))
+        .collect();
+    assert!(
+        own.iter().any(|quad| quad.background == wash),
+        "the callout's box paints the warning wash"
+    );
+    let quad = own
+        .iter()
+        .find(|quad| quad.border_color == crate::theme::color(palette.warn))
+        .expect("the callout's box paints an edge in the warning color");
+    assert_eq!(quad.border_widths.left, gpui::px(3.).scale(scale));
+    let none = gpui::px(0.).scale(scale);
+    assert!(
+        [
+            quad.border_widths.top,
+            quad.border_widths.right,
+            quad.border_widths.bottom
+        ] == [none; 3],
+        "only the left edge"
+    );
+}
+
+/// Why this matters: Back must return to what was typed, never lose it, and leave Name editable: a plan is for the
+/// name and recipe it was made for, so going back to change the name must lead to a plan for the new one (the old
+/// suite's Back test edited the name before Continue for exactly this).
+///
+/// Specified: Back sends nothing and reopens Add host on the Tensorlake sandbox kind with `gpubox` and `rust-dev` kept
+/// and focus in Name, without reading the account again; typing there edits the name, and Continue's probe and the
+/// question that follows name `gpubox2`.
+#[gpui::test]
+fn back_reopens_add_host_with_the_fields_kept_and_continue_asks_for_the_edited_name(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    click(cx, "prompt-alternative-0");
+    settle(cx);
+    assert!(helm.commands().is_empty(), "Back sends nothing");
+    assert!(sandbox_fields_open(cx), "Add host is back on the sandbox");
+    assert_eq!(question_title(cx), None, "the question closed");
+    assert_eq!(sandbox_name(cx), "gpubox");
+    assert_eq!(recipe_shown(cx).as_deref(), Some("rust-dev"));
+    assert!(focus_in(cx, "add-tensorlake-name"), "focus is back in Name");
+    type_text(cx, "2");
+    assert_eq!(sandbox_name(cx), "gpubox2", "Name is editable again");
+    let (probe, body) = continue_to_probe(cx, &mut helm);
+    assert_eq!(body["target"]["name"], "gpubox2", "Continue asks again");
+    helm.reply(probe, 200, Some(plan("probe-2")));
+    settle(cx);
+    assert_eq!(
+        question_title(cx).as_deref(),
+        Some("Create Tensorlake sandbox · gpubox2")
+    );
+}
+
+/// Why this matters: Create sandbox is the one press that bills, so it must send exactly the plan shown, once, under
+/// Add host's key, where a second creation from the same opening is refused; the run's progress then shows on the new
+/// host's row.
+///
+/// Specified: Create sandbox closes the question and sends `POST /api/hosts/provision` with the plan's id under the
+/// key Continue's probe ran under; the helm's acceptance leaves nothing open.
+#[gpui::test]
+fn create_sandbox_submits_the_plan_under_add_hosts_key(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    let key = super::tests::dialog_key(cx);
+    confirm_plan(cx, &mut helm, "probe-1");
+    click(cx, "prompt-confirm");
+    let (create, body) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    assert_eq!(body, json!({ "probe_id": "probe-1" }));
+    assert_eq!(question_title(cx), None, "the question closed");
+    assert!(
+        cx.update(|_, cx| crate::session::current_operations(cx)
+            .is_some_and(|operations| operations.read(cx).in_flight(&key).is_some())),
+        "the creation runs under Add host's key"
+    );
+    helm.reply(
+        create,
+        202,
+        Some(json!({ "host_id": 7, "run_id": "run-1" })),
+    );
+    settle(cx);
+    assert!(!any_open(cx), "nothing reopened once the helm accepted it");
+}
+
+/// Why this matters: a creation is a host registry change, which the migration keeps out of the way of a session
+/// launch, and the question can stay open while a launch starts, so checking only at Continue would let Create
+/// sandbox put a new host beside the launch. The refusal takes the path a refused SSH setup takes, so the user can try
+/// again with the fields as they were.
+///
+/// Specified: with the question open and a launcher `Launch` in flight, Create sandbox sends no provision request and
+/// reopens Add host on the sandbox with `gpubox` and `rust-dev`, focus in Name and its error line reading "Add host:
+/// not started, a session launch is in progress; try again when it finishes".
+#[gpui::test]
+fn create_sandbox_during_a_launch_sends_nothing_and_reopens_add_host_saying_why(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    assert!(
+        question_title(cx).is_some(),
+        "the premise: the question is open"
+    );
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, "prompt-confirm");
+    settle(cx);
+    assert!(helm.commands().is_empty(), "no creation was sent");
+    assert!(sandbox_fields_open(cx));
+    assert_eq!(sandbox_name(cx), "gpubox");
+    assert_eq!(recipe_shown(cx).as_deref(), Some("rust-dev"));
+    assert!(focus_in(cx, "add-tensorlake-name"));
+    assert_eq!(
+        super::tests::error_line(cx),
+        Some(format!("Add host: {}", crate::hosts::LAUNCH_IN_FLIGHT))
+    );
+}
+
+/// Why this matters: without asking, nobody presses Create sandbox, so the launch check at the submission is the only
+/// one between a launch that started while the probe was out and a billed creation beside it.
+///
+/// Specified: with the account's `create_without_asking` on and a `Launch` started while the probe is out, the plan's
+/// arrival sends no provision request and reopens Add host on the sandbox with the fields and the launch's reason.
+#[gpui::test]
+fn without_asking_a_plan_during_a_launch_is_refused_as_create_sandbox_is(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, true, Vec::new());
+    let (probe, _) = continue_to_probe(cx, &mut helm);
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    helm.reply(probe, 200, Some(plan("probe-1")));
+    settle(cx);
+    assert!(helm.commands().is_empty(), "no creation was sent");
+    assert!(sandbox_fields_open(cx));
+    assert_eq!(sandbox_name(cx), "gpubox");
+    assert_eq!(
+        super::tests::error_line(cx),
+        Some(format!("Add host: {}", crate::hosts::LAUNCH_IN_FLIGHT))
+    );
+}
+
+/// Why this matters: what Continue refuses without asking the helm must say why with the fields kept, and Enter in
+/// Name reaches the same refusals the button's unavailability hides.
+///
+/// Specified: Enter in an empty Name says "Enter a name for the host"; with a name and no recipe, "Choose a recipe";
+/// with both and a `Launch` in flight, Continue says "Add host: not started, …". None of them sends a probe.
+#[gpui::test]
+fn continue_refuses_a_missing_field_or_a_launch_with_the_fields_kept(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail_with(cx, vec![catalog(&[recipe("rust-dev", "team/devbox")])]);
+    open_dialog(cx);
+    let read = choose_tensorlake(cx, &mut helm);
+    helm.reply(read, 200, Some(account(true)));
+    cx.run_until_parked();
+    keys(cx, "tab");
+    assert!(
+        focus_in(cx, "add-tensorlake-name"),
+        "the premise: focus in Name"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        super::tests::error_line(cx).as_deref(),
+        Some("Enter a name for the host")
+    );
+    type_text(cx, "gpubox");
+    keys(cx, "enter");
+    assert_eq!(
+        super::tests::error_line(cx).as_deref(),
+        Some("Choose a recipe")
+    );
+    click(cx, "add-tensorlake-recipe");
+    click(cx, "add-tensorlake-recipe-option-rust-dev");
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, "add-tensorlake-continue");
+    assert_eq!(
+        super::tests::error_line(cx),
+        Some(format!("Add host: {}", crate::hosts::LAUNCH_IN_FLIGHT))
+    );
+    assert!(helm.commands().is_empty(), "no probe was sent");
+    assert_eq!(sandbox_name(cx), "gpubox");
+}
+
+/// Why this matters: a probe the helm refuses, or answers with something other than a Tensorlake plan, must say so
+/// rather than open a question about nothing, and leave the fields for another try.
+///
+/// Specified: a 409 to the probe shows the helm's words in Add host's error line; an SSH plan in reply shows "The
+/// helm did not return a Tensorlake creation plan"; Add host stays open with the name kept and no question opens.
+#[gpui::test]
+fn a_refused_probe_or_a_reply_that_is_no_sandbox_plan_says_why(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    let (probe, _) = continue_to_probe(cx, &mut helm);
+    helm.reply(
+        probe,
+        409,
+        Some(json!("a host named gpubox already exists")),
+    );
+    settle(cx);
+    assert_eq!(
+        super::tests::error_line(cx).as_deref(),
+        Some("a host named gpubox already exists")
+    );
+    let (probe, _) = continue_to_probe(cx, &mut helm);
+    helm.reply(
+        probe,
+        200,
+        Some(json!({
+            "result": "provisionable", "probe_id": "p-1", "plan": {},
+            "confirmation": "", "steps": { "lead": "", "kept": null, "steps": [] },
+        })),
+    );
+    settle(cx);
+    assert_eq!(
+        super::tests::error_line(cx).as_deref(),
+        Some("The helm did not return a Tensorlake creation plan")
+    );
+    assert!(sandbox_fields_open(cx) && question_title(cx).is_none());
+    assert_eq!(sandbox_name(cx), "gpubox");
+}
+
+/// Why this matters: the helm can still refuse the plan (its recipe deleted while the question was open, a name taken
+/// meanwhile), and the user must see why with what they typed intact.
+///
+/// Specified: a 409 to Create sandbox reopens Add host on the sandbox with `gpubox` and `rust-dev` kept, the helm's
+/// words in its error line and focus in Name, and reads nothing more.
+#[gpui::test]
+fn a_refused_creation_reopens_add_host_with_the_fields_and_the_helms_words(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    click(cx, "prompt-confirm");
+    let (create, _) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    helm.reply(create, 409, Some(json!(RECIPE_GONE)));
+    settle(cx);
+    assert!(sandbox_fields_open(cx), "back at the fields");
+    assert_eq!(sandbox_name(cx), "gpubox");
+    assert_eq!(recipe_shown(cx).as_deref(), Some("rust-dev"));
+    assert!(focus_in(cx, "add-tensorlake-name"));
+    assert_eq!(super::tests::error_line(cx).as_deref(), Some(RECIPE_GONE));
+    assert!(helm.commands().is_empty(), "the account is not read again");
+}
+
+/// Why this matters: SPEC.md, "Keyboard focus": once the user has moved on, a result opens no dialog, and a refused
+/// new host has no row, so the Hosts panel says it, as it does for a refused SSH setup.
+///
+/// Specified: after Create sandbox, a key press, then a 409, nothing opens and the panel's line reads "Add host: "
+/// and the helm's words.
+#[gpui::test]
+fn a_creation_refused_after_the_user_moved_on_shows_on_the_hosts_panel(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    click(cx, "prompt-confirm");
+    let (create, _) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    keys(cx, "tab");
+    helm.reply(create, 409, Some(json!(RECIPE_GONE)));
+    settle(cx);
+    assert!(!any_open(cx), "nothing opened");
+    assert_eq!(
+        label(cx, "hosts-add-error"),
+        Some(format!("Add host: {RECIPE_GONE}"))
+    );
+}
+
+/// Why this matters: a question the user did not just ask for must not open once they have moved on (the SSH setup
+/// confirmation's rule); the dialog still open says to ask again.
+///
+/// Specified: Shift+Tab while the probe is out, then a plan, opens no question and sends nothing; Add host stays on
+/// the sandbox saying to press Continue again.
+#[gpui::test]
+fn a_plan_after_the_user_moved_on_opens_no_question(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    let (probe, _) = continue_to_probe(cx, &mut helm);
+    keys(cx, "shift-tab");
+    helm.reply(probe, 200, Some(plan("probe-1")));
+    settle(cx);
+    assert_eq!(question_title(cx), None, "no question");
+    assert!(sandbox_fields_open(cx));
+    assert_eq!(
+        super::tests::error_line(cx).as_deref(),
+        Some(super::tensorlake::MOVED_ON)
+    );
+    assert!(helm.commands().is_empty());
+}
+
+/// Why this matters: without asking, the plan goes out on the strength of the Continue, as an SSH plan does under "Set
+/// up new hosts without asking"; whether the user moved on decides only where a refusal shows, never whether the
+/// creation goes.
+///
+/// Specified: with the account's `create_without_asking` on, Shift+Tab while the probe is out, then a plan, still
+/// sends the plan's `POST /api/hosts/provision` with Add host closed and no question.
+#[gpui::test]
+fn without_asking_the_plan_goes_out_after_the_user_moved_on(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, true, Vec::new());
+    let (probe, _) = continue_to_probe(cx, &mut helm);
+    keys(cx, "shift-tab");
+    helm.reply(probe, 200, Some(plan("probe-1")));
+    settle(cx);
+    let (_, body) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    assert_eq!(body, json!({ "probe_id": "probe-1" }));
+    assert!(!any_open(cx), "Add host closed and no question opened");
+}
+
+/// Why this matters: "Create Tensorlake sandboxes without asking" is the one setting that lets a plan bill without a
+/// question, and it is Tensorlake's own: the SSH setup preference must never stand in for it.
+///
+/// Specified: with the account's `create_without_asking` on, the plan is sent as it arrives, with Add host closed and
+/// no question.
+#[gpui::test]
+fn only_the_tensorlake_setting_sends_the_plan_without_asking(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, true, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    let (_, body) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    assert_eq!(body, json!({ "probe_id": "probe-1" }));
+    assert!(!any_open(cx), "Add host closed and no question opened");
+}
+
+/// The SSH setup preference on, the Tensorlake setting off: [`only_the_tensorlake_setting_sends_the_plan_without_asking`]'s
+/// other half, kept apart since it needs the preference row in the helm's first snapshot.
+///
+/// Specified: with "Set up new hosts without asking" on (asserted as the premise), the plan opens the question and
+/// sends nothing.
+#[gpui::test]
+fn the_ssh_setup_preference_never_sends_a_sandbox_plan(cx: &mut TestAppContext) {
+    let preferences = CollectionState {
+        collection: Collection::Preferences,
+        meta: meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+        entries: vec![KeyedEntry {
+            key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+            value: json!({ "skip_host_setup_confirmation": true }),
+        }],
+    };
+    let (mut helm, cx) = filled_form(cx, false, vec![preferences]);
+    assert!(
+        cx.update(|_, cx| !crate::hosts::setup::asks_first(cx)),
+        "the premise: the SSH setup preference is on"
+    );
+    confirm_plan(cx, &mut helm, "probe-1");
+    assert!(
+        helm.commands().is_empty(),
+        "the plan waits for Create sandbox"
+    );
+    assert!(question_title(cx).is_some(), "the question is open");
+}
+
+/// Why this matters: Cancel and Escape must retire the plan for good, so that nothing bills from a question the user
+/// dismissed (the old suite's Back, Cancel and Escape checks, and its "cancel retires a Tensorlake creation before a
+/// queued answer").
+///
+/// Specified: Cancel on the question closes it with nothing open and nothing sent; so does Escape, on a second plan.
+#[gpui::test]
+fn cancel_and_escape_on_the_question_create_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    click(cx, "prompt-cancel");
+    settle(cx);
+    assert!(!any_open(cx));
+    assert!(helm.commands().is_empty(), "Cancel created nothing");
+
+    fill_form(cx, &mut helm, false);
+    confirm_plan(cx, &mut helm, "probe-2");
+    assert!(
+        question_title(cx).is_some(),
+        "the premise: the question is open"
+    );
+    keys(cx, "escape");
+    settle(cx);
+    assert!(!any_open(cx));
+    assert!(helm.commands().is_empty(), "Escape created nothing");
 }
