@@ -19,7 +19,7 @@ use super::tests::{
 };
 use crate::layers;
 use crate::operations::Work;
-use crate::test_support::{advance, bounds, click, focused_id, frame, keys, settle};
+use crate::test_support::{advance, any_open, bounds, click, focused_id, frame, keys, settle};
 use std::time::Duration;
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -461,8 +461,8 @@ fn create_ssh_key_shows_the_registration_command_and_copy_copies_it(cx: &mut Tes
 /// again the key would never show in this opening. Specified: a Create SSH key refused with a 504 shows the helm's
 /// words and reads the account once; answered with no key yet, the group still offers Create SSH key with the words
 /// under it; showing another section and Tensorlake again reads the account once more, and its ready key shows the
-/// command and takes the refusal's words away; showing Tensorlake a third time reads nothing. A user who stays on
-/// Tensorlake sees the key only on the next showing (the parity file's deviation).
+/// command and takes the refusal's words away; showing Tensorlake a third time reads nothing. The re-reads while the
+/// section stays shown are `a_carried_on_create_shows_the_key_where_it_was_pressed`'s.
 #[gpui::test]
 fn a_refused_create_reads_the_account_now_and_on_the_next_showing(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -528,6 +528,104 @@ fn a_refused_create_reads_the_account_now_and_on_the_next_showing(cx: &mut TestA
     show_section(cx, Section::Sessions);
     show_section(cx, Section::Tensorlake);
     assert_eq!(sent(&mut helm), [], "a third showing reads nothing");
+}
+
+/// The words a Create SSH key refused at the helm's bound carry, while the generation goes on.
+const CARRIES_ON: &str = "Farhelm's SSH key was not ready within 20 seconds; its creation carries on, and Settings \
+                          shows the key once it exists";
+
+/// Show Tensorlake with no key yet, press Create SSH key, refuse it with [`CARRIES_ON`], and answer the account read
+/// the refusal sends with no key yet: the state a carried-on generation leaves the group in.
+fn refuse_create(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    let read = show_tensorlake(helm, cx);
+    let not_created = || Some(account_with_ssh_key(json!({ "state": "not_created" })));
+    helm.reply(read.id, 200, not_created());
+    settle(cx);
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(helm);
+    assert_eq!(create.len(), 1, "one command: {create:?}");
+    helm.reply(create[0].id, 504, Some(json!(CARRIES_ON)));
+    settle(cx);
+    let read = one_account_read(helm);
+    helm.reply(read.id, 200, not_created());
+    settle(cx);
+    assert!(
+        drawn(cx, "tensorlake-ssh-key-create"),
+        "premise: no key yet"
+    );
+}
+
+/// The one command sent since the last call, checked to be a read of the account.
+fn one_account_read(helm: &mut FakeHelm) -> FakeCommand {
+    let reads = sent(helm);
+    assert_eq!(
+        reads
+            .iter()
+            .map(|read| (read.method, read.path.as_str()))
+            .collect::<Vec<_>>(),
+        [(Method::Get, "/api/tensorlake")],
+        "one read of the account"
+    );
+    reads.into_iter().next().unwrap()
+}
+
+/// The old app's Create SSH key waited for `ssh-keygen`, so the key showed where the user pressed. The helm now answers
+/// at its bound while the generation carries on, and nothing pushed says when the key is written, so a user who stays
+/// on Tensorlake must see it appear without leaving the section. Specified: after a carried-on create and its read
+/// finding no key, nothing is read before five seconds; at five seconds one read goes out; answered with the ready key,
+/// the command shows, the refusal's words go, and focus moves to Copy; a minute more reads nothing.
+#[gpui::test]
+fn a_carried_on_create_shows_the_key_where_it_was_pressed(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    refuse_create(&mut helm, cx);
+    advance(cx, Duration::from_millis(4_900));
+    assert_eq!(sent(&mut helm), [], "not before five seconds");
+    advance(cx, Duration::from_millis(100));
+    let read = one_account_read(&mut helm);
+    helm.reply(read.id, 200, Some(account_with_ssh_key(ready_ssh_key())));
+    settle(cx);
+    assert!(shows_command(cx));
+    assert!(!drawn(cx, "tensorlake-ssh-key-error"));
+    assert_eq!(focused_id(cx).as_deref(), Some("tensorlake-ssh-key-copy"));
+    advance(cx, Duration::from_secs(60));
+    assert_eq!(sent(&mut helm), [], "the key showed, so the re-reads stop");
+}
+
+/// The re-reads are bounded: a generation that never writes a key must not leave Settings reading the account for as
+/// long as it stays open, and the helm's own bounds end any generation about 10 seconds after the refusal. Specified:
+/// with every read answered with no key yet, re-reads go out at 5, 15 and 30 seconds after the refusal, one each, and
+/// nothing more in the next two minutes.
+#[gpui::test]
+fn the_re_reads_after_a_carried_on_create_end_after_half_a_minute(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    refuse_create(&mut helm, cx);
+    for wait in [5, 10, 15] {
+        advance(cx, Duration::from_secs(wait));
+        let read = one_account_read(&mut helm);
+        helm.reply(
+            read.id,
+            200,
+            Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+        );
+        settle(cx);
+    }
+    advance(cx, Duration::from_secs(120));
+    assert_eq!(sent(&mut helm), [], "the schedule has ended");
+}
+
+/// The re-reads belong to the open Settings: once it closes, a read would reach nobody and only ask the helm again.
+/// Specified: after a carried-on create, closing Settings with Escape and letting two minutes pass sends nothing. This
+/// passes with no re-reads at all; it guards against re-reads that outlive Settings, and
+/// `a_carried_on_create_shows_the_key_where_it_was_pressed` supplies its premise, that a read goes out at five seconds
+/// while Settings stays open.
+#[gpui::test]
+fn closing_settings_stops_the_re_reads(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    refuse_create(&mut helm, cx);
+    keys(cx, "escape");
+    assert!(!any_open(cx), "premise: Settings closed");
+    advance(cx, Duration::from_secs(120));
+    assert_eq!(sent(&mut helm), [], "nothing is read after Settings closes");
 }
 
 /// A refusal asks for a read on the next showing, but once a later Create SSH key is done the key is known and that

@@ -15,14 +15,21 @@
 //!   a key: it goes out with [`crate::operations::send`], the button is busy while it is out, and a done answer, the
 //!   helm's whole settings, becomes the account's, as a done save's does. A refusal shows the helm's words under the
 //!   group.
-//! - **A refusal reads the account again, now and on the next showing.** The helm answers Create SSH key within its
-//!   host reply bound, and a generation still running then carries on after a 504 that says the key will show once it
-//!   exists. The account is not pushed, so the group reads it again when that answer comes and once more the next time
-//!   Tensorlake is shown in this opening ([`SshKey::shown_again`]), when the key has most likely been written. Any
-//!   refusal does this, not only the 504: telling them apart would take the reply's status, which a plain command does
-//!   not carry ([`crate::operations::answer`]), and one extra read of the helm's own settings costs nothing. A refusal's
-//!   line shows only while the key is still not created; once a read finds the key, the line and the read on the next
-//!   showing are dropped.
+//! - **A refusal reads the account again, now, a few times over the next half minute, and on the next showing.** The
+//!   helm answers Create SSH key within its host reply bound, and a generation still running then carries on after a
+//!   504 that says the key will show once it exists. The account is not pushed, and nothing that is pushed changes when
+//!   the key is written, so the group reads the account again when that answer comes, then after each of [`RECHECKS`]
+//!   through the shared ticker while the key is still not created, and once more the next time Tensorlake is shown in
+//!   this opening ([`SshKey::shown_again`]). The old app's Create waited for `ssh-keygen` itself, so its key showed
+//!   where the user pressed; the re-reads keep that for a user who stays on Tensorlake. They are the group's, which
+//!   lives for the opening, so they also go on while another section is shown: a key found then drops the read on the
+//!   next showing, and moves no focus, since showing another section was the user's input. A re-read that fails shows
+//!   the helm's reason with Retry loading in the API key forms, as any failed account read does, until a later read
+//!   answers. Any refusal does this, not only the 504: telling them apart would take the reply's status, which a plain
+//!   command does not carry ([`crate::operations::answer`]), and a few extra reads of the helm's own settings cost
+//!   nothing. A refusal's line shows only while the key is still not created; once a read finds the key, the line and
+//!   the read on the next showing are dropped, and no further re-read goes out. Closing Settings drops the group, and
+//!   its re-reads with it.
 //! - **The key appearing moves focus to Copy.** Whichever answer first shows the key after a press of Create SSH key
 //!   (the done answer, or a read after a refusal) replaces the button that held focus with the command, so focus goes to
 //!   Copy, the control that takes its place, unless the user has moved on since the press. Left to the
@@ -40,12 +47,15 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
 };
 
+use std::time::Duration;
+
 use super::choices;
 use super::tensorlake_key::{TensorlakeAccount, path};
 use crate::components::{Button, CopyFeedback, HoverHelp, Tier, copy_button_then};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::theme::{self, metrics};
+use crate::ticker::{self, Deadline};
 
 /// The group's element id; its controls and lines are `-create`, `-command`, `-copy`, `-copied`, `-unavailable` and
 /// `-error` after it.
@@ -54,6 +64,20 @@ pub(super) const ID: &str = "tensorlake-ssh-key";
 /// The lines saying why the group has no key to show, and why Create SSH key failed.
 const UNAVAILABLE_ID: &str = "tensorlake-ssh-key-unavailable";
 const ERROR_ID: &str = "tensorlake-ssh-key-error";
+
+/// The waits between the account's re-reads after a refused Create SSH key, one after another: re-reads 5, 15 and 30
+/// seconds after the refusal. The helm's 504 comes at its 20-second host reply bound, which starts with the Create
+/// handler (`create_ssh_key` in `crates/farhelm-helm/src/tensorlake/mod.rs`, under `within_host_reply_bound_saying`),
+/// and `ssh-keygen` runs inside that handler under a 30-second bound of its own from its start (`KEYGEN_TIMEOUT` in
+/// `crates/farhelm-helm/src/tensorlake/ssh_key.rs`). So a generation that carried on has ended, with or without a key,
+/// about 10 seconds after the refusal: the read at 15 seconds comes after that, and the one at 30 leaves room for the
+/// handler's work before `ssh-keygen` starts (a registry read, and `ensure`'s wait for the generation lock), which no
+/// bound covers.
+const RECHECKS: [Duration; 3] = [
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(15),
+];
 
 /// The old words.
 const HELP: &str = "Farhelm reaches sandboxes over SSH with a key of its own, kept in this helm's state. Register it \
@@ -84,6 +108,9 @@ pub(super) struct SshKey {
     failure: Option<HostText>,
     /// Whether to read the account again the next time the section is shown, after a refused Create SSH key.
     read_when_shown: bool,
+    /// The next re-read after a refused Create SSH key, until [`RECHECKS`] runs out; it reads nothing once the key
+    /// shows ([`SshKey::recheck`]), and dropping it, as the group's own drop does, cancels it.
+    next_recheck: Option<Deadline>,
     /// Copy's confirmation, which "Command copied" shows while it lasts.
     copied: Entity<CopyFeedback>,
     /// Copy's focus handle, where a done Create SSH key moves focus.
@@ -112,6 +139,7 @@ impl SshKey {
             creating: false,
             failure: None,
             read_when_shown: false,
+            next_recheck: None,
             copied,
             copy_focus: cx.focus_handle().tab_stop(true),
             window: window.window_handle(),
@@ -188,8 +216,8 @@ impl SshKey {
     }
 
     /// Create SSH key's answer: a done one is the helm's settings with the key in them, which the account takes (and
-    /// whose key then moves focus, [`SshKey::follow_account`]); a refused one is shown and reads the account again, now
-    /// and on the next showing (the module docs).
+    /// whose key then moves focus, [`SshKey::follow_account`]); a refused one is shown and reads the account again now,
+    /// after each of [`RECHECKS`] while no key shows, and on the next showing (the module docs).
     fn created(
         &mut self,
         answer: Result<Option<serde_json::Value>, HostText>,
@@ -206,9 +234,32 @@ impl SshKey {
                 self.read_when_shown = true;
                 self.account
                     .update(cx, |account, cx| account.read_again(cx));
+                self.schedule_recheck(0, cx);
             }
         }
         cx.notify();
+    }
+
+    /// Read the account again after the `step`th of [`RECHECKS`], unless the schedule has ended. The deadline holds the
+    /// group weakly, so a closed Settings reads nothing.
+    fn schedule_recheck(&mut self, step: usize, cx: &mut Context<Self>) {
+        let group = cx.weak_entity();
+        self.next_recheck = RECHECKS.get(step).map(|delay| {
+            ticker::after(*delay, cx, move |cx| {
+                let _ = group.update(cx, |group, cx| group.recheck(step, cx));
+            })
+        });
+    }
+
+    /// The `step`th re-read is due: read the account again while it still shows no key, and schedule the next.
+    fn recheck(&mut self, step: usize, cx: &mut Context<Self>) {
+        self.next_recheck = None;
+        if self.status(cx) != Some(SshKeyStatus::NotCreated) {
+            return;
+        }
+        self.account
+            .update(cx, |account, cx| account.read_again(cx));
+        self.schedule_recheck(step + 1, cx);
     }
 
     /// The registration command in its well with Copy beside it (`.tensorlake-command`).
