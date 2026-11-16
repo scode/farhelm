@@ -1,8 +1,9 @@
 //! Tests of the ticker: an animating view redraws at most ten times a second and only in an active window, the
-//! override and reduced motion, the cursor blink and the running pulse that wake their views only when they change,
-//! one-shot deadlines, the wall clock that follows the executor's clock, the 30-second clock that redraws its views
-//! whatever the window's activity and starts again after its last handle went, and the one-second clock that does the
-//! same for counts of seconds on a loop of its own and runs until its last holder goes.
+//! override and reduced motion, the cursor blink and the running pulse that wake their views only when they change, a
+//! blink that wakes its view only on the pulse's ticks whatever tick it started on, one-shot deadlines, the wall clock
+//! that follows the executor's clock, the 30-second clock that redraws its views whatever the window's activity and
+//! starts again after its last handle went, and the one-second clock that does the same for counts of seconds on a loop
+//! of its own and runs until its last holder goes.
 //!
 //! Each test installs the app-wide state as the real bootstrap does ([`crate::test_support::install`]), and each but
 //! the deadline and wall-clock tests opens a window of its own. Time moves only when the test advances GPUI's simulated clock.
@@ -155,8 +156,9 @@ impl Render for Blinker {
 
 /// A cursor blink changes twice a second, so its view is woken twice a second, not at every tick: a focused terminal
 /// otherwise redraws its window ten times a second for a cursor that changes twice. The handle starts on its shown
-/// half and says which half it is in, half a second each (the old cursor's one-second blink); under reduced motion it
-/// stays shown and nothing wakes the view.
+/// half and says which half it is in, half a second each (the old cursor's one-second blink) for a blink started on a
+/// multiple of `BLINK_HALF_TICKS`, as one on a fresh ticker is; under reduced motion it stays shown and nothing wakes
+/// the view.
 #[gpui::test]
 fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
     test_support::install(cx);
@@ -169,6 +171,13 @@ fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
         cx.update(|_, cx| blinker.read(cx).blinking.as_ref().unwrap().is_on(cx))
     };
     assert!(on(cx), "a new blink starts shown");
+    // The ticker lays a blink's halves on multiples of BLINK_HALF_TICKS, so a blink started anywhere else has a longer
+    // first half; the exact halves below hold only for one started on such a multiple.
+    assert_eq!(
+        cx.update(|_, cx| ticker::ticks(cx)) % ticker::BLINK_HALF_TICKS,
+        0,
+        "premise: the blink started on a multiple of BLINK_HALF_TICKS, so its first half is a whole half"
+    );
     cx.update(|_, cx| render_count::reset(cx));
     let mut halves = Vec::new();
     for _ in 0..2 * ticker::BLINK_HALF_TICKS {
@@ -190,6 +199,106 @@ fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
     assert!(
         on(cx),
         "shown under reduced motion, whichever half it was in"
+    );
+}
+
+/// A window that blinks a cursor and pulses a running dot draws a frame on every tick either one changes, so a blink
+/// whose halves fall between the pulse's steps costs the window two extra frames a second, about 1.5 times its idle
+/// frames (the terminal area's TE-P2 measurement). Blinks start whenever focus lands, on any tick, so the ticker lays
+/// every blink onto the pulse's ticks rather than counting from its start.
+///
+/// Specified: with a pulse running in one window, a blink started in another on each of the five ticks of the pulse's
+/// pattern (every start tick modulo `BLINK_HALF_TICKS`) wakes its view only on ticks that also wake the pulse's view,
+/// and wakes it exactly on the ticks where its half changes, so it never wakes for nothing nor changes half unannounced.
+/// Both windows count as active through the override, so a tick reaches every due view, and the pulse's view is woken
+/// exactly once per step over each cycle, so a wake of it marks a pulse tick and not merely a tick.
+#[gpui::test]
+fn a_blink_wakes_its_view_only_on_pulse_ticks_whatever_tick_it_started_on(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    cx.update(|cx| ticker::set_active_override(Some(true), cx));
+    let _pulser = cx.add_window(|window, cx| Pulser {
+        pulsing: ticker::pulse(window, cx),
+    });
+    let blinker = cx.add_window(|_, _| Blinker { blinking: None });
+    cx.run_until_parked();
+
+    let half = ticker::BLINK_HALF_TICKS;
+    let on = |cx: &mut TestAppContext| {
+        blinker
+            .update(cx, |blinker, _, cx| {
+                blinker.blinking.as_ref().map(|blinking| blinking.is_on(cx))
+            })
+            .expect("premise: the blinker's window is open")
+    };
+    // One tick, and whether it woke each view: the tick number, the pulser, the blinker.
+    let tick = |cx: &mut TestAppContext| {
+        cx.update(render_count::reset);
+        cx.executor().advance_clock(ticker::TICK);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            (
+                ticker::ticks(cx),
+                render_count::count("pulser", cx) > 0,
+                render_count::count("blinker", cx) > 0,
+            )
+        })
+    };
+
+    let mut start_phases = std::collections::BTreeSet::new();
+    for _ in 0..half {
+        let start = cx.update(|cx| ticker::ticks(cx));
+        start_phases.insert(start % half);
+        blinker
+            .update(cx, |blinker, window, cx| {
+                blinker.blinking = Some(ticker::blink(window, cx));
+            })
+            .expect("premise: the blinker's window is open");
+        cx.run_until_parked();
+        let mut was_on = on(cx);
+        assert_eq!(was_on, Some(true), "a new blink starts shown");
+
+        let mut woken = Vec::new();
+        let mut pulse_wakes = 0;
+        for _ in 0..ticker::PULSE_CYCLE_TICKS {
+            let (now, pulse_woken, blink_woken) = tick(cx);
+            pulse_wakes += usize::from(pulse_woken);
+            let is_on = on(cx);
+            assert_eq!(
+                blink_woken,
+                is_on != was_on,
+                "the blink started on tick {start} wakes its view exactly when its half changes (tick {now})"
+            );
+            if blink_woken {
+                woken.push(now);
+                assert!(
+                    pulse_woken,
+                    "the blink started on tick {start} woke its view on tick {now}, which is not a pulse tick"
+                );
+            }
+            was_on = is_on;
+        }
+        // A pulser woken on every tick would make every blink look as if it landed on a pulse tick, so the oracle has
+        // to be shown selective: exactly one wake per step over the cycle.
+        assert_eq!(
+            pulse_wakes,
+            ticker::PULSE_STEPS as usize,
+            "premise: the pulser wakes only on its steps, once each, over a whole cycle"
+        );
+        assert!(
+            woken.len() >= 3,
+            "premise: the blink started on tick {start} kept changing half over a pulse cycle: {woken:?}"
+        );
+
+        // Drop the blink and let one tick pass, so the next blink starts one tick later in the pulse's pattern.
+        blinker
+            .update(cx, |blinker, _, _| blinker.blinking = None)
+            .expect("premise: the blinker's window is open");
+        tick(cx);
+    }
+    assert_eq!(
+        start_phases.len() as u64,
+        half,
+        "premise: the blinks started on every tick of the pattern: {start_phases:?}"
     );
 }
 
