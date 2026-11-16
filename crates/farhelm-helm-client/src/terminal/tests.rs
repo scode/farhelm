@@ -142,13 +142,16 @@ async fn replay(socket: &mut WebSocketStream<TcpStream>) {
 }
 
 /// The lease is how the supervisor tells this stream's own reattach (replaced quietly) from an attach under another
-/// lease, and a takeover notice is the one detach the stream must not answer by attaching again, so both are pinned on
-/// the wire: every attach (the first, a reconnect after a drop, and take-control) goes to the one terminal route with
-/// the same lease, a reconnect asks for the latest size, a takeover notice stops the stream instead of fighting back,
-/// and only an explicit take-control attaches again. Every attach is the ordinary one because the app is single-UI
-/// (SPEC_impl.md, "The seat: one UI per helm").
+/// lease, so every attach must carry the same one; and a takeover notice must be answered by attaching again, since in
+/// the single-UI app its only source is a window that was just displaced reconnecting a terminal before its Displaced
+/// notice arrived, and stopping would leave the window that holds the seat without its terminal (SPEC_impl.md, "The
+/// seat: one UI per helm"). Pinned on the wire: every attach (the first, a reconnect after a drop, the reattach after
+/// a takeover, and take-control after a stall) goes to the one terminal route with the same lease; a reconnect asks
+/// for the latest size; a takeover shows the GUI the ladder's first wait and its attempt, as a `replaced` detach
+/// does, and never a `Detached`; and a stall stops the stream until take-control. Every attach is the ordinary one
+/// because the app is single-UI.
 #[tokio::test]
-async fn every_attach_takes_the_one_route_and_a_takeover_stops_the_stream() {
+async fn every_attach_takes_the_one_route_and_a_takeover_reattaches() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let (addr, mut accepted) = server().await;
         let attach = TerminalAttach {
@@ -239,27 +242,49 @@ async fn every_attach_takes_the_one_route_and_a_takeover_stops_the_stream() {
         );
         assert_eq!(next_event(&mut events).await, TerminalEvent::ReplayComplete);
 
-        // An attach under another lease took the terminal: the stream stops and says why.
-        let notice =
-            r#"{"type":"detached","reason":"another client took over","code":"taken_over"}"#;
+        // An attach under another lease took the terminal: the stream waits the ladder's first rung (the attachment
+        // was live, so the ladder starts over) and attaches again under its own lease, with no Detached in between.
+        let notice = r#"{"type":"detached","reason":"taken over","code":"taken_over"}"#;
         second.socket.send(Message::text(notice)).await.unwrap();
         assert_eq!(
             next_event(&mut events).await,
+            reconnecting(1, 6, ReconnectPhase::Retrying, Some(500))
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 6, ReconnectPhase::Retrying, None)
+        );
+        let mut third = accepted.recv().await.unwrap();
+        assert_eq!(
+            third.uri,
+            format!("/api/sessions/host%3A1%2Fs%201/term?cols=100&rows=30&lease={lease}&tab=t1")
+        );
+        replay(&mut third.socket).await;
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attached(Attachment(3)))
+        );
+        until_event(&mut events, TerminalEvent::ReplayComplete).await;
+
+        // A stall stops the stream, and only the user's take-control attaches again, through the same route with the
+        // same lease.
+        let notice = r#"{"type":"detached","reason":"too slow","code":"stalled"}"#;
+        third.socket.send(Message::text(notice)).await.unwrap();
+        assert_eq!(
+            next_event(&mut events).await,
             TerminalEvent::State(StreamState::Detached {
-                code: Some(DetachCode::TakenOver),
-                reason: "another client took over".into(),
+                code: Some(DetachCode::Stalled),
+                reason: "too slow".into(),
             })
         );
-
-        // Only the user's take-control attaches again, through the same route with the same lease.
         handle.take_control();
         assert_eq!(
             next_event(&mut events).await,
             TerminalEvent::State(StreamState::Attaching)
         );
-        let third = accepted.recv().await.unwrap();
+        let fourth = accepted.recv().await.unwrap();
         assert_eq!(
-            third.uri,
+            fourth.uri,
             format!("/api/sessions/host%3A1%2Fs%201/term?cols=100&rows=30&lease={lease}&tab=t1")
         );
 
@@ -300,7 +325,7 @@ async fn a_dot_session_id_never_becomes_a_path() {
 
 /// `Closed` is how the GUI learns a stream is over ([`StreamState::Closed`]: a close, or every handle dropped), and the
 /// states that wait for the user are where a GUI most often lets a terminal go. The stream once returned from those
-/// waits without emitting it, so the feed just ended. Pinned for a refusal ended by `close` and a takeover detach
+/// waits without emitting it, so the feed just ended. Pinned for a refusal ended by `close` and a stalled detach
 /// ended by dropping the last handle.
 #[tokio::test]
 async fn a_stream_closed_while_waiting_for_the_user_still_reports_closed() {
@@ -323,14 +348,13 @@ async fn a_stream_closed_while_waiting_for_the_user_still_reports_closed() {
         );
 
         let (handle, mut events, _accepted, mut first) = attached(ChannelConfig::default()).await;
-        let notice =
-            r#"{"type":"detached","reason":"another client took over","code":"taken_over"}"#;
+        let notice = r#"{"type":"detached","reason":"too slow","code":"stalled"}"#;
         first.socket.send(Message::text(notice)).await.unwrap();
         until_event(
             &mut events,
             TerminalEvent::State(StreamState::Detached {
-                code: Some(DetachCode::TakenOver),
-                reason: "another client took over".into(),
+                code: Some(DetachCode::Stalled),
+                reason: "too slow".into(),
             }),
         )
         .await;
@@ -383,12 +407,15 @@ async fn until_event(events: &mut TerminalEvents, wanted: TerminalEvent) {
     while next_event(events).await != wanted {}
 }
 
-/// Which detach codes stop the stream is the whole reconnect policy (SPEC.md, "Terminal experience"): a takeover, a
-/// closed tab or a stall waits for the user, because reattaching would fight whatever took the terminal, chase a tab
-/// that is gone, or walk back into the wedge that stalled it. In the single-UI app a takeover's only source is a
-/// just-displaced window's reconnect landing before its Displaced notice (SPEC_impl.md, "The seat: one UI per helm").
-/// `replaced` and `other` carry trouble that keeps recovering (a lost supervisor, an unreachable host), so they wait
-/// their rung and reattach. Pinned per code, on the wire.
+/// Which detach codes stop the stream is the whole reconnect policy (SPEC.md, "Terminal experience"): a closed tab or
+/// a stall waits for the user, because reattaching would chase a tab that is gone or walk back into the wedge that
+/// stalled it. `other` carries trouble that keeps recovering (a lost supervisor, an unreachable host) and `replaced`
+/// is a newer attach under this stream's own lease, so they wait their rung and reattach. `taken_over` does the same,
+/// through the same path: in the single-UI app its only source is a window that was just displaced reconnecting a
+/// terminal before its Displaced notice arrived, and the window that holds the seat takes the terminal back by
+/// attaching again (SPEC_impl.md, "The seat: one UI per helm"). Pinned per code, on the wire: a stopping code shows
+/// `Detached`; every other shows the ladder's first wait and then attaches again with the very query it first
+/// attached with, so the same lease and size.
 #[tokio::test]
 async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
     tokio::time::timeout(Duration::from_secs(60), async {
@@ -397,10 +424,10 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
             ..ChannelConfig::default()
         };
         for (code, stops) in [
-            ("taken_over", true),
             ("tab_closed", true),
             ("stalled", true),
             ("replaced", false),
+            ("taken_over", false),
             ("other", false),
         ] {
             let (_handle, mut events, mut accepted, mut first) = attached(quick.clone()).await;
@@ -418,11 +445,7 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
             assert_eq!(next_event(&mut events).await, expected, "{code}");
             if !stops {
                 let again = accepted.recv().await.unwrap();
-                assert!(
-                    again.uri.starts_with("/api/sessions/s1/term?"),
-                    "{code}: {}",
-                    again.uri
-                );
+                assert_eq!(again.uri, first.uri, "{code}: the reattach's query");
             }
         }
     })
