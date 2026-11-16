@@ -21,19 +21,19 @@
 //!   Otherwise the batch starts at the press. Opening the question counts as a marking choice.
 //! - **The question's answer authorizes only what it drew.** One row per target (status, title, full host, what the
 //!   action does, and for a Delete the managed checkout's line). Confirming runs the frozen targets still shown and
-//!   still marked, never one marked since. While the question is open, a listing that changes what a target's answer
-//!   would authorize (its title, host, consequence or precondition) rewords it by closing it and asking the
-//!   replacement, which starts on Cancel as a question that arrived later does; a listing that proves a target gone
-//!   removes it, and one that only leaves it out (filtered, cut, failed) does not. A question with no target left
-//!   closes. Cancel, Close and Escape keep the marks. The old question replaced itself in place on any change it drew,
-//!   its status words included; here a reword moves focus (the prompt cannot replace a question in place), so only what
-//!   the answer authorizes rewords it, and a status word may go stale while the question is open.
-//! - **Focus.** Cancel returns focus to the marked bar's ⋯, as the old question did (to the bar's pressed Stop or
-//!   Delete while it draws no ⋯), and Confirm sends it to "N marked", which stays while the batch runs. The bulk
-//!   question's opener is that control for that reason: the prompt returns focus to what held it when it opened, so
-//!   the bar moves focus there before asking. A reword asks under the mark the
-//!   question first opened with, so once the user has pressed a key or clicked since (in the question, or in an
-//!   approval card beside it), it leaves the question as drawn rather than move focus out from under them.
+//!   still marked, never one marked since. While the question is open, a listing that changes anything a target's
+//!   row draws or its request carries (its status words too) rewords it in place ([`prompt::Open::reword`]), as the
+//!   old question replaced itself: it stays open, focus stays where it was, and until the new words are on screen
+//!   every answer but Cancel does nothing. A listing that proves a target gone removes it, and one that only leaves it
+//!   out (filtered, cut, failed) does not. A question with no target left closes. Cancel, Close and Escape keep the
+//!   marks.
+//! - **Focus.** Every close of the question returns focus to the marked bar's ⋯, as the old question's Cancel did (to
+//!   the bar's pressed Stop or Delete while it draws no ⋯), and Confirm then sends it to "N marked", which stays while
+//!   the batch runs. A question that closes because every target is proven gone closes before the frame that drops
+//!   the bar, so focus goes to the ⋯ still on screen, and once the ⋯ goes the focus coordinator's recovery sends it to
+//!   the open session's terminal (SPEC.md, "Where focus rests"), whatever held focus when the question opened; the old
+//!   app focused the order's title. The question's text is a keyboard scroll stop named "Sessions affected", the old body's region,
+//!   so a keyboard user can bring every row into view before answering for it.
 //! - **A batch paces itself per host.** Every target is admitted at acceptance: one whose commands are refused now
 //!   ([`super::menu::refused`]) gets its not-started line, and every other one is held in the operation store as its
 //!   Stop or Delete ([`crate::operations::Operations::hold`]), so the row shows that work pending and its own menu, the
@@ -79,7 +79,7 @@ use crate::components::{HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText, Line};
 use crate::hosts::identity;
-use crate::layers::{self, LayerId};
+use crate::layers;
 use crate::operations::{NotStarted, OpKey, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
@@ -132,7 +132,13 @@ impl Lifecycle {
 }
 
 /// One target as a bulk Stop or Delete drew it: what its row in the question shows and what its request carries.
-#[derive(Clone, Debug)]
+///
+/// Compared whole to decide a reword: the open question rewords when the same session frozen afresh differs in
+/// anything, which covers every field its row draws (status words included, as the old question compared) and the
+/// precondition its answer authorizes. Whether its own row would ask follows from that precondition, so it never
+/// changes alone; the one field that can differ while every drawn word stays the same is the host's registry id, which
+/// its row does not draw, and a reword then shows the same words, which costs nothing, since it is in place.
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Target {
     pub(super) key: String,
     /// The registry id of the session's host: one request at a time goes to each.
@@ -141,8 +147,7 @@ pub(super) struct Target {
     title: HostText,
     /// The host's full name as the helm names it (`Local (this machine)` for the local host), `None` when it sent none.
     host_name: Option<HostText>,
-    /// What the row's status said when the target was frozen. Drawn, but not part of what the answer authorizes
-    /// ([`Target::rewords`]).
+    /// What the row's status said when the target was frozen.
     status: Status,
     /// What the action does to the session: the row question's own consequence.
     consequence: String,
@@ -156,7 +161,7 @@ pub(super) struct Target {
 
 /// What a target's status says in the question: a live word, an ended status's words, or "Unknown" for one nobody
 /// classified (the question names an uncertainty a row leaves undrawn).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum Status {
     Live(Live),
     Ended(EndedWords),
@@ -210,20 +215,6 @@ impl Target {
         }
     }
 
-    /// Whether `now`, the same session frozen afresh, would have the question say or authorize something else: another
-    /// title, host, consequence, checkout line or precondition. The status word alone does not count. The old question
-    /// compared everything it drew, status included, and replaced itself in place at no cost; here a reword closes the
-    /// question and asks again, which moves focus, and an agent at work moves between Running, Waiting and Idle every
-    /// turn, so a full comparison would reopen a question over working agents while the user reads it. Narrowed until
-    /// the prompt can replace a question in place.
-    fn rewords(&self, now: &Target) -> bool {
-        self.title != now.title
-            || self.host_name != now.host_name
-            || self.consequence != now.consequence
-            || self.managed != now.managed
-            || self.guard != now.guard
-    }
-
     /// The work this target's request is, which its row draws pending while it is held and in flight.
     fn work(&self) -> Work {
         match self.guard {
@@ -270,12 +261,6 @@ impl Target {
     }
 }
 
-/// Whether `drawn` would be reworded as `now`: a target gone, or one whose answer would authorize something else
-/// ([`Target::rewords`]). The two lists are in the same order, `now` never longer.
-fn rewords(drawn: &[Target], now: &[Target]) -> bool {
-    drawn.len() != now.len() || drawn.iter().zip(now).any(|(drawn, now)| drawn.rewords(now))
-}
-
 // ---- What the list keeps ---------------------------------------------------------------------------------------------
 
 /// The bulk work of one UI session: the accepted batches and the open bulk question. Kept in the list's per-UI-session
@@ -306,14 +291,13 @@ type Targets = Rc<[Target]>;
 
 /// The open bulk question, as the list checks it with the layer manager and rewords it.
 struct Asked {
-    layer: LayerId,
+    /// The prompt's handle: its layer for the layer manager, and the reword in place.
+    open: prompt::Open<Targets>,
     action: Lifecycle,
-    /// The question's frozen targets, shared with the prompt's value and its body ([`Targets`]). The prompt gives no
-    /// way to read its value back once asked, so the list keeps this handle to compare each listing against.
+    /// The question's frozen targets as last asked or reworded, shared with the prompt's value and its body
+    /// ([`Targets`]). The prompt gives no way to read its value back, so the list keeps this handle to compare each
+    /// listing against.
     targets: Targets,
-    /// The user's input when the question first opened, from the press of the bar's button: a reword asks under it, so
-    /// it never opens or moves focus once the user has moved on.
-    mark: Mark,
     /// The window it is open in, which a reconciling settle (an observer, with no window) reaches it through.
     window: AnyWindowHandle,
 }
@@ -331,14 +315,6 @@ fn reconciled(asked: &Asked, collections: &Collections) -> Vec<Target> {
             None => Some(drawn.clone()),
         })
         .collect()
-}
-
-/// Whether the open question stays as drawn although the store now reads `now`: the user has pressed a key or clicked
-/// since it opened, so a replacement could not open or take focus under its mark, and while a target is left its answer
-/// still authorizes only what it drew. The one statement of that rule, for the reconcile that schedules a reword and
-/// the reword itself.
-fn stays_as_drawn(asked: &Asked, now: &[Target], cx: &App) -> bool {
-    focus::has_moved_on(&asked.mark, cx) && !now.is_empty()
 }
 
 // ---- Starting ------------------------------------------------------------------------------------------------------
@@ -390,7 +366,7 @@ impl SessionList {
             self.run_batch(targets, window, cx);
             return;
         }
-        self.ask_bulk(action, targets.into(), mark, false, window, cx);
+        self.ask_bulk(action, targets.into(), &mark, window, cx);
         // The question is a choice of its own: a batch accepted earlier must not clear the marks it asks about.
         let current = self.current.current(cx);
         if current.bulk.question.is_some() {
@@ -398,46 +374,40 @@ impl SessionList {
         }
     }
 
-    /// Ask the bulk question about `targets` under `mark`, the press that first asked it, as a replacement of an
-    /// earlier one when `later` (it then starts on Cancel). Focus first goes to the ⋯, which the prompt returns it to
-    /// on Cancel, as the old question's Cancel did. While the bar draws no ⋯ (every mark shown is a retired session,
-    /// which no metadata action takes), it goes to the bar's own button for `action` instead, where the old app fell
-    /// back to the order's title, which the bar here replaces and so is not drawn.
+    /// Ask the bulk question about `targets` under `mark`, the press of the bar's button. Every close returns focus to
+    /// the ⋯, as the old question's Cancel did. While the bar draws no ⋯ (every mark shown is a retired session, which
+    /// no metadata action takes), it returns to the bar's own button for `action` instead, where the old app fell back
+    /// to the order's title, which the bar here replaces and so is not drawn. A close whose ⋯ goes right after it (every
+    /// target proven gone) leaves focus to the coordinator's recovery, which sends it to the open session's terminal
+    /// (the module docs, "Focus").
     fn ask_bulk(
         &mut self,
         action: Lifecycle,
         targets: Targets,
-        mark: Mark,
-        later: bool,
+        mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let opener = self
+        let returns_to = self
             .marking
             .menu_toggle_drawn()
             .unwrap_or_else(|| self.marking.button_focus(action))
             .clone();
-        focus::focus_control(&opener, &mark, window, cx);
-        let mut question = question(action, targets.clone());
-        if later {
-            question = question.starts_on_cancel();
-        }
         let list = cx.weak_entity();
-        let asked = prompt::ask(
-            question,
+        let open = prompt::ask_rewordable(
+            question(action, targets.clone()).returns_to(returns_to),
             None,
-            &mark,
+            mark,
             move |targets, window, cx| {
                 let _ = list.update(cx, |list, cx| list.confirm_bulk(targets, window, cx));
             },
             window,
             cx,
         );
-        self.current.current(cx).bulk.question = asked.map(|layer| Asked {
-            layer,
+        self.current.current(cx).bulk.question = open.map(|open| Asked {
+            open,
             action,
             targets,
-            mark,
             window: window.window_handle(),
         });
     }
@@ -449,7 +419,7 @@ impl SessionList {
         if bulk
             .question
             .as_ref()
-            .is_some_and(|asked| !layers::is_open(asked.layer, window, cx))
+            .is_some_and(|asked| !layers::is_open(asked.open.layer(), window, cx))
         {
             bulk.question = None;
         }
@@ -581,9 +551,9 @@ impl SessionList {
 
     // ---- Rewording -----------------------------------------------------------------------------------------------------
 
-    /// After a change of the store, see whether the open bulk question still reads as drawn ([`reconciled`],
-    /// [`rewords`]), and if not, reword it once the observer has returned (rewording asks, which needs the window).
-    /// Called from the list's settle, which every change of the store reaches.
+    /// After a change of the store, see whether the open bulk question still reads as drawn ([`reconciled`]), and if
+    /// not, reword it once the observer has returned (a reword needs the window). Called from the list's settle, which
+    /// every change of the store reaches.
     pub(super) fn reconcile_bulk_question(&mut self, cx: &mut Context<Self>) {
         let Some(store) = session::current_store(cx) else {
             return;
@@ -591,8 +561,7 @@ impl SessionList {
         let Some(asked) = &self.current.current(cx).bulk.question else {
             return;
         };
-        let now = reconciled(asked, store.read(cx).collections());
-        if stays_as_drawn(asked, &now, cx) || !rewords(&asked.targets, &now) {
+        if *asked.targets == *reconciled(asked, store.read(cx).collections()) {
             return;
         }
         let (list, window) = (cx.weak_entity(), asked.window);
@@ -603,11 +572,14 @@ impl SessionList {
         });
     }
 
-    /// Reword the open bulk question to the targets the store gives now: close it, then ask the replacement under the
-    /// question's own opening mark, or leave it closed when no target is left. Done afresh from the store as it is when
-    /// it runs, so several changes before it ran reword once; a question closed meanwhile is only forgotten. Once the
-    /// user has moved on since the question opened, it stays as drawn: the replacement could not open under that mark,
-    /// and its answer still authorizes only what it drew (admission drops a target no longer shown).
+    /// Reword the open bulk question in place to the targets the store gives now, or close it when no target is left.
+    /// Done afresh from the store as it is when it runs, so several changes before it ran reword once; a question
+    /// closed meanwhile is only forgotten.
+    ///
+    /// The prompt refuses a reword once the question has closed, and while an answer that can fail has an attempt in
+    /// flight. The bulk question has no such answer, so today a refusal means it closed; one refused while still open
+    /// stays tracked with the targets it last drew, so the bar's Stop and Delete keep refusing to ask a second question
+    /// over it, and a later listing tries the reword again.
     fn reword_bulk_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.bulk_question_open(window, cx) {
             return;
@@ -619,14 +591,24 @@ impl SessionList {
             return;
         };
         let targets = reconciled(&asked, store.read(cx).collections());
-        if stays_as_drawn(&asked, &targets, cx) || !rewords(&asked.targets, &targets) {
+        if *asked.targets == *targets {
             self.current.current(cx).bulk.question = Some(asked);
             return;
         }
-        layers::close(asked.layer, window, cx);
-        if !targets.is_empty() {
-            self.ask_bulk(asked.action, targets.into(), asked.mark, true, window, cx);
+        if targets.is_empty() {
+            layers::close(asked.open.layer(), window, cx);
+            return;
         }
+        let targets: Targets = targets.into();
+        let reworded = asked
+            .open
+            .reword(question(asked.action, targets.clone()), window, cx);
+        let kept = if reworded {
+            Some(Asked { targets, ..asked })
+        } else {
+            layers::is_open(asked.open.layer(), window, cx).then_some(asked)
+        };
+        self.current.current(cx).bulk.question = kept;
     }
 }
 
@@ -637,7 +619,9 @@ impl SessionList {
 const QUESTION_WIDTH: f32 = 620.;
 
 /// The bulk question about `targets`: "Stop 2 sessions?" or "Delete 1 session?", with one row per target in its body,
-/// and the old dialog's answers and their help. Its answer acts on `targets` as frozen here.
+/// and the old dialog's answers and their help. Its answer acts on `targets` as frozen here. Built both to ask and to
+/// reword, which reads only its words and `targets`: where closing returns focus is the asker's ([`SessionList`]'s
+/// `ask_bulk`).
 fn question(action: Lifecycle, targets: Targets) -> Question<Targets> {
     let verb = action.label();
     let noun = if targets.len() == 1 {
@@ -661,6 +645,7 @@ fn question(action: Lifecycle, targets: Targets) -> Question<Targets> {
     ))
     .keeps_focus_on_empty_click()
     .width(px(QUESTION_WIDTH))
+    .scroll_stop("Sessions affected")
     .body(move |targets: &Targets, _, cx| {
         let targets = targets.clone();
         cx.new(|_| Rows { action, targets })
@@ -709,12 +694,17 @@ impl Render for Rows {
                             .flex_wrap()
                             .gap(px(8.))
                             .min_w_0()
-                            .child(
+                            .child({
+                                // The status cell's own id, for tests that read its words: the ended status's host
+                                // sentence inside it already takes `bulk-target-status-<key>`.
+                                let selector = format!("bulk-target-word-{key}");
                                 div()
+                                    .id(ElementId::Name(selector.clone().into()))
+                                    .debug_selector(move || selector)
                                     .flex_none()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(status),
-                            )
+                                    .child(status)
+                            })
                             .child(
                                 div()
                                     .flex_1()

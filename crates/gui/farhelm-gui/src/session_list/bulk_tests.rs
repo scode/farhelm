@@ -24,11 +24,13 @@ use super::marking_tests::{
 use super::menu_tests::{drawn, ended, label_of, push, snapshot};
 use super::pins_tests::away;
 use super::retired_tests::retired;
+use super::row_tests::texts_within;
 use super::status::{self, Live};
 use super::tests::{change, listing_meta, painted, selected, session};
+use crate::components::Role;
 use crate::focus;
 use crate::session;
-use crate::test_support::{self, focused_id, frame};
+use crate::test_support::{self, focused_id, frame, show_next_frame};
 
 // ---- Helpers ---------------------------------------------------------------------------------------------------------
 
@@ -105,6 +107,15 @@ fn question_rows(cx: &mut VisualTestContext) -> Vec<&'static str> {
     .filter(|(_, row)| drawn(cx, row))
     .map(|(key, _)| key)
     .collect()
+}
+
+/// The texts painted in the status cell of the bulk question's row for `key` (`bulk-target-word-<key>`), in paint
+/// order: a live status's word, or an ended status's words.
+fn status_words(cx: &mut VisualTestContext, key: &str) -> Vec<String> {
+    texts_within(&frame(cx), &format!("bulk-target-word-{key}"))
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect()
 }
 
 /// Ctrl-click each of `rows` (row selectors), marking them.
@@ -705,12 +716,16 @@ fn a_bulk_stop_asks_about_tabs_and_freezes_each_rows_preconditions(cx: &mut Test
 /// Why this matters: SPEC.md: the bulk question "lists one row per target with status, name, full host and what the
 /// action will do, with the same conditional managed-checkout consequence for Delete", and "Cancel, Close and Escape
 /// dismiss their current question without clearing marks"; the old app returned focus to the ⋯ after a Cancel. The rows
-/// are what the answer authorizes, so each must say what will happen to its own session. Specified: Delete of a
-/// (running, in a managed checkout), b (exited, on a host named `a-very-long-host.example.test`) and c (status unknown)
-/// asks "Delete 3 sessions?" with focus on Confirm, rows saying "Running", "Exited (code 0)" and "Unknown", each title,
-/// b's full host, each row's Delete consequence and the managed checkout's line once; Cancel sends nothing, keeps the
-/// three marks and leaves focus on the ⋯. (Skip session confirmations is
-/// `skip_session_confirmations_runs_bulk_stop_and_delete_unasked`'s.)
+/// are what the answer authorizes, so each must say what will happen to its own session, and a keyboard user must be
+/// able to scroll every row into view before answering, as the old body's "Sessions affected" region let them (SPEC.md
+/// keeps Tab within a modal's "keyboard scroll regions"). Specified: Delete of a (running, in a managed checkout), b
+/// (exited, on a host named `a-very-long-host.example.test`) and c (status unknown) asks "Delete 3 sessions?" with
+/// focus on Confirm, rows saying "Running", "Exited (code 0)" and "Unknown", each title, b's full host, each row's
+/// Delete consequence and the managed checkout's line once; Tab from Confirm reaches the text's scroll stop, a region
+/// named "Sessions affected"; Cancel then sends nothing, keeps the three marks and returns focus to the ⋯, the control
+/// the question names for its close, though the bar's Delete asked it and focus was last on the stop. (The stop is
+/// there whether or not the rows overflow, under the dialog frame's rule, tested with it; Skip session confirmations
+/// is `skip_session_confirmations_runs_bulk_stop_and_delete_unasked`'s.)
 #[gpui::test]
 fn a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks(cx: &mut TestAppContext) {
     let (mut fake, list, cx) = open_list(
@@ -766,6 +781,17 @@ fn a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks(cx: &mut 
     }
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
 
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-body-stop"));
+    let stop = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("prompt-body-stop"))
+        .expect("the stop is drawn");
+    assert_eq!(
+        (stop.role, stop.label.as_deref()),
+        (Some(Role::Region), Some("Sessions affected"))
+    );
+
     test_support::click(cx, "prompt-cancel");
     test_support::settle(cx);
     assert!(!drawn(cx, "prompt"));
@@ -810,12 +836,12 @@ fn skip_session_confirmations_runs_bulk_stop_and_delete_unasked(cx: &mut TestApp
 /// Why this matters: SPEC.md: "An accepted changed target rewords the question and replaces its opening; authoritative
 /// disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot", and
 /// "answer-time admission may only remove targets no longer displayed or marked"; the old spec's "Delete rewords and
-/// shrinks without gaining targets". The rewording is a close and a re-ask, which must keep focus inside the question
-/// (the migration's decision: a replacement that moved focus out would need a prompt that can replace in place).
-/// Specified: with a, b and d asked about (all running) and c unmarked, b exiting rewords b's row to "Delete anyway:"
-/// with focus on the replacement's Cancel, as a question arriving later starts; a complete listing without d removes
-/// d's row ("Delete 2 sessions?"); a filtered listing that leaves a out keeps a's row; Confirm then sends b's Delete
-/// alone, with the reworded row's `only_if_nothing_alive`, since a is no longer shown.
+/// shrinks without gaining targets". The reword is in place, as the old question's was, so focus stays on the answer
+/// the user was on rather than jumping while they read. Specified: with a, b and d asked about (all running) and c
+/// unmarked, b exiting rewords b's row to "Delete anyway:" with focus still on Confirm; a complete listing without d
+/// removes d's row ("Delete 2 sessions?"); a filtered listing that leaves a out keeps a's row; once the new words are
+/// on screen, Confirm sends b's Delete alone, with the reworded row's `only_if_nothing_alive`, since a is no longer
+/// shown.
 #[gpui::test]
 fn a_changed_target_rewords_the_question_which_never_gains_one(cx: &mut TestAppContext) {
     let unmanaged = |key| session(key).unmanaged();
@@ -851,8 +877,8 @@ fn a_changed_target_rewords_the_question_which_never_gains_one(cx: &mut TestAppC
     assert!(texts(cx).iter().any(|text| text == "Delete anyway:"));
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("prompt-cancel"),
-        "focus stayed in the question"
+        Some("prompt-confirm"),
+        "focus stayed where it was"
     );
 
     fake.push(change(
@@ -882,6 +908,7 @@ fn a_changed_target_rewords_the_question_which_never_gains_one(cx: &mut TestAppC
         paths(&sent)
     );
 
+    show_next_frame(cx);
     test_support::click(cx, "prompt-confirm");
     test_support::settle(cx);
     assert_eq!(
@@ -920,13 +947,33 @@ fn a_batch_acts_only_on_the_marks_shown(cx: &mut TestAppContext) {
 }
 
 /// Why this matters: SPEC.md: "authoritative disappearance can remove" a target, and a question about nothing would
-/// authorize nothing; the old reconcile closed the question once no target was left. Specified: with the Delete
-/// question asking about a and b, a complete listing without either closes it, and nothing is sent.
+/// authorize nothing; the old reconcile closed the question once no target was left. The close runs before the frame
+/// that drops the bar, so focus goes to the ⋯ still on screen and, once it goes, recovers to the open session's terminal
+/// (SPEC.md, "Where focus rests"); a fallback to what held focus at opening would land on a row instead. Specified:
+/// with c open and focused on its row, a and b marked, and the macOS click rule (the bar's Delete takes no focus, so
+/// row c holds it when the question opens), the Delete question asks about a and b; a complete listing without either
+/// closes it, sends nothing, and leaves focus on the terminal, not on row c.
 #[gpui::test]
 fn the_question_closes_once_no_target_is_left(cx: &mut TestAppContext) {
-    let (mut fake, _list, cx) = open_list(cx, fleet(&["a", "b", "c"]));
+    let (mut fake, _list, cx) = open_list(cx, fleet(&["c", "a", "b"]));
     requests(&mut fake);
-    mark(cx, &["session-row-a", "session-row-b"]);
+    // Marking c and unmarking it again leaves focus on c's row, which survives the listing below.
+    mark(
+        cx,
+        &[
+            "session-row-a",
+            "session-row-b",
+            "session-row-c",
+            "session-row-c",
+        ],
+    );
+    assert_eq!(count(cx).as_deref(), Some("2 marked"), "the premise");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-row-c"),
+        "the premise"
+    );
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
     test_support::click(cx, DELETE_ID);
     test_support::settle(cx);
     assert_eq!(question_rows(cx), ["a", "b"], "the premise");
@@ -937,16 +984,26 @@ fn the_question_closes_once_no_target_is_left(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "prompt"));
     let (sent, _) = lifecycle(fake.commands());
     assert!(sent.is_empty(), "{:?}", paths(&sent));
+    assert_eq!(selected(cx).as_deref(), Some("c"), "c stays open");
+    assert!(
+        drawn(cx, "session-row-c"),
+        "the premise: the opener's row is still drawn"
+    );
+    assert!(
+        test_support::terminal_focused(cx),
+        "focus is on the terminal: {:?}",
+        focused_id(cx)
+    );
 }
 
-/// Why this matters: an agent at work moves between Running, Waiting and Idle every turn, and an idle row with new
-/// output reads "Idle — new output"; none of that changes what a Delete would do or carry. The old question replaced
-/// itself in place on such a change at no cost, but here a reword closes and reopens the question, moving focus from
-/// Confirm to Cancel each time, so the status word is left out of what rewords it. Specified: with the Delete question
-/// asking about running a and b and focus on its Confirm, a listing that makes b idle with unseen output (the premise
-/// checked in the store) leaves the same question open, with focus still on Confirm.
+/// Why this matters: the question's rows say each target's status, and the old question replaced itself in place on
+/// any change it drew, its status words included, so a row never named a status its session had left. An agent at work
+/// moves between Running, Waiting and Idle every turn, so the reword must also leave focus alone, or it would move
+/// under the user while they read. Specified: with the Delete question asking about running a and b and focus on its
+/// Confirm, a listing that makes b idle with unseen output (the premise checked in the store) leaves the question open
+/// with b's row saying "Idle — new output" in place of "Running", a's row still "Running", and focus still on Confirm.
 #[gpui::test]
-fn a_status_word_change_does_not_reword_the_question(cx: &mut TestAppContext) {
+fn a_status_word_change_rewords_the_question_in_place(cx: &mut TestAppContext) {
     let (mut fake, _list, cx) = open_list(cx, fleet(&["a", "b"]));
     requests(&mut fake);
     mark(cx, &["session-row-a", "session-row-b"]);
@@ -956,6 +1013,10 @@ fn a_status_word_change_does_not_reword_the_question(cx: &mut TestAppContext) {
         focused_id(cx).as_deref(),
         Some("prompt-confirm"),
         "the premise"
+    );
+    assert!(
+        status_words(cx, "b").contains(&"Running".to_owned()),
+        "the premise: b's row says Running"
     );
 
     push(
@@ -982,50 +1043,37 @@ fn a_status_word_change_does_not_reword_the_question(cx: &mut TestAppContext) {
     );
     assert!(drawn(cx, "prompt"));
     assert_eq!(question_rows(cx), ["a", "b"]);
+    let b = status_words(cx, "b");
+    assert!(b.contains(&"Idle — new output".to_owned()), "{b:?}");
+    assert!(!b.contains(&"Running".to_owned()), "{b:?}");
+    assert!(status_words(cx, "a").contains(&"Running".to_owned()));
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
 }
 
-/// Why this matters: a reword closes the question and asks again, which moves focus; once the user has pressed a key or
-/// clicked since the question opened, that move would take focus from where they put it (in the question, or an agent
-/// approval card beside it), so the question stays as drawn, and its answer still authorizes only what it drew.
-/// Specified: with the Delete question over running a, b and d, and Shift+Tab then Tab pressed (focus back on Confirm,
-/// where a reword's replacement, which starts on Cancel, would not leave it), b exiting (checked in the store) leaves
-/// the question with a, b and d, b's drawn consequence and focus on Confirm; a complete listing without d (d's row gone
-/// from the list) still draws d's row in the question; Confirm sends a's Delete, then b's with the guard drawn for a
-/// running agent (no flag), and once b's is answered nothing for d.
+/// Why this matters: the bulk question can stay open while agents work, so a listing can reword it after the user has
+/// moved focus inside it, onto Cancel to back out, say. Closing it and asking again, as this port once did, put focus
+/// back on a starting answer each time; a reword in place must leave it on the control the user chose, and the answers
+/// must then act on the reworded targets. Specified: with the Delete question over running a and b and Shift+Tab
+/// pressed (focus on Cancel), b exiting (checked in the store) rewords b's row to "Delete anyway:" with focus still on
+/// Cancel; Tab to Confirm and, once the new words are on screen, Enter sends a's Delete with no flag, then b's with
+/// the reworded row's `only_if_nothing_alive`.
 #[gpui::test]
-fn after_the_user_moved_on_a_change_leaves_the_question_as_drawn(cx: &mut TestAppContext) {
+fn a_reword_keeps_focus_where_the_user_put_it_in_the_question(cx: &mut TestAppContext) {
     let unmanaged = |key| session(key).unmanaged();
-    let (mut fake, _list, cx) = open_list(
-        cx,
-        rows(vec![
-            unmanaged("a"),
-            unmanaged("b"),
-            unmanaged("c"),
-            unmanaged("d"),
-        ]),
-    );
+    let (mut fake, _list, cx) = open_list(cx, rows(vec![unmanaged("a"), unmanaged("b")]));
     requests(&mut fake);
-    mark(cx, &["session-row-a", "session-row-b", "session-row-d"]);
+    mark(cx, &["session-row-a", "session-row-b"]);
     test_support::click(cx, DELETE_ID);
     test_support::settle(cx);
-    assert_eq!(question_rows(cx), ["a", "b", "d"], "the premise");
-    test_support::keys(cx, "shift-tab tab");
+    assert_eq!(question_rows(cx), ["a", "b"], "the premise");
+    test_support::keys(cx, "shift-tab");
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("prompt-confirm"),
-        "the premise: the user pressed keys and focus is back on Confirm"
+        Some("prompt-cancel"),
+        "the premise: the user moved focus to Cancel"
     );
-    // The marking clicks took the order hold; off the rows, the list draws the pushed listings as they are, so d's row
-    // can leave it (`pins_tests::away`).
-    away(cx);
 
-    push(
-        &mut fake,
-        &["a", "b", "c", "d"],
-        &[(ended("b").unmanaged(), 0)],
-        cx,
-    );
+    push(&mut fake, &["a", "b"], &[(ended("b").unmanaged(), 0)], cx);
     let b_ended = cx.update(|_, cx| {
         let store = session::current_store(cx).expect("the premise: a UI session is live");
         let collections = store.read(cx).collections();
@@ -1034,27 +1082,17 @@ fn after_the_user_moved_on_a_change_leaves_the_question_as_drawn(cx: &mut TestAp
             .map(|row| row.info.status.has_ended())
     });
     assert_eq!(b_ended, Some(true), "the premise: b ended in the store");
-    assert_eq!(question_rows(cx), ["a", "b", "d"]);
-    assert!(
-        !texts(cx).iter().any(|text| text == "Delete anyway:"),
-        "b keeps its drawn consequence"
-    );
-    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    assert!(texts(cx).iter().any(|text| text == "Delete anyway:"));
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
 
-    fake.push(change(
-        listing_meta(&["a", "b", "c"], 3, false),
-        &[],
-        &["d"],
-    ));
-    test_support::settle(cx);
-    assert!(
-        !drawn(cx, "session-row-d"),
-        "the premise: the listing proved d gone"
+    test_support::keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise"
     );
-    assert_eq!(question_rows(cx), ["a", "b", "d"], "d's row stays drawn");
-
-    test_support::click(cx, "prompt-confirm");
-    test_support::settle(cx);
+    show_next_frame(cx);
+    test_support::keys(cx, "enter");
     let first = fake.commands();
     assert_eq!(
         owned(&lifecycle(first.clone()).0),
@@ -1064,18 +1102,11 @@ fn after_the_user_moved_on_a_change_leaves_the_question_as_drawn(cx: &mut TestAp
         done(&mut fake, command);
     }
     test_support::settle(cx);
-    let second = fake.commands();
     assert_eq!(
-        owned(&lifecycle(second.clone()).0),
-        [delete("/api/sessions/b")],
-        "b goes with the guard drawn for a running agent, not the exited one's"
+        owned(&lifecycle(fake.commands()).0),
+        [delete("/api/sessions/b?only_if_nothing_alive=true")],
+        "b goes with the guard the reworded row drew"
     );
-    for command in &second {
-        done(&mut fake, command);
-    }
-    test_support::settle(cx);
-    let (rest, _) = lifecycle(fake.commands());
-    assert!(rest.is_empty(), "nothing for d: {:?}", paths(&rest));
 }
 
 // ---- Retired containerized sessions ---------------------------------------------------------------------------------
@@ -1149,11 +1180,12 @@ fn with_only_retired_sessions_marked_the_bar_draws_delete_and_no_stop(cx: &mut T
     assert!(drawn(cx, STOP_ID));
 }
 
-/// Why this matters: Cancel returns focus to the control the bar moved it to before asking, the ⋯; with only retired
-/// sessions marked no metadata action applies and the bar draws no ⋯, so that control must be one the bar does draw,
-/// or Cancel would leave focus nowhere the user was. The old app fell back to the order's title, which the bar here
-/// replaces. Specified: under the macOS click rule (a click focuses nothing), with retired r (running) alone marked,
-/// Delete asks about r, and Cancel sends nothing, keeps r marked and leaves focus on the bar's Delete.
+/// Why this matters: the bulk question names the ⋯ as where its close returns focus; with only retired sessions
+/// marked no metadata action applies and the bar draws no ⋯, so the question must name a control the bar does draw, or
+/// Cancel would leave focus nowhere the user was. The old app fell back to the order's title, which the bar here
+/// replaces. Specified: under the macOS click rule (a click focuses nothing, so the pressed Delete never held focus),
+/// with retired r (running) alone marked, Delete asks about r, and Cancel sends nothing, keeps r marked and returns
+/// focus to the bar's Delete.
 #[gpui::test]
 fn with_no_menu_toggle_cancel_returns_focus_to_the_pressed_button(cx: &mut TestAppContext) {
     let (mut fake, list, cx) = open_list(cx, rows(vec![session("o"), retired("r")]));

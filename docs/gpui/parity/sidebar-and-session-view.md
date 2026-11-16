@@ -469,13 +469,14 @@ list's Escape, and is not driven here); `metadata acts only on displayed eligibl
 `a_press_on_the_bar_closes_a_rows_own_question_and_takes_the_row`: the old spec's scripted click left the row's own
 Delete question open, but in the app a press on the bar closes it first, so the row is taken like any other);
 `Delete rewords and shrinks without gaining targets` (`a_changed_target_rewords_the_question_which_never_gains_one`,
-which also checks that the reword keeps focus in the question, `a_status_word_change_does_not_reword_the_question`,
-`after_the_user_moved_on_a_change_leaves_the_question_as_drawn`, `the_question_closes_once_no_target_is_left`, and
+which also checks that the reword leaves focus where it was, `a_status_word_change_rewords_the_question_in_place`,
+`a_reword_keeps_focus_where_the_user_put_it_in_the_question`, `the_question_closes_once_no_target_is_left`, and
 `a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks` for the rows, the full host, the managed
-checkout's line and Cancel's focus on the ⋯; the hostile title's escaping is the host-text element's, tested there; the
-marked bar's Stop and Delete are in the `session-list-marked` golden); `completion preserves a later intent`, four
-variants (`completion_keeps_the_marks_of_a_later_question`, `completion_keeps_a_target_marked_again`,
-`completion_keeps_the_marks_under_a_later_menu`, `completion_keeps_the_marks_of_a_later_question_about_them`);
+checkout's line, the "Sessions affected" scroll stop and Cancel's focus on the ⋯; the hostile title's escaping is the
+host-text element's, tested there; the marked bar's Stop and Delete are in the `session-list-marked` golden);
+`completion preserves a later intent`, four variants (`completion_keeps_the_marks_of_a_later_question`,
+`completion_keeps_a_target_marked_again`, `completion_keeps_the_marks_under_a_later_menu`,
+`completion_keeps_the_marks_of_a_later_question_about_them`);
 `Stop paces nine rows on one host while another progresses`
 (`a_batch_sends_one_request_per_host_and_a_second_batch_keeps_its_own_pace`, with three rows on one host and two on
 another, Clear and a second batch while the first runs);
@@ -1255,22 +1256,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   anyway and skipped only a row whose question or Rename was open: the port's row menu refuses Pin and the seen toggle
   while a request is in flight, and the bulk action follows it.
 - The bulk question's rows show the status in words in the body's ink, where the old ones drew the colored status badge.
-- The bulk question's body scrolls with the wheel only: the prompt gives a question's body no keyboard scroll stop,
-  where the old body was a scroll region of its own ("Sessions affected"), so with more targets than fit, a keyboard
-  user cannot bring every row into view. This waits for a prompt request (a scroll stop for a question's body).
-- A bulk question reworded by a listing is closed and asked again, starting on Cancel as a question that arrives later
-  does, so focus on its Confirm moves to the replacement's Cancel; the old one replaced its opening in place and
-  remembered where focus was. The old question also replaced itself on any change it drew, its status words included;
-  here only what the answer would authorize counts (a title, host, consequence, checkout line or precondition), so a
-  status word can go stale while the question is open, because each reword moves focus. Once the user has pressed a key
-  or clicked since the question opened (in it, or in an agent approval card beside it), a change no longer rewords it:
-  the replacement asks under the question's own opening, which may not take focus then, so the question stays as drawn,
-  and its answer still authorizes only what it drew. A question whose every target is proven gone still closes then, and
-  closing it also closes any dialog raised above it (an approval card's tunnel warning, say). All of this waits for the
-  prompt's replace-in-place, which the area owner has requested. Cancel returns focus to the ⋯ because the bar moves
-  focus there before asking (the prompt returns focus to what held it when the question opened, and has no way to name
-  another control). While the bar draws no ⋯ (every mark shown a retired session, which no metadata action takes),
-  Cancel returns focus to the bar's Delete (the only lifecycle control it draws then), where the old app named the
+- A bulk question whose every target a listing proves gone closes, and closing it also closes any dialog raised above it
+  from elsewhere (an approval card's tunnel warning, say), where the old app closed the bulk dialog alone. This waits
+  for the layer manager to close one dialog without closing the layers raised above it from outside it, which has been
+  requested from its owner.
+- When a bulk question closes because every target is proven gone, focus goes to the ⋯ while the frame still draws it,
+  and once the ⋯ is gone it recovers to the open session's terminal, whatever held focus when the question opened; the
+  old app focused the order's title.
+- While the bar draws no ⋯ (every mark shown a retired session, which no metadata action takes), closing the bulk
+  question returns focus to the bar's Delete (the only lifecycle control it draws then), where the old app named the
   order's title, which is not drawn while the bar is, so it focused nothing.
 - The bulk question has no header Close (the prompt's centered question draws none), where the old one had a "×" named
   "Cancel bulk stop" or "Cancel bulk delete". Cancel and Escape do what it did.
