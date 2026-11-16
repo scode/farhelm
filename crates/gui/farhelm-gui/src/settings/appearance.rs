@@ -4,8 +4,8 @@
 //! its "Color theme" legend over the segmented well, and its three choices. The old app kept the choice per device, in
 //! the web view's storage; here it is one field of the helm's preference row like every other Settings choice (the
 //! maintainer decided on 2026-11-13 that appearance is a helm preference), so the help no longer says "for this device"
-//! and says instead that other open clients pick the choice up right away. Nothing is carried over from the old
-//! storage: every user starts at System after the switch to this app.
+//! and says instead that a change from the command line or an agent shows right away. Nothing is carried over from the
+//! old storage: every user starts at System after the switch to this app.
 //!
 //! The radio saves like a switch does ([`super::SettingsDialog::choose_appearance`]): the field alone, under the
 //! preference row's key, showing the value being saved only while the save is in flight and the helm's stored choice
@@ -40,8 +40,8 @@ const LEGEND_TEXT: f32 = 13.;
 const LEGEND_GAP: f32 = 8.;
 
 /// The help above the group: the old line, reworded for a choice the helm holds (see the module docs).
-const HELP: &str = "Choose the interface colors. This choice applies to this helm; other open clients pick it up right \
-                    away. System follows each device's own appearance. The terminal stays dark.";
+const HELP: &str = "Choose the interface colors. This choice applies to this helm; changes from the command line or an \
+                    agent show here right away. System follows each device's own appearance. The terminal stays dark.";
 
 /// The line under the group after the helm refused a save.
 const FAILURE: &str = "Could not save the color theme. Try again.";
@@ -142,7 +142,7 @@ pub(super) fn section(
         RadioGroup::new(
             ID,
             "Color theme",
-            HoverHelp::tooltip("The interface colors for every client of this helm"),
+            HoverHelp::tooltip("The interface colors for this helm"),
             Role::RadioGroup,
         )
         .chosen(Some(shown(draft, preferences))),

@@ -3,10 +3,12 @@
 //!
 //! Each switch is ported from the old Settings dialog (`settings.rs` at reference commit `24bc0580`) with its label,
 //! hover help and help text, except that the help no longer says other clients see the choice "when they reload": the
-//! migration's orchestrator decided on 2026-11-13 that such shared changes arrive live in the new app, whose helm pushes
-//! its state, and that each area rewords its own help as it ports it. The three status sounds' switches come from the
-//! old `SoundSettings` (`sounds.rs` at the same commit), which saved them on the device; here they are fields of the
-//! preference row like the rest (the maintainer's decision of 2026-11-13).
+//! migration's orchestrator decided on 2026-11-13 that such shared changes arrive live in the new app, whose helm
+//! pushes its state, and that each area rewords its own help as it ports it. The help names who else changes these
+//! choices, the command line and agents, rather than other open clients: one desktop app talks to its helm (the
+//! orchestrator's drift scan of 2026-11-15). The three status sounds' switches come from the old `SoundSettings`
+//! (`sounds.rs` at the same commit), which saved them on the device; here they are fields of the preference row like
+//! the rest (the maintainer's decision of 2026-11-13).
 //!
 //! A switch saves one field of the preference row with `PUT /api/preferences` and a sparse body naming only that field
 //! (the helm's `put_preferences`: a field the patch leaves out is untouched), so it never overwrites another field with
@@ -263,21 +265,21 @@ impl Choice {
         match self {
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash \
-                 confirmations still follow their own rules. This choice applies to this helm; other open clients \
-                 pick it up right away."
+                 confirmations still follow their own rules. This choice applies to this helm; changes from the \
+                 command line or an agent show here right away."
             }
             Choice::NameSessionsOnQuickLaunch => {
                 "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This \
-                 choice applies to this helm; other open clients pick it up right away."
+                 choice applies to this helm; changes from the command line or an agent show here right away."
             }
             Choice::ColorTerminalFrames => {
                 "Match the thin frame around every session's terminal to its host icon color. The terminal \
-                 background stays the same. This choice applies to this helm; other open clients pick it up right \
-                 away."
+                 background stays the same. This choice applies to this helm; changes from the command line or an \
+                 agent show here right away."
             }
             Choice::AutoUpdateRemoteHosts => {
                 "Update remote hosts as soon as an update is available, even with no window open. This never updates \
-                 the helm's own machine. Other open clients pick up this choice right away."
+                 the helm's own machine."
             }
             Choice::SkipHostSetupConfirmation if on => {
                 "Farhelm sets up a new host as soon as it has checked it, without asking."

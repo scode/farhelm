@@ -24,7 +24,7 @@ use std::time::Duration;
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
 /// The helm's Tensorlake settings as `GET /api/tensorlake` and a done `PUT` answer them.
-fn account(key_set: bool, create_without_asking: bool) -> Value {
+pub(super) fn account(key_set: bool, create_without_asking: bool) -> Value {
     json!({ "api_key_set": key_set, "create_without_asking": create_without_asking, "helm_tag": "fixture",
             "ssh_key": { "state": "not_created" } })
 }
@@ -62,7 +62,7 @@ fn shows_command(cx: &mut VisualTestContext) -> bool {
 
 /// Open Settings and show Tensorlake, checking that showing it sends exactly one read, of the account, which is
 /// returned unanswered.
-fn show_tensorlake(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> FakeCommand {
+pub(super) fn show_tensorlake(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> FakeCommand {
     open_settings(cx);
     assert_eq!(sent(helm), [], "the premise: Sessions reads nothing");
     click(cx, section_button(Section::Tensorlake));
@@ -89,7 +89,7 @@ fn one_account_save(helm: &mut FakeHelm) -> (u64, Value) {
 
 /// Press the control with element id `id` the way a keyboard user does: Tab to it, which scrolls it into the dialog's
 /// view, and Space. The switch sits below the fold, so a click cannot reach it.
-fn press(cx: &mut VisualTestContext, id: &str) {
+pub(super) fn press(cx: &mut VisualTestContext, id: &str) {
     reach(cx, id);
     keys(cx, "space");
 }
@@ -239,6 +239,17 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
     helm.reply(id, 200, Some(account(true, false)));
     settle(cx);
     assert_eq!(typed_in_credentials(cx), "", "the saving form was emptied");
+    // The saved key makes Tensorlake's list of Sandboxes not on this helm read, though the section is not shown.
+    let reads = sent(&mut helm);
+    assert_eq!(
+        reads
+            .iter()
+            .map(|read| read.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/api/tensorlake/orphans"]
+    );
+    helm.reply(reads[0].id, 200, Some(json!([])));
+    settle(cx);
 
     click(cx, section_button(Section::Tensorlake));
     assert_eq!(

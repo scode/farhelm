@@ -113,6 +113,10 @@ pub(super) struct TensorlakeAccount {
     settings: Option<Settings>,
     /// Why the last read failed, until a read answers.
     unreadable: Option<HostText>,
+    /// How many Saves and Clears of the key either form has had done in this opening. A replaced key can make a list
+    /// read with the old one wrong even while a key stays saved, so the list of Sandboxes not on this helm reads again
+    /// when this moves ([`super::tensorlake_sandboxes`]).
+    key_saves: u64,
 }
 
 impl TensorlakeAccount {
@@ -122,12 +126,18 @@ impl TensorlakeAccount {
         TensorlakeAccount {
             settings: None,
             unreadable: None,
+            key_saves: 0,
         }
     }
 
     /// The helm's settings as last answered; `None` until the read answers, and while it keeps failing.
     pub(super) fn settings(&self) -> Option<&Settings> {
         self.settings.as_ref()
+    }
+
+    /// How many Saves and Clears of the key have been done in this opening ([`TensorlakeAccount::key_saves`]'s field).
+    pub(super) fn key_saves(&self) -> u64 {
+        self.key_saves
     }
 
     /// Why the account could not be read, until a read answers.
@@ -170,6 +180,18 @@ impl TensorlakeAccount {
     /// again: the save is done, but what it stored is unknown, and the account is otherwise read only once per opening,
     /// so the controls would go on showing the choice from before the save until Settings is opened again.
     pub(super) fn acknowledged(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
+        self.take_answer(body, cx);
+    }
+
+    /// A done Save or Clear of the key answered with `body`: [`TensorlakeAccount::acknowledged`], and one more key save
+    /// counted.
+    fn key_saved(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
+        self.key_saves += 1;
+        self.take_answer(body, cx);
+    }
+
+    /// [`TensorlakeAccount::acknowledged`]'s work.
+    fn take_answer(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
         match body.map(serde_json::from_value::<Settings>) {
             Some(Ok(settings)) => self.answered(Ok(settings), cx),
             Some(Err(_)) | None => Self::read(cx),
@@ -369,7 +391,7 @@ impl TensorlakeKey {
                         form.outcome = Some((Ok("API key saved".into()), String::new()));
                         let body = body.clone();
                         form.account
-                            .update(cx, |account, cx| account.acknowledged(body, cx));
+                            .update(cx, |account, cx| account.key_saved(body, cx));
                         form.empty_later(cx);
                     }
                     Outcome::Refused(refusal) => {
@@ -410,7 +432,7 @@ impl TensorlakeKey {
                         Outcome::Done(body) => {
                             form.outcome = Some((Ok("API key cleared".into()), String::new()));
                             form.account
-                                .update(cx, |account, cx| account.acknowledged(body, cx));
+                                .update(cx, |account, cx| account.key_saved(body, cx));
                             form.empty_later(cx);
                         }
                         Outcome::Refused(refusal) => {
