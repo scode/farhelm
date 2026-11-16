@@ -1,13 +1,6 @@
-//! Attachments by paste: a file or an image pasted into a session terminal is uploaded to the session's host, and the
+//! Attachments: a file or an image pasted or dropped into a session terminal is uploaded to the session's host, and the
 //! host path it lands at is typed at the program's cursor (SPEC.md, "Attachments"; the old app's `installAttachments`
 //! in terminal.js and the rules in `crates/farhelm-ui/src/attachments.rs`, both at the reference commit).
-//!
-//! NOTE: This covers pastes only. Drops, the status strip at the bottom of the terminal (with its "Attaching …" line),
-//! and the report of uploads cut off when the terminal goes away come in the next change, which lands together with
-//! this one. Until then a terminal dropped mid-upload (a reset, a closed tab) abandons its uploads without a word, and
-//! failures show in the overlay at the top of the terminal, where a refused link click's explanation already sits, in
-//! the old failure line's red. A file or an image pasted into a terminal that is not live is refused on that same
-//! refusal line ([`DETACHED_TEXT`]).
 //!
 //! Here's the TLDR of the rules this module keeps, each a decision the old app made and SPEC.md pins:
 //!
@@ -19,11 +12,20 @@
 //!   this side only awaits the answer, so typing goes on meanwhile.
 //! - The path is typed when its upload completes, into whatever attachment is live then, as a paste (so the supervisor
 //!   brackets it for a program that asked) and shell-quoted ([`shell_safe_path`]), one word with a trailing space.
-//! - Every failure is shown, and says whether the upload was definitely not attached or its outcome cannot be told
-//!   ([`TransferError::upload_outcome`]). A failure stays until the next paste this module acts on, never on a timer.
+//! - Every failure is shown in the strip at the bottom right of the terminal ([`strip`]), which takes no room from the
+//!   grid, and says whether the upload was definitely not attached or its outcome cannot be told
+//!   ([`TransferError::upload_outcome`]). A failure stays until the next paste or drop this module acts on, never on a
+//!   timer, and outlives its terminal ([`Carried`]).
+//! - Files or an image offered to a terminal that is not live are refused ([`DETACHED_TEXT`]), and the refusal goes
+//!   once the terminal is live again.
+//! - A terminal that goes away with uploads running or waiting says so for each ([`Attachments::hand_over`]): one not
+//!   yet sent was not attached, one sent cannot be told.
 //!
-//! The terminal's owner ([`super::attached`]) hands a classified paste to [`Attachments::attach`] and types each
-//! [`Uploaded`] event's path itself, because only it knows which attachment is live when the upload completes.
+//! The terminal's owner ([`super::attached`]) hands a classified paste or a drop to [`Attachments::attach`] and types
+//! each [`Uploaded`] event's path itself, because only it knows which attachment is live when the upload completes.
+//! Drops reach a terminal through its own pane only; a file dropped anywhere else in the window opens nothing, since a
+//! native window has no default action for a drop (the old page needed a window-wide guard, because a browser's
+//! default opened the file).
 //!
 //! Uploads go through the UI session's transfers, which the terminal's owner hands over as it makes this. Only a
 //! connection with no helm client has none, which the app never makes; there every upload fails visibly, saying so
@@ -36,18 +38,20 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use farhelm_helm_client::{TransferError, Transfers, UploadOutcome};
 use gpui::{
-    AnyElement, App, ClipboardEntry, ClipboardItem, Context, EventEmitter, Image,
-    InteractiveElement as _, IntoElement as _, ParentElement as _, Pixels, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Task, div, px,
+    AnyElement, App, ClipboardEntry, ClipboardItem, Context, ElementId, EventEmitter, Global,
+    Image, InteractiveElement as _, IntoElement as _, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, div, px, relative,
 };
 
 use crate::components::Role;
 use crate::host_text::{HostSentence, HostText};
+use crate::session;
 use crate::theme;
 
 // ---- The rules ---------------------------------------------------------------------------------------------------------
@@ -235,8 +239,8 @@ const NO_PATH_TEXT: &str = "The upload reply carried no usable path";
 /// none, which the app never makes; tests that serve no transfers do.
 const NO_HELM_CLIENT: &str = "this window has no helm client to attach files through";
 
-/// A paste of files or an image into a terminal that is not live, or is inert: refused before anything is uploaded,
-/// since no path could be typed (the old `DETACHED_TEXT`). Shown by the owner on its refusal line.
+/// Files or an image offered to a terminal that is not live, or is inert: refused before anything is uploaded, since
+/// no path could be typed (the old `DETACHED_TEXT`). It goes once the terminal is live again ([`Attachments::live`]).
 pub(crate) const DETACHED_TEXT: &str =
     "This terminal is not connected, so nothing was attached — reconnect and try again";
 
@@ -245,12 +249,82 @@ pub(crate) const DETACHED_TEXT: &str =
 const LANDED_AT: &str = " landed at ";
 
 /// The end of that line. The old line said "terminal detached" and "copy it from here"; this one is shown for a
-/// terminal that is reconnecting or inert too, and the overlay's text cannot be selected, so it says neither.
+/// terminal that is reconnecting or inert too, and the strip's text cannot be selected, so it says neither.
 const LANDED_NOT_TYPED: &str = " — the terminal was not taking input, so the path was not inserted";
 
-/// The tallest the failure lines are drawn: the refused click's line's bound, three lines of the small text with its
-/// padding.
-const STATUS_MAX_HEIGHT: Pixels = px(54.);
+/// The end of the line for an upload the terminal's going away stopped before it started (the old
+/// `INTERRUPTED_UNSENT_TEXT`'s ending): nothing reached the helm.
+const INTERRUPTED_UNSENT_TEXT: &str =
+    " was interrupted before it was sent, so nothing was uploaded";
+
+/// The end of the line for an upload the terminal's going away stopped after it started. The old line said the file
+/// "may have reached the host anyway"; like every unknown outcome here, this one says only that it cannot be told.
+const INTERRUPTED_UNKNOWN_TEXT: &str =
+    " was interrupted — whether it was attached cannot be told, and no path was inserted";
+
+// ---- The strip -------------------------------------------------------------------------------------------------------
+
+/// The strip at the bottom right of a terminal (the old `.attach-status`): `busy` says what is uploading, then come
+/// `lines`, the failures and refusals, oldest first. `None` when there is nothing to say.
+///
+/// Overlaid on the terminal rather than placed beside it, because a line that took room from the grid would resize the
+/// program twice per upload, reflowing its scrollback and making a full-screen agent redraw (the old stylesheet's
+/// reason, which holds the same here). Bottom right and as wide as its text, at most 80% of the terminal, because the
+/// cursor's row is at the bottom and its right end is almost always empty. It takes no pointer input: it has no
+/// listener, so a selection dragged into its corner reaches the terminal, as the old `pointer-events: none` made it.
+fn strip(busy: Option<HostSentence>, lines: &[HostSentence], cx: &App) -> Option<AnyElement> {
+    if busy.is_none() && lines.is_empty() {
+        return None;
+    }
+    let palette = theme::palette(cx);
+    let label: SharedString = busy
+        .iter()
+        .chain(lines)
+        .map(HostSentence::accessible_name)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into();
+    let busy = busy.map(|busy| div().text_color(theme::color(palette.fg_dim)).child(busy));
+    let lines = lines
+        .iter()
+        .cloned()
+        .map(|line| div().text_color(theme::color(palette.danger)).child(line));
+    Some(
+        div()
+            .id(STRIP_ID)
+            .debug_selector(|| STRIP_ID.into())
+            .role(Role::Status)
+            .aria_label(label)
+            .absolute()
+            .right_0()
+            .bottom_0()
+            .max_w(relative(0.8))
+            .px(px(10.))
+            .py(px(2.))
+            .flex()
+            .flex_col()
+            .bg(theme::color(palette.bg_2))
+            .text_color(theme::color(palette.fg_0))
+            .text_size(theme::metrics::TEXT_SM)
+            .children(busy)
+            .children(lines)
+            .into_any_element(),
+    )
+}
+
+/// The strip's element id, and the selector tests and the bridge find it by.
+pub(crate) const STRIP_ID: &str = "terminal-attachment-status";
+
+/// A new line's element id. Process-wide, because lines move between terminals ([`Carried`]) and two with one id in
+/// one frame would be one accessible node.
+fn line_id() -> ElementId {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    (
+        "terminal-attachment-line",
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    )
+        .into()
+}
 
 // ---- The queue -------------------------------------------------------------------------------------------------------
 
@@ -271,22 +345,77 @@ impl Uploaded {
     }
 }
 
-/// The attachments of one terminal: the uploads waiting and the one running, and the failure lines on screen. One per
-/// terminal, made and dropped with it; dropping it drops the running upload, which abandons the request.
+/// The lines a terminal that went away left behind, by session, until the session's agent terminal takes them.
+///
+/// The old app kept a pane's messages on its status element, which outlived the terminal a reconnect or a restart
+/// remounted into it (SPEC.md: an attachment must never disappear silently). Here a terminal goes away whole when its
+/// session is closed, its tab closes or the window's connection resets, so what it showed, and a line for each upload
+/// it cut off, waits here. The session's agent terminal takes them, at once if one is up and otherwise when one is next
+/// made: it is the one terminal every open session has, so a closed tab's lines land where the user is.
+///
+/// The lines of a session that is gone go too ([`prune_carried`]), so a deleted session's lines do not stay for the life
+/// of the app: whenever the current UI session's store changes (a new snapshot after a reset included), every
+/// terminal's attachments drop the entries of sessions the store's listing proves gone, by the one evidence rule for
+/// that ([`session::listing_proves_gone`]). A filtered, cut or unavailable listing proves nothing, so their lines wait
+/// for a complete one. With no terminal open nothing watches, and the lines wait for the next terminal, which prunes as
+/// it is made.
+#[derive(Default)]
+struct Carried(HashMap<String, Vec<HostSentence>>);
+
+impl Global for Carried {}
+
+/// Drop the carried lines of every session the current UI session's store proves gone. Reads first without writing,
+/// because writing the global notifies its observers.
+fn prune_carried(cx: &mut App) {
+    let Some(carried) = cx.try_global::<Carried>() else {
+        return;
+    };
+    if carried.0.is_empty() {
+        return;
+    }
+    let Some(store) = session::current_store(cx) else {
+        return;
+    };
+    let collections = store.read(cx).collections();
+    let gone: Vec<String> = carried
+        .0
+        .keys()
+        .filter(|key| session::listing_proves_gone(collections, key))
+        .cloned()
+        .collect();
+    if gone.is_empty() {
+        return;
+    }
+    let carried = cx.default_global::<Carried>();
+    for key in gone {
+        carried.0.remove(&key);
+    }
+}
+
+/// The attachments of one terminal: the uploads waiting and the one running, and the lines its strip shows. One per
+/// terminal, made with it; dropping it, or retiring it with its terminal ([`Attachments::hand_over`]), drops the
+/// running upload, which abandons the request, and leaves a line for every upload that did not finish.
 pub(crate) struct Attachments {
     /// The session's served id, which the upload goes to.
     session: String,
+    /// Whether this is the session's agent terminal, which takes the lines other terminals of the session left
+    /// ([`Carried`]).
+    agent: bool,
     /// Where uploads go: the UI session's transfers, `None` only without a helm client ([`NO_HELM_CLIENT`]).
     transfers: Option<Transfers>,
     /// The number the next pasted image's generated name takes.
     pasted: u64,
     queue: VecDeque<Queued>,
-    /// The upload in flight. Dropping it abandons the request, whose outcome is then unknown on the host.
-    running: Option<Task<()>>,
-    /// The lines on screen: every failure since the last paste acted on, in order.
-    failures: Vec<HostSentence>,
-    /// How many lines this terminal has shown, which numbers the next line's element id.
-    lines: usize,
+    /// The upload in flight.
+    running: Option<Running>,
+    /// The lines on screen, oldest first: every failure since the last paste or drop acted on, and a refusal.
+    lines: Vec<Line>,
+    /// Set once the terminal went away; from then on nothing is started or taken.
+    retired: bool,
+    /// Hands the lines over when the entity goes, and (for an agent terminal) takes those carried for it.
+    _carry: Vec<Subscription>,
+    /// Prunes the carried lines of gone sessions whenever the current UI session's store changes ([`prune_carried`]).
+    _prune: session::ObservingCurrent,
 }
 
 /// One upload waiting its turn.
@@ -296,6 +425,22 @@ struct Queued {
     /// The name proposed to the host: the file's own, or the generated one; empty lets the supervisor choose.
     filename: String,
     source: Source,
+}
+
+/// The upload in flight.
+struct Running {
+    name: HostText,
+    /// Whether its request was handed to the helm client, after which its outcome is unknown if it is cut off.
+    sent: bool,
+    /// Dropping it abandons the request.
+    _task: Task<()>,
+}
+
+/// One line of the strip.
+struct Line {
+    sentence: HostSentence,
+    /// The not-connected refusal, which goes once the terminal is live and never moves to another terminal.
+    refusal: bool,
 }
 
 /// Where a queued upload's bytes come from.
@@ -314,24 +459,47 @@ enum Outcome {
 impl EventEmitter<Uploaded> for Attachments {}
 
 impl Attachments {
-    /// The attachments of a terminal of session `session`, uploading through `transfers`.
-    pub(crate) fn new(session: String, transfers: Option<Transfers>) -> Self {
-        Attachments {
+    /// The attachments of a terminal of session `session` (its agent terminal when `tab` is `None`), uploading through
+    /// `transfers`. An agent terminal takes the lines its session's terminals left as it is made, once the lines of
+    /// sessions already gone are pruned.
+    pub(crate) fn new(
+        session: String,
+        tab: Option<&str>,
+        transfers: Option<Transfers>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let agent = tab.is_none();
+        let mut carry = vec![cx.on_release(|attachments, cx| attachments.hand_over(cx))];
+        if agent {
+            carry
+                .push(cx.observe_global::<Carried>(|attachments, cx| attachments.take_carried(cx)));
+        }
+        let prune = session::observe_current(cx, |_: &mut Self, cx| prune_carried(cx));
+        prune_carried(cx);
+        let mut attachments = Attachments {
             session,
+            agent,
             transfers,
             pasted: 0,
             queue: VecDeque::new(),
             running: None,
-            failures: Vec::new(),
-            lines: 0,
-        }
+            lines: Vec::new(),
+            retired: false,
+            _carry: carry,
+            _prune: prune,
+        };
+        attachments.take_carried(cx);
+        attachments
     }
 
-    /// Attach what a paste offered, in order, behind any upload still waiting. The earlier paste's failures go: a
-    /// failure stays on screen until the user does something that supersedes it, and a paste that attaches something
-    /// is that (the old `accept`). A generated image name is taken now, so names follow the order pasted.
+    /// Attach what a paste or a drop offered, in order, behind any upload still waiting. The lines before it go: a
+    /// line stays on screen until the user does something that supersedes it, and offering files is that (the old
+    /// `accept`). A generated image name is taken now, so names follow the order offered.
     pub(crate) fn attach(&mut self, offered: Vec<Offered>, cx: &mut Context<Self>) {
-        self.failures.clear();
+        if self.retired {
+            return;
+        }
+        self.lines.clear();
         for offered in offered {
             let queued = match offered {
                 Offered::File(path) => {
@@ -370,21 +538,43 @@ impl Attachments {
         self.next(cx);
     }
 
+    /// Files or an image were offered to a terminal that could not take their path: say so instead, replacing the
+    /// lines before it, as the old app's refusal did. Nothing is uploaded.
+    pub(crate) fn refuse(&mut self, cx: &mut Context<Self>) {
+        self.lines.clear();
+        self.lines.push(Line {
+            sentence: HostSentence::new(line_id()).text(DETACHED_TEXT),
+            refusal: true,
+        });
+        cx.notify();
+    }
+
+    /// The terminal is live again: the not-connected refusal, which asked for exactly this, goes. Every other line
+    /// stays.
+    pub(crate) fn live(&mut self, cx: &mut Context<Self>) {
+        let before = self.lines.len();
+        self.lines.retain(|line| !line.refusal);
+        if self.lines.len() != before {
+            cx.notify();
+        }
+    }
+
     /// Start the next waiting upload, unless one is running: one at a time, as the old `send` ran them.
     fn next(&mut self, cx: &mut Context<Self>) {
-        if self.running.is_some() {
+        if self.running.is_some() || self.retired {
             return;
         }
         let Some(queued) = self.queue.pop_front() else {
             return;
         };
         let (session, transfers) = (self.session.clone(), self.transfers.clone());
-        self.running = Some(cx.spawn(async move |attachments, cx| {
-            let Queued {
-                name,
-                filename,
-                source,
-            } = queued;
+        let Queued {
+            name,
+            filename,
+            source,
+        } = queued;
+        let shown = name.clone();
+        let task = cx.spawn(async move |attachments, cx| {
             let outcome = match (source, transfers) {
                 (_, None) => Outcome::Failed(TransferError::NotSent(NO_HELM_CLIENT.into())),
                 (Source::File(path), Some(transfers)) => {
@@ -400,17 +590,33 @@ impl Attachments {
                     if directory {
                         Outcome::Directory
                     } else {
-                        ended(transfers.upload(&session, path, &filename).await)
+                        let upload = transfers.upload(&session, path, &filename);
+                        let _ = attachments.update(cx, |attachments, _| attachments.sent());
+                        ended(upload.await)
                     }
                 }
                 (Source::Bytes(bytes), Some(transfers)) => {
-                    ended(transfers.upload_bytes(&session, bytes, &filename).await)
+                    let upload = transfers.upload_bytes(&session, bytes, &filename);
+                    let _ = attachments.update(cx, |attachments, _| attachments.sent());
+                    ended(upload.await)
                 }
             };
             let _ = attachments.update(cx, |attachments, cx| {
                 attachments.finished(name, outcome, cx)
             });
-        }));
+        });
+        self.running = Some(Running {
+            name: shown,
+            sent: false,
+            _task: task,
+        });
+    }
+
+    /// The running upload's request went to the helm client: from now on, cut off, its outcome is unknown.
+    fn sent(&mut self) {
+        if let Some(running) = &mut self.running {
+            running.sent = true;
+        }
     }
 
     /// An upload ended: hand a path to the owner to type, or show the failure, then start the next.
@@ -419,13 +625,12 @@ impl Attachments {
         match outcome {
             Outcome::Uploaded(path) => cx.emit(Uploaded { name, path }),
             Outcome::Directory => {
-                let line = self.line().host(&name).text(DIRECTORY_TEXT);
-                self.failures.push(line);
+                let line = HostSentence::new(line_id())
+                    .host(&name)
+                    .text(DIRECTORY_TEXT);
+                self.push(line);
             }
-            Outcome::Failed(error) => {
-                let line = self.failure_line(&name, &error);
-                self.failures.push(line);
-            }
+            Outcome::Failed(error) => self.push(failure_line(&name, &error)),
         }
         cx.notify();
         self.next(cx);
@@ -435,82 +640,136 @@ impl Attachments {
     /// is not lost from view.
     pub(crate) fn not_typed(&mut self, uploaded: &Uploaded, cx: &mut Context<Self>) {
         let path = HostText::from_host(uploaded.path.as_str());
-        let line = self
-            .line()
+        let line = HostSentence::new(line_id())
             .host(&uploaded.name)
             .text(LANDED_AT)
             .mono(&path)
             .text(LANDED_NOT_TYPED);
-        self.failures.push(line);
+        self.push(line);
         cx.notify();
     }
 
-    /// A new line, under an id of its own.
-    fn line(&mut self) -> HostSentence {
-        self.lines += 1;
-        HostSentence::new(("terminal-attachment-line", self.lines))
+    fn push(&mut self, sentence: HostSentence) {
+        self.lines.push(Line {
+            sentence,
+            refusal: false,
+        });
     }
 
-    /// The line for an upload of `name` that failed with `error`: the old `FAILED_TEXT`, with the reason drawn as the
-    /// helm's own words, escaped (they may come from another machine), and the ending saying what became of the file.
-    fn failure_line(&mut self, name: &HostText, error: &TransferError) -> HostSentence {
-        let reason = match error {
-            TransferError::Refused { message, .. } if !message.is_empty() => message.clone(),
-            TransferError::Refused { status, .. } => {
-                HTTP_STATUS_TEXT.replace("{status}", &status.to_string())
-            }
-            TransferError::BadReply(_) => NO_PATH_TEXT.to_owned(),
-            other => other.to_string(),
-        };
-        let ending = match error.upload_outcome() {
-            UploadOutcome::NotPublished => NOT_ATTACHED_TEXT,
-            UploadOutcome::Unknown => UNKNOWN_TEXT,
-        };
-        self.line()
-            .text("Attaching ")
-            .host(name)
-            .text(" failed: ")
-            .host(&HostText::from_host(reason))
-            .text(ending)
+    /// The terminal is going away (retired with its window's connection, or dropped): stop the running upload, which
+    /// abandons its request, and leave what the strip showed, with a line for the running and every waiting upload,
+    /// for the session's agent terminal to show ([`Carried`]). The refusal stays behind: it was about this terminal.
+    /// Once only; nothing starts afterwards.
+    pub(crate) fn hand_over(&mut self, cx: &mut App) {
+        if std::mem::replace(&mut self.retired, true) {
+            return;
+        }
+        let mut left: Vec<HostSentence> = self
+            .lines
+            .drain(..)
+            .filter(|line| !line.refusal)
+            .map(|line| line.sentence)
+            .collect();
+        if let Some(running) = self.running.take() {
+            left.push(interrupted_line(&running.name, running.sent));
+        }
+        left.extend(
+            self.queue
+                .drain(..)
+                .map(|queued| interrupted_line(&queued.name, false)),
+        );
+        if !left.is_empty() {
+            let carried = cx.default_global::<Carried>();
+            carried
+                .0
+                .entry(self.session.clone())
+                .or_default()
+                .extend(left);
+        }
     }
 
-    /// The lines on screen, as assistive technology reads them (each host value escaped), oldest first.
+    /// An agent terminal takes the lines its session's terminals left. Read first without writing, because writing the
+    /// global notifies its observers, this one included.
+    fn take_carried(&mut self, cx: &mut Context<Self>) {
+        let waiting = cx
+            .try_global::<Carried>()
+            .is_some_and(|carried| carried.0.contains_key(&self.session));
+        if !self.agent || self.retired || !waiting {
+            return;
+        }
+        let taken = cx.default_global::<Carried>().0.remove(&self.session);
+        for sentence in taken.into_iter().flatten() {
+            self.push(sentence);
+        }
+        cx.notify();
+    }
+
+    /// What the strip's first line says: the upload running, by name, or how many are running and waiting.
+    fn busy(&self) -> Option<HostSentence> {
+        let running = self.running.as_ref()?;
+        let line = HostSentence::new(("terminal-attachment-busy", 0usize));
+        Some(match self.queue.len() {
+            0 => line.text("Attaching ").host(&running.name).text("…"),
+            waiting => line.text(format!("Attaching {} files…", waiting + 1)),
+        })
+    }
+
+    /// The strip's lines, as assistive technology reads them (each host value escaped): the busy line first, then the
+    /// failures and refusals, oldest first. Test builds only; the strip names itself the same way.
+    #[cfg(test)]
     pub(crate) fn lines_shown(&self) -> Vec<SharedString> {
-        self.failures
+        self.busy()
             .iter()
+            .chain(self.lines.iter().map(|line| &line.sentence))
             .map(HostSentence::accessible_name)
             .collect()
     }
 
-    /// The failure lines, for the owner to draw in its top overlay; `None` when there is nothing to say. Drawn as the
-    /// refused click's line is (`AttachedTerminal::refusal_line`), in the old failure line's red (`.attach-error`), and
-    /// bounded to [`STATUS_MAX_HEIGHT`] so a pile of failures cannot cover the terminal: past it the stack scrolls, so
-    /// no failure is cut off unseen.
-    pub(crate) fn status_line(&self, cx: &App) -> Option<AnyElement> {
-        if self.failures.is_empty() {
-            return None;
-        }
-        let palette = theme::palette(cx);
-        let label = self.lines_shown().join("\n");
-        Some(
-            div()
-                .id("terminal-attachment-status")
-                .debug_selector(|| "terminal-attachment-status".into())
-                .role(Role::Status)
-                .aria_label(label)
-                .px(px(6.))
-                .py(px(4.))
-                .max_h(STATUS_MAX_HEIGHT)
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .bg(theme::color(palette.bg_2))
-                .text_color(theme::color(palette.danger))
-                .text_size(theme::metrics::TEXT_SM)
-                .children(self.failures.iter().cloned())
-                .into_any_element(),
-        )
+    /// The strip, for the owner to draw over the bottom of its terminal; `None` when there is nothing to say.
+    pub(crate) fn strip(&self, cx: &App) -> Option<AnyElement> {
+        let lines: Vec<HostSentence> = self
+            .lines
+            .iter()
+            .map(|line| line.sentence.clone())
+            .collect();
+        strip(self.busy(), &lines, cx)
     }
+}
+
+/// The line for an upload of `name` that failed with `error`: the old `FAILED_TEXT`, with the reason drawn as the helm's
+/// own words, escaped (they may come from another machine), and the ending saying what became of the file.
+fn failure_line(name: &HostText, error: &TransferError) -> HostSentence {
+    let reason = match error {
+        TransferError::Refused { message, .. } if !message.is_empty() => message.clone(),
+        TransferError::Refused { status, .. } => {
+            HTTP_STATUS_TEXT.replace("{status}", &status.to_string())
+        }
+        TransferError::BadReply(_) => NO_PATH_TEXT.to_owned(),
+        other => other.to_string(),
+    };
+    let ending = match error.upload_outcome() {
+        UploadOutcome::NotPublished => NOT_ATTACHED_TEXT,
+        UploadOutcome::Unknown => UNKNOWN_TEXT,
+    };
+    HostSentence::new(line_id())
+        .text("Attaching ")
+        .host(name)
+        .text(" failed: ")
+        .host(&HostText::from_host(reason))
+        .text(ending)
+}
+
+/// The line for an upload of `name` its terminal's going away cut off, `sent` or not yet.
+fn interrupted_line(name: &HostText, sent: bool) -> HostSentence {
+    let ending = if sent {
+        INTERRUPTED_UNKNOWN_TEXT
+    } else {
+        INTERRUPTED_UNSENT_TEXT
+    };
+    HostSentence::new(line_id())
+        .text("Attaching ")
+        .host(name)
+        .text(ending)
 }
 
 /// An upload's answer as an [`Outcome`].
