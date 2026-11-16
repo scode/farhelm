@@ -77,7 +77,7 @@ conflicted across all of it.
 | Local time                      | `crates/gui/farhelm-gui/src/local_time.rs`, `crates/gui/farhelm-gui/src/local_time_tests.rs`                                                                                                                                                                                                                                   | [none](#local-time)                      | none                                  |
 | Notice center                   | `crates/gui/farhelm-gui/src/notices.rs`                                                                                                                                                                                                                                                                                        | [append-only](#notice-center)            | none                                  |
 | Render counter                  | `crates/gui/farhelm-gui/src/render_count.rs`                                                                                                                                                                                                                                                                                   | [none](#render-counter)                  | none                                  |
-| Test harness                    | `crates/gui/farhelm-gui/src/test_support.rs`, `crates/gui/farhelm-gui/src/goldens/`, `scripts/check-gui-goldens.py`                                                                                                                                                                                                            | [reported, append-only](#test-harness)   | none                                  |
+| Test harness                    | `crates/gui/farhelm-gui/src/test_support.rs`, `crates/gui/farhelm-gui/src/goldens/`, `scripts/check-gui-goldens.py`, `crates/gui/farhelm-gui/tests/goldens.txt`, `scripts/gui-goldens.py`                                                                                                                                      | [reported, append-only](#test-harness)   | none                                  |
 | Assets                          | `crates/gui/farhelm-gui/src/assets.rs`, `crates/gui/farhelm-gui/assets/`                                                                                                                                                                                                                                                       | [reported, new files](#assets)           | none                                  |
 | Main view                       | `crates/gui/farhelm-gui/src/main_view.rs`                                                                                                                                                                                                                                                                                      | [reported](#main-view)                   | none                                  |
 | Harness marks                   | `crates/gui/farhelm-gui/src/marks.rs`, `crates/gui/farhelm-gui/src/marks/`                                                                                                                                                                                                                                                     | [append-only, new files](#harness-marks) | none                                  |
@@ -422,15 +422,19 @@ Lint exceptions: none.
 
 Extension points:
 
-- reported: the `src/goldens/` directory, for a golden scene and its reference PNGs under
-  `crates/gui/farhelm-gui/tests/goldens/` for a new control or dialog: the scene's functions in its area's file
-  (`src/goldens/<area>.rs`), its entry in `SCENES` in `src/goldens/mod.rs`, and in `mod.rs` only a helper more than one
-  area's scenes use;
+- reported: the `src/goldens/` directory, for a golden scene for a new control or dialog: the scene's functions in its
+  area's file (`src/goldens/<area>.rs`), its entry in `SCENES` in `src/goldens/mod.rs`, and in `mod.rs` only a helper
+  more than one area's scenes use;
+- reported: the golden manifest `tests/goldens.txt`, for the lines of an area's own scenes, which only
+  `scripts/gui-goldens.py publish` writes: it adds a new scene's lines, changes a redrawn one's and drops a removed
+  one's, after pushing the pictures to the storage repository (the reference pictures are not in this repository;
+  `scripts/gui-goldens.py` says why). A line edited by hand, or one naming a picture the storage lacks, does not follow
+  the pattern;
 - append-only: `test_support.rs`, for a new shared test helper with a docstring and its test, added only inside its
   "Shared helpers, appended on request" section, any `use` it needs on a line of its own (the other helpers and the
   per-step invariant checks change only by request; the review gate checks that an addition stays inside the section,
   since the rule itself admits an added line anywhere in the file);
-- `check-gui-goldens.py` has none.
+- `check-gui-goldens.py` and `gui-goldens.py` have none.
 
 An area's own tests and helpers belong in the area's own test modules.
 
@@ -1036,9 +1040,10 @@ Lint exceptions: none.
 The rest of `crates/gui/farhelm-gui/src/` is area code, owned by the area that builds it and outside this table: the
 session list (`session_list.rs` and `session_list/`) and the session pane (`session_pane.rs` and `session_pane/`) belong
 to the sidebar-and-session-view area, the terminal (`terminal.rs` and `terminal/`) to the terminal area, and the desktop
-integration (`desktop.rs` and `desktop/`) to the desktop-integration area. The reference PNGs under
-`crates/gui/farhelm-gui/tests/goldens/` and the screenshot scene list (`docs/gpui/screenshot-scenes.json`) are outside
-it too: an area adds its own scenes and references and updates them, with no request and no rule from the check.
+integration (`desktop.rs` and `desktop/`) to the desktop-integration area. The screenshot scene list
+(`docs/gpui/screenshot-scenes.json`) is outside it too: an area adds its own scenes and updates them, with no request
+and no rule from the check. The golden reference pictures are not in the repository at all; the manifest that names them
+belongs to the Test harness, and an area updates its own scenes' lines through `scripts/gui-goldens.py publish`.
 
 Area-built modules other areas share are in the table all the same, so their changes to it are reported to the gate:
 host identity (`hosts/identity.rs` and `hosts/identity/`), owned by settings-and-hosts; the harness answers
@@ -1101,7 +1106,8 @@ the check let it through.
 
 The Host text and Drafts extension points have no row here, because they are uses of the foundation from area code (a
 view calling `HostText::from_host`, an editor holding a `Draft`) and touch no owned path. The Test harness's reference
-PNGs are not owned, so only the golden scenes under `goldens/` need a rule.
+pictures are not in the repository, so only the golden scenes under `goldens/` and the manifest naming the pictures need
+a rule.
 
 NOTE: An append-only file only works as an extension point when an addition to it leaves every existing line alone, so
 `HarnessGlyph::ALL` in `marks.rs` is a slice with one entry per line. Two traps refused real PRs before the wiring was
@@ -1124,6 +1130,7 @@ without a conflict marker.
 | Operation store        | `crates/gui/farhelm-gui/src/operations.rs`                       | `append-only` |
 | Notice center          | `crates/gui/farhelm-gui/src/notices.rs`                          | `append-only` |
 | Test harness           | `crates/gui/farhelm-gui/src/goldens/`                            | `reported`    |
+| Test harness           | `crates/gui/farhelm-gui/tests/goldens.txt`                       | `reported`    |
 | Test harness           | `crates/gui/farhelm-gui/src/test_support.rs`                     | `append-only` |
 | Assets                 | `crates/gui/farhelm-gui/src/assets.rs`                           | `reported`    |
 | Assets                 | `crates/gui/farhelm-gui/assets/icons/`                           | `new-files`   |

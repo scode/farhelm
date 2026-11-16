@@ -20,8 +20,10 @@ pictures are. `all` runs both.
 
 The scene list names every reference scene (by its id in the reference `scenes.json`) and whether the GPUI app shows it
 yet, plus two kinds of new-app capture: app scenes, which drive the running app with bridge commands and screenshot the
-window, and the foundation goldens (`crates/gui/farhelm-gui/tests/goldens/`), shown beside the reference scene they
-relate to. The goldens are copies, so every platform's are shown wherever the batch runs. App scenes are captured once
+window, and the foundation goldens (the references the manifest `crates/gui/farhelm-gui/tests/goldens.txt` names),
+shown beside the reference scene they relate to. The goldens are copies, so every platform's are shown wherever the
+batch runs: from `FARHELM_GOLDENS_DIR` when it is set, as on a machine that cannot reach the storage repository, and
+otherwise from what `scripts/gui-goldens.py fetch` writes. App scenes are captured once
 per app variant the list names (a theme and a window size): the bridge has no theme or resize command, so each variant
 is its own app run, started with `gui-agent.py start --appearance --window-size`. The list's `app_start` names the
 start options (the fleet to seed) its scenes share; a scene that needs another fleet (none at all, say) names its own
@@ -40,7 +42,9 @@ any app run did not start or did not stop cleanly.
 from __future__ import annotations
 
 import argparse
+import functools
 import html
+import importlib.util
 import json
 import os
 import shutil
@@ -53,7 +57,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SCENE_LIST = REPO / "docs/gpui/screenshot-scenes.json"
-GOLDENS = REPO / "crates/gui/farhelm-gui/tests/goldens"
+GOLDEN_MANIFEST = REPO / "crates/gui/farhelm-gui/tests/goldens.txt"
 GUI_AGENT = REPO / "scripts/gui-agent.py"
 
 THEMES = ("light", "dark")
@@ -105,9 +109,20 @@ RUNS_PARENT = Path("/tmp")
 # --- scene list -----------------------------------------------------------------------------------------------------
 
 
-def tree_goldens(goldens: Path) -> set[str]:
-    """The golden names committed under any platform's directory (`<name>--<theme>.png`)."""
-    return {p.name.split("--")[0] for p in goldens.glob("*/*.png")}
+@functools.cache
+def goldens_tool():
+    """`scripts/gui-goldens.py` as a module (its name is not importable): the manifest's parser and the fetch. Loaded
+    once, so its classes (`Refused`) stay the same objects across calls."""
+    spec = importlib.util.spec_from_file_location("gui_goldens", REPO / "scripts/gui-goldens.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def manifest_goldens(manifest: Path) -> set[str]:
+    """The golden names the manifest lists for any platform (`<platform>/<name>--<theme>.png`)."""
+    return {name.split("/")[1].split("--")[0] for name in goldens_tool().read_manifest(manifest)}
 
 
 def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
@@ -115,8 +130,8 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
 
     The page's sections are keyed by scene id, so ids must be unique across app scenes, goldens (`golden-<name>`) and
     reference scenes. A `reference` must name a listed reference scene, or the page would show "unknown reference
-    scene" only once someone looks. Every committed golden must be listed and every listed golden committed, so the page
-    shows the whole foundation set.
+    scene" only once someone looks. Every golden the manifest names must be listed and every listed golden in the
+    manifest, so the page shows the whole foundation set.
     """
     problems: list[str] = []
     for key in ("reference_commit", "app_variants", "app_scenes", "foundation_goldens", "reference_scenes"):
@@ -170,9 +185,9 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
             problems.append(f"{name}: reference {ref!r} is not a listed reference scene")
     listed_goldens = {e.get("golden") for e in scenes["foundation_goldens"]}
     for name in sorted(goldens - listed_goldens):
-        problems.append(f"golden {name!r} is committed but not listed in foundation_goldens")
+        problems.append(f"golden {name!r} is in the golden manifest but not listed in foundation_goldens")
     for name in sorted(n for n in listed_goldens - goldens if n is not None):
-        problems.append(f"golden {name!r} is listed but not committed")
+        problems.append(f"golden {name!r} is listed but not in the golden manifest")
     section_ids = (
         [e.get("id") for e in scenes["app_scenes"]]
         + [f"golden-{e.get('golden')}" for e in scenes["foundation_goldens"]]
@@ -195,10 +210,10 @@ def owned_options(start: list[str]) -> list[str]:
     return sorted(option for option in BATCH_START_OPTIONS if any(option.startswith(name) for name in names))
 
 
-def load_scenes(path: Path = SCENE_LIST, goldens: Path = GOLDENS) -> dict:
+def load_scenes(path: Path = SCENE_LIST, manifest: Path = GOLDEN_MANIFEST) -> dict:
     """The committed scene list, refused with every problem listed when it is not well formed."""
     scenes = json.loads(path.read_text(encoding="utf-8"))
-    problems = validate_scenes(scenes, tree_goldens(goldens))
+    problems = validate_scenes(scenes, manifest_goldens(manifest))
     if problems:
         raise SystemExit("gui-screenshot-batch: the scene list is not well formed:\n  " + "\n  ".join(problems))
     return scenes
@@ -359,16 +374,19 @@ def capture(
     lock: Path | None = None,
     agent: Path = GUI_AGENT,
     runs: Path | None = None,
-    goldens: Path = GOLDENS,
+    goldens: Path,
+    manifest: Path = GOLDEN_MANIFEST,
     platform: str | None = None,
     commit: str | None = None,
     step_timeout: float = STEP_TIMEOUT_SECONDS,
 ) -> dict:
     """Copy the foundation goldens, capture every app scene in every app variant, and record it all in captures.json.
 
-    The goldens are copied from the tree rather than re-rendered: `scripts/check-gui-goldens.py` is what proves them
-    current, and a batch is not a gate. Because they are copies, every platform's goldens are shown wherever the batch
-    runs, each labelled with its platform; only a golden that no platform has is an error. Each variant is its own app
+    The goldens are copied rather than re-rendered, from `goldens` (a directory `scripts/gui-goldens.py fetch` wrote,
+    laid out as `<platform>/<file>`), for every platform's picture the manifest names: `scripts/check-gui-goldens.py`
+    is what proves them current, and a batch is not a gate. Because they are copies, every platform's goldens are shown
+    wherever the batch runs, each labelled with its platform; a golden that no platform has, and a picture the manifest
+    names that `goldens` lacks, are errors. Each variant is its own app
     run per group of scenes that share `start` options ([`start_groups`]), each in its own fresh directory under `runs`
     (a new directory under /tmp by default); `start` runs inside the `try`,
     so an interrupted or failed start is still followed by `stop` whenever it made the run directory. A start that
@@ -376,7 +394,7 @@ def capture(
     failed under `stop_failures`. `lock` is passed to every `start` (a shared GUI session's lock, as on the test Mac).
     Only the first run builds. On Linux each capture is cropped to the app's own drawing (`LINUX_FRAME` says why).
 
-    `agent`, `runs`, `goldens`, `platform`, `commit` and `step_timeout` exist so the self-test can drive a fake harness
+    `agent`, `runs`, `manifest`, `platform`, `commit` and `step_timeout` exist so the self-test can drive a fake harness
     without touching the real checkout.
     """
     platform = platform or host_platform()
@@ -394,14 +412,18 @@ def capture(
     def error(scene_id: str, message: str) -> None:
         record["errors"].setdefault(scene_id, []).append(message)
 
-    golden_platforms = sorted(p.name for p in goldens.iterdir() if p.is_dir()) if goldens.is_dir() else []
+    listed = goldens_tool().read_manifest(manifest)
+    golden_platforms = sorted({name.split("/")[0] for name in listed})
     for entry in scenes["foundation_goldens"]:
         for theme in THEMES:
             name = f"{entry['golden']}--{theme}.png"
-            found = [p for p in golden_platforms if (goldens / p / name).exists()]
+            found = [p for p in golden_platforms if f"{p}/{name}" in listed]
             if not found:
-                error(f"golden-{entry['golden']}", f"no platform's goldens under {goldens} hold {name}")
+                error(f"golden-{entry['golden']}", f"the golden manifest names no platform's {name}")
             for golden_platform in found:
+                if not (goldens / golden_platform / name).is_file():
+                    error(f"golden-{entry['golden']}", f"{goldens} lacks {golden_platform}/{name}; fetch it again")
+                    continue
                 target = shots / f"golden-{entry['golden']}--{golden_platform}--{theme}.png"
                 shutil.copyfile(goldens / golden_platform / name, target)
                 shown = record["goldens"].setdefault(entry["golden"], {}).setdefault(golden_platform, {})
@@ -719,7 +741,15 @@ def main(argv: list[str], repo: Path = REPO) -> int:
     out.mkdir(parents=True, exist_ok=True)
     status = 0
     if args.mode in ("capture", "all"):
-        record = capture(out, load_scenes(), not args.no_build, lock=args.lock)
+        # The same rule as scripts/check-gui-goldens.py: a directory the caller fetched (or copied over) wins, and
+        # only without one does the batch fetch the references itself.
+        given = os.environ.get("FARHELM_GOLDENS_DIR")
+        tool = goldens_tool()
+        try:
+            goldens = Path(given) if given else tool.fetch(tool.MANIFEST, tool.FETCHED, tool.REMOTE, tool.CACHE)
+        except tool.Refused as refusal:
+            raise SystemExit(f"gui-screenshot-batch: cannot fetch the golden references: {refusal}") from None
+        record = capture(out, load_scenes(), not args.no_build, lock=args.lock, goldens=goldens)
         for failure in record["start_failures"] + record["stop_failures"]:
             print(f"gui-screenshot-batch: {failure}", file=sys.stderr)
         for scene_id, messages in record["errors"].items():

@@ -688,12 +688,39 @@ systemd or SSH substrate ran.
   — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens/`): every component, the dialog frame and the
   layer manager's overlays (a tooltip, a popover, the prompt over its veil), the keyboard focus ring, host-supplied text
   over its spoofing corpus, the terminal's styles and cursor shapes, and an attached terminal's status line and exit
-  line, light and dark, compared pixel for pixel with the PNGs under `crates/gui/farhelm-gui/tests/goldens/<os>/`. The
-  test is ignored in workspace runs because it needs the software renderer, which the script selects (Mesa's lavapipe on
-  Linux: the `mesa-vulkan-drivers` and `libegl-mesa0` packages). After an intended visual change, `--update` rewrites
-  the references; look at each changed PNG before keeping it. A failure leaves the new captures in `gui-goldens/` beside
-  the test binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit
-  change; CI does not run it yet.
+  line, light and dark, compared pixel for pixel with reference PNGs. The references are in a separate private
+  repository, not this one (`scripts/gui-goldens.py` has the why and the storage's shape), and main keeps only the
+  manifest `crates/gui/farhelm-gui/tests/goldens.txt`, one line per picture with its git blob id. The script fetches the
+  pictures the manifest names (`scripts/gui-goldens.py fetch`, into `target/gui-goldens/`; every picture ever published
+  the first time, then only what changed) and points the test at them through `FARHELM_GOLDENS_DIR`. That needs read
+  access to the storage repository through plain `git` over HTTPS with whatever credentials the running machine has (on
+  a maintainer's machine `gh auth setup-git` is enough); git never prompts on the terminal for HTTPS credentials, so a
+  missing credential fails the run. A machine without that access runs the goldens against a copy fetched elsewhere
+  (`scripts/gui-goldens.py fetch --manifest <file> --cache <dir> --dir <dir>`, which also works when the script is
+  extracted from any commit and run outside a checkout, fetches for another commit's manifest saved to a file): with
+  `FARHELM_GOLDENS_DIR` set to it, and `--keep-farhelm-env FARHELM_GOLDENS_DIR` passed to the recorder, the script
+  fetches nothing. The test fails, never skips, when the variable is unset or a picture is missing. It is ignored in
+  workspace runs because it needs the software renderer, which the script selects (Mesa's lavapipe on Linux: the
+  `mesa-vulkan-drivers` and `libegl-mesa0` packages). After an intended visual change, `--update` writes every capture
+  to `target/gui-goldens/captures` instead of comparing, and `python3 scripts/gui-goldens.py publish`, which needs push
+  access to the storage repository, pushes the pictures the storage lacks and rewrites the manifest's lines (a scene
+  that no longer exists loses its line). It refuses captures taken against another manifest than the current one, so
+  publish before rebasing, or run `--update` again after. Look at each picture its report names as changed or added
+  before committing the manifest with the change. A failure leaves the new captures in `gui-goldens/` beside the test
+  binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI
+  does not run it yet.
+- `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
+  repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
+  picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
+  the changed picture on top of the old keeper, unchanged captures pushing nothing, the first publish pushing pictures
+  the manifest already names, the manifest gaining new scenes and dropping gone ones while another platform's lines
+  stay, captures taken against an older manifest refused, a publish that lost the race to another retrying on the
+  winner's keeper, a warm cache fetching with the storage unreachable, a fetch for a manifest given as a file writing
+  that manifest's pictures (an older one's) rather than the checkout's, a copy of the script run from a temporary
+  directory with `--manifest`, `--cache` and `--dir` fetching without a checkout around it, a cached blob that does not
+  hash to its id and a blob the storage lacks each failing the fetch and leaving no directory, a directory the fetch did
+  not write and a regular file left alone, an unfinished capture refused before anything is pushed, and malformed or
+  repeated manifest lines refused. Seconds, no network. Run it when the script changes.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI host text on macOS' --concurrency 'libtest default threads' -- cargo test --locked -p farhelm-gui --lib host_text::`,
   on a Mac — the host-supplied text tests, including the macOS-only
   `host_text::tests::on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated`, which shapes a sentence
@@ -727,15 +754,17 @@ systemd or SSH substrate ran.
   next to its reference scene with its variant and real size, touched scenes come first and once, unknown touched ids
   and a failed capture, start or stop are shown, each golden labelled with its platform, a reference scene missing from
   the committed scene list (`docs/gpui/screenshot-scenes.json`) is flagged, the list's validation (and the committed
-  list passing it), and the output being outside the checkout and new. Reading PNGs is checked against every row filter,
-  and cropping a Linux capture's window frame against a framed picture and pictures without that frame (left uncropped
-  and reported). The capture step runs against a fake `gui-agent.py`: one app run per variant with its theme, size (on
-  Linux, larger by the frame, cropped back to the variant's size) and lock, `stop` after every `start` that made a run
-  directory (also a failed or interrupted one), a failed start (also with no app scenes), a failed or timed-out step, a
-  failed `stop` or a golden no platform has failing the batch, every platform's goldens copied wherever the batch runs,
-  and run directories removed when clean and kept when not, and scenes with their own `start` options getting an app run
-  of their own while the rest share the list's `app_start`. Seconds; needs neither the app nor the reference set. The
-  batch itself is a tool, not a gate. Run the tests when the script or the scene list changes.
+  list passing it against the golden manifest), and the output being outside the checkout and new. Reading PNGs is
+  checked against every row filter, and cropping a Linux capture's window frame against a framed picture and pictures
+  without that frame (left uncropped and reported). The capture step runs against a fake `gui-agent.py`: one app run per
+  variant with its theme, size (on Linux, larger by the frame, cropped back to the variant's size) and lock, `stop`
+  after every `start` that made a run directory (also a failed or interrupted one), a failed start (also with no app
+  scenes), a failed or timed-out step, a failed `stop`, a golden the manifest names for no platform or a named picture
+  the fetched directory lacks failing the batch, every platform's goldens copied wherever the batch runs, and run
+  directories removed when clean and kept when not, and scenes with their own `start` options getting an app run of
+  their own while the rest share the list's `app_start`. Seconds; needs neither the app nor the reference set. The batch
+  itself is a tool, not a gate. Run the tests when the script or the scene list changes, or the golden manifest gains or
+  loses a scene.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
   inside a module-level function that way), or while two steps share a number (areas merging steps under one number run

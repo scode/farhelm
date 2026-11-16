@@ -258,9 +258,10 @@ class SceneList(unittest.TestCase):
     """The scene list's validation, on the committed list and on broken fixtures."""
 
     def test_the_committed_scene_list_is_well_formed(self) -> None:
-        """The capture and the page trust the committed list; every rule `validate_scenes` checks holds for it."""
+        """The capture and the page trust the committed list; every rule `validate_scenes` checks holds for it, the
+        goldens included, which come from the committed golden manifest now that the pictures are not in the tree."""
         listed = json.loads(batch.SCENE_LIST.read_text(encoding="utf-8"))
-        self.assertEqual(batch.validate_scenes(listed, batch.tree_goldens(batch.GOLDENS)), [])
+        self.assertEqual(batch.validate_scenes(listed, batch.manifest_goldens(batch.GOLDEN_MANIFEST)), [])
 
     def test_the_fixture_is_well_formed(self) -> None:
         """The baseline for the broken cases below: each one breaks exactly one rule."""
@@ -276,7 +277,7 @@ class SceneList(unittest.TestCase):
             "reference 'nope' is not a listed reference scene": lambda s: s["app_scenes"][0].update(reference="nope"),
             "steps must be a list of non-empty lists of strings": lambda s: s["app_scenes"][0].update(steps=["wait"]),
             "foundation golden needs golden and title": lambda s: s["foundation_goldens"].append({"title": "x"}),
-            "golden 'tooltip' is listed but not committed": lambda s: s["foundation_goldens"].append(
+            "golden 'tooltip' is listed but not in the golden manifest": lambda s: s["foundation_goldens"].append(
                 {"golden": "tooltip", "title": "t", "reference": None}),
             "duplicate app variant light wide": lambda s: s["app_variants"].append(dict(s["app_variants"][0])),
             "app variant needs theme light|dark": lambda s: s["app_variants"].append(
@@ -294,7 +295,7 @@ class SceneList(unittest.TestCase):
             problems = batch.validate_scenes(listed, {"dialog"})
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
         problems = batch.validate_scenes(scenes(), {"dialog", "buttons"})
-        self.assertIn("golden 'buttons' is committed but not listed in foundation_goldens", problems)
+        self.assertIn("golden 'buttons' is in the golden manifest but not listed in foundation_goldens", problems)
 
 
 class Pictures(unittest.TestCase):
@@ -447,9 +448,15 @@ class Capture(unittest.TestCase):
         self.agent.write_text(FAKE_AGENT, encoding="utf-8")
         for theme in ("light", "dark"):
             tiny_png(self.goldens / "linux" / f"dialog--{theme}.png", 4, 3)
+        self.manifest = root / "goldens.txt"
+        self.list_goldens("linux/dialog--light.png", "linux/dialog--dark.png")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def list_goldens(self, *names: str) -> None:
+        """Write the fixture's golden manifest naming `names`; the batch reads names from it, never the ids."""
+        batch.goldens_tool().write_manifest(self.manifest, {name: "0" * 40 for name in names})
 
     def make_fail(self, *verbs: str) -> None:
         """Make the fake harness fail these verbs (named `make_fail` because `fail` is unittest's own)."""
@@ -459,7 +466,8 @@ class Capture(unittest.TestCase):
         """Run the capture step on the fixture scene list against the fake harness, a scratch goldens tree and a fixed
         commit, so nothing reads the real checkout."""
         return batch.capture(self.out, kw.pop("scenes", scenes()), kw.pop("build", True), agent=self.agent,
-                             runs=self.runs, goldens=self.goldens, platform=kw.pop("platform", "linux"), commit="test",
+                             runs=self.runs, goldens=self.goldens, manifest=self.manifest,
+                             platform=kw.pop("platform", "linux"), commit="test",
                              **kw)
 
     def calls(self) -> list[list[str]]:
@@ -624,6 +632,7 @@ class Capture(unittest.TestCase):
         """Goldens are files, not renders, so a Mac batch shows the Linux goldens (labelled as such) and does not fail
         for lacking its own; the batch's exit status then means something on a Mac too."""
         tiny_png(self.goldens / "macos" / "dialog--dark.png", 4, 3)
+        self.list_goldens("linux/dialog--light.png", "linux/dialog--dark.png", "macos/dialog--dark.png")
         record = self.capture(platform="macos")
         self.assertEqual(record["goldens"]["dialog"], {
             "linux": {"light": "captures/golden-dialog--linux--light.png",
@@ -634,10 +643,19 @@ class Capture(unittest.TestCase):
         self.assertFalse(batch.capture_failed(record))
 
     def test_a_golden_no_platform_has_is_an_error(self) -> None:
-        """A listed golden with no picture anywhere must show as a failure, not as an empty cell."""
+        """A listed golden the manifest names for no platform must show as a failure, not as an empty cell."""
+        self.list_goldens("linux/dialog--light.png")
+        record = self.capture()
+        self.assertIn("names no platform's dialog--dark.png", record["errors"]["golden-dialog"][0])
+        self.assertEqual(list(record["goldens"]["dialog"]["linux"]), ["light"])
+        self.assertTrue(batch.capture_failed(record))
+
+    def test_a_picture_the_manifest_names_but_the_fetched_directory_lacks_is_an_error(self) -> None:
+        """The pictures come from a directory fetched (or copied) apart from the checkout, so one that is stale or
+        incomplete must fail the batch by name rather than leave the golden's cell empty."""
         (self.goldens / "linux" / "dialog--dark.png").unlink()
         record = self.capture()
-        self.assertIn("dialog--dark.png", record["errors"]["golden-dialog"][0])
+        self.assertIn("lacks linux/dialog--dark.png", record["errors"]["golden-dialog"][0])
         self.assertEqual(list(record["goldens"]["dialog"]["linux"]), ["light"])
         self.assertTrue(batch.capture_failed(record))
 
