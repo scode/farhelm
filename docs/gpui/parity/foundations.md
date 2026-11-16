@@ -99,6 +99,18 @@ Tests: 5. Covers: a completed Delete notice moves the anchor and closes an open 
 superseded: SPEC.md "Things changing underneath" (an open menu moves with its session); port the remaining cases (a menu
 whose session or anchor is gone closes)
 
+- crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
+  `an_open_row_menu_stays_open_and_follows_its_button_when_the_band_appears` (the band's appearance moves an open row
+  menu with its button and leaves it open, with focus on its command)
+- crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
+  `a_delete_whose_checkout_was_not_archived_shows_the_helms_words_in_the_band` (the band a completed Delete's notice
+  inserts)
+- crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
+  `a_later_notice_replaces_the_band_and_one_with_nothing_to_report_keeps_it` (a Delete with no notice keeps the band)
+- crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
+  `dismiss_takes_the_band_away_and_focus_goes_home_to_the_open_sessions_terminal` (Dismiss takes the band away; with no
+  menu open)
+
 ### `tests/popover-host-movement.spec.ts`
 
 Tests: 1. Covers: a concealed same-height host reorder leaves the session ${kind} open.
