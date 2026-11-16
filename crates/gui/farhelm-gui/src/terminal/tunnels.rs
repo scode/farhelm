@@ -128,7 +128,8 @@ pub(crate) struct Tunnels {
     /// list does not dismiss a close failure").
     failures: Vec<HostText>,
     /// The shared consent as it was when the last read was sent: a read is due again once it changes
-    /// ([`Tunnels::stale`]). `None` before any read.
+    /// ([`Tunnels::stale`]). `None` before any read; being set by every read, whatever sent it, it also marks the
+    /// open-time read as sent, and no failure clears it.
     consent_read: Option<Option<bool>>,
     /// Whether closes are under way (one, or Close all's run), so the list draws its closing state.
     closing: bool,
@@ -136,8 +137,9 @@ pub(crate) struct Tunnels {
     pill_focus: FocusHandle,
     /// The list's layer while it is open.
     list: Option<LayerId>,
-    /// Whether a read was asked for by a hover ([`Tunnels::request`]); cleared again by [`Tunnels::rearm`] after a
-    /// read that failed with nothing to show.
+    /// Whether a read was asked for by a hover ([`Tunnels::request`]) or by any [`Tunnels::refresh`]; cleared again
+    /// by [`Tunnels::rearm`] after a read that failed with nothing to show, so the next hover may read. It gates
+    /// hovers only: whether the open-time read went out is `consent_read`, which no failure clears.
     requested: bool,
     /// Whether the last read failed with no snapshot to show, so the next hover of a loopback link tries again.
     failed: bool,
@@ -200,12 +202,13 @@ impl Tunnels {
     /// session on a remote host (`remote`, by the pushed host registry) once, so its pill lists its tunnels as the view
     /// opens; and any listing read before, again, once the shared consent differs from what it was when that read was
     /// sent (withdrawing it closes every tunnel). A read still in flight counts as read, so a consent change during it
-    /// sends another.
+    /// sends another. Any read sent, failed or not and whatever sent it, counts as the open-time one: a failure waits
+    /// for the next hover of a loopback link ([`Tunnels::rearm`]) rather than going out again on every pushed change.
     pub(crate) fn stale(&self, remote: bool, cx: &App) -> bool {
-        (remote && !self.requested)
-            || self
-                .consent_read
-                .is_some_and(|read| read != pushed_consent(cx))
+        match self.consent_read {
+            None => remote,
+            Some(read) => read != pushed_consent(cx),
+        }
     }
 
     /// Read now, as [`Tunnels::stale`] asked.
@@ -219,7 +222,8 @@ impl Tunnels {
         self.failed
     }
 
-    /// Let the next hover of a loopback link read again, after a read failed with nothing to show.
+    /// Let the next hover of a loopback link read again, after a read failed with nothing to show. Only a hover: the
+    /// open-time read stays sent, so a failure is not tried again on every pushed change.
     pub(crate) fn rearm(&mut self) {
         if std::mem::take(&mut self.failed) {
             self.requested = false;
@@ -265,11 +269,12 @@ impl Tunnels {
 
     /// Read the session's snapshot. A failed read shows in the notice; the snapshot already held stays.
     fn read(&mut self, cx: &mut Context<Self>) {
+        // Recorded before the path is built, so even a read that cannot be sent counts as tried ([`Tunnels::stale`]).
+        self.consent_read = Some(pushed_consent(cx));
         let Ok(path) = ApiPath::api(&["sessions", &self.session, "tunnels"]) else {
             return;
         };
         let revision = self.revision;
-        self.consent_read = Some(pushed_consent(cx));
         let tunnels = cx.weak_entity();
         operations::read::<Snapshot>(
             path,
