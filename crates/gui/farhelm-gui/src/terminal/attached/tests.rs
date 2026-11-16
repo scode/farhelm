@@ -2567,18 +2567,47 @@ fn nothing_is_sent_unless_the_terminal_is_live(cx: &mut TestAppContext) {
 }
 
 /// Keys that are not the program's never reach it: Farhelm's shortcuts that work from a terminal (bound or not yet
-/// bound) and the terminal's own commands, which do nothing until scrollback, selection and paste exist. Each is
-/// pressed in a live, focused terminal, which sends a program key typed after them.
+/// bound) and the terminal's own commands, which act on the terminal (scrolling, selecting, copying) and send the
+/// program nothing. Each is pressed in a live, focused terminal, which sends a program key typed after them.
+///
+/// Two kinds of chord are left out. Paste's whole job is to send the clipboard to the program, and on a Mac the select
+/// all and copy chords pressed before it fill the clipboard (`a_paste_sends_the_clipboards_text_as_a_paste` covers
+/// it). And on a Mac, Hide, Hide Others and Minimize call the platform, whose test stand-in in GPUI does not implement
+/// them and panics; patching the vendored GPUI for a test was declined by the migration's orchestrator on 2026-11-16.
+/// The app menu's other chords are still pressed and still never reach the program; that their bindings run is the
+/// keymap tests' to show.
 #[gpui::test]
 fn app_and_terminal_keys_never_reach_the_program(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("screen");
     let owner = h.owner.clone();
     h.choose(&owner);
+    let unpressable: [&dyn gpui::Action; 3] = [
+        &actions::HideApp,
+        &actions::HideOtherApps,
+        &actions::MinimizeWindow,
+    ];
+    let left_out: Vec<&str> = crate::actions::MAC_MENU_CHORDS
+        .iter()
+        .filter(|(chord, bind)| {
+            let binding = bind(chord);
+            unpressable
+                .iter()
+                .any(|unpressable| binding.action().partial_eq(*unpressable))
+        })
+        .map(|(chord, _)| *chord)
+        .collect();
+    assert_eq!(
+        left_out.len(),
+        3,
+        "the premise: the Mac menu binds hide, hide others and minimize"
+    );
+    let left_out: Vec<&str> = left_out.into_iter().chain(paste_chords()).collect();
     let kept: Vec<&str> = TERMINAL_KEYS
         .iter()
         .filter(|row| row.owner != KeyOwner::Program)
         .filter_map(|row| row.chord(THIS_PLATFORM))
+        .filter(|chord| !left_out.contains(chord))
         .collect();
     assert!(!kept.is_empty());
     for chord in kept {
