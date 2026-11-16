@@ -680,7 +680,18 @@ place, and a committed one shows its progress until the reply lands),
 `escape_returns_to_the_terminal_and_cancel_to_the_button`, `every_action_is_whole_and_reachable_in_a_650_pixel_pane`
 (the real text system; with nothing in the left region yet it pins only that the four actions fit whole on one line, and
 becomes a real guard once the tab strip lands); scripts/gui-e2e-smoke.py
-`test_38_restart_from_the_header_resumes_the_session`; crates/gui/farhelm-gui/src/session_pane/details_tests.rs
+`test_38_restart_from_the_header_resumes_the_session`; the header's half of "header actions compact only for measured
+tunnel pressure and recover when it leaves" and "native tunnel preview keeps ports and actions inside a 650px pane":
+crates/gui/farhelm-gui/src/session_pane/header_tests.rs `a_pill_at_650_pixels_condenses_the_actions_beside_it` (at 650
+pixels with a pill on a long host, for an ordinary and an environment session: every action, both carets, the text size
+group and Suspend whole on one line, drawn once, reachable by Tab, the pill whole at no less than its floor and left of
+the actions, Stop condensed, the same look on the following frames, the ordinary look back once the same row is widened
+to 1400 pixels and the condensed one again at 650) and `a_wide_pane_keeps_the_ordinary_actions_beside_a_pill` (1400
+pixels: the ordinary look with the pill), the rule's arithmetic in crates/gui/farhelm-gui/src/session_pane/header/fit.rs
+`the_actions_condense_only_when_a_pill_and_the_rest_do_not_fit`, and the condensed box in
+crates/gui/farhelm-gui/src/components/tests/button.rs
+`a_condensed_compact_button_gives_up_only_padding_text_size_and_line_height`;
+crates/gui/farhelm-gui/src/session_pane/details_tests.rs
 `the_bar_draws_status_title_host_and_age_in_order_for_each_kind_of_status` (the field order status, title, host, age for
 a running, an idle, an exited and an unclassified session, the bar below the terminal, `Local (this machine)` with one
 host mark, one badge, the ended badge's words), `each_parts_hover_help_is_its_whole_value` (the title's tooltip is the
@@ -724,8 +735,14 @@ flows" half, and Cancel of Restart with back on the persistent caret),
 650-pixel tests with the carets and Clone in the row; crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs
 `an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions` (the carets and Clone refused with the rest);
 scripts/gui-e2e-smoke.py `test_69_the_headers_replace_with_and_clone_open_the_launcher`; the `session-row-menu` golden.
-Space on a caret and switching from one caret's open menu to the other's by a click are not pinned. Waiting: the text
-size buttons, the tab strip and the tunnel pill, with the cases about tunnel pressure and compact actions (the terminal
+Space on a caret and switching from one caret's open menu to the other's by a click are not pinned, nor are, of the
+compact cases, a pill's content changing in place across the boundary, a pill hidden while mounted or closed (only the
+pane's widening brings the ordinary look back in a test), a strip replaced after an interruption (the fit measures the
+strip it is drawn with, every frame) and the condensed row's open menus and questions, which keep their size (they are
+drawn by the layer manager, apart from the row). Waiting: the condensed text size buttons (the old `.btn` rule gave them
+2 pixels of padding too; the terminal area, which owns them, agreed on 2026-11-16 to give the group's drawing a
+`compact: bool` that the header will pass into its condensed look), the text size buttons, the tab strip and the tunnel
+pill themselves, with the pill's ports, the tab strip's floor beside a pill and the selected tab's reveal (the terminal
 area's); the bar's 32-pixel height, its position at the window's bottom and the macOS title-band inset, which no test
 pins yet (the goldens and screenshots show them)
 
@@ -1331,10 +1348,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   from the 504 until the push (the helm's lifecycle lock refuses a second request meanwhile). The header's control keeps
   its label and width while pending, with the spinner in its glyph's slot and "Suspending…" or "Resuming…" as its
   accessible name and help, where the old button read the words.
-- At the 650-pixel floor a tunnel pill at its 154-pixel floor already overlaps the header's actions on main: measured 49
-  pixels with an ordinary session (the pill ending at x=174, the actions starting at x=125). An environment session's
-  Suspend or Resume adds its fixed width (85 or 81 pixels) to that overlap and nothing more while pending. The fix is
-  the header's compact mode (the old `header-layout.js`'s `.actions-compact`), a follow-up of this area's.
 - The unavailable card's "Resume host" has hover help, "Resume host: this session continues when its host resumes",
   where the old button had none; every GPUI control has help. A refused Resume shows on the card, and the lines above
   the terminal leave it out while the card shows it.

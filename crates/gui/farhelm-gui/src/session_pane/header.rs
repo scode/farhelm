@@ -10,6 +10,15 @@
 //!   to draw, [`AttachedTerminal::tunnel_pill`](crate::terminal::attached::AttachedTerminal::tunnel_pill)), then the
 //!   actions, which never shrink. The row never wraps; a pane too narrow for it clips it. SPEC.md's floor is a
 //!   650-pixel pane, where every action stays fully visible and keyboard reachable.
+//! - **Condensed actions under a pill.** While a tunnel pill shows, the row's gaps are 6 pixels rather than 10, and
+//!   when the row cannot hold the actions at their ordinary size beside the pill at its content's width and the strip
+//!   at its floor, the actions take the old `.actions-compact` look: 2 pixels between them, and the lifecycle buttons
+//!   and carets at 11 pixels on a 15-pixel line with no side padding (an environment session's control narrows to 2
+//!   pixels of padding). Menus and questions keep their size, and names, help and Tab's order do not change. Which look
+//!   is drawn is decided from
+//!   widths measured in the frame being drawn ([`fit`]); the pill keeps its floor (the terminal area agreed on
+//!   2026-11-16 that the pill keeps it and this row condenses its actions, as the old row did). "Compact" in the old
+//!   rule's name is "condensed" here, since [`Button::compact`] already names the header buttons' ordinary geometry.
 //! - **The actions, in the old order.** Stop, Restart, Replace, Clone, Delete, each a compact button with the old icon,
 //!   label and hover help; Delete in the danger tier, the rest neutral. The terminal area adds the text size group at
 //!   the start of the actions.
@@ -66,11 +75,19 @@
 //!
 //! The row is drawn by the pane on every frame, uncached, and reads everything it shows from the store, the operation
 //! store and the shared clocks while it draws; the only state it keeps is where each button and caret was drawn, and
-//! which question or caret menu it opened ([`Header`]).
+//! which question or caret menu it opened ([`Header`]). Whether its actions are condensed is not kept: each frame
+//! measures it again.
 //!
 //! NOTE: Not ported from the old caret: `aria-haspopup`, which GPUI cannot report, and placing the menu at its caret's
-//! right edge (the layer manager places a popover below its anchor). The old header's compact mode under tunnel
-//! pressure is the terminal area's, and is not here.
+//! right edge (the layer manager places a popover below its anchor). The tab strip's floor beside a pill (the old
+//! `min-width: 112px`) is the terminal area's; the fit measures whatever floor the strip has. The old condensed look
+//! also gave the text size buttons 2 pixels of padding (the `.btn` rule reached them), which this row does not draw yet:
+//! those buttons are the terminal area's (`terminal/text_size.rs`), which agreed on 2026-11-16 to give the group's
+//! drawing a `compact: bool` that the header will pass into the condensed look.
+//!
+//! NOTE: The row's height is its minimum (30 pixels, or the title band's height), no longer the tallest thing in it:
+//! its content is laid out by [`fit`] inside a box that asks for no height of its own. Everything the row holds is
+//! shorter today (about 23 pixels); something taller would be clipped.
 
 use std::collections::HashMap;
 
@@ -87,8 +104,8 @@ use crate::actions::DELETE_SESSION_SHORTCUT_NAME;
 use crate::actions::{FocusNext, FocusPrevious};
 use crate::assets::Icon;
 use crate::components::{
-    Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, SplitPart, Tier, home_end_keys,
-    spinner_icon, toggle_arrow_keys,
+    Button, CONDENSED_GAP, Condensed, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart,
+    SplitPart, Tier, home_end_keys, spinner_icon, toggle_arrow_keys,
 };
 use crate::desktop::title_band::{self, Row};
 use crate::environment_ui::ProviderUi;
@@ -102,6 +119,9 @@ use crate::session_list::replace_yolo::{self, Surface};
 use crate::session_list::{delete, environment, menu, outcome, replace, restart, retired, stop};
 use crate::theme::{self, metrics};
 
+mod fit;
+use fit::Measured;
+
 /// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
 /// while the session has tunnels open; the strip always, its Agent tab at least. The row's layout (a region that takes
 /// the width the actions leave, and shrinks to nothing first) is already the one they need.
@@ -111,10 +131,15 @@ pub(crate) const TABS_SLOT: &str = "session-header-tabs";
 const ROW_MIN_HEIGHT: f32 = 30.;
 /// `.session-topbar`'s horizontal padding.
 const ROW_PAD_X: f32 = 10.;
-/// `.session-topbar`'s gap between the left region and the actions.
+/// `.session-topbar`'s gap between the left region and the actions, and inside the left region between the strip and
+/// the pill.
 const ROW_GAP: f32 = 10.;
+/// That gap while a tunnel pill shows (`.session-topbar:has(> .session-tunnel-pill) { gap: 6px }`).
+const PILL_ROW_GAP: f32 = 6.;
 /// `.titlebar-actions`'s gap between actions.
 const ACTIONS_GAP: f32 = 6.;
+/// That gap while the actions are condensed (`.actions-compact`'s `gap: 2px`).
+const CONDENSED_ACTIONS_GAP: f32 = 2.;
 
 /// One of the header's actions, in the old order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -453,6 +478,9 @@ impl EnvironmentShown {
 
 impl SessionPane {
     /// The top row for the open session filed under `key`, its spinner at `step`, recording where each button is drawn.
+    /// With actions to draw, it builds them in both looks and leaves the choice to [`fit`], which makes it as the row is
+    /// laid out; without (no store, no row, or a Delete in flight) the left region fills the row alone, beside the
+    /// Delete's progress if there is one.
     pub(super) fn header_row(
         &mut self,
         key: &str,
@@ -470,20 +498,32 @@ impl SessionPane {
         };
         // The terminal area's part of the left region: the strip of the session's terminals, then the open-tunnels pill
         // while the session has tunnels open (the agent terminal's: SPEC.md's tunnels belong to the session). Buttons,
-        // so they keep their presses inside the title band.
+        // so they keep their presses inside the title band. The strip is drawn through `Measured`, so the fit can read
+        // its floor (`fit`'s module docs).
         let set = self
             .mounted
             .current(cx)
             .as_ref()
             .and_then(|mounted| mounted.set.clone());
-        let strip = set
-            .as_ref()
-            .map(|set| crate::terminal::set::TerminalSet::strip(set, window, cx));
-        let pill = set
-            .map(|set| set.read(cx).agent().clone())
-            .and_then(|terminal| {
+        let strip_layout = fit::LayoutSlot::default();
+        let strip = set.as_ref().map(|set| {
+            let strip = crate::terminal::set::TerminalSet::strip(set, window, cx);
+            Measured::new(strip, strip_layout.clone())
+        });
+        let agent = set.map(|set| set.read(cx).agent().clone());
+        let pill_of = |window: &mut Window, cx: &mut Context<Self>| {
+            agent.as_ref().and_then(|terminal| {
                 terminal.update(cx, |terminal, cx| terminal.tunnel_pill(window, cx))
-            });
+            })
+        };
+        let pill = pill_of(window, cx);
+        // `.session-topbar:has(> .session-tunnel-pill) { gap: 6px }`: a pill tightens the row's gaps.
+        let gap = px(if pill.is_some() {
+            PILL_ROW_GAP
+        } else {
+            ROW_GAP
+        });
+        let shows_pill = pill.is_some();
         let row = div()
             .id("session-header")
             .debug_selector(|| "session-header".into())
@@ -491,30 +531,29 @@ impl SessionPane {
             .flex_row()
             .flex_none()
             .items_center()
-            .gap(px(ROW_GAP))
+            .gap(gap)
             .min_h(min_height)
             .px(px(ROW_PAD_X))
             .overflow_hidden()
             .bg(theme::color(palette.bg_1))
-            .text_size(metrics::TEXT_MD)
-            // The left region: the terminal area's tabs and tunnel pill go here. It takes the width the actions leave
-            // and gives it up first (`min_w_0`), so the actions never shrink at the 650-pixel floor.
-            .child(
-                div()
-                    .id(TABS_SLOT)
-                    .debug_selector(|| TABS_SLOT.into())
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(ROW_GAP))
-                    .children(strip)
-                    .children(pill),
-            );
+            .text_size(metrics::TEXT_MD);
+        // The left region: the terminal area's tabs and tunnel pill go here. It takes the width the actions leave and
+        // gives it up first (`min_w_0`), so the actions never shrink at the 650-pixel floor.
+        let left = div()
+            .id(TABS_SLOT)
+            .debug_selector(|| TABS_SLOT.into())
+            .flex()
+            .flex_row()
+            .items_center()
+            .flex_1()
+            .min_w_0()
+            .gap(gap)
+            .children(strip)
+            .children(pill)
+            .into_any_element();
         let row = title_band::row(row, Row::SessionTop);
         let Some(store) = session::current_store(cx) else {
-            return row.into_any_element();
+            return row.child(left).into_any_element();
         };
         let collections = store.read(cx).collections();
         let row_now = collections.get::<SessionRow>(key).cloned();
@@ -527,6 +566,7 @@ impl SessionPane {
             self.header.anchors.clear();
             self.header.carets.clear();
             return row
+                .child(left)
                 // Text in the title band keeps its presses: it must not move the window (`desktop::title_band`).
                 .child(title_band::claims_presses(
                     div().child(delete_progress(key, guard, step, cx)),
@@ -537,7 +577,7 @@ impl SessionPane {
         let Some(row_now) = row_now else {
             self.header.anchors.clear();
             self.header.carets.clear();
-            return row.into_any_element();
+            return row.child(left).into_any_element();
         };
         let shown = Shown {
             row: &row_now,
@@ -551,12 +591,6 @@ impl SessionPane {
             step,
             environment,
         };
-        let open = self.header.open_question(window, cx);
-        let menu_open = self.header.open_menu(window, cx);
-        let pane = cx.weak_entity();
-        let mut anchors = HashMap::new();
-        let mut carets = HashMap::new();
-        let mut buttons: Vec<AnyElement> = Vec::new();
         // A retired session's row draws Delete alone (the module docs).
         let retired = retired::is(&row_now);
         let actions: &[Action] = if retired {
@@ -564,102 +598,76 @@ impl SessionPane {
         } else {
             &Action::ALL
         };
+        // Each control's anchor, and each split's choices and caret, once: both looks of the actions share them.
+        let mut anchors = HashMap::new();
+        let mut carets = HashMap::new();
+        let mut slots = Vec::new();
         for &action in actions {
             // An environment session's Suspend or Resume, immediately left of Stop (SPEC.md, "Sandbox sessions").
-            if action == Action::Stop
-                && let Some(environment) = shown.environment
-            {
+            if action == Action::Stop && shown.environment.is_some() {
                 let anchor = Anchor::for_element(
                     SharedString::from(format!("{ENVIRONMENT_ID}-anchor")),
                     window,
                     cx,
                 );
-                anchors.insert(Control::Environment, anchor.clone());
-                let asking = open == Some(Control::Environment);
-                let button = environment_button(environment, shown.step, asking, &pane, cx);
-                buttons.push(
-                    div()
-                        .relative()
-                        .flex_none()
-                        .child(button)
-                        .child(anchor.track())
-                        .into_any_element(),
-                );
+                anchors.insert(Control::Environment, anchor);
             }
             let anchor = Anchor::for_element(
                 SharedString::from(format!("{}-anchor", action.id())),
                 window,
                 cx,
             );
-            anchors.insert(Control::Action(action), anchor.clone());
-            let asking = open == Some(Control::Action(action));
-            let button = action_button(action, &shown, asking, &pane, cx);
-            // Each action is its own anchor, exactly as wide as its button, as the old `.restart-offer`
-            // wrappers were, so its question hangs under it.
-            let main = div()
-                .relative()
-                .flex_none()
-                .child(button)
-                .child(anchor.track());
-            let Some(split) = Split::of(action) else {
-                buttons.push(main.into_any_element());
-                continue;
-            };
-            let choices = Choices::of(split, key, shown.row, shown.launcher_wait, cx);
-            // The session's key is in the anchor's id, so a caret menu closes with its session: the next session's
-            // caret is another anchor, and an anchor that is no longer drawn closes its popover.
-            let anchor = Anchor::for_element(
-                SharedString::from(format!("{}-anchor-{key}", split.caret_id())),
-                window,
-                cx,
-            );
-            let focus = focus::control_handle(
-                SharedString::from(format!("{}-focus-handle", split.caret_id())),
-                window,
-                cx,
-            );
-            carets.insert(split, (anchor.clone(), focus.clone()));
-            // A frozen environment withholds the whole split, its caret menu's choices included, as the old header's
-            // `busy: lifecycle.busy() || sandbox_frozen` did.
-            let frozen = shown
-                .environment
-                .is_some_and(|environment| environment.frozen);
-            let caret = caret_button(
-                split,
-                &choices,
-                shown.busy || frozen,
-                menu_open == Some(split),
-                &focus,
-                &pane,
-            );
-            // The two parts side by side with no gap, as the old `.header-action-split`; the row's default
-            // stretch gives the icon-only caret the main part's height. The caret is its menu's anchor.
-            buttons.push(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_none()
-                    .child(main)
-                    .child(div().relative().flex().child(caret).child(anchor.track()))
-                    .into_any_element(),
-            );
+            anchors.insert(Control::Action(action), anchor);
+            let caret = Split::of(action).map(|split| {
+                // The session's key is in the anchor's id, so a caret menu closes with its session: the next session's
+                // caret is another anchor, and an anchor that is no longer drawn closes its popover.
+                let anchor = Anchor::for_element(
+                    SharedString::from(format!("{}-anchor-{key}", split.caret_id())),
+                    window,
+                    cx,
+                );
+                let focus = focus::control_handle(
+                    SharedString::from(format!("{}-focus-handle", split.caret_id())),
+                    window,
+                    cx,
+                );
+                carets.insert(split, (anchor, focus));
+                (
+                    split,
+                    Choices::of(split, key, shown.row, shown.launcher_wait, cx),
+                )
+            });
+            slots.push((action, caret));
         }
+        let drawn = Drawn {
+            shown: &shown,
+            slots: &slots,
+            anchors: &anchors,
+            carets: &carets,
+            open: self.header.open_question(window, cx),
+            menu_open: self.header.open_menu(window, cx),
+            pane: cx.weak_entity(),
+            retired,
+        };
+        // The condensed look and a second pill for the fit to measure, only while a pill shows: without one the actions
+        // never condense.
+        let ordinary = drawn.actions(false, cx);
+        let condensed = shows_pill.then(|| drawn.actions(true, cx));
         self.header.anchors = anchors;
         self.header.carets = carets;
-        row.child(
-            div()
-                .id("session-header-actions")
-                .debug_selector(|| "session-header-actions".into())
-                .flex()
-                .flex_row()
-                .flex_none()
-                .items_center()
-                .gap(px(ACTIONS_GAP))
-                // The terminal area's text size group starts the right-hand group (SPEC.md's top row), for a session
-                // that has a terminal to size.
-                .children((!retired).then(|| crate::terminal::text_size::controls(cx)))
-                .children(buttons),
-        )
+        let pill = if shows_pill {
+            pill_of(window, cx)
+        } else {
+            None
+        };
+        row.child(fit::Fit {
+            left,
+            strip: strip_layout,
+            pill,
+            ordinary,
+            condensed,
+            gap,
+        })
         .into_any_element()
     }
 
@@ -864,11 +872,119 @@ struct Asking<'a> {
     mark: &'a Mark,
 }
 
-/// `action`'s button as `shown` says, pressed while its question is open (`asking`), activating through `pane`.
+/// What both looks of the actions are drawn from in one frame: what the row shows, each action in order with its split's
+/// choices, each control's anchor and each caret's anchor and focus handle (made once, so the two looks share them),
+/// the question and caret menu open now, and whether the session is retired (Delete alone, no text size).
+struct Drawn<'a> {
+    shown: &'a Shown<'a>,
+    slots: &'a [(Action, Option<(Split, Choices)>)],
+    anchors: &'a HashMap<Control, Anchor>,
+    carets: &'a HashMap<Split, (Anchor, FocusHandle)>,
+    open: Option<Control>,
+    menu_open: Option<Split>,
+    pane: WeakEntity<SessionPane>,
+    retired: bool,
+}
+
+impl Drawn<'_> {
+    /// The actions, in their ordinary look or `condensed` (`fit` decides which is drawn): the terminal area's text size
+    /// group, then each control in its anchor, each split's two parts side by side.
+    fn actions(&self, condensed: bool, cx: &App) -> AnyElement {
+        let mut buttons: Vec<AnyElement> = Vec::new();
+        for (action, caret) in self.slots {
+            let action = *action;
+            // An environment session's Suspend or Resume, immediately left of Stop (SPEC.md, "Sandbox sessions").
+            if action == Action::Stop
+                && let Some(environment) = self.shown.environment
+            {
+                let asking = self.open == Some(Control::Environment);
+                let button = environment_button(
+                    environment,
+                    self.shown.step,
+                    asking,
+                    condensed,
+                    &self.pane,
+                    cx,
+                );
+                buttons.push(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .child(button)
+                        .children(self.anchors.get(&Control::Environment).map(Anchor::track))
+                        .into_any_element(),
+                );
+            }
+            let asking = self.open == Some(Control::Action(action));
+            let button = action_button(action, self.shown, asking, condensed, &self.pane, cx);
+            // Each action is its own anchor, exactly as wide as its button, as the old `.restart-offer` wrappers were,
+            // so its question hangs under it.
+            let main = div().relative().flex_none().child(button).children(
+                self.anchors
+                    .get(&Control::Action(action))
+                    .map(Anchor::track),
+            );
+            let Some(((split, choices), (anchor, focus))) = caret
+                .as_ref()
+                .and_then(|caret| Some((caret, self.carets.get(&caret.0)?)))
+            else {
+                buttons.push(main.into_any_element());
+                continue;
+            };
+            // A frozen environment withholds the whole split, its caret menu's choices included, as the old header's
+            // `busy: lifecycle.busy() || sandbox_frozen` did.
+            let frozen = self
+                .shown
+                .environment
+                .is_some_and(|environment| environment.frozen);
+            let caret = caret_button(
+                *split,
+                choices,
+                self.shown.busy || frozen,
+                self.menu_open == Some(*split),
+                condensed,
+                focus,
+                &self.pane,
+            );
+            // The two parts side by side with no gap, as the old `.header-action-split`; the row's default stretch
+            // gives the icon-only caret the main part's height. The caret is its menu's anchor.
+            buttons.push(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_none()
+                    .child(main)
+                    .child(div().relative().flex().child(caret).child(anchor.track()))
+                    .into_any_element(),
+            );
+        }
+        div()
+            .id("session-header-actions")
+            .debug_selector(|| "session-header-actions".into())
+            .flex()
+            .flex_row()
+            .flex_none()
+            .items_center()
+            .gap(px(if condensed {
+                CONDENSED_ACTIONS_GAP
+            } else {
+                ACTIONS_GAP
+            }))
+            // The terminal area's text size group starts the right-hand group (SPEC.md's top row), for a session that
+            // has a terminal to size.
+            .children((!self.retired).then(|| crate::terminal::text_size::controls(cx)))
+            .children(buttons)
+            .into_any_element()
+    }
+}
+
+/// `action`'s button as `shown` says, pressed while its question is open (`asking`), activating through `pane`, in the
+/// actions' ordinary look or `condensed`.
 fn action_button(
     action: Action,
     shown: &Shown,
     asking: bool,
+    condensed: bool,
     pane: &WeakEntity<SessionPane>,
     cx: &App,
 ) -> Button {
@@ -900,6 +1016,7 @@ fn action_button(
         .icon(action.icon())
         .tier(action.tier())
         .compact()
+        .condensed(condensed.then_some(Condensed::Words))
         .expanded(asking)
         .on_click(move |_, window, cx| {
             let mark = Mark::take(cx);
@@ -908,14 +1025,18 @@ fn action_button(
         });
     if stopping {
         // The old header's Stop while stopping: its icon, then the spinner and "Stopping…" in place of the label, which
-        // stays the button's accessible name.
+        // stays the button's accessible name. Its gap is the button's own, which condensing narrows.
         let ink = theme::color(theme::palette(cx).fg_0);
         button = button.content(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(4.))
+                .gap(if condensed {
+                    CONDENSED_GAP
+                } else {
+                    COMPACT_GLYPH_GAP
+                })
                 .child(spinner_icon(shown.step, px(12.), ink))
                 .child(stop::PROGRESS_LABEL),
         );
@@ -943,11 +1064,13 @@ fn action_button(
 /// way it is unavailable, the spinner turns in the glyph's slot, and its label names the direction ("Resume" while
 /// resuming, else "Suspend"), so the control keeps its width and the actions stay whole at the 650-pixel floor; its
 /// accessible name and hover help say what is under way ("Resuming…"). Unavailable too while the environment changes
-/// and while the session's commands are refused.
+/// and while the session's commands are refused. `condensed` takes only the old rule for every header button, 2 pixels
+/// of padding all round: the rule that also shrinks the text named the lifecycle buttons alone.
 fn environment_button(
     environment: EnvironmentShown,
     step: u8,
     asking: bool,
+    condensed: bool,
     pane: &WeakEntity<SessionPane>,
     cx: &App,
 ) -> Button {
@@ -974,6 +1097,7 @@ fn environment_button(
     )
     .tier(tier)
     .compact()
+    .condensed(condensed.then_some(Condensed::Padding))
     .expanded(asking)
     .disabled(environment.unavailable)
     .on_click(move |_, window, cx| {
@@ -1010,16 +1134,17 @@ fn frozen(row: &SessionRow, cx: &App) -> bool {
     })
 }
 
-/// `split`'s caret, offering `choices`, drawn open while its menu is (`open`), tracking `focus`, and opening its menu
-/// through `pane`. It is unavailable only while the session's commands are refused (`busy`), as the old caret was:
-/// while neither choice can run it is muted but still opens the menu, which is where the reasons are (SPEC.md: "the
-/// menu remains available to inspect reasons"). Down and Up open the closed menu on its first or last choice, as the
-/// old caret did.
+/// `split`'s caret, offering `choices`, drawn open while its menu is (`open`), in the actions' ordinary look or
+/// `condensed`, tracking `focus`, and opening its menu through `pane`. It is unavailable only while the session's
+/// commands are refused (`busy`), as the old caret was: while neither choice can run it is muted but still opens the
+/// menu, which is where the reasons are (SPEC.md: "the menu remains available to inspect reasons"). Down and Up open the
+/// closed menu on its first or last choice, as the old caret did.
 fn caret_button(
     split: Split,
     choices: &Choices,
     busy: bool,
     open: bool,
+    condensed: bool,
     focus: &FocusHandle,
     pane: &WeakEntity<SessionPane>,
 ) -> IconButton {
@@ -1041,6 +1166,7 @@ fn caret_button(
     )
     .tier(Tier::Neutral)
     .compact()
+    .condensed(condensed.then_some(Condensed::Words))
     .split(SplitPart::Caret {
         muted: choices.none_available(),
     })
