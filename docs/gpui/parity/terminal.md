@@ -573,3 +573,9 @@ stay.
   font's block glyph is shorter than the cell at most sizes, which left a stripe of background under every row. The
   shades are flat fills at a quarter, half and three quarters of the foreground's opacity rather than a dot pattern. Box
   drawing (U+2500 to U+257F) stays a font glyph. Decided by the maintainer on 2026-11-14. (`terminal/blocks.rs`.)
+- Beside a tunnel pill, the tab strip keeps the old 112-pixel floor only as far as the top row has room: when the width
+  the pill needs to stay whole and the actions leave less, the strip gets what is left and scrolls. At 650 pixels,
+  beside one tunnel's pill, it comes out below 112 pixels for both environment and remote sessions. While a Delete runs,
+  the row has no actions to fit and the strip has no floor at all beside a pill, where the old rule still applied it.
+  Decided with the session view's owner on 2026-11-16; meant to stay. The rule and why are in the module docs of
+  `crates/gui/farhelm-gui/src/session_pane/header/fit.rs`.

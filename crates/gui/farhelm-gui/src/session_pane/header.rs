@@ -19,6 +19,11 @@
 //!   widths measured in the frame being drawn ([`fit`]); the pill keeps its floor (the terminal area agreed on
 //!   2026-11-16 that the pill keeps it and this row condenses its actions, as the old row did). "Compact" in the old
 //!   rule's name is "condensed" here, since [`Button::compact`] already names the header buttons' ordinary geometry.
+//! - **The tab strip's floor beside a pill.** While a pill shows, the strip is at least 112 pixels wide, the old
+//!   `min-width: 112px` ([`crate::terminal::set::STRIP_FLOOR_BESIDE_PILL`]), but only as far as the row has room: when
+//!   the width the pill needs to stay whole and the chosen actions leave less, the strip gets what is left, down to
+//!   nothing, and scrolls. The fit decides the floor as the row is laid out, and its module docs give the rule and why
+//!   ([`fit`]); without a pill there is none.
 //! - **The actions, in the old order.** Stop, Restart, Replace, Clone, Delete, each a compact button with the old icon,
 //!   label and hover help; Delete in the danger tier, the rest neutral. The terminal area adds the text size group at
 //!   the start of the actions.
@@ -86,11 +91,10 @@
 //! measures it again.
 //!
 //! NOTE: Not ported from the old caret: `aria-haspopup`, which GPUI cannot report, and placing the menu at its caret's
-//! right edge (the layer manager places a popover below its anchor). The tab strip's floor beside a pill (the old
-//! `min-width: 112px`) is the terminal area's; the fit measures whatever floor the strip has. The old condensed look
-//! also gave the text size buttons 2 pixels of padding (the `.btn` rule reached them), which this row does not draw yet:
-//! those buttons are the terminal area's (`terminal/text_size.rs`), which agreed on 2026-11-16 to give the group's
-//! drawing a `compact: bool` that the header will pass into the condensed look.
+//! right edge (the layer manager places a popover below its anchor). The old condensed look also gave the text size
+//! buttons 2 pixels of padding (the `.btn` rule reached them), which this row does not draw yet: those buttons are the
+//! terminal area's (`terminal/text_size.rs`), which agreed on 2026-11-16 to give the group's drawing a `compact: bool`
+//! that the header will pass into the condensed look.
 //!
 //! NOTE: The row's height is its minimum (30 pixels, or the title band's height), no longer the tallest thing in it:
 //! its content is laid out by [`fit`] inside a box that asks for no height of its own. Everything the row holds is
@@ -130,7 +134,7 @@ use crate::session_list::{
 use crate::theme::{self, metrics};
 
 mod fit;
-use fit::Measured;
+use fit::Floored;
 
 /// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
 /// while the session has tunnels open; the strip always, its Agent tab at least. The row's layout (a region that takes
@@ -516,25 +520,28 @@ impl SessionPane {
         };
         // The terminal area's part of the left region: the strip of the session's terminals, then the open-tunnels pill
         // while the session has tunnels open (the agent terminal's: SPEC.md's tunnels belong to the session). Buttons,
-        // so they keep their presses inside the title band. The strip is drawn through `Measured`, so the fit can read
-        // its floor (`fit`'s module docs).
+        // so they keep their presses inside the title band. The strip and the pill are drawn through `Floored`, which
+        // lays each out with the floor the fit decides beside a pill (`fit`'s module docs); drawn without a fit, they
+        // have none.
         let set = self
             .mounted
             .current(cx)
             .as_ref()
             .and_then(|mounted| mounted.set.clone());
-        let strip_layout = fit::LayoutSlot::default();
+        let strip_floor = fit::Floor::default();
         let strip = set.as_ref().map(|set| {
             let strip = crate::terminal::set::TerminalSet::strip(set, window, cx);
-            Measured::new(strip, strip_layout.clone())
+            Floored::new(strip, strip_floor.clone())
         });
+        let has_strip = strip.is_some();
         let agent = set.map(|set| set.read(cx).agent().clone());
         let pill_of = |window: &mut Window, cx: &mut Context<Self>| {
             agent.as_ref().and_then(|terminal| {
                 terminal.update(cx, |terminal, cx| terminal.tunnel_pill(window, cx))
             })
         };
-        let pill = pill_of(window, cx);
+        let pill_floor = fit::Floor::default();
+        let pill = pill_of(window, cx).map(|pill| Floored::new(pill, pill_floor.clone()));
         // `.session-topbar:has(> .session-tunnel-pill) { gap: 6px }`: a pill tightens the row's gaps.
         let gap = px(if pill.is_some() {
             PILL_ROW_GAP
@@ -674,13 +681,13 @@ impl SessionPane {
         self.header.anchors = anchors;
         self.header.carets = carets;
         let pill = if shows_pill {
-            pill_of(window, cx)
+            pill_of(window, cx).map(|copy| (copy, pill_floor))
         } else {
             None
         };
         row.child(fit::Fit {
             left,
-            strip: strip_layout,
+            strip: has_strip.then_some(strip_floor),
             pill,
             ordinary,
             condensed,
