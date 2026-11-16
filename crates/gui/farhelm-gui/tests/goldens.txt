@@ -34,8 +34,8 @@ linux/filter-empty-both-links--dark.png d423cda2aa8331116574e6e3c3f47a750dcce928
 linux/filter-empty-both-links--light.png 92265c2d7487766dc3f1fb779e3c4a7d29a6bfb3
 linux/focus-ring--dark.png 6b7b43d368f719b9d73f4c93732399604dc5aba1
 linux/focus-ring--light.png 5cfb9bdb574c9451c8ddfcfbcf879933fccc6d20
-linux/help-menu--dark.png 1bd2ff1ce7b935e8d5f962fdac20a984527a1bb0
-linux/help-menu--light.png 245af7aff87cc1695446c69a99325ffee7d1a72b
+linux/help-menu--dark.png cb343a668751fcafad35ab9360a3dd70f16e2bbf
+linux/help-menu--light.png 944eaf9af90c40350779c682772f051ff18b3121
 linux/host-add-dialog--dark.png 3626e7f18511dbbb0bbc493982c6c49086502d05
 linux/host-add-dialog--light.png 08166489d78424b50cbed37e364d23d4eda2338d
 linux/host-add-dialog-agent--dark.png a93fb1059a0295108c15f0b83d7381b96e55aa2a

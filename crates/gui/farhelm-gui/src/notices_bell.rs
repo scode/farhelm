@@ -108,10 +108,10 @@ const BELL_GAP: f32 = 4.;
 /// entries are sentences rather than command names.
 const LIST_WIDTH: f32 = 288.;
 
-/// The room the list keeps free below the height of the window's content area
-/// ([`crate::desktop::linux_title_bar::content_area`]): the list is at most that height less this, and a list taller
-/// than that scrolls its entries. The old `max-height: calc(100vh - 16px)` took it from the viewport, which was the old
-/// page and so is the content area here; the name still says window from then.
+/// The room a floating panel keeps free below the height of the window's content area
+/// ([`crate::desktop::linux_title_bar::content_area`]): a panel is at most that height less this, and one taller
+/// scrolls ([`window_cap`]). The old flyouts' `max-height: calc(100vh - 16px)` took it from the viewport, which was the
+/// old page and so is the content area here; the name still says window from then.
 const WINDOW_ROOM: f32 = 16.;
 
 /// An entry's text size (`.session-bell-text`).
@@ -564,7 +564,7 @@ impl Render for NotificationList {
         let clear = Button::new(
             CLEAR_ID,
             "Clear all",
-            HoverHelp::tooltip("Clear: remove these notifications for every window"),
+            HoverHelp::tooltip("Clear: remove these notifications"),
             Role::Button,
         )
         .busy(self.clearing)
@@ -694,15 +694,22 @@ pub(crate) fn list_panel(
         .debug_selector(move || id.into())
         .role(Role::Dialog)
         .w(width)
-        .max_h(
-            crate::desktop::linux_title_bar::content_area(window)
-                .size
-                .height
-                - px(WINDOW_ROOM),
-        )
+        .max_h(window_cap(window))
         .flex()
         .flex_col()
         .py(px(4.))
+}
+
+/// The tallest a floating panel of this area may be in `window`: the height of its content area (inside a drawn Linux
+/// frame and below the title bar; the whole window elsewhere) less [`WINDOW_ROOM`]. The session bell's list, the rail's
+/// notices panel and the Help menu are capped at it and scroll what does not fit, so none of them runs past the content
+/// area's edge at the smallest window size, where the layer manager can keep a popover inside that area only once it is
+/// no taller than the area.
+pub(crate) fn window_cap(window: &Window) -> gpui::Pixels {
+    crate::desktop::linux_title_bar::content_area(window)
+        .size
+        .height
+        - px(WINDOW_ROOM)
 }
 
 /// One entry's frame under element id `id` (`.session-bell-entry`): a red edge at its left while it is `new`, so the
