@@ -15,13 +15,14 @@
 //!   here; it hands its measured pane to the set, which fits the hidden ones to the same pane, so a hidden tab attaches,
 //!   replays its history and keeps real rows and columns (and is resized with the window and the text size).
 //! - **One lease for the view.** The agent terminal and every tab attach under one [`AttachmentLease`], minted when the
-//!   set is made, so the helm sees one viewer: a second window's view takes all of them over at once, and a reconnect
-//!   of one is not a takeover of the others. They share one tunnel list too, the agent terminal's, since tunnels belong
-//!   to the session: a tunnel a tab opens shows in the top row's pill.
-//! - **A takeover holds back new tabs.** When another window takes the terminals over, each shows its own Detached line
-//!   with Take control. A tab learned about meanwhile is parked rather than attached, because attaching it under this
-//!   view's lease would take every terminal back without the user asking (the old app's takeover latch). Take control
-//!   on any terminal takes all of them back, parked ones included.
+//!   set is made, so the helm sees one viewer, and a reconnect of one is not a takeover of the others. They share one
+//!   tunnel list too, the agent terminal's, since tunnels belong to the session: a tunnel a tab opens shows in the top
+//!   row's pill.
+//! - **Each terminal attaches on its own.** A tab the set learns about opens its stream at its first fit, whatever the
+//!   other terminals are doing, and a terminal whose stream stopped (a stalled viewer, a refused attach) waits for its
+//!   own Reconnect. One UI holds the helm at a time, and a window that loses it goes inert as a whole, so there is no
+//!   other window whose terminals a new tab's attach could take back (decided by the migration's orchestrator on
+//!   2026-11-15).
 //! - **At most 32 tabs are attached.** A bound on what the window builds from a tab list it did not write (the old
 //!   app's `MAX_MOUNTED_TAB_ISLANDS`), not a feature limit: the strip lists every tab, and a tab past the bound shows
 //!   that it is not attached instead of a terminal. The agent terminal does not count.
@@ -46,7 +47,7 @@
 //! itself as tabs before it closed); it acts on the tab's id either way.
 
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use farhelm_helm_client::terminal::AttachmentLease;
@@ -55,8 +56,8 @@ use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EntityId,
     FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Role,
-    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 
 #[cfg(test)]
@@ -231,8 +232,6 @@ struct Tab {
     terminal: Option<Entity<AttachedTerminal>>,
     /// Its button's focus handle in the strip, kept with the tab so focus stays on its button as tabs come and go.
     focus: FocusHandle,
-    /// Hears its terminal's changes, for the takeover rule.
-    _watch: Option<Subscription>,
 }
 
 /// The open session's terminals. See the module docs.
@@ -245,15 +244,10 @@ pub struct TerminalSet {
     lease: AttachmentLease,
     /// The agent terminal, always attached.
     agent: Entity<AttachedTerminal>,
-    /// Hears the agent terminal's changes, for the takeover rule.
-    _agent_watch: Subscription,
     /// The shell tabs, in the helm's order.
     tabs: Vec<Tab>,
     /// The chosen tab's id, `None` for the agent terminal. Only ever a listed tab's.
     chosen: Option<String>,
-    /// The terminals that wait for Take control after another window took them over, by entity id. While any does,
-    /// tabs learned about are parked (see the module docs).
-    waiting: HashSet<EntityId>,
     /// The hold every terminal's notices answer to.
     hold: SharedHold,
     /// The Agent tab's focus handle in the strip.
@@ -285,17 +279,14 @@ impl TerminalSet {
     ) -> Self {
         let lease = AttachmentLease::new();
         let agent = Self::make(session, &key, None, &lease, metrics, &hold, false, None, cx);
-        let agent_watch = cx.observe(&agent, |set, _, cx| set.member_changed(cx));
         let tabs_follow = session::observe_current(cx, |set: &mut Self, cx| set.follow_tabs(cx));
         let mut set = TerminalSet {
             session: session.downgrade(),
             key,
             lease,
             agent,
-            _agent_watch: agent_watch,
             tabs: Vec::new(),
             chosen: None,
-            waiting: HashSet::new(),
             hold,
             agent_focus: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
@@ -452,9 +443,8 @@ impl TerminalSet {
         cx.notify();
     }
 
-    /// Bring the tabs in line with the pushed row: keep the terminals of tabs still listed, make terminals for new ones
-    /// (parked while another window holds the terminals), drop those no longer listed, and fall back to the agent
-    /// terminal when the chosen tab went.
+    /// Bring the tabs in line with the pushed row: keep the terminals of tabs still listed, make terminals for new
+    /// ones, drop those no longer listed, and fall back to the agent terminal when the chosen tab went.
     fn follow_tabs(&mut self, cx: &mut Context<Self>) {
         let listed: Vec<String> = session::current_store(cx)
             .and_then(|store| {
@@ -486,7 +476,6 @@ impl TerminalSet {
                 id,
                 terminal: None,
                 focus: cx.focus_handle().tab_stop(true),
-                _watch: None,
             });
             if tab.terminal.is_none()
                 && index < MAX_ATTACHED_TABS
@@ -503,11 +492,7 @@ impl TerminalSet {
                     Some(self.agent.read(cx).tunnels().clone()),
                     cx,
                 );
-                if !self.waiting.is_empty() {
-                    terminal.update(cx, |terminal, cx| terminal.park(cx));
-                }
                 // Not fitted here: the notify below redraws the shown terminal, whose measured pane fits it (`measured`).
-                tab._watch = Some(cx.observe(&terminal, |set, _, cx| set.member_changed(cx)));
                 tab.terminal = Some(terminal);
             }
             self.tabs.push(tab);
@@ -527,7 +512,6 @@ impl TerminalSet {
             let set = cx.entity();
             cx.defer(move |cx| choose_in(&set, id, mark, window, cx));
         }
-        self.member_changed(cx);
         cx.notify();
     }
 
@@ -548,35 +532,6 @@ impl TerminalSet {
             .collect();
         for terminal in hidden {
             terminal.update(cx, |terminal, cx| terminal.fit_hidden(pane, scale, cx));
-        }
-    }
-
-    /// A terminal of the set changed: keep the takeover rule. Another window taking the terminals over makes them wait
-    /// for Take control; once the user takes control on any of them (a terminal that waited and is still in the set
-    /// waits no more), every other one that waits takes control too, parked ones included, since the helm hands all of
-    /// a lease's terminals to the newest attach anyway. A waiting terminal that leaves the set (its tab closed or reaped
-    /// in the other window) is not the user taking control, and releases nothing.
-    fn member_changed(&mut self, cx: &mut Context<Self>) {
-        let members: Vec<_> = self.terminals().cloned().collect();
-        let now: HashSet<EntityId> = members
-            .iter()
-            .filter(|terminal| terminal.read(cx).taken_over())
-            .map(|terminal| terminal.entity_id())
-            .collect();
-        let taken_back = members.iter().any(|terminal| {
-            let id = terminal.entity_id();
-            self.waiting.contains(&id) && !now.contains(&id)
-        });
-        if taken_back {
-            self.waiting.clear();
-            for terminal in members
-                .into_iter()
-                .filter(|terminal| now.contains(&terminal.entity_id()))
-            {
-                terminal.update(cx, |terminal, cx| terminal.take_control(cx));
-            }
-        } else {
-            self.waiting = now;
         }
     }
 

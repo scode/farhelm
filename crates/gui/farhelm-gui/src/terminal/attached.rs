@@ -19,15 +19,15 @@
 //!   80x24 attach followed by a resize). Later size changes go out as resizes, only when the size changes.
 //! - Staged replay. Each attachment replays the whole screen and history from nothing, so its output goes into a fresh
 //!   view kept off screen until the helm says the replay is complete; only then does it replace what is shown. A
-//!   reconnect, a takeover or a refusal therefore never replaces a shown screen with half a replay, and the last
-//!   complete screen stays up while the stream is not live. The one exception is a detach (a takeover, say) during
-//!   the first replay, with no earlier screen to keep: what arrived of it is shown, once it holds a whole screen, as
-//!   the displaced client's snapshot.
+//!   reconnect, a detach or a refusal therefore never replaces a shown screen with half a replay, and the last
+//!   complete screen stays up while the stream is not live. The one exception is a detach (a stall, say) during the
+//!   first replay, with no earlier screen to keep: what arrived of it is shown, once it holds a whole screen, as the
+//!   detached viewer's snapshot.
 //! - Bounded delivery. Each GUI turn takes at most [`BATCH`] events from the stream, applies consecutive output as one
 //!   batch (so a flood redraws once per turn, not once per message), and then yields to the executor, so a flood cannot
 //!   hold the main thread and frames keep their turn.
 //! - One status line, or the reconnect card. Whenever the stream is not live and not catching up, one line in the old
-//!   app's red banner says why, with a Take control button where the stream waits for the user. A stream that dropped
+//!   app's red banner says why, with a Reconnect button where the stream waits for the user. A stream that dropped
 //!   and is coming back by itself says so on a calm card over the kept screen instead ("The reconnect card" below).
 //!   Its owner can hold these back, with the exit line, while something else explains what is happening
 //!   ([`AttachedTerminal::hold_notices`]).
@@ -46,7 +46,7 @@
 //! SPEC.md, "Session list": "A dropped terminal stream between the window and the helm uses the same card with
 //! `Session unavailable — reconnecting` and a neutral `Reconnect now` button; recoverable drops show no red detach
 //! banner." A drop the stream recovers from by itself is not a failure the user has to act on, so it gets the old app's
-//! outage card (`paintReconnect` in terminal.js at the reference commit) rather than the red band that a takeover, a
+//! outage card (`paintReconnect` in terminal.js at the reference commit) rather than the red band that a stall, a
 //! refusal or a closed stream keeps. Here's the TLDR of how it behaves:
 //!
 //! - **When.** From the stream's `Reconnecting` until the attachment it comes back on has replayed and gone live
@@ -271,9 +271,14 @@ const RECONNECT_CARD_MAX_WIDTH: f32 = 672.;
 /// The reconnect overlay's `padding: 20px`, between the pane's edge and the card.
 const RECONNECT_SCRIM_PADDING: f32 = 20.;
 
-/// Take control's hover help, the old button's tooltip word for word.
-const TAKE_CONTROL_HELP: &str =
-    "Take control: attach this view, detaching any other client attached to this session";
+/// The status line's Reconnect's id, which tests find it by.
+pub(crate) const STATUS_RECONNECT_ID: &str = "terminal-status-reconnect";
+
+/// The status line's Reconnect's hover help. The old app's button in this place was Take control, offered only after
+/// another client took the session over, and its help promised to detach that client. One UI holds the helm at a time,
+/// so the button only attaches this view again (decided by the migration's orchestrator on 2026-11-15), and it takes
+/// the word of the old app's other reattach button, the reconnect card's Reconnect now.
+const STATUS_RECONNECT_HELP: &str = "Reconnect: attach this terminal again";
 
 /// Which terminal an owner attaches: the session's agent terminal or one of its tabs, under the session view's lease.
 #[derive(Clone, Debug)]
@@ -289,16 +294,16 @@ pub struct TerminalTarget {
 /// Opens the stream once the owner knows its size. The app passes its UI session's
 /// [`UiSession::terminal_opener`], which opens nothing once the session is retired; tests pass one that hands out a
 /// fake terminal's handle and feed. Called at most once
-/// per owner: the stream reconnects by itself, and Take control goes through the same stream.
+/// per owner: the stream reconnects by itself, and the status line's Reconnect goes through the same stream.
 pub type OpenStream = Box<dyn FnOnce(TerminalAttach) -> (TerminalHandle, TerminalEvents)>;
 
-/// What the status line says, and whether it offers Take control. `reason` is the helm's or supervisor's own
+/// What the status line says, and whether it offers Reconnect. `reason` is the helm's or supervisor's own
 /// explanation of a detach, which is host-supplied text and is drawn escaped after `words`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StatusLine {
     pub words: SharedString,
     pub reason: Option<HostText>,
-    pub take_control: bool,
+    pub offers_reconnect: bool,
 }
 
 /// How much of a terminal's own notices its owner holds back now ([`AttachedTerminal::hold_notices`]).
@@ -491,9 +496,6 @@ pub struct AttachedTerminal {
     _size_steps: Subscription,
     /// Told the pane's size whenever this terminal is drawn and measures it ([`AttachedTerminal::on_measured`]).
     measured: Option<Measured>,
-    /// Kept from opening its stream while another window holds the session's terminals ([`AttachedTerminal::park`]),
-    /// with the size it would have opened at, once it is known.
-    parked: Option<Option<(Bounds<Pixels>, f32)>>,
     /// The text size the terminal is drawn at: the size current when it was made, then each size
     /// [`AttachedTerminal::follow_text_size`] took on. The maker measures the metrics it passes in at that same current
     /// size (the session pane does); a terminal handed metrics for another size would keep them until the size moves.
@@ -633,7 +635,6 @@ impl AttachedTerminal {
             _tunnel_reads: tunnel_reads,
             _size_steps: size_steps,
             measured: None,
-            parked: None,
             text_size: super::text_size::current(cx),
             #[cfg(test)]
             turns: 0,
@@ -651,7 +652,7 @@ impl AttachedTerminal {
     /// line included, which takes every press, hover and wheel turn; its grid takes no keys and no actions (no key
     /// context, so Tab and Escape are the window's, not the program's), and nothing the user types, commits or pastes
     /// is sent; its pane is no Tab stop, its cursor is drawn as unfocused, the platform's text input is not handed to
-    /// it, the status line's Take control, the tunnel notice and the reconnect card, which Tab could still reach under
+    /// it, the status line's Reconnect, the tunnel notice and the reconnect card, which Tab could still reach under
     /// the veil, are not drawn, and neither is the refused-click line. Going inert ends whatever was under way: a selection drag or a press
     /// on a link is dropped, and a paste still reading the clipboard is not sent. Going inert sends no release for a
     /// press the program's mouse reporting took (the old app sent none either, and the card this serves stands over a
@@ -707,11 +708,11 @@ impl AttachedTerminal {
     /// What the status line says now, if anything. `None` while live, while catching up, while the stream comes back
     /// from a drop by itself (the reconnect card says that: [`AttachedTerminal::reconnecting`]), and once retired.
     pub fn status_line(&self) -> Option<StatusLine> {
-        let line = |words: String, reason, take_control| {
+        let line = |words: String, reason, offers_reconnect| {
             Some(StatusLine {
                 words: words.into(),
                 reason,
-                take_control,
+                offers_reconnect,
             })
         };
         if self.retired {
@@ -720,31 +721,19 @@ impl AttachedTerminal {
         if let Some(fault) = &self.fault {
             return line(fault.to_string(), None, false);
         }
-        // Parked before it ever opened: it waits for Take control as a terminal the takeover detached does, and says so
-        // in the same words, the helm's own for a takeover.
-        if self.parked.is_some() && self.handle.is_none() {
-            return line(
-                "Detached: ".into(),
-                Some(HostText::from_host(
-                    farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
-                )),
-                true,
-            );
-        }
         match &self.stream {
             // A drop the stream recovers from by itself is the reconnect card's, never the red band's (SPEC.md:
             // "recoverable drops show no red detach banner").
             StreamState::Attaching | StreamState::Attached(_) | StreamState::Reconnecting(_) => {
                 None
             }
-            // The old app offered Take control only after a takeover. The helm client parks a stalled viewer and a
-            // refused attach until Take control as well, and nothing else in this milestone can ask it to try again
-            // (Retry comes with the reconnect display), so they offer it too, on purpose. A closed tab is gone, so there
-            // is nothing to take.
-            // A tab that was attached and then closed or reaped says nothing: the session view drops it at the next
-            // pushed tab list, moments later, and SPEC.md has a tab whose shell exits disappear "automatically and
-            // silently". A tab the helm never attached (one the supervisor cannot find) still explains itself, or its
-            // pane would stay blank.
+            // The helm client stops a stalled viewer and a refused attach until the user asks again, and nothing else
+            // can ask it to (SPEC.md: a viewer detached for stalling "keeps its reason", and comes back "because
+            // someone asks"), so every stopping detach and every refusal offers Reconnect. A closed tab is gone, so
+            // there is nothing to reconnect to. A tab that was attached and then closed or reaped says nothing: the
+            // session view drops it at the next pushed tab list, moments later, and SPEC.md has a tab whose shell exits
+            // disappear "automatically and silently". A tab the helm never attached (one the supervisor cannot find)
+            // still explains itself, or its pane would stay blank.
             StreamState::Detached {
                 code: Some(DetachCode::TabClosed),
                 ..
@@ -768,17 +757,17 @@ impl AttachedTerminal {
     /// The session pane holds them while a Delete of its session is in flight (SPEC.md, "Lifecycle operations": the
     /// terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile), because the Delete
     /// kills the agent and detaches the viewer, and those notices would otherwise read as failures. Only drawing
-    /// changes: a stream that waits for Take control still waits, input still goes out only while live, and
+    /// changes: a stream that waits for Reconnect still waits, input still goes out only while live, and
     /// [`AttachedTerminal::status_line`] keeps reporting the stream's own line.
     ///
     /// The hold does not tell the Delete's notices from others: one already showing when the hold begins (an ended
-    /// agent's exit line under "Stopping tabs…", a takeover's band with Take control) goes too, and the screen drops
+    /// agent's exit line under "Stopping tabs…", a stall's band with Reconnect) goes too, and the screen drops
     /// the lift it had for it. That is accepted because the pane's scrim covers the terminal for exactly as long, and
     /// the notice comes back on release if it still applies.
     ///
     /// The pane holds the reconnect card alone ([`Hold::ReconnectCard`]) while its Restart of the session is in flight
-    /// (`session_pane.rs` says why). That hold is narrower on purpose: a takeover or a refusal during a Restart is not
-    /// the Restart's doing, so its band still shows.
+    /// (`session_pane.rs` says why). That hold is narrower on purpose: a stall or a refusal during a Restart is not the
+    /// Restart's doing, so its band still shows.
     ///
     /// `hold` is asked while drawing, so whatever it reads must notify when its answer changes.
     pub fn hold_notices(&mut self, hold: NoticeHold) {
@@ -810,10 +799,9 @@ impl AttachedTerminal {
         self.recovery.filter(|_| self.reconnecting())
     }
 
-    /// The user's Reconnect now: ask the stream to skip what is left of its backoff and attach at once, through the
-    /// non-displacing route, so it never takes the terminal from anyone. Sends nothing unless the stream is coming back
-    /// from a drop. During the catch-up of the attachment it came back on there is no backoff left to skip, and the
-    /// stream ignores the request then.
+    /// The user's Reconnect now: ask the stream to skip what is left of its backoff and attach at once. Sends nothing
+    /// unless the stream is coming back from a drop. During the catch-up of the attachment it came back on there is no
+    /// backoff left to skip, and the stream ignores the request then.
     pub fn reconnect_now(&self) {
         if self.reconnecting()
             && let Some(handle) = &self.handle
@@ -831,13 +819,11 @@ impl AttachedTerminal {
             .map(|placement| placement.lift)
     }
 
-    /// The user's Take control: attach again, or, parked, open at last. Only the states
-    /// that wait for it offer it.
-    pub fn take_control(&mut self, cx: &mut Context<Self>) {
-        if self.parked.is_some() && self.handle.is_none() {
-            self.unpark(cx);
-            return;
-        }
+    /// The user's Reconnect on the status line: attach again after a detach that stopped the stream (a stall, say) or a
+    /// refusal. Only the states that wait for it offer it, and it sends nothing in any other. Unlike
+    /// [`AttachedTerminal::reconnect_now`], which only shortens a recovery already under way, this starts the attach
+    /// that nothing else would.
+    pub fn reconnect(&mut self, cx: &mut Context<Self>) {
         let waiting = matches!(
             self.stream,
             StreamState::Detached { .. } | StreamState::Refused { .. }
@@ -863,41 +849,6 @@ impl AttachedTerminal {
         self.fitted(pane, scale, cx);
     }
 
-    /// Keep this terminal from opening its stream until [`AttachedTerminal::unpark`] or the user's Take control. The
-    /// terminal set parks a tab it learns about while another window holds the session's terminals: the helm groups a
-    /// session's streams by lease, so opening one under this window's lease would take every terminal back from the
-    /// window that took them, without the user asking (the old app's takeover latch, `terminal.js` at the reference
-    /// commit). Parked, it says it is detached and offers Take control. Does nothing to a terminal that already opened.
-    pub(crate) fn park(&mut self, cx: &mut Context<Self>) {
-        if self.handle.is_none() && self.parked.is_none() {
-            self.parked = Some(None);
-            cx.notify();
-        }
-    }
-
-    /// Let a parked terminal open, at the size it was last told, if any; otherwise it opens at its next fit.
-    pub(crate) fn unpark(&mut self, cx: &mut Context<Self>) {
-        if let Some(parked) = self.parked.take() {
-            if let Some((pane, scale)) = parked {
-                self.fitted(pane, scale, cx);
-            }
-            cx.notify();
-        }
-    }
-
-    /// Whether another window took this terminal over and it waits for Take control, or it is parked for the same
-    /// reason. The terminal set reads this to hold back tabs it learns about meanwhile.
-    pub(crate) fn taken_over(&self) -> bool {
-        (self.parked.is_some() && self.handle.is_none())
-            || matches!(
-                self.stream,
-                StreamState::Detached {
-                    code: Some(DetachCode::TakenOver),
-                    ..
-                }
-            )
-    }
-
     /// The pane was drawn at `pane` on a display of `scale`: open the stream at the size that fits, or resize it when
     /// the size changed. Runs deferred after the frame that measured it, never during paint.
     fn fitted(&mut self, pane: Bounds<Pixels>, scale: f32, cx: &mut Context<Self>) {
@@ -910,11 +861,6 @@ impl AttachedTerminal {
             cx.notify();
         }
         if self.fault.is_some() {
-            return;
-        }
-        // Parked, it remembers where it would have opened and opens nothing (see `park`).
-        if let (Some(parked), None) = (&mut self.parked, &self.handle) {
-            *parked = Some((pane, scale));
             return;
         }
         let width = f32::from(pane.size.width) - 2. * PANE_PADDING;
@@ -1101,11 +1047,12 @@ impl AttachedTerminal {
 
     /// The stream moved to `state`.
     fn stream_changed(&mut self, state: StreamState, cx: &mut Context<Self>) {
-        // A detach that cuts off the first replay leaves no complete screen to keep, and no end of replay will come
-        // for it, so the part that arrived becomes the non-live snapshot SPEC.md promises a displaced client, as the
-        // old app showed it. Only once a whole first screen is there (the model refuses an earlier release), and never
-        // for a reconnect, whose own replay follows. The history arrives after the screen, oldest first, so a replay
-        // cut during it keeps the screen and its oldest lines, with nothing marking the newer lines that never came.
+        // A detach that cuts off the first replay leaves no complete screen to keep, and no end of replay will come for
+        // it, so the part that arrived becomes the detached viewer's non-live snapshot (a stalled viewer keeps its
+        // snapshot, decided by the migration's orchestrator on 2026-11-15), as the old app showed it. Only once a whole
+        // first screen is there (the model refuses an earlier release), and never for a reconnect, whose own replay
+        // follows. The history arrives after the screen, oldest first, so a replay cut during it keeps the screen and
+        // its oldest lines, with nothing marking the newer lines that never came.
         if self.committed.is_none()
             && matches!(state, StreamState::Detached { .. })
             && let Some(staging) = self.staging.take()
@@ -1130,9 +1077,9 @@ impl AttachedTerminal {
             let metrics = self.metrics;
             self.staging = Some(cx.new(|_| TerminalView::new(metrics)));
         }
-        // Each of these ends the attach, and the next one (a reconnect by itself, or Take control) asks for the size
-        // last fitted: no resize is on its way for it yet. Resetting here rather than on `Attaching` keeps a resize
-        // sent while the new attach is opening from being forgotten; the first attach starts with none.
+        // Each of these ends the attach, and the next one (a reconnect by itself, or the user's Reconnect) asks for the
+        // size last fitted: no resize is on its way for it yet. Resetting here rather than on `Attaching` keeps a
+        // resize sent while the new attach is opening from being forgotten; the first attach starts with none.
         if matches!(
             state,
             StreamState::Reconnecting(_)
@@ -1810,8 +1757,8 @@ fn lift(rows: u16, cell_height: f32, room: f32, exit: bool, band: bool) -> f32 {
 }
 
 impl AttachedTerminal {
-    /// The status line: the old terminal's red `.banner` (the shared [`Banner`]), with `.banner-reclaim`'s Take
-    /// control. It sits above the grid in the pane's flow, as the old banner did, but the fit measures the whole pane,
+    /// The status line: the old terminal's red `.banner` (the shared [`Banner`]), with Reconnect in `.banner-reclaim`'s
+    /// place. It sits above the grid in the pane's flow, as the old banner did, but the fit measures the whole pane,
     /// so showing or hiding it never resizes the program; the screen is lifted by whole rows instead (see [`lift`]).
     fn banner(&self, line: StatusLine, cx: &mut Context<Self>) -> Banner {
         let mut sentence = HostSentence::new("terminal-status").text(line.words);
@@ -1819,17 +1766,17 @@ impl AttachedTerminal {
             sentence = sentence.host(reason);
         }
         let owner = cx.weak_entity();
-        // Take control is not offered under an inert terminal's veil, where Tab could still reach it.
-        Banner::new(sentence).when(line.take_control && !self.inert, |banner| {
+        // Reconnect is not offered under an inert terminal's veil, where Tab could still reach it.
+        Banner::new(sentence).when(line.offers_reconnect && !self.inert, |banner| {
             banner.action(
                 Button::new(
-                    "terminal-take-control",
-                    "Take control",
-                    HoverHelp::tooltip(TAKE_CONTROL_HELP),
+                    STATUS_RECONNECT_ID,
+                    "Reconnect",
+                    HoverHelp::tooltip(STATUS_RECONNECT_HELP),
                     Role::Button,
                 )
                 .on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |owner, cx| owner.take_control(cx));
+                    let _ = owner.update(cx, |owner, cx| owner.reconnect(cx));
                 }),
             )
         })
