@@ -83,6 +83,13 @@ MIN_MONITOR = (1600, 1200)
 LINUX_FRAME_MARGIN = 20
 LINUX_FRAME_BORDER = 1
 LINUX_FRAME = LINUX_FRAME_MARGIN + LINUX_FRAME_BORDER
+# The largest channel value a margin pixel may have and still count as black. The margin is not always pure black:
+# dialogs are sized and centered on the whole window surface, Kit's frame and the title bar included, so a dialog at
+# its height cap (New with Save as template open, at 1600x1000) reaches the surface's edge and casts its light
+# shadow into the margin, at most 6 on any channel in the captures that showed it, which an exact check left
+# uncropped. 8 keeps a little headroom. Kit's border must stay above it: a border this dark would fail the check
+# loudly (as a 21-pixel margin) rather than crop into the app.
+LINUX_FRAME_BLACK = 8
 
 # The title bar the Linux window draws for itself under Mutter, which draws none (`linux_title_bar::HEIGHT` in the GUI
 # crate), in pixels, inside Kit's frame at the window's top. The old app's pictures have no title bar, so a Linux run
@@ -294,11 +301,11 @@ def crop_frame(path: Path, margin: int, border: int, top: int = 0) -> str | None
     `top` more rows inside it at the top (the window's own title bar).
 
     Returns why it did not crop, or None. The frame is checked before anything is cut: along the middle row and column,
-    exactly `margin` black pixels from each edge, then a pixel that is not black (the border). The `top` rows are cut
-    unchecked: the bar the app draws there has no fixed look to check, only its height. A capture that does not
-    show that frame (a Kit release that changed its shadow, a compositor that draws decorations itself) is left as it
-    was and reported, rather than cropped into the app's drawing or left with a band under a label that claims the
-    asked size.
+    exactly `margin` black pixels (no channel above `LINUX_FRAME_BLACK`) from each edge, then a pixel that is not (the
+    border). The `top` rows are cut unchecked: the bar the app draws there has no fixed look to check, only its
+    height. A capture that does not show that frame (a Kit release that changed its shadow, a compositor that draws
+    decorations itself) is left as it was and reported, rather than cropped into the app's drawing or left with a band
+    under a label that claims the asked size.
     """
     try:
         width, height, pixels = read_rgba(path)
@@ -310,7 +317,7 @@ def crop_frame(path: Path, margin: int, border: int, top: int = 0) -> str | None
 
     def black(x: int, y: int) -> bool:
         at = (y * width + x) * 4
-        return pixels[at:at + 3] == b"\x00\x00\x00"
+        return max(pixels[at:at + 3]) <= LINUX_FRAME_BLACK
 
     def edge_run(points) -> int:
         run = 0
