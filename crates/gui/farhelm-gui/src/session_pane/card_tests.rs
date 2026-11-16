@@ -474,6 +474,50 @@ fn a_yolo_refused_replace_from_the_card_asks_in_the_card(cx: &mut TestAppContext
     assert_eq!(sent(&mut main.helm), [consented("a", true, false)]);
 }
 
+/// SPEC.md, "Opening and closing": closing something returns focus to where it was before it opened, "on every platform,
+/// including those where clicking the button that opened it did not move focus to the button". On the Mac a click never
+/// focuses the answer it presses, so a pointer answer and a keyboard answer reach the question's close with focus in
+/// different places, and the Linux suite, where a click focuses the answer first, cannot tell them apart. This guards
+/// the Mac click rule on a question drawn in the page itself (the card's inline YOLO question) rather than in a dialog,
+/// which the prompt's own Mac-rule test covers. Specified, under the macOS click rule: the card's
+/// Replace, confirmed and refused for YOLO, asks with focus on Cancel; a click on Cancel closes the question, sends
+/// nothing and leaves focus where it was when the question arrived; asked again, Enter on Cancel does the same.
+#[gpui::test]
+fn a_clicked_yolo_answer_in_the_card_returns_focus_as_enter_does_on_the_mac(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, snapshot(&[(interrupted("a"), 0)], false));
+    main.cx
+        .update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    lifecycle(&mut main.helm);
+    for clicked in [true, false] {
+        test_support::click(main.cx, "session-card-replace");
+        test_support::click(main.cx, "prompt-confirm");
+        let [(id, _, _)] = lifecycle(&mut main.helm)[..] else {
+            panic!("one Replace was sent");
+        };
+        let arrived = focused_id(main.cx);
+        assert!(arrived.is_some(), "the premise: a control holds focus");
+        refuse_for_yolo(&mut main.helm, main.cx, id);
+        assert_eq!(
+            focused_id(main.cx).as_deref(),
+            Some("prompt-cancel"),
+            "the premise: the question took focus"
+        );
+        if clicked {
+            test_support::click(main.cx, "prompt-cancel");
+        } else {
+            test_support::keys(main.cx, "enter");
+        }
+        assert!(
+            !drawn(main.cx, "prompt-cancel"),
+            "clicked {clicked}: closed"
+        );
+        assert_eq!(sent(&mut main.helm), [], "clicked {clicked}: nothing sent");
+        assert_eq!(focused_id(main.cx), arrived, "clicked {clicked}");
+    }
+}
+
 /// The follower notifies on the host's reachability as well as on the card, for the one path where the card does not
 /// change: a card whose host drops away (no card, nothing mounted) and whose session is listed live once the host is
 /// back, after a restart elsewhere or pushes that came together. Without it the pane would stay blank until some

@@ -716,6 +716,40 @@ fn a_bulk_stop_asks_about_tabs_and_freezes_each_rows_preconditions(cx: &mut Test
     assert_eq!(focused_id(cx).as_deref(), Some("session-order"));
 }
 
+/// The old `session-action-completion.spec.ts`, "bulk Stop completion leaves the bystander terminal focused": a batch
+/// that finishes while the open session's terminal holds focus must leave the keyboard there, since the order's title
+/// takes focus only when the emptied bar held it; taking it would send the user's next key nowhere they chose. Under
+/// the macOS click rule the marking click and the bar's Stop leave focus where it was, which keeps it on the terminal
+/// without a click into the grid. Specified, under that rule: with c open and its terminal focused, a marked and its
+/// Stop sent from the bar, focus is still on the terminal; the Stop's answer clears a's mark and the bar, and c stays
+/// open with its terminal focused.
+#[gpui::test]
+fn a_finished_stop_batch_leaves_the_open_sessions_terminal_focused(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(cx, fleet(&["c", "a"]));
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    requests(&mut fake);
+    test_support::settle(cx);
+    assert!(
+        test_support::terminal_focused(cx),
+        "the premise: c's terminal"
+    );
+    mark(cx, &["session-row-a"]);
+    test_support::click(cx, STOP_ID);
+    test_support::settle(cx);
+    let sent = fake.commands();
+    assert_eq!(owned(&sent), [stop("a")], "the premise: a's Stop is out");
+    assert!(
+        test_support::terminal_focused(cx),
+        "the premise: still there"
+    );
+
+    done(&mut fake, &sent[0]);
+    test_support::settle(cx);
+    assert_eq!(count(cx), None, "the batch cleared its mark");
+    assert!(test_support::terminal_focused(cx), "{:?}", focused_id(cx));
+    assert_eq!(selected(cx).as_deref(), Some("c"));
+}
+
 /// Why this matters: SPEC.md: the bulk question "lists one row per target with status, name, full host and what the
 /// action will do, with the same conditional managed-checkout consequence for Delete", and "Cancel, Close and Escape
 /// dismiss their current question without clearing marks"; the old app returned focus to the ⋯ after a Cancel. The rows
