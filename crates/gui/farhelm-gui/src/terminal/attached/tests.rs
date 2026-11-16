@@ -4,9 +4,9 @@
 //! cursor blink.
 //!
 //! The fake plays the helm (`farhelm_helm_client::fake::terminal`); GPUI's deterministic executor cannot wait on a real
-//! socket. The owner is drawn in a pane of a fixed size inside a window from the shared harness (`test_support`), so its
-//! first fit is a real measurement, its Take control is a real button, and the focus and layer invariants are checked
-//! after every step.
+//! socket. The owner is drawn in a pane of a fixed size inside a window from the shared harness (`test_support`), so
+//! its first fit is a real measurement, its status line's Reconnect is a real button, and the focus and layer
+//! invariants are checked after every step.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,7 +16,7 @@ use farhelm_helm_client::fake::terminal::{
     FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest,
 };
 use farhelm_input_mapping::Modifiers as KeyModifiers;
-use farhelm_proto::DetachCode;
+use farhelm_proto::{DETACH_REASON_STALLED, DetachCode};
 use gpui::{
     AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, MouseButton,
     MouseMoveEvent, MouseUpEvent, ParentElement, PlatformInput, Render, ScrollDelta, ScrollEvent,
@@ -46,7 +46,7 @@ const SECOND_PANE: (f32, f32) = (400., 200.);
 const PILL_ROW: f32 = 30.;
 
 /// The window's root: a pane of the size in `size` holding the owner (and, in tests that need one, a second, smaller
-/// pane below it), wired through [`root`] as the app's root views are, so the Take control button and focus behave as
+/// pane below it), wired through [`root`] as the app's root views are, so the Reconnect button and focus behave as
 /// they do there. It handles the session Delete shortcut's action on the root element, as the session view will,
 /// counting its runs. Its own root view rather than [`test_support::open`]'s scene because the test changes its size
 /// and reads its counts.
@@ -549,8 +549,8 @@ fn a_new_size_is_sent_once(cx: &mut TestAppContext) {
 /// be corrected, once, or the program keeps drawing for a grid the pane does not show. Specified: the attach asks for
 /// the fitted size; when its replay says hello at two columns fewer, the owner sends one resize to the fitted size, and
 /// a later redraw sends nothing more; after a dropped link, the reconnect's first screen at the wrong size gets one
-/// resize again, and so does the first screen of a Take control after another window took the session over (the
-/// likeliest wrong size: that window resized the program to its own pane).
+/// resize again, and so does the first screen of the user's Reconnect after a stall, an attach of its own that never
+/// passes through the stream's reconnecting.
 #[gpui::test]
 fn a_first_screen_at_another_size_is_resized_once(cx: &mut TestAppContext) {
     let h = harness(cx);
@@ -593,11 +593,12 @@ fn a_first_screen_at_another_size_is_resized_once(cx: &mut TestAppContext) {
         "and after a reconnect"
     );
 
-    // Take control never passes through a reconnect, and the attach before it already sent its correction.
-    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    // Reconnect never passes through the stream's reconnecting, and the attach before it already sent its correction.
+    h.fake()
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     let owner = h.owner.clone();
-    h.cx.update(|_, cx| owner.update(cx, |owner, cx| owner.take_control(cx)));
+    h.cx.update(|_, cx| owner.update(cx, |owner, cx| owner.reconnect(cx)));
     settle(h.cx);
     h.fake().attach();
     for message in screen(FITTED.0 + 3, FITTED.1, "wide", serde_json::Value::Null) {
@@ -614,7 +615,7 @@ fn a_first_screen_at_another_size_is_resized_once(cx: &mut TestAppContext) {
                 rows: FITTED.1
             }
         ],
-        "and after Take control"
+        "and after Reconnect"
     );
 }
 
@@ -860,14 +861,14 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     assert_eq!(h.renders("attached-terminal"), 1);
     assert!(h.read(|owner, _| owner.is_live()));
 
-    // A takeover in the middle of the next replay keeps the second screen.
+    // A stall in the middle of the next replay keeps the second screen.
     h.fake().drop_link();
     let asked = h.fake().attach();
     for message in screen(asked.cols, asked.rows, "third", serde_json::Value::Null) {
         h.fake().output(message);
     }
     h.fake()
-        .detach(Some(DetachCode::TakenOver), "another window took it");
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     assert_eq!(h.text().as_deref().map(first_line), Some("second"));
 }
@@ -897,16 +898,16 @@ fn history(lines: usize, cols: u16) -> GridOutput {
 
 /// A restart replaces the session's terminal with a new one that starts with the old one's scrollback above a blank
 /// screen (SPEC.md, "Lifecycle operations"), and the supervisor detaches the viewer with `other` to move it there. The
-/// client must come back by itself: a restart is not another client taking over, so offering Take control would ask the
+/// client must come back by itself: a restart is not a detach the user must answer, so offering Reconnect would ask the
 /// user to fix something nobody broke (old `terminal-restart.spec.ts`, "a restarted session's terminal still shows the
 /// previous run's scrollback above the new one", whose client half this is). The old screen must give way to the new
-/// run's in one redraw, never to half a replay. Specified: with a live, focused terminal showing "screen" above 40 history lines, a
-/// detach with `other` offers no Take control and keeps "screen" up; the stream reattaches by itself,
-/// and while the new replay (a screen with "new run" on its first row and the 40 lines above it) arrives nothing is
-/// redrawn and "screen" stays; on completion the owner redraws once to show "new run" with no line of the old screen,
-/// following the bottom; the wheel then reaches the carried-over history, and a typed key is delivered to the new
-/// attachment. What the pane says during the backoff is the reconnect card's, which its own tests pin; here it is only
-/// checked to be no red band.
+/// run's in one redraw, never to half a replay. Specified: with a live, focused terminal showing "screen" above 40
+/// history lines, a detach with `other` offers no Reconnect and keeps "screen" up; the stream reattaches by itself, and
+/// while the new replay (a screen with "new run" on its first row and the 40 lines above it) arrives nothing is redrawn
+/// and "screen" stays; on completion the owner redraws once to show "new run" with no line of the old screen, following
+/// the bottom; the wheel then reaches the carried-over history, and a typed key is delivered to the new attachment.
+/// What the pane says during the backoff is the reconnect card's, which its own tests pin; here it is only checked to
+/// be no red band.
 #[gpui::test]
 fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
     cx: &mut TestAppContext,
@@ -925,8 +926,8 @@ fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
         .detach(Some(DetachCode::Other), "session restarted");
     settle(h.cx);
     assert_eq!(h.fake().phase(), FakePhase::Reconnecting);
-    assert_eq!(h.status(), None, "no band, so no Take control");
-    assert!(h.cx.debug_bounds("terminal-take-control").is_none());
+    assert_eq!(h.status(), None, "no band, so no Reconnect");
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_none());
     assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
 
     let asked = h.fake().attach();
@@ -965,18 +966,18 @@ fn a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw(
     assert_eq!(h.sent(), [(key("a", 65), true)]);
 }
 
-/// SPEC.md, "Terminal experience": attaching from a second client "visibly detaches the first, which keeps a non-live
-/// snapshot". When that happens during the first attach's replay there is no earlier screen to keep, and the
-/// supervisor sends no end of replay to a viewer it has detached, so a terminal that only ever showed complete replays
-/// would sit blank under its Detached line. The old app showed what had arrived (old `grid-attach.spec.ts`, "a takeover
-/// during a grid terminal's catch-up reveals what arrived, under the banner"). A replay that a reconnect cuts off is
-/// still dropped, since the reconnect replays again; so is one with no complete screen yet, which has nothing to draw.
-/// Specified: a takeover after only the hello and state shows no screen and says "Detached: " with Take control; after
-/// Take control, a complete first screen ("$ echo" on its first row) cut off by a dropped link shows no screen either;
-/// after the reconnect delivers that screen and part of its history, a takeover shows "$ echo" on the first row under
-/// "Detached: " with Take control, not live.
+/// A stalled viewer keeps its snapshot and its reason (decided by the migration's orchestrator on 2026-11-15; SPEC.md,
+/// "Terminal experience": "A viewer detached for stalling keeps its reason"). When the stall cuts off the first
+/// attach's replay there is no earlier screen to keep, and the supervisor sends no end of replay to a viewer it has
+/// detached, so a terminal that only ever showed complete replays would sit blank under its Detached line. The old app
+/// showed what had arrived (old `grid-attach.spec.ts`, "a takeover during a grid terminal's catch-up reveals what
+/// arrived, under the banner"). A replay that a reconnect cuts off is still dropped, since the reconnect replays again;
+/// so is one with no complete screen yet, which has nothing to draw. Specified: a stall after only the hello and state
+/// shows no screen and says "Detached: " with Reconnect; after Reconnect, a complete first screen ("$ echo" on its
+/// first row) cut off by a dropped link shows no screen either; after the reconnect delivers that screen and part of
+/// its history, a stall shows "$ echo" on the first row under "Detached: " with its reason and Reconnect, not live.
 #[gpui::test]
-fn a_takeover_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext) {
+fn a_stall_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let asked = h.fake().attach();
     for message in first_screen(asked.cols, asked.rows, "$ echo")
@@ -986,16 +987,16 @@ fn a_takeover_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext
         h.fake().output(message);
     }
     h.fake()
-        .detach(Some(DetachCode::TakenOver), "another client attached");
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     assert_eq!(h.text(), None, "no screen had arrived");
-    assert!(h.status().is_some_and(|line| line.take_control));
+    assert!(h.status().is_some_and(|line| line.offers_reconnect));
 
-    click(h.cx, "terminal-take-control");
+    click(h.cx, STATUS_RECONNECT_ID);
     assert_eq!(
         h.fake().phase(),
         FakePhase::Attaching,
-        "the premise: Take control attaches again"
+        "the premise: Reconnect attaches again"
     );
     let asked = h.fake().attach();
     for message in first_screen(asked.cols, asked.rows, "$ echo") {
@@ -1011,12 +1012,17 @@ fn a_takeover_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext
     }
     h.fake().output(history(10, asked.cols));
     h.fake()
-        .detach(Some(DetachCode::TakenOver), "another client attached");
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     assert_eq!(h.text().as_deref().map(first_line), Some("$ echo"));
     let line = h.status().expect("the Detached line");
     assert_eq!(line.words, "Detached: ");
-    assert!(line.take_control);
+    assert_eq!(
+        line.reason.as_ref().map(HostText::raw),
+        Some(DETACH_REASON_STALLED),
+        "the stall keeps its reason"
+    );
+    assert!(line.offers_reconnect);
     assert!(!h.read(|owner, _| owner.is_live()));
     assert!(h.cx.debug_bounds("terminal-connecting").is_none());
 }
@@ -1076,29 +1082,29 @@ fn a_programs_clipboard_write_reaches_the_clipboard(cx: &mut TestAppContext) {
 
 // ---- What the pane says --------------------------------------------------------------------------------------------
 
-/// A detach that waits for the user shows "Detached:" with the helm's reason, escaped as host text, and a Take
-/// control button that attaches again. A refusal shows the old app's "Connection error"
-/// and offers the same, since the stream waits for Take control there too: without the button the terminal would stay
-/// dead until the session is reopened. A tab closed after it was attached says nothing at all: the session view drops
+/// A detach that waits for the user (a stall, say) shows "Detached:" with the helm's reason, escaped as host text, and
+/// a Reconnect button that attaches again. A refusal shows the old app's "Connection error" and offers the same, since
+/// the stream waits for the user there too: without the button the terminal would stay dead until the session is
+/// reopened. A tab closed after it was attached says nothing at all: the session view drops
 /// it moments later, and SPEC.md has a reaped tab disappear silently.
 #[gpui::test]
-fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
+fn detached_and_refused_offer_reconnect(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("screen");
     h.fake()
-        .detach(Some(DetachCode::TakenOver), "taken over\u{202e}");
+        .detach(Some(DetachCode::Stalled), "stalled\u{202e}");
     settle(h.cx);
     let line = h.status().unwrap();
     assert_eq!(line.words, "Detached: ");
     assert_eq!(
         line.reason.as_ref().map(HostText::raw),
-        Some("taken over\u{202e}")
+        Some("stalled\u{202e}")
     );
-    assert!(line.take_control);
+    assert!(line.offers_reconnect);
     // The screen stays up under the banner.
     assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
 
-    click(h.cx, "terminal-take-control");
+    click(h.cx, STATUS_RECONNECT_ID);
     // The fake acts on the request when asked, and then tells the owner it is attaching again.
     assert_eq!(h.fake().phase(), FakePhase::Attaching);
     assert!(
@@ -1115,10 +1121,10 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
     settle(h.cx);
     let line = h.status().unwrap();
     assert_eq!(line.words, "Connection error");
-    assert!(line.take_control);
-    assert!(h.cx.debug_bounds("terminal-take-control").is_some());
+    assert!(line.offers_reconnect);
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_some());
 
-    click(h.cx, "terminal-take-control");
+    click(h.cx, STATUS_RECONNECT_ID);
     h.fake().phase();
     settle(h.cx);
     h.attach_showing("tab");
@@ -1126,14 +1132,14 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
         .detach(Some(DetachCode::TabClosed), "the tab was closed");
     settle(h.cx);
     assert_eq!(h.status(), None, "a closed tab goes silently");
-    assert!(h.cx.debug_bounds("terminal-take-control").is_none());
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_none());
 }
 
 /// A tab the helm cannot attach (the supervisor never minted it, or it went before the attach) is detached as a closed
 /// tab before anything was shown. Unlike a tab that was attached and then reaped, it is not about to be dropped by the
 /// session view, so it must say why its pane is blank (the old spec's "a tab the supervisor cannot attach explains
 /// itself instead of showing a blank pane"), and offer nothing to take. Specified: a stream detached as a closed tab
-/// before its first replay shows "Detached: " with the helm's reason and no Take control.
+/// before its first replay shows "Detached: " with the helm's reason and no Reconnect.
 #[gpui::test]
 fn a_tab_closed_before_it_was_ever_attached_explains_itself(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -1147,7 +1153,7 @@ fn a_tab_closed_before_it_was_ever_attached_explains_itself(cx: &mut TestAppCont
         line.reason.as_ref().map(HostText::raw),
         Some("no such terminal tab")
     );
-    assert!(!line.take_control);
+    assert!(!line.offers_reconnect);
 }
 
 /// A message the grid model refuses ends the stream: the owner closes it, says "Terminal stream error:" with the
@@ -1168,11 +1174,11 @@ fn a_protocol_fault_closes_the_stream_with_an_error_line(cx: &mut TestAppContext
         line.words,
         "Terminal stream error: grid message breaks a bound: a second hello on one attachment"
     );
-    assert!(!line.take_control);
+    assert!(!line.offers_reconnect);
     assert_eq!(h.fake().phase(), FakePhase::Closed);
     assert!(!h.read(|owner, _| owner.is_live()));
     assert_eq!(h.text().as_deref().map(first_line), Some("before"));
-    assert!(h.cx.debug_bounds("terminal-take-control").is_none());
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_none());
 }
 
 /// The exit line's words are the old app's, for a status and for a signal. A replay that already holds the exit
@@ -1286,7 +1292,8 @@ fn the_status_line_keeps_the_newest_rows_in_view(cx: &mut TestAppContext) {
         })
     };
     assert_eq!(placed(&mut h).0.lift, 0.);
-    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    h.fake()
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     assert!(h.status().is_some(), "the status line shows");
     let (placement, room) = placed(&mut h);
@@ -1551,11 +1558,11 @@ fn the_card_stays_through_the_reconnects_catch_up_and_goes_when_it_is_live(
     assert!(!h.banner_drawn());
 }
 
-/// The card is for drops the stream recovers from by itself. A takeover, a refusal and a close stop the stream until
-/// the user acts (or for good), and SPEC.md keeps "explicit banners" for such decisions, so each must still show the
-/// red band and never the calm card, even when it ends an outage. Specified: a detach as taken over during an outage
-/// shows the band with Take control and no card; Take control, then a refusal, shows the band ("Connection error") and
-/// no card; closing the stream then shows "Connection closed" in the band and no card.
+/// The card is for drops the stream recovers from by itself. A stall, a refusal and a close stop the stream until the
+/// user acts (or for good), and SPEC.md keeps "explicit banners" for such decisions, so each must still show the red
+/// band and never the calm card, even when it ends an outage. Specified: a detach as stalled during an outage shows
+/// the band with Reconnect and no card; Reconnect, then a refusal, shows the band ("Connection error") and no card;
+/// closing the stream then shows "Connection closed" in the band and no card.
 #[gpui::test]
 fn detached_refused_and_closed_streams_keep_the_red_band(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -1565,13 +1572,13 @@ fn detached_refused_and_closed_streams_keep_the_red_band(cx: &mut TestAppContext
     assert!(h.card_drawn(), "the premise: an outage");
     h.fake().attach();
     h.fake()
-        .detach(Some(DetachCode::TakenOver), "another client attached");
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     assert!(h.banner_drawn());
-    assert!(h.status().is_some_and(|line| line.take_control));
+    assert!(h.status().is_some_and(|line| line.offers_reconnect));
     assert!(!h.card_drawn());
 
-    click(h.cx, "terminal-take-control");
+    click(h.cx, STATUS_RECONNECT_ID);
     h.fake().phase();
     h.fake().refuse(401);
     settle(h.cx);
@@ -1944,17 +1951,18 @@ fn clicking_or_choosing_a_terminal_focuses_it(cx: &mut TestAppContext) {
 }
 
 /// Only the grid's area is the terminal's for keys, not the status line above it: Tab moves through the status line's
-/// Take control button and on into the terminal, where it then stays for the program. With the whole pane in the
-/// terminal's key context, the context that hands Tab and Escape to the program, a focused Take control button kept
-/// Tab and Escape from doing anything, and the keyboard could not leave it.
+/// Reconnect button and on into the terminal, where it then stays for the program. With the whole pane in the
+/// terminal's key context, the context that hands Tab and Escape to the program, a focused button on the status line
+/// kept Tab and Escape from doing anything, and the keyboard could not leave it.
 #[gpui::test]
 fn tab_moves_through_the_status_line_into_the_terminal(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("screen");
-    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    h.fake()
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     let owner = h.owner.clone();
-    assert!(h.cx.debug_bounds("terminal-take-control").is_some());
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_some());
     let before = h.cx.update(|window, cx| window.focused(cx));
     keys(h.cx, "tab");
     // The window's tab stops are the button and the terminal (the root, where focus rested, is not one), so focus
@@ -2056,14 +2064,15 @@ fn nothing_is_sent_unless_the_terminal_is_live(cx: &mut TestAppContext) {
     assert_eq!(h.sent(), [], "reconnecting");
 
     h.attach_showing("y");
-    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    h.fake()
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     keys(h.cx, "e");
     assert_eq!(h.sent(), [], "detached");
 
     h.owner
         .clone()
-        .update(h.cx, |owner, cx| owner.take_control(cx));
+        .update(h.cx, |owner, cx| owner.reconnect(cx));
     settle(h.cx);
     h.fake().refuse(401);
     settle(h.cx);
@@ -2908,17 +2917,17 @@ fn under_mouse_reporting_only_the_forcing_modifier_selects(cx: &mut TestAppConte
     assert_eq!(h.clipboard().as_deref(), Some("hello"));
 }
 
-/// A client displaced by a takeover keeps a non-live snapshot (SPEC.md, "Terminal experience"), and a snapshot the
-/// user cannot copy from is only a picture: reading back what the agent printed before another client took over is
-/// the point of keeping it. Nothing may reach the program from it, though, since the session now belongs to the client
-/// that took it. The old app's "a frozen grid sends nothing but still selects and copies", and the selection half of
-/// grid-attach's "a takeover keeps it as a usable snapshot".
+/// A stalled viewer keeps a non-live snapshot (decided by the migration's orchestrator on 2026-11-15), and a snapshot
+/// the user cannot copy from is only a picture: reading back what the agent printed before the stall is the point of
+/// keeping it. Nothing may reach the program from it, though: input goes out only while the terminal is live (the
+/// module docs, "Input"). The old app's "a frozen grid sends nothing but still selects and copies", and the selection
+/// half of grid-attach's "a takeover keeps it as a usable snapshot".
 ///
-/// Specified: on a screen whose program asked for click reporting, after a detach as taken over (the status line
-/// offering Take control), a key and a plain click send nothing, a drag with the forcing modifier selects and copies
-/// the text it covers, and the snapshot and its Take control stay.
+/// Specified: on a screen whose program asked for click reporting, after a detach as stalled (the status line
+/// offering Reconnect), a key and a plain click send nothing, a drag with the forcing modifier selects and copies the
+/// text it covers, and the snapshot and its Reconnect stay.
 #[gpui::test]
-fn a_taken_over_snapshot_still_selects_and_copies_and_sends_nothing(cx: &mut TestAppContext) {
+fn a_stalled_snapshot_still_selects_and_copies_and_sends_nothing(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     // The text sits on row 10, below the rows the status line's band lifts out of view once detached.
     let asked = h.fake().attach();
@@ -2934,12 +2943,13 @@ fn a_taken_over_snapshot_still_selects_and_copies_and_sends_nothing(cx: &mut Tes
     settle(h.cx);
     let owner = h.owner.clone();
     h.choose(&owner);
-    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    h.fake()
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
     settle(h.cx);
     assert!(!h.read(|owner, _| owner.is_live()), "the premise: detached");
     assert!(
-        h.status().is_some_and(|line| line.take_control),
-        "the premise: the snapshot offers Take control"
+        h.status().is_some_and(|line| line.offers_reconnect),
+        "the premise: the snapshot offers Reconnect"
     );
     assert!(h.focused(&owner), "the premise: the terminal kept focus");
 
@@ -2955,7 +2965,7 @@ fn a_taken_over_snapshot_still_selects_and_copies_and_sends_nothing(cx: &mut Tes
         "the forcing modifier selects and copies"
     );
     assert_eq!(h.sent(), [], "neither the key nor the click reached anyone");
-    assert!(h.status().is_some_and(|line| line.take_control));
+    assert!(h.status().is_some_and(|line| line.offers_reconnect));
     assert!(h.text().unwrap().contains("hello world"));
 }
 
@@ -4005,7 +4015,7 @@ fn declining_the_warning_opens_nothing_and_says_nothing(cx: &mut TestAppContext)
     assert!(h.cx.debug_bounds(tunnels::NOTICE_ID).is_none());
 }
 
-/// Once consent is given (here or in another client: it is a shared preference), Cmd-click opens at once; a refusal is
+/// Once consent is given (here or elsewhere: it is a shared preference), Cmd-click opens at once; a refusal is
 /// shown in the helm's words in a notice that stays until dismissed. Only Cmd alone means a tunnel: with another
 /// modifier the click opens the address as printed, as a plain click does. Specified: with consent pushed, Cmd-click
 /// sends the open with no warning; the helm's refusal shows in the notice; Dismiss puts it away; Cmd+Shift opens the

@@ -1,6 +1,6 @@
 //! Tests of the session view's terminal set: which streams it opens for a session's tabs and under which lease, what
-//! the strip lists and chooses, where focus goes, how tabs opened, closed and reaped elsewhere come and go, the
-//! takeover rule, and the bound on attached tabs.
+//! the strip lists and chooses, where focus goes, how tabs opened, closed and reaped elsewhere come and go, that a
+//! terminal whose stream stopped holds back no other, and the bound on attached tabs.
 //!
 //! The window is the real main view over the helm client's fake channel, and its connection hands out fake terminals
 //! (`Connection::serve_terminals`), which play the helm's side of every stream and record what each was asked. A tab
@@ -24,6 +24,7 @@ use crate::main_view::MainView;
 use crate::session::Connection;
 use crate::session_list::tests::{listing_meta, painted, preferences, session};
 use crate::session_pane::SessionPane;
+use crate::terminal::attached::STATUS_RECONNECT_ID;
 use crate::test_support::{self, click, keys, settle, started};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -286,10 +287,11 @@ fn choosing_a_tab_shows_and_focuses_its_terminal(cx: &mut TestAppContext) {
 
 // ---- Tabs that come and go -----------------------------------------------------------------------------------------
 
-/// The tab list is the helm's: a tab opened from another client must appear and attach without a reload, and one
-/// closed elsewhere must go, with its stream, while its siblings stay attached; the names follow the places. Specified:
-/// from t1 and t2, a push of t1, t2 and t3 opens one stream, for t3, at the shared size, and the strip lists three
-/// terminals; a push of t1 and t3 closes t2's stream, leaves t1's and t3's open, and the strip names t3 "Terminal 2".
+/// The tab list is the helm's: a tab opened elsewhere (by an agent, say) must appear and attach without a reload, and
+/// one closed elsewhere must go, with its stream, while its siblings stay attached; the names follow the places.
+/// Specified: from t1 and t2, a push of t1, t2 and t3 opens one stream, for t3, at the shared size, and the strip lists
+/// three terminals; a push of t1 and t3 closes t2's stream, leaves t1's and t3's open, and the strip names t3 "Terminal
+/// 2".
 #[gpui::test]
 fn tabs_opened_and_closed_elsewhere_come_and_go(cx: &mut TestAppContext) {
     let mut window = open(cx, snapshot(&["t1", "t2"]));
@@ -470,54 +472,86 @@ fn a_tabs_replay_is_staged_on_its_own_and_shown_at_the_bottom(cx: &mut TestAppCo
     assert!(!window.typed_into(agent));
 }
 
-// ---- Takeover ------------------------------------------------------------------------------------------------------
+// ---- A stopped stream -----------------------------------------------------------------------------------------------
 
-/// The helm hands all of a lease's terminals to the newest attach, so once another window took this view's terminals,
-/// attaching a tab it learns about would take everything back without the user asking, and the two windows would take
-/// turns (the old app's takeover latch). Take control on any terminal is the user asking. Specified: with the agent
-/// terminal and t1 live and both detached as taken over, a push adding t2 opens no stream, and t2's terminal says it
-/// is detached with Take control; Take control on the agent terminal asks the agent's and t1's streams to take control
-/// and opens t2's.
+/// One UI holds the helm at a time, so no other window can hold this view's terminals, and a terminal whose stream
+/// stopped waits alone, for its own Reconnect (decided by the migration's orchestrator on 2026-11-15). The set once
+/// kept new tabs from attaching, and reconnected every waiting terminal together, while one of them waited to take the
+/// session back; this is the fence against either coming back for a stream that merely stopped. Specified: with the
+/// agent terminal, t1 and t3 live and all three detached as stalled, a push adding t2 opens t2's stream; a push without
+/// t1 sends the agent terminal's stream nothing, and the agent terminal still offers Reconnect; Reconnect there asks
+/// the agent terminal's stream to attach again, and neither t3's, which waits too, nor t2's.
 #[gpui::test]
-fn a_takeover_holds_back_new_tabs_until_take_control(cx: &mut TestAppContext) {
-    let mut window = open(cx, snapshot(&["t1"]));
+fn a_stalled_terminal_holds_back_no_other(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t3"]));
     let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    let t3 = window.stream_of(Some("t3"));
     window.go_live(agent, "agent");
     window.go_live(t1, "shell");
-    for index in [agent, t1] {
-        window.opened.borrow_mut()[index]
-            .0
-            .detach(Some(DetachCode::TakenOver), "another client attached");
+    window.go_live(t3, "other shell");
+    for index in [agent, t1, t3] {
+        window.opened.borrow_mut()[index].0.detach(
+            Some(DetachCode::Stalled),
+            farhelm_proto::DETACH_REASON_STALLED,
+        );
     }
     settle(window.cx);
-
-    window.push_tabs(&["t1", "t2"]);
-    assert_eq!(window.opened.borrow().len(), 2, "t2 is not attached");
     let set = window.set();
-    let parked = window.cx.update(|_, cx| {
-        let terminals: Vec<_> = set.read(cx).terminals().cloned().collect();
-        terminals[2].read(cx).status_line()
-    });
-    let parked = parked.expect("t2 says why it shows nothing");
-    assert_eq!(parked.words, "Detached: ");
-    assert!(parked.take_control);
+    let offers_reconnect = |window: &mut Window| {
+        window.cx.update(|_, cx| {
+            set.read(cx)
+                .agent()
+                .read(cx)
+                .status_line()
+                .is_some_and(|line| line.offers_reconnect)
+        })
+    };
+    assert!(
+        offers_reconnect(&mut window),
+        "the premise: the agent terminal waits"
+    );
 
-    test_support::click(window.cx, "terminal-take-control");
+    window.push_tabs(&["t1", "t3", "t2"]);
+    assert_eq!(
+        window.tabs_attached().last().cloned().flatten().as_deref(),
+        Some("t2"),
+        "t2 attaches"
+    );
+    let t2 = window.stream_of(Some("t2"));
+    window.received(agent);
+    window.push_tabs(&["t3", "t2"]);
+    assert_eq!(window.phase(t1), FakePhase::Closed, "the premise: t1 went");
+    assert_eq!(
+        window.received(agent),
+        [],
+        "a tab leaving reconnects nothing"
+    );
+    assert!(offers_reconnect(&mut window));
+
+    assert_eq!(
+        window.phase(t3),
+        FakePhase::Detached,
+        "the premise: t3 waits too"
+    );
+    window.received(t2);
+    window.received(t3);
+    click(window.cx, STATUS_RECONNECT_ID);
     assert!(
         window
             .received(agent)
             .contains(&FakeTerminalRequest::TakeControl)
     );
-    // The fake tells the agent terminal it is attaching again once it acts on the request (above); the set hears that.
     settle(window.cx);
     assert!(
-        window
-            .received(t1)
-            .contains(&FakeTerminalRequest::TakeControl)
+        !window
+            .received(t3)
+            .contains(&FakeTerminalRequest::TakeControl),
+        "the waiting tab is not reconnected with the agent terminal"
     );
-    assert_eq!(
-        window.tabs_attached().last().cloned().flatten().as_deref(),
-        Some("t2")
+    assert!(
+        !window
+            .received(t2)
+            .contains(&FakeTerminalRequest::TakeControl)
     );
 }
 
@@ -656,34 +690,6 @@ fn an_inert_set_makes_every_terminal_and_the_strip_inert(cx: &mut TestAppContext
     settle(window.cx);
     click(window.cx, T1_TAB);
     assert_eq!(window.chosen().as_deref(), Some("t1"));
-}
-
-/// The other half of the takeover rule: only the user asking releases it. A tab closed or reaped in the window that
-/// took over leaves this window's set while it waits, and if that counted as taking control, this window would take
-/// every terminal back from the other without anyone asking, and the two would take turns. Specified: with the agent
-/// terminal and t1 live and both detached as taken over, a push without t1 sends the agent terminal's stream nothing,
-/// and the agent terminal still waits for Take control.
-#[gpui::test]
-fn a_tab_leaving_while_taken_over_takes_nothing_back(cx: &mut TestAppContext) {
-    let mut window = open(cx, snapshot(&["t1"]));
-    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
-    window.go_live(agent, "agent");
-    window.go_live(t1, "shell");
-    for index in [agent, t1] {
-        window.opened.borrow_mut()[index]
-            .0
-            .detach(Some(DetachCode::TakenOver), "another client attached");
-    }
-    settle(window.cx);
-    window.received(agent);
-
-    window.push_tabs(&[]);
-    assert_eq!(window.received(agent), [], "no Take control");
-    let set = window.set();
-    let waits = window
-        .cx
-        .update(|_, cx| set.read(cx).agent().read(cx).taken_over());
-    assert!(waits);
 }
 
 /// SPEC.md, "Session view": the strip "scrolls horizontally when needed", and every control stays keyboard reachable.
