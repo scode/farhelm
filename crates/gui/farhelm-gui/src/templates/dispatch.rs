@@ -256,6 +256,8 @@ fn apply_in_launcher(
         .map(|applied| BatchApplied {
             notice: applied.notice,
             note: None,
+            switched_agent: applied.switched_agent,
+            escalation: applied.escalation,
         })
         .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &[Part::Host(refusal)]))
 }
@@ -334,6 +336,8 @@ pub fn pick_from_switcher(name: &str, window: &mut Window, cx: &mut App) {
                     .map(|applied| BatchApplied {
                         notice: applied.notice,
                         note: banner,
+                        switched_agent: applied.switched_agent,
+                        escalation: applied.escalation,
                     })
                     .map_err(|refusal| sentence(PAGE_REFUSAL, &[Part::Host(refusal)]))
             },

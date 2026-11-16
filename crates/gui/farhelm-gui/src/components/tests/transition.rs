@@ -1,6 +1,7 @@
-//! Tests of the one-shot entrance (`components/transition.rs`): it follows CSS's `ease-out` to the element's own
-//! opacity, asks for no frame once it ends, starts opaque under reduced motion, and in an inactive window ends on time
-//! without playing again when the window is activated.
+//! Tests of the one-shot transitions (`components/transition.rs`). The entrance follows CSS's `ease-out` to the
+//! element's own opacity, asks for no frame once it ends, starts opaque under reduced motion, and in an inactive window
+//! ends on time without playing again when the window is activated. The escalation banner's slide and the permission
+//! outline's fade run their course and end in place, and under reduced motion neither moves.
 //!
 //! These drive GPUI's animation the way the platform would: the executor's clock moves only when a test advances it,
 //! and a display frame arrives only when a test delivers one ([`next_frame`]), so a test sees each frame the entrance
@@ -323,4 +324,214 @@ fn in_an_inactive_window_an_entrance_ends_on_time_and_does_not_replay_on_activat
         "activating the window does not play the entrance again"
     );
     assert_eq!(next_frame(cx), 0, "nor make it ask for frames");
+}
+
+// ---- The escalation banner's slide and outline fade ----------------------------------------------------------------
+
+/// A box that records the whole style each frame drew it with, for the transitions that change more than opacity: the
+/// slide's `top` and the outline fade's border color. Like [`OpacityProbe`] it lays out with the default style and
+/// paints nothing.
+struct StyleProbe {
+    style: gpui::StyleRefinement,
+    seen: Rc<RefCell<Vec<gpui::StyleRefinement>>>,
+}
+
+impl StyleProbe {
+    fn new(seen: &Rc<RefCell<Vec<gpui::StyleRefinement>>>) -> Self {
+        StyleProbe {
+            style: gpui::StyleRefinement::default(),
+            seen: seen.clone(),
+        }
+    }
+}
+
+impl Styled for StyleProbe {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl IntoElement for StyleProbe {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl gpui::Element for StyleProbe {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) -> (gpui::LayoutId, ()) {
+        self.seen.borrow_mut().push(self.style.clone());
+        (window.request_layout(gpui::Style::default(), [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<gpui::Pixels>,
+        _: &mut (),
+        _: &mut Window,
+        _: &mut gpui::App,
+    ) {
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<gpui::Pixels>,
+        _: &mut (),
+        _: &mut (),
+        _: &mut Window,
+        _: &mut gpui::App,
+    ) {
+    }
+}
+
+/// The `top` a probe was last drawn with, in pixels; `None` when it set none (or was never drawn).
+fn last_top(seen: &Rc<RefCell<Vec<gpui::StyleRefinement>>>) -> Option<f32> {
+    let style = seen.borrow().last().cloned()?;
+    match style.inset.top? {
+        gpui::Length::Definite(gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(
+            pixels,
+        ))) => Some(f32::from(pixels)),
+        _ => None,
+    }
+}
+
+/// The alpha of the border color a probe was last drawn with; NaN when it set none.
+fn last_border_alpha(seen: &Rc<RefCell<Vec<gpui::StyleRefinement>>>) -> f32 {
+    seen.borrow()
+        .last()
+        .and_then(|style| style.border_color)
+        .map_or(f32::NAN, |color| color.a)
+}
+
+/// SPEC.md: the escalation banner "slides down", the old `translateY(-12px)` to 0 over 200 ms. GPUI cannot transform a
+/// quad, so the slide is a `top` offset. Specified: drawn through `slide_down`, an element starts 12 pixels up, is
+/// part way down at half the time, and ends at 0 asking for no further frame.
+#[gpui::test]
+fn the_banner_slides_down_into_place(cx: &mut TestAppContext) {
+    let seen: Rc<RefCell<Vec<gpui::StyleRefinement>>> = Rc::default();
+    let probe = seen.clone();
+    let cx = open(cx, move |_, cx| {
+        crate::components::slide_down("banner", StyleProbe::new(&probe), cx).into_any_element()
+    });
+    let start = last_top(&seen).expect("an offset in the first frame");
+    assert!((start + 12.).abs() < 0.6, "starts 12 pixels up: {start}");
+    advance(cx, crate::components::transition::SLIDE_DOWN / 2);
+    next_frame(cx);
+    let halfway = last_top(&seen).expect("an offset halfway");
+    assert!(halfway > -11. && halfway < -1., "part way down: {halfway}");
+    advance(cx, crate::components::transition::SLIDE_DOWN);
+    next_frame(cx);
+    assert_eq!(last_top(&seen), Some(0.), "ends in place");
+    assert_eq!(next_frame(cx), 0, "and asks for no frame after that");
+}
+
+/// Shown under reduced motion, the probe drawn through `transition` shows at once in its final state.
+fn shown_under_reduced_motion(
+    cx: &mut TestAppContext,
+    transition: impl Fn(StyleProbe, &gpui::App) -> gpui::AnyElement + 'static,
+) -> (
+    Rc<RefCell<Vec<gpui::StyleRefinement>>>,
+    &mut VisualTestContext,
+) {
+    let seen: Rc<RefCell<Vec<gpui::StyleRefinement>>> = Rc::default();
+    let shown = Rc::new(Cell::new(false));
+    let (probe, showing) = (seen.clone(), shown.clone());
+    let cx = open(cx, move |_, cx| {
+        div()
+            .when(showing.get(), |this| {
+                this.child(transition(StyleProbe::new(&probe), cx))
+            })
+            .into_any_element()
+    });
+    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    shown.set(true);
+    redraw(cx);
+    (seen, cx)
+}
+
+/// Under reduced motion the banner does not slide: it is drawn in place from its first frame. Why: SPEC.md, "Reduced
+/// motion replaces slide and fade".
+#[gpui::test]
+fn under_reduced_motion_the_banner_does_not_slide(cx: &mut TestAppContext) {
+    let (seen, cx) = shown_under_reduced_motion(cx, |probe, cx| {
+        crate::components::slide_down("banner", probe, cx)
+    });
+    assert!(!seen.borrow().is_empty(), "the premise: it was drawn");
+    assert_eq!(last_top(&seen), None, "no offset in its first frame");
+    assert_eq!(next_frame(cx), 0, "and no frame asked for");
+}
+
+/// SPEC.md: the permission control's thick red outline "fades after about two and a half seconds", and "Reduced motion
+/// replaces slide and fade with a static outline while the banner is shown". Specified: drawn through `outline_fade`,
+/// an element's border starts fully colored, is part transparent at half the time, and ends transparent.
+#[gpui::test]
+fn the_outline_fades(cx: &mut TestAppContext) {
+    let red = gpui::Hsla {
+        h: 0.,
+        s: 1.,
+        l: 0.5,
+        a: 1.,
+    };
+    let seen: Rc<RefCell<Vec<gpui::StyleRefinement>>> = Rc::default();
+    let probe = seen.clone();
+    let cx = open(cx, move |_, cx| {
+        crate::components::outline_fade(
+            "outline",
+            StyleProbe::new(&probe).border_color(red),
+            red,
+            cx,
+        )
+        .into_any_element()
+    });
+    assert!(last_border_alpha(&seen) > 0.95, "starts fully colored");
+    advance(cx, crate::components::transition::OUTLINE_FADE / 2);
+    next_frame(cx);
+    let halfway = last_border_alpha(&seen);
+    assert!(
+        halfway > 0.05 && halfway < 0.95,
+        "part faded halfway: {halfway}"
+    );
+    advance(cx, crate::components::transition::OUTLINE_FADE);
+    next_frame(cx);
+    assert_eq!(last_border_alpha(&seen), 0., "ends transparent");
+}
+
+/// Under reduced motion the outline does not fade: it keeps its full color for as long as it is drawn. Why: SPEC.md,
+/// "Reduced motion replaces slide and fade with a static outline while the banner is shown".
+#[gpui::test]
+fn under_reduced_motion_the_outline_stays(cx: &mut TestAppContext) {
+    let red = gpui::Hsla {
+        h: 0.,
+        s: 1.,
+        l: 0.5,
+        a: 1.,
+    };
+    let (seen, cx) = shown_under_reduced_motion(cx, move |probe, cx| {
+        crate::components::outline_fade("outline", probe.border_color(red), red, cx)
+    });
+    assert!(last_border_alpha(&seen) > 0.99, "fully colored at once");
+    advance(cx, crate::components::transition::OUTLINE_FADE * 2);
+    redraw(cx);
+    assert!(last_border_alpha(&seen) > 0.99, "and still, long after");
 }
