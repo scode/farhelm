@@ -69,8 +69,8 @@ pub(crate) struct SessionDial {
 
 impl SessionEnv {
     /// Read the three injected variables from this process's environment.
-    /// The one place outside `farhelm helm setup` and the supervisor's own
-    /// startup that this binary reads them.
+    /// The one place outside the supervisor's own startup that this binary
+    /// reads them.
     pub(crate) fn from_env() -> SessionEnv {
         SessionEnv {
             session_id: std::env::var_os(SESSION_ID_ENV_VAR),

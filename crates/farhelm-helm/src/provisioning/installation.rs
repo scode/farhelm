@@ -53,9 +53,8 @@ pub(super) async fn prepare_payloads(
 /// The bundled tmux's removal is refused here too, although Add plans it.
 /// The ordinary service runs it itself because a failed removal only warns
 /// there, and snapshot preparation skips it: the sandbox image it installs
-/// into has no Farhelm installation (preparation refuses setup-managed
-/// installs and copied state), so it is not expected to carry an earlier
-/// tmux.
+/// into has no Farhelm installation (preparation refuses copied supervisor
+/// state), so it is not expected to carry an earlier tmux.
 pub(super) async fn execute_install_action(
     backend: &dyn ProvisioningBackend,
     plan: &ProvisioningPlan,

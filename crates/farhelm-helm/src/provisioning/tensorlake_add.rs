@@ -1718,11 +1718,6 @@ impl ProvisioningService {
         let reach = match self.backend.inspect(&probe).await? {
             ReachOutcome::Supported(reach) => reach,
             ReachOutcome::Manual(reason) => return Err(refused(reason)),
-            ReachOutcome::SetupManaged => {
-                return Err(refused(
-                    "this sandbox has an installation managed by farhelm helm setup; use an image without a Farhelm installation",
-                ));
-            }
         };
         let nonce = uuid::Uuid::new_v4().to_string();
         let inner = self

@@ -144,17 +144,15 @@ pub fn default_state_dir() -> anyhow::Result<std::path::PathBuf> {
 /// something, `~/.local/state/farhelm` otherwise.
 ///
 /// The entry point for code that must not read the environment at all.
-/// `farhelm helm setup` captures both values once in `main` and computes
-/// every path from that capture, which is what lets its tests drive the
-/// whole command without touching the test process's environment — and,
-/// more importantly, what keeps the unit it writes pointing at the SAME
-/// directory a helm or supervisor started from those units would pick for
-/// itself. An empty value counts as unset, matching the shell's
+/// `farhelm uninstall` captures both values once and computes every path
+/// from that capture, which is what lets its tests drive the whole command
+/// without touching the test process's environment, while still naming the
+/// SAME directory a helm or supervisor resolving its own default would
+/// pick. An empty value counts as unset, matching the shell's
 /// `${VAR:-default}` and [`default_state_dir`].
 ///
 /// A RELATIVE value counts as unset too, as the XDG Base Directory spec
-/// asks and as the unit-directory rule already does for `XDG_CONFIG_HOME`.
-/// Taken literally it would resolve against each process's own working
+/// asks. Taken literally it would resolve against each process's own working
 /// directory: systemd starts the services in `$HOME`, while an operator
 /// command like `farhelm helm checkout-config` runs wherever the shell is, so
 /// the two would read different state trees.
@@ -256,9 +254,10 @@ mod tests {
     /// directory happens to be — would put the helm and its supervisor on
     /// different state trees and hide their socket from each other.
     ///
-    /// Both entry points are checked because `farhelm helm setup` computes
-    /// the path it PINS through the injected one while the running helm
-    /// computes its own through the environment one; they must agree.
+    /// Both entry points are checked because `farhelm uninstall` computes
+    /// the path it retains through the injected one while a running helm or
+    /// supervisor computes its own through the environment one; they must
+    /// agree.
     #[farhelm_testtrace::test]
     fn an_empty_xdg_state_home_falls_back_to_the_home_layout() {
         let expected = std::path::PathBuf::from("/home/u/.local/state/farhelm");
@@ -289,14 +288,14 @@ mod tests {
     /// A relative `XDG_STATE_HOME` is ignored, on both entry points.
     ///
     /// Why: taken literally it resolves against each process's working
-    /// directory, and `farhelm helm setup` pinned it unresolved into both
-    /// units. systemd starts them in `$HOME` while an operator command runs
-    /// wherever its shell is, so an operator command such as `farhelm helm
-    /// checkout-config` could read a different state tree than the running
-    /// helm. The
-    /// XDG Base Directory spec says to ignore a relative value. Spec: the home
-    /// layout is used instead, and with no HOME either, the environment path
-    /// refuses rather than inventing one.
+    /// directory, and an earlier release's `farhelm helm setup` pinned it
+    /// unresolved into both of its units. systemd starts them in `$HOME`
+    /// while an operator command runs wherever its shell is, so an operator
+    /// command such as `farhelm helm checkout-config` could read a different
+    /// state tree than the running helm. The XDG Base Directory spec says to
+    /// ignore a relative value. Spec: the home layout is used instead, and
+    /// with no HOME either, the environment path refuses rather than
+    /// inventing one.
     #[farhelm_testtrace::test]
     fn a_relative_xdg_state_home_is_ignored() {
         let expected = std::path::PathBuf::from("/home/u/.local/state/farhelm");

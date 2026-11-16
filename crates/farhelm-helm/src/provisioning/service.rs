@@ -22,8 +22,8 @@ use super::http::{
 };
 use super::payloads::{PayloadSelection, PayloadSource, production_payloads};
 use super::plan::{
-    OperationRefusal as _, PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan,
-    ProvisioningTarget, ResolvedPath, UninstallFacts,
+    PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
+    ResolvedPath, UninstallFacts,
 };
 use crate::manager::{ConnectionManager, HostState, ProvisionLockGuard, peer_text};
 use crate::store::{
@@ -35,14 +35,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// What the hosts panel says about the helm's own machine when nothing
-/// there is already somebody's supervisor.
+/// What the hosts panel says instead of installing or updating a
+/// supervisor on the helm's own machine.
 ///
-/// The panel never installs a supervisor on the helm's own machine. The
-/// desktop app starts this machine's supervisor itself whenever it opens and
-/// none answers (`farhelm-desktop`'s `spawn`), so the remedy for a missing one
-/// is to reopen the app, not an install from the panel beside it.
-const LOCAL_SETUP_HANDOFF: &str = "this is the helm's own machine: the Farhelm app starts its supervisor here when it \
+/// The panel never does either there (D1/D9). The desktop app starts this
+/// machine's supervisor itself whenever it opens and none answers
+/// (`farhelm-desktop`'s `spawn`), so the remedy for a missing one is to
+/// reopen the app, not an install from the panel beside it.
+const LOCAL_REOPEN_HANDOFF: &str = "this is the helm's own machine: the Farhelm app starts its supervisor here when it \
      opens; quit Farhelm and open it again to start it";
 
 /// What the hosts panel says when uninstall is chosen for the helm's own
@@ -787,65 +787,6 @@ impl ProvisioningService {
         }
     }
 
-    /// What to tell the operator instead of installing or updating a
-    /// supervisor on the helm's own machine.
-    ///
-    /// The panel does neither of those here any more (D1/D9): the
-    /// helm-machine layout belongs to `farhelm helm setup`, which is the
-    /// only thing that knows how to write units for the binary this helm
-    /// is running. Every caller therefore gets a reason, never a
-    /// permission — the only question this answers is WHICH reason:
-    ///
-    /// - A `farhelm-supervisor.service` whose `ExecStart=` resolves to
-    ///   this helm's own binary means somebody already owns the
-    ///   supervisor here. `farhelm helm setup` wrote it (marked) or a
-    ///   person did, and the two get different advice: the first can be
-    ///   driven with `systemctl --user restart`, while the second is its
-    ///   author's to manage and is only reported as off limits.
-    /// - Anything else — no unit, or one running some OTHER farhelm — is
-    ///   the ordinary first-run answer: tell the user to reopen the
-    ///   Farhelm app.
-    ///
-    /// Resolution is by canonical path on both sides, so a symlinked
-    /// `~/.local/bin/farhelm` and the binary it points at are recognized
-    /// as the same program. A unit that exists but names no classifiable
-    /// program FAILS CLOSED into the hand-written wording: something is
-    /// there, this code cannot tell what it runs, and the one answer that
-    /// must never come out of that is "there is nothing here".
-    async fn local_handoff_reason(&self) -> anyhow::Result<String> {
-        let unit = crate::units::SUPERVISOR_UNIT_NAME;
-        let handwritten = format!(
-            "{unit} on this machine already runs this farhelm and was written by hand; it is not \
-             touched from the hosts panel"
-        );
-        let text = self
-            .backend
-            .read_user_unit(unit)
-            .await
-            .map_err(anyhow::Error::new)?;
-        let Some(text) = text else {
-            return Ok(LOCAL_SETUP_HANDOFF.to_string());
-        };
-        let Some(program) = crate::units::exec_start_program(&text) else {
-            return Ok(handwritten);
-        };
-        let resolved = (
-            std::fs::canonicalize(&program),
-            std::fs::canonicalize(&self.local_farhelm),
-        );
-        if !matches!(resolved, (Ok(unit_program), Ok(ours)) if unit_program == ours) {
-            return Ok(LOCAL_SETUP_HANDOFF.to_string());
-        }
-        Ok(if crate::units::is_managed(&text) {
-            format!(
-                "{unit} on this machine is managed by farhelm helm setup; it is not touched from \
-                 the hosts panel. Start or restart it with: systemctl --user restart {unit}"
-            )
-        } else {
-            handwritten
-        })
-    }
-
     /// Complete discovery before either registering an answer or retaining a
     /// non-mutating plan for later confirmation.
     ///
@@ -967,11 +908,9 @@ impl ProvisioningService {
             self.store.check_new_entry(destination, entry).await?;
         }
         // Discovery comes FIRST, on every transport including the local
-        // one. Reading a unit file is not what decides whether a
-        // supervisor is there — a running one answers the protocol hello
-        // and gets registered and used as-is, with its unit untouched.
-        // The local handoff below is about INSTALLING, and only an absent
-        // supervisor raises that question.
+        // one: a running supervisor answers the protocol hello and is
+        // registered as-is; the local handoff below only answers an absent
+        // one.
         match self
             .backend
             .probe(&target)
@@ -1036,11 +975,10 @@ impl ProvisioningService {
                 // Nothing answered on the helm's OWN machine, so the next
                 // step would have been to install one — which is exactly
                 // what the panel no longer does here. Tell the user to reopen
-                // the Farhelm app, naming whoever already owns the supervisor
-                // unit if anybody does.
+                // the Farhelm app.
                 if matches!(target.transport, ProvisioningTarget::Local) {
                     return Ok(ProbeResponse::Manual {
-                        reason: self.local_handoff_reason().await?,
+                        reason: LOCAL_REOPEN_HANDOFF.to_string(),
                     });
                 }
                 let reach = match self
@@ -1051,11 +989,6 @@ impl ProvisioningService {
                 {
                     ReachOutcome::Supported(reach) => reach,
                     ReachOutcome::Manual(reason) => return Ok(ProbeResponse::Manual { reason }),
-                    ReachOutcome::SetupManaged => {
-                        return Ok(ProbeResponse::Manual {
-                            reason: ProvisioningOperation::Add.setup_managed_refusal(),
-                        });
-                    }
                 };
                 let probe_id = uuid::Uuid::new_v4().to_string();
                 let plan = self.layout.plan(
@@ -1423,11 +1356,11 @@ impl ProvisioningService {
     ///
     /// A LOCAL row never gets that far. UPDATE is the path that writes the
     /// unit file and the binary beside it, and on the helm's own machine
-    /// that is `farhelm helm setup`'s job whether or not a supervisor unit
-    /// happens to be there right now (D1). Refusing every local row —
-    /// rather than only the ones already carrying a recognizable unit —
-    /// is what closes the alternate route to the install the ADD path
-    /// stopped offering.
+    /// the panel never does that, whether or not a supervisor unit happens
+    /// to be there right now (D1): the desktop app starts this machine's
+    /// supervisor itself. Refusing every local row — rather than only the
+    /// ones already carrying a recognizable unit — is what closes the
+    /// alternate route to the install the ADD path stopped offering.
     ///
     /// Refusing before the probe also removes a time-of-check problem the
     /// narrower rule had: a plan retained here is confirmed later, under
@@ -1442,7 +1375,7 @@ impl ProvisioningService {
         let row = self.host_row(host).await?;
         if !row.kind.panel_updates() {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
-                self.local_handoff_reason().await?,
+                LOCAL_REOPEN_HANDOFF.to_string(),
             )));
         }
         self.plan_update_unguarded(host).await
@@ -1615,11 +1548,6 @@ impl ProvisioningService {
             ReachOutcome::Manual(reason) => {
                 return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                     reason,
-                )));
-            }
-            ReachOutcome::SetupManaged => {
-                return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
-                    ProvisioningOperation::Update.setup_managed_refusal(),
                 )));
             }
         };
@@ -1960,11 +1888,6 @@ impl ProvisioningService {
         let reach = match self.backend.inspect(&target).await {
             Ok(ReachOutcome::Supported(reach)) => reach,
             Ok(ReachOutcome::Manual(reason)) => return Err(refused(reason)),
-            Ok(ReachOutcome::SetupManaged) => {
-                return Err(refused(
-                    ProvisioningOperation::Uninstall.setup_managed_refusal(),
-                ));
-            }
             Err(_) if client.is_none() => return Err(not_connected()),
             Err(failure) => return Err(anyhow::Error::new(failure)),
         };

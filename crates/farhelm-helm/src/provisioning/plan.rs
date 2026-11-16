@@ -10,41 +10,10 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 // The operation and the plan's steps live in `farhelm-proto`, because provisioning progress and the probe's reply carry
-// them to the GUI; the helm-only behavior on them is in the two traits below.
+// them to the GUI; the helm-only behavior on them is in the trait below.
 pub(crate) use farhelm_proto::provisioning::{
     PlanStep, PlanStepPath, PlanSteps, ProvisioningOperation,
 };
-
-/// The helm's own wording for an operation, kept out of the shared type because only the helm phrases refusals.
-pub(super) trait OperationRefusal {
-    /// What the panel says instead of acting on a host whose supervisor unit
-    /// carries `farhelm helm setup`'s managed-by marker.
-    ///
-    /// One refusal per operation rather than one string for all of them:
-    /// setup owns that unit on the host (SPEC.md "Ownership during cleanup
-    /// and provisioning"), so the remedy depends on what the user was trying
-    /// to do. Installing or updating there is the host's own installer and
-    /// setup; removing is the host's own `farhelm uninstall`, which knows how
-    /// to take down a setup-owned service.
-    fn setup_managed_refusal(self) -> String;
-}
-
-impl OperationRefusal for ProvisioningOperation {
-    fn setup_managed_refusal(self) -> String {
-        let unit = crate::units::SUPERVISOR_UNIT_NAME;
-        match self {
-            Self::Add | Self::Update => format!(
-                "{unit} on this host is managed by farhelm helm setup there, so the hosts panel does \
-                 not replace it. Update Farhelm on that host with its installer and farhelm helm \
-                 setup, or move the unit aside to let the panel provision the host."
-            ),
-            Self::Uninstall => format!(
-                "{unit} on this host is managed by farhelm helm setup there, so the hosts panel does \
-                 not remove it. Remove Farhelm on that host by running farhelm uninstall there."
-            ),
-        }
-    }
-}
 
 /// Transport facts retained in the plan so execution cannot silently switch
 /// machines or access policies between confirmation and execution.
@@ -255,8 +224,8 @@ pub(crate) enum ProvisioningAction {
     /// the file may have been left in place instead (a timeout or a lost
     /// connection may still have removed it). Snapshot preparation skips the
     /// step: the sandbox image it installs into has no Farhelm installation
-    /// (preparation refuses setup-managed installs and copied state), so it
-    /// is not expected to carry an earlier tmux.
+    /// (preparation refuses copied supervisor state), so it is not expected
+    /// to carry an earlier tmux.
     RemoveBundledTmux {
         path: PathBuf,
     },
@@ -269,10 +238,7 @@ pub(crate) enum ProvisioningAction {
     DisableSupervisor {
         unit: String,
     },
-    /// Delete the supervisor's unit file. The remote command re-checks
-    /// setup's managed-by marker in the same shell that removes the file, as
-    /// the unit write does, because the plan was confirmed some time after
-    /// the host was inspected.
+    /// Delete the supervisor's unit file.
     RemoveUnit {
         unit: String,
         destination: PathBuf,
@@ -1161,12 +1127,7 @@ fn unit_failure(error: anyhow::Error) -> BackendFailure {
 /// Render the supervisor unit from the paths carried by the plan.
 ///
 /// A thin adapter over [`crate::units::render_supervisor_unit`], which
-/// `farhelm helm setup` shares: one renderer means remote provisioning and
-/// local setup cannot ship different lifecycle behaviour.
-///
-/// The unit is deliberately left UNMARKED — the managed-by marker means
-/// "setup owns this file", and provisioning's remote units are owned by
-/// the provisioning workflow instead.
+/// keeps the unit's lifecycle policy in one reviewed template.
 ///
 /// The unit names no tmux and puts no tmux directory on `PATH`: the
 /// supervisor starts none. Its `PATH` is the directory holding `farhelm`

@@ -399,16 +399,6 @@ mod tests {
         /// came before anything dialed the host.
         probes: std::sync::atomic::AtomicUsize,
         reach: Mutex<ReachOutcome>,
-        /// What this machine's `systemd/user` directory holds for the unit
-        /// the local-row rule asks about. `Ok(None)` is "no such file",
-        /// which is the only state most tests care about; `Err` stands in
-        /// for the lookup failures — permission, undecodable contents, an
-        /// unlocatable directory — that must never read as absence.
-        user_unit: Mutex<Result<Option<String>, String>>,
-        /// Every unit name the service asked for, in order. Lets a test
-        /// prove WHICH unit the ownership rule consults, and that paths
-        /// which have no business reading local state never do.
-        unit_reads: Mutex<Vec<String>>,
         inspect_failure: Mutex<Option<String>>,
         pub(super) operations: Mutex<Vec<String>>,
         pub(super) fail: Mutex<Option<String>>,
@@ -486,8 +476,6 @@ mod tests {
                     distro_id: "ubuntu".to_string(),
                     launchd_domain: None,
                 })),
-                user_unit: Mutex::new(Ok(None)),
-                unit_reads: Mutex::new(Vec::new()),
                 inspect_failure: Mutex::new(None),
                 operations: Mutex::new(Vec::new()),
                 fail: Mutex::new(None),
@@ -931,15 +919,6 @@ mod tests {
             _path: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
             self.record("remove-directory")
-        }
-
-        async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure> {
-            self.unit_reads.lock().unwrap().push(name.to_string());
-            self.user_unit
-                .lock()
-                .unwrap()
-                .clone()
-                .map_err(|message| BackendFailure::new(message, ""))
         }
     }
 
@@ -6228,15 +6207,13 @@ mod tests {
     /// rather than a partial removal.
     ///
     /// Spec: planning refuses, with a 409 and before any host action,
-    /// the helm's own machine (pointing at `farhelm uninstall`), a host
-    /// whose unit `farhelm helm setup` manages (pointing at `farhelm
-    /// uninstall` on that host), a supervisor running from outside
-    /// Farhelm's lib directory, a state directory that really lies inside
-    /// the lib directory that would be removed (through a symlink, so
-    /// spelling alone would not show it), a mount point on or inside the lib
-    /// directory (a home bind there would be deleted through it, while a
-    /// mount beside it is fine), a connected supervisor that its
-    /// unit is not running (one started by hand).
+    /// the helm's own machine (pointing at `farhelm uninstall`), a
+    /// supervisor running from outside Farhelm's lib directory, a state
+    /// directory that really lies inside the lib directory that would be
+    /// removed (through a symlink, so spelling alone would not show it), a
+    /// mount point on or inside the lib directory (a home bind there would
+    /// be deleted through it, while a mount beside it is fine), a connected
+    /// supervisor that its unit is not running (one started by hand).
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_hosts_whose_removal_farhelm_does_not_own() {
         let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
@@ -6249,16 +6226,6 @@ mod tests {
         );
         assert!(local.contains("farhelm uninstall"), "{local}");
 
-        *backend.reach.lock().unwrap() = ReachOutcome::SetupManaged;
-        let setup = refusal_text(service.plan_uninstall(host).await.unwrap_err());
-        assert!(setup.contains("managed by farhelm helm setup"), "{setup}");
-        assert!(setup.contains("farhelm uninstall"), "{setup}");
-
-        *backend.reach.lock().unwrap() = FakeBackend::absent(root.path().to_path_buf())
-            .reach
-            .lock()
-            .unwrap()
-            .clone();
         let elsewhere = root.path().join("bin/farhelm");
         backend
             .repeat_probe
@@ -8123,7 +8090,7 @@ mod tests {
     fn reach_output_parser_covers_platform_and_tool_boundaries() {
         let supported = |os: &str, arch: &str, manager: &str| {
             format!(
-                "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{manager}\0/home/test/.config/systemd/user\0\0"
+                "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{manager}\0/home/test/.config/systemd/user\0"
             )
         };
         // A non-Ubuntu ID with every real capability present is supported,
@@ -8201,63 +8168,13 @@ mod tests {
         {
             let mut non_utf8_home = format!("{REACH_RECORD_MARKER}\0ubuntu\0/home/").into_bytes();
             non_utf8_home.push(0xff);
-            non_utf8_home
-                .extend_from_slice(b"\0x86_64\0usable\0/home/test/.config/systemd/user\0\0");
+            non_utf8_home.extend_from_slice(b"\0x86_64\0usable\0/home/test/.config/systemd/user\0");
             assert!(matches!(
                 parse_reach_output(&non_utf8_home).unwrap(),
                 ReachOutcome::Manual(reason)
                     if reason.contains("HOME") && reason.contains("explicit paths")
             ));
         }
-    }
-
-    /// Why this matters: a remote host's supervisor unit may have been
-    /// written by `farhelm helm setup` on that host, and replacing it strips
-    /// setup's marker so setup and uninstall there refuse to manage it. The
-    /// reach check reports that ownership, and the parser turns it into the
-    /// `SetupManaged` outcome every operation refuses on, each with its own
-    /// remedy; any value other than empty or `setup` is malformed output,
-    /// not a silent "not setup's".
-    #[farhelm_testtrace::test]
-    fn reach_output_refuses_a_setup_managed_supervisor_unit() {
-        let with_owner = |owner: &str| {
-            format!(
-                "{REACH_RECORD_MARKER}\0ubuntu\0/home/test\0x86_64\0usable\0/home/test/.config/systemd/user\0{owner}\0"
-            )
-        };
-        assert!(matches!(
-            parse_reach_output(with_owner("").as_bytes()).unwrap(),
-            ReachOutcome::Supported(_)
-        ));
-        assert!(matches!(
-            parse_reach_output(with_owner("setup").as_bytes()).unwrap(),
-            ReachOutcome::SetupManaged
-        ));
-        assert!(parse_reach_output(with_owner("someone-else").as_bytes()).is_err());
-        // The refusal each operation turns that outcome into names the unit
-        // and its owner, and gives that operation's own remedy.
-        for operation in [
-            ProvisioningOperation::Add,
-            ProvisioningOperation::Update,
-            ProvisioningOperation::Uninstall,
-        ] {
-            let reason = operation.setup_managed_refusal();
-            assert!(
-                reason.contains(crate::units::SUPERVISOR_UNIT_NAME),
-                "{reason}"
-            );
-            assert!(reason.contains("farhelm helm setup"), "{reason}");
-        }
-        assert!(
-            ProvisioningOperation::Update
-                .setup_managed_refusal()
-                .contains("installer"),
-        );
-        assert!(
-            ProvisioningOperation::Uninstall
-                .setup_managed_refusal()
-                .contains("farhelm uninstall"),
-        );
     }
 
     /// Why this matters: GNU `install -d -m` chmods a directory that already
@@ -8332,73 +8249,6 @@ mod tests {
         }
     }
 
-    /// Why this matters: the ownership field is produced by a shell snippet
-    /// that no Rust parser test executes, and two ways of getting it wrong
-    /// both fail open. `read` returns failure at EOF, so a marker line with no
-    /// trailing newline would pass as unmarked; and an unreadable unit would
-    /// pass as unmarked too. This runs the real reach-check script against a
-    /// fixture user-unit directory: absent and unmarked units are supported,
-    /// a marker-only file without a newline is refused as setup's, and a unit
-    /// path that cannot be read fails the check instead of admitting a plan.
-    #[farhelm_testtrace::test]
-    async fn reach_check_script_reports_setup_ownership_and_fails_closed() {
-        let root = tempfile::tempdir().unwrap();
-        let home = root.path().join("home");
-        let bin = root.path().join("bin");
-        let unit_dir = home.join(".config/systemd/user");
-        tokio::fs::create_dir_all(&unit_dir).await.unwrap();
-        tokio::fs::create_dir_all(&bin).await.unwrap();
-        write_fake_tool(&bin, "systemctl", "echo PATH=/usr/bin").await;
-        // No user bus: the environment comes from `show-environment`, and the
-        // host's real busctl can never answer for this fixture.
-        write_fake_tool(&bin, "busctl", "exit 1").await;
-        let backend = SystemBackend {
-            control_dir: root.path().to_path_buf(),
-            linger: LingerBehavior::Simulated(Ok(())),
-            launcher: Arc::new(FixtureHomeLauncher { home, bin }),
-            runtime_units: false,
-            one_shot: false,
-            fail_before_rename: false,
-        };
-        let target = ProbeTarget {
-            transport: ProvisioningTarget::ssh("scripted.example"),
-            probe_farhelm: PathBuf::from("farhelm"),
-            probe_state_dir: None,
-        };
-        let unit = unit_dir.join(crate::units::SUPERVISOR_UNIT_NAME);
-
-        assert!(matches!(
-            backend.inspect(&target).await.unwrap(),
-            ReachOutcome::Supported(_)
-        ));
-        tokio::fs::write(&unit, "[Unit]\n").await.unwrap();
-        assert!(matches!(
-            backend.inspect(&target).await.unwrap(),
-            ReachOutcome::Supported(_)
-        ));
-        tokio::fs::write(&unit, crate::units::MANAGED_MARKER)
-            .await
-            .unwrap();
-        assert!(matches!(
-            backend.inspect(&target).await.unwrap(),
-            ReachOutcome::SetupManaged
-        ));
-        tokio::fs::remove_file(&unit).await.unwrap();
-        // A directory at the unit's path exists but cannot be read as a file,
-        // which stands in for any unreadable unit without depending on the
-        // test not running as root.
-        tokio::fs::create_dir(&unit).await.unwrap();
-        let error = backend
-            .inspect(&target)
-            .await
-            .expect_err("an unreadable unit must not pass as unmarked");
-        assert!(
-            error.rendered().contains("cannot read"),
-            "the failure says why: {}",
-            error.rendered()
-        );
-    }
-
     /// Install an executable `name` in `bin` whose body is `script`.
     async fn write_fake_tool(bin: &Path, name: &str, script: &str) {
         use std::os::unix::fs::PermissionsExt;
@@ -8420,10 +8270,8 @@ mod tests {
     /// check used to read it with `sed`, so the host was refused with a false
     /// "relative XDG_CONFIG_HOME" reason, or its units looked for in the
     /// wrong place. Specified: with busctl answering, a supported host
-    /// reports the spaced unit directory, and a setup-marked unit inside it
-    /// is found and refused as setup's (proof the check looked there); with
-    /// busctl failing, the refusal names the escaped form instead of calling
-    /// the path relative.
+    /// reports the spaced unit directory; with busctl failing, the refusal
+    /// names the escaped form instead of calling the path relative.
     #[farhelm_testtrace::test]
     async fn reach_check_reads_a_spaced_config_dir_through_busctl() {
         let root = tempfile::tempdir().unwrap();
@@ -8485,16 +8333,6 @@ mod tests {
             panic!("a spaced config directory read through busctl must be supported");
         };
         assert_eq!(reach.user_unit_dir, unit_dir);
-        tokio::fs::write(
-            unit_dir.join(crate::units::SUPERVISOR_UNIT_NAME),
-            crate::units::MANAGED_MARKER,
-        )
-        .await
-        .unwrap();
-        assert!(matches!(
-            backend.inspect(&target).await.unwrap(),
-            ReachOutcome::SetupManaged
-        ));
 
         write_fake_tool(&bin, "busctl", "exit 1").await;
         let ReachOutcome::Manual(reason) = backend.inspect(&target).await.unwrap() else {
@@ -9745,9 +9583,8 @@ mod tests {
 
     /// Why this matters: UNINSTALL's host commands delete files and stop a
     /// service on someone's machine, and a retry reruns them over whatever
-    /// an earlier run left. They must refuse setup's unit at the moment of
-    /// removal, treat work already done as done rather than as a failure,
-    /// and never run on the helm's own machine.
+    /// an earlier run left. They must treat work already done as done
+    /// rather than as a failure, and never run on the helm's own machine.
     ///
     /// Spec, for the real shell scripts run against fixture paths with a
     /// fake `systemctl`: `inspect_uninstall` reports each path's existence,
@@ -9756,21 +9593,20 @@ mod tests {
     /// symlink resolved to its target, with a second home spelling normalized
     /// only when the complete paths are the same file, none for one the host
     /// cannot resolve), the default state directory under the host's HOME,
-    /// and the unit's run state; `remove_unit` refuses a unit whose
-    /// first line is setup's marker (with or without a trailing newline) and
-    /// keeps it, removes an unmarked one, and skips an absent one; `stop`
-    /// stops a running unit and skips an inactive one with nothing left to
-    /// end; `disable` passes `--runtime` exactly when the backend links
-    /// units for this boot only; `remove_directory` refuses a path that is
-    /// itself a symlink and leaves both the link and its target, removes the
-    /// real tree under a symlinked parent, and removes a tree and then skips
-    /// it; every mutator refuses the local transport.
+    /// and the unit's run state; `remove_unit` removes a unit and skips an
+    /// absent one; `stop` stops a running unit and skips an inactive one
+    /// with nothing left to end; `disable` passes `--runtime` exactly when
+    /// the backend links units for this boot only; `remove_directory`
+    /// refuses a path that is itself a symlink and leaves both the link and
+    /// its target, removes the real tree under a symlinked parent, and
+    /// removes a tree and then skips it; every mutator refuses the local
+    /// transport.
     ///
     /// Linux-only: this fixture executes the remote Linux scripts locally,
     /// including stat's GNU-compatible `-c` interface; macOS stat cannot run it.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
-    async fn uninstall_host_commands_refuse_setup_units_and_skip_finished_work() {
+    async fn uninstall_host_commands_skip_finished_work() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
         let bin = root.path().join("bin");
@@ -9935,22 +9771,6 @@ mod tests {
         tokio::fs::remove_dir(lib.join("data")).await.unwrap();
         tokio::fs::write(&log, "").await.unwrap();
 
-        for setup_unit in [
-            format!("{}\n[Unit]\n", crate::units::MANAGED_MARKER),
-            crate::units::MANAGED_MARKER.to_string(),
-        ] {
-            tokio::fs::write(&unit, &setup_unit).await.unwrap();
-            let refusal = system
-                .remove_unit(&target, &unit)
-                .await
-                .expect_err("a setup-managed unit must not be removed");
-            assert!(
-                refusal.rendered().contains("managed by farhelm helm setup"),
-                "{}",
-                refusal.rendered()
-            );
-            assert_eq!(tokio::fs::read_to_string(&unit).await.unwrap(), setup_unit);
-        }
         tokio::fs::write(&unit, "[Unit]\n# written by provisioning\n")
             .await
             .unwrap();
@@ -10256,74 +10076,6 @@ mod tests {
         ));
         assert!(!lib.exists());
         assert!(bin.exists(), "only the installation tree should be removed");
-    }
-
-    /// Why this matters: a plan is confirmed some time after the reach check
-    /// that approved it, and `farhelm helm setup` may run on the host in
-    /// between. The remote unit write re-checks setup's marker in the same
-    /// command that renames, so a marked unit found at write time is refused
-    /// and left byte for byte as it was, while an unmarked unit (the
-    /// provisioning-owned case) is still replaced.
-    #[farhelm_testtrace::test]
-    async fn remote_unit_write_refuses_a_setup_managed_destination() {
-        let root = tempfile::tempdir().unwrap();
-        let unit = root.path().join("farhelm-supervisor.service");
-        let temporary = root
-            .path()
-            .join(".farhelm-supervisor.service.farhelm-tmp-run");
-        let backend = SystemBackend {
-            control_dir: root.path().to_path_buf(),
-            linger: LingerBehavior::Simulated(Ok(())),
-            launcher: Arc::new(ScriptedTransferLauncher {
-                temporary: temporary.clone(),
-                bytes: "provisioned unit",
-                exit_status: 0,
-                edit: None,
-            }),
-            runtime_units: false,
-            one_shot: false,
-            fail_before_rename: false,
-        };
-        let target = ProvisioningTarget::ssh("scripted.example");
-        let setup_unit = format!("{}\n[Unit]\n", crate::units::MANAGED_MARKER);
-        tokio::fs::write(&unit, &setup_unit).await.unwrap();
-        let error = backend
-            .install_bytes(&target, b"provisioned unit", &unit, &temporary, 0o644)
-            .await
-            .expect_err("a setup-managed unit must not be replaced");
-        assert!(
-            error.rendered().contains("managed by farhelm helm setup"),
-            "the refusal names the owner: {}",
-            error.rendered()
-        );
-        assert_eq!(tokio::fs::read_to_string(&unit).await.unwrap(), setup_unit);
-        assert!(!temporary.exists(), "a refused write cleans its temporary");
-
-        // A marker-only file with no trailing newline is still setup's; a
-        // `read`-based check would have let this one through.
-        tokio::fs::write(&unit, crate::units::MANAGED_MARKER)
-            .await
-            .unwrap();
-        backend
-            .install_bytes(&target, b"provisioned unit", &unit, &temporary, 0o644)
-            .await
-            .expect_err("a marker line without a newline is still setup's");
-        assert_eq!(
-            tokio::fs::read_to_string(&unit).await.unwrap(),
-            crate::units::MANAGED_MARKER
-        );
-
-        tokio::fs::write(&unit, "[Unit]\n# written by provisioning\n")
-            .await
-            .unwrap();
-        backend
-            .install_bytes(&target, b"provisioned unit", &unit, &temporary, 0o644)
-            .await
-            .expect("an unmarked unit is provisioning's to replace");
-        assert_eq!(
-            tokio::fs::read_to_string(&unit).await.unwrap(),
-            "provisioned unit"
-        );
     }
 
     /// Exercise the real finishing command, with a save planted during upload:
@@ -10933,139 +10685,39 @@ mod tests {
         std::mem::forget(group);
     }
 
-    /// A supervisor unit on the helm's own machine that runs this farhelm
-    /// belongs to whoever wrote it, and the panel says so with the
-    /// remedy that fits (D9). Both wordings are asserted whole because
-    /// they are the entire user-facing answer.
-    ///
-    /// The two differ on purpose: a unit `farhelm helm setup` wrote can be
-    /// driven with `systemctl --user restart`, while a hand-written one is
-    /// its author's to manage and is only reported as off limits to the
-    /// panel — Farhelm has no idea what that author intended.
-    ///
-    /// Both the ADD path (which reaches this only after discovery finds
-    /// nothing answering) and the UPDATE path produce it.
-    #[farhelm_testtrace::test]
-    async fn a_local_supervisor_unit_running_this_farhelm_is_off_limits_to_the_panel() {
-        for managed in [true, false] {
-            let harness = harness().await;
-            let root = tempfile::tempdir().unwrap();
-            let farhelm = root.path().join("farhelm");
-            std::fs::write(&farhelm, b"#!/bin/sh\n").unwrap();
-            let unit = crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
-                farhelm: &farhelm,
-                state_dir: &root.path().join("state"),
-            })
-            .unwrap();
-            let backend = FakeBackend::absent(root.path().to_path_buf());
-            *backend.user_unit.lock().unwrap() = Ok(Some(if managed {
-                crate::units::managed(unit)
-            } else {
-                unit
-            }));
-            let service = ProvisioningService::injected(
-                harness.store.clone(),
-                Arc::clone(&harness.manager),
-                backend.clone(),
-                Arc::new(NoPayloads),
-                layout(root.path()),
-                farhelm.clone(),
-            );
-
-            let response = service
-                .probe(ProbeRequest {
-                    target: ProbeDestination::Local,
-                    remote_farhelm: None,
-                    remote_state_dir: None,
-                    new_entry: None,
-                })
-                .await
-                .unwrap();
-            let ProbeResponse::Manual { reason } = response else {
-                panic!("a setup-owned local supervisor must not be provisionable")
-            };
-            if managed {
-                assert_eq!(
-                    reason,
-                    "farhelm-supervisor.service on this machine is managed by farhelm helm setup; \
-                     it is not touched from the hosts panel. Start or restart it with: systemctl \
-                     --user restart farhelm-supervisor.service"
-                );
-            } else {
-                assert_eq!(
-                    reason,
-                    "farhelm-supervisor.service on this machine already runs this farhelm and was \
-                     written by hand; it is not touched from the hosts panel"
-                );
-            }
-
-            let error = service
-                .plan_update(local_row(&harness).await)
-                .await
-                .expect_err("UPDATE is the path that would overwrite the unit");
-            assert_eq!(error.to_string(), reason);
-            // The ownership question is only ever asked about the
-            // supervisor unit; the helm's own unit is none of the panel's
-            // business.
-            assert_eq!(
-                backend.unit_reads.lock().unwrap().as_slice(),
-                ["farhelm-supervisor.service", "farhelm-supervisor.service"]
-            );
-        }
-    }
-
     /// With nothing answering on the helm's own machine, the panel stops
     /// offering to install a supervisor and tells the user to reopen the
-    /// Farhelm app, which starts that machine's supervisor when it opens (D1)
-    /// — on the ADD path AFTER discovery has found nothing, and on the UPDATE
-    /// path before any probe at all.
+    /// Farhelm app, which starts that machine's supervisor when it opens (D1),
+    /// on the ADD path AFTER discovery has found nothing (UPDATE: see
+    /// `an_absent_local_supervisor_cannot_be_installed_through_update`).
     /// This is what an ordinary first-time helm machine sees, so the
     /// wording is asserted whole.
-    ///
-    /// A unit for some OTHER farhelm falls through to this same generic
-    /// answer: it is not this helm's supervisor, so there is no owner to
-    /// name. A unit whose command cannot be parsed does NOT — see the
-    /// unclassifiable case below.
     #[farhelm_testtrace::test]
     async fn an_absent_local_supervisor_is_answered_with_reopen_the_app() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
-        let other = root.path().join("other-farhelm");
-        std::fs::write(&other, b"#!/bin/sh\n").unwrap();
-        for unit in [
-            None,
-            Some(crate::units::managed(
-                crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
-                    farhelm: &other,
-                    state_dir: &root.path().join("state"),
-                })
-                .unwrap(),
-            )),
-        ] {
-            let backend = FakeBackend::absent(root.path().to_path_buf());
-            *backend.user_unit.lock().unwrap() = Ok(unit);
-            let service = service(&harness, backend.clone(), root.path());
-            let response = service
-                .probe(ProbeRequest {
-                    target: ProbeDestination::Local,
-                    remote_farhelm: None,
-                    remote_state_dir: None,
-                    new_entry: None,
-                })
-                .await
-                .unwrap();
-            let ProbeResponse::Manual { reason } = response else {
-                panic!("the local row no longer installs a supervisor")
-            };
-            assert_eq!(
-                reason,
-                "this is the helm's own machine: the Farhelm app starts its supervisor here when \
-                 it opens; quit Farhelm and open it again to start it"
-            );
-            // Discovery ran first: this answer reports what the probe
-            // found, and a supervisor that ANSWERS is registered instead.
-            assert!(backend.probe.lock().unwrap().is_none());
-        }
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Local,
+                remote_farhelm: None,
+                remote_state_dir: None,
+                new_entry: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Manual { reason } = response else {
+            panic!("the local row no longer installs a supervisor")
+        };
+        assert_eq!(
+            reason,
+            "this is the helm's own machine: the Farhelm app starts its supervisor here when it \
+             opens; quit Farhelm and open it again to start it"
+        );
+        // Discovery ran first: this answer reports what the probe found,
+        // and a supervisor that ANSWERS is registered instead.
+        assert!(backend.probe.lock().unwrap().is_none());
     }
 
     /// A local supervisor reporting a different identity must leave the
@@ -11204,9 +10856,9 @@ mod tests {
         );
     }
 
-    /// UPDATE on the local row is refused for EVERY local row, with no
-    /// unit file present and before any transport work — the alternate
-    /// route to the install the ADD path stopped offering.
+    /// UPDATE on the local row is refused for EVERY local row, before any
+    /// transport work — the alternate route to the install the ADD path
+    /// stopped offering.
     ///
     /// This is the regression the narrower rule missed: a local row whose
     /// supervisor unit was absent (or unrecognizable) went straight on to
@@ -11237,8 +10889,9 @@ mod tests {
     /// The local UPDATE handoff is a conflict response, not a server fault.
     ///
     /// The route must not return an update plan for the helm's own machine:
-    /// setup owns that installation, and a client needs a recoverable status
-    /// rather than a 500 that suggests the panel failed unexpectedly.
+    /// the panel never updates that installation, and a client needs a
+    /// recoverable status rather than a 500 that suggests the panel failed
+    /// unexpectedly.
     #[farhelm_testtrace::test]
     async fn local_update_handoff_is_an_http_conflict_without_a_plan() {
         let mut harness = harness().await;
@@ -11269,19 +10922,14 @@ mod tests {
         assert!(service.memory.lock().await.plans.is_empty());
     }
 
-    /// A unit file that exists but names no command this parser can
-    /// classify must fail CLOSED. "I cannot tell what this runs" is not
-    /// "there is nothing here": answering the generic run-setup message
-    /// would invite the operator to have setup overwrite a file whose
-    /// contents nobody understood.
+    /// A supervisor that is actually running on the helm's machine is
+    /// discovered and registered. The rule against installing here (D1)
+    /// must never stop the panel from adopting what is already running.
     #[farhelm_testtrace::test]
-    async fn an_unclassifiable_local_unit_is_reported_as_somebody_elses() {
+    async fn a_running_local_supervisor_is_still_discovered() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        *backend.user_unit.lock().unwrap() = Ok(Some(
-            "[Service]\nType=oneshot\nExecStop=/bin/true\n".to_string(),
-        ));
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
         let service = service(&harness, backend, root.path());
         let response = service
             .probe(ProbeRequest {
@@ -11292,135 +10940,23 @@ mod tests {
             })
             .await
             .unwrap();
-        let ProbeResponse::Manual { reason } = response else {
-            panic!("an unreadable local unit is not permission to install")
-        };
-        assert_eq!(
-            reason,
-            "farhelm-supervisor.service on this machine already runs this farhelm and was written \
-             by hand; it is not touched from the hosts panel"
-        );
-    }
-
-    /// A supervisor that is actually running on the helm's machine is
-    /// discovered and registered, its unit untouched — including the case
-    /// that matters most, where `farhelm helm setup` wrote that unit and
-    /// it names this very binary. The ownership rule exists to stop the
-    /// panel INSTALLING here, and must never stop it from adopting what
-    /// is already running; a helm machine set up with `farhelm helm setup`
-    /// joins its own fleet exactly this way.
-    #[farhelm_testtrace::test]
-    async fn a_running_local_supervisor_is_still_discovered() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let farhelm = root.path().join("farhelm");
-        std::fs::write(&farhelm, b"#!/bin/sh\n").unwrap();
-        let backend = FakeBackend::supervisor(root.path().to_path_buf());
-        *backend.user_unit.lock().unwrap() = Ok(Some(crate::units::managed(
-            crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
-                farhelm: &farhelm,
-                state_dir: &root.path().join("state"),
-            })
-            .unwrap(),
-        )));
-        let service = ProvisioningService::injected(
-            harness.store.clone(),
-            Arc::clone(&harness.manager),
-            backend.clone(),
-            Arc::new(NoPayloads),
-            layout(root.path()),
-            farhelm.clone(),
-        );
-        let response = service
-            .probe(ProbeRequest {
-                target: ProbeDestination::Local,
-                remote_farhelm: None,
-                remote_state_dir: None,
-                new_entry: None,
-            })
-            .await
-            .unwrap();
         assert!(matches!(response, ProbeResponse::Discovered { .. }));
-        // Discovery answered without ever consulting the unit file.
-        assert!(backend.unit_reads.lock().unwrap().is_empty());
-    }
-
-    /// An ownership lookup that FAILS must stop both panel paths before
-    /// any transport work. A permission error or an undecodable unit file
-    /// is not evidence that there is no unit — treating it as absence
-    /// would tell the user to run setup over a unit the helm merely could
-    /// not read.
-    #[farhelm_testtrace::test]
-    async fn an_unreadable_local_unit_stops_both_panel_paths() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        *backend.user_unit.lock().unwrap() = Err("permission denied".to_string());
-        let service = service(&harness, backend.clone(), root.path());
-
-        let add = service
-            .probe(ProbeRequest {
-                target: ProbeDestination::Local,
-                remote_farhelm: None,
-                remote_state_dir: None,
-                new_entry: None,
-            })
-            .await
-            .expect_err("an unreadable unit is not permission to install");
-        assert!(add.to_string().contains("permission denied"), "{add}");
-
-        let update = service
-            .plan_update(local_row(&harness).await)
-            .await
-            .expect_err("an unreadable unit is not permission to update");
-        assert!(update.to_string().contains("permission denied"), "{update}");
-        // The update path refuses before probing; the add path probes
-        // first and fails on the lookup that follows, so neither one
-        // reached the executor.
-        assert!(backend.operations.lock().unwrap().is_empty());
-    }
-
-    /// An SSH probe must never consult this machine's unit directory: the
-    /// local ownership seam answers a question about the HELM's machine,
-    /// and a remote host's supervisor has nothing to do with it.
-    #[farhelm_testtrace::test]
-    async fn an_ssh_probe_never_reads_a_local_unit() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        let service = service(&harness, backend.clone(), root.path());
-        let response = service
-            .probe(ProbeRequest {
-                target: ProbeDestination::Ssh {
-                    destination: "remote.example".to_string(),
-                },
-                remote_farhelm: None,
-                remote_state_dir: None,
-                new_entry: None,
-            })
-            .await
-            .unwrap();
-        assert!(matches!(response, ProbeResponse::Provisionable { .. }));
-        assert!(backend.unit_reads.lock().unwrap().is_empty());
     }
 
     /// The unit provisioning pushes to a host carries the reviewed
-    /// lifecycle policy, stays free of the setup ownership marker (D9:
-    /// remote units belong to the provisioning workflow, and a marked one
-    /// would invite `farhelm helm setup` on that host to rewrite it), and
-    /// refuses a path it cannot represent before any plan is offered.
+    /// lifecycle policy and refuses a path it cannot represent before any
+    /// plan is offered.
     ///
     /// The escaping and PATH-composition rules themselves are exercised in
     /// `crate::units`, which owns them.
     #[farhelm_testtrace::test]
-    fn the_provisioned_unit_carries_policy_and_no_ownership_marker() {
+    fn the_provisioned_unit_carries_policy() {
         let unit = supervisor_unit(Path::new("/tmp/%h/farhelm"), Path::new("/tmp/state")).unwrap();
         assert!(unit.contains("/tmp/%%h/farhelm"));
         assert!(unit.contains("PATH=/tmp/%%h:"));
         assert!(unit.contains("KillMode=process"));
         assert!(!unit.contains("After=default.target"));
         assert!(!unit.contains('@'), "{unit}");
-        assert!(!crate::units::is_managed(&unit), "{unit}");
         assert!(
             supervisor_unit(Path::new("/tmp/farhelm"), Path::new("/tmp/state\nother")).is_err()
         );
@@ -13802,9 +13338,8 @@ mod tests {
     ///
     /// Both of this case's runs are UPDATEs now: the hosts panel's local
     /// row stopped offering to install a supervisor (D1), so UPDATE is the
-    /// only entry point left into the direct-local executor — and it is a
-    /// real one, since a local row whose supervisor unit was not written
-    /// by `farhelm helm setup` is still the panel's to converge.
+    /// only entry point left into the direct-local executor, through the
+    /// test-only planner that skips the panel's local-row refusal.
     #[farhelm_testtrace::test]
     async fn local_provisioning_and_update_preserve_a_running_session() {
         real_provisioning_case(false, true).await;

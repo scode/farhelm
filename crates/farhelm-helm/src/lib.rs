@@ -253,9 +253,9 @@ pub use ownership::{LOCK_NAME as HELM_LOCK_FILE, SERVING_CLAIM_WAIT as HELM_LOCK
 /// Local sockets and routed child processes behind the connection manager's seam.
 mod transport;
 
-/// The systemd user units Farhelm writes, shared by `farhelm helm setup`
-/// and remote provisioning so the two cannot render different policy.
-pub mod units;
+/// The systemd user unit remote provisioning writes, and the reading of
+/// the systemd user manager's environment that provisioning and podman share.
+pub(crate) mod units;
 
 /// `POST /api/sessions/{id}/attachments` — the streaming attachment
 /// upload.
