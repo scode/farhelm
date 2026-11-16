@@ -562,3 +562,8 @@ stay.
   the pointer through. A notice whose terminal is hidden (another tab chosen) is closed and does not come back with the
   terminal, where the old one, hidden with its pane, did. A notice taller than the window is cut at the window's content
   area's height less 8 pixels where the old one scrolled. (`attached.rs`, "The drag-copy notice".)
+- The block elements (U+2580 to U+259F: full, half, eighth and quadrant blocks, and the three shades) are drawn as
+  filled rectangles of their cell, not from the font as in the old app, so stacked blocks meet at every text size; the
+  font's block glyph is shorter than the cell at most sizes, which left a stripe of background under every row. The
+  shades are flat fills at a quarter, half and three quarters of the foreground's opacity rather than a dot pattern. Box
+  drawing (U+2500 to U+257F) stays a font glyph. Decided by the maintainer on 2026-11-14. (`terminal/blocks.rs`.)
