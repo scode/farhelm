@@ -1343,6 +1343,48 @@ fn the_notices_window_is_titled_and_fits_its_column() {
     });
 }
 
+// ---- Bringing the window forward at startup on a Mac ---------------------------------------------------------------
+
+/// `follow_activations_with`'s startup choice, named for the tests: what Linux does, and what a Mac does. (Leaving
+/// startup alone is pinned by the second-launch test below, which records every activation.)
+const LEAVE_STARTUP: bool = false;
+const ACTIVATE_STARTUP: bool = true;
+
+/// A program macOS did not open through Launch Services (a devbuild's binary run from a terminal) is not made the
+/// active app, so without its own request the main window opened behind the app in front and stayed there until the
+/// user clicked the Dock icon. Specified: on the platform that asks at startup, following activations brings the main
+/// window forward at once, before and without any second launch, over another window that was in front.
+///
+/// NOTE: The other window is the app's own, and this sees only the window's half of the request. The half that fixes
+/// the Mac bug, asking macOS to make the app the active one (`App::activate`), does nothing on GPUI's test platform, so
+/// no in-process test can tell it is there. It was checked on a test Mac instead: launched from a shell with Finder in
+/// front, the app was frontmost after startup, where without the change Finder stayed in front.
+#[gpui::test]
+fn the_mac_brings_the_main_window_forward_at_startup(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let (_, main) = test_support::open_view(cx, |_, _| Blank);
+    let handle = main.update(|window, _| window.window_handle());
+    let (_, mut other) = test_support::another_window(main, |_, _| Blank);
+    other.run_until_parked();
+    let other_handle = other.update(|window, _| window.window_handle());
+    let in_front = |main: &mut gpui::VisualTestContext| main.update(|_, cx| cx.active_window());
+    assert_eq!(
+        in_front(main),
+        Some(other_handle),
+        "the premise: another window is in front"
+    );
+
+    main.cx.update(|cx| {
+        super::follow_activations_with(handle, None, ACTIVATE_STARTUP, super::activate, cx)
+    });
+    main.run_until_parked();
+    assert_eq!(
+        in_front(main),
+        Some(handle),
+        "a Mac brings the main window forward with no second launch"
+    );
+}
+
 // ---- A second launch -----------------------------------------------------------------------------------------------
 
 /// On Linux a second launch hands its activation token to the app already open, and a compositor raises the window only
@@ -1377,6 +1419,7 @@ fn each_second_launch_activates_the_main_window_with_its_token(cx: &mut TestAppC
         super::follow_activations_with(
             handle,
             Some(activations),
+            LEAVE_STARTUP,
             move |window, token| {
                 recorded
                     .borrow_mut()
@@ -1409,8 +1452,16 @@ fn each_second_launch_activates_the_main_window_with_its_token(cx: &mut TestAppC
             Box::pin(async move { launch })
         }),
     };
-    main.cx
-        .update(|cx| super::follow_activations(handle, Some(activations), cx));
+    // Startup is left alone here, so that only the second launch can bring the window forward, on every platform.
+    main.cx.update(|cx| {
+        super::follow_activations_with(
+            handle,
+            Some(activations),
+            LEAVE_STARTUP,
+            super::activate,
+            cx,
+        )
+    });
     main.run_until_parked();
     assert_eq!(main.update(|_, cx| cx.active_window()), Some(handle));
 }

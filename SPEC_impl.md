@@ -1336,11 +1336,13 @@ through without interpreting them. Its menus install last, after every key bindi
 shortcuts it shows once, when it is set. The window's saved frame is read before the window opens, so the first frame is
 already in place; an agent run's window size wins over it. The updater is handed over before the window opens too, so
 the first frame already knows whether one runs. The source of second launches is handed over only once the window is
-open, since bringing the window forward needs the window. In the macOS window the sidebar's top row and the session's
-top row are the title band, where a drag that starts on anything that does not keep its press moves the window and a
-double-click there zooms it: a control built on the component layer's buttons keeps its presses, but text placed in a
-band row (a tab's label, a pill, a status) must be wrapped in `desktop::title_band::claims_presses`, or a drag from it
-moves the window.
+open, since bringing the window forward needs the window; at that same point the Mac app asks once to become the active
+app with its window in front, because macOS activates only an app Launch Services opened, and GPUI never asks on the
+app's behalf, so a binary started from a terminal would otherwise open behind the app in front. In the macOS window the
+sidebar's top row and the session's top row are the title band, where a drag that starts on anything that does not keep
+its press moves the window and a double-click there zooms it: a control built on the component layer's buttons keeps its
+presses, but text placed in a band row (a tab's label, a pill, a status) must be wrapped in
+`desktop::title_band::claims_presses`, or a drag from it moves the window.
 
 A foundation reads the global the bootstrap installed for it through one bootstrap helper (`bootstrap::installed`),
 never through GPUI's panicking `global`. A missing global fails an assertion in a debug build, which every test and
