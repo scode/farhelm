@@ -1,6 +1,7 @@
 //! Supervisor change hints, end to end: a real supervisor process, a real
-//! helm process whose backstop poll is pushed an hour away, and a direct
-//! full-authority client making every change.
+//! helm (run in the test process through the desktop app's embedded entry)
+//! whose backstop poll is pushed an hour away, and a direct full-authority
+//! client making every change.
 //!
 //! # Why this shape
 //!
@@ -11,12 +12,12 @@
 //! halves meet. Every change here is made through a separate connection
 //! straight to the supervisor, so the helm initiates nothing and hears
 //! nothing about it except what the supervisor volunteers, and with the
-//! poll an hour out (`--backstop-refresh-secs`), a helm that shows the
+//! poll an hour out (`HelmArgs::backstop_refresh_secs`), a helm that shows the
 //! change within seconds can only have been hinted.
 //!
 //! NOTE: This does not pin the case that motivated hints, a tab opened and
 //! exited between two helm refreshes so that the helm's cached listing
-//! never changes. Which of two real processes gets there first cannot be
+//! never changes. Which of the supervisor and the helm gets there first cannot be
 //! controlled from here; the helm's own
 //! `a_hint_refreshes_at_once_and_always_raises_a_feed_event` scripts that
 //! boundary exactly.
@@ -116,14 +117,12 @@ async fn until_helm_lists(
 async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
-    let helm = helm_process_with_args(
-        supervisor.state.path(),
-        None,
-        &["--backstop-refresh-secs", "3600"],
-    )
+    let helm = start_helm_with(farhelm_helm::HelmArgs {
+        backstop_refresh_secs: Some(3600),
+        ..helm_args(supervisor.state.path())
+    })
     .await;
-    let secret = device_secret(supervisor.state.path()).await;
-    let client = client_with_secret(&secret);
+    let client = helm.client();
     // The first poll runs at connect, before the hour starts; after it, only
     // hints refresh this host. Connected alone is not that premise: the
     // helm reports it before its first refresh has finished, and a create

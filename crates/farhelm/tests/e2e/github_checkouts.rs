@@ -595,10 +595,10 @@ struct HostClaim {
 
 /// The owned real stack and every filesystem input its children may read.
 ///
-/// Field order keeps the helm ahead of the supervisor and both processes
+/// Field order keeps the helm ahead of the supervisor and both of them
 /// ahead of their private homes, Git source, roots, and marker directory.
 struct CheckoutStack {
-    helm: Option<HelmProcess>,
+    helm: Option<EmbeddedHelm>,
     supervisor: SupervisorProcess,
     _fake: FakeHarness,
     git: GitSource,
@@ -645,9 +645,9 @@ impl CheckoutStack {
         )
         .await;
         wait_for_supervisor_ready(supervisor.state.path()).await;
-        let helm = helm_process(supervisor.state.path(), None).await;
-        let secret = device_secret(supervisor.state.path()).await;
-        let client = client_with_secret(&secret);
+        let helm = start_helm(supervisor.state.path()).await;
+        let secret = helm.secret.clone();
+        let client = helm.client();
         let claim = await_local_claim(&client, &helm.base).await;
         let mut stack = Self {
             helm: Some(helm),
@@ -694,7 +694,7 @@ impl CheckoutStack {
         assert_eq!(self.spare_enabled().await, enabled);
     }
 
-    fn helm(&self) -> &HelmProcess {
+    fn helm(&self) -> &EmbeddedHelm {
         self.helm.as_ref().expect("the owned helm is running")
     }
 
@@ -742,15 +742,22 @@ impl CheckoutStack {
     }
 
     /// Reboot only the helm, then obtain a fresh browser credential and claim.
+    ///
+    /// The old helm gets the orderly stop the desktop app gives it on quit,
+    /// not a kill, since it runs in the test process (`EmbeddedHelm`). That
+    /// stop adds no helm.db writes of its own, and these tests restart only
+    /// after the state they check has settled, so here it leaves what a
+    /// killed helm would. A helm that dies abruptly, with a write cut off
+    /// mid-flight, is no longer exercised here.
     async fn restart_helm(&mut self) {
         self.helm
             .take()
             .expect("the old helm is running")
-            .stop_and_reap()
+            .stop()
             .await;
-        let helm = helm_process(self.supervisor.state.path(), None).await;
-        let secret = device_secret(self.supervisor.state.path()).await;
-        let client = client_with_secret(&secret);
+        let helm = start_helm(self.supervisor.state.path()).await;
+        let secret = helm.secret.clone();
+        let client = helm.client();
         let claim = await_local_claim(&client, &helm.base).await;
         assert_eq!(
             claim.identity, self.claim.identity,
@@ -1422,7 +1429,7 @@ async fn a_fresh_checkout_creates_the_missing_root_and_parents_on_first_use() {
 /// R1.3 acceptance: each supported selector replays under its accepted snapshot.
 ///
 /// The first replies are never read. After server-side readiness, root and hook
-/// change, the helm is reaped and restarted, and byte-identical bodies retry.
+/// change, the helm is stopped and restarted, and byte-identical bodies retry.
 /// A never-accepted key with stale settings is refused, while a fresh preview
 /// and key allocate under B. Only that never-accepted request is rebound to
 /// the restarted helm's connection: connection numbers no longer repeat after

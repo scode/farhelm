@@ -224,15 +224,20 @@ async fn read_inside_file(client: &Arc<SupervisorClient>, session: &str, path: &
 }
 
 /// One random recipe owns every provider-created object, including failed
-/// builders. Keep the helm alive through assertions, then reap it before fallback
+/// builders. Keep the helm alive through assertions, then stop it before fallback
 /// cleanup so its automatic-start actor cannot race the test's resource removal.
+///
+/// Field order is drop order: the helm first, so that on a path where cleanup
+/// did not stop it, it still stops before the supervisors it talks to are killed.
 struct Fixture {
+    helm: Option<EmbeddedHelm>,
     local: SupervisorProcess,
     /// The SSH variant registers this isolated supervisor at localhost. Engine
     /// evidence still observes the same account's owned objects independently.
     ssh_place: Option<SupervisorProcess>,
-    ensure_hosts: Option<PathBuf>,
-    helm: Option<HelmProcess>,
+    /// Whether the SSH place is in helm.db yet. The first helm registers it
+    /// through its API; helm.db keeps it for every restarted helm.
+    ssh_place_registered: bool,
     http: reqwest::Client,
     payload: PathBuf,
     recipe: String,
@@ -254,27 +259,11 @@ impl Fixture {
         } else {
             None
         };
-        let ensure_hosts = if let Some(remote) = &ssh_place {
-            let path = local.state.path().join("ensure-hosts.json5");
-            tokio::fs::write(
-                &path,
-                json!({"hosts":[{
-                    "ssh":"localhost", "remote_farhelm":farhelm_bin(),
-                    "remote_state_dir":remote.state.path().to_string_lossy()
-                }]})
-                .to_string(),
-            )
-            .await
-            .unwrap();
-            Some(path)
-        } else {
-            None
-        };
         Self {
+            helm: None,
             local,
             ssh_place,
-            ensure_hosts,
-            helm: None,
+            ssh_place_registered: false,
             http: reqwest::Client::new(),
             payload,
             recipe: format!("e2e-{}", &nonce[..24]),
@@ -285,18 +274,27 @@ impl Fixture {
     /// Restart only the owned helm. Its local and optional SSH-place supervisor,
     /// and the in-container supervisor, stay running so reconnection tests
     /// persistence rather than rebuilding the fixture.
+    ///
+    /// The old helm gets the orderly stop the desktop app gives it on quit, not
+    /// a kill, since it runs in the test process (`EmbeddedHelm`): the restart
+    /// shows reconnection after a helm that stopped, not after one that died.
     async fn start_helm(&mut self) {
         if let Some(helm) = self.helm.take() {
-            helm.stop_and_reap().await;
+            helm.stop().await;
         }
-        let payload = self.payload.to_str().expect("payload directory is UTF-8");
-        let helm = helm_process_with_args(
-            self.local.state.path(),
-            self.ensure_hosts.as_deref(),
-            &["--payload-dir", payload, "--backstop-refresh-secs", "1"],
-        )
+        let helm = start_helm_with(farhelm_helm::HelmArgs {
+            payload_dir: Some(self.payload.clone()),
+            backstop_refresh_secs: Some(1),
+            ..helm_args(self.local.state.path())
+        })
         .await;
-        self.http = authenticated_client(self.local.state.path()).await;
+        if let Some(remote) = &self.ssh_place
+            && !self.ssh_place_registered
+        {
+            register_self_ssh_host(&helm, remote.state.path()).await;
+            self.ssh_place_registered = true;
+        }
+        self.http = helm.client();
         self.helm = Some(helm);
     }
 
@@ -461,8 +459,8 @@ impl Fixture {
     }
 
     /// Exercise the ordinary inside-supervisor protocol, including the TCP
-    /// relay used by desktop localhost tunnels. Standalone helm intentionally has
-    /// no native opener, so this owns one loopback listener and sends its accepted
+    /// relay used by desktop localhost tunnels. The test's helm is given no
+    /// native opener, so this owns one loopback listener and sends its accepted
     /// socket through SupervisorClient::relay_tcp. The SSH variant carries this
     /// exact protocol over ssh localhost followed by podman exec as well.
     ///
@@ -1583,7 +1581,7 @@ impl Fixture {
     /// Four passes cover the managed-base/software/prepared dependency chain.
     async fn cleanup(&mut self) -> anyhow::Result<()> {
         if let Some(helm) = self.helm.take() {
-            helm.stop_and_reap().await;
+            helm.stop().await;
         }
         if exists("container", &self.hold).await? {
             let held = self.inspect(&self.hold).await;

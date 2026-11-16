@@ -372,8 +372,10 @@ pub struct HelmArgs {
     /// address.
     ///
     /// The API accepts only credentials the helm minted in its own process,
-    /// and a standalone helm otherwise mints none, so this is how an
-    /// end-to-end test reaches the real binary's API. Hidden because no
+    /// and a standalone helm otherwise mints none, so this is how a helm
+    /// started from the command line can be reached at all. No test uses it
+    /// any more: the end-to-end tests run the helm in process through
+    /// [`run_embedded`] and take the credential it returns. Hidden because no
     /// production launch passes it: the desktop app gets its credentials in
     /// process (see [`EmbeddedReady`]). The credential dies with the process,
     /// like every other.
@@ -1622,7 +1624,7 @@ async fn serve_with_ready(
     }
 
     // The standalone helm prints the address it bound: with `--port 0` the
-    // kernel chose it, and a caller (the end-to-end tests) needs it. The
+    // kernel chose it, and a caller needs it. The
     // embedded address stays private to the desktop process that owns it.
     if mode == ServingMode::Standalone {
         println!("farhelm helm: http://{addr}/");
