@@ -3418,11 +3418,12 @@ switcher's focus, Escape, loading and modal rules. Typing filters template names
 show the template name, summary and its ⚡ or number shortcut when assigned. Enter starts the highlighted template
 through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the trimmed query
 (case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to another row changes
-that choice. With no match, Enter does nothing. A partial template opens New with its choices applied. A pick uses the
-template currently holding that name, including a template edited or recreated since the list opened; a name missing
-from the current catalog shows a preparation error in New. The chord never reaches the terminal's program and does
-nothing while any modal is open, including New, Clone, Replace with and hidden quick-launch preparation, or before
-preferences finish loading.
+that choice. With no match and no template already chosen, Enter does nothing; a chosen template deleted while the list
+is open gives the missing-name error below (decided by the orchestrator on 2026-11-15, matching the old app). A partial
+template opens New with its choices applied. A pick uses the template currently holding that name, including a template
+edited or recreated since the list opened; a name missing from the current catalog shows a preparation error in New. The
+chord never reaches the terminal's program and does nothing while any modal is open, including New, Clone, Replace with
+and hidden quick-launch preparation, or before preferences finish loading.
 
 Cmd+/ on macOS, Ctrl+Shift+/ on Linux, opens **Keyboard shortcuts**, including from a focused terminal. Matching uses
 the physical Slash key, with no extra modifiers; repeat and composition do not open it. The chord never reaches the

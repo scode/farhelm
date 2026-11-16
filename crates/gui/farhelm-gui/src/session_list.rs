@@ -206,6 +206,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::hosts::HostsPanel;
 use crate::layers::Anchor;
 use crate::local_state::{self, LocalState};
+use crate::main_view::MainView;
 use crate::operations;
 use crate::rail_notices::NoticesButton;
 use crate::render_count;
@@ -1111,6 +1112,25 @@ pub(crate) fn open_new(
     if opened {
         let _ = list.update(cx, |list, cx| list.hide_hosts(cx));
     }
+}
+
+/// Show Sessions in place of the Hosts panel in `window`, for a hand-off that starts outside the list: a quick launch
+/// from the page (the ⚡ chord, a number key, a sequence or the template list), once it has started a launch or opened
+/// New. The old app's quick launch went through the list's own New, which hid the panel (SPEC.md: "All or a host
+/// avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff"), so a session launched from the
+/// panel shows up where the user can see it. The list is the one the window's main view holds; a window without one (a
+/// golden's scene) has no panel, and nothing changes. Call it only once the hand-off was accepted, and never from inside
+/// an update of the main view or the session list: it reads the one and updates the other, which GPUI refuses while
+/// either is already being updated.
+pub(crate) fn show_sessions(window: &mut Window, cx: &mut App) {
+    let Some(Some(root)) = window.root::<gpui_component::Root>() else {
+        return;
+    };
+    let Ok(main) = root.read(cx).view().clone().downcast::<MainView>() else {
+        return;
+    };
+    let list = main.read(cx).session_list().clone();
+    list.update(cx, |list, cx| list.hide_hosts(cx));
 }
 
 /// The count's element id, for the count beside the title and the cut listing's warning alike (only one is drawn).
