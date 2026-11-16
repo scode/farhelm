@@ -6953,8 +6953,9 @@ grammar declared next to the types.
 ## Native app packaging
 
 During the GPUI migration this section describes release machinery that no longer builds: the browser UI and the dx
-build it relies on are gone from main, and the release files are deliberately left as they were until the GPUI app
-replaces them at cutover. Main ships no releases in the meantime.
+build it relies on are gone from main. `scripts/build-desktop-binary.sh` already builds the GPUI `farhelm-desktop` with
+cargo, but the release workflow's build setup still runs dx, and the paragraphs below on dx and the embedded web bundle
+describe the old app until they are rewritten at cutover. Main ships no releases in the meantime.
 
 Dioxus desktop (wry) wrapping farhelm-ui, released as a BARE BINARY rather than a `.app` bundle: `farhelm-desktop`, a
 thin crate (`crates/farhelm-desktop`) whose `main` is one call into farhelm-ui's desktop module, built by cargo-dist
@@ -7020,11 +7021,11 @@ shell is declared to it TWICE, and exactly one of the two descriptions ships. `c
 package) carries `[package.metadata.dist] dist = false`, which is what stops cargo-dist from publishing its own
 placeholder-bearing Cargo output. `packaging/farhelm-desktop/dist.toml` declares a generic (non-Cargo) dist package of
 the same name in the hybrid workspace `dist-workspace.toml` defines, and its `build-command` is
-`scripts/build-desktop-binary.sh`, which runs dx, refuses a binary still carrying placeholder asset names, checks the
-requested set against the bundle it embedded, and hands the result back for archiving. Neither half is redundant: delete
-the generic package and the Mac loses its window; delete the `dist = false` and the release grows a second
-`farhelm-desktop` archive that renders nothing. The cost of the arrangement is a version number duplicated into that
-`dist.toml`, which a unit test in `assets.rs` holds to the workspace's.
+`scripts/build-desktop-binary.sh`, which builds the crate with cargo, refuses a binary the installer would turn away,
+one that carries the test-automation bridge and one whose `--licenses` fails, and hands it back with the app icon for
+archiving. Neither half is redundant: delete the generic package and the Mac loses its window; delete the `dist = false`
+and the release grows a second `farhelm-desktop` archive that renders nothing. The cost of the arrangement is a version
+number duplicated into that `dist.toml`, which a unit test in `assets.rs` holds to the workspace's.
 
 Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
 risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
@@ -7815,25 +7816,26 @@ them, are not protected, and the sweep deliberately has no protected-process set
 
 The provisioning payloads — linux-musl `farhelm` binaries for both architectures and the Apple-silicon Darwin `farhelm`,
 the only program a host is sent — are no longer embedded in the helm's own distribution (D2). This REVERSES the earlier
-"provisioning must work with no third-party downloads" posture: a release-shaped build (D13 — one that embedded the web
-UI) downloads them, on demand, from its own version's release on get.farhelm.io (`https://get.farhelm.io/v<version>/`,
-whose archive links redirect to where the archives are hosted, followed over https only), verifies them, and caches them
-under helm state before pushing them over SSH exactly as before. A release-shaped build of main, whose version is the
-development sentinel (see "Version and skew"), has no release to download from and refuses by default, naming
-`--payload-dir` and payloads built from the same commit (`UnreleasedPayloads`). A developer build defaults to no
-payloads at all (`NoPayloads`, D13) rather than to a download, and `--payload-dir <dir>` (env
-`FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead — files in an explicitly selected local
-directory are treated as operator-trusted and are not verified, on ANY build, developer or release. The desktop app's
-embedded helm takes the same directory from the same environment variable, so a desktop build from a working copy can
-update hosts with target payloads built from that working copy (`scripts/devbuild-mac.sh`). The downloading source is
-`ReleasePayloadSource` (`provisioning/release_payloads.rs`), which caches one release's assets, their extracted
-binaries, and the signed checksum file under `<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` —
-keyed by version so an upgraded helm never reuses the previous release's binaries, and by base URL so a mirror or test
-server can neither read nor poison what the real release wrote. Motivation for reversing the embedding: bundling every
-target's binaries inside every platform's own artifact cost tens of MB per download and coupled a payload's presence to
-whichever platform happened to embed it; a download keeps the size cost where it belongs (paid once, by the host
-actually being provisioned) while keeping the same "provisioned host runs exactly what the provisioning helm expects"
-property, because the default download always names the provisioning helm's own version.
+"provisioning must work with no third-party downloads" posture: a release-shaped build (D13 — one built with
+`FARHELM_RELEASE_BUILD` set) downloads them, on demand, from its own version's release on get.farhelm.io
+(`https://get.farhelm.io/v<version>/`, whose archive links redirect to where the archives are hosted, followed over
+https only), verifies them, and caches them under helm state before pushing them over SSH exactly as before. A
+release-shaped build of main, whose version is the development sentinel (see "Version and skew"), has no release to
+download from and refuses by default, naming `--payload-dir` and payloads built from the same commit
+(`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a download,
+and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead — files in an
+explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build, developer or
+release. The desktop app's embedded helm takes the same directory from the same environment variable, so a desktop build
+from a working copy can update hosts with target payloads built from that working copy (`scripts/devbuild-mac.sh`). The
+downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`), which caches one release's assets,
+their extracted binaries, and the signed checksum file under
+`<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` — keyed by version so an upgraded helm never
+reuses the previous release's binaries, and by base URL so a mirror or test server can neither read nor poison what the
+real release wrote. Motivation for reversing the embedding: bundling every target's binaries inside every platform's own
+artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
+download keeps the size cost where it belongs (paid once, by the host actually being provisioned) while keeping the same
+"provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
+the provisioning helm's own version.
 
 Verification chain (D3): every release is published on one origin, `https://get.farhelm.io`, in a fixed layout that is a
 permanent contract with every client: `/latest` is one line naming the latest stable tag (never a prerelease; 404 before

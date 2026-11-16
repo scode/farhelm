@@ -310,8 +310,8 @@ debug = true
 # Written by `dist init`, and used for the CARGO-built release artifact only —
 # that is, `farhelm` on all three targets. `farhelm-desktop` does not come
 # through cargo-dist's cargo build at all: it is a generic dist package whose
-# build command runs `dx build --release`, so it links under Cargo's ordinary
-# `release` profile. A change here (LTO, stripping, panic strategy) therefore
+# build command runs `cargo build --release`, so it links under Cargo's
+# ordinary `release` profile. A change here (LTO, stripping, panic strategy) therefore
 # moves one of the two shipped binaries and not the other; make it in both
 # places, or say why not.
 #
