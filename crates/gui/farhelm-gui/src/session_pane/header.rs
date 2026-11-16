@@ -68,7 +68,9 @@
 //!   "Suspending…" or "Resuming…", at the same width, so the row still fits the 650-pixel floor. It is no [`Action`]
 //!   ([`Control`] says why). While the environment is frozen, Stop, Restart and Replace are unavailable, their carets
 //!   and "with…" choices included, and Clone and Delete stay (both wait while a Suspend or Resume runs); Stop's help says
-//!   what plain Stop leaves running there, and its question offers Stop and suspend (`session_list::stop`).
+//!   what plain Stop leaves running there, and its question offers Stop and suspend (`session_list::stop`). While it is
+//!   being deleted every action is unavailable, Clone and Delete included, through `session_list::menu::refused` like
+//!   any other exclusion, and Stop's, Clone's and Delete's help say why, as the old header's tooltips did.
 //! - **The YOLO question.** A Replace from the header that the source's host refuses for YOLO asks the launcher's
 //!   question below the top row, among the header's lines, rather than at the source's row
 //!   ([`crate::session_list::replace_yolo`]). It is drawn only while the source is the open session.
@@ -459,6 +461,9 @@ struct EnvironmentShown {
     stopped: bool,
     pending: Option<environment::Pending>,
     unavailable: bool,
+    /// Why every action is unavailable while the environment is being deleted, `None` otherwise
+    /// (`environment::Environment::deleting`): Stop's, Clone's and Delete's help.
+    deleting: Option<&'static str>,
 }
 
 impl EnvironmentShown {
@@ -472,6 +477,7 @@ impl EnvironmentShown {
             stopped: shown.stopped(),
             pending: environment::pending(key, shown, cx),
             unavailable: environment::unavailable(key, shown, cx),
+            deleting: shown.deleting().map(|deleting| deleting.help),
         })
     }
 }
@@ -998,8 +1004,15 @@ fn action_button(
     };
     let help = wait.map_or_else(|| hover_help(action, row, shown.skipped), str::to_owned);
     // An environment session's Stop says what plain Stop leaves running there, and its freeze withholds Stop, Restart
-    // and Replace (the old header's).
+    // and Replace (the old header's). While it is being deleted, Stop, Clone and Delete say why nothing is available.
     let help = match (action, shown.environment) {
+        (
+            Action::Stop | Action::Clone | Action::Delete,
+            Some(EnvironmentShown {
+                deleting: Some(reason),
+                ..
+            }),
+        ) => reason.to_owned(),
         (Action::Stop, Some(environment)) => environment.ui.stop_help().to_owned(),
         _ => help,
     };

@@ -135,9 +135,10 @@ impl ProviderUi {
 // ---- A session's own environment: its marks, its lifecycle words and its suspended card -------------------------------
 //
 // The session list's and the session view's words for a session that runs in a disposable environment of its own
-// (`session_list::environment`), the old app's `ProviderUi` methods of the same names at the reference commit, word for
-// word. The wordings that only name the environment (`suspend_question` and the rest) are the same sentence for every
-// provider around its noun, as the old ones were, so they format [`ProviderUi::noun`] rather than matching.
+// (`session_list::environment`), including why its actions are unavailable while that environment is being deleted:
+// the old app's `ProviderUi` methods of the same names at the reference commit, word for word. The wordings that only
+// name the environment (`suspend_question` and the rest) are the same sentence for every provider around its noun, as
+// the old ones were, so they format [`ProviderUi::noun`] rather than matching.
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl ProviderUi {
@@ -187,6 +188,28 @@ impl ProviderUi {
             ProviderKind::Podman => {
                 "The container keeps running until you suspend or delete it. Suspending freezes its processes; its \
                  memory stays in use on its host."
+            }
+        }
+    }
+
+    /// Why every action of a session whose environment is being deleted is unavailable: the being-deleted badge's hover
+    /// help and the reason the row menu's Clone and Delete and the header's Stop, Clone and Delete give. `failed` is a
+    /// deletion that failed and waits for Retry in Hosts. The old `session_deleting_help`, word for word.
+    pub(crate) fn session_deleting_help(self, failed: bool) -> &'static str {
+        match (self.0, failed) {
+            (ProviderKind::Tensorlake, false) => {
+                "This session's sandbox is being deleted, so its actions are unavailable"
+            }
+            (ProviderKind::Podman, false) => {
+                "This session's container is being deleted, so its actions are unavailable"
+            }
+            (ProviderKind::Tensorlake, true) => {
+                "Deleting this session's sandbox failed, so its actions are unavailable. Retry in Hosts finishes the \
+                 deletion"
+            }
+            (ProviderKind::Podman, true) => {
+                "Deleting this session's container failed, so its actions are unavailable. Retry in Hosts finishes \
+                 the deletion"
             }
         }
     }

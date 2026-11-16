@@ -56,9 +56,10 @@
 //! session's header and card draw it as any other line of the session's ([`super::outcome`]), and the session's next
 //! operation clears it.
 //!
-//! NOTE: Sandbox and recipe container rows get nothing of their own yet: which Delete each gets, one whole-resource
-//! Delete per resource, continued billing for Stop and a batch with an environment Delete always asking come with the
-//! environments work.
+//! NOTE: Sandbox and recipe container rows get nothing of their own yet beyond being left out of the question and the
+//! batch, with the reason on their rows, while their environment is being deleted ([`not_started`]): which Delete each gets, one whole-resource
+//! Delete per resource, continued billing for Stop, a batch with an environment Delete always asking, and the bar's
+//! Stop and Delete drawn unavailable when every mark's environment is being deleted come with the environments work.
 
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -93,6 +94,10 @@ use crate::theme::{self, metrics};
 /// shows the helm's words alone (a Delete's) gets `label` as its name instead. Nothing is recorded while the window is
 /// inert.
 ///
+/// A session whose environment is being deleted was skipped for that, not for another operation, so its line gives
+/// that reason alone after the name ([`super::environment::deleting_reason`]), as the old batch's "Delete: <reason>"
+/// did: "another operation was in progress. Try again." would be false there, and trying again cannot help.
+///
 /// The line is recorded even while the request that refused the action is still in flight, which
 /// [`crate::operations::Operations::note`] otherwise warns against: here outliving that request is the point, since the
 /// bulk action still did not happen once the request settles, and a refusal it settles with replaces the line, as a
@@ -106,7 +111,10 @@ pub(super) fn not_started(key: &str, work: Work, label: &str, cx: &mut App) {
     } else {
         String::new()
     };
-    let words = HostText::from_host(format!("{lead}not started, {}", NotStarted::BUSY_REASON));
+    let words = HostText::from_host(match super::environment::deleting_reason(key, cx) {
+        Some(reason) => format!("{lead}{reason}"),
+        None => format!("{lead}not started, {}", NotStarted::BUSY_REASON),
+    });
     operations.update(cx, |operations, cx| {
         operations.note(&OpKey::session(key), work, words, cx)
     });
@@ -359,6 +367,16 @@ impl SessionList {
                 .collect();
             (targets, menu::skips_questions(collections))
         };
+        // A session whose environment is being deleted takes no action, so it is left out of the question and the
+        // batch, its line said at once, as the old batch's `exclude_unavailable` did when the batch was drawn; never
+        // the batch's, it keeps its mark when the batch finishes. Admission checks again (`run_batch`), for one whose
+        // environment started being deleted while the question was open.
+        let (unavailable, targets): (Vec<Target>, Vec<Target>) = targets
+            .into_iter()
+            .partition(|target| super::environment::deleting_reason(&target.key, cx).is_some());
+        for target in &unavailable {
+            not_started(&target.key, target.work(), target.label(), cx);
+        }
         if targets.is_empty() {
             return;
         }

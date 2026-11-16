@@ -1034,10 +1034,31 @@ leaving the host out is the host rail's existing rule. Waiting for milestone M3.
 
 Case: a connected sandbox's Delete asks its Farhelm and reports the sandbox that stays; a sandbox destroyed elsewhere
 retires its stays count but keeps the checkout notice; a row's unasked environment Delete offers the warned
-whole-sandbox Delete; the header's unasked environment Delete reopens as the warned whole-sandbox Delete; a session of a
-sandbox being deleted shows why its actions are unavailable.
+whole-sandbox Delete; the header's unasked environment Delete reopens as the warned whole-sandbox Delete.
 
 not yet ported (the environment Delete, milestone M3.4b).
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: a session of a sandbox being deleted shows why its actions are unavailable.
+
+partly (its row and header half): the row's "Deleting…" or "Deleting failed" in place of the stale cause with the
+provider's reason as its help, and the same in the details bar in the age's place; every command of the row's menu and
+the header refused, Clone's and Delete's descriptions and the header's Stop, Clone and Delete help giving the reason;
+the Delete shortcut refused; nothing sent; and everything back once the host leaves Deleting. Bulk Stop and Delete leave
+such a session out of their question and their batch with "Stop: " or "Delete: " and the reason on its row, as the old
+batch did when it was drawn. Waiting for the bulk environment work: the marked bar's Stop and Delete drawn unavailable,
+with "The marked sessions' environments are being deleted, so their actions are unavailable", when every mark is such a
+session.
+
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `a_row_being_deleted_shows_the_phase_in_place_of_its_cause`
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs
+  `every_menu_command_is_refused_while_the_environment_is_being_deleted`
+- crates/gui/farhelm-gui/src/session_pane/environment_tests.rs
+  `every_header_action_is_refused_while_the_environment_is_being_deleted`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `a_bulk_action_leaves_out_a_session_being_deleted_and_says_why`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `the_bulk_question_leaves_out_a_session_being_deleted`
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
@@ -1367,3 +1388,12 @@ Where the port does not match the old app, and why. Each stays until the work na
   targets or is waking the same host (the old "A launch on this host is in progress; try again once it finishes"), and
   Clone's environment wording ("New session in a new environment, keep this one"), which would describe a Clone the
   launcher does not make yet. The helm's lifecycle lock refuses a collision meanwhile.
+- While a session's environment is being deleted, its row menu's Rename, Mark read or Mark unread and pin items are
+  unavailable too, where the old menu kept them while nothing else ran: every command refuses through the one refusal
+  place (`session_list::menu::refused`), as it already did while a Suspend or Resume ran, which SPEC.md's "its actions
+  unavailable" also says, and bulk Pin and Mark read leave such a session out with the reason. The Rename shortcut and
+  the status dot do not consult that place, as they do not while a Suspend or Resume runs either, so they still act. A
+  compact row keeps its stale clock and cause ("Host being deleted") rather than drawing the phase, as the old compact
+  row had no being-deleted mark.
+- A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while the Hosts panel offers no
+  Retry yet: it comes with settings-and-hosts' Delete sandbox. The session list offers no Retry, as the old row did not.

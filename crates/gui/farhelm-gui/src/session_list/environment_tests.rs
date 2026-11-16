@@ -1,8 +1,10 @@
 //! Tests of environment sessions in the list (`environment.rs`): a sandbox's and a container's row marks, words and
 //! hover help, the Suspended badge and its absence on a stopped container, the row menu's Suspend, Resume and Stop and
 //! suspend with their preconditions, questions and the exact requests they send, the fresh per-host activity read before
-//! a Suspend, the verb captured at the click, the 504 at the helm's bound shown as still pending, and refusals. The open
-//! session's header and suspended card are `session_pane/environment_tests.rs`'s.
+//! a Suspend, the verb captured at the click, the 504 at the helm's bound shown as still pending, and refusals; and a
+//! session whose environment is being deleted, with its phase in place of the stale cause and every menu command
+//! refused until the host leaves that phase. The open session's header and suspended card are
+//! `session_pane/environment_tests.rs`'s, and bulk admission's refusal of a session being deleted is `bulk_tests.rs`'s.
 //!
 //! Everything runs in the real main view over the helm client's fake, as the list's other lifecycle tests do, and reads
 //! what the window sent from the fake and what it drew from GPUI's driver record. An environment session is seeded as
@@ -67,6 +69,14 @@ pub(crate) fn changing(direction: LifecycleDirection) -> HostStateView {
         starting: false,
         direction,
         requested_at: 0,
+    }
+}
+
+/// A host being deleted, as the helm pushes one: its environment's destruction under way (`failure` `None`), or failed
+/// with the provider's words `failure` and waiting for Retry in Hosts.
+pub(crate) fn deleting(failure: Option<&str>) -> HostStateView {
+    HostStateView::Deleting {
+        failure: failure.map(str::to_owned),
     }
 }
 
@@ -669,6 +679,125 @@ fn a_container_suspend_past_the_bound_stays_pending_and_held(cx: &mut TestAppCon
         label_of(cx, "session-row-a-suspended").as_deref(),
         Some("Suspended")
     );
+}
+
+// ---- Being deleted ---------------------------------------------------------------------------------------------------
+
+/// The words a sandbox session gives for every action being unavailable while its sandbox is being deleted.
+const SANDBOX_DELETING: &str =
+    "This session's sandbox is being deleted, so its actions are unavailable";
+
+/// SPEC.md, "Sandbox sessions": while the helm destroys an environment, "its sessions show as being deleted with their
+/// actions unavailable". The generic stale cause ("Host being deleted") says nothing about the actions, so the old row
+/// put the host's phase in its place with why as its help. Specified: a stale session on a sandbox being deleted draws,
+/// in place of its cause, a mark named "Deleting…" helped by "This session's sandbox is being deleted, so its actions
+/// are unavailable"; with the host a container whose deletion failed, the mark is named "Deleting failed" and helped by
+/// "Deleting this session's container failed, so its actions are unavailable. Retry in Hosts finishes the deletion";
+/// with the host connected again, no mark is drawn and the cause ("Refreshing session") is back.
+#[gpui::test]
+fn a_row_being_deleted_shows_the_phase_in_place_of_its_cause(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, deleting(None));
+    let (mut fake, cx) = open(cx, &[(session("a").stale(), 0)], false, &host);
+    pending(&mut fake);
+    assert_eq!(
+        label_of(cx, "session-row-a-deleting").as_deref(),
+        Some("Deleting…")
+    );
+    assert_eq!(
+        hover_help(cx, "session-row-a-deleting").as_deref(),
+        Some(SANDBOX_DELETING)
+    );
+    assert!(
+        !drawn(cx, "session-row-a-cause"),
+        "the phase replaces the cause"
+    );
+
+    let failed = environment_host(Provider::Container, deleting(Some("podman rm failed")));
+    push_host(&mut fake, &failed, cx);
+    // The pointer leaves the mark first: help already showing stays as it was shown until the pointer moves on.
+    hover_help(cx, "session-row-a-host");
+    assert_eq!(
+        label_of(cx, "session-row-a-deleting").as_deref(),
+        Some("Deleting failed")
+    );
+    assert_eq!(
+        hover_help(cx, "session-row-a-deleting").as_deref(),
+        Some(
+            "Deleting this session's container failed, so its actions are unavailable. Retry in Hosts finishes the \
+             deletion"
+        )
+    );
+
+    push_host(
+        &mut fake,
+        &environment_host(Provider::Container, connected()),
+        cx,
+    );
+    assert!(!drawn(cx, "session-row-a-deleting"));
+    assert_eq!(
+        label_of(cx, "session-row-a-cause").as_deref(),
+        Some("Refreshing session")
+    );
+}
+
+/// SPEC.md, "Sandbox sessions": a session whose environment is being deleted has its actions unavailable, Delete and
+/// Clone included. The helm is destroying the environment, so a Delete would be a doomed request and a Clone would copy
+/// a session on its way out; the old menu disabled every command and said why in Clone's and Delete's descriptions.
+/// Specified: with idle a on a sandbox being deleted, the menu lists Rename, Mark unread, Pin to top, Suspend, Stop and
+/// suspend, Clone, Replace with…, Replace, Stop and Delete, and a click on each leaves the menu open and opens nothing
+/// (no question, no launcher); Clone's and Delete's descriptions both read "This session's sandbox is being deleted, so
+/// its actions are unavailable"; nothing at all is sent; once the host is connected, the menu's Delete asks again.
+#[gpui::test]
+fn every_menu_command_is_refused_while_the_environment_is_being_deleted(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, deleting(None));
+    let (mut fake, cx) = open(cx, &[(idle("a"), 0)], false, &host);
+    pending(&mut fake);
+    test_support::click(cx, "session-menu-a");
+    let items = [
+        "session-menu-rename",
+        "session-menu-seen",
+        "session-menu-pin",
+        "session-menu-suspend",
+        "session-menu-stop-and-suspend",
+        "session-menu-clone",
+        "session-menu-replace-with",
+        "session-menu-replace",
+        "session-menu-stop",
+        "session-menu-delete",
+    ];
+    assert_eq!(menu_items(cx), items, "the premise: the menu is open");
+    assert_eq!(
+        texts(cx)
+            .iter()
+            .filter(|text| *text == SANDBOX_DELETING)
+            .count(),
+        2,
+        "Clone's and Delete's descriptions give the reason"
+    );
+    for item in items {
+        test_support::click(cx, item);
+        assert!(drawn(cx, "session-menu"), "{item} does nothing");
+        assert!(!drawn(cx, "prompt"), "{item} asks nothing");
+        assert!(
+            !super::tests::launcher_drawn(cx),
+            "{item} opens no launcher"
+        );
+    }
+    let sent: Vec<_> = fake
+        .commands()
+        .into_iter()
+        .map(|command| (command.method, command.path))
+        .collect();
+    assert_eq!(sent, [], "nothing was sent");
+    test_support::keys(cx, "escape");
+
+    push_host(
+        &mut fake,
+        &environment_host(Provider::Sandbox, connected()),
+        cx,
+    );
+    choose(cx, "session-menu-a", "session-menu-delete");
+    assert!(drawn(cx, "prompt"), "Delete asks again");
 }
 
 // ---- The rules, without a window -------------------------------------------------------------------------------------
