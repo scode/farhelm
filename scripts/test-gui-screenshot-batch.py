@@ -362,6 +362,25 @@ class Pictures(unittest.TestCase):
         filtered_png(tiny, 50, 46, framed_pixels(50, 46, 20, 1))
         self.assertIn("too small", batch.crop_frame(tiny, 20, 1, 4) or "")
 
+    def test_a_dialogs_shadow_in_the_margin_still_reads_as_the_frame(self) -> None:
+        """A light dialog that reaches the window's edge paints its shadow into Kit's margin as near-black, not black;
+        an exact check left those captures uncropped (New's Save as template panel, light and wide). Specified: a
+        margin whose pixels reach `LINUX_FRAME_BLACK` on a channel is cropped as the frame, and one pixel above it
+        on the middle column makes the check report that side's margin as shorter and leaves the capture alone."""
+        shadow = bytes((2, 4, batch.LINUX_FRAME_BLACK, 255))
+        pixels = framed_pixels(50, 46, 20, 1).replace(b"\x00\x00\x00\xff", shadow)
+        path = self.root / "shot.png"
+        filtered_png(path, 50, 46, pixels)
+        self.assertIsNone(batch.crop_frame(path, 20, 1))
+        width, height, kept = batch.read_rgba(path)
+        self.assertEqual((width, height), (8, 4))
+        self.assertEqual(set(bytes(kept[i:i + 4]) for i in range(0, len(kept), 4)), {GROUND})
+        brighter = bytearray(pixels)
+        at = (5 * 50 + 25) * 4
+        brighter[at:at + 3] = bytes((0, 0, batch.LINUX_FRAME_BLACK + 1))
+        filtered_png(path, 50, 46, bytes(brighter))
+        self.assertIn("top 5", batch.crop_frame(path, 20, 1) or "")
+
     def test_a_capture_without_the_expected_frame_is_left_alone(self) -> None:
         """If Kit's frame changes (or a compositor draws decorations itself), cropping a fixed width would cut into the
         app or leave a band under a label that claims the asked size; the capture is kept as it was and the reason
