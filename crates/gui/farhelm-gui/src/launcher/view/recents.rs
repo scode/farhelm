@@ -26,7 +26,6 @@
 //!   longer in the history (the host changed under it) does nothing.
 
 use farhelm_proto::session_requests::LaunchHistoryEntry;
-use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -213,15 +212,7 @@ impl Launcher {
             return None;
         }
         // Rows come only from a connected chosen host's history, so the host is there to name.
-        let placement = self.draft.host.and_then(|id| {
-            self.store
-                .read(cx)
-                .collections()
-                .ordered::<HostView>()
-                .into_iter()
-                .find(|host| host.id == id)
-                .map(host_name_with_phase)
-        })?;
+        let placement = self.chosen_host(cx).map(host_name_with_phase)?;
         let replacing = matches!(self.draft.mode, Mode::ReplaceWith { .. });
         let verb = if replacing { "Replace" } else { "Launch" };
         let mut slots = div()

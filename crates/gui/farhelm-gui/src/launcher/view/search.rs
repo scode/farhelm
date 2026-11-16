@@ -42,12 +42,13 @@ use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, WeakEntity, Window, div, px,
+    AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
+    WeakEntity, Window, div, px,
 };
 
 use super::Launcher;
+use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
 use super::recents::RecentRefusal;
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
@@ -56,33 +57,27 @@ use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::recents::{destination_label, permission_value, summary_before_permissions};
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
-use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::theme::{self, metrics};
 
 /// The box's accessible name, the old `aria-label`; the old end-to-end tests found the box by it.
 pub(super) const SEARCH_LABEL: &str = "Search folders, harnesses, models, and efforts";
 /// The hint the empty box shows, the old placeholder.
 pub(super) const SEARCH_PLACEHOLDER: &str = "Search names, hosts, folders, harnesses, models…";
-/// `.launch-composer-search-results`: `max-height: 260px; padding: 6px; gap: 2px`.
-const LIST_MAX_HEIGHT: f32 = 260.;
-const LIST_PAD: f32 = 6.;
-const LIST_GAP: f32 = 2.;
+/// The results' element id (`.launch-composer-search-results`), which tests find them by.
+const SEARCH_RESULTS: &str = "launcher-search-results";
 /// Why a saved folder or recent setup from an earlier host's history changed nothing, as the old launcher said it.
 const STALE_ROW: &str = "That result belongs to an earlier host; choose a current result";
 
 /// What the search box holds besides the draft and its own text. None of it is shared with another surface.
 #[derive(Default)]
 pub(super) struct SearchBox {
-    /// The open results' layer, if open. The layer manager closes it itself on Escape or a press outside, without
-    /// telling the box, so [`Launcher::search_open`] asks it rather than trusting this.
-    layer: Option<LayerId>,
-    /// The highlighted row, as an index into the current rows; clamped when read, since the rows follow the store.
-    active: usize,
+    /// The results under the box, with the highlighted row: always set by the time the results open (to the row the
+    /// box's text names, [`Results::default`]), and clamped when read, since the rows follow the store. Read as the
+    /// first row while unset.
+    list: FieldList,
     /// Why the last row taken changed nothing (a field this launcher holds fixed), said above the box until the next
     /// keystroke in it or the next row taken.
     refusal: Option<String>,
-    /// Where the box is drawn, for the results to open under it; refreshed every frame.
-    anchor: Option<Anchor>,
 }
 
 impl Launcher {
@@ -90,14 +85,7 @@ impl Launcher {
     pub(in crate::launcher) fn search_results(&self, cx: &App) -> Results {
         let query = self.search.text(cx);
         // The search reads hosts by value; a launcher sees a handful, so the copy is cheap.
-        let hosts: Vec<HostView> = self
-            .store
-            .read(cx)
-            .collections()
-            .ordered::<HostView>()
-            .into_iter()
-            .cloned()
-            .collect();
+        let hosts = self.hosts(cx);
         // Every template, as the templates' own rows give them, which the search filters; only a `tl:` query reads them.
         let templates = if scoped(&query).0 == Scope::Templates {
             crate::templates::rows::rows("", cx)
@@ -105,11 +93,7 @@ impl Launcher {
             Ok(Vec::new())
         };
         // The chosen host's history rows name that host as its own field does, phase included.
-        let placement = self
-            .draft
-            .host
-            .and_then(|id| hosts.iter().find(|host| host.id == id))
-            .map(host_name_with_phase);
+        let placement = self.chosen_host(cx).map(host_name_with_phase);
         let history = self.launch_history(cx).zip(placement.as_ref());
         search(&Inputs {
             query: &query,
@@ -128,14 +112,23 @@ impl Launcher {
     /// history answer adds or drops rows), so the index the arrows left would now point at a row they never reached,
     /// and Enter would take it.
     pub(super) fn reset_search_highlight(&mut self, cx: &App) {
-        self.search_box.active = self.search_results(cx).default;
+        let default = self.search_results(cx).default;
+        self.search_box.list.highlighted = Some(default);
     }
 
     /// Whether the results are open: opened by the box and not since closed by the layer manager.
     pub(super) fn search_open(&self, window: &Window, cx: &App) -> bool {
+        self.search_box.list.is_open(window, cx)
+    }
+
+    /// The highlighted row among `count` rows (`count` at least one): the one the box's text named or an arrow moved
+    /// to, clamped to the rows there are now.
+    fn search_highlight(&self, count: usize) -> usize {
         self.search_box
-            .layer
-            .is_some_and(|layer| layers::is_open(layer, window, cx))
+            .list
+            .highlighted
+            .unwrap_or(0)
+            .min(count.saturating_sub(1))
     }
 
     /// The user typed in the box: forget the last refusal, preselect what the new text names, and show the results
@@ -143,7 +136,7 @@ impl Launcher {
     pub(super) fn search_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search_box.refusal = None;
         let results = self.search_results(cx);
-        self.search_box.active = results.default;
+        self.search_box.list.highlighted = Some(results.default);
         if results.rows.is_empty() && results.message.is_none() && results.reason.is_none() {
             self.close_search(window, cx);
         } else if !self.search_open(window, cx) {
@@ -163,11 +156,9 @@ impl Launcher {
         if !self.search_open(window, cx) || count == 0 {
             return;
         }
-        let active = self.search_box.active.min(count - 1);
-        self.search_box.active = match arrow {
-            Vertical::Down => (active + 1) % count,
-            Vertical::Up => (active + count - 1) % count,
-        };
+        // From the clamped row: the box always has one highlighted, so neither arrow starts from none.
+        let from = self.search_highlight(count);
+        self.search_box.list.highlighted = step(Some(from), arrow, count);
         cx.notify();
     }
 
@@ -184,13 +175,13 @@ impl Launcher {
         }
         if !self.search_open(window, cx) {
             let results = self.search_results(cx);
-            self.search_box.active = results.default;
+            self.search_box.list.highlighted = Some(results.default);
             self.open_search(window, cx);
             cx.notify();
             return;
         }
         let rows = self.search_results(cx).rows;
-        if let Some(row) = rows.get(self.search_box.active.min(rows.len().saturating_sub(1))) {
+        if let Some(row) = rows.get(self.search_highlight(rows.len())) {
             self.take_search_row(row.clone(), window, cx);
         }
     }
@@ -394,28 +385,15 @@ impl Launcher {
 
     /// Open the results under the box, as a popover that never takes focus.
     fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(anchor) = self.search_box.anchor.clone() else {
-            return;
-        };
-        let launcher = cx.weak_entity();
-        let rows = cx.new(|cx| SearchRows::new(launcher, cx));
-        let container = cx.focus_handle();
-        let mark = Mark::take(cx);
-        self.search_box.layer = layers::open_popover(
-            Popover::floating(rows, container, anchor),
-            &mark,
-            window,
-            cx,
-        );
+        self.search_box
+            .list
+            .open(SEARCH_RESULTS, draw_search_rows, window, cx);
     }
 
-    /// Close the results if they are open. What was typed stays.
+    /// Close the results if they are open. What was typed stays; the highlight goes, and the next opening sets it
+    /// again.
     pub(super) fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(layer) = self.search_box.layer.take()
-            && layers::is_open(layer, window, cx)
-        {
-            layers::close(layer, window, cx);
-        }
+        self.search_box.list.close(window, cx);
     }
 
     /// The search box, full width at the top of the body, with the last refusal above it.
@@ -428,12 +406,11 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.search_box.layer.is_some() && !self.search_open(window, cx) {
-            self.search_box.layer = None;
-        }
-        let anchor = Anchor::for_element("launcher-search-anchor", window, cx).matching_width();
-        let tracker = anchor.track();
-        self.search_box.anchor = Some(anchor.clone());
+        self.search_box.list.follow(window, cx);
+        let tracker = self
+            .search_box
+            .list
+            .track_anchor("launcher-search-anchor", window, cx);
         let weak = cx.weak_entity();
         let field = self.launcher_input(
             "launcher-search",
@@ -513,148 +490,106 @@ fn status_line(
         .into_any_element()
 }
 
-/// The open results, drawn from the launcher's state, and kept scrolled so the highlighted row is in view.
-pub(super) struct SearchRows {
-    launcher: WeakEntity<Launcher>,
-    scroll: ScrollHandle,
-    /// The child last scrolled into view. The list is scrolled only when the highlight moves, so a wheel scroll is not
-    /// pulled back to the highlighted row on the next redraw.
-    scrolled_to: Option<usize>,
-    /// Redraws the rows when the launcher changes (what is typed, the highlighted row, the draft).
-    _redraw: Option<gpui::Subscription>,
-}
-
-impl SearchRows {
-    fn new(launcher: WeakEntity<Launcher>, cx: &mut Context<Self>) -> Self {
-        let redraw = launcher
-            .upgrade()
-            .map(|entity| cx.observe(&entity, |_, _, cx| cx.notify()));
-        SearchRows {
-            launcher,
-            scroll: ScrollHandle::new(),
-            scrolled_to: None,
-            _redraw: redraw,
-        }
-    }
-}
-
-impl Render for SearchRows {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = theme::palette(cx);
-        let list = layers::surface(cx)
-            .id("launcher-search-results")
-            // Tests find the results by where they are drawn; this records nothing outside test builds.
-            .debug_selector(|| "launcher-search-results".into())
-            .flex()
-            .flex_col()
-            .gap(px(LIST_GAP))
-            .p(px(LIST_PAD))
-            .max_h(px(LIST_MAX_HEIGHT))
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .text_size(metrics::TEXT_MD);
-        let Some(launcher) = self.launcher.upgrade() else {
-            return list;
-        };
-        let launcher_ref = launcher.read(cx);
-        let results = launcher_ref.search_results(cx);
-        let harness = launcher_ref.draft.agent.harness;
-        let active = launcher_ref
-            .search_box
-            .active
-            .min(results.rows.len().saturating_sub(1));
-        // With rows the area is a list box; with none, it holds only its message, which is the status line the old
-        // area was (`role="status"`).
-        let list = if results.rows.is_empty() {
-            list
+/// The open results (`field_list`): the search's message or the helm's reason if it has one, then each group's heading
+/// and rows, with the highlighted row selected.
+fn draw_search_rows(
+    launcher: &Launcher,
+    list: Stateful<Div>,
+    weak: &WeakEntity<Launcher>,
+    _: &Window,
+    cx: &App,
+) -> Drawn {
+    let palette = theme::palette(cx);
+    let results = launcher.search_results(cx);
+    let harness = launcher.draft.agent.harness;
+    let active = launcher.search_highlight(results.rows.len());
+    // With rows the area is a list box; with none, it holds only its message, which is the status line the old
+    // area was (`role="status"`).
+    let list = if results.rows.is_empty() {
+        list
+    } else {
+        list.role(Role::ListBox).aria_label(SEARCH_LABEL)
+    };
+    let mut children: Vec<AnyElement> = Vec::new();
+    if let Some(message) = results.message {
+        let ink = if message.warning {
+            palette.warn_bright
         } else {
-            list.role(Role::ListBox).aria_label(SEARCH_LABEL)
+            palette.fg_1
         };
-        let mut children: Vec<AnyElement> = Vec::new();
-        if let Some(message) = results.message {
-            let ink = if message.warning {
-                palette.warn_bright
-            } else {
-                palette.fg_1
+        children.push(status_line(
+            "launcher-search-message",
+            message.text.into(),
+            ink,
+            message.text,
+        ));
+    }
+    // Why `tl:` offers no rows while the helm cannot give its templates: the helm's words, escaped.
+    if let Some(reason) = results.reason.clone() {
+        let label = reason.accessible_name();
+        children.push(status_line(
+            "launcher-search-reason",
+            label,
+            palette.warn_bright,
+            reason,
+        ));
+    }
+    // The child index of the highlighted row, for scrolling it into view. Headings and rows are all the list's
+    // own children, so the scroll handle can find any row; the old list nested each group in a `role="group"`
+    // node, which this leaves out (a recorded deviation): a nested row would scroll only its whole group into view.
+    let mut active_child = None;
+    for (group, rows) in results.groups() {
+        children.push(
+            div()
+                .id(SharedString::from(format!(
+                    "launcher-search-group-{}",
+                    group.label()
+                )))
+                .role(Role::Label)
+                .aria_label(group.label())
+                .pt(px(4.))
+                .px(px(6.))
+                .pb(px(1.))
+                .text_size(metrics::TEXT_SM)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::color(palette.fg_1))
+                .child(group.label())
+                .into_any_element(),
+        );
+        for (index, row) in rows {
+            if index == active {
+                active_child = Some(children.len());
+            }
+            let id = format!("launcher-search-option-{index}");
+            let words = row.words(SharedString::from(format!("{id}-words")));
+            let label = words.accessible_name();
+            let help =
+                HoverHelp::sentence(row.help(harness, SharedString::from(format!("{id}-help"))));
+            let weak = weak.clone();
+            let taken = row.clone();
+            let content = match row {
+                Row::Recent { entry, placement } => {
+                    recent_lines(&id, entry, placement, index == active, palette)
+                }
+                _ => words.into_any_element(),
             };
-            children.push(status_line(
-                "launcher-search-message",
-                message.text.into(),
-                ink,
-                message.text,
-            ));
-        }
-        // Why `tl:` offers no rows while the helm cannot give its templates: the helm's words, escaped.
-        if let Some(reason) = results.reason.clone() {
-            let label = reason.accessible_name();
-            children.push(status_line(
-                "launcher-search-reason",
-                label,
-                palette.warn_bright,
-                reason,
-            ));
-        }
-        // The child index of the highlighted row, for scrolling it into view. Headings and rows are all the list's
-        // own children, so the scroll handle can find any row; the old list nested each group in a `role="group"`
-        // node, which this leaves out (a recorded deviation): a nested row would scroll only its whole group into view.
-        let mut active_child = None;
-        for (group, rows) in results.groups() {
             children.push(
-                div()
-                    .id(SharedString::from(format!(
-                        "launcher-search-group-{}",
-                        group.label()
-                    )))
-                    .role(Role::Label)
-                    .aria_label(group.label())
-                    .pt(px(4.))
-                    .px(px(6.))
-                    .pb(px(1.))
-                    .text_size(metrics::TEXT_SM)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_1))
-                    .child(group.label())
+                OptionRow::new(id, label, help, Role::ListBoxOption)
+                    .selected(index == active)
+                    .child(content)
+                    .on_click(move |_, window, cx| {
+                        let row = taken.clone();
+                        let _ = weak
+                            .update(cx, |launcher, cx| launcher.take_search_row(row, window, cx));
+                    })
                     .into_any_element(),
             );
-            for (index, row) in rows {
-                if index == active {
-                    active_child = Some(children.len());
-                }
-                let id = format!("launcher-search-option-{index}");
-                let words = row.words(SharedString::from(format!("{id}-words")));
-                let label = words.accessible_name();
-                let help = HoverHelp::sentence(
-                    row.help(harness, SharedString::from(format!("{id}-help"))),
-                );
-                let weak = self.launcher.clone();
-                let taken = row.clone();
-                let content = match row {
-                    Row::Recent { entry, placement } => {
-                        recent_lines(&id, entry, placement, index == active, palette)
-                    }
-                    _ => words.into_any_element(),
-                };
-                children.push(
-                    OptionRow::new(id, label, help, Role::ListBoxOption)
-                        .selected(index == active)
-                        .child(content)
-                        .on_click(move |_, window, cx| {
-                            let row = taken.clone();
-                            let _ = weak.update(cx, |launcher, cx| {
-                                launcher.take_search_row(row, window, cx)
-                            });
-                        })
-                        .into_any_element(),
-                );
-            }
         }
-        if active_child != self.scrolled_to {
-            if let Some(child) = active_child {
-                self.scroll.scroll_to_item(child);
-            }
-            self.scrolled_to = active_child;
-        }
-        list.children(children)
+    }
+    Drawn {
+        list,
+        children,
+        highlighted: active_child,
     }
 }
 

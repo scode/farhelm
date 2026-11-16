@@ -22,7 +22,6 @@
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::session_requests::{BrowseDirectoryBody, BrowseDirectoryReply};
-use farhelm_proto::ui_channel::HostView;
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -67,16 +66,9 @@ impl Launcher {
         if !self.offers_browse() {
             return None;
         }
-        let host = self.draft.host?;
-        let view = self
-            .store
-            .read(cx)
-            .collections()
-            .ordered::<HostView>()
-            .into_iter()
-            .find(|view| view.id == host)?;
+        let view = self.chosen_host(cx)?;
         Some(BrowseKey {
-            host,
+            host: view.id,
             incarnation: view.incarnation,
             cwd: self.draft.folder.value().clone(),
         })

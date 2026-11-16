@@ -37,7 +37,9 @@
 //! Clear agent command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took
 //! focus once it overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
 //! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`, Browse
-//! `browse`, the recent setups strip `recents`, the escalation banner `escalation`.
+//! `browse`, the recent setups strip `recents`, the escalation banner `escalation`, Save as template's side `save`. The
+//! floating lists under the model, folder, search and repository fields share `field_list`, and the debounced reads
+//! (the checkout's and the folder check's) share `latest`.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -74,13 +76,12 @@ use crate::components::{
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
-use crate::layers::{self, Anchor, Dialog, DialogPlacement, LayerId, MainAction};
+use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::operations::OpKey;
 use crate::permission::words::{effort_label, permission_display};
 use crate::session_list::replace;
 use crate::store::HelmStore;
 use crate::templates::checkout_name;
-use crate::templates::save::Candidate;
 use crate::templates::save_panel::SavePanel;
 use crate::theme::{self, metrics};
 use crate::{operations, session, ticker};
@@ -89,10 +90,14 @@ use changed::Changed;
 mod browse;
 mod changed;
 mod checkout;
+pub(crate) use checkout::destination_choice;
 #[cfg(test)]
 pub(super) use checkout::repository_choices as repository_choices_for_tests;
 mod choices;
 mod escalation;
+mod field_list;
+#[cfg(test)]
+pub(super) use field_list::step as step_for_tests;
 mod folder_check;
 mod folder_list;
 #[cfg(test)]
@@ -101,8 +106,10 @@ pub(super) use folder_list::{
 };
 mod history;
 mod host_picker;
+mod latest;
 mod model_field;
 mod recents;
+mod save;
 mod search;
 pub(in crate::launcher) mod yolo_question;
 
@@ -1007,6 +1014,18 @@ impl Launcher {
             .collect()
     }
 
+    /// The draft's chosen host as the store's registry holds it now; `None` when no host is chosen or the registry no
+    /// longer lists it. Every view of the chosen host (its name, connection, installation, history) reads it here.
+    fn chosen_host<'a>(&self, cx: &'a App) -> Option<&'a HostView> {
+        let id = self.draft.host?;
+        self.store
+            .read(cx)
+            .collections()
+            .ordered::<HostView>()
+            .into_iter()
+            .find(|host| host.id == id)
+    }
+
     /// The source session's stored launch as the store holds it now, for Restart with's check.
     fn live_launch(&self, cx: &App) -> Option<SessionLaunch> {
         let Mode::RestartWith(restart) = &self.draft.mode else {
@@ -1198,10 +1217,7 @@ impl Launcher {
             Some(environment) => request
                 .as_ref()
                 .map(|_| crate::environment_ui::launch_target_label(environment, &hosts)),
-            None => request
-                .as_ref()
-                .and(self.draft.host)
-                .and_then(|id| hosts.iter().find(|host| host.id == id).map(display_name)),
+            None => request.as_ref().and(self.chosen_host(cx)).map(display_name),
         };
         let (Some(request), Some(host)) = (request, host) else {
             self.pressed = true;
@@ -1268,118 +1284,6 @@ impl Launcher {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Save as template
-// ---------------------------------------------------------------------------------------------------------------------
-
-impl Launcher {
-    /// Whether Save as template's save is in flight, when Cancel, Close and Escape hold still.
-    fn template_saving(&self, cx: &App) -> bool {
-        self.save_panel
-            .as_ref()
-            .is_some_and(|panel| panel.read(cx).saving())
-    }
-
-    /// Save as template: open the inline panel on what the draft holds now, with focus in its name field (SPEC.md,
-    /// "Launch templates"). Not while the panel is open or the YOLO question's host write is out. A draft whose Agent tab
-    /// holds a retired container choice or a wrapper prefix that does not parse cannot be saved as it stands, and the
-    /// launcher says why on a plain line instead, as the old one did.
-    fn open_save_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.save_panel.is_some() || self.yolo_in_flight(cx) {
-            return;
-        }
-        let mark = Mark::take(cx);
-        if self.draft.tab == Tab::Agent {
-            let refusal = if self.draft.agent.container.is_some() {
-                Some(farhelm_proto::RETIRED_CONTAINER_REASON.to_owned())
-            } else if self.draft.agent.wrapper.is_empty() {
-                None
-            } else {
-                split_wrapper_prefix(&self.draft.agent.wrapper)
-                    .err()
-                    .map(|reason| capitalized(&reason))
-            };
-            if refusal.is_some() {
-                self.save_refusal = refusal;
-                self.pressed = false;
-                cx.notify();
-                return;
-            }
-        }
-        let hosts = self.hosts(cx);
-        let candidate = Candidate::from_draft(&self.draft, &hosts);
-        let host_label = self
-            .draft
-            .host
-            .and_then(|id| hosts.iter().find(|host| host.id == id))
-            .map(host_name_with_phase);
-        let (cancel, saved) = (cx.weak_entity(), cx.weak_entity());
-        let panel = cx.new(|cx| {
-            SavePanel::new(
-                candidate,
-                host_label,
-                self.catalog.clone(),
-                Rc::new(move |window, cx| {
-                    let _ = cancel.update(cx, |launcher, cx| launcher.close_save_panel(window, cx));
-                }),
-                Rc::new(move |name, moved_on, window, cx| {
-                    let _ = saved.update(cx, |launcher, cx| {
-                        launcher.template_saved(&name, moved_on, window, cx)
-                    });
-                }),
-                window,
-                cx,
-            )
-        });
-        let name = panel.read(cx).name_focus(cx);
-        self.save_panel = Some(panel);
-        // Template presses still waiting for the catalog read would edit the draft under the panel once it answers;
-        // while the panel is open a press changes nothing (SPEC.md, "Quick launch"), so they are dropped, as a press
-        // of Launch drops them.
-        self.waiting_batches.clear();
-        self.save_refusal = None;
-        self.pressed = false;
-        crate::focus::focus_in_layer(&name, &mark, window, cx);
-        cx.notify();
-    }
-
-    /// Close the panel without saving (its Cancel, or Escape), and put focus back where the launcher starts it, as the
-    /// old panel returned to the composer's search. Not while it saves.
-    pub(super) fn close_save_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.template_saving(cx) {
-            return;
-        }
-        if self.save_panel.take().is_some() {
-            let start = self.start_focus(cx);
-            crate::focus::focus_in_layer(&start, &Mark::take(cx), window, cx);
-            cx.notify();
-        }
-    }
-
-    /// The panel saved the template `name`: the launcher closes, its draft discarded with any edit made while the save
-    /// was out, and Templates opens with the new template in its editor (SPEC.md: "Successful saving closes the launcher
-    /// and opens the new template in the Templates editor"), unless the user moved on while it was saved (`moved_on`).
-    /// Then the completion opens no dialog (SPEC.md, "Who may move focus": "Once the user has moved on, the result moves
-    /// no focus, opens no dialog"); closing the launcher, its own subject, is the one thing it still does, and the
-    /// template shows in the Templates list. The old launcher opened Templates either way (recorded in the parity file).
-    fn template_saved(
-        &mut self,
-        name: &str,
-        moved_on: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.save_panel = None;
-        if let Some(layer) = self.layer.take() {
-            layers::close(layer, window, cx);
-        }
-        // The store's flag is the moved-on gate; the mark only lets the dialog open now.
-        if !moved_on {
-            crate::templates::open_at(name, &Mark::take(cx), window, cx);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -1419,18 +1323,6 @@ impl Launcher {
         input.on_unselected_prefix(|window, cx| {
             window.dispatch_action(Box::new(crate::actions::BeginSequence), cx)
         })
-    }
-
-    /// Whether Save as template's panel is open, when the template shortcuts and the sequence prefix change nothing in
-    /// this launcher (`crate::templates::dispatch`, `crate::templates::armed`).
-    pub(crate) fn save_panel_open(&self) -> bool {
-        self.save_panel.is_some()
-    }
-
-    /// The open Save as template panel, for tests that look at its own fields.
-    #[cfg(test)]
-    pub(crate) fn save_panel_for_tests(&self) -> Option<Entity<SavePanel>> {
-        self.save_panel.clone()
     }
 }
 
@@ -1594,13 +1486,7 @@ impl Launcher {
                 .map(|row| HostText::from_host(row.host_name.as_str())),
             Mode::New | Mode::Clone | Mode::ReplaceWith { .. } => None,
         };
-        let registered = self.draft.host.and_then(|id| {
-            collections
-                .ordered::<HostView>()
-                .into_iter()
-                .find(|host| host.id == id)
-                .map(host_name_with_phase)
-        });
+        let registered = self.chosen_host(cx).map(host_name_with_phase);
         let host = source
             .or(registered)
             .unwrap_or_else(|| HostText::from_host("Unavailable host"));
@@ -2130,13 +2016,13 @@ impl Render for Launcher {
         self.follow_folder_check(cx);
         self.follow_browse(cx);
         self.follow_checkout(window, cx);
-        // The launch history follows the chosen host's connection the same way (`history`), and the folder list notices
-        // a close the layer manager made on its own (`folder_list`).
+        // The launch history follows the chosen host's connection the same way (`history`), and the folder list forgets
+        // a list the layer manager closed on its own, with its highlight (`folder_list`).
         self.follow_history(cx);
         if self.settle_folder_default(cx) {
             self.sync_fields(window, cx);
         }
-        self.follow_folder_list(window, cx);
+        self.folder_list.list.follow(window, cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refusal = self.refusal(cx);
@@ -2162,9 +2048,10 @@ impl Render for Launcher {
                 .into_any_element()
         } else {
             // The folder list opens under the field (`folder_list`), as wide as it.
-            let anchor = Anchor::for_element("launcher-folder-anchor", window, cx).matching_width();
-            let tracker = anchor.track();
-            self.folder_list.anchor = Some(anchor.clone());
+            let tracker = self
+                .folder_list
+                .list
+                .track_anchor("launcher-folder-anchor", window, cx);
             let on_arrow = weak.clone();
             div()
                 .relative()
@@ -2363,17 +2250,7 @@ impl Render for Launcher {
         // box instead (`view::search`).
         let warning = self.source_warning_line(palette, cx);
         let note = self.note_element(palette);
-        // Why Save as template did not open: a plain line in the warning ink, not a refused launch.
-        let save_refusal = self.save_refusal.clone().map(|reason| {
-            div()
-                .id("launcher-save-template-refusal")
-                .debug_selector(|| "launcher-save-template-refusal".into())
-                .role(Role::Alert)
-                .aria_label(SharedString::from(reason.clone()))
-                .text_size(metrics::TEXT_SM)
-                .text_color(theme::color(palette.warn_bright))
-                .child(reason)
-        });
+        let save_refusal = self.save_refusal_line(palette);
         let question = self.yolo_inline().cloned();
         let notices = (warning.is_some()
             || note.is_some()
@@ -2429,30 +2306,8 @@ impl Render for Launcher {
                 .on_click(on_launcher(weak.clone(), Launcher::reset_choices)),
             );
         }
-        // Save as template, after Reset choices and before the main action (SPEC.md: "Cancel comes first in the action
-        // row, then Reset choices where offered, Save as template where offered, and the main action last"). Replace with
-        // does not offer it, and neither does a launch on a host a disposable environment owns, as the old footer left it
-        // out there: that host's identity names the environment, not a place a template can send a later launch.
-        // Busy while its panel is open, as the old button was disabled then.
-        let environment_host = self
-            .draft
-            .host
-            .and_then(|id| self.hosts(cx).into_iter().find(|host| host.id == id))
-            .is_some_and(|host| host.is_session_owned);
-        if !matches!(self.draft.mode, Mode::ReplaceWith { .. }) && !environment_host {
-            answers.push(
-                Button::new(
-                    "launcher-save-template",
-                    "Save as template",
-                    HoverHelp::tooltip(
-                        "Save as template: keep choices from this setup for another launch",
-                    ),
-                    Role::Button,
-                )
-                .busy(holding || self.save_panel.is_some())
-                .on_click(on_launcher(weak.clone(), Launcher::open_save_panel)),
-            );
-        }
+        // Save as template, after Reset choices and before the main action (`save`).
+        answers.extend(self.save_template_button(holding, cx));
         let verb = self.verb(cx);
         let help = refusal.clone().unwrap_or_else(|| match self.draft.mode {
             // The old stop-first wording while the agent works, so the help never contradicts "Stop and restart".

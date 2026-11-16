@@ -125,9 +125,7 @@ impl Launcher {
         };
         let reason = YoloReason::of_launch(selection.as_ref());
         let host_name = self
-            .hosts(cx)
-            .iter()
-            .find(|view: &&HostView| view.id == host)
+            .chosen_host(cx)
             .map(display_name)
             .unwrap_or_else(|| HostText::from_host("this host"));
         self.yolo = Some(YoloState {

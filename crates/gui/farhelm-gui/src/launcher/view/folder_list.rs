@@ -19,32 +19,29 @@
 //! - **Long paths** keep their end: a label is at most 36 characters, the rest replaced by a leading ellipsis, and never
 //!   cuts through an escaped character's `<U+XXXX>`; the full escaped path is the row's accessible name and hover help.
 //!
-//! What the list holds besides the draft (the open layer, the highlight) is the launcher's alone; its rows are worked out
-//! from the draft and the history each time they are needed.
+//! What the list holds besides the draft (the open layer, the highlight, `field_list`) is the launcher's alone; its rows
+//! are worked out from the draft and the history each time they are needed.
 
 use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, WeakEntity, Window, div, px,
+    AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
+    WeakEntity, Window, div, px,
 };
 
 use super::Launcher;
+use super::field_list::{Drawn, FieldList};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
-use crate::focus::Mark;
 use crate::launcher::draft::Field;
 use crate::launcher::entry::local_host;
-use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::theme::{self, metrics};
 
 /// `folder_suggestions`: at most eight recent folders.
 const RECENT_LIMIT: usize = 8;
 /// `folder_tail_label`: labels longer than this many characters keep their end.
 const LABEL_CHARS: usize = 36;
-/// `.launch-composer-folder-options`, as the composer's other floating lists: `max-height: 260px; padding: 6px; gap: 2px`.
-const LIST_MAX_HEIGHT: f32 = 260.;
-const LIST_PAD: f32 = 6.;
-const LIST_GAP: f32 = 2.;
+/// The list's element id (`.launch-composer-folder-options`), which tests find it by.
+const FOLDER_LIST: &str = "launcher-folder-list";
 
 /// One row of the folder list, in its keyboard order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,18 +57,14 @@ pub(super) enum FolderChoice {
 /// What the folder list holds besides the draft. None of it is shared with another surface.
 #[derive(Default)]
 pub(super) struct FolderList {
-    /// The open list's layer, if open. The layer manager closes it itself on Escape or a press outside, without telling
-    /// the field, so [`Launcher::folder_list_open`] asks it rather than trusting this.
-    layer: Option<LayerId>,
-    /// The row an arrow moved to, as an index into the current rows; none until one does. Dropped whenever the rows can
-    /// change under it (typing, a history answer, the list closing), so Enter never takes a row the arrow did not reach.
-    active: Option<usize>,
+    /// The list under the field, with the row an arrow moved to; none until one does. The highlight is dropped whenever
+    /// the rows can change under it (typing, a history answer, the list closing), so Enter never takes a row the arrow
+    /// did not reach. The launcher's draw notes where the field is for it to open under.
+    pub(super) list: FieldList,
     /// Whether the user has typed in the field since the folder was last seeded or picked: only then do the recent
     /// folders filter by its text (SPEC.md: "Untouched prefilled fields show the newest eight; typing filters"). A picked
     /// folder is the user's own choice for a later host change, but picking is not typing, so it does not filter.
     filtering: bool,
-    /// Where the folder field is drawn, for the list to open under it; refreshed every frame.
-    pub(super) anchor: Option<Anchor>,
 }
 
 /// The recent folders `folders` (newest first, as typed) offer for the field's `text`: all of them while the folder
@@ -129,13 +122,6 @@ pub(in crate::launcher) fn tail_label(path: &str) -> String {
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl Launcher {
-    /// Whether the folder list is open: opened by the field and not since closed by the layer manager.
-    pub(super) fn folder_list_open(&self, window: &Window, cx: &App) -> bool {
-        self.folder_list
-            .layer
-            .is_some_and(|layer| layers::is_open(layer, window, cx))
-    }
-
     /// The list's rows now, in keyboard order: the recent folders, Home, and Local home unless the host is held.
     pub(super) fn folder_choices(&self, cx: &App) -> Vec<FolderChoice> {
         let folders = self
@@ -163,8 +149,8 @@ impl Launcher {
 
     /// The folder field took focus: open the list, with nothing highlighted.
     pub(super) fn folder_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.folder_list.active = None;
-        if !self.folder_list_open(window, cx) {
+        self.folder_list.list.highlighted = None;
+        if !self.folder_list.list.is_open(window, cx) {
             self.open_folder_list(window, cx);
         }
         cx.notify();
@@ -174,18 +160,18 @@ impl Launcher {
     /// shows every recent folder again, and no highlight survives the change.
     pub(super) fn folder_picked(&mut self) {
         self.folder_list.filtering = false;
-        self.folder_list.active = None;
+        self.folder_list.list.highlighted = None;
     }
 
     /// The rows may have changed under the highlight (a history answer, or the host or its connection changing), so
     /// Enter must not take whatever row now sits at its index.
     pub(super) fn drop_folder_highlight(&mut self) {
-        self.folder_list.active = None;
+        self.folder_list.list.highlighted = None;
     }
 
     /// The folder field lost focus: close the list.
     pub(super) fn folder_blurred(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_folder_list(window, cx);
+        self.folder_list.list.close(window, cx);
         cx.notify();
     }
 
@@ -193,8 +179,8 @@ impl Launcher {
     /// launches again until an arrow picks a row), and a list Escape closed opens again (SPEC.md: "typing reopens it").
     pub(super) fn folder_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.folder_list.filtering = true;
-        self.folder_list.active = None;
-        if !self.folder_list_open(window, cx) {
+        self.folder_list.list.highlighted = None;
+        if !self.folder_list.list.is_open(window, cx) {
             self.open_folder_list(window, cx);
         }
     }
@@ -207,16 +193,12 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) {
         let count = self.folder_choices(cx).len();
-        if !self.folder_list_open(window, cx) {
-            self.folder_list.active = None;
+        if !self.folder_list.list.is_open(window, cx) {
+            self.folder_list.list.highlighted = None;
             self.open_folder_list(window, cx);
         }
-        self.folder_list.active = Some(match (arrow, self.folder_list.active) {
-            (Vertical::Down, None) => 0,
-            (Vertical::Down, Some(index)) => (index + 1) % count,
-            (Vertical::Up, None) => count - 1,
-            (Vertical::Up, Some(index)) => (index + count - 1) % count,
-        });
+        // Home is always a row, so there is always one to move to.
+        self.folder_list.list.arrow(arrow, count);
         cx.notify();
     }
 
@@ -225,15 +207,16 @@ impl Launcher {
     /// controls below the field are not left under it (SPEC.md: "Enter that submits a launch also closes the list,
     /// whether the launch is accepted or refused").
     pub(super) fn folder_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if !self.folder_list_open(window, cx) {
+        if !self.folder_list.list.is_open(window, cx) {
             return false;
         }
         let Some(choice) = self
             .folder_list
-            .active
+            .list
+            .highlighted
             .and_then(|index| self.folder_choices(cx).get(index).cloned())
         else {
-            self.close_folder_list(window, cx);
+            self.folder_list.list.close(window, cx);
             return false;
         };
         self.choose_folder(choice, window, cx);
@@ -244,7 +227,7 @@ impl Launcher {
     /// the list; the next list shows every recent folder again, since picking is not typing. Local home first makes the
     /// local host the target, as picking it in the host list does.
     fn choose_folder(&mut self, choice: FolderChoice, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_folder_list(window, cx);
+        self.folder_list.list.close(window, cx);
         self.folder_picked();
         match choice {
             // A recent folder is this host's history, and stays bound to its installation.
@@ -267,68 +250,21 @@ impl Launcher {
 
     /// Open the list under the folder field, as a popover that never takes focus.
     fn open_folder_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(anchor) = self.folder_list.anchor.clone() else {
-            return;
-        };
-        let launcher = cx.weak_entity();
-        let rows = cx.new(|cx| FolderRows::new(launcher, cx));
-        let container = cx.focus_handle();
-        let mark = Mark::take(cx);
-        self.folder_list.layer = layers::open_popover(
-            Popover::floating(rows, container, anchor),
-            &mark,
-            window,
-            cx,
-        );
+        self.folder_list
+            .list
+            .open(FOLDER_LIST, draw_folder_rows, window, cx);
     }
 
-    /// Close the list if it is open, and drop the highlight.
-    fn close_folder_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(layer) = self.folder_list.layer.take()
-            && layers::is_open(layer, window, cx)
-        {
-            layers::close(layer, window, cx);
-        }
-        self.folder_list.active = None;
-    }
-
-    /// Forget a list the layer manager closed on its own (Escape, a press outside), which tells the field nothing; the
-    /// highlight goes with it. Called while drawing, as the model field does.
-    pub(super) fn follow_folder_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.folder_list.layer.is_some() && !self.folder_list_open(window, cx) {
-            self.folder_list.layer = None;
-            self.folder_list.active = None;
-        }
+    /// The folder list's state, for tests of the shared list plumbing it is built on.
+    #[cfg(test)]
+    pub(in crate::launcher) fn folder_field_list_for_tests(&mut self) -> &mut FieldList {
+        &mut self.folder_list.list
     }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The rows
 // ---------------------------------------------------------------------------------------------------------------------
-
-/// The open folder list's rows, drawn from the launcher's state, and kept scrolled so the highlighted row is in view.
-pub(super) struct FolderRows {
-    launcher: WeakEntity<Launcher>,
-    scroll: ScrollHandle,
-    /// The child last scrolled into view, so a wheel scroll is not pulled back on the next redraw.
-    scrolled_to: Option<usize>,
-    /// Redraws the rows when the launcher changes (what is typed, the highlight, the history).
-    _redraw: Option<gpui::Subscription>,
-}
-
-impl FolderRows {
-    fn new(launcher: WeakEntity<Launcher>, cx: &mut Context<Self>) -> Self {
-        let redraw = launcher
-            .upgrade()
-            .map(|entity| cx.observe(&entity, |_, _, cx| cx.notify()));
-        FolderRows {
-            launcher,
-            scroll: ScrollHandle::new(),
-            scrolled_to: None,
-            _redraw: redraw,
-        }
-    }
-}
 
 /// A group heading (`.launch-composer-folder-heading`), named for assistive technology.
 fn heading(id: &'static str, words: &'static str, palette: &theme::Palette) -> AnyElement {
@@ -346,114 +282,100 @@ fn heading(id: &'static str, words: &'static str, palette: &theme::Palette) -> A
         .into_any_element()
 }
 
-impl Render for FolderRows {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = theme::palette(cx);
-        let list = layers::surface(cx)
-            .id("launcher-folder-list")
-            // Tests find the list by where it is drawn; this records nothing outside test builds.
-            .debug_selector(|| "launcher-folder-list".into())
-            .role(Role::ListBox)
-            .aria_label("Folders")
-            .flex()
-            .flex_col()
-            .gap(px(LIST_GAP))
-            .p(px(LIST_PAD))
-            .max_h(px(LIST_MAX_HEIGHT))
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .text_size(metrics::TEXT_MD);
-        let Some(launcher) = self.launcher.upgrade() else {
-            return list;
+/// The open folder list's rows (`field_list`): the Recent heading and folders (or "No recent folders"), then the Reset
+/// heading and its rows, with the highlighted row selected.
+fn draw_folder_rows(
+    launcher: &Launcher,
+    list: Stateful<Div>,
+    weak: &WeakEntity<Launcher>,
+    _: &Window,
+    cx: &App,
+) -> Drawn {
+    let palette = theme::palette(cx);
+    let list = list.role(Role::ListBox).aria_label("Folders");
+    let choices = launcher.folder_choices(cx);
+    let active = launcher.folder_list.list.highlighted;
+    // Headings and rows are all the list's own children, so the scroll handle can bring any row into view.
+    let mut children: Vec<AnyElement> = vec![heading("launcher-folder-recent", "Recent", palette)];
+    if !choices
+        .iter()
+        .any(|choice| matches!(choice, FolderChoice::Recent(_)))
+    {
+        children.push(
+            div()
+                .id("launcher-folder-empty")
+                // A plain line, as the old one was: a live status would be announced every time the list opens.
+                .role(Role::Label)
+                .aria_label("No recent folders")
+                .p(px(6.))
+                .text_color(theme::color(palette.fg_1))
+                .child("No recent folders")
+                .into_any_element(),
+        );
+    }
+    let mut active_child = None;
+    for (index, choice) in choices.into_iter().enumerate() {
+        if choice == FolderChoice::Home {
+            children.push(heading("launcher-folder-reset", "Reset", palette));
+        }
+        if active == Some(index) {
+            active_child = Some(children.len());
+        }
+        let selected = active == Some(index);
+        let ink = theme::color(if selected {
+            palette.on_fill
+        } else {
+            palette.fg_0
+        });
+        let meaning_ink = theme::color(if selected {
+            palette.on_fill
+        } else {
+            palette.fg_1
+        });
+        let id = format!("launcher-folder-{index}");
+        // A recent folder's hover help is its whole path, escaped, as the old row's tooltip was.
+        let (label, help, content): (SharedString, HoverHelp, AnyElement) = match &choice {
+            FolderChoice::Recent(folder) => {
+                let spelled = escaped(folder);
+                (
+                    spelled.clone().into(),
+                    HoverHelp::tooltip(spelled),
+                    div()
+                        .font_family(crate::assets::TERMINAL_FONT)
+                        .text_color(ink)
+                        .child(tail_label(folder))
+                        .into_any_element(),
+                )
+            }
+            FolderChoice::Home => (
+                "Reset folder to home".into(),
+                HoverHelp::tooltip("Home: start in your home folder on this host"),
+                reset_content("Home", "~ on this host", ink, meaning_ink),
+            ),
+            FolderChoice::LocalHome => (
+                "Reset destination to local home".into(),
+                HoverHelp::tooltip("Local home: start in your home folder on this machine"),
+                reset_content("Local home", "~ on this machine", ink, meaning_ink),
+            ),
         };
-        let launcher_ref = launcher.read(cx);
-        let choices = launcher_ref.folder_choices(cx);
-        let active = launcher_ref.folder_list.active;
-        // Headings and rows are all the list's own children, so the scroll handle can bring any row into view.
-        let mut children: Vec<AnyElement> =
-            vec![heading("launcher-folder-recent", "Recent", palette)];
-        if !choices
-            .iter()
-            .any(|choice| matches!(choice, FolderChoice::Recent(_)))
-        {
-            children.push(
-                div()
-                    .id("launcher-folder-empty")
-                    // A plain line, as the old one was: a live status would be announced every time the list opens.
-                    .role(Role::Label)
-                    .aria_label("No recent folders")
-                    .p(px(6.))
-                    .text_color(theme::color(palette.fg_1))
-                    .child("No recent folders")
-                    .into_any_element(),
-            );
-        }
-        let mut active_child = None;
-        for (index, choice) in choices.into_iter().enumerate() {
-            if choice == FolderChoice::Home {
-                children.push(heading("launcher-folder-reset", "Reset", palette));
-            }
-            if active == Some(index) {
-                active_child = Some(children.len());
-            }
-            let selected = active == Some(index);
-            let ink = theme::color(if selected {
-                palette.on_fill
-            } else {
-                palette.fg_0
-            });
-            let meaning_ink = theme::color(if selected {
-                palette.on_fill
-            } else {
-                palette.fg_1
-            });
-            let id = format!("launcher-folder-{index}");
-            // A recent folder's hover help is its whole path, escaped, as the old row's tooltip was.
-            let (label, help, content): (SharedString, HoverHelp, AnyElement) = match &choice {
-                FolderChoice::Recent(folder) => {
-                    let spelled = escaped(folder);
-                    (
-                        spelled.clone().into(),
-                        HoverHelp::tooltip(spelled),
-                        div()
-                            .font_family(crate::assets::TERMINAL_FONT)
-                            .text_color(ink)
-                            .child(tail_label(folder))
-                            .into_any_element(),
-                    )
-                }
-                FolderChoice::Home => (
-                    "Reset folder to home".into(),
-                    HoverHelp::tooltip("Home: start in your home folder on this host"),
-                    reset_content("Home", "~ on this host", ink, meaning_ink),
-                ),
-                FolderChoice::LocalHome => (
-                    "Reset destination to local home".into(),
-                    HoverHelp::tooltip("Local home: start in your home folder on this machine"),
-                    reset_content("Local home", "~ on this machine", ink, meaning_ink),
-                ),
-            };
-            let weak = self.launcher.clone();
-            children.push(
-                OptionRow::new(id, label, help, Role::ListBoxOption)
-                    .selected(selected)
-                    .child(content)
-                    .on_click(move |_, window, cx| {
-                        let choice = choice.clone();
-                        let _ = weak.update(cx, |launcher, cx| {
-                            launcher.choose_folder(choice, window, cx)
-                        });
-                    })
-                    .into_any_element(),
-            );
-        }
-        if active_child != self.scrolled_to {
-            if let Some(child) = active_child {
-                self.scroll.scroll_to_item(child);
-            }
-            self.scrolled_to = active_child;
-        }
-        list.children(children)
+        let weak = weak.clone();
+        children.push(
+            OptionRow::new(id, label, help, Role::ListBoxOption)
+                .selected(selected)
+                .child(content)
+                .on_click(move |_, window, cx| {
+                    let choice = choice.clone();
+                    let _ = weak.update(cx, |launcher, cx| {
+                        launcher.choose_folder(choice, window, cx)
+                    });
+                })
+                .into_any_element(),
+        );
+    }
+    Drawn {
+        list,
+        children,
+        highlighted: active_child,
     }
 }
 

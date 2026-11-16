@@ -12,20 +12,20 @@
 //! - **Repository suggestions** (`POST /api/github-repositories`) are read while the user is choosing (no repository
 //!   chosen, or the list open), 150 ms after the field, the host or its connection stops changing (SPEC_impl.md:
 //!   "Browser requests debounce for 150 ms and discard stale host/query generations"). The list floats under the field
-//!   on the layer manager's non-focusing popover, as the model field's does: a valid `owner/repo` typed into the field
-//!   is always its first row, so an incomplete scan never stops a choice (SPEC.md: "Incomplete discovery is visible and
-//!   does not prevent selecting a valid manually entered pair"), and an incomplete scan says so under the field. Enter
-//!   picks the highlighted row and never launches.
+//!   on the layer manager's non-focusing popover, as the model field's does (`field_list`): a valid `owner/repo` typed
+//!   into the field is always its first row, so an incomplete scan never stops a choice (SPEC.md: "Incomplete discovery
+//!   is visible and does not prevent selecting a valid manually entered pair"), and an incomplete scan says so under the
+//!   field. Enter picks the highlighted row and never launches.
 //! - **The preview** (`POST /api/github-checkout-preview`) is asked for whenever what it answers for changes: the host,
 //!   its connection and installation, the repository (or choosing it again), the checkout's name, the agent choices and
 //!   the configuration revision last observed (SPEC.md: "Host, installation, destination, title, agent choice and
 //!   observed configuration changes invalidate an undispatched preview"). Launch waits for it
 //!   ([`super::super::request::Preview`]).
-//! - **Latest wins, one read at a time**, for both reads, as the folder check does: an answer counts only while the
-//!   launcher still asks what it was asked, so a late answer can neither bring back an old destination nor move focus
-//!   ("Late responses cannot restore its authority or steal focus"); and a read is not sent while another of its kind
-//!   is out, the next going out when that answers. The old launcher sent a preview per change; one at a time keeps a
-//!   name typed key by key from queuing a preview per key behind each other on the ordered channel.
+//! - **Latest wins, one read at a time**, for both reads, as the folder check does (`latest`): an answer counts only
+//!   while the launcher still asks what it was asked, so a late answer can neither bring back an old destination nor
+//!   move focus ("Late responses cannot restore its authority or steal focus"); and a read is not sent while another of
+//!   its kind is out, the next going out when that answers. The old launcher sent a preview per change; one at a time
+//!   keeps a name typed key by key from queuing a preview per key behind each other on the ordered channel.
 //! - **The configuration revision.** The helm's checkout configuration (the folder a host's checkouts go in) changes
 //!   from Settings or the command line, and a preview taken before the change is stale. The launcher learns the
 //!   current revision from its launch-history read ([`Launcher::observe_checkout_config_revision`]); a preview is
@@ -60,11 +60,13 @@ use farhelm_proto::session_requests::{
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use farhelm_proto::{AcceptedGithubPreview, GithubRepo, parse_github_repo};
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, Entity,
+    InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
+use super::field_list::{Drawn, FieldList};
+use super::latest::Latest;
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, row};
 use crate::assets::Icon;
 use crate::components::{
@@ -77,7 +79,6 @@ use crate::launcher::draft::{
 };
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
-use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::settings::{CheckoutField, FolderScope, Saved};
 use crate::theme::{self, metrics};
 use crate::{operations, ticker};
@@ -86,11 +87,8 @@ use crate::{operations, ticker};
 const SUGGEST_AFTER: Duration = Duration::from_millis(150);
 /// The most rows the suggestions list offers, the old `repository_choices` cap.
 const MAX_CHOICES: usize = 100;
-/// `.launch-composer-repository-options`: at most 260 pixels tall, scrolling past that, like the launcher's other
-/// floating lists; padded and spaced as they are.
-const LIST_MAX_HEIGHT: f32 = 260.;
-const LIST_PAD: f32 = 6.;
-const LIST_GAP: f32 = 2.;
+/// The suggestions list's element id (`.launch-composer-repository-options`), which tests find it by.
+const REPOSITORY_LIST: &str = "launcher-repository-list";
 
 /// The sentence under the repository field and preview while a managed checkout is chosen, the old launcher's
 /// `.launch-composer-checkout-explanation` for an installed host.
@@ -118,59 +116,8 @@ const STALE_PREVIEW: &str =
     "The preview is stale or belongs to a different host installation; select the repository again";
 
 // ---------------------------------------------------------------------------------------------------------------------
-// One read at a time, latest wins
+// What the reads ask, one at a time, latest wins (`super::latest`)
 // ---------------------------------------------------------------------------------------------------------------------
-
-/// One kind of read the destination makes, keyed by what it asks about: the last key asked, its answer while it is
-/// still the current one, whether a read is out and whether another is due when it answers, and the debounce deadline
-/// (see the module docs). The folder check keeps the same facts for its own read.
-struct Latest<K, A> {
-    /// The key the pending deadline, the read out, or the last answer is about.
-    asked: Option<K>,
-    /// The answer for `asked`, once it came.
-    answered: Option<A>,
-    /// Whether a read is out, which holds the next one until it answers.
-    out: bool,
-    /// Whether the key changed while a read was out: its answer then sends the read for the current key.
-    due: bool,
-    /// The debounce deadline before the next read, for a read that waits for the input to settle; dropping it cancels
-    /// it.
-    _waiting: Option<ticker::Deadline>,
-}
-
-impl<K, A> Default for Latest<K, A> {
-    fn default() -> Self {
-        Latest {
-            asked: None,
-            answered: None,
-            out: false,
-            due: false,
-            _waiting: None,
-        }
-    }
-}
-
-impl<K: Clone + PartialEq, A> Latest<K, A> {
-    /// Follow `key`, what the read would ask about now: returns the key to read now when it changed and nothing holds
-    /// it, else `None`. A change forgets the answer for the old key at once, so nothing about it shows a moment longer.
-    fn follow(&mut self, key: Option<K>) -> Option<K> {
-        if key == self.asked {
-            return None;
-        }
-        self.asked = key.clone();
-        self.answered = None;
-        self._waiting = None;
-        self.due = false;
-        key
-    }
-
-    /// The answer, while it is about `key`.
-    fn answer_for(&self, key: &K) -> Option<&A> {
-        (self.asked.as_ref() == Some(key))
-            .then_some(self.answered.as_ref())
-            .flatten()
-    }
-}
 
 /// What a suggestions read asks: on which host connection and installation, for which typed text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -254,13 +201,8 @@ pub(super) struct CheckoutState {
     /// The read-only folder field shown in place of the folder while a managed checkout is chosen: the preview's
     /// path, escaped, or empty with a placeholder saying why there is none.
     path: TextInputState,
-    /// The open suggestions list's layer, if open; the layer manager closes it itself on Escape or a press outside,
-    /// so [`Launcher::repository_list_open`] asks it.
-    list: Option<LayerId>,
-    /// The row moved to with the arrows, as an index into the current rows.
-    active: Option<usize>,
-    /// Where the repository field is drawn, for the list to open under it; refreshed every frame.
-    anchor: Option<Anchor>,
+    /// The suggestions list under the repository field, with the row moved to with the arrows.
+    list: FieldList,
     suggestions: Latest<SuggestKey, SuggestAnswer>,
     preview: Latest<PreviewKey, PreviewAnswer>,
     /// The highest checkout configuration revision observed, which never goes back down; `None` until one is.
@@ -328,16 +270,14 @@ impl CheckoutState {
         });
         let blur = cx.on_blur(&handle, window, |_, window, cx| {
             cx.defer_in(window, |launcher, window, cx| {
-                launcher.close_repository_list(window, cx);
+                launcher.checkout.list.close(window, cx);
                 cx.notify();
             });
         });
         CheckoutState {
             repository,
             path,
-            list: None,
-            active: None,
-            anchor: None,
+            list: FieldList::default(),
             suggestions: Latest::default(),
             preview: Latest::default(),
             revision: None,
@@ -386,15 +326,7 @@ impl Launcher {
     /// The chosen host as the store holds it now, while it is connected with an installation identity: the only host
     /// either read can ask about, since the helm binds both to that identity.
     fn checkout_host(&self, cx: &App) -> Option<HostView> {
-        let id = self.draft.host?;
-        let view = self
-            .store
-            .read(cx)
-            .collections()
-            .ordered::<HostView>()
-            .into_iter()
-            .find(|view| view.id == id)?
-            .clone();
+        let view = self.chosen_host(cx)?.clone();
         let connected = matches!(view.state, HostStateView::Connected { .. });
         let identified = view.identity.as_deref().is_some_and(|id| !id.is_empty());
         (connected && identified).then_some(view)
@@ -406,7 +338,7 @@ impl Launcher {
             .checkout
             .as_ref()
             .is_some_and(|checkout| checkout.repo.is_none())
-            || self.repository_list_open(window, cx)
+            || self.checkout.list.is_open(window, cx)
     }
 
     /// The chosen host's connection and installation, while it can be asked.
@@ -480,10 +412,10 @@ impl Launcher {
         let key = self.suggest_key(window, cx);
         if let Some(key) = self.checkout.suggestions.follow(key) {
             let launcher = cx.weak_entity();
-            self.checkout.suggestions._waiting =
-                Some(ticker::after(SUGGEST_AFTER, cx, move |cx| {
-                    let _ = launcher.update(cx, |launcher, cx| launcher.send_suggestions(key, cx));
-                }));
+            let deadline = ticker::after(SUGGEST_AFTER, cx, move |cx| {
+                let _ = launcher.update(cx, |launcher, cx| launcher.send_suggestions(key, cx));
+            });
+            self.checkout.suggestions.wait(deadline);
         }
         self.follow_preview(cx);
         self.show_checkout_path(window, cx);
@@ -641,14 +573,6 @@ impl Launcher {
     /// Read the suggestions for `key`, if it is still what the launcher would ask and no read is out (then the
     /// answer sends it).
     fn send_suggestions(&mut self, key: SuggestKey, cx: &mut Context<Self>) {
-        let state = &mut self.checkout.suggestions;
-        if state.asked.as_ref() != Some(&key) {
-            return;
-        }
-        if state.out {
-            state.due = true;
-            return;
-        }
         let Ok(path) = ApiPath::api(&["github-repositories"]) else {
             return;
         };
@@ -660,8 +584,10 @@ impl Launcher {
         let Ok(body) = serde_json::to_value(&body) else {
             return;
         };
+        if !self.checkout.suggestions.begin(&key) {
+            return;
+        }
         let launcher = cx.weak_entity();
-        state.out = true;
         let sent = operations::send(
             Method::Post,
             path,
@@ -672,48 +598,46 @@ impl Launcher {
                 let answer = operations::decode::<GithubRepositoriesReply>(
                     answer,
                     "POST /api/github-repositories",
-                );
+                )
+                .and_then(|reply| {
+                    // The helm names the installation that answered; one other than the launcher asked about is no
+                    // answer about this host (the old `RepositoryAuthority::accepts`).
+                    let same = reply.host == key.host.to_string()
+                        && reply.incarnation == key.incarnation
+                        && reply.installation_identity == key.identity;
+                    if same {
+                        Ok(reply)
+                    } else {
+                        Err(HostText::from_host(OTHER_INSTALLATION))
+                    }
+                });
+                let needs_root = answer.as_ref().ok().map(|reply| reply.needs_checkout_root);
                 let _ = launcher.update(cx, |launcher, cx| {
-                    let state = &mut launcher.checkout.suggestions;
-                    state.out = false;
-                    if state.asked.as_ref() == Some(&key) {
-                        state.answered = Some(answer.and_then(|reply| {
-                            // The helm names the installation that answered; one other than the launcher asked about is
-                            // no answer about this host (the old `RepositoryAuthority::accepts`).
-                            let same = reply.host == key.host.to_string()
-                                && reply.incarnation == key.incarnation
-                                && reply.installation_identity == key.identity;
-                            if same {
-                                Ok(reply)
-                            } else {
-                                Err(HostText::from_host(OTHER_INSTALLATION))
-                            }
-                        }));
-                        if let Some(Ok(reply)) = &state.answered {
+                    let finished = launcher.checkout.suggestions.finish(&key, Some(answer));
+                    if finished.kept {
+                        if let Some(needs_root) = needs_root {
                             let host = HostKey {
                                 host: key.host,
                                 incarnation: key.incarnation,
                                 identity: key.identity.clone(),
                             };
-                            launcher.checkout.needs_root = Some((host, reply.needs_checkout_root));
+                            launcher.checkout.needs_root = Some((host, needs_root));
                             launcher.checkout.root_recheck = false;
                             // The field stays: the save did not give the host a folder, and focus stays in it.
-                            if reply.needs_checkout_root {
+                            if needs_root {
                                 launcher.checkout.focus_after_setup = None;
                             }
                         }
                         cx.notify();
                     }
-                    if std::mem::take(&mut launcher.checkout.suggestions.due)
-                        && let Some(now) = launcher.checkout.suggestions.asked.clone()
-                    {
+                    if let Some(now) = finished.next {
                         launcher.send_suggestions(now, cx);
                     }
                 });
             },
         );
         if !sent {
-            self.checkout.suggestions.out = false;
+            self.checkout.suggestions.unsent();
         }
     }
 
@@ -721,14 +645,6 @@ impl Launcher {
     /// it). The preview is a read: it creates and reserves nothing (SPEC.md: "Preview creates no directory and reserves
     /// nothing").
     fn send_preview(&mut self, key: PreviewKey, cx: &mut Context<Self>) {
-        let state = &mut self.checkout.preview;
-        if state.asked.as_ref() != Some(&key) {
-            return;
-        }
-        if state.out {
-            state.due = true;
-            return;
-        }
         let Ok(path) = ApiPath::api(&["github-checkout-preview"]) else {
             return;
         };
@@ -742,8 +658,10 @@ impl Launcher {
         let Ok(body) = serde_json::to_value(&body) else {
             return;
         };
+        if !self.checkout.preview.begin(&key) {
+            return;
+        }
         let launcher = cx.weak_entity();
-        state.out = true;
         let sent = operations::send(
             Method::Post,
             path,
@@ -754,31 +672,28 @@ impl Launcher {
                 let answer = operations::decode::<AcceptedGithubPreview>(
                     answer,
                     "POST /api/github-checkout-preview",
-                );
+                )
+                .and_then(|preview| {
+                    if preview_matches(&key, &preview) {
+                        Ok(preview)
+                    } else {
+                        Err(HostText::from_host(STALE_PREVIEW))
+                    }
+                });
+                let occupied = answer
+                    .as_ref()
+                    .is_err_and(|words| words.raw().contains(OCCUPIED));
                 let _ = launcher.update(cx, |launcher, cx| {
-                    let state = &mut launcher.checkout.preview;
-                    state.out = false;
-                    if state.asked.as_ref() == Some(&key) {
-                        state.answered = Some(answer.and_then(|preview| {
-                            if preview_matches(&key, &preview) {
-                                Ok(preview)
-                            } else {
-                                Err(HostText::from_host(STALE_PREVIEW))
-                            }
-                        }));
+                    let finished = launcher.checkout.preview.finish(&key, Some(answer));
+                    if finished.kept {
                         // A numbered default name that is taken moves on; its next candidate is then previewed, since
                         // the name is part of what the preview answers for.
-                        if let Some(Err(words)) = &state.answered
-                            && words.raw().contains(OCCUPIED)
-                            && launcher.draft.advance_checkout_name(&key.title)
-                        {
+                        if occupied && launcher.draft.advance_checkout_name(&key.title) {
                             launcher.checkout.advanced_from = Some(key.clone());
                         }
                         cx.notify();
                     }
-                    if std::mem::take(&mut launcher.checkout.preview.due)
-                        && let Some(now) = launcher.checkout.preview.asked.clone()
-                    {
+                    if let Some(now) = finished.next {
                         launcher.send_preview(now, cx);
                     }
                 });
@@ -787,7 +702,7 @@ impl Launcher {
             },
         );
         if !sent {
-            self.checkout.preview.out = false;
+            self.checkout.preview.unsent();
         }
     }
 
@@ -843,13 +758,6 @@ fn preview_matches(key: &PreviewKey, preview: &AcceptedGithubPreview) -> bool {
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl Launcher {
-    /// Whether the suggestions list is open: opened by the field and not since closed by the layer manager.
-    pub(super) fn repository_list_open(&self, window: &Window, cx: &App) -> bool {
-        self.checkout
-            .list
-            .is_some_and(|layer| layers::is_open(layer, window, cx))
-    }
-
     /// The list's rows for the field as it is now, from the suggestions answer while it is about this host and text.
     fn repository_rows(&self, window: &Window, cx: &App) -> Vec<GithubRepo> {
         let query = self.checkout.repository.text(cx).to_string();
@@ -866,39 +774,30 @@ impl Launcher {
     fn repository_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.checkout.repository.text(cx).to_string();
         self.draft.edit_repository_query(text);
-        self.checkout.active = None;
-        if !self.repository_list_open(window, cx) {
-            self.open_repository_list(window, cx);
-        }
+        self.checkout.list.highlighted = None;
+        self.open_repository_list(window, cx);
         self.changed(cx);
     }
 
     /// Up or Down in the field: move the highlighted row, wrapping, while the list is open and has rows.
     fn repository_arrow(&mut self, arrow: Vertical, window: &mut Window, cx: &mut Context<Self>) {
         let count = self.repository_rows(window, cx).len();
-        if !self.repository_list_open(window, cx) || count == 0 {
-            return;
+        if self.checkout.list.is_open(window, cx) && self.checkout.list.arrow(arrow, count) {
+            cx.notify();
         }
-        let active = &mut self.checkout.active;
-        *active = Some(match (arrow, *active) {
-            (Vertical::Down, None) => 0,
-            (Vertical::Down, Some(index)) => (index + 1) % count,
-            (Vertical::Up, None) => count - 1,
-            (Vertical::Up, Some(index)) => (index + count - 1) % count,
-        });
-        cx.notify();
     }
 
     /// Enter in the field: pick the highlighted row (or, with none highlighted, the first) while the list is open, or
     /// open it. Never launches: in the old field, choosing a repository and launching were separate keys.
     fn repository_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.repository_list_open(window, cx) {
+        if !self.checkout.list.is_open(window, cx) {
             self.open_repository_list(window, cx);
             cx.notify();
             return;
         }
         let rows = self.repository_rows(window, cx);
-        if let Some(repo) = rows.get(self.checkout.active.unwrap_or(0)).cloned() {
+        let highlighted = self.checkout.list.highlighted.unwrap_or(0);
+        if let Some(repo) = rows.get(highlighted).cloned() {
             self.pick_repository(repo, window, cx);
         }
     }
@@ -906,41 +805,21 @@ impl Launcher {
     /// A row picked by a click or Enter: the draft's repository, the field showing it, the list closed.
     fn pick_repository(&mut self, repo: GithubRepo, window: &mut Window, cx: &mut Context<Self>) {
         self.draft.choose_repository(repo);
-        self.close_repository_list(window, cx);
+        self.checkout.list.close(window, cx);
         self.sync_fields(window, cx);
         self.changed(cx);
     }
 
-    /// Open the list under the field, as a popover that never takes focus. Not while the field is read-only (the mode
-    /// holds the destination).
+    /// Open the list under the field with nothing highlighted, unless it is open already. Not while the field is
+    /// read-only (the mode holds the destination).
     fn open_repository_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.draft.holds(Field::Destination) || self.repository_list_open(window, cx) {
+        if self.draft.holds(Field::Destination) || self.checkout.list.is_open(window, cx) {
             return;
         }
-        let Some(anchor) = self.checkout.anchor.clone() else {
-            return;
-        };
-        self.checkout.active = None;
-        let launcher = cx.weak_entity();
-        let rows = cx.new(|cx| RepositoryRows::new(launcher, cx));
-        let container = cx.focus_handle();
-        let mark = Mark::take(cx);
-        self.checkout.list = layers::open_popover(
-            Popover::floating(rows, container, anchor),
-            &mark,
-            window,
-            cx,
-        );
-    }
-
-    /// Close the list if it is open, and drop the highlight.
-    fn close_repository_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(layer) = self.checkout.list.take()
-            && layers::is_open(layer, window, cx)
-        {
-            layers::close(layer, window, cx);
-        }
-        self.checkout.active = None;
+        self.checkout.list.highlighted = None;
+        self.checkout
+            .list
+            .open(REPOSITORY_LIST, draw_repository_rows, window, cx);
     }
 
     /// The Where row chose `kind`: the draft's destination, with the fields it changes put back in step.
@@ -954,7 +833,7 @@ impl Launcher {
             return;
         }
         self.draft.choose_destination(kind);
-        self.close_repository_list(window, cx);
+        self.checkout.list.close(window, cx);
         self.sync_fields(window, cx);
         self.changed(cx);
     }
@@ -990,8 +869,8 @@ impl Launcher {
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl Launcher {
-    /// The Where row: Folder or Managed checkout, with their glyphs (the old `DestinationTypeControl`). Not drawn where
-    /// the mode holds the destination.
+    /// The Where row: Folder or Managed checkout ([`destination_choice`]). Not drawn where the mode holds the
+    /// destination.
     pub(super) fn where_row(
         &self,
         palette: &theme::Palette,
@@ -1001,36 +880,18 @@ impl Launcher {
             return None;
         }
         let weak = cx.weak_entity();
-        let group = RadioGroup::new(
+        let group = destination_choice(
             "launcher-destination",
-            "Destination type",
-            HoverHelp::tooltip("Where: an existing folder, or a new managed checkout of a repository"),
-            Role::Group,
-        )
-        .option(
-            RadioOption::new(
-                "Folder",
-                HoverHelp::tooltip("Folder: start in an existing folder on this host"),
-                DestinationKind::Folder,
-            )
-            .icon(Icon::Folder),
-        )
-        .option(
-            RadioOption::new(
-                "Managed checkout",
-                HoverHelp::tooltip(
-                    "Managed checkout: Farhelm clones a repository into a new folder for this session",
-                ),
-                DestinationKind::Checkout,
-            )
-            .icon(Icon::Branch),
-        )
-        .chosen(Some(self.draft.destination_kind()))
-        .on_change(move |kind, window, cx| {
-            let _ = weak.update(cx, |launcher, cx| {
-                launcher.choose_destination(*kind, window, cx)
-            });
-        });
+            self.draft.destination_kind(),
+            HoverHelp::tooltip(
+                "Where: an existing folder, or a new managed checkout of a repository",
+            ),
+            move |kind, window, cx| {
+                let _ = weak.update(cx, |launcher, cx| {
+                    launcher.choose_destination(kind, window, cx)
+                });
+            },
+        );
         Some(row("launcher-where-row", "Where", group, palette).into_any_element())
     }
 
@@ -1044,15 +905,14 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        if self.checkout.list.is_some() && !self.repository_list_open(window, cx) {
-            self.close_repository_list(window, cx);
-        }
+        self.checkout.list.follow(window, cx);
         let Some(checkout) = self.draft.checkout.clone() else {
             return Vec::new();
         };
-        let anchor = Anchor::for_element("launcher-repository-anchor", window, cx).matching_width();
-        let tracker = anchor.track();
-        self.checkout.anchor = Some(anchor.clone());
+        let tracker = self
+            .checkout
+            .list
+            .track_anchor("launcher-repository-anchor", window, cx);
         let weak = cx.weak_entity();
         let field = self
             .launcher_input(
@@ -1161,17 +1021,8 @@ impl Launcher {
     /// so a change is announced without interrupting.
     fn preview_block(&self, repo: &GithubRepo, palette: &theme::Palette, cx: &App) -> AnyElement {
         let host = self
-            .draft
-            .host
-            .and_then(|id| {
-                self.store
-                    .read(cx)
-                    .collections()
-                    .ordered::<HostView>()
-                    .into_iter()
-                    .find(|view| view.id == id)
-                    .map(super::host_name_with_phase)
-            })
+            .chosen_host(cx)
+            .map(super::host_name_with_phase)
             .unwrap_or_else(|| HostText::from_host("this host"));
         let heading = HostSentence::new("launcher-preview-heading")
             .text("Managed checkout of ")
@@ -1298,121 +1149,126 @@ impl Launcher {
     }
 }
 
-/// The open suggestions list's rows, drawn from the launcher's state and kept scrolled to the highlighted row, as the
-/// model list's are (`model_field`).
-pub(super) struct RepositoryRows {
-    launcher: WeakEntity<Launcher>,
-    scroll: ScrollHandle,
-    scrolled_to: Option<usize>,
-    _redraw: Option<Subscription>,
+/// The Folder or Managed checkout choice, with their glyphs and words, as the launcher's Where row and the template
+/// editor's destination both draw it (the old app's shared `DestinationTypeControl`), under `id`, with `chosen` chosen
+/// and `help` as the group's hover help. It only reports a choice through `on_change`: what changing the kind does (the
+/// launcher restores a folder draft; the editor keeps the destination's text) is each caller's own. Enter on it only
+/// chooses, as the old control's did.
+pub(crate) fn destination_choice(
+    id: &'static str,
+    chosen: DestinationKind,
+    help: HoverHelp,
+    on_change: impl Fn(DestinationKind, &mut Window, &mut App) + 'static,
+) -> RadioGroup<DestinationKind> {
+    RadioGroup::new(id, "Destination type", help, Role::Group)
+        .option(
+            RadioOption::new(
+                "Folder",
+                HoverHelp::tooltip("Folder: start in an existing folder on this host"),
+                DestinationKind::Folder,
+            )
+            .icon(Icon::Folder),
+        )
+        .option(
+            RadioOption::new(
+                "Managed checkout",
+                HoverHelp::tooltip(
+                    "Managed checkout: Farhelm clones a repository into a new folder for this session",
+                ),
+                DestinationKind::Checkout,
+            )
+            .icon(Icon::Branch),
+        )
+        .chosen(Some(chosen))
+        .on_change(move |kind, window, cx| on_change(*kind, window, cx))
 }
 
-impl RepositoryRows {
-    fn new(launcher: WeakEntity<Launcher>, cx: &mut Context<Self>) -> Self {
-        let redraw = launcher
-            .upgrade()
-            .map(|entity| cx.observe(&entity, |_, _, cx| cx.notify()));
-        RepositoryRows {
-            launcher,
-            scroll: ScrollHandle::new(),
-            scrolled_to: None,
-            _redraw: redraw,
-        }
-    }
-}
-
-impl Render for RepositoryRows {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = theme::palette(cx);
-        let list = layers::surface(cx)
-            .id("launcher-repository-list")
-            .debug_selector(|| "launcher-repository-list".into())
-            .aria_label("Repositories")
-            .flex()
-            .flex_col()
-            .gap(px(LIST_GAP))
-            .p(px(LIST_PAD))
-            .max_h(px(LIST_MAX_HEIGHT))
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .text_size(metrics::TEXT_MD);
-        let Some(launcher) = self.launcher.upgrade() else {
-            return list;
+/// The open suggestions list's rows (`field_list`): a branch glyph and the `owner/repo` per suggestion, or, with none,
+/// a status line saying what to type.
+fn draw_repository_rows(
+    launcher: &Launcher,
+    list: Stateful<Div>,
+    weak: &WeakEntity<Launcher>,
+    window: &Window,
+    cx: &App,
+) -> Drawn {
+    let palette = theme::palette(cx);
+    let list = list.aria_label("Repositories");
+    let rows = launcher.repository_rows(window, cx);
+    if rows.is_empty() {
+        // The old list became a status saying what to type, a warning once something typed matches nothing.
+        let typed = !launcher.checkout.repository.text(cx).trim().is_empty();
+        let (words, color) = if typed {
+            (NO_MATCH, palette.warn)
+        } else {
+            (TYPE_A_PAIR, palette.fg_1)
         };
-        let launcher_ref = launcher.read(cx);
-        let rows = launcher_ref.repository_rows(window, cx);
-        if rows.is_empty() {
-            // The old list became a status saying what to type, a warning once something typed matches nothing.
-            let typed = !launcher_ref.checkout.repository.text(cx).trim().is_empty();
-            let (words, color) = if typed {
-                (NO_MATCH, palette.warn)
-            } else {
-                (TYPE_A_PAIR, palette.fg_1)
-            };
-            return list.role(Role::Status).child(
+        let empty = div()
+            .id("launcher-repository-empty")
+            .role(Role::Label)
+            .aria_label(SharedString::from(words))
+            .px(px(8.))
+            .py(px(4.))
+            .text_size(metrics::TEXT_SM)
+            .text_color(theme::color(color))
+            .child(words)
+            .into_any_element();
+        return Drawn {
+            list: list.role(Role::Status),
+            children: vec![empty],
+            highlighted: None,
+        };
+    }
+    let active = launcher.checkout.list.highlighted;
+    let mut children = Vec::with_capacity(rows.len());
+    for (index, repo) in rows.into_iter().enumerate() {
+        let identifier = repo_identifier(&repo);
+        let id = format!("launcher-repository-option-{identifier}");
+        let words = HostSentence::new(SharedString::from(format!("{id}-words")))
+            .host(&HostText::from_host(identifier.as_str()));
+        let help = format!("Managed checkout of {}", words.accessible_name());
+        let weak = weak.clone();
+        children.push(
+            OptionRow::new(
+                id,
+                words.accessible_name(),
+                HoverHelp::tooltip(help),
+                Role::ListBoxOption,
+            )
+            .selected(active == Some(index))
+            .child(
                 div()
-                    .id("launcher-repository-empty")
-                    .role(Role::Label)
-                    .aria_label(SharedString::from(words))
-                    .px(px(8.))
-                    .py(px(4.))
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(color))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    // The row colors its words itself (the fill's ink when highlighted); the glyph is quieter when
+                    // not, as the old list's was.
+                    .child(
+                        gpui::svg()
+                            .path(Icon::Branch.path())
+                            .size(px(12.))
+                            .flex_none()
+                            .text_color(theme::color(if active == Some(index) {
+                                palette.on_fill
+                            } else {
+                                palette.fg_1
+                            })),
+                    )
                     .child(words),
-            );
-        }
-        let active = launcher_ref.checkout.active;
-        let mut children = Vec::with_capacity(rows.len());
-        for (index, repo) in rows.into_iter().enumerate() {
-            let identifier = repo_identifier(&repo);
-            let id = format!("launcher-repository-option-{identifier}");
-            let words = HostSentence::new(SharedString::from(format!("{id}-words")))
-                .host(&HostText::from_host(identifier.as_str()));
-            let help = format!("Managed checkout of {}", words.accessible_name());
-            let weak = self.launcher.clone();
-            children.push(
-                OptionRow::new(
-                    id,
-                    words.accessible_name(),
-                    HoverHelp::tooltip(help),
-                    Role::ListBoxOption,
-                )
-                .selected(active == Some(index))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        // The row colors its words itself (the fill's ink when highlighted); the glyph is quieter when
-                        // not, as the old list's was.
-                        .child(
-                            gpui::svg()
-                                .path(Icon::Branch.path())
-                                .size(px(12.))
-                                .flex_none()
-                                .text_color(theme::color(if active == Some(index) {
-                                    palette.on_fill
-                                } else {
-                                    palette.fg_1
-                                })),
-                        )
-                        .child(words),
-                )
-                .on_click(move |_, window, cx| {
-                    let repo = repo.clone();
-                    let _ = weak.update(cx, |launcher, cx| {
-                        launcher.pick_repository(repo, window, cx)
-                    });
-                })
-                .into_any_element(),
-            );
-        }
-        if active != self.scrolled_to {
-            if let Some(index) = active {
-                self.scroll.scroll_to_item(index);
-            }
-            self.scrolled_to = active;
-        }
-        list.role(Role::ListBox).children(children)
+            )
+            .on_click(move |_, window, cx| {
+                let repo = repo.clone();
+                let _ = weak.update(cx, |launcher, cx| {
+                    launcher.pick_repository(repo, window, cx)
+                });
+            })
+            .into_any_element(),
+        );
+    }
+    // Every child is a row, so the highlighted row's index is its child's.
+    Drawn {
+        list: list.role(Role::ListBox),
+        children,
+        highlighted: active,
     }
 }
