@@ -367,7 +367,8 @@ pub(crate) fn status(
         | Work::MovePin
         | Work::Suspend
         | Work::Resume
-        | Work::StopAndSuspend => None,
+        | Work::StopAndSuspend
+        | Work::EnvironmentDelete => None,
     }
 }
 

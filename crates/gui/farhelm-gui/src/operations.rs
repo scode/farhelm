@@ -196,6 +196,13 @@ pub enum Work {
     /// its host's Suspend, as one helm operation, on the session's own key. Not supersedable. The Stop half ends an
     /// agent, but it creates no session and changes no registry entry.
     StopAndSuspend,
+    /// The user's Delete of a session in a disposable environment (`DELETE /api/sessions/{id}` with
+    /// `delete_environment_session` or `delete_sandbox`, `session_list::environment_delete`), on the session's own
+    /// key, so its other actions wait for it as they wait for an ordinary Delete. Not supersedable: each answer of its
+    /// question sends one. It carries no guard, since the helm refuses a guarded environment Delete. The
+    /// whole-environment lane destroys the environment through host removal's path, but it creates no session and adds
+    /// or replaces no registry entry, and the old app put neither lane through the launch and registry exclusion.
+    EnvironmentDelete,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -251,6 +258,7 @@ impl Work {
             Work::Suspend => false,
             Work::Resume => false,
             Work::StopAndSuspend => false,
+            Work::EnvironmentDelete => false,
         }
     }
 
@@ -289,6 +297,7 @@ impl Work {
             Work::Suspend => false,
             Work::Resume => false,
             Work::StopAndSuspend => false,
+            Work::EnvironmentDelete => false,
         }
     }
 }

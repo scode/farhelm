@@ -28,7 +28,13 @@
 //!
 //! A success's own report outlives the row it was about: a notice the helm's reply carries (a checkout that could not
 //! be archived, which SPEC.md says is never silent) goes to the list's Delete notice band ([`super::delete_notice`]),
-//! from [`start`]'s completion, which every Delete of this window passes through.
+//! from [`start`]'s completion, which every ordinary Delete of this window passes through (an environment Delete's
+//! completion is its own, `super::environment_delete`'s).
+//!
+//! A session in a disposable environment gets its own Delete in place of this one ([`super::environment_delete`]):
+//! [`begin`] always asks it, in the lane the hosts read picks, [`question`] words it, and the answer
+//! ([`confirming`]) sends it, with a way to ask the warned whole-environment question again at the same row or header
+//! when the helm could not ask the environment's own Farhelm.
 //!
 //! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
@@ -47,6 +53,7 @@
 //! layer keeps the complete-listing rule, and the helm refuses what it then sends.
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::SessionRow;
@@ -58,6 +65,7 @@ use gpui::{
 };
 use serde_json::Value;
 
+use super::environment_delete::{self, AskAgain};
 use super::{SessionList, delete_notice, menu};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
@@ -133,46 +141,53 @@ pub(super) fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
     }
 }
 
-/// What a confirmed Delete acts on: the session, by the key the helm files it under, and the guard of the row the
-/// question was drawn from.
+/// What a confirmed Delete acts on: the session, by the key the helm files it under, the guard of the row the question
+/// was drawn from, and, for a session in a disposable environment, the environment Delete the question asked for
+/// ([`environment_delete::Asked`]), which sends no guard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Frozen {
     pub(crate) key: String,
     pub(crate) guard: DeleteGuard,
+    pub(crate) environment: Option<environment_delete::Asked>,
 }
 
-/// The row's Delete question for `row`, filed under `key`, asked with `guard`: the consequence first, then the title
-/// quoted on a line of its own (so a long title can never push the consequence out of view), then, for a session in a
-/// managed checkout, what happens to the checkout. Ported from the old row's question with its wording; Cancel keeps
-/// the prompt's own wording.
-pub(super) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Question<Frozen> {
+/// The Delete question for `row`, freezing `frozen`: the consequence first, then the title quoted on a line of its own
+/// (so a long title can never push the consequence out of view), then, for a session in a managed checkout, what
+/// happens to the checkout. Ported from the old row's question with its wording; Cancel keeps the prompt's own wording.
+/// An environment session's question is its lane's instead: the lane's consequence and the environment's name, the
+/// quoted title, no checkout line, and the lane's answer ([`environment_delete`]).
+pub(crate) fn question(row: &SessionRow, frozen: Frozen) -> Question<Frozen> {
+    let key = frozen.key.clone();
     let title = HostText::from_host(row.info.title.as_str());
-    let mut question = Question::new(
-        "Delete confirmation",
-        Answer::new(
+    let environment = frozen.environment.clone();
+    let answer = match &environment {
+        Some(asked) => asked.answer(),
+        None => Answer::new(
             "Confirm delete",
             HoverHelp::tooltip("Delete this session and its state now"),
             Tier::Danger,
         ),
-        Frozen {
-            key: key.to_owned(),
-            guard,
-        },
-    )
-    .line(consequence(row))
-    .line(
-        HostSentence::new(SharedString::from(format!("session-delete-title-{key}")))
-            .text("\"")
-            .host(&title)
-            .text("\""),
-    )
-    .keeps_focus_on_empty_click();
+    };
+    let question = Question::new("Delete confirmation", answer, frozen);
+    let question = match &environment {
+        Some(asked) => question.line(asked.consequence(&key)),
+        None => question.line(consequence(row)),
+    };
+    let question = question
+        .line(
+            HostSentence::new(SharedString::from(format!("session-delete-title-{key}")))
+                .text("\"")
+                .host(&title)
+                .text("\""),
+        )
+        .keeps_focus_on_empty_click();
     // Whether the checkout moves is decided by the supervisor from every session that uses it, so this says what
     // happens in either case rather than counting sessions the client may have stale.
-    if row.info.working_copy.is_some() {
-        question = question.line(MANAGED_CHECKOUT);
+    if environment.is_none() && row.info.working_copy.is_some() {
+        question.line(MANAGED_CHECKOUT)
+    } else {
+        question
     }
-    question
 }
 
 /// What a Delete question says about a session in a managed checkout, the row's and the bulk question's alike
@@ -185,9 +200,9 @@ pub(super) const MANAGED_CHECKOUT: &str = "The managed checkout stays while anot
 impl SessionList {
     /// The user asked to delete `key` (its row's Delete) at `mark`: delete it at once when nothing shows alive or
     /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in the list's view
-    /// and centered when it is not (scrolled away). Nothing happens for a session the store holds no row for, or that
-    /// has any request in flight. Visible to the crate for the screenshot goldens, which ask the question without a
-    /// click.
+    /// and centered when it is not (scrolled away). A session in a disposable environment is always asked ([`begin`]).
+    /// Nothing happens for a session the store holds no row for, or that has any request in flight. Visible to the
+    /// crate for the screenshot goldens, which ask the question without a click.
     pub(crate) fn delete(
         &mut self,
         key: &str,
@@ -199,8 +214,39 @@ impl SessionList {
             return;
         };
         if let Some(ask) = begin(key, &target.row, target.skips_questions, false, cx) {
-            self.ask_about_row(key, ask, mark, confirm, window, cx);
+            let again = self.ask_again_at_row(window, cx);
+            self.ask_about_row(key, ask, mark, confirming(Some(again)), window, cx);
         }
+    }
+
+    /// How an environment Delete asked at a row asks the whole-lane question at the same row once the helm answers
+    /// "unasked" (`environment_delete`'s "Settling"): beside the row's menu button while the row is in view, centered
+    /// otherwise, as the first question was, and only while the session's commands are not refused. Its answer sends
+    /// the whole lane, which never asks again.
+    fn ask_again_at_row(&self, window: &Window, cx: &Context<Self>) -> AskAgain {
+        let (list, handle) = (cx.weak_entity(), window.window_handle());
+        Rc::new(move |frozen: Frozen, mark: Mark, cx: &mut App| {
+            let Some(target) = menu::actionable(&frozen.key, cx) else {
+                return false;
+            };
+            let list = list.clone();
+            handle
+                .update(cx, move |_, window, cx| {
+                    let key = frozen.key.clone();
+                    list.update(cx, |list, cx| {
+                        list.ask_about_row(
+                            &key,
+                            || question(&target.row, frozen.clone()),
+                            &mark,
+                            confirm,
+                            window,
+                            cx,
+                        )
+                    })
+                    .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        })
     }
 }
 
@@ -210,7 +256,10 @@ impl SessionList {
 /// anchored way, even for a session that has ended"), which `ask_when_nothing_alive` says. Skipped questions go ahead
 /// either way. When nothing needs asking, the Delete is sent at once with the guard of `row` as drawn, and there is
 /// nothing to ask. Otherwise nothing is sent, and what comes back builds the question to ask, whose answer goes to
-/// [`confirm`].
+/// [`confirm`] or [`confirming`].
+///
+/// A session in a disposable environment is always asked, skipped or not and alive or not, in the lane the hosts read
+/// picks now (`environment_delete`'s "Always asked").
 pub(crate) fn begin<'a>(
     key: &'a str,
     row: &'a SessionRow,
@@ -219,25 +268,53 @@ pub(crate) fn begin<'a>(
     cx: &mut App,
 ) -> Option<impl Fn() -> Question<Frozen> + 'a> {
     let guard = guard(row);
-    if skipped || (shows_nothing_alive(row) && !ask_when_nothing_alive) {
+    let environment = environment_delete::asked(row, cx);
+    let unasked = skipped || (shows_nothing_alive(row) && !ask_when_nothing_alive);
+    if environment.is_none() && unasked {
         send_delete(key, guard, cx);
         return None;
     }
-    Some(move || question(key, row, guard))
+    Some(move || {
+        question(
+            row,
+            Frozen {
+                key: key.to_owned(),
+                guard,
+                environment: environment.clone(),
+            },
+        )
+    })
 }
 
-/// A Delete question was confirmed: send the Delete it froze.
-pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
-    send_delete(&frozen.key, frozen.guard, cx);
+/// A Delete question was confirmed: send the Delete it froze, an environment Delete without a way to ask its whole
+/// lane again (for a question that is already the whole lane's, or a surface that cannot ask).
+pub(crate) fn confirm(frozen: Frozen, window: &mut Window, cx: &mut App) {
+    confirming(None)(frozen, window, cx);
+}
+
+/// The answer of a Delete question asked where `again` can ask the whole-lane question once more: it sends the Delete
+/// the question froze, the ordinary one or the environment one, and an environment Delete the helm answers "unasked"
+/// asks through `again` ([`environment_delete::AskAgain`]).
+pub(crate) fn confirming(
+    again: Option<AskAgain>,
+) -> impl FnOnce(Frozen, &mut Window, &mut App) + Clone + 'static {
+    move |frozen: Frozen, _: &mut Window, cx: &mut App| {
+        if frozen.environment.is_some() {
+            environment_delete::send(frozen, again, cx);
+        } else {
+            send_delete(&frozen.key, frozen.guard, cx);
+        }
+    }
 }
 
 /// The ordinary session Delete, `DELETE /api/sessions/{id}`, with the precondition the user's confirmation covered:
 /// `guard` is what that confirmation showed, so a session that became more alive since is refused rather than killed.
 /// Only a guard that asks for something adds its flag, as in the old app's `api::delete_url`.
 ///
-/// NOTE: The helm refuses this for a session in a disposable environment, whose Delete states what happens to the
-/// environment and asks for it with a flag of its own. That refusal is correct, not a bug; the area that ports
-/// environment sessions adds their Delete.
+/// The helm refuses this for a session in a disposable environment, whose Delete states what happens to the environment
+/// and asks for it with a flag of its own ([`environment_delete::command`]). The row's, the header's and the
+/// shortcut's Delete send that one instead; the bulk Delete still sends this one, and shows the helm's refusal on such
+/// a row, until the bulk environment work.
 pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, PathError> {
     let path = ApiPath::api(&["sessions", session])?;
     let flag = match guard {
@@ -275,8 +352,9 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
 /// trash cue played and its notice, if the reply carried one, put in the list's Delete notice band
 /// ([`delete_notice`]); a reset drops `then` with the Delete's own waiting.
 ///
-/// Every Delete this window sends goes through here, so this completion is the one place a Delete's result reaches the
-/// band: the row's, the header's, the shortcut's and the bulk Delete's alike.
+/// Every ordinary Delete this window sends goes through here, so this completion is the one place its result reaches
+/// the band: the row's, the header's, the shortcut's and the bulk Delete's alike. An environment Delete settles in
+/// `super::environment_delete`, which reaches the band its own way.
 pub(super) fn start(
     key: &str,
     guard: DeleteGuard,
@@ -294,9 +372,7 @@ pub(super) fn start(
     operations.update(cx, |operations, cx| {
         operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
             if let Outcome::Done(reply) = &settled.outcome {
-                cx.update_default_global::<DeletedHere, _>(|here, cx| {
-                    here.0.current(cx).insert(deleted);
-                });
+                record_deleted_here(&deleted, cx);
                 let outcome = decode(reply.as_ref());
                 crate::trash::cue::archived(outcome.as_ref(), cx);
                 // A checkout the host could not archive is never silent (SPEC.md, "Managed checkouts").
@@ -308,9 +384,18 @@ pub(super) fn start(
 }
 
 /// A Delete's success `reply`, the route's own answer, read as its outcome ([`SessionDeleteOutcome`]): `None` for no
-/// reply or a body that does not read as one. Decoded once per completion, for both the trash cue and the band.
-fn decode(reply: Option<&Value>) -> Option<SessionDeleteOutcome> {
+/// reply or a body that does not read as one. Decoded once per completion, for both the trash cue and the band, and
+/// for an environment Delete's count (`environment_delete`).
+pub(super) fn decode(reply: Option<&Value>) -> Option<SessionDeleteOutcome> {
     reply.and_then(|reply| serde_json::from_value::<SessionDeleteOutcome>(reply.clone()).ok())
+}
+
+/// Record that this window's Delete of `key` succeeded under the current UI session ([`deleted_here`]): from the
+/// ordinary Delete's completion, and from an environment Delete's, a 404 included (`environment_delete`).
+pub(super) fn record_deleted_here(key: &str, cx: &mut App) {
+    cx.update_default_global::<DeletedHere, _>(|here, cx| {
+        here.0.current(cx).insert(key.to_owned());
+    });
 }
 
 /// The sessions this window deleted under the current UI session: every Delete it sent that the helm did (a 2xx other
@@ -351,12 +436,27 @@ pub(crate) fn busy(key: &str, cx: &App) -> bool {
 /// The guard of `key`'s Delete while it is in flight, as the request carries it, or while it is held for a bulk Delete
 /// not sent yet, as the request will carry it; `None` when no Delete is. For the row's progress, and for the open
 /// session's pane once it draws the Delete over its terminal.
+///
+/// An environment Delete in flight counts too. It carries no guard, so the words come from the guard the session's row
+/// shows now ([`guard`]), as the old app chose its progress words from the status it drew; with no row, it reads as
+/// having nothing alive ("Deleting…").
 pub(crate) fn in_flight(key: &str, cx: &App) -> Option<DeleteGuard> {
     let operations = session::current_operations(cx)?;
-    let Work::Delete(guard) = operations.read(cx).in_flight(&OpKey::session(key))? else {
-        return None;
-    };
-    Some(guard)
+    match operations.read(cx).in_flight(&OpKey::session(key))? {
+        Work::Delete(guard) => Some(guard),
+        Work::EnvironmentDelete => Some(
+            session::current_store(cx)
+                .and_then(|store| {
+                    store
+                        .read(cx)
+                        .collections()
+                        .get::<SessionRow>(key)
+                        .map(guard)
+                })
+                .unwrap_or(DeleteGuard::NothingAlive),
+        ),
+        _ => None,
+    }
 }
 
 /// What a pending Delete says it is doing, from the guard it was sent with: stopping the agent, stopping only the
