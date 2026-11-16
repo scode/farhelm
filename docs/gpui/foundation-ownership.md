@@ -225,7 +225,11 @@ region that draws agent approval cards above every dialog but a raised one, once
 a listener when empty, per that function's docs. The terminal's tunnel warning raises its dialog's box (not its veil)
 above that region as it opens, through `layers::above_approval_region` from its own code (`terminal/tunnels.rs`), so a
 card that asks for it cannot cover it; that function's docs say why only that warning is raised, and raising another
-layer is a decision of this foundation's owner.
+layer is a decision of this foundation's owner. The sidebar draws the edge that hover help placed beside it sits
+against, once per window, through `layers::beside_edge` from its own code; a control asks for that placement through its
+hover help (`HoverHelp::beside` in the component layer), which only SPEC.md's session-row hovers and host progress card
+do, and only for a control drawn inside the column that draws the edge: the help is placed against the edge wherever the
+control is, where the old app checked that the control was inside the sidebar.
 
 Lint exceptions: 1: `deferred` and `anchored` in `layers::overlay`.
 

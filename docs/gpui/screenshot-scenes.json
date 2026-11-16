@@ -972,6 +972,11 @@
       "reference": null
     },
     {
+      "golden": "tooltip-beside",
+      "title": "A session row's help beside the sidebar, with its notch and the accent ring on the row",
+      "reference": null
+    },
+    {
       "golden": "text-input",
       "title": "A text input",
       "reference": null
