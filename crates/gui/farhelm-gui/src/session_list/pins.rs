@@ -29,10 +29,12 @@
 //!   leading pinned run, and only when an unpinned row follows ([`separator_after`]), so a pin the hold keeps lower down
 //!   does not move it.
 //!
-//! NOTE: Not ported: dragging pins by their grip (SPEC.md, "Hovering an eligible pinned row reveals a grip"), which is
-//! its own piece of work. The keyboard path, the row menu, is complete without it. The old noncompact identity line
-//! wrapped its title under the pin when the sidebar was narrow; here the title truncates beside the glyph as it does on
-//! every row, and the glyph's line box is held to its own size so that a pinned row is no taller than an unpinned one.
+//! Dragging a movable pin by its grip is the pointer's way to make the same move ([`super::pin_drag`]): it sends one
+//! Move through [`send_move`], with the pin it was dropped on as the neighbor.
+//!
+//! NOTE: The old noncompact identity line wrapped its title under the pin when the sidebar was narrow; here the title
+//! truncates beside the glyph as it does on every row, and the glyph's line box is held to its own size so that a
+//! pinned row is no taller than an unpinned one.
 
 use std::collections::{HashMap, HashSet};
 
@@ -145,6 +147,26 @@ pub(super) fn separator_after<'a>(shown: &[Listed<'a>]) -> Option<&'a str> {
 
 // ---- The menu items --------------------------------------------------------------------------------------------------
 
+/// Which side of the neighbor it names a move puts the pin: the pin-order route's `placement`. A Move up is always
+/// before the pin above and a Move down after the pin below; a drag names either side of any movable pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Placement {
+    /// Just above the neighbor.
+    Before,
+    /// Just below the neighbor.
+    After,
+}
+
+impl Placement {
+    /// The route's word for it.
+    pub(super) fn word(self) -> &'static str {
+        match self {
+            Placement::Before => "before",
+            Placement::After => "after",
+        }
+    }
+}
+
 /// The pin item's element id in a row's menu.
 const PIN_ITEM_ID: &str = "session-menu-pin";
 
@@ -222,11 +244,11 @@ impl Direction {
         }
     }
 
-    /// The route's placement word for this direction, relative to the neighbor it names.
-    fn placement(self) -> &'static str {
+    /// Where this direction puts the pin, relative to the neighbor it names.
+    fn placement(self) -> Placement {
         match self {
-            Direction::Up => "before",
-            Direction::Down => "after",
+            Direction::Up => Placement::Before,
+            Direction::Down => Placement::After,
         }
     }
 
@@ -293,7 +315,7 @@ pub(super) fn menu_items(
                         // Closing returns focus to this row's menu button, where SPEC.md keeps it after a Move,
                         // before the request goes out; the reply's new order moves the row and the focus with it.
                         list.close_menu(&key, window, cx);
-                        super::menu::send(&key, move_command(&key, &neighbor, direction), cx);
+                        send_move(&key, &neighbor, direction.placement(), cx);
                     });
                 }),
             )
@@ -321,14 +343,21 @@ fn pin_command(session: &str, pinned: bool) -> Result<Command, PathError> {
     ))
 }
 
-/// The session's Move up or Move down: `PUT /api/sessions/{id}/pin-order` naming the displayed `neighbor` by its full
-/// key and the placement relative to it. The helm refuses it when either is no longer pinned.
-fn move_command(session: &str, neighbor: &str, direction: Direction) -> Result<Command, PathError> {
+/// Send `key`'s move to `placement` of `neighbor`, a displayed movable pin, through the operation store, as the menu's
+/// Move up and Move down and a drop of the row's grip do: one request, under the session's key, with nothing drawn in
+/// advance (the helm pushes the new order before it replies, and the order hold lets it through at once).
+pub(super) fn send_move(key: &str, neighbor: &str, placement: Placement, cx: &mut gpui::App) {
+    super::menu::send(key, move_command(key, neighbor, placement), cx);
+}
+
+/// The session's move: `PUT /api/sessions/{id}/pin-order` naming the displayed `neighbor` by its full key and the
+/// placement relative to it. The helm refuses it when either is no longer pinned.
+fn move_command(session: &str, neighbor: &str, placement: Placement) -> Result<Command, PathError> {
     Ok(Command::new(
         Work::MovePin,
         Method::Put,
         ApiPath::api(&["sessions", session, "pin-order"])?,
-        Some(json!({ "neighbor": neighbor, "placement": direction.placement() })),
+        Some(json!({ "neighbor": neighbor, "placement": placement.word() })),
         "PUT /api/sessions/[session]/pin-order",
     ))
 }
@@ -518,10 +547,17 @@ mod tests {
             (pin.work(), pin.path().as_str()),
             (Work::Pin, "/api/sessions/a/pin")
         );
-        let moved = move_command("a", "b", Direction::Up).unwrap();
+        let moved = move_command("a", "b", Direction::Up.placement()).unwrap();
         assert_eq!(
             (moved.work(), moved.path().as_str()),
             (Work::MovePin, "/api/sessions/a/pin-order")
+        );
+        assert_eq!(
+            (
+                Direction::Up.placement().word(),
+                Direction::Down.placement().word()
+            ),
+            ("before", "after")
         );
     }
 

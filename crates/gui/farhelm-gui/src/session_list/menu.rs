@@ -201,6 +201,15 @@ impl RowLayers {
         !self.open.is_empty()
     }
 
+    /// Whether a question one of `key`'s commands asked is still open: while it is, the row's pin grip is not drawn
+    /// ([`super::pin_drag`]), as the old grip was disabled while its row confirmed something.
+    pub(super) fn asks(&mut self, key: &str, window: &Window, cx: &App) -> bool {
+        matches!(
+            self.still_open(key, window, cx),
+            Some((_, Opened::Question))
+        )
+    }
+
     /// The rows that opened a layer which may still be open, by key: a caller closing every row's menu needs only
     /// these, and [`SessionList::close_menu`] checks each with the layer manager.
     pub(super) fn opened_rows(&self) -> Vec<String> {

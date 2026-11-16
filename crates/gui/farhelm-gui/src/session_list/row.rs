@@ -54,7 +54,10 @@
 //!
 //! A pinned row draws the muted pin glyph just before its title, and its accessible name starts with "Pinned"
 //! ([`super::pins`]). A retired containerized session's title, and its accessible name after any "Pinned", follow
-//! "Retired container · " in every density, and its row draws no bell ([`super::retired`]).
+//! "Retired container · " in every density, and its row draws no bell ([`super::retired`]). A movable pin also draws
+//! its grip over the open control's leading gutter, and while it is dragged the row is lifted, and the pin a drop would
+//! land beside draws the drop line ([`super::pin_drag`]): the item's fill and shadow, and children after the open
+//! control so they paint over its hover fill and take the press first.
 //!
 //! A marked row ([`super::marking`]) draws a 3-pixel marker down its leading edge, in the accent fill, or in the fill's
 //! ink on the selected row, whose accent fill it keeps; an unselected marked row is tinted as well (`marked_bg`). The
@@ -219,13 +222,14 @@ impl Inks {
 }
 
 /// Draw `session`'s row, its animations at the list's `steps`, `menu`, its actions menu button, at its end, and `bell`,
-/// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `card` is the row's summary
-/// card ([`SummaryCard::of`]), its open control's hover help. `focus` is the row's own focus handle, which the list
-/// owns and registers with its list state: the row's item tracks it so it contains whichever of the row's controls
-/// holds focus, and never takes focus itself. `hover` is where the item records whether the pointer is over it, for the
-/// menu button's reveal. `marked` draws the marked look (see the module docs). `on_open` runs when the user activates
-/// the row, with the gesture the click's modifiers ask for; the keyboard's Enter and Space carry none, so they always
-/// open.
+/// its notification bell, before its age when it has one ([`crate::notices_bell::bell`]). `drag` is the row's part of a
+/// pin drag ([`super::pin_drag::paint`]): its grip, its lift, its drop line and its bounds' recorder. `card` is the
+/// row's summary card ([`SummaryCard::of`]), its open control's hover help. `focus` is the row's own focus handle,
+/// which the list owns and registers with its list state: the row's item tracks it so it contains whichever of the
+/// row's controls holds focus, and never takes focus itself. `hover` is where the item records whether the pointer is
+/// over it, for the menu button's reveal. `marked` draws the marked look (see the module docs). `on_open` runs when the
+/// user activates the row, with the gesture the click's modifiers ask for; the keyboard's Enter and Space carry none,
+/// so they always open.
 #[allow(
     clippy::too_many_arguments,
     reason = "one row's inputs, all drawn from by one function"
@@ -238,6 +242,7 @@ pub(crate) fn row(
     steps: Steps,
     menu: AnyElement,
     bell: Option<AnyElement>,
+    drag: super::pin_drag::RowPaint,
     card: Entity<SummaryCard>,
     focus: &FocusHandle,
     hover: RowHover,
@@ -394,6 +399,14 @@ pub(crate) fn row(
         .when(marked && !selected, |row| {
             row.bg(theme::color(palette.marked_bg))
         })
+        // After the selected and marked fills, which the lift replaces while it lasts. Tests find a lifted row by its
+        // debug selector, `session-pin-lifted-<key>`.
+        .when(drag.lifted, |row| {
+            let selector = format!("session-pin-lifted-{}", session.key);
+            row.bg(super::pin_drag::lifted_fill(palette, selected))
+                .shadow(super::pin_drag::lifted_shadow(palette))
+                .debug_selector(move || selector.clone())
+        })
         .child(
             div()
                 .flex()
@@ -411,6 +424,9 @@ pub(crate) fn row(
         ))
         .children(outcome::row_line(session.key, selected, cx))
         .children(replace_yolo::row_question(session.key, cx))
+        .children(drag.recorder)
+        .children(drag.grip)
+        .children(drag.drop_line)
         .children(marked.then(|| marker(session.key, selected, palette)))
         .into_any_element()
 }
