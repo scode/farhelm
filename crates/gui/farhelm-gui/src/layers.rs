@@ -5,12 +5,14 @@
 //! holds that one exemption. Its rules:
 //!
 //! - **Who opened what.** Opening a layer returns its [`LayerId`], and only that id closes it ([`close`]): nothing
-//!   closes a dialog, menu or confirmation it did not open. The user closes the topmost layer with Escape
-//!   ([`dismiss_top`]) or, for a popover, by clicking outside it; a popover that lets the pointer through is not one
-//!   the user answers, so both pass over it ([`Popover::passes_pointer`]). A dialog's own hook decides each dismissal
-//!   ([`Dialog::on_dismiss`]): it may keep the dialog open, as an editor with a save in flight does, or keep it open
-//!   and ask first, as an editor with an unsaved draft will. The one exception is a reset of the connection to the
-//!   helm, which closes everything ([`close_all`]) without asking.
+//!   closes a dialog, menu or confirmation it did not open. A layer also remembers the layer it was opened from, and
+//!   closing a layer closes the layers opened from it, not every layer above it: one opened from an approval card over
+//!   a dialog belongs to no layer, and stays when the dialog goes ([`close`] has the rule). The user closes the
+//!   topmost layer with Escape ([`dismiss_top`]) or, for a popover, by clicking outside it; a popover that lets the
+//!   pointer through is not one the user answers, so both pass over it ([`Popover::passes_pointer`]). A dialog's own
+//!   hook decides each dismissal ([`Dialog::on_dismiss`]): it may keep the dialog open, as an editor with a save in
+//!   flight does, or keep it open and ask first, as an editor with an unsaved draft will. The one exception is a reset
+//!   of the connection to the helm, which closes everything ([`close_all`]) without asking.
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
 //!   shows its result where it belongs instead. The one exception is SPEC.md's window-start dialogs (the Welcome card,
@@ -73,12 +75,13 @@
 //!   if they stood in the page right after its toggle (the control its [`Popover::returns_to`] names), and go on out of
 //!   it to the controls around the toggle. Focus leaving it, by Tab or by a press elsewhere, closes it and returns no
 //!   focus; focus on its toggle is not leaving, and neither is keyboard focus moving into a layer opened above it (a
-//!   press inside such a layer is still a press outside the popover, which closes it and everything above it). It is
-//!   SPEC.md's tunnel list: "Escape closes the list and returns focus to the pill; Tab follows its ordinary controls
-//!   and leaving the list closes it without reclaiming focus", and the old list closed on the pill's `focusout` once
-//!   focus was outside both the pill and the list. It holds focus, so it is the topmost layer that holds focus for
-//!   recovery and the menu highlight, and it counts for [`focus_layer_open`] (which says why). [`tab_through`] says how
-//!   its place in Tab order is kept, since GPUI paints every overlay, and so orders its controls, after the whole page.
+//!   press inside such a layer is still a press outside the popover, which closes it and the layers opened from it).
+//!   It is SPEC.md's tunnel list: "Escape closes the list and returns focus to the pill; Tab follows its ordinary
+//!   controls and leaving the list closes it without reclaiming focus", and the old list closed on the pill's
+//!   `focusout` once focus was outside both the pill and the list. It holds focus, so it is the topmost layer that
+//!   holds focus for recovery and the menu highlight, and it counts for [`focus_layer_open`] (which says why).
+//!   [`tab_through`] says how its place in Tab order is kept, since GPUI paints every overlay, and so orders its
+//!   controls, after the whole page.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it, and card
@@ -193,6 +196,14 @@ use tooltip::{Hovered, tooltip_card};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LayerId(u64);
 
+impl LayerId {
+    /// Whether this layer opened after `other`, and so, while both are open, sits above it: ids grow with every open,
+    /// are never reused, and a layer only ever joins the top of its window's stack, which nothing reorders.
+    fn opened_after(self, other: LayerId) -> bool {
+        self.0 > other.0
+    }
+}
+
 /// One window's overlays: its open layers, bottom to top, its two pills and its tooltip.
 pub struct LayerStack {
     window: AnyWindowHandle,
@@ -251,6 +262,11 @@ struct Layer {
     container: FocusHandle,
     /// What held focus when the layer opened, so closing it can return focus there.
     opener: Option<WeakFocusHandle>,
+    /// The layer it was opened from, decided as it opened ([`parent_for_new_layer`], or cleared by its opener through
+    /// [`opened_from_approval_card`]): closing that layer closes this one too ([`close`]). Always a layer that holds
+    /// focus and sits below this one, since layers only ever join the top of the stack; `None` for a layer opened from
+    /// the page or from an approval card.
+    parent: Option<LayerId>,
     /// Whether the layer took focus when it opened and holds it while open: every layer but a popover opened without
     /// a start ([`Popover::start`]), which Tab's trap, focus recovery and the focus return on close all pass over.
     takes_focus: bool,
@@ -907,17 +923,6 @@ impl Anchor {
     }
 }
 
-/// Whether a popover asked to let the pointer through (`asked`, [`Popover::passes_pointer`]) does: only when it never
-/// takes focus. One that does take focus fails closed and opens as an ordinary popover, since letting the pointer
-/// through drops the focus tracking its container needs (Tab's trap, focus recovery and the focus return on close
-/// all look for focus inside it) and the outside-press close a menu depends on.
-///
-/// Crate-visible only for its truth-table test in `layers_tests.rs`; that [`open_popover`] applies it is tested through
-/// [`open_popover_as_a_release_build`].
-pub(crate) fn lets_pointer_through(asked: bool, takes_focus: bool) -> bool {
-    asked && !takes_focus
-}
-
 /// Open `dialog` beside its anchor, on top of everything else, unless the user has moved on since `mark` or the anchor
 /// is no longer drawn.
 pub fn open_anchored(
@@ -955,35 +960,15 @@ pub fn open_anchored(
 }
 
 /// Open `popover` on top of everything else, unless the user has moved on since `mark`.
+///
+/// A popover that takes focus ([`Popover::start`]) and asks to let the pointer through ([`Popover::passes_pointer`]) is
+/// a mistake the builders allow: letting the pointer through drops the focus tracking its container needs (Tab's trap,
+/// focus recovery and the focus return on close all look for focus inside it) and the outside-press close a menu
+/// depends on. A debug build stops at the open that asks for it (the assertion below). A release build fails closed
+/// through the one-line normalization after the assertion, which drops the pass-through request whenever there is a
+/// start, so the popover opens as an ordinary one. No test runs a release build, so that line is held by review, not by
+/// a test.
 pub fn open_popover(
-    popover: Popover,
-    mark: &Mark,
-    window: &mut Window,
-    cx: &mut App,
-) -> Option<LayerId> {
-    debug_assert!(
-        !popover.passes_pointer || popover.start.is_none(),
-        "a popover that lets the pointer through never takes focus (Popover::passes_pointer)"
-    );
-    open_popover_unasserted(popover, mark, window, cx)
-}
-
-/// [`open_popover`] as a release build runs it, without the debug assertion, so a test can reach the fallback a
-/// release build relies on for a popover that takes focus and asks to let the pointer through: it opens as an ordinary
-/// popover ([`lets_pointer_through`]).
-#[cfg(test)]
-pub(crate) fn open_popover_as_a_release_build(
-    popover: Popover,
-    mark: &Mark,
-    window: &mut Window,
-    cx: &mut App,
-) -> Option<LayerId> {
-    open_popover_unasserted(popover, mark, window, cx)
-}
-
-/// What [`open_popover`] does once its debug assertion has passed. Split out so that a release build's fallback is
-/// tested through the same code that opens every popover, not only through [`lets_pointer_through`] on its own.
-fn open_popover_unasserted(
     popover: Popover,
     mark: &Mark,
     window: &mut Window,
@@ -998,7 +983,11 @@ fn open_popover_unasserted(
         traps_tab,
         passes_pointer,
     } = popover;
-    let passes_pointer = lets_pointer_through(passes_pointer, start.is_some());
+    debug_assert!(
+        !passes_pointer || start.is_none(),
+        "a popover that lets the pointer through never takes focus (Popover::passes_pointer)"
+    );
+    let passes_pointer = passes_pointer && start.is_none();
     let drawn = drawn(&anchor)?;
     open(
         anchor.kind(passes_pointer),
@@ -1047,6 +1036,7 @@ fn open(
     // A layer's container holds focus only as a fallback; Tab moves between its controls, never onto the container.
     let container = container.tab_stop(false);
     let opener = window.focused(cx).map(|focused| focused.downgrade());
+    let parent = parent_for_new_layer(stack.read(cx), window, cx);
     let id = stack.update(cx, |stack, cx| {
         let id = LayerId(stack.next_id);
         stack.next_id += 1;
@@ -1067,6 +1057,7 @@ fn open(
             view,
             container,
             opener,
+            parent,
             takes_focus: start.is_some(),
             traps_tab,
             returns_to,
@@ -1087,6 +1078,27 @@ fn open(
         focus::enter_layer(start, window, cx);
     }
     Some(id)
+}
+
+/// The layer a layer opening now is opened from, its parent, read from where focus is before the open moves it; the
+/// rules, in order, and why each is so, are [`close`]'s. Only a layer that holds focus is ever a parent: a popover that
+/// never takes focus never held the focus anything was opened from. This sees only focus; a card's opener that leaves
+/// focus where it was (macOS) clears the result afterwards ([`opened_from_approval_card`]).
+fn parent_for_new_layer(stack: &LayerStack, window: &Window, cx: &App) -> Option<LayerId> {
+    let holders = || stack.layers.iter().rev().filter(|layer| layer.takes_focus);
+    let holding = holders().find(|layer| {
+        layer.container.contains_focused(window, cx)
+            || layer
+                .place()
+                .is_some_and(|place| place.contains_focused(window, cx))
+    });
+    if let Some(layer) = holding {
+        return Some(layer.id);
+    }
+    if stack.focus_in_region(window, cx) {
+        return None;
+    }
+    holders().next().map(|layer| layer.id)
 }
 
 /// Close the popover `id`, which takes focus but lets Tab through ([`Popover::traps_tab`]), once focus has left it:
@@ -1180,18 +1192,40 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
     });
 }
 
-/// Close the layer `id`, if it is still open, and anything opened on top of it, unless `id` is a popover that never
-/// takes focus ([`Popover::start`] `None`): that one closes alone. If focus was inside what closed, it returns to what
-/// held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`], [`Popover::returns_to`]).
-/// A popover that never took focus is passed over: closing one moves no focus.
+/// Close the layer `id`, if it is still open, and every layer opened from it, directly or from one of those: its
+/// descendants. A layer another owner opened above it stays open, in its place in the stack, and so does that layer's
+/// raise above the approval region ([`above_approval_region`]), which is worked out from stack positions every frame.
+/// If focus was inside what closed, it returns to what held it when `id` opened, or where `id`'s opener said instead
+/// ([`Dialog::returns_to`], [`Popover::returns_to`]), unless a layer that holds focus is left open above it: then focus
+/// goes into that layer, as when its own focused control goes ([`focus::return_to`]'s recovery), since what `id`'s
+/// opener named sits under that layer now. A popover that never took focus is passed over: closing one moves no focus.
 ///
-/// A layer that takes focus owns what was opened over it: focus stays inside the topmost such layer ([`trap`]), so
-/// whatever opened over it was opened from inside it (a menu from one of a dialog's controls), and goes with it. A
-/// popover that never takes focus owns nothing above it. Focus was never in it, so a dialog over it was opened from the
-/// page or the layer beneath (a shortcut pressed while a floating list or a link's disclosure showed), and the
-/// popover's going (its owner closing it, a press outside it, its anchor no longer drawn) must leave that dialog open
-/// with focus inside it. A layer opened by a click on the popover's own content and anchored there still goes with it,
-/// since its anchor is no longer drawn; a centered dialog opened that way stays.
+/// Which layer a layer was opened from, its parent, is decided as it opens, from where focus is then, by the first of
+/// the focus rules below that applies; an opener's own word that it opened from an approval card (rule 2) then holds
+/// whatever the focus rules decided:
+///
+/// 1. The topmost layer that holds focus and contains the focused control, or whose toggle holds it (a popover that
+///    lets Tab through, [`Popover::traps_tab`]): focus stays inside the topmost such layer ([`trap`]), so a menu opened
+///    from one of a dialog's controls, or a question from a menu's item, was opened from there and goes with it.
+/// 2. No layer, when the layer was opened from an approval card ([`install_approval_region`]): its opener says so
+///    ([`opened_from_approval_card`]), or focus is on the card. The cards stay usable over a dialog, and what a card
+///    opens (its tunnel warning, the agent's Add host) is about that card's request, not about the dialog under it.
+///    SPEC.md: "Nothing closes a dialog, menu, popup list or confirmation that it did not open", so the dialog's owner
+///    closing it (a bulk question whose targets are gone) must leave the card's layer open. Focus alone cannot tell:
+///    on macOS a press on a card's button moves no focus, which stays in the dialog under the card, and rule 1 would
+///    make that dialog the parent.
+/// 3. The topmost layer that holds focus, when focus is anywhere else: nowhere, or on a control no frame has drawn yet
+///    (the start of a layer opened earlier in the same update), and the topmost such layer is the one the user is in.
+/// 4. No layer, when none holds focus: a layer opened from the page.
+///
+/// So only a layer that holds focus is ever a parent. A popover that never takes focus owns nothing: focus was never in
+/// it, so a dialog over it was opened from the page or the layer beneath (a shortcut pressed while a floating list or a
+/// link's disclosure showed), and the popover's going (its owner closing it, a press outside it, its anchor no longer
+/// drawn) must leave that dialog open with focus inside it. A layer opened by a click on the popover's own content and
+/// anchored there still goes with it, since its anchor is no longer drawn; a centered dialog opened that way stays.
+///
+/// Every close but [`close_all`] comes here, whatever its cause: the opener's own call, a subject or anchor going
+/// ([`Subject`]), Escape and a dialog's Close ([`dismiss`]), and a press outside a popover.
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     close_as(id, CloseCause::Closed, window, cx);
 }
@@ -1220,17 +1254,29 @@ enum CloseCause {
 fn close_as(id: LayerId, why: CloseCause, window: &mut Window, cx: &mut App) {
     close_taking(why, window, cx, |layers| {
         let index = layers.iter().position(|layer| layer.id == id)?;
-        Some(if layers[index].takes_focus {
-            layers.drain(index..).collect()
-        } else {
-            vec![layers.remove(index)]
-        })
+        // A parent always sits below the layers opened from it, so one pass up from `id` finds every descendant: each
+        // layer whose parent is already closing.
+        let mut closing = vec![id];
+        for layer in &layers[index + 1..] {
+            if layer.parent.is_some_and(|parent| closing.contains(&parent)) {
+                closing.push(layer.id);
+            }
+        }
+        // `extract_if` keeps stack order on both sides: the layers left keep theirs, and the closed ones come out bottom
+        // to top, as `close_taking` reads them.
+        Some(
+            layers
+                .extract_if(.., |layer| closing.contains(&layer.id))
+                .collect(),
+        )
     });
 }
 
-/// Take the layers `take` picks out of `window`'s stack, then return focus as the lowest of them that took it says.
-/// The one place layers leave the stack, so [`close`] and [`close_all`] share the focus return. `take` gets the stack's
-/// layers, bottom to top, and answers `None` when there is nothing to close.
+/// Take the layers `take` picks out of `window`'s stack, then return focus as the lowest of them that took it says, or
+/// into the layer that holds focus left open above them, if one is ([`close`]). The one place layers leave the stack,
+/// so [`close`] and [`close_all`] share the focus return. `take` gets the stack's layers, bottom to top, leaves the
+/// ones that stay in their order, and answers the ones it took, bottom to top, or `None` when there is nothing to
+/// close.
 fn close_taking(
     why: CloseCause,
     window: &mut Window,
@@ -1266,6 +1312,25 @@ fn close_taking(
         && (focus_was_inside || window.focused(cx).is_none())
         && let Some(bottom) = closed.iter().find(|layer| layer.takes_focus)
     {
+        // A layer that holds focus left open above the closed one was opened by another owner (an approval card's
+        // warning over a dialog whose owner closed it). Its veil covers whatever the closed layer would return focus
+        // to, so focus goes into it instead, through the recovery a return with nowhere to go makes: the closest
+        // control inside the topmost layer that holds focus.
+        let covered = stack
+            .read(cx)
+            .layers
+            .iter()
+            .any(|layer| layer.takes_focus && layer.id.opened_after(bottom.id));
+        if covered {
+            focus::return_to(
+                focus::ReturnTo::Opener,
+                None,
+                why == CloseCause::Dismissed,
+                window,
+                cx,
+            );
+            return;
+        }
         let returns_to = match &bottom.returns_to {
             focus::ReturnTo::HomeOnEscape if why == CloseCause::Dismissed => focus::ReturnTo::Home,
             focus::ReturnTo::HomeOnEscape => focus::ReturnTo::Opener,
@@ -1480,10 +1545,7 @@ pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
     stack.layers[top_dialog..]
         .iter()
         .any(|layer| layer.container.contains_focused(window, cx))
-        || stack
-            .region
-            .as_ref()
-            .is_some_and(|region| region.container.contains_focused(window, cx))
+        || stack.focus_in_region(window, cx)
 }
 
 /// The container of the topmost layer that holds focus, where focus recovers to when its holder disappears inside an
@@ -1827,6 +1889,36 @@ pub fn above_approval_region(id: LayerId, window: &mut Window, cx: &mut App) {
     });
 }
 
+/// Say that the open layer `id` was opened from an approval card, so that it belongs to no layer and no other layer's
+/// close takes it ([`close`], rule 2 of the parent rules). Every opener that a card's control calls makes this call
+/// in the same update as a successful open, before anything can close the layer under it: Tunnel and open's warning
+/// and the agent's Add host, together with every layer that add opens later in Add host's place (the setup
+/// confirmation, and Add host reopened after a refused setup), which `setup::Target::New::from_agent` marks. Those open
+/// after Add host has returned focus to its opener, which on macOS is the covered dialog's control, so the focus rules
+/// alone would make them that dialog's too. A debug build fails on an `id` that is no longer open: the call came too
+/// late, and in a release build it does nothing.
+///
+/// Focus cannot say where an open came from: on macOS a press on a card's button moves no focus
+/// (`focus::CLICK_FOCUSES_CONTROLS`), so a card pressed while a dialog is open leaves focus in that dialog, which would
+/// otherwise become the card layer's parent and take it along when its owner closes it. It is a call of its own rather
+/// than part of [`above_approval_region`]: the tunnel warning is raised however it opens (from Settings, where it does
+/// belong to Settings, as well as from a card), and the agent's Add host is not raised at all.
+pub fn opened_from_approval_card(id: LayerId, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    stack.update(cx, |stack, _| {
+        let layer = stack.layers.iter_mut().find(|layer| layer.id == id);
+        debug_assert!(
+            layer.is_some(),
+            "opened_from_approval_card for a layer no longer open: call it in the same update as the open"
+        );
+        if let Some(layer) = layer {
+            layer.parent = None;
+        }
+    });
+}
+
 /// Whether the topmost open layer is raised above the approval region ([`above_approval_region`]): for the tests of
 /// the tunnel warning's openers, which have no other way to see that their call was made.
 #[cfg(test)]
@@ -1848,6 +1940,13 @@ impl LayerStack {
             .iter()
             .position(|layer| layer.above_region)
             .unwrap_or(self.layers.len())
+    }
+
+    /// Whether focus is on one of the approval region's controls (an agent approval card's).
+    fn focus_in_region(&self, window: &Window, cx: &App) -> bool {
+        self.region
+            .as_ref()
+            .is_some_and(|region| region.container.contains_focused(window, cx))
     }
 }
 

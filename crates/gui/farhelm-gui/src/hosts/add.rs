@@ -908,7 +908,8 @@ impl AddHostDialog {
                 if !setup::asks_first(cx) && !self.from_agent {
                     // The close is queued first: a submission refused at once (a launch in flight) reopens Add host
                     // on a later turn, which must come after this dialog's close, or the close would take the
-                    // reopened dialog with it (closing a layer closes everything above it).
+                    // reopened dialog with it (closing a layer closes the layers opened from it, and the reopened
+                    // dialog would be one).
                     self.close_later(None, window, cx);
                     setup::submit(offer, window, cx);
                 } else if focus::has_moved_on(&mark, cx) {
@@ -936,7 +937,7 @@ impl AddHostDialog {
 
     /// Close the dialog from the probe's completion, which has no window at hand: once the completion has returned, in
     /// `window` if it is still open. With `confirm`, then ask the setup confirmation for it in the dialog's place,
-    /// through its mark. Closed first: closing a layer also closes everything opened above it, and focus goes back to
+    /// through its mark. Closed first: closing a layer also closes the layers opened from it, and focus goes back to
     /// the opener before the question records where to return it.
     fn close_later(
         &mut self,
