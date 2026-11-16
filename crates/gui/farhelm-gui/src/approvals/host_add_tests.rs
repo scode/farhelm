@@ -5,7 +5,8 @@
 //! They matter because the dialog is the only place an agent's host add is approved: opening it must approve nothing,
 //! Allow must carry what the user left in the field rather than what the agent asked for, nothing may contact the
 //! destination before the helm accepted the Allow, and a Cancel must tell the agent no. Each would otherwise let an
-//! agent add a host, or dial one, without the user's answer.
+//! agent add a host, or dial one, without the user's answer. The last section checks that what opens in the dialog's
+//! place belongs to the request's card, as the dialog does, so that an unrelated dialog's close does not take it along.
 //!
 //! The dialog is opened the way a card's action will open it: from a control of the test's own root view, with a mark
 //! taken in the same update, calling [`open_for_agent`] with an [`AgentRequest`] built from the pushed request. The
@@ -27,16 +28,18 @@ use serde_json::{Value, json};
 use super::answers::{self, ARM_DELAY, Arming, Sent};
 use super::host_add::{AgentRequest, NOT_CONFIRMED};
 use crate::components::{Button, HoverHelp, Role};
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::host_text::tests::painted_words;
 use crate::hosts::add::tests::{alias, alias_focused, destination, error_line, type_text};
 use crate::hosts::add::{NotOpened, open_for_agent};
+use crate::hosts::setup;
 use crate::hosts::tests::{connected, host, hosts, start_work};
+use crate::layers::LayerId;
 use crate::notices::{self, Notice};
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
-    self, any_open, click, focused, focused_id, frame, keys, label, meta, one_command, settle,
-    started,
+    self, any_open, click, focused, focused_id, frame, handle, is_open, keys, label, meta,
+    one_command, settle, started,
 };
 use crate::{layers, root};
 
@@ -729,4 +732,141 @@ fn the_dialog_closes_once_the_cards_answer_ends_its_request(cx: &mut TestAppCont
         !any_open(f.cx),
         "the card's answer settled: the dialog closed"
     );
+}
+
+// ---- Layers opened in Add host's place ------------------------------------------------------------------------------
+
+/// The setup offer an add's probe leads to, for an agent's add (`from_agent`) or an ordinary one: [`plan_reply`]'s plan
+/// for the requested destination and alias, under the new host add's key, Add host's opener the card's control, and a
+/// mark taken now.
+fn offer(f: &mut Fixture<'_>, from_agent: bool) -> setup::Offer {
+    let steps = serde_json::from_value(plan_reply()["steps"].clone()).expect("the steps decode");
+    let opener = f.opener.clone();
+    f.cx.update(|_, cx| setup::Offer {
+        key: OpKey::new_host_add(),
+        probe_id: "p-1".to_owned(),
+        confirmation: "Farhelm will set up ops@new.example".to_owned(),
+        steps,
+        target: setup::Target::New {
+            destination: "ops@new.example".to_owned(),
+            alias: "newbox".to_owned(),
+            opener,
+            from_agent,
+        },
+        mark: Mark::take(cx),
+    })
+}
+
+/// Open a dialog unrelated to the add, with its one control focused, and no press or key: where focus is on macOS when
+/// a layer opens in Add host's place after Add host returned focus to its opener, if that opener was a control of a
+/// dialog the card was pressed over (a press there moves no focus).
+fn unrelated_dialog(f: &mut Fixture<'_>) -> LayerId {
+    let inside = handle(f.cx);
+    let (dialog, _, _) =
+        test_support::open_dialog(f.cx, vec![("unrelated-control", inside.clone())], &inside);
+    assert!(
+        focused(f.cx, &inside),
+        "premise: the unrelated dialog holds focus"
+    );
+    dialog
+}
+
+/// Close the layer `dialog` as its owner would on a data change, and settle.
+fn owner_closes(f: &mut Fixture<'_>, dialog: LayerId) {
+    f.cx.update(|window, cx| layers::close(dialog, window, cx));
+    settle(f.cx);
+}
+
+/// Why this matters: SPEC.md, "Nothing closes a dialog, menu, popup list or confirmation that it did not open". An
+/// agent's setup confirmation opens in the place of Add host, which belongs to the request's card and to no dialog, so
+/// an unrelated dialog under it must not take it along when that dialog's owner closes it. On macOS the focus rules
+/// alone would make that dialog its parent (see [`unrelated_dialog`]). The card's Add host does not open over another
+/// dialog today ([`NotOpened::AnotherDialog`]), so the test asks the confirmation directly in that state. An ordinary
+/// add's confirmation keeps the focus rules, which also shows that it is the agent's add, not something else, that
+/// keeps the confirmation open.
+///
+/// Specified, under the macOS click rule, with an unrelated dialog holding focus each time: an ordinary add's
+/// confirmation opens over the dialog and closes with it; an agent's add's confirmation opens over it, stays open when
+/// the dialog's owner closes it, and its Set up still sends the plan.
+#[gpui::test]
+fn an_agents_setup_confirmation_outlives_an_unrelated_dialog_under_it(cx: &mut TestAppContext) {
+    let mut f = fixture(cx, Vec::new());
+    f.cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    for from_agent in [false, true] {
+        let dialog = unrelated_dialog(&mut f);
+        let offer = offer(&mut f, from_agent);
+        f.cx.update(|window, cx| setup::confirm(offer, window, cx));
+        settle(f.cx);
+        assert!(
+            painted(f.cx).contains("Set up host · ops@new.example"),
+            "premise: the confirmation opened (agent's add: {from_agent})"
+        );
+        owner_closes(&mut f, dialog);
+        assert!(!is_open(f.cx, dialog), "premise: the dialog closed");
+        if !from_agent {
+            assert!(
+                !any_open(f.cx),
+                "an ordinary add's confirmation went with the dialog"
+            );
+            continue;
+        }
+        assert!(
+            painted(f.cx).contains("Set up host · ops@new.example"),
+            "an agent's add's confirmation stayed open"
+        );
+        assert!(f.helm.commands().is_empty(), "nothing was sent");
+        click(f.cx, "prompt-confirm");
+        let (_, body) = one_command(&mut f.helm, Method::Post, "/api/hosts/provision");
+        assert_eq!(body, json!({ "probe_id": "p-1" }), "Set up sent the plan");
+    }
+}
+
+/// Why this matters: the same rule for Add host reopened after the helm refused an agent's setup. It is the request's
+/// Add host again ([`crate::hosts::add::Seed`]'s `from_agent`), opened once the confirmation has closed, so the focus
+/// rules alone would make a dialog under the card its parent on macOS, as for the confirmation. A dialog the user opens
+/// while the setup is out means they moved on, which reopens nothing, so the test opens the unrelated dialog without
+/// a press. An ordinary add's reopened Add host keeps the focus rules, the contrast that shows the agent's add is what
+/// keeps the dialog open.
+///
+/// Specified, under the macOS click rule, for an ordinary add and then an agent's: the setup goes out, an unrelated
+/// dialog opens and holds focus, and the helm refuses the setup; Add host reopens over the dialog with the destination
+/// and the helm's words. The ordinary add's closes with the dialog. The agent's add's stays open when the dialog's
+/// owner closes it, and its Add still probes the destination.
+#[gpui::test]
+fn an_agents_add_host_reopened_after_a_refused_setup_outlives_an_unrelated_dialog_under_it(
+    cx: &mut TestAppContext,
+) {
+    let mut f = fixture(cx, Vec::new());
+    f.cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    for from_agent in [false, true] {
+        let offer = offer(&mut f, from_agent);
+        f.cx.update(|window, cx| setup::submit(offer, window.window_handle(), cx));
+        settle(f.cx);
+        let (provision, _) = one_command(&mut f.helm, Method::Post, "/api/hosts/provision");
+        let dialog = unrelated_dialog(&mut f);
+        f.helm
+            .reply(provision, 409, Some(json!("the plan was already used")));
+        settle(f.cx);
+        assert_eq!(
+            (destination(f.cx), error_line(f.cx)),
+            (
+                "ops@new.example".to_owned(),
+                Some("the plan was already used".to_owned())
+            ),
+            "premise: Add host reopened with the destination and the helm's words (agent's add: {from_agent})"
+        );
+        assert!(is_open(f.cx, dialog), "premise: over the unrelated dialog");
+        owner_closes(&mut f, dialog);
+        assert!(!is_open(f.cx, dialog), "premise: the dialog closed");
+        if !from_agent {
+            assert!(
+                !any_open(f.cx),
+                "an ordinary add's Add host went with the dialog"
+            );
+            continue;
+        }
+        assert!(any_open(f.cx), "an agent's add's Add host stayed open");
+        click(f.cx, "add-host-submit");
+        one_command(&mut f.helm, Method::Post, "/api/hosts/probe");
+    }
 }

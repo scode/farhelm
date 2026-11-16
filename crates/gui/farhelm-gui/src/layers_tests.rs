@@ -4223,8 +4223,9 @@ fn card_scene(
 ///
 /// Premises, under Linux's click rule: a dialog holds focus; a second dialog opened from its control (a question it
 /// asks) takes focus; a press on the card's Allow puts focus there with both open; a dialog opened from Allow (standing
-/// in for the warning, whose real opener still refuses to open over a dialog) is raised above the approval region; a
-/// menu opened from that dialog's control takes focus; the frame draws the card, then the raised dialog, then the menu.
+/// in for the warning, whose own tests over a dialog are the approvals feature's) is raised above the approval region;
+/// a menu opened from that dialog's control takes focus; the frame draws the card, then the raised dialog, then the
+/// menu.
 /// (A menu cannot stand in for the question: the press that puts focus on the card is outside it, and closes it.)
 /// Specified: closing the first dialog closes it and its question; the raised dialog and its menu stay open, focus stays
 /// on the menu's item, and the frame still draws the card, then the raised dialog, then the menu; Escape closes the menu
@@ -4516,4 +4517,54 @@ fn a_layer_opened_before_the_one_under_it_is_drawn_belongs_to_it(cx: &mut TestAp
         focused(cx, &scene.page),
         "and focus returned to the page control the dialog was opened from"
     );
+}
+
+// ---- The approval region: whether a raised layer is open ------------------------------------------------------------
+
+/// Whether any layer raised above the approval region is open, for an approval card's Tunnel and open, which asks it so
+/// that it never stacks a second tunnel warning (today the one raised layer) over one already up from any opener.
+fn raised_open(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| layers::above_approval_region_open(window, cx))
+}
+
+/// Why this matters: a card's Tunnel and open asks the tunnel warning only while no raised layer is open, so the query
+/// must see a raised layer while it is open, not mistake an ordinary dialog for one, and forget it once it closes, or
+/// the card would stack warnings or refuse every later press.
+///
+/// The query is about the raised layer itself, wherever it sits, not about which layer is on top.
+///
+/// Specified: with nothing open the query is false; an ordinary dialog leaves it false; a second dialog raised above
+/// the approval region makes it true; a menu opened from the raised dialog's control, which is not raised and now sits
+/// on top, leaves it true; closing the raised dialog, which takes its menu, makes it false again, with the ordinary
+/// dialog still open.
+#[gpui::test]
+fn whether_a_layer_raised_above_the_approval_region_is_open(cx: &mut TestAppContext) {
+    let (cx, scene) = CloseScene::open(cx);
+    assert!(!raised_open(cx), "nothing open");
+    let in_dialog = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("ordinary", in_dialog.clone())], &in_dialog);
+    assert!(!raised_open(cx), "an ordinary dialog is not raised");
+    let in_raised = handle(cx);
+    let (raised, _, _) = open_dialog(cx, vec![("raised", in_raised.clone())], &in_raised);
+    cx.update(|window, cx| layers::above_approval_region(raised, window, cx));
+    settle(cx);
+    assert!(raised_open(cx), "a raised dialog is open");
+    let item = handle(cx);
+    open_menu(cx, scene.anchor(), vec![("item", item.clone())]);
+    let top_raised = cx.update(|window, cx| layers::top_is_above_approval_region(window, cx));
+    assert!(
+        focused(cx, &item) && !top_raised,
+        "premise: the unraised menu opened on top"
+    );
+    assert!(
+        raised_open(cx),
+        "the raised dialog under the menu still counts"
+    );
+    cx.update(|window, cx| layers::close(raised, window, cx));
+    settle(cx);
+    assert!(
+        !is_open(cx, raised) && is_open(cx, dialog),
+        "premise: the raised dialog closed, and only it"
+    );
+    assert!(!raised_open(cx), "no raised layer is left open");
 }
