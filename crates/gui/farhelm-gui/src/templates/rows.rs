@@ -13,8 +13,8 @@
 //! query is the list's rule, made over the rows this returns, which keep the store's order and the names unchanged.
 //!
 //! The drawing and the words are the caller's (the sidebar draws the switcher, in the old switcher's words). The rest of
-//! this module is what the switcher needs from the templates side for its section and its Quick launch row: what a
-//! pick does, and the row's label and action.
+//! this module is what the switcher needs from the templates side for its section, its Quick launch row and its
+//! templates-only mode, the Cmd+J list: what a pick does in each, and the row's label and action.
 
 use farhelm_proto::launcher::LaunchTemplate;
 use gpui::{App, Window};
@@ -90,6 +90,22 @@ pub fn rows(filter: &str, cx: &App) -> Result<Vec<Row>, HostSentence> {
 
 /// A pick in the switcher's templates section ([`dispatch::pick_from_switcher`], which has its contract).
 pub use super::dispatch::pick_from_switcher;
+
+/// A pick in the Cmd+J template list: quick launch the template named `name`, as the store holds it now (SPEC.md:
+/// "Enter starts the highlighted template through the fresh quick-launch path; clicking a row does the same"). It
+/// launches unseen when the template is complete, opens New with its choices applied and the needs-more-choices banner
+/// when it is not, and opens New with a refusal when no template has that name any more ("A pick uses the template
+/// currently holding that name ...; a name missing from the current catalog shows a preparation error in New"). It does
+/// nothing while a dialog holds the keyboard or the launcher is busy, so call it once the list has closed, from the
+/// handler of the user's pick, as for [`pick_from_switcher`].
+pub fn launch_from_list(name: &str, window: &mut Window, cx: &mut App) {
+    dispatch::dispatch(
+        Origin::TemplateList,
+        &[Reference::Name(name.to_owned())],
+        window,
+        cx,
+    );
+}
 
 /// The Quick launch row's label: "Quick launch: " and the marked template's name (host text, as stored, whether or not
 /// a template still has it), or "Mark a template" when none is marked, in the old words. The row draws the ⚡ chord

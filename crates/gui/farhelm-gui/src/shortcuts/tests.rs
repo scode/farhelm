@@ -24,7 +24,8 @@ use super::{Chord, KeyboardShortcuts, Keys, Name, Row, sections, wording};
 use crate::actions::{
     self, BeginSequence, CONTEXT, DecreaseTerminalTextSize, DeleteSession,
     IncreaseTerminalTextSize, KeyOwner, NewSession, PHYSICAL_KEYS, QuickLaunch, QuickSwitcher,
-    RenameSession, ShowKeyboardShortcuts, TERMINAL_KEYS, THIS_PLATFORM, TemplateNumberKey,
+    RenameSession, ShowKeyboardShortcuts, TERMINAL_KEYS, THIS_PLATFORM, TemplateList,
+    TemplateNumberKey,
 };
 use crate::session_list::tests::{listing, preferences_state, session};
 use crate::templates::shortcuts::Bindings;
@@ -245,10 +246,6 @@ enum Runs {
     Action(Box<dyn Action>),
     /// Every template number key, one row of [`PHYSICAL_KEYS`] per digit (the generic "0–9" row).
     NumberKeys,
-    /// An app shortcut whose feature declares no action yet (the template list), so only its app row in
-    /// [`TERMINAL_KEYS`], named by the row's `what`, reserves the chord. When the feature lands with an action, its
-    /// row here moves to [`Runs::Action`], as quick launch's did.
-    Reserved(&'static str),
 }
 
 /// What the row naming `name` runs. Panics on a row this test has no answer for, so a new row cannot slip past it.
@@ -264,7 +261,7 @@ fn runs(name: &Name) -> Runs {
         Name::Words("Smaller terminal text") => action(&DecreaseTerminalTextSize),
         Name::Words("Larger terminal text") => action(&IncreaseTerminalTextSize),
         Name::Words("Launch a numbered template") => Runs::NumberKeys,
-        Name::Words("Templates") => Runs::Reserved("open the template list"),
+        Name::Words("Templates") => action(&TemplateList),
         // The ⚡ chord inside an armed sequence is the same chord: the sequence's key rules read it from the constants
         // the binding is built from.
         Name::QuickLaunch(_) | Name::Words("In a sequence: add the ⚡ template") => {
@@ -391,19 +388,6 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
                 );
             }
         }
-        Runs::Reserved(reserved) => {
-            // By the row's own description, not by the chord: any app row holding the chord would do otherwise, the
-            // quick switcher's included.
-            let row = TERMINAL_KEYS
-                .iter()
-                .find(|row| row.owner == KeyOwner::App && row.what == reserved)
-                .unwrap_or_else(|| panic!("{what}: no app shortcut row is \"{reserved}\""));
-            assert!(
-                row.chord(platform)
-                    .is_some_and(|bound| same(&keystroke(chord), bound)),
-                "{what} on {platform:?}: the \"{reserved}\" row has another chord"
-            );
-        }
     }
 }
 
@@ -414,8 +398,7 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
 /// the action its row names. A shortcut matched by position agrees with its physical-key row (key and exact
 /// modifiers). Any other shortcut is bound to its action by this platform's installed keymap in Farhelm's context, and,
 /// for the other platform, its chord is that action's app-shortcut row in the terminal key table (New, the Mac's alone,
-/// through its binding function). Quick launch is checked as bound to its action alone and inside a sequence. The
-/// template list, which has no action yet, is the chord of its own app row there, found by that row's description.
+/// through its binding function). Quick launch is checked as bound to its action alone and inside a sequence.
 #[gpui::test]
 fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppContext) {
     test_support::install(cx);

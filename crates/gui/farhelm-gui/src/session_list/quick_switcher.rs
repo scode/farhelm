@@ -78,6 +78,22 @@
 //! - **The templates hint.** A quiet section above the footer names `tl:`: "Templates" and "Type tl: to search
 //!   templates. Picking one opens New with it applied." normally, and in the templates section only "Picking a
 //!   template opens New with it applied; nothing launches yet.", in the old words.
+//! - **The template list (Cmd+J).** The same dialog in its templates-only mode ([`Mode::Templates`]; SPEC.md, the
+//!   Cmd+J paragraph), as the old app's `SwitcherMode::Templates` was: opened by its own chord under the same refusals
+//!   and one more, any launcher held out of sight ([`open`] says which), with the same focus, Escape and outside-press
+//!   rules, and named "Template launcher". It sends no session read and shows no session, New or Quick launch row: the
+//!   whole query, with no prefix, filters templates as `tl:` does, and each row adds the template's ⚡ and number-key
+//!   chords to its name and summary. A template named exactly the trimmed query (case-sensitively) is selected over an
+//!   earlier match until the arrows choose another row, so typing a whole name and pressing Enter starts that template
+//!   even when another name contains it. The selection is kept as a template's name, not a row's place, because the rows
+//!   follow the templates the helm pushes while the list is open and a pick launches unseen. What is drawn selected is
+//!   latched on every frame, so a push that adds or removes a row never moves the choice to another template, and a
+//!   chosen template that goes stays chosen, drawn on no row ([`QuickSwitcher::chosen`]). A pick closes the list, then
+//!   quick launches the chosen name through [`template_rows::launch_from_list`]: it starts unseen, or opens New with the
+//!   template applied when it needs more choices, or with a refusal when no template has that name any more (SPEC.md:
+//!   "a name missing from the current catalog shows a preparation error in New"), even when the list then says "No
+//!   templates match". With nothing chosen, Enter does nothing. The hint says "Enter starts the highlighted template. A
+//!   partial template opens New to complete it."
 //!
 //! The card is drawn here rather than in the shared dialog frame, because the old switcher had neither the frame's
 //! title header nor its answer footer: one padded column on the dialog surface, whose results list is the only part
@@ -86,6 +102,8 @@
 //!
 //! NOTE: The old layout for windows narrower than 600 pixels is not ported, because the window's minimum width is 720.
 
+#[cfg(test)]
+mod template_list_tests;
 #[cfg(test)]
 mod tests;
 
@@ -111,11 +129,11 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::launcher::entry;
 use crate::layers::{self, Dialog, DialogPlacement, LayerId};
 use crate::session;
-use crate::templates::QUICK_LAUNCH_SHORTCUT_NAME;
 use crate::templates::rows::{self as template_rows, Row as TemplateRow};
 use crate::templates::summary;
+use crate::templates::{self, QUICK_LAUNCH_SHORTCUT_NAME};
 use crate::theme::{self, Palette, metrics};
-use crate::{assets, operations, ticker};
+use crate::{assets, operations, shortcuts, ticker};
 
 // ---- Layout: the old `.quick-switcher-*` rules ------------------------------------------------------------------------
 
@@ -165,6 +183,13 @@ pub(crate) const TEMPLATE_ROW_ID: &str = "quick-switcher-template-";
 /// A template row's hover help, the old section's `data-tooltip`.
 pub(crate) const TEMPLATE_ROW_HELP: &str =
     "Open New with this template applied; nothing launches yet";
+
+/// A template row's hover help in the template list, the old templates-only mode's `data-tooltip`: there a pick starts
+/// the template rather than opening New.
+pub(crate) const TEMPLATE_LIST_ROW_HELP: &str = "Start a session from this template";
+
+/// `.quick-switcher-template-keys`: the gap between a template row's key chips.
+const KEY_CHIP_GAP: Pixels = px(5.);
 
 // ---- Matching -----------------------------------------------------------------------------------------------------------
 
@@ -229,17 +254,42 @@ pub(crate) fn ranked(sessions: &[SessionRow], query: &str) -> Vec<usize> {
 
 // ---- Opening ------------------------------------------------------------------------------------------------------------
 
-/// The shortcut ([`crate::actions::QuickSwitcher`]): open the switcher on top of the window's page. The main view calls
-/// it for the action wherever focus is, and the action is taken whatever this does, as `ONCE_PER_PRESS` requires.
-/// `list` is the window's session list, which a pick asks to show what it opened.
+/// Which list the dialog is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// The quick switcher (Cmd+K): sessions, the New or Quick launch row, and templates for a `tl:` query.
+    Sessions,
+    /// The template list (Cmd+J): templates only, filtered by the whole query, a pick starting the template (the module
+    /// docs' "The template list").
+    Templates,
+}
+
+/// The shortcuts ([`crate::actions::QuickSwitcher`] for the switcher, [`crate::actions::TemplateList`] for the template
+/// list, as `mode` says): open the dialog on top of the window's page. The main view calls it for the action wherever
+/// focus is, and the action is taken whatever this does, as `ONCE_PER_PRESS` requires. `list` is the window's session
+/// list, which a pick asks to show what it opened.
 ///
 /// Does nothing while a dialog or menu holds the keyboard (SPEC.md: "It does nothing while another modal is open"; a
 /// popover that never takes focus, such as a terminal link's destination display, is not a modal), while the window is
-/// inert, or before the snapshot has brought the helm's preferences.
-pub(crate) fn open(list: WeakEntity<super::SessionList>, window: &mut Window, cx: &mut App) {
+/// inert, or before the snapshot has brought the helm's preferences. For the template list SPEC.md names the modals:
+/// "New, Clone, Replace with and hidden quick-launch preparation". The first three are dialogs. The last is asked of the
+/// launcher ([`entry::quick_launch_available`]), which refuses whenever its slot holds a launcher out of sight: a quick
+/// launch being prepared, a launch waiting for its reply, or a refused launch waiting behind its notice. That is the old
+/// key listener's "preparing" context, which kept Cmd+J from opening in all three. The same answer also refuses during
+/// a host change in flight, which is new: the old list opened then and only its pick was refused.
+pub(crate) fn open(
+    list: WeakEntity<super::SessionList>,
+    mode: Mode,
+    window: &mut Window,
+    cx: &mut App,
+) {
     // A key pressed inside a layer reaches the main view's ground too, since the overlay is drawn inside it; this is
     // what keeps a second switcher from opening over the first, or over any other dialog or menu.
-    if layers::focus_layer_open(window, cx) {
+    let launcher_held = match mode {
+        Mode::Sessions => false,
+        Mode::Templates => !entry::quick_launch_available(cx),
+    };
+    if layers::focus_layer_open(window, cx) || launcher_held {
         return;
     }
     let Some(current) = session::connection(cx).and_then(|c| c.read(cx).session().cloned()) else {
@@ -249,7 +299,7 @@ pub(crate) fn open(list: WeakEntity<super::SessionList>, window: &mut Window, cx
         return;
     }
     let mark = Mark::take(cx);
-    let switcher = cx.new(|cx| QuickSwitcher::new(list, window, cx));
+    let switcher = cx.new(|cx| QuickSwitcher::new(list, mode, window, cx));
     let start = switcher.read(cx).input.focus_handle(cx);
     // Near the window's top, and closed by a press outside the card, as the old switcher was: the layer manager's
     // placement for exactly this dialog. The press goes the way Escape goes, so focus returns to the opener.
@@ -258,7 +308,8 @@ pub(crate) fn open(list: WeakEntity<super::SessionList>, window: &mut Window, cx
             view: switcher.clone().into(),
             container: cx.focus_handle(),
             start,
-            // Nothing it shows can go away under it: it searches a snapshot of its own.
+            // Nothing it shows can go away under it: it searches a snapshot of its own, or the templates the store holds
+            // as it draws.
             subject: None,
             // None, because the card itself never takes focus (below), so Enter on it could never be pressed.
             main_action: None,
@@ -278,7 +329,11 @@ pub(crate) fn open(list: WeakEntity<super::SessionList>, window: &mut Window, cx
     switcher.update(cx, |switcher, _| switcher.layer = Some(layer));
     #[cfg(test)]
     cx.set_global(tests::Opened(switcher.downgrade()));
-    read_sessions(switcher.downgrade(), cx);
+    match mode {
+        Mode::Sessions => read_sessions(switcher.downgrade(), cx),
+        // The template list lists no session, so it reads none; its read stays loading, unseen.
+        Mode::Templates => {}
+    }
 }
 
 /// Send the switcher's one read, `GET /api/sessions?sort=activity`, through the shared read helper
@@ -328,16 +383,26 @@ enum Read {
 /// The open switcher: its field, its read, which row is selected, and its layer.
 ///
 /// Its rows, in arrow-key order, are the matches and then the New row (something typed) or the Quick launch row
-/// (nothing typed); for a `tl:` query, the templates alone ([`Rows`]).
+/// (nothing typed); for a `tl:` query, and always in the template list, the templates alone ([`Rows`]).
 pub(crate) struct QuickSwitcher {
     /// The window's session list, told about every pick so that it can show the session the pick opened.
     list: WeakEntity<super::SessionList>,
+    /// The switcher or the template list, for the dialog's life.
+    mode: Mode,
     /// The search field. Its text is the query; the switcher keeps no copy of it.
     input: TextInputState,
     read: Read,
     /// The selected row's position among the rows (the matches, then the New row), kept within them wherever it is
-    /// used ([`Rows::selected`]), since the rows change with every edit and when the read arrives.
+    /// used ([`Rows::selected`]), since the rows change with every edit and when the read arrives. The switcher's
+    /// alone: the template list keeps a name instead ([`QuickSwitcher::chosen`]).
     selected: usize,
+    /// The template list's choice, by name: the template an edit left selected (the one named exactly the query, or
+    /// else the first listed), the one the arrows moved to, or the one last drawn selected (latched on each frame).
+    /// `None` while nothing has been listed since the last edit.
+    choice: Option<String>,
+    /// Whether the arrows have moved the template list's choice since the last edit, which ends its preference for an
+    /// exact name.
+    arrowed: bool,
     /// The results list's scroll position, which follows the selected row.
     scroll: ScrollHandle,
     /// The running pulse's ticks, held exactly while the window is active and a listed row pulses, and worked out at
@@ -350,23 +415,39 @@ pub(crate) struct QuickSwitcher {
 }
 
 impl QuickSwitcher {
-    /// A switcher for `list`, loading, with an empty field and the first row selected.
+    /// A switcher for `list` in `mode`, loading, with an empty field and the first row selected.
     fn new(
         list: WeakEntity<super::SessionList>,
+        mode: Mode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let input = TextInputState::new(window, cx);
-        input.set_placeholder("Jump to a session · tl: for templates", window, cx);
+        let placeholder = match mode {
+            Mode::Sessions => "Jump to a session · tl: for templates",
+            Mode::Templates => "Start a template",
+        };
+        input.set_placeholder(placeholder, window, cx);
         let events = input.subscribe(window, cx, |switcher, event, window, cx| match event {
             TextInputEvent::Changed => switcher.edited(cx),
             TextInputEvent::Submitted { .. } => switcher.pick_selected(window, cx),
         });
+        // The list opens with nothing typed, so its first template is chosen, as after an edit.
+        let choice = match mode {
+            Mode::Sessions => None,
+            Mode::Templates => template_rows::rows("", cx)
+                .ok()
+                .and_then(|rows| rows.into_iter().next())
+                .map(|row| row.name),
+        };
         QuickSwitcher {
             list,
+            mode,
             input,
             read: Read::Loading,
             selected: 0,
+            choice,
+            arrowed: false,
             scroll: ScrollHandle::new(),
             pulse: None,
             layer: None,
@@ -389,58 +470,157 @@ impl QuickSwitcher {
     }
 
     /// The rows for the field's text now: the matches and whether the New or Quick launch row shows, or for a `tl:`
-    /// query the templates alone, and with them which rows the arrows walk.
+    /// query the templates alone, and with them which rows the arrows walk. The template list's rows are the templates
+    /// the whole query finds, with the one named exactly the trimmed query, if any.
     fn rows(&self, cx: &App) -> Rows {
         let query = self.input.text(cx);
-        if let Some(filter) = template_rows::template_query(&query) {
-            return Rows {
+        let only_templates = |filter: &str, exact: Option<&str>| {
+            let templates = template_rows::rows(filter, cx);
+            let exact = exact.and_then(|name| {
+                let rows = templates.as_ref().ok()?;
+                rows.iter().position(|row| row.name == name)
+            });
+            Rows {
                 matches: Vec::new(),
                 new: false,
                 quick: false,
                 loading: false,
-                templates: Some(template_rows::rows(filter, cx)),
-            };
+                exact,
+                templates: Some(templates),
+            }
+        };
+        match self.mode {
+            Mode::Templates => return only_templates(&query, Some(query.trim())),
+            Mode::Sessions => {}
+        }
+        if let Some(filter) = template_rows::template_query(&query) {
+            return only_templates(filter, None);
         }
         Rows {
             matches: self.matches(cx),
             new: shows_new_row(&query),
             quick: query.trim().is_empty(),
             loading: matches!(self.read, Read::Loading),
+            exact: None,
             templates: None,
         }
     }
 
-    /// The user edited the query: the first match is selected again, and shown.
+    /// The template list's chosen template, by name, for the template list's `rows`: until the arrows move after an
+    /// edit, a listed template named exactly the query (SPEC.md: it "is highlighted over an earlier substring match, and
+    /// Enter starts it; arrowing to another row changes that choice"), which also picks up an exact name a push brings
+    /// after the user typed, as the old list did; otherwise the name the last edit or arrow chose, listed or not, so a
+    /// push never hands the choice to another template; and with none, the first template listed now. `None` when
+    /// nothing is chosen and nothing is listed, or the templates cannot be listed.
+    fn chosen(&self, rows: &Rows) -> Option<String> {
+        let Some(Ok(listed)) = &rows.templates else {
+            return None;
+        };
+        match rows.exact {
+            Some(exact) if !self.arrowed => Some(listed[exact].name.clone()),
+            _ => self
+                .choice
+                .clone()
+                .or_else(|| listed.first().map(|row| row.name.clone())),
+        }
+    }
+
+    /// The row drawn selected, if any: the switcher's by position; the template list's where its chosen template is
+    /// listed, so none while that template is gone.
+    fn selection(&self, rows: &Rows) -> Option<Selected> {
+        match self.mode {
+            Mode::Sessions => rows.selected(self.selected),
+            Mode::Templates => {
+                let name = self.chosen(rows)?;
+                let Some(Ok(listed)) = &rows.templates else {
+                    return None;
+                };
+                listed
+                    .iter()
+                    .position(|row| row.name == name)
+                    .map(Selected::Template)
+            }
+        }
+    }
+
+    /// The user edited the query: the first match is selected again, or in the template list the template named
+    /// exactly the query, else the first one listed, and shown.
     fn edited(&mut self, cx: &mut Context<Self>) {
-        self.selected = 0;
-        self.scroll.scroll_to_item(0);
+        match self.mode {
+            Mode::Sessions => {
+                self.selected = 0;
+                self.scroll.scroll_to_item(0);
+            }
+            Mode::Templates => {
+                self.arrowed = false;
+                self.choice = None;
+                let rows = self.rows(cx);
+                self.choice = self.chosen(&rows);
+                if let Some(Selected::Template(position)) = self.selection(&rows) {
+                    self.scroll.scroll_to_item(position);
+                }
+            }
+        }
         cx.notify();
     }
 
     /// Up or Down in the field: move the selection one row, stopping at either end, and scroll it into view. With
     /// nothing the arrows can reach there is nothing to move. The New and Quick launch rows are pinned outside the
     /// scrolling list, so they are always in view and selecting one scrolls nothing.
+    ///
+    /// In the template list the arrows move from the chosen template's row, or to the first row while the chosen
+    /// template is not listed, and choose the template they arrive at by name.
     fn step(&mut self, direction: Vertical, cx: &mut Context<Self>) {
         let rows = self.rows(cx);
         let count = rows.reachable();
         if count == 0 {
             return;
         }
-        let current = self.selected.min(count - 1);
-        self.selected = match direction {
-            Vertical::Up => current.saturating_sub(1),
-            Vertical::Down => (current + 1).min(count - 1),
-        };
-        if self.selected < rows.scrolled() {
-            self.scroll.scroll_to_item(self.selected);
+        match self.mode {
+            Mode::Templates => {
+                // `count` is the listed templates', so they are listed.
+                let Some(Ok(listed)) = &rows.templates else {
+                    return;
+                };
+                let next = match (self.selection(&rows), direction) {
+                    (Some(Selected::Template(current)), Vertical::Up) => current.saturating_sub(1),
+                    (Some(Selected::Template(current)), Vertical::Down) => {
+                        (current + 1).min(count - 1)
+                    }
+                    _ => 0,
+                };
+                self.arrowed = true;
+                self.choice = Some(listed[next].name.clone());
+                self.scroll.scroll_to_item(next);
+            }
+            Mode::Sessions => {
+                let current = self.selected.min(count - 1);
+                self.selected = match direction {
+                    Vertical::Up => current.saturating_sub(1),
+                    Vertical::Down => (current + 1).min(count - 1),
+                };
+                if self.selected < rows.scrolled() {
+                    self.scroll.scroll_to_item(self.selected);
+                }
+            }
         }
         cx.notify();
     }
 
     /// Enter: pick the selected row, if there is one. Nothing while the read is loading, the New and Quick launch rows
-    /// included; a template whatever the read's state.
+    /// included; a template whatever the read's state. In the template list, the chosen template by name, even when
+    /// no row lists it any more, so that the pick is refused in New rather than given to another template.
     fn pick_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rows = self.rows(cx);
+        match self.mode {
+            Mode::Templates => {
+                if let Some(name) = self.chosen(&rows) {
+                    self.pick_template(&name, window, cx);
+                }
+                return;
+            }
+            Mode::Sessions => {}
+        }
         match rows.selected(self.selected) {
             Some(Selected::Session(index)) => self.pick(index, window, cx),
             Some(Selected::New) => self.pick_new(window, cx),
@@ -456,29 +636,36 @@ impl QuickSwitcher {
         }
     }
 
-    /// Pick the template named `name` in the templates section: close the switcher, then open New with it applied
-    /// (the module docs say why in that order). A pick that opened New hides the Hosts panel, as the New row's does; a
+    /// Pick the template named `name`: close the switcher, then, in the templates section, open New with it applied, or
+    /// in the template list quick launch it (the module docs say why in that order). A pick that opened New or started
+    /// a launch hides the Hosts panel, as the New row's does (a launch through the dispatcher, which hides it itself); a
     /// refused one (New unavailable) opens nothing and leaves the panel as it was.
     fn pick_template(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.hand_off(window, cx, |window, cx| {
-            template_rows::pick_from_switcher(name, window, cx)
-        });
+        match self.mode {
+            Mode::Sessions => self.hand_off(window, cx, |window, cx| {
+                template_rows::pick_from_switcher(name, window, cx)
+            }),
+            Mode::Templates => self.hand_off(window, cx, |window, cx| {
+                template_rows::launch_from_list(name, window, cx)
+            }),
+        }
     }
 
     /// Pick the Quick launch row: close the switcher, then take the ⚡ chord's path (the module docs say why in that
-    /// order). A launch it started or a New it opened hides the Hosts panel; Templates, opened to mark one, does not.
+    /// order). A launch it started or a New it opened hides the Hosts panel (the dispatcher's doing); Templates, opened to
+    /// mark one, does not.
     fn pick_quick_launch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hand_off(window, cx, template_rows::quick_launch_from_switcher);
     }
 
-    /// Close the switcher, then run `pick`, one of the templates area's switcher entry points, and when it handed the
-    /// user's intent on, return the list from the Hosts panel through its own hide path (SPEC.md: "All or a host avatar
-    /// returns to Sessions, as does an accepted quick-switcher pick or New handoff").
+    /// Close the switcher, then run `pick`, one of the templates area's switcher entry points, and when it showed New,
+    /// return the list from the Hosts panel through its own hide path (SPEC.md: "All or a host avatar returns to
+    /// Sessions, as does an accepted quick-switcher pick or New handoff").
     ///
-    /// The entry points report nothing back, so the hand-off is read from what they leave: New shown
-    /// ([`entry::open_launcher`]), or a launch out of sight, seen as quick launches turning unavailable across the pick
-    /// ([`entry::quick_launch_available`], false while a launch is pending or being prepared). A pick that did neither
-    /// (refused, or Templates opened to mark a template) leaves the panel as it was.
+    /// The entry points report nothing back, so New is read from what they leave ([`entry::open_launcher`]). A launch
+    /// started out of sight needs nothing here: the dispatcher returns the list from the panel itself
+    /// ([`super::show_sessions`]). A pick that did neither (refused, or Templates opened to mark a template) leaves the
+    /// panel as it was.
     fn hand_off(
         &mut self,
         window: &mut Window,
@@ -488,10 +675,8 @@ impl QuickSwitcher {
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
         }
-        let available = entry::quick_launch_available(cx);
         pick(window, cx);
-        let launching = available && !entry::quick_launch_available(cx);
-        if launching || entry::open_launcher(window, cx).is_some() {
+        if entry::open_launcher(window, cx).is_some() {
             let _ = self.list.update(cx, |list, cx| list.hide_hosts(cx));
         }
     }
@@ -546,7 +731,14 @@ impl Render for QuickSwitcher {
         let width = CARD_MAX_WIDTH.min(viewport.width - CARD_MARGIN * 2.);
         let query = self.input.text(cx);
         let listed = self.rows(cx);
-        let selected = listed.selected(self.selected);
+        // The template list latches what it is about to draw selected, so a choice worked out this frame (an exact name
+        // a push brought, or the first row after an edit that listed nothing) stays chosen when a later push takes it
+        // away or puts a row ahead of it, rather than passing to whatever is then exact or first.
+        match self.mode {
+            Mode::Templates => self.choice = self.chosen(&listed),
+            Mode::Sessions => {}
+        }
+        let selected = self.selection(&listed);
         let matches = &listed.matches;
 
         let pulses = ticker::is_active(window, cx)
@@ -562,6 +754,16 @@ impl Render for QuickSwitcher {
         let step = self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx));
 
         let weak = cx.weak_entity();
+        let (name, help) = match self.mode {
+            Mode::Sessions => (
+                "Search sessions or templates",
+                "Search sessions across every host; tl: searches templates",
+            ),
+            Mode::Templates => (
+                "Search templates",
+                "Search templates by name; Enter starts the highlighted one",
+            ),
+        };
         let field = {
             let weak = weak.clone();
             div()
@@ -573,10 +775,8 @@ impl Render for QuickSwitcher {
                     TextInput::new(
                         "quick-switcher-search",
                         &self.input,
-                        "Search sessions or templates",
-                        HoverHelp::tooltip(
-                            "Search sessions across every host; tl: searches templates",
-                        ),
+                        name,
+                        HoverHelp::tooltip(help),
                     )
                     .on_vertical(move |direction, _, cx| {
                         let _ = weak.update(cx, |switcher, cx| switcher.step(direction, cx));
@@ -618,7 +818,7 @@ impl Render for QuickSwitcher {
                             let weak = weak.clone();
                             let name = row.name.clone();
                             let selected = selected == Some(Selected::Template(position));
-                            template_row(row, selected, palette)
+                            template_row(row, selected, self.mode, palette)
                                 .on_click(move |_, window, cx| {
                                     let _ = weak.update(cx, |switcher, cx| {
                                         switcher.pick_template(&name, window, cx)
@@ -734,7 +934,7 @@ impl Render for QuickSwitcher {
             }
             Read::Loaded(_) | Read::Loading | Read::Failed(_) => None,
         };
-        let hint = templates_hint(in_templates, palette);
+        let hint = templates_hint(in_templates, self.mode, palette);
         let footer = div()
             .flex()
             .flex_none()
@@ -763,7 +963,10 @@ impl Render for QuickSwitcher {
             .id("quick-switcher")
             .debug_selector(|| "quick-switcher".into())
             .role(Role::Dialog)
-            .aria_label("Quick switcher")
+            .aria_label(match self.mode {
+                Mode::Sessions => "Quick switcher",
+                Mode::Templates => "Template launcher",
+            })
             .flex()
             .flex_col()
             .gap(CARD_GAP)
@@ -790,7 +993,7 @@ impl Render for QuickSwitcher {
 }
 
 /// The switcher's rows for one query, in arrow-key order: the matches, then the New row or the Quick launch row when
-/// one shows; or, for a `tl:` query, the templates alone.
+/// one shows; or, for a `tl:` query and in the template list, the templates alone.
 struct Rows {
     /// The matches, as indices into the listing, in the order they are listed. None for a `tl:` query.
     matches: Vec<usize>,
@@ -799,9 +1002,13 @@ struct Rows {
     /// Whether the Quick launch row shows: nothing typed, whatever the read's state. Never with the New row.
     quick: bool,
     /// Whether the read is still loading, when no session row can be selected, the New and Quick launch rows included.
-    /// Never set for a `tl:` query, whose rows do not wait on the read.
+    /// Never set for templates, whose rows do not wait on the read.
     loading: bool,
-    /// For a `tl:` query, its templates in the helm's order, or why they cannot be listed; `None` otherwise.
+    /// In the template list, the position of the template named exactly the trimmed query, if one is listed; `None`
+    /// otherwise, the `tl:` section included, which has no such rule.
+    exact: Option<usize>,
+    /// For a `tl:` query or the template list, its templates in the helm's order, or why they cannot be listed; `None`
+    /// otherwise.
     templates: Option<Result<Vec<TemplateRow>, HostSentence>>,
 }
 
@@ -821,7 +1028,7 @@ enum Selected {
     New,
     /// The Quick launch row.
     QuickLaunch,
-    /// The template at this position among a `tl:` query's rows.
+    /// The template at this position among the templates listed (a `tl:` query's, or the template list's).
     Template(usize),
 }
 
@@ -953,7 +1160,12 @@ const HINT_GAP: Pixels = px(4.);
 /// is drawn as the Templates list draws it ([`summary::line`]) and may shrink to the row, so a long one is cut at its
 /// edge. On the selected row the summary takes the dimmer inverse ink, as the old sheet's selected rule had it. The
 /// name names the row for assistive technology and its id, which tests find it by.
-fn template_row(row: &TemplateRow, selected: bool, palette: &Palette) -> OptionRow {
+///
+/// In the template list ([`Mode::Templates`]) the row's help says a pick starts the template, and a third line holds
+/// its shortcuts as key chips (the old `.quick-switcher-template-keys`): the ⚡ chord when it holds ⚡, then its number
+/// key's chord, in this platform's form, as the old list showed only there (SPEC.md: "Rows show the template name,
+/// summary and its ⚡ or number shortcut when assigned"). A template holding neither has no third line.
+fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette) -> OptionRow {
     let name = HostText::from_host(row.name.as_str());
     let id: SharedString = format!("{TEMPLATE_ROW_ID}{}", row.name).into();
     let label = HostSentence::new(id.clone()).host(&name).accessible_name();
@@ -962,25 +1174,41 @@ fn template_row(row: &TemplateRow, selected: bool, palette: &Palette) -> OptionR
     } else {
         palette.fg_1
     };
-    OptionRow::new(
-        id,
-        label,
-        HoverHelp::tooltip(TEMPLATE_ROW_HELP),
-        Role::ListBoxOption,
-    )
-    .selected(selected)
-    .child(
-        div()
-            .min_w_0()
-            .truncate()
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(host_text::element(&name)),
-    )
-    .child(
-        summary::line(&row.summary)
-            .min_w_0()
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(quiet)),
+    let (help, chords) = match mode {
+        Mode::Sessions => (TEMPLATE_ROW_HELP, Vec::new()),
+        Mode::Templates => {
+            let mark = row.marked.then(|| QUICK_LAUNCH_SHORTCUT_NAME.to_owned());
+            let key = row.key.map(templates::number_key_name);
+            (
+                TEMPLATE_LIST_ROW_HELP,
+                mark.into_iter().chain(key).collect(),
+            )
+        }
+    };
+    let option = OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
+        .selected(selected)
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(host_text::element(&name)),
+        )
+        .child(
+            summary::line(&row.summary)
+                .min_w_0()
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(quiet)),
+        );
+    if chords.is_empty() {
+        return option;
+    }
+    option.child(
+        div().flex().flex_wrap().gap(KEY_CHIP_GAP).children(
+            chords
+                .into_iter()
+                .map(|chord| shortcuts::chip(chord, quiet, palette)),
+        ),
     )
 }
 
@@ -1038,8 +1266,9 @@ fn quick_row(
 }
 
 /// The templates hint (the old `.quick-switcher-templates-hint`), a quiet section with an edge above it: "Templates"
-/// over the `tl:` sentence normally, and only the templates section's own sentence while a `tl:` query shows it.
-fn templates_hint(in_templates: bool, palette: &Palette) -> AnyElement {
+/// over the `tl:` sentence normally, only the templates section's own sentence while a `tl:` query shows it, and the
+/// template list's own sentence there.
+fn templates_hint(in_templates: bool, mode: Mode, palette: &Palette) -> AnyElement {
     let hint = div()
         .id("quick-switcher-templates-hint")
         .flex()
@@ -1051,11 +1280,16 @@ fn templates_hint(in_templates: bool, palette: &Palette) -> AnyElement {
         .border_color(theme::color(palette.border_dialog))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.fg_1));
-    if in_templates {
-        hint.child("Picking a template opens New with it applied; nothing launches yet.")
-    } else {
-        hint.child("Templates")
-            .child("Type tl: to search templates. Picking one opens New with it applied.")
+    match mode {
+        Mode::Templates => hint.child(
+            "Enter starts the highlighted template. A partial template opens New to complete it.",
+        ),
+        Mode::Sessions if in_templates => {
+            hint.child("Picking a template opens New with it applied; nothing launches yet.")
+        }
+        Mode::Sessions => hint
+            .child("Templates")
+            .child("Type tl: to search templates. Picking one opens New with it applied."),
     }
     .into_any_element()
 }

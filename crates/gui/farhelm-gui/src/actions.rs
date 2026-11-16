@@ -195,6 +195,18 @@ pub(crate) const QUICK_SWITCHER_CHORD: &str = if cfg!(target_os = "macos") {
     QUICK_SWITCHER_LINUX
 };
 
+/// The template list's chords (SPEC.md, "Desktop window chrome": Cmd+J on macOS, Ctrl+Shift+J on Linux). Spelled once
+/// here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
+const TEMPLATE_LIST_MAC: &str = "cmd-j";
+const TEMPLATE_LIST_LINUX: &str = "ctrl-shift-j";
+
+/// The template list's chord on this platform.
+pub(crate) const TEMPLATE_LIST_CHORD: &str = if cfg!(target_os = "macos") {
+    TEMPLATE_LIST_MAC
+} else {
+    TEMPLATE_LIST_LINUX
+};
+
 /// New's chord in the Mac app (SPEC.md, "Desktop window chrome"); the Linux app has none. Spelled once here, for its
 /// binding and its row in [`TERMINAL_KEYS`]; the tests spell it out on their own.
 pub(crate) const NEW_SESSION_MAC: &str = "cmd-n";
@@ -268,6 +280,10 @@ actions!(
         /// (SPEC.md: Cmd+K on a Mac, Ctrl+Shift+K on Linux, also from a focused terminal). Runs once per press
         /// (`ONCE_PER_PRESS`).
         QuickSwitcher,
+        /// Open the template list, the quick switcher listing templates only, to start one by typing part of its name
+        /// (SPEC.md, "Desktop window chrome": Cmd+J on a Mac, Ctrl+Shift+J on Linux, also from a focused terminal).
+        /// Runs once per press (`ONCE_PER_PRESS`).
+        TemplateList,
         /// Open New, the session launcher with New's prefill (SPEC.md, "Desktop window chrome": Cmd+N in the Mac
         /// app only, also from a focused terminal; the Linux app has no New shortcut). Runs once per press
         /// (`ONCE_PER_PRESS`).
@@ -395,6 +411,9 @@ pub fn install(cx: &mut App) {
         // SPEC.md, "Desktop window chrome". The main view hands it to the session list's quick switcher; it works from
         // a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
         KeyBinding::new(QUICK_SWITCHER_CHORD, QuickSwitcher, Some(CONTEXT)),
+        // SPEC.md, "Desktop window chrome". The main view hands it to the session list's quick switcher, which opens
+        // listing templates only; it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
+        KeyBinding::new(TEMPLATE_LIST_CHORD, TemplateList, Some(CONTEXT)),
         // SPEC.md, "Quick-launch sequences". The main view hands it to the templates module, which arms the sequence;
         // it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut, and a text field keeps
         // it (`TEXT_FIELD_KEYS`, and on a Mac GPUI Kit's own Cut), except a launcher field with nothing selected, which
@@ -671,6 +690,8 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     // listed the same way and a held chord opens the switcher once; a repeat would only reach the ground's handler,
     // which refuses while the switcher is open, and listed, it never runs the opener again.
     &QuickSwitcher,
+    // The template list is the switcher listing templates, opened the same way, so a held chord opens it once.
+    &TemplateList,
     // Opening New, like opening the switcher above: a held Cmd+N opens it once.
     &NewSession,
     // SPEC.md, "Quick-launch sequences": "Repeated held keys add nothing". While a sequence is armed its own capture
@@ -788,7 +809,11 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         QUICK_SWITCHER_LINUX,
         "open the quick switcher",
     ),
-    app("cmd-j", "ctrl-shift-j", "open the template list"),
+    app(
+        TEMPLATE_LIST_MAC,
+        TEMPLATE_LIST_LINUX,
+        "open the template list",
+    ),
     app(
         QUICK_LAUNCH_MAC,
         QUICK_LAUNCH_LINUX,

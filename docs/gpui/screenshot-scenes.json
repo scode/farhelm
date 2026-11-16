@@ -1257,6 +1257,11 @@
       "reference": "template-leave-question"
     },
     {
+      "golden": "template-launcher",
+      "title": "The template list as Cmd+J opens it: three templates with their summaries, number keys 1 and 8 as key chips, the first selected",
+      "reference": "template-launcher"
+    },
+    {
       "golden": "settings-sessions",
       "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Recipes, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications are listed so far)",
       "reference": "settings-sessions"
@@ -1627,19 +1632,19 @@
     },
     {
       "id": "templates-dialog",
-      "ported": false
+      "ported": true
     },
     {
       "id": "template-editor",
-      "ported": false
+      "ported": true
     },
     {
       "id": "template-number-menu",
-      "ported": false
+      "ported": true
     },
     {
       "id": "template-leave-question",
-      "ported": false
+      "ported": true
     },
     {
       "id": "quick-switcher",
@@ -1647,7 +1652,7 @@
     },
     {
       "id": "template-launcher",
-      "ported": false
+      "ported": true
     },
     {
       "id": "checkout-trash-dialog",

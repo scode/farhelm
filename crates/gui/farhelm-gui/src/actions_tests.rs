@@ -28,9 +28,9 @@ use crate::actions::{
     CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, HideApp, HideOtherApps,
     IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, NewSession, PHYSICAL_KEYS,
     PhysicalKey, QuickLaunch, QuickSwitcher, Quit, RenameSession, ShowKeyboardShortcuts,
-    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
-    ToggleFullScreen, arm_key_capture, disarm_key_capture, key_capture_armed, new_session_binding,
-    owner_on, physical_key_at, physical_on, terminal_key_owner,
+    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateList,
+    TemplateNumberKey, ToggleFullScreen, arm_key_capture, disarm_key_capture, key_capture_armed,
+    new_session_binding, owner_on, physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -66,7 +66,7 @@ impl Render for Scene {
         let probes = self.probes.clone();
         let (deletes, renames, switchers) = (self.ran.clone(), self.ran.clone(), self.ran.clone());
         let news = self.ran.clone();
-        let quick_launches = self.ran.clone();
+        let (quick_launches, lists) = (self.ran.clone(), self.ran.clone());
         let (shortcuts, bigger, smaller, numbers) = (
             self.ran.clone(),
             self.ran.clone(),
@@ -88,6 +88,7 @@ impl Render for Scene {
             .on_action(move |action: &QuickLaunch, _, _| {
                 quick_launches.borrow_mut().push(action.name())
             })
+            .on_action(move |action: &TemplateList, _, _| lists.borrow_mut().push(action.name()))
             .on_action(move |action: &ShowKeyboardShortcuts, _, _| {
                 shortcuts.borrow_mut().push(action.name())
             })
@@ -1365,8 +1366,9 @@ fn a_physical_shortcut_with_no_handler_never_reaches_a_focused_text_field(cx: &m
 /// Every key-down a test capture was handed, in order: its logical key and whether it was a held repeat.
 type Seen = Rc<RefCell<Vec<(String, bool)>>>;
 
-/// The app shortcut a test binds a [`Probe`] to (the template list's chord, which no feature binds yet), so a test can
-/// see whether a key reached Farhelm's bindings.
+/// The app shortcut a test binds a [`Probe`] to (the template list's chord), so a test can see whether a key reached
+/// Farhelm's bindings. The keymap binds the chord to [`TemplateList`] too; the probe's binding, added after it in the
+/// same context, is the one GPUI tries first.
 fn probe_chord() -> &'static str {
     match THIS_PLATFORM {
         Platform::Mac => "cmd-j",
@@ -1756,30 +1758,38 @@ fn cmd_n_opens_new_on_the_mac_only_and_once_per_press(cx: &mut TestAppContext) {
 }
 
 /// SPEC.md, "Quick launch": the ⚡ chord is Cmd+P on a Mac and Ctrl+Shift+P elsewhere, it works from a focused terminal,
-/// and "A held chord starts only once; the chord never reaches the terminal". A chord that leaked would type into the
-/// agent, and one that repeated would start a session per repeat. Specified: the chord, spelled out here, runs
-/// `QuickLaunch` from a focused terminal without reaching it, and held for two repeats runs it once more.
+/// and "A held chord starts only once; the chord never reaches the terminal"; SPEC.md, "Desktop window chrome": the
+/// template list's Cmd+J or Ctrl+Shift+J "never reaches the terminal's program", and like every opening shortcut a held
+/// chord opens it once (the migration's orchestrator decided on 2026-11-14 that a held opening shortcut acts once per
+/// press). A chord that leaked would type into the agent, and one that repeated would start a session per repeat.
+/// Specified, for each chord, spelled out here: it runs its action (`QuickLaunch`, `TemplateList`) from a focused
+/// terminal without reaching it, and held for two repeats runs it once more.
 #[gpui::test]
-fn the_quick_launch_chord_runs_once_per_press_from_a_terminal(cx: &mut TestAppContext) {
-    let chord = match THIS_PLATFORM {
-        Platform::Mac => "cmd-p",
-        Platform::Linux => "ctrl-shift-p",
-    };
+fn the_launch_chords_run_once_per_press_from_a_terminal(cx: &mut TestAppContext) {
+    let mac = matches!(THIS_PLATFORM, Platform::Mac);
+    let rows = [
+        (
+            if mac { "cmd-p" } else { "ctrl-shift-p" },
+            QuickLaunch.name(),
+        ),
+        (
+            if mac { "cmd-j" } else { "ctrl-shift-j" },
+            TemplateList.name(),
+        ),
+    ];
     let mut opened = open(cx);
     opened.focus_terminal();
-    assert!(
-        !opened.reaches_terminal(chord),
-        "the chord never reaches the terminal"
-    );
-    assert_eq!(
-        opened.runs_of(QuickLaunch.name()),
-        1,
-        "a press ran QuickLaunch"
-    );
-    opened.hold(chord);
-    assert_eq!(
-        opened.runs_of(QuickLaunch.name()),
-        2,
-        "a held chord ran it once more"
-    );
+    for (chord, action) in rows {
+        assert!(
+            !opened.reaches_terminal(chord),
+            "{chord} never reaches the terminal"
+        );
+        assert_eq!(opened.runs_of(action), 1, "a press of {chord} ran {action}");
+        opened.hold(chord);
+        assert_eq!(
+            opened.runs_of(action),
+            2,
+            "a held {chord} ran {action} once more"
+        );
+    }
 }

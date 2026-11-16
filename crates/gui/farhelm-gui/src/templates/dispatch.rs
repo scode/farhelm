@@ -34,7 +34,10 @@
 //!   submit path; otherwise New is shown with the draft and the banner the origin calls for ([`incomplete_banner`]). A
 //!   refusal shows New on its prefill saying why. From the submit on, the outcome is the launcher's: success opens the
 //!   session unless the user moved on, and a refusal brings the launcher back with its draft or offers it in a notice.
-//!   Nothing here watches the reply.
+//!   Nothing here watches the reply. A launch started or New shown from the page also brings the sidebar back from
+//!   its Hosts panel to Sessions (`session_list::show_sessions`), as the old app's quick launch did through the list's
+//!   New, so the session the press started is where the user can see it; Templates opened with a hint leaves the
+//!   panel as it was.
 //!
 //! On the page a press waits for the catalog. A press that launches out of sight then also waits for the host's launch
 //! history while New's folder default is pending (no session open on the host) and the templates chose neither a
@@ -65,7 +68,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Catalog, LaunchDraft};
 use crate::launcher::view::{BatchApplied, Launcher, Note, Prepared};
 use crate::launcher::{self, entry};
-use crate::{layers, local_state, session};
+use crate::{layers, local_state, session, session_list};
 
 /// Where a quick launch came from. It decides only the banner New shows when the templates cannot launch on their own:
 /// a number key's explains the sequence prefix, a sequence's speaks of the combined setup (it already used the prefix),
@@ -143,8 +146,10 @@ pub(super) fn refused(refusal: &Refusal, window: &mut Window, cx: &mut App) {
             super::open_with_hint(hint, &mark, window, cx);
         } else {
             let note = Note::Refusal(not_launched(&refusal.sentence()));
-            if let Some(draft) = entry::new_prefill(cx) {
-                entry::open_with(draft, Some(note), window, cx);
+            if let Some(draft) = entry::new_prefill(cx)
+                && entry::open_with(draft, Some(note), window, cx)
+            {
+                session_list::show_sessions(window, cx);
             }
         }
     }
@@ -417,7 +422,9 @@ fn on_the_page(
             },
         }
     };
-    launcher::view::prepare_unseen(draft, Mark::take(cx), finish, window, cx);
+    if launcher::view::prepare_unseen(draft, Mark::take(cx), finish, window, cx) {
+        session_list::show_sessions(window, cx);
+    }
 }
 
 // ---- The open launcher -----------------------------------------------------------------------------------------------

@@ -3266,14 +3266,10 @@ const EDITOR_SCENE_TEMPLATES: [(&str, &str); 3] = [
     ),
 ];
 
-/// The Templates dialog with `codex-deep` open in its editor, as a click on its row opens it (reference
-/// `template-editor`): focus in its name field, where opening a row puts it, and its model suggestions from the
-/// catalog read the editor sends, which is answered at once with the reference stack's four Codex models. The fake,
-/// the connection and the watch are kept for the scene's life, like Settings'.
-fn template_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    let (mut helm, handle, events) = FakeHelm::new();
-    let connection = session::start(handle, events, None, cx);
-    helm.connect(vec![
+/// The editor scenes' snapshot: [`EDITOR_SCENE_TEMPLATES`] and number keys 1 and 8 on `codex-deep` and
+/// `quick-claude`, nothing marked ⚡. The template list's scene shows the same reference stack.
+fn editor_scene_collections() -> Vec<CollectionState> {
+    vec![
         CollectionState {
             collection: Collection::Templates,
             meta: test_support::meta(&["api-repo", "codex-deep", "quick-claude"]),
@@ -3298,7 +3294,17 @@ fn template_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) 
                 }),
             }],
         },
-    ]);
+    ]
+}
+
+/// The Templates dialog with `codex-deep` open in its editor, as a click on its row opens it (reference
+/// `template-editor`): focus in its name field, where opening a row puts it, and its model suggestions from the
+/// catalog read the editor sends, which is answered at once with the reference stack's four Codex models. The fake,
+/// the connection and the watch are kept for the scene's life, like Settings'.
+fn template_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(editor_scene_collections());
     let handle = window.window_handle();
     let opener = state.ring.clone();
     let opened = std::cell::Cell::new(false);
@@ -3368,6 +3374,37 @@ fn template_number_menu_scene(state: &SceneState, window: &mut Window, cx: &mut 
         });
     }
     div().into_any_element()
+}
+
+/// The template list as Cmd+J opens it (reference `template-launcher`): the editor scenes' snapshot
+/// ([`editor_scene_collections`]), so `codex-deep` and `quick-claude` show their key chips and `api-repo`, first, is
+/// selected; focus in the search field. The list asks the session list to show Sessions after a pick, and the scene has
+/// none, so it is handed a list that is gone. The fake, the connection and the watch are kept for the scene's life,
+/// like Settings'.
+fn template_launcher_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(editor_scene_collections());
+    let handle = window.window_handle();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            crate::session_list::quick_switcher::open(
+                gpui::WeakEntity::new_invalid(),
+                crate::session_list::quick_switcher::Mode::Templates,
+                window,
+                cx,
+            );
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
 }
 
 /// [`template_editor_setup`], then (reference `template-leave-question`) the name changed to `codex-deep-unsaved` and the
@@ -5176,6 +5213,14 @@ static SCENES: &[Scene] = &[
         size: (1010., 940.),
         draw: template_number_menu_scene,
         setup: template_number_menu_setup,
+    },
+    Scene {
+        name: "template-launcher",
+        // The card at its widest, near the window's top as the layer manager places it. Tall enough that the layer
+        // manager's height cap (75% of the window) leaves all three rows in view, as the reference's taller window did.
+        size: (800., 640.),
+        draw: empty,
+        setup: template_launcher_setup,
     },
     Scene {
         name: "template-leave-question",

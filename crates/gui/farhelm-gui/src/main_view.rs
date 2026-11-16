@@ -6,13 +6,14 @@
 //! helm, which is what makes it inert (SPEC.md, "Losing the connection to the helm" and "One GUI at a time"): the
 //! session that held helm state was retired, so there is nothing stale to draw or act on.
 //!
-//! The open session's Delete and Rename shortcuts ([`DeleteSession`], [`RenameSession`]) and the quick switcher's
-//! ([`QuickSwitcher`]) are handled on the window's ground, so they reach the session pane's header (Delete) and the
-//! session list (Rename, the switcher) from wherever focus is on the page (a row, the terminal), and those decide what
-//! they do. From inside a dialog or menu they reach these handlers too, because `root::wrap` draws the overlay inside
-//! the ground, and each refuses while a layer that holds the keyboard is open (`layers::focus_layer_open`), which is
-//! SPEC.md's "A visible modal keeps keyboard ownership". A popover that takes no focus, such as a terminal link's
-//! destination display, does not count: it owns no keys.
+//! The open session's Delete and Rename shortcuts ([`DeleteSession`], [`RenameSession`]), the quick switcher's
+//! ([`QuickSwitcher`]) and the template list's ([`TemplateList`], the switcher in its templates-only mode) are handled
+//! on the window's ground, so they reach the session pane's header (Delete) and the session list (Rename, the switcher)
+//! from wherever focus is on the page (a row, the terminal), and those decide what they do. From inside a dialog or
+//! menu they reach these handlers too, because `root::wrap` draws the overlay inside the ground, and each refuses while
+//! a layer that holds the keyboard is open (`layers::focus_layer_open`), which is SPEC.md's "A visible modal keeps
+//! keyboard ownership". A popover that takes no focus, such as a terminal link's destination display, does not count:
+//! it owns no keys.
 //!
 //! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
 //! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar
@@ -57,13 +58,14 @@ use gpui::{
 };
 
 use crate::actions::{BeginSequence, QuickLaunch, ShowKeyboardShortcuts, TemplateNumberKey};
-use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession};
+use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession, TemplateList};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::desktop::linux_title_bar;
 use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
 use crate::layers::Anchor;
 use crate::notices::{self, Notice};
+use crate::session_list::quick_switcher::Mode;
 use crate::session_list::{self, SessionList};
 use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
@@ -140,6 +142,12 @@ impl MainView {
             pane_anchor: None,
         }
     }
+
+    /// The session list, for a hand-off that starts outside the list and must still show Sessions
+    /// ([`session_list::show_sessions`]), and for tests that ask it for a row's action the way its menu does.
+    pub(crate) fn session_list(&self) -> &Entity<SessionList> {
+        &self.session_list
+    }
 }
 
 #[cfg(test)]
@@ -147,11 +155,6 @@ impl MainView {
     /// The pane, for tests that reach the terminal it shows.
     pub(crate) fn session_pane(&self) -> &Entity<SessionPane> {
         &self.session_pane
-    }
-
-    /// The session list, for tests that ask it for a row's action the way its menu does.
-    pub(crate) fn session_list(&self) -> &Entity<SessionList> {
-        &self.session_list
     }
 }
 
@@ -243,8 +246,15 @@ impl Render for MainView {
             })
             // Taken whatever the switcher does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             // The switcher holds the list weakly, so that a pick can show the session it opened.
-            .on_action(move |_: &QuickSwitcher, window, cx| {
-                session_list::quick_switcher::open(list.clone(), window, cx)
+            .on_action({
+                let list = list.clone();
+                move |_: &QuickSwitcher, window, cx| {
+                    session_list::quick_switcher::open(list.clone(), Mode::Sessions, window, cx)
+                }
+            })
+            // The template list is the switcher listing templates only; taken the same way, for the same reason.
+            .on_action(move |_: &TemplateList, window, cx| {
+                session_list::quick_switcher::open(list.clone(), Mode::Templates, window, cx)
             })
             // Taken whatever New does with it, as a once-per-press shortcut's handler must be (`actions.rs`). New
             // itself refuses while a dialog or menu is open, a launch is pending or a host change is in flight
