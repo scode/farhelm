@@ -3,8 +3,9 @@
 #
 # This directory holds no source: the app is the cargo crate
 # `crates/farhelm-desktop`, built with cargo. It stays a generic package
-# because the release workflow's files are left alone until the cutover
-# changes that workflow. The likely simpler replacement is the cargo package
+# because that is how the icon already reaches the archive (`binaries`,
+# below), and replacing it is a release configuration change nobody has
+# tried yet. The likely simpler replacement is the cargo package
 # itself with an `include` for the icon (a cargo package's `include` does
 # reach dist's plan, as the `binaries` comment below notes), not yet checked
 # for the archive's layout or the icon's file mode.
