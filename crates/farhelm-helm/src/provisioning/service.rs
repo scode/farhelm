@@ -2330,17 +2330,19 @@ impl ProvisioningService {
     /// on a loaded machine the GPUI app's end-to-end smoke removed its host
     /// in that gap often enough to fail.
     ///
-    /// `host_write` is `None` for Tensorlake's add, which runs its inner plan
-    /// through [`Self::execute_actions`] and keeps the lock for its own task.
-    /// So the gap described above remains in two places there: a Tensorlake
-    /// host's setup that was not started for a session launch publishes its
-    /// end (completed, or failed at a step of its inner install plan) before
-    /// its task lets go of the lock; and should a session launch's setup take
-    /// the inner install plan instead of a prepared clone (a fresh launch
-    /// normally clones), that plan publishes "completed" before the launch
-    /// has created its session, while the launch still holds the lock. The
-    /// launch's own end and the add's own failure release the lock before
-    /// they publish.
+    /// A Tensorlake add that was not started for a session launch hands its
+    /// lock to whichever of its steps ends the run (the prepared clone's
+    /// attachment, or its inner install plan through
+    /// [`Self::execute_actions`]), so it ends here too. `host_write` is
+    /// `None` only for a session launch's setup, whose launch keeps the lock
+    /// until its session exists. The gap described above remains in that one
+    /// place: should a session launch's setup take the inner install plan
+    /// instead of a prepared clone (a fresh launch normally clones; the
+    /// install plan is the recovery path for a sandbox whose earlier create
+    /// turns up without prepared facts), that plan publishes "completed"
+    /// before the launch has created its session, while the launch still
+    /// holds the lock. The launch's own end and the add's own failure
+    /// release the lock before they publish.
     async fn end_run(
         &self,
         host: HostId,
@@ -2798,7 +2800,8 @@ impl ProvisioningService {
     /// its actions after the outer steps. Keep action execution and failure
     /// handling identical to ordinary SSH setup by carrying only an offset.
     /// `host_write` goes to [`Self::end_run`], `None` when the caller keeps
-    /// the host's provisioning lock past the plan.
+    /// the host's provisioning lock past the plan (a session launch's setup,
+    /// whose launch ends the run).
     async fn execute_actions(
         &self,
         host: HostId,

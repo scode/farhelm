@@ -941,6 +941,14 @@ impl ProvisioningService {
     /// Ordinary host failures retain progress for a setup retry. A fresh
     /// session launch instead attempts whole-sandbox cleanup on failure,
     /// including when a create reply was lost.
+    ///
+    /// `host_write`, the host's provisioning lock, goes to whichever step
+    /// publishes the run's end, which gives it up in the same critical
+    /// section (see `end_run`). For a plain add (Add host, or setup run
+    /// again) that is the setup's own last step: the prepared clone's
+    /// attachment, or the inner install plan's end. For a session launch it
+    /// is [`Self::finish_session_launch`], once the session exists, so the
+    /// setup steps get no lock to give up.
     async fn execute_tensorlake_add(
         &self,
         host: HostId,
@@ -952,8 +960,17 @@ impl ProvisioningService {
         // depend on another state change after the connection already settled.
         let setup_state = self.manager.state(host);
         let mut index = 0;
-        let result = self.tensorlake_steps(host, &plan, &mut index).await;
+        let (mut setup_lock, launch_lock) = if plan.session.is_some() {
+            (None, Some(host_write))
+        } else {
+            (Some(host_write), None)
+        };
+        let result = self
+            .tensorlake_steps(host, &plan, &mut index, &mut setup_lock)
+            .await;
         if let Some(launch) = plan.session.take() {
+            let host_write =
+                launch_lock.expect("a session launch keeps the host's lock for its launch's end");
             self.finish_session_launch(
                 host,
                 &plan.sandbox,
@@ -983,8 +1000,9 @@ impl ProvisioningService {
                 .await;
             let mut memory = self.memory.lock().await;
             // Let go of the host before the failure is readable, so a removal
-            // right after it is not refused as busy (see `end_run`).
-            drop(host_write);
+            // right after it is not refused as busy (see `end_run`). A step
+            // that failed before publishing anything never took the lock.
+            drop(setup_lock);
             if let Some(run) = memory.runs.get_mut(&host) {
                 run.status = RunStatus::Failed;
                 run.message = Some(message);
@@ -1091,11 +1109,17 @@ impl ProvisioningService {
     /// Select prepared-clone creation or ordinary recovery from durable
     /// ownership and admission facts. The free probe cannot establish which
     /// sandbox an outstanding request will eventually reveal.
+    ///
+    /// `host_write` is the host's provisioning lock for a plain add, which
+    /// the step that publishes the run's end takes and gives up as it
+    /// publishes; `None` for a session launch, whose launch ends the run
+    /// (see [`Self::execute_tensorlake_add`]). An error returns it untaken.
     async fn tensorlake_steps(
         &self,
         host: HostId,
         plan: &TensorlakeAddPlan,
         index: &mut usize,
+        host_write: &mut Option<crate::manager::ProvisionLockGuard>,
     ) -> anyhow::Result<()> {
         let key = plan.tensorlake.api_key().await.map_err(refused)?;
         // Old reuse recipes now need a build for new hosts, but rerunning setup
@@ -1129,7 +1153,7 @@ impl ProvisioningService {
             || (!needs_snapshot && saved_facts.is_some())
         {
             return self
-                .prepared_tensorlake_steps(host, plan, index, &key, needs_snapshot)
+                .prepared_tensorlake_steps(host, plan, index, &key, needs_snapshot, host_write)
                 .await;
         }
         // The free probe cannot know whether a pending create has appeared.
@@ -1218,7 +1242,8 @@ impl ProvisioningService {
         )
         .await;
         *index += 1;
-        self.install_tensorlake_host(host, plan, index).await
+        self.install_tensorlake_host(host, plan, index, host_write)
+            .await
     }
 
     /// Change the outer plan when execution learns whether this is a new
@@ -1251,6 +1276,9 @@ impl ProvisioningService {
     /// Create a state-free cold clone and admit its own booted supervisor.
     /// The installer never runs on this path. A retained create uses its own
     /// saved facts; the recipe's newer snapshot cannot describe that sandbox.
+    ///
+    /// `host_write` as for [`Self::tensorlake_steps`]: a plain add's
+    /// attachment step ends the run and gives the lock up as it publishes.
     async fn prepared_tensorlake_steps(
         &self,
         host: HostId,
@@ -1258,6 +1286,7 @@ impl ProvisioningService {
         index: &mut usize,
         key: &crate::tensorlake::api::ApiKey,
         needs_snapshot: bool,
+        host_write: &mut Option<crate::manager::ProvisionLockGuard>,
     ) -> anyhow::Result<()> {
         let builds = plan.tensorlake.builds();
         let built = self
@@ -1447,7 +1476,9 @@ impl ProvisioningService {
             )
             .await;
             *index = 2;
-            return self.install_tensorlake_host(host, plan, index).await;
+            return self
+                .install_tensorlake_host(host, plan, index, host_write)
+                .await;
         };
         anyhow::ensure!(
             facts.home.is_absolute()
@@ -1507,27 +1538,33 @@ impl ProvisioningService {
             "prepared sandbox connected"
         );
         self.set_step(host, *index, status, message).await;
-        let mut memory = self.memory.lock().await;
-        if let Some(run) = memory.runs.get_mut(&host)
-            && plan.session.is_none()
-        {
-            run.status = RunStatus::Completed;
-        }
         if plan.session.is_none() {
-            memory.busy.remove(&host);
+            // A plain add ends here: publish that and let go of the host in
+            // one step, so a removal the moment the host reads as set up is
+            // not refused as busy.
+            self.end_run(host, host_write.take(), |memory| {
+                if let Some(run) = memory.runs.get_mut(&host) {
+                    run.status = RunStatus::Completed;
+                }
+            })
+            .await;
+        } else {
+            self.manager.events().bump();
         }
-        drop(memory);
-        self.manager.events().bump();
         Ok(())
     }
 
     /// Recovery of an ordinary sandbox keeps the inspection and copied-state
     /// admission rules, even when the same run first considered preparation.
+    ///
+    /// `host_write` as for [`Self::tensorlake_steps`]: the inner install
+    /// plan's end is a plain add's, and gives the lock up as it publishes.
     async fn install_tensorlake_host(
         &self,
         host: HostId,
         plan: &TensorlakeAddPlan,
         index: &mut usize,
+        host_write: &mut Option<crate::manager::ProvisionLockGuard>,
     ) -> anyhow::Result<()> {
         let target =
             ProvisioningTarget::Remote(crate::tensorlake::ssh::route(plan.destination.clone()));
@@ -1607,9 +1644,12 @@ impl ProvisioningService {
         }
         self.manager.events().bump();
         self.manager.release_hold(host, true);
-        // No lock to hand over: this add's own task holds the host's
-        // provisioning lock until it ends (`execute_tensorlake_add`).
-        self.execute_actions(host, inner, *index, None).await;
+        // The plan's end (completed, or failed at one of its steps) is a plain
+        // add's end, so the lock goes with it. A session launch has none to
+        // hand over; its launch keeps the lock until the session exists, and
+        // the plan still publishes "completed" before that (see `end_run`).
+        self.execute_actions(host, inner, *index, host_write.take())
+            .await;
         Ok(())
     }
 

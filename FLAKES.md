@@ -4935,7 +4935,11 @@ disposable environment's session launch (covered by
 Two places keep the gap, neither driven by this step: a Tensorlake host's setup not started for a session launch still
 holds the lock a moment past its published end (completed, or failed at a step of its inner install plan), and a session
 launch whose setup takes the inner install plan instead of a prepared clone (a fresh launch normally clones) publishes
-"completed" before its session exists, while still holding the lock.
+"completed" before its session exists, while still holding the lock. Follow-up, 2026-11-15: the first of those was fixed
+in #3823: a Tensorlake add not started for a session launch now hands its lock to the step that ends its run (the
+prepared clone's attachment, or the inner install plan), which gives it up as it publishes. The helm unit test
+`a_tensorlake_host_whose_setup_reads_as_ended_is_removed_at_once` parks the run right after its end for a prepared clone
+completing and an install plan completing and failing, and removes the host there. The session launch's case remains.
 
 ```text
   File "scripts/gui-e2e-smoke.py", line 744, in test_40_the_scripted_backend_sets_up_a_fake_ssh_host
