@@ -567,25 +567,43 @@ fn a_press_just_right_of_the_grip_reaches_the_terminal(cx: &mut TestAppContext) 
 
 /// SPEC.md: "The main pane keeps its 320px floor; a narrower window scrolls horizontally." Without the sideways scroll,
 /// the part of the pane past the window's edge, most of the terminal, could never be shown. Specified: in a 720 by 560
-/// window over a stored 656, a vertical wheel over the header moves nothing (only a sideways wheel scrolls the row, so
-/// a wheel over the list or the terminal scrolls only those), and a sideways wheel of 200 pixels there moves the pane
-/// and the divider 200 pixels to the left, the pane keeping its 320.
+/// window over a stored 656, a vertical wheel over the part of the pane still inside the window moves nothing (only a
+/// sideways wheel scrolls the row, so a wheel over the list or the terminal scrolls only those), and a sideways wheel
+/// of 200 pixels there moves the pane and the divider 200 pixels to the left, the pane keeping its 320. Where the app
+/// header floats above both panes (the macOS window, whose cutoff this window is under), the header stays where it was.
+///
+/// The wheel goes over the pane, not over the app header, because the header is part of the scrolling row only where
+/// it does not float. In the narrow macOS window it is drawn above the row, fixed (SPEC.md, "Desktop window chrome":
+/// "the app-level row stays fixed above both scrolling panes"), so a wheel over it scrolls nothing; a test wheeling
+/// there held on Linux and failed on a Mac. Whether the header floats is read from the sidebar's own rule
+/// ([`super::header_floats`], which starts from the macOS title band's flag) rather than repeated here, so the check
+/// follows that rule wherever it holds.
 #[gpui::test]
 fn a_window_too_narrow_for_both_panes_scrolls_sideways(cx: &mut TestAppContext) {
     let (_fake, cx) = open(cx, Some(656));
-    cx.simulate_resize(size(px(720.), px(560.)));
+    let viewport = size(px(720.), px(560.));
+    cx.simulate_resize(viewport);
     test_support::settle(cx);
     let nodes = frame(cx);
-    let (pane, divider) = (
+    let (pane, divider, version) = (
         node(&nodes, "main-pane").bounds,
         node(&nodes, "sidebar-divider").bounds,
+        node(&nodes, "app-version").bounds,
     );
     assert_eq!(
-        pane.size.width,
-        px(320.),
-        "premise: the pane is at its floor"
+        (pane.left(), pane.size.width),
+        (px(656.), px(320.)),
+        "premise: the pane is at its floor, beside the sidebar and mostly past the window's edge"
     );
-    let over = test_support::center(cx, "app-version");
+    // The middle of the pane's 64 visible pixels, clear of the divider's strip, which ends 4 pixels into the pane.
+    let over = point((pane.left() + viewport.width) / 2., pane.center().y);
+    assert!(
+        over.x > divider.right() && over.x < viewport.width,
+        "premise: the wheel lands on the pane inside the window, beside the divider"
+    );
+    // The sidebar is shown as wide as the pane's left edge, asserted above, so the cutoff is asked about that width.
+    let shown = f32::from(pane.left()) as u32;
+    let floats = cx.update(|window, _| super::header_floats(shown, window));
     cx.simulate_event(ScrollEvent {
         position: over,
         delta: ScrollDelta::Pixels(point(px(0.), px(-200.))),
@@ -613,6 +631,13 @@ fn a_window_too_narrow_for_both_panes_scrolls_sideways(cx: &mut TestAppContext) 
     assert_eq!(moved.left(), pane.left() - px(200.));
     assert_eq!(moved_divider.left(), divider.left() - px(200.));
     assert_eq!(moved.size.width, px(320.));
+    if floats {
+        assert_eq!(
+            node(&nodes, "app-version").bounds,
+            version,
+            "the floating header's version text stays above the row as it scrolls"
+        );
+    }
 }
 
 /// The element holding focus in a fresh frame, among those with an id.
