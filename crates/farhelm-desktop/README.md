@@ -29,9 +29,12 @@ On a Mac, `scripts/devbuild-mac.sh` does the same thing in release mode, stages 
 Linux `farhelm` payloads built from the same working copy (so Update works on remote hosts), and runs the app on a state
 directory of its own instead of the installed app's. Its header has the details.
 
-The release describes `farhelm-desktop` as a generic dist package (`packaging/farhelm-desktop/dist.toml`), whose build
-command, `scripts/build-desktop-binary.sh`, builds this crate with cargo and stages the binary with the app icon; the
-cargo package here is marked `dist = false` so the two descriptions cannot both produce an asset.
+Only the Mac app is released. A release builds it with cargo, through `scripts/build-desktop-binary.sh`, which is the
+build command of the generic dist package `packaging/farhelm-desktop/dist.toml`: the script refuses a binary that must
+not ship and stages the one it accepts with the app icon, which the archive needs and the cargo package alone would not
+ship. The cargo package here is marked `dist = false` so the two descriptions cannot both produce an asset
+(SPEC_impl.md, "Native app packaging", has why). On Linux the app is run from a build like the ones above (SPEC.md,
+"Installation and updates").
 
 ## Environment overrides
 
@@ -45,3 +48,8 @@ cargo package here is marked `dist = false` so the two descriptions cannot both 
   latest, for the release test in `releasing/mac-vm-test/`. An invalid or empty value fails every check without asking
   `/latest`; the real download origin and verification remain unchanged. Restart to update removes it from the relaunch
   helper's environment (SPEC_impl.md, "The desktop app's updater").
+- `FARHELM_RELEASE_BUILD` — read when the crates COMPILE, not when the app runs. Set and not empty, it marks a release
+  build, whose embedded helm downloads host payloads from its own version's release by default
+  (`crates/farhelm-helm/build.rs`); without it the helm has no payloads unless `FARHELM_HELM_PAYLOAD_DIR` names some.
+  `scripts/build-desktop-binary.sh` refuses to build without it. A build of main carries no release version, so a
+  release-marked one refuses that download instead.
