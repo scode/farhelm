@@ -3,11 +3,22 @@
 //! SPEC_impl.md, "Questions: the prompt". The old GUI's largest bug class was an action that ran on state the user was
 //! not shown: a confirmation drawn from one row, answered after the list had moved, acting on another. A [`Question`]
 //! is built from the state at the moment it opens and is frozen there: its title, its lines (targets, consequences,
-//! preconditions) and the value its confirming answer acts on ([`Question::frozen`]) never change while it is open, and
-//! the answer buttons come pre-wired to that frozen value, so feature code never wires an answer itself. Commands name
-//! their targets by stable id inside the frozen value, and the helm refuses a target that is gone; the existing
-//! per-route refusals of a target that changed since its prompt stay as they are. No generic precondition protocol is
-//! added here.
+//! preconditions) and the value its confirming answer acts on ([`Question::frozen`]) never change while it is open,
+//! except through a reword (below), and the answer buttons come pre-wired to that frozen value, so feature code never
+//! wires an answer itself. Commands name their targets by stable id inside the frozen value, and the helm refuses a
+//! target that is gone; the existing per-route refusals of a target that changed since its prompt stay as they are. No
+//! generic precondition protocol is added here.
+//!
+//! A centered question asked through [`ask_rewordable`] can be reworded while it is open ([`Open::reword`]): SPEC.md's
+//! bulk Stop and Delete question rewords itself when a target it lists changes, and closing it to ask the replacement
+//! moved focus off the answer the user was on and could take focus out of an approval card beside it. A reword swaps
+//! the words and the frozen value together, so what is drawn and what the answers act on still match, and it keeps
+//! everything else: the same layer, the same answers with their focus handles, focus where it is, the body's scroll
+//! position. What it guards against is the answer the user gave to the old words: an answer other than Cancel that
+//! arrives after a reword and before a frame showing the new words has gone on screen does nothing (SPEC.md: "An old
+//! answer cannot authorize a replacement question"), since its press was aimed at a question that no longer exists.
+//! Shown, not drawn: GPUI draws a dirty window before it handles a key, and shows that frame only at the next frame,
+//! so a key queued behind a reword is handled with the new words drawn but not yet on screen.
 //!
 //! The first answer wins: once one answer has run, the others do nothing, and an answer's action runs at most once (a
 //! confirmation that could send a second delete after the first succeeded is a bug the prototype shipped). SPEC.md's
@@ -42,7 +53,8 @@
 //! A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy
 //! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
 //! the host dialogs' header tile, footer note and width ([`Question::tile`], [`Question::note`], [`Question::width`]).
-//! The body is a view built once, as the question is asked, from the frozen value; its own controls are not answers.
+//! The body is a view built once, as the question is asked or reworded, from the frozen value; its own controls are
+//! not answers.
 //! The anchored and inline questions do not take them (below). Approved by the GPUI migration's orchestrator on
 //! 2026-11-14.
 //!
@@ -55,8 +67,13 @@
 //! Where focus starts follows SPEC.md, "Opening and closing": on the confirming button for a question the user just
 //! asked for, on Cancel when that button is disabled, when the action is risky and cannot be undone, or when the
 //! question arrived later. Escape and Cancel close it and return focus to where it was (Escape sends it home instead
-//! for a question built with [`Question::returns_home_on_escape`]); Enter on the dialog itself presses the enabled
-//! confirming answer.
+//! for a question built with [`Question::returns_home_on_escape`], and every close sends it to a named control for one
+//! built with [`Question::returns_to`]); Enter on the dialog itself presses the enabled confirming answer.
+//!
+//! A centered question whose text can outgrow the dialog (the bulk question's row per session) can give it a keyboard
+//! scroll stop ([`Question::scroll_stop`]), the dialog frame's own, since SPEC.md keeps Tab within a modal's "visible,
+//! enabled controls and keyboard scroll regions" and otherwise the keyboard could not bring the lines below the fold
+//! into view before answering for them.
 //!
 //! A question shows in one of three ways, with every rule above the same in all. [`ask`] centers it over a veil in the
 //! dialog frame. [`ask_anchored`] draws it beside the control it is about, as the old app did for the questions a row
@@ -88,12 +105,12 @@
 //! ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its title as a red heading
 //! (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
 //!
-//! Some options belong to some presentations only: the body, tile, note and width to the centered question, the loud
-//! look to the inline one, and the empty-click and Escape-home rules to the two layers. A debug build asserts, as the
-//! question opens, that none is set on a question asked a way that ignores it; a release build ignores it. Otherwise a
-//! question moved from centered to anchored, or a helper that builds one question for both, would lose its body or its
-//! tile with no test failing. The answer that can fail is stricter: a question asked a way that may not carry one
-//! refuses to open, in every build.
+//! Some options belong to some presentations only: the body, tile, note, width and scroll stop to the centered
+//! question, the loud look to the inline one, and the empty-click rule and the Escape-home and named-control returns
+//! to the two layers. A debug build asserts, as the question opens, that none is set on a question asked a way that
+//! ignores it; a release build ignores it. Otherwise a question moved from centered to anchored, or a helper that
+//! builds one question for both, would lose its body or its tile with no test failing. The answer that can fail is
+//! stricter: a question asked a way that may not carry one refuses to open, in every build.
 //!
 //! NOTE: Two recorded deviations from the old YOLO question's look. The old one drew its last line (the host "asks
 //! before every YOLO launch") in the dimmer `--fg-dim`; here every line is drawn alike, since a question's lines carry
@@ -206,10 +223,13 @@ pub struct Question<T> {
     note: Option<SharedString>,
     /// The dialog frame's width in place of the ordinary one ([`Question::width`]).
     width: Option<Pixels>,
+    /// The accessible name of the text's keyboard scroll stop, when it has one ([`Question::scroll_stop`]).
+    scroll_stop: Option<SharedString>,
     frozen: T,
 }
 
-/// What [`Question::body`] is handed: called once, when the question opens, with the frozen value.
+/// What [`Question::body`] is handed: called once when the question opens, and once more for each reword
+/// ([`Open::reword`]), with the frozen value.
 type BuildBody<T> = Box<dyn FnOnce(&T, &mut Window, &mut App) -> AnyView>;
 
 /// What [`Question::tile`] is handed: called on every draw, since an element lasts one frame.
@@ -248,6 +268,7 @@ impl<T: Clone + 'static> Question<T> {
             tile: None,
             note: None,
             width: None,
+            scroll_stop: None,
             frozen,
         }
     }
@@ -364,7 +385,8 @@ impl<T: Clone + 'static> Question<T> {
 
     /// A body the feature draws, below the lines and above the answers, for a question that needs more than lines of
     /// text: the host setup confirmation's numbered plan with its Copy plan button, say. `build` runs once, when the
-    /// question is asked, with the frozen value, and returns the view the prompt then draws for as long as it is open.
+    /// question is asked, with the frozen value, and returns the view the prompt then draws for as long as it is open
+    /// or until it is reworded ([`Open::reword`], which builds the new question's body from its own frozen value).
     /// It runs even when the question then does not open (the user moved on since the mark), and its view is dropped
     /// unseen, so it should only build the view:
     ///
@@ -374,7 +396,8 @@ impl<T: Clone + 'static> Question<T> {
     /// ```
     ///
     /// A view built once rather than a function drawn every frame, for two reasons. What it shows is fixed at the
-    /// moment the question opens, as the lines are, so the plan the user reads is the plan the answers act on. And
+    /// moment the question opens or is reworded, as the lines are, so the plan the user reads is the plan the answers
+    /// act on. And
     /// the body's own controls need state that outlives a frame: a Copy button's focus handle, which must stay the
     /// same handle for focus to stay on it. The prompt cannot check the first: a view that reads live state when it
     /// draws (an entity, the store) would show something else, so it holds copies, as the frozen value does.
@@ -433,14 +456,57 @@ impl<T: Clone + 'static> Question<T> {
         self
     }
 
+    /// Give the question's text (its lines, the body and a failed attempt's reason) a keyboard scroll stop named
+    /// `label`, for a question whose text can run past the dialog: the bulk Stop and Delete question lists a row per
+    /// session ("Sessions affected", the old dialog's name for that region). The answers authorize what the text lists,
+    /// so a keyboard user must be able to scroll it into view before answering, and SPEC.md, "Opening and closing",
+    /// keeps Tab within a modal's "visible, enabled controls and keyboard scroll regions".
+    ///
+    /// It is the dialog frame's stop ([`DialogFrame::scroll_stop`]), under the frame's rule: present whenever the text
+    /// holds no tab stop, overflowing or not, as the old app's scroll region was, and absent while a control in the
+    /// body is the keyboard's way in. It comes first in Tab's order, before the answers, since it is drawn above them;
+    /// focus still starts on the answer the rules pick. Without this the text is drawn exactly as before. Only the
+    /// centered question has a scrolling body; a debug build asserts the others are not given one.
+    pub fn scroll_stop(mut self, label: impl Into<SharedString>) -> Self {
+        self.scroll_stop = Some(label.into());
+        self
+    }
+
     /// Escape on the question sends focus home (the selected session's terminal) rather than back to the control that
     /// opened it; every other way it closes (an answer, a press outside it) still returns focus to the opener. SPEC.md,
     /// "Keyboard focus", for the session header's Stop, Restart, Replace and Delete questions: "Escape cancels the
     /// header's … question and returns focus to the terminal". A row's questions return to their opener on Escape too.
     /// While there is no home, or another layer is still open, Escape returns focus to the opener all the same. Not for
     /// an inline question, whose Escape keeps focus in its owner's dialog ([`ask_inline`]; a debug build asserts it).
+    ///
+    /// A question has one return rule: this and [`Question::returns_to`] exclude each other, and a debug build asserts
+    /// that only one was called, since whichever came last would otherwise win unseen.
     pub fn returns_home_on_escape(mut self) -> Self {
+        debug_assert!(
+            self.returns_to == ReturnTo::Opener,
+            "Question::returns_home_on_escape on a question that already returns focus elsewhere"
+        );
         self.returns_to = ReturnTo::HomeOnEscape;
+        self
+    }
+
+    /// Every close of the question (Cancel, Escape, any other dismissal, an answer, its subject going) returns focus
+    /// to `control` rather than to what held focus when it opened: the layer manager's [`ReturnTo::Control`], with its
+    /// fallback when `control` is not drawn as the question closes (then focus goes back to what held it when the
+    /// question opened). For a question about a control other than the one that asked it: the bulk Stop and Delete
+    /// question returns focus to the marked bar's ⋯, as the old one did, though its Stop or Delete button asked it.
+    /// Naming the control costs no focus move before the question opens, where focusing the control first is one more
+    /// visible move, and one the focus coordinator refuses once the user has moved on.
+    ///
+    /// An answer's own action may still move focus after the question has closed (the bulk question's Confirm sends it
+    /// to the marked count). Not for an inline question, which returns focus to what held it inside its owner's dialog
+    /// ([`ask_inline`]; a debug build asserts it), and not together with [`Question::returns_home_on_escape`].
+    pub fn returns_to(mut self, control: FocusHandle) -> Self {
+        debug_assert!(
+            self.returns_to == ReturnTo::Opener,
+            "Question::returns_to on a question that already returns focus elsewhere"
+        );
+        self.returns_to = ReturnTo::Control(control);
         self
     }
 
@@ -466,11 +532,11 @@ impl<T: Clone + 'static> Question<T> {
     }
 
     /// The options set on this question that a question shown as `shown` ignores, by builder name, in the order the
-    /// builders are declared: the body, tile, note and width outside the centered question, the loud look outside the
-    /// inline one, and inside it the empty-click and Escape rules its owner's dialog keeps. This is the one list of
-    /// what each presentation ignores, which [`build`] asserts empty in a debug build (see the module docs). An answer
-    /// that can fail is not here: a question that may not carry one refuses to open, in every build
-    /// ([`Question::may_fail_when`]).
+    /// builders are declared: the body, tile, note, width and scroll stop outside the centered question, the loud look
+    /// outside the inline one, and inside it the empty-click rule and the focus returns its owner's dialog keeps. This
+    /// is the one list of what each presentation ignores, which [`build`] asserts empty in a debug build (see the
+    /// module docs). An answer that can fail is not here: a question that may not carry one refuses to open, in every
+    /// build ([`Question::may_fail_when`]).
     fn ignored_by(&self, shown: Shown) -> Vec<&'static str> {
         let (centered, inline) = (shown == Shown::Centered, shown == Shown::Inline);
         [
@@ -484,8 +550,16 @@ impl<T: Clone + 'static> Question<T> {
             ("Question::note", !centered && self.note.is_some()),
             ("Question::width", !centered && self.width.is_some()),
             (
+                "Question::scroll_stop",
+                !centered && self.scroll_stop.is_some(),
+            ),
+            (
                 "Question::returns_home_on_escape",
                 inline && self.returns_to == ReturnTo::HomeOnEscape,
+            ),
+            (
+                "Question::returns_to",
+                inline && matches!(self.returns_to, ReturnTo::Control(_)),
             ),
         ]
         .into_iter()
@@ -574,6 +648,11 @@ pub struct Prompt<T: 'static> {
     reason: Option<Line>,
     /// What held focus when an inline question opened, where an answer returns it. Layers keep their own.
     opener: Option<WeakFocusHandle>,
+    /// How many times the question has been reworded ([`Open::reword`]), and the count as of the last frame shown on
+    /// screen. While the two differ, the user has not yet seen the words the answers would act on, and only Cancel
+    /// answers.
+    wording: u32,
+    drawn_wording: u32,
     confirm_focus: FocusHandle,
     cancel_focus: FocusHandle,
     alternative_focus: Vec<FocusHandle>,
@@ -594,7 +673,7 @@ impl Shown {
     /// The call that asks a question this way, which is how a feature author knows the presentation: for messages.
     fn asked_through(self) -> &'static str {
         match self {
-            Shown::Centered => "prompt::ask or prompt::ask_fallible",
+            Shown::Centered => "prompt::ask, prompt::ask_rewordable or prompt::ask_fallible",
             Shown::Anchored => "prompt::ask_anchored",
             Shown::Inline => "prompt::ask_inline",
         }
@@ -622,11 +701,14 @@ impl<T: Clone + 'static> Prompt<T> {
 
     /// Run `which`, if no answer has run yet and no attempt is in flight: close the question (returning focus to its
     /// opener), then, for Confirm or an extra answer, hand the frozen value to its action. A fallible answer instead
-    /// starts an attempt and leaves the question open, frozen, until the attempt settles.
+    /// starts an attempt and leaves the question open, frozen, until the attempt settles. Every answer but Cancel does
+    /// nothing between a reword and the frame that shows it (see the module docs).
     fn answer(&mut self, which: Which, window: &mut Window, cx: &mut Context<Self>) {
+        let unseen = self.wording != self.drawn_wording;
         if self.answered
             || self.in_flight
             || (which == Which::Confirm && !self.question.confirm_enabled)
+            || (which != Which::Cancel && unseen)
         {
             return;
         }
@@ -712,6 +794,47 @@ impl<T: Clone + 'static> Prompt<T> {
             cx.notify();
         }
     }
+
+    /// Show `question`'s words and act on its frozen value from now on ([`Open::reword`] has the contract): `false`,
+    /// changing nothing, while an attempt is in flight. A closed question never gets here ([`Open::reword`]).
+    fn reword(
+        &mut self,
+        mut question: Question<T>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // An attempt in flight was handed the old value; rewording under it would show one thing while that action
+        // settles another, and its failure would arm answers the user never saw beside the reason.
+        if self.in_flight {
+            return false;
+        }
+        let open = &mut self.question;
+        // The layer was opened with these (Enter's main action exists only for an enabled Confirm, and each extra
+        // answer has its button and action), so a new question that differs in them would be drawn one way and
+        // answered another.
+        debug_assert_eq!(
+            question.alternatives.len(),
+            open.alternatives.len(),
+            "a reword must keep the question's extra answers"
+        );
+        debug_assert_eq!(
+            question.confirm_enabled, open.confirm_enabled,
+            "a reword must keep whether Confirm is enabled"
+        );
+        self.body = question
+            .body
+            .take()
+            .map(|build| build(&question.frozen, window, cx));
+        open.title = question.title;
+        open.summary = question.summary;
+        open.lines = question.lines;
+        open.confirm.label = question.confirm.label;
+        open.confirm.help = question.confirm.help;
+        open.frozen = question.frozen;
+        self.wording += 1;
+        cx.notify();
+        true
+    }
 }
 
 impl<T: Clone + 'static> Render for Prompt<T> {
@@ -719,6 +842,19 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         let palette = theme::palette(cx);
         if self.shown == Shown::Inline && self.answered {
             return div().into_any_element();
+        }
+        // The words count as seen once the frame drawing them is on screen, not once they render: GPUI draws a dirty
+        // window before it handles a key and shows that frame only at the next frame, so a key queued behind a reword
+        // would otherwise confirm words never shown. Next-frame callbacks run right before a frame is shown, with no
+        // input between, and a pending one asks for a frame, so the guard never outlives the next frame. Each clears
+        // only the wording its own frame drew, since a later reword may have come since.
+        if self.drawn_wording != self.wording {
+            let (drawn, prompt) = (self.wording, cx.weak_entity());
+            when_shown(window, move |cx| {
+                let _ = prompt.update(cx, |prompt, _| {
+                    prompt.drawn_wording = prompt.drawn_wording.max(drawn)
+                });
+            });
         }
         let busy = self.in_flight;
         let question = &self.question;
@@ -824,8 +960,25 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         if let Some(width) = question.width {
             frame = frame.width(width);
         }
+        if let Some(label) = &question.scroll_stop {
+            frame = frame.scroll_stop(label.clone());
+        }
         frame.into_any_element()
     }
+}
+
+/// Run `shown` at the next frame GPUI shows: by then the frame drawn now is on screen, or, when it was drawn early to
+/// handle a key, it goes up right after the callback, with no input dispatched in between. A pending callback asks for
+/// that frame. The prompt's one use of
+/// a next-frame callback, for [`Prompt`]'s old-answer guard (its `render`): it asks for the next frame only while a
+/// reword's words have not been shown, once per frame that draws them, and never schedules anything over time.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "one frame per reword, only to learn when its new words are shown; it schedules nothing over time, so \
+              the ticker's rule (SPEC_impl.md, \"Animation time: the ticker\") is not bypassed"
+)]
+fn when_shown(window: &Window, shown: impl FnOnce(&mut App) + 'static) {
+    window.on_next_frame(move |_, cx| shown(cx));
 }
 
 /// An inline question, as [`ask_inline`] draws it: the title, the summary and the lines, the reason the last attempt
@@ -1011,6 +1164,21 @@ pub fn ask<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    ask_rewordable(question, subject, mark, on_confirm, window, cx).map(|open| open.layer())
+}
+
+/// Ask `question` as a dialog, exactly as [`ask`] does, and hand back the open question so its asker can reword it in
+/// place while it is open ([`Open::reword`]). For a question whose subject can change under it in a way SPEC.md says
+/// rewords the question rather than closing it: the bulk Stop and Delete question, whose targets' titles, hosts and
+/// consequences the listing can change while the user reads it.
+pub fn ask_rewordable<T: Clone + 'static>(
+    question: Question<T>,
+    subject: Option<Subject>,
+    mark: &Mark,
+    on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<Open<T>> {
     ask_inner(
         question,
         Presentation::Centered,
@@ -1020,7 +1188,66 @@ pub fn ask<T: Clone + 'static>(
         window,
         cx,
     )
-    .map(|(layer, _)| layer)
+    .map(|(layer, prompt)| Open {
+        layer,
+        prompt: prompt.downgrade(),
+    })
+}
+
+/// A centered question [`ask_rewordable`] opened, which its asker keeps to reword it. Holding it keeps nothing open:
+/// the question closes as any other does (an answer, Escape, its subject going), and the handle then rewords nothing.
+pub struct Open<T: 'static> {
+    layer: LayerId,
+    prompt: WeakEntity<Prompt<T>>,
+}
+
+impl<T: Clone + 'static> Open<T> {
+    /// The question's layer, to ask [`layers::is_open`] or to close it with [`layers::close`].
+    pub fn layer(&self) -> LayerId {
+        self.layer
+    }
+
+    /// Replace the open question's words and the value its answers act on with `question`'s, in place: its title, its
+    /// summary and lines, its body (built afresh from `question`'s builder and frozen value, as at asking), and the
+    /// Confirm answer's label and help. From the next frame on the question shows them, and every answer acts on
+    /// `question`'s frozen value: the confirming action passed when it was asked runs with it, and so do the extra
+    /// answers' actions. Returns whether it did.
+    ///
+    /// Everything else stays as the question opened, and the rest of `question` is not read: the layer, Cancel, the
+    /// extra answers and their actions, Confirm's tier, whether Confirm is enabled, the empty-click rule, where closing
+    /// returns focus, the tile, note, width and scroll stop, and a failed attempt's reason, which still says what the
+    /// last press did. A debug build asserts that `question` has as many extra answers and the same Confirm enabled,
+    /// since a question differing there would be drawn one way and answered another. Where focus starts is not read
+    /// either: the question has started.
+    ///
+    /// Focus stays where it is. The answers keep their focus handles and the text's scroll stop its own, so an answer
+    /// or the stop that held focus still holds it, and nothing closes, opens, moves or animates. A control inside the
+    /// old body is gone with it, so focus on one goes to the closest control left, as for any control that goes away
+    /// inside a dialog; no question asked this way has one. An answer other than Cancel pressed after this and before a
+    /// frame showing the new words is on screen does nothing (see the module docs). A mouse press that began before
+    /// the reword and is released after that frame answers the new words, as the old app's did. A Confirm tooltip
+    /// already waiting or showing keeps its old help until it goes, as every tooltip keeps the words it began
+    /// with.
+    ///
+    /// Nothing changes, and `false` comes back, once the question has closed (answered, cancelled, dismissed, its
+    /// subject gone, or the connection reset; also from inside its own answer's action, which runs once it closed),
+    /// and while one of its answers that can fail has an attempt in flight
+    /// ([`Question::fallible_alternative`]): that attempt was handed the old value, and a reword under it would show
+    /// one thing while the action settles another. [`layers::is_open`] tells the two apart. A closed question is never
+    /// reopened here; an asker that still has something to ask asks it afresh. An answer that can fail must not reword
+    /// its own question from inside its action: the question is open and being updated there, so the reword panics
+    /// rather than returning `false`. No caller does this.
+    pub fn reword(&self, question: Question<T>, window: &mut Window, cx: &mut App) -> bool {
+        let Some(prompt) = self.prompt.upgrade() else {
+            return false;
+        };
+        // The entity outlives its layer while its own answer's action runs (that action runs inside the prompt's
+        // update, after the close), and updating it again from there would panic.
+        if !layers::is_open(self.layer, window, cx) {
+            return false;
+        }
+        prompt.update(cx, |prompt, cx| prompt.reword(question, window, cx))
+    }
 }
 
 /// Ask `question` as a dialog, as [`ask`] does, with a confirming answer whose action can fail: the host remove
@@ -1119,8 +1346,9 @@ fn move_for_question(target: &FocusHandle, mark: &Mark, window: &mut Window, cx:
     }
 }
 
-/// [`ask`], [`ask_fallible`] or [`ask_anchored`], also handing back the prompt's entity for tests. Refuses, opening
-/// nothing, a question with an answer that can fail that its presentation may not carry ([`Question::may_fail_when`]).
+/// [`ask_rewordable`] (and through it [`ask`]), [`ask_fallible`] or [`ask_anchored`], also handing back the prompt's
+/// entity (for [`ask_rewordable`]'s handle and for tests). Refuses, opening nothing, a question with an answer that can
+/// fail that its presentation may not carry ([`Question::may_fail_when`]).
 fn ask_inner<T: Clone + 'static>(
     question: Question<T>,
     presentation: Presentation,
@@ -1237,7 +1465,8 @@ fn build<T: Clone + 'static>(
         .into_iter()
         .map(Some)
         .collect();
-    // Built here, once, from the value the answers act on: what the body shows is fixed from the moment it opens.
+    // Built here, once, from the value the answers act on: what the body shows is fixed from the moment it opens (or,
+    // later, is reworded).
     let body = question
         .body
         .take()
@@ -1258,6 +1487,8 @@ fn build<T: Clone + 'static>(
         in_flight: false,
         reason: None,
         opener: None,
+        wording: 0,
+        drawn_wording: 0,
         confirm_focus,
         cancel_focus,
         alternative_focus,

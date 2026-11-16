@@ -2,8 +2,9 @@
 //! a question starts and how it is answered, cancelled and closed, how its summary and its title draw a host value,
 //! the anchored question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
 //! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, the
-//! debug build's refusal of an option the question's presentation ignores, and a body the feature draws (the host setup
-//! confirmation's plan) with the dialog frame's tile, note and width.
+//! debug build's refusal of an option the question's presentation ignores, a body the feature draws (the host setup
+//! confirmation's plan) with the dialog frame's tile, note and width, and the bulk question's three needs: rewording
+//! an open question in place, returning focus to a named control, and a keyboard scroll stop for long text.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -15,7 +16,7 @@ use std::rc::Rc;
 
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render, SharedString,
     StatefulInteractiveElement as _, Styled, TestAppContext, VisualTestContext, Window, div, point,
     px, size,
 };
@@ -28,7 +29,7 @@ use crate::layers::{self, Anchor, Dialog, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
 use crate::test_support::{
     Thing, advance, any_open, bounds, button, center, check, click, focused, focused_id, frame,
-    handle, is_open, keys, open, question, redraw, settle,
+    handle, is_open, keys, label, open, question, redraw, settle, show_next_frame,
 };
 
 // ---- The prompt ------------------------------------------------------------------------------------------------------
@@ -1083,25 +1084,51 @@ fn a_click_on_an_anchored_question_over_a_terminal_stays_with_the_question(
     assert!(focused(cx, &page.opener), "and focus went back");
 }
 
-/// SPEC.md, "Keyboard focus": "Escape cancels the header's … question and returns focus to the terminal", while every
-/// other close (an answer, Cancel included) returns focus to where it was before the question opened, and a row's
-/// questions return to the row's menu button on Escape too. A header question whose Escape went back to its button
-/// would leave the user's next keys off the terminal they were working in.
+/// Why this matters: where focus lands when a question closes decides where the user's next keys go. SPEC.md, "Keyboard
+/// focus": "Escape cancels the header's … question and returns focus to the terminal", while every other close (an
+/// answer, Cancel included) returns focus to where it was before the question opened; a header question whose Escape
+/// went back to its button would leave the user's next keys off the terminal they were working in. The bulk Stop and
+/// Delete question is asked by the marked bar's Stop or Delete, but SPEC.md and the old app return focus to the bar's ⋯
+/// when it closes. Without a way to name that control, the asker focused the ⋯ before asking: one more visible focus
+/// move, and one the focus coordinator refuses once the user moved on, which left Cancel returning to whatever held
+/// focus before.
 ///
-/// Specified, for a question drawn beside its control and one drawn centered, with a drawn home (standing in for the
-/// selected terminal) and the opener focused: the open question holds focus; a question built with
-/// `returns_home_on_escape` sends focus home on Escape and back to the opener on a click on Cancel; a question built
-/// without it sends focus back to the opener on Escape.
+/// Specified, for a question drawn centered and one drawn beside its control, on a page with the opener, a drawn home
+/// (standing in for the selected terminal) and a named control (standing in for the bar's ⋯), opened with focus on the
+/// opener: the open question holds focus, so none of the three has it. Then, by how the question was built:
+/// - with no return rule, Escape returns focus to the opener;
+/// - with `returns_home_on_escape`, Escape sends focus home and a click on Cancel returns it to the opener;
+/// - with `returns_to` naming the control, Escape and a click on Cancel each send focus to the named control.
+///
+/// A named control that is no longer drawn as the question closes falls back to the opener; that rule is the focus
+/// coordinator's, pinned in `focus_tests.rs`.
 #[gpui::test]
-fn escape_on_a_question_can_return_focus_home(cx: &mut TestAppContext) {
-    let (opener, home) = cx.update(|cx| {
+fn a_question_can_return_focus_home_or_to_a_named_control(cx: &mut TestAppContext) {
+    /// How a question in this test is told to return focus as it closes.
+    #[derive(Clone, Copy, Debug)]
+    enum Returns {
+        /// No rule: every close returns to the opener.
+        Unset,
+        /// `returns_home_on_escape`.
+        HomeOnEscape,
+        /// `returns_to` naming the page's named control.
+        Named,
+    }
+
+    let (opener, home, named) = cx.update(|cx| {
         (
+            cx.focus_handle().tab_stop(true),
             cx.focus_handle().tab_stop(true),
             cx.focus_handle().tab_stop(true),
         )
     });
     let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
-    let (drawn_opener, drawn_home, out) = (opener.clone(), home.clone(), anchor_out.clone());
+    let (drawn_opener, drawn_home, drawn_named, out) = (
+        opener.clone(),
+        home.clone(),
+        named.clone(),
+        anchor_out.clone(),
+    );
     let cx = open(cx, move |window, cx| {
         let anchor = Anchor::for_element("header-anchor", window, cx);
         out.replace(Some(anchor.clone()));
@@ -1116,6 +1143,7 @@ fn escape_on_a_question_can_return_focus_home(cx: &mut TestAppContext) {
                     .child(anchor.track()),
             )
             .child(button("terminal", &drawn_home))
+            .child(button("bar-menu", &drawn_named))
             .into_any_element()
     });
     let terminal = home.clone();
@@ -1124,34 +1152,43 @@ fn escape_on_a_question_can_return_focus_home(cx: &mut TestAppContext) {
         .borrow()
         .clone()
         .expect("the page drew its anchor");
+    // Which of the page's controls hold focus, by name: exactly one after a close, none while the question is open.
+    let holding = |cx: &mut VisualTestContext| -> Vec<&'static str> {
+        [("opener", &opener), ("home", &home), ("named", &named)]
+            .into_iter()
+            .filter(|(_, control)| focused(cx, control))
+            .map(|(name, _)| name)
+            .collect()
+    };
     for presentation in [Presentation::Centered, Presentation::Anchored(anchored)] {
-        for (built, close, goes_home) in [
-            (true, "escape", true),
-            (true, "cancel", false),
-            (false, "escape", false),
+        for (returns, close, lands_on) in [
+            (Returns::Unset, "escape", "opener"),
+            (Returns::HomeOnEscape, "escape", "home"),
+            (Returns::HomeOnEscape, "cancel", "opener"),
+            (Returns::Named, "escape", "named"),
+            (Returns::Named, "cancel", "named"),
         ] {
-            let case = format!("built: {built}, {close}");
+            let case = format!("{returns:?}, {close}");
             click(cx, "opener");
-            assert!(
-                focused(cx, &opener),
+            assert_eq!(
+                holding(cx),
+                ["opener"],
                 "{case}: the premise: the opener has focus"
             );
-            let shown = presentation.clone();
+            let (shown, control) = (presentation.clone(), named.clone());
             let asked = cx.update(|window, cx| {
                 let mark = Mark::take(cx);
-                let question = question("alpha");
-                let question = if built {
-                    question.returns_home_on_escape()
-                } else {
-                    question
+                let question = match returns {
+                    Returns::Unset => question("alpha"),
+                    Returns::HomeOnEscape => question("alpha").returns_home_on_escape(),
+                    Returns::Named => question("alpha").returns_to(control),
                 };
                 prompt::ask_for_test(shown, question, None, &mark, |_, _, _| {}, window, cx)
             });
-            cx.run_until_parked();
-            check(cx);
+            settle(cx);
             let asked = asked.expect("the question opened");
             assert!(
-                !focused(cx, &opener) && !focused(cx, &home),
+                holding(cx).is_empty(),
                 "{case}: the premise: the open question holds focus"
             );
             if close == "escape" {
@@ -1160,15 +1197,7 @@ fn escape_on_a_question_can_return_focus_home(cx: &mut TestAppContext) {
                 click(cx, "prompt-cancel");
             }
             assert!(!is_open(cx, asked.layer), "{case}: it closed");
-            let (to, from) = if goes_home {
-                (&home, &opener)
-            } else {
-                (&opener, &home)
-            };
-            assert!(
-                focused(cx, to) && !focused(cx, from),
-                "{case}: where focus went"
-            );
+            assert_eq!(holding(cx), [lands_on], "{case}: where focus went");
         }
     }
 }
@@ -2177,7 +2206,8 @@ fn a_question_that_can_fail_opens_as_a_layer_only_centered_with_the_empty_click_
 // ---- Options a presentation ignores ----------------------------------------------------------------------------------
 
 /// `question` with every option that only some presentations take: the empty-click rule, the loud look, a body, a tile,
-/// a note, a width and Escape sending focus home. Each test below asks it one way, and the assertion's message names
+/// a note, a width, a scroll stop and Escape sending focus home. ([`Question::returns_to`] excludes the last, so its
+/// own test covers it.) Each test below asks it one way, and the assertion's message names
 /// exactly the options that way ignores, in the builders' order, so a test pins both what is refused and what is not.
 #[cfg(debug_assertions)]
 fn with_every_presentation_option(question: Question<String>) -> Question<String> {
@@ -2193,6 +2223,7 @@ fn with_every_presentation_option(question: Question<String>) -> Question<String
         .tile(|_, _| div())
         .note("Undo it with the gear")
         .width(px(560.))
+        .scroll_stop("Question text")
         .returns_home_on_escape()
 }
 
@@ -2201,12 +2232,13 @@ fn with_every_presentation_option(question: Question<String>) -> Question<String
 /// to say so. The debug build the tests run in has to fail instead, naming the option and the call.
 ///
 /// Specified: a centered question carrying every presentation-specific option fails a debug build as it is asked,
-/// naming the centered question's calls (`prompt::ask` or `prompt::ask_fallible`) and the loud look only, since the
-/// centered question takes all the others.
+/// naming the centered question's calls (`prompt::ask`, `prompt::ask_rewordable` or `prompt::ask_fallible`) and the
+/// loud look only, since the centered question takes all the others.
 #[cfg(debug_assertions)]
 #[gpui::test]
 #[should_panic(
-    expected = "a question was asked through prompt::ask or prompt::ask_fallible with Question::loud, which it ignores"
+    expected = "a question was asked through prompt::ask, prompt::ask_rewordable or prompt::ask_fallible with \
+                Question::loud, which it ignores"
 )]
 fn a_centered_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
     let cx = open(cx, |_, _| div().into_any_element());
@@ -2222,13 +2254,13 @@ fn a_centered_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut Te
 /// tile added there for the centered case would vanish whenever the anchored one shows.
 ///
 /// Specified: an anchored question carrying every presentation-specific option fails a debug build as it is asked,
-/// naming `prompt::ask_anchored` with the loud look, the body, the tile, the note and the width, and not the
-/// empty-click and Escape-home rules, which an anchored question keeps.
+/// naming `prompt::ask_anchored` with the loud look, the body, the tile, the note, the width and the scroll stop, and
+/// not the empty-click and Escape-home rules, which an anchored question keeps.
 #[cfg(debug_assertions)]
 #[gpui::test]
 #[should_panic(
     expected = "a question was asked through prompt::ask_anchored with Question::loud, Question::body, \
-                Question::tile, Question::note, Question::width, which it ignores"
+                Question::tile, Question::note, Question::width, Question::scroll_stop, which it ignores"
 )]
 fn an_anchored_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
     let (cx, row) = open_row(cx);
@@ -2247,13 +2279,13 @@ fn an_anchored_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut T
 /// return to the terminal SPEC.md asks of the header's questions.
 ///
 /// Specified: an inline question carrying every presentation-specific option fails a debug build as it is asked,
-/// naming `prompt::ask_inline` with the empty-click rule, the body, the tile, the note, the width and the Escape-home
-/// rule, and not the loud look, which is the inline question's own.
+/// naming `prompt::ask_inline` with the empty-click rule, the body, the tile, the note, the width, the scroll stop and
+/// the Escape-home rule, and not the loud look, which is the inline question's own.
 #[cfg(debug_assertions)]
 #[gpui::test]
 #[should_panic(
     expected = "a question was asked through prompt::ask_inline with Question::keeps_focus_on_empty_click, \
-                Question::body, Question::tile, Question::note, Question::width, \
+                Question::body, Question::tile, Question::note, Question::width, Question::scroll_stop, \
                 Question::returns_home_on_escape, which it ignores"
 )]
 fn an_inline_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
@@ -2422,4 +2454,454 @@ fn a_questions_tile_note_and_width_reach_its_dialog_frame(cx: &mut TestAppContex
     );
     cx.update(|window, cx| asked.cancel(window, cx));
     settle(cx);
+}
+
+// ---- Rewording an open question --------------------------------------------------------------------------------------
+
+/// The body a rewordable test question draws, standing in for the bulk question's row per session: `count` lines, each
+/// `name` followed by its number from 1, drawn under `listed-0` on. Nothing in it takes focus.
+struct Listed {
+    name: String,
+    count: usize,
+}
+
+impl Render for Listed {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let name = self.name.clone();
+        div().children((0..self.count).map(move |index| {
+            div()
+                .debug_selector(move || format!("listed-{index}"))
+                .child(format!("{name} {}", index + 1))
+        }))
+    }
+}
+
+/// A question shaped like the bulk Delete question, about the sessions `names` and frozen at them: its title, summary,
+/// line and Confirm's label and help all count or name them, its body lists them `rows` times ([`Listed`], so a test
+/// can make it overflow), and its text has the scroll stop "Sessions affected". Each body build records the names it
+/// was handed in `built`.
+fn bulk(names: &[&str], rows: usize, built: &Built) -> Question<Vec<String>> {
+    let count = names.len();
+    let record = built.clone();
+    Question::new(
+        format!("Delete {count} sessions?"),
+        Answer::new(
+            format!("Delete {count}"),
+            HoverHelp::tooltip(format!("Delete the {count} sessions listed")),
+            Tier::Danger,
+        ),
+        names
+            .iter()
+            .map(|name| name.to_string())
+            .collect::<Vec<_>>(),
+    )
+    .summary(format!("Marked: {}", names.join(", ")))
+    .line(format!("{count} sessions are removed."))
+    .keeps_focus_on_empty_click()
+    .scroll_stop("Sessions affected")
+    .body(move |frozen: &Vec<String>, _, cx| {
+        let name = frozen.join(",");
+        record.borrow_mut().push(name.clone());
+        cx.new(|_| Listed { name, count: rows })
+    })
+}
+
+/// Ask `question` through [`prompt::ask_rewordable`] with a mark taken now, its Confirm recording the frozen names
+/// (joined with commas) in `confirmed`, and draw it. Panics if it did not open.
+fn ask_rewordable(
+    cx: &mut VisualTestContext,
+    question: Question<Vec<String>>,
+    confirmed: &Ran,
+) -> prompt::Open<Vec<String>> {
+    let record = confirmed.clone();
+    let open = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_rewordable(
+            question,
+            None,
+            &mark,
+            move |frozen: Vec<String>, _, _| record.borrow_mut().push(frozen.join(",")),
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    open.expect("the premise: the question opened")
+}
+
+/// Reword `open` to `question`, then let whatever that queued run and draw.
+fn reword(
+    cx: &mut VisualTestContext,
+    open: &prompt::Open<Vec<String>>,
+    question: Question<Vec<String>>,
+) -> bool {
+    let reworded = cx.update(|window, cx| open.reword(question, window, cx));
+    settle(cx);
+    reworded
+}
+
+/// Why this matters: SPEC.md's bulk Stop and Delete question rewords itself when a target it lists changes, and the
+/// first port did it by closing the question and asking the replacement, which put focus back on the starting answer
+/// after every listing change (a user who had tabbed to Cancel or into the list was moved) and could pull focus out of
+/// an approval card beside it. A reword that left any of its words stale would show the user one set of targets while
+/// the answer acts on another, the very bug class the prompt exists to prevent.
+///
+/// Specified: rewording a question from two sessions to three, with focus on Confirm, on Cancel, or on the text's
+/// scroll stop, keeps the same layer open and focus on that same control. With focus on Confirm, the next frame paints
+/// the new title, summary, line and body and none of the old title, the body is built once more from the new frozen
+/// value, and Confirm is labelled and helped with the new count.
+#[gpui::test]
+fn a_reword_changes_the_words_in_place_and_keeps_focus_where_it_is(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    for (on, keystrokes) in [
+        ("prompt-confirm", ""),
+        ("prompt-cancel", "shift-tab"),
+        ("prompt-body-stop", "shift-tab shift-tab"),
+    ] {
+        let (built, confirmed): (Built, Ran) = Default::default();
+        let open = ask_rewordable(cx, bulk(&["alpha", "beta"], 1, &built), &confirmed);
+        if !keystrokes.is_empty() {
+            keys(cx, keystrokes);
+        }
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(on),
+            "the premise: focus is on {on}"
+        );
+        assert!(
+            reword(cx, &open, bulk(&["alpha", "beta", "gamma"], 1, &built)),
+            "{on}: the open question was reworded"
+        );
+        assert!(
+            is_open(cx, open.layer()),
+            "{on}: the same question is still open"
+        );
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(on),
+            "{on}: focus stayed where it was"
+        );
+        if on != "prompt-confirm" {
+            keys(cx, "escape");
+            continue;
+        }
+
+        let painted = painted_in_question(cx);
+        for words in [
+            "Delete 3 sessions?",
+            "Marked: alpha, beta, gamma",
+            "3 sessions are removed.",
+            "alpha,beta,gamma 1",
+        ] {
+            assert!(
+                painted.iter().any(|text| text == words),
+                "{words:?} is painted; painted: {painted:?}"
+            );
+        }
+        assert!(
+            !painted.iter().any(|text| text == "Delete 2 sessions?"),
+            "the old title is gone; painted: {painted:?}"
+        );
+        assert_eq!(
+            *built.borrow(),
+            ["alpha,beta", "alpha,beta,gamma"],
+            "the body was built once more, from the new frozen value"
+        );
+        assert_eq!(
+            label(cx, "prompt-confirm").as_deref(),
+            Some("Delete 3"),
+            "Confirm carries the new label"
+        );
+        let confirm = center(cx, "prompt-confirm");
+        cx.simulate_mouse_move(confirm, None, Modifiers::none());
+        advance(cx, layers::HOVER_DELAY);
+        assert_eq!(
+            cx.update(|window, cx| layers::shown_tooltip(window, cx))
+                .map(|shown| shown.text),
+            Some("Delete the 3 sessions listed".into()),
+            "Confirm shows the new help"
+        );
+        keys(cx, "escape");
+    }
+}
+
+/// Why this matters: the answers of a reworded question must act on what it now shows, or the bulk question would
+/// delete the targets of its first wording after the user read the second. And an answer the user gave to the old
+/// words must not authorize the new ones (SPEC.md: "An old answer cannot authorize a replacement question"). The key
+/// is the case that matters: GPUI draws a dirty window before it handles a key, but shows that frame only at the next
+/// frame, so an Enter already queued when a reword lands is handled with the new words drawn and not yet on screen.
+/// Focus starts on Confirm, so that Enter is the likeliest answer of all.
+///
+/// Specified, on a question about two sessions with focus on Confirm: after a reword to one session, an Enter
+/// dispatched as input before the next frame is shown runs nothing and leaves the question open; once that frame has
+/// been shown, Enter confirms once, on the one session, and closes the question.
+#[gpui::test]
+fn an_answer_after_a_reword_acts_on_the_new_value_once_it_is_shown(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let (built, confirmed): (Built, Ran) = Default::default();
+    let open = ask_rewordable(cx, bulk(&["alpha", "beta"], 1, &built), &confirmed);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: focus starts on Confirm"
+    );
+    let reworded = cx.update(|window, cx| open.reword(bulk(&["alpha"], 1, &built), window, cx));
+    assert!(reworded, "the premise: the question was reworded");
+    // `keys` dispatches in an update of its own after the reword's, as a real key arrives after the reword: the new words
+    // are drawn by then (test GPUI draws a dirty window at the end of each update, where the app's key dispatch draws it
+    // before handling the key), but no frame has shown them.
+    keys(cx, "enter");
+    assert!(
+        confirmed.borrow().is_empty(),
+        "an Enter before the new words were shown ran nothing: {:?}",
+        confirmed.borrow()
+    );
+    assert!(is_open(cx, open.layer()), "and left the question open");
+
+    show_next_frame(cx);
+    keys(cx, "enter");
+    assert_eq!(
+        *confirmed.borrow(),
+        ["alpha"],
+        "Enter after the new words were shown confirmed once, on the reworded value"
+    );
+    assert!(!is_open(cx, open.layer()), "Confirm closed the question");
+}
+
+/// Why this matters: the bulk question's asker rewords from a listing change that can arrive after the user closed the
+/// question, or after it closed because its subject went. A reword there that drew or reopened anything would put a
+/// question in front of a user who had dismissed it (SPEC.md: things that finish later never open over what the user
+/// is doing). A reword from inside the question's own answer is the case a closed check must catch: the answer runs
+/// inside the prompt's own update, after the close, so the prompt is still alive there and updating it again would
+/// panic.
+///
+/// Specified, for a question closed by Escape, and for one whose Confirm action rewords it: the reword returns `false`,
+/// builds no body and opens nothing, and only the Confirm, once, ran.
+#[gpui::test]
+fn a_reword_after_the_question_closed_does_nothing(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    for close in ["escape", "confirm"] {
+        let built: Built = Default::default();
+        let ran: Ran = Default::default();
+        let handle: Rc<RefCell<Option<prompt::Open<Vec<String>>>>> = Rc::default();
+        let (record, inside, rebuilt) = (ran.clone(), handle.clone(), built.clone());
+        let opened = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            prompt::ask_rewordable(
+                bulk(&["alpha", "beta"], 1, &built),
+                None,
+                &mark,
+                move |frozen: Vec<String>, window, cx| {
+                    let reworded = inside
+                        .borrow()
+                        .as_ref()
+                        .map(|open| open.reword(bulk(&["gamma"], 1, &rebuilt), window, cx));
+                    record.borrow_mut().push(format!(
+                        "confirmed {}, reworded {reworded:?}",
+                        frozen.join(",")
+                    ));
+                },
+                window,
+                cx,
+            )
+        });
+        settle(cx);
+        let layer = opened.as_ref().expect("the premise: it opened").layer();
+        handle.replace(opened);
+        let reworded = if close == "escape" {
+            keys(cx, "escape");
+            assert!(!is_open(cx, layer), "escape: the premise: it closed");
+            let open = handle
+                .borrow_mut()
+                .take()
+                .expect("the test holds the handle");
+            Some(reword(cx, &open, bulk(&["gamma"], 1, &built)))
+        } else {
+            keys(cx, "enter");
+            None
+        };
+        let expected: Vec<String> = match reworded {
+            Some(reworded) => {
+                assert!(!reworded, "escape: the reword reported that it did nothing");
+                Vec::new()
+            }
+            None => vec!["confirmed alpha,beta, reworded Some(false)".into()],
+        };
+        assert_eq!(*ran.borrow(), expected, "{close}: what ran");
+        assert_eq!(
+            *built.borrow(),
+            ["alpha,beta"],
+            "{close}: no body was built"
+        );
+        assert!(!any_open(cx), "{close}: nothing is open");
+    }
+}
+
+/// Why this matters: an answer whose action can fail is handed the frozen value when it is pressed and keeps the
+/// question up until it settles. A reword under it would show one set of targets while the action settles another,
+/// and a failure would then arm answers beside a reason about something no longer shown.
+///
+/// Specified, on a bulk-shaped question with an extra answer that can fail: while that answer's attempt is in flight a
+/// reword returns `false`, builds no body and leaves the old words drawn; once the attempt has failed, a reword
+/// succeeds and the new words are drawn.
+#[gpui::test]
+fn a_reword_waits_out_an_attempt_in_flight(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let (built, confirmed, ran): (Built, Ran, Ran) = Default::default();
+    let attempts: Attempts = Default::default();
+    let (record, kept) = (ran.clone(), attempts.clone());
+    let question = bulk(&["alpha", "beta"], 1, &built).fallible_alternative(
+        keep_it_answer(),
+        move |frozen: Vec<String>, attempt, _, _| {
+            record.borrow_mut().push(frozen.join(","));
+            kept.borrow_mut().push(attempt);
+        },
+    );
+    let open = ask_rewordable(cx, question, &confirmed);
+    keys(cx, "shift-tab enter");
+    assert_eq!(
+        *ran.borrow(),
+        ["alpha,beta"],
+        "the premise: the extra answer's attempt is in flight"
+    );
+
+    let alternative = |built: &Built| {
+        bulk(&["gamma"], 1, built).fallible_alternative(keep_it_answer(), |_, _, _, _| {})
+    };
+    assert!(
+        !reword(cx, &open, alternative(&built)),
+        "the reword in flight reported that it did nothing"
+    );
+    assert!(is_open(cx, open.layer()), "the question is still open");
+    assert_eq!(*built.borrow(), ["alpha,beta"], "no body was built");
+    let painted = painted_in_question(cx);
+    assert!(
+        painted.iter().any(|text| text == "Delete 2 sessions?"),
+        "the old words are still drawn; painted: {painted:?}"
+    );
+
+    settle_attempt(
+        cx,
+        &attempts,
+        Some(HostSentence::new("prompt-reason").text("Busy")),
+    );
+    assert!(
+        reword(cx, &open, alternative(&built)),
+        "after the failure, the reword went through"
+    );
+    let painted = painted_in_question(cx);
+    assert!(
+        painted.iter().any(|text| text == "Delete 1 sessions?"),
+        "the new words are drawn; painted: {painted:?}"
+    );
+    keys(cx, "escape");
+}
+
+// ---- Returning focus to a named control ------------------------------------------------------------------------------
+
+/// Why this matters: an inline question returns focus itself, to what held it inside its owner's dialog, so a named
+/// control would be dropped without a word, and a question moved from a dialog to inline would quietly stop returning
+/// where its feature asked.
+///
+/// Specified: an inline question built with `returns_to` fails a debug build as it is asked, naming
+/// `prompt::ask_inline` and `Question::returns_to` only.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(
+    expected = "a question was asked through prompt::ask_inline with Question::returns_to, which it ignores"
+)]
+fn an_inline_question_that_names_a_control_to_return_to_fails_a_debug_build(
+    cx: &mut TestAppContext,
+) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let control = handle(cx);
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        let _ = prompt::ask_inline(
+            question("alpha").returns_to(control),
+            &mark,
+            |_, _, _| {},
+            window,
+            cx,
+        );
+    });
+}
+
+// ---- The text's scroll stop ------------------------------------------------------------------------------------------
+
+/// With focus on Confirm (asserted as the premise), press Tab and assert that it reached `reached`; then hand back the
+/// role and accessible name of the text's scroll stop in a fresh frame, or `None` when no stop is drawn.
+fn tab_from_confirm(
+    cx: &mut VisualTestContext,
+    case: &str,
+    reached: &str,
+) -> Option<(Role, SharedString)> {
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "{case}: the premise: focus starts on Confirm"
+    );
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(reached),
+        "{case}: what Tab from Confirm reached"
+    );
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("prompt-body-stop"))
+        .and_then(|node| node.role.zip(node.label))
+}
+
+/// Why this matters: a bulk question lists a row per session, and its answers authorize exactly the rows it lists. With
+/// more rows than fit, a keyboard user had no way to scroll the rows below the fold into view before confirming them,
+/// since nothing in the list takes focus and GPUI scrolls nothing from the keyboard on its own (SPEC.md: Tab stays
+/// within a modal's "visible, enabled controls and keyboard scroll regions"). The stop and its rule are the dialog
+/// frame's, pinned in `components/tests/dialog.rs`; this pins that the question hands its label on, and that a
+/// question not asking for one keeps its Tab order.
+///
+/// Specified, in a 400-pixel-high window, focus starting on Confirm each time: a question given the stop whose body
+/// overflows has a region named "Sessions affected", which Tab from Confirm reaches first; a question not given the
+/// stop has none, and Tab from Confirm reaches Cancel.
+#[gpui::test]
+fn a_question_given_a_scroll_stop_lets_the_keyboard_reach_its_text(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    cx.simulate_resize(size(px(720.), px(400.)));
+    settle(cx);
+    let built: Built = Default::default();
+
+    let open = ask_rewordable(cx, bulk(&["alpha", "beta"], 60, &built), &Ran::default());
+    assert!(
+        bounds(cx, "listed-59").bottom() > bounds(cx, "prompt-body").bottom(),
+        "the premise: the long body overflows"
+    );
+    assert_eq!(
+        tab_from_confirm(cx, "given the stop", "prompt-body-stop"),
+        Some((Role::Region, "Sessions affected".into())),
+        "the stop is a region named by its label"
+    );
+    keys(cx, "escape");
+    assert!(!is_open(cx, open.layer()), "Escape closed it");
+
+    let asked = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_for_test(
+            Presentation::Centered,
+            question("alpha"),
+            None,
+            &mark,
+            |_, _, _| {},
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    let asked = asked.expect("the question opened");
+    assert_eq!(
+        tab_from_confirm(cx, "not given the stop", "prompt-cancel"),
+        None,
+        "a question not given the stop has none"
+    );
+    keys(cx, "escape");
+    assert!(!is_open(cx, asked.layer), "Escape closed it");
 }
