@@ -427,13 +427,27 @@ or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.
 Add host opens on SSH and offers the Tensorlake sandbox kind beside it. Choosing it reads the Tensorlake account (each
 time, as the old dialog's remount did) and draws "Loading Tensorlake settings…", a failed read's words with Retry, the
 no-key line with "Open Settings → Tensorlake" (closing Settings reads the account again), or Name and Recipe with the
-chosen recipe's summary. Continue is drawn and not yet available: the creation confirmation, its billing callout and
-Back come with it, as does the inline recipe editor. Replacing tests, in
+chosen recipe's summary. "New recipe…" opens Settings → Recipes' editor in place of the fields, with focus in its Name
+and its answers in Add host's footer; a done Save chooses the new recipe. Continue is drawn and not yet available: the
+creation confirmation, its billing callout and Back come with it. Replacing tests, in
 `crates/gui/farhelm-gui/src/hosts/add/tensorlake_tests.rs`:
 
-- "the Tensorlake form links Settings and protects an inline recipe draft": its Settings half,
-  `without_a_key_the_body_opens_settings_and_reads_the_account_again_when_it_closes`. The inline draft waits for the
-  inline editor.
+- "Add host pins inline recipe answers and focuses Name in ${palette}": partly.
+  `new_recipe_opens_the_editor_with_focus_in_name_and_pins_its_answers` checks the editor's Name holding focus, no Back,
+  the kind choice hidden, the editor taller than the body (the premise), its Cancel and Save in the footer below the
+  scrolling body, and Tab from the editor's fields reaching Cancel, then Save; a done Save choosing the recipe is
+  `a_done_save_chooses_the_new_recipe_and_returns_focus_to_recipe`. The rest is the shared code's, tested where it
+  lives: a refusal shown beside the pinned answers, with and without the leave question up, is the editor's answers
+  element (`settings/recipe_editor_tests.rs` `a_bad_name_or_size_is_refused_locally_until_the_next_edit`,
+  `settings/recipe_leave_tests.rs` `a_refused_save_takes_an_open_question_away`); Keep editing keeping the draft is
+  `every_way_out_asks_first_and_keep_editing_stays` there; the footer staying put while the body scrolls, and the whole
+  card scrolling in a short window, are the dialog frame's (`components/tests/dialog.rs`
+  `a_long_dialog_body_scrolls_and_the_answers_stay_visible`, `a_frame_too_tall_for_the_window_scrolls_as_a_whole`). Not
+  ported: the body starting at its top, and the palettes, which have no app scene since the form needs a saved key.
+- "the Tensorlake form links Settings and protects an inline recipe draft":
+  `without_a_key_the_body_opens_settings_and_reads_the_account_again_when_it_closes`, and the draft's protection,
+  `leaving_with_unsaved_changes_asks_and_discard_goes_where_it_was_asked` (the editor's Cancel and Add host's Escape
+  both ask, and Discard goes back to the form or closes Add host).
 - "Tensorlake Add host structures its form and creation plan in ${palette}": the form's half, the fields, the recipe
   choice in the catalog's order and a chosen recipe kept, marked unavailable, when it leaves the catalog,
   `the_recipe_choice_offers_the_catalog_shows_the_summary_and_keeps_a_vanished_choice`; the kind choice keeping the SSH
@@ -444,9 +458,9 @@ Back come with it, as does the inline recipe editor. Replacing tests, in
   `app-host-add-tensorlake-no-key`; the form with a key has no app scene, since a drive stops at the no-key refusal.
 - An agent's add request draws no kind choice: `approvals/host_add_tests.rs`
   `the_cards_action_opens_the_dialog_prefilled_and_answers_nothing`.
-- The other cases (pinned inline answers, billing confirmation and setup progress, the image-base recipe through the
-  Tensorlake preference, a recipe deleted during confirmation, Cancel retiring a queued answer, rerun before the first
-  create) wait for the inline editor and the creation confirmation. The deleted recipe's helm half is the helm's test
+- The other cases (billing confirmation and setup progress, the image-base recipe through the Tensorlake preference, a
+  recipe deleted during confirmation, Cancel retiring a queued answer, rerun before the first create) wait for the
+  creation confirmation. The deleted recipe's helm half is the helm's test
   `a_recipe_deleted_while_its_creation_plan_is_offered_refuses_and_registers_nothing`.
 
 ## `tests/provisioning.spec.ts`, Add host's dialog, probe and setup
