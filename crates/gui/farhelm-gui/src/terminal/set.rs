@@ -63,7 +63,7 @@ use gpui::{
 mod tests;
 
 use super::CellMetrics;
-use super::attached::{AttachedTerminal, NoticeHold, TerminalTarget};
+use super::attached::{AttachedTerminal, Hold, NoticeHold, TerminalTarget};
 use super::tunnels::Tunnels;
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, IconButton, Tier};
@@ -219,9 +219,9 @@ fn choose_in(
     });
 }
 
-/// Says whether the terminals' notices are held back now; shared by every terminal of the set (see
+/// Says how much of the terminals' notices is held back now; shared by every terminal of the set (see
 /// [`AttachedTerminal::hold_notices`]).
-pub(crate) type SharedHold = Rc<dyn Fn(&App) -> bool>;
+pub(crate) type SharedHold = Rc<dyn Fn(&App) -> Hold>;
 
 /// One shell tab, in the helm's order.
 struct Tab {
@@ -275,7 +275,7 @@ pub struct TerminalSet {
 
 impl TerminalSet {
     /// The terminals of the session filed under `key`, made for `session`: the agent terminal at `metrics`, and the
-    /// session's tabs as the store lists them. Every terminal holds its notices back while `hold` says so.
+    /// session's tabs as the store lists them. Every terminal holds back as much of its notices as `hold` says.
     pub fn new(
         session: &Entity<UiSession>,
         key: String,
@@ -326,6 +326,9 @@ impl TerminalSet {
         cx: &mut Context<Self>,
     ) -> Entity<AttachedTerminal> {
         let open = session.read(cx).terminal_opener();
+        // A Restart detaches only the agent's terminal, so a tab keeps showing its own reconnect card: a tab's drop
+        // during the Restart is its own outage, and holding its card would hide it until the helm answered.
+        let agent = tab.is_none();
         let target = TerminalTarget {
             session: key.to_owned(),
             tab,
@@ -336,7 +339,10 @@ impl TerminalSet {
         cx.new(|cx| {
             let mut terminal =
                 AttachedTerminal::sharing(session, target, metrics, open, tunnels, cx);
-            let notices: NoticeHold = Box::new(move |cx| hold(cx));
+            let notices: NoticeHold = Box::new(move |cx| match hold(cx) {
+                Hold::ReconnectCard if !agent => Hold::Nothing,
+                held => held,
+            });
             terminal.hold_notices(notices);
             let shown = cx.entity_id();
             terminal.on_measured(Rc::new(move |pane, scale, cx| {

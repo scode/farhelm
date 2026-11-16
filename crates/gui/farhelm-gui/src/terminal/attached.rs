@@ -4,10 +4,10 @@
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
 //! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
-//! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status
-//! card stands over ([`AttachedTerminal::set_inert`]) since. File links and the reconnect display with its phase and
-//! Retry come later in that work. The session pane ([`crate::session_pane`]) mounts one for
-//! the selected session.
+//! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status card
+//! stands over ([`AttachedTerminal::set_inert`]), and the reconnect card with its Reconnect now (below) since. File
+//! links, and the reconnect card's line naming its phase and attempt, come later in that work. The session pane
+//! ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -25,9 +25,11 @@
 //! - Bounded delivery. Each GUI turn takes at most [`BATCH`] events from the stream, applies consecutive output as one
 //!   batch (so a flood redraws once per turn, not once per message), and then yields to the executor, so a flood cannot
 //!   hold the main thread and frames keep their turn.
-//! - One status line. Whenever the stream is not live and not catching up, one line in the old app's red banner says
-//!   why, with a Take control button where the stream waits for the user. Its owner can hold it back, with the exit
-//!   line, while something else explains what is happening ([`AttachedTerminal::hold_notices`]).
+//! - One status line, or the reconnect card. Whenever the stream is not live and not catching up, one line in the old
+//!   app's red banner says why, with a Take control button where the stream waits for the user. A stream that dropped
+//!   and is coming back by itself says so on a calm card over the kept screen instead ("The reconnect card" below).
+//!   Its owner can hold these back, with the exit line, while something else explains what is happening
+//!   ([`AttachedTerminal::hold_notices`]).
 //! - A protocol fault ends the stream. A message the grid model refuses means the peer broke the format; the owner
 //!   closes the stream and says so on the status line. It does not restart the attachment by itself (that, too, waits
 //!   for the terminal area).
@@ -37,6 +39,45 @@
 //!
 //! The owner does not own the grid itself: each [`TerminalView`] owns its grid model, as the renderer's module explains,
 //! and this module decides which view is shown and which one receives output.
+//!
+//! ## The reconnect card
+//!
+//! SPEC.md, "Session list": "A dropped terminal stream between the window and the helm uses the same card with
+//! `Session unavailable — reconnecting` and a neutral `Reconnect now` button; recoverable drops show no red detach
+//! banner." A drop the stream recovers from by itself is not a failure the user has to act on, so it gets the old app's
+//! outage card (`paintReconnect` in terminal.js at the reference commit) rather than the red band that a takeover, a
+//! refusal or a closed stream keeps. Here's the TLDR of how it behaves:
+//!
+//! - **When.** From the stream's `Reconnecting` until the attachment it comes back on has replayed and gone live
+//!   ([`AttachedTerminal::reconnecting`]). The card stays through that catch-up, as the old one stayed until the replay
+//!   was revealed: the kept screen is not live and takes no input until then. A detach that waits for the user, a
+//!   refusal, a close or a protocol fault ends it, and their band takes over.
+//! - **What it draws.** The component layer's accent card ([`crate::components::status_card`], which the session pane's
+//!   Delete scrim shares) on the terminal scrim, with the heading and its spinner, the old explanation line and
+//!   Reconnect now, which asks the stream to skip its backoff ([`AttachedTerminal::reconnect_now`]). The last complete
+//!   screen stays up beneath it. A pane too short for the card scrolls the card, as the old one scrolled.
+//! - **The pointer.** The scrim around the card draws no hitbox, like the Delete scrim's: a press there still reaches
+//!   the terminal, which takes focus as usual, and the wheel still scrolls its history, so the kept screen stays
+//!   readable and nothing on its way out eats a click. The card itself takes the pointer, because it holds a button: a
+//!   press on its words must not start a selection or a mouse report in the screen behind it, and its own wheel turns
+//!   scroll the card. (The old overlay took every press across the whole pane; letting the scrim's through is the
+//!   Delete scrim's rule, which this card shares the look of.)
+//! - **Focus.** The card takes no focus by itself: a focused terminal keeps focus when it appears and when it goes, and
+//!   stays home. Reconnect now is an ordinary button, tracked by the focus coordinator, drawn after the grid's area, so
+//!   Tab's order runs through the terminal, then Reconnect now, then whatever follows the terminal. From a focused
+//!   terminal, Tab is the program's (SPEC.md, "Who may move focus"), so the keyboard reaches the button from the
+//!   controls around the terminal: Shift+Tab from the one after it. On a Mac with Keyboard navigation off, plain Tab
+//!   skips buttons, as everywhere (SPEC.md: "keyboard-only users reach buttons with Keyboard navigation or
+//!   Option-Tab").
+//! - **Under the veil, and held.** An inert terminal draws no card: the status card standing over it (the unreachable
+//!   host's) explains the pane, and a button there could still be reached with Tab. The owner's hold
+//!   ([`AttachedTerminal::hold_notices`]) can hold back the card alone (the session pane does while its Restart of the
+//!   session is pending) or with every other notice (while its Delete is). A recovery that begins under the card-only
+//!   hold stays held after the hold lifts, until it ends or its first attempt fails: the helm answers a Restart before
+//!   the stream reattaches, so a hold that ended with the answer would still show the card on almost every Restart.
+//!
+//! NOTE: The old card had a third line, which named the reconnect's phase (retrying, or probing in the background) and
+//! attempt. The card does not draw it yet; it goes between the explanation and Reconnect now.
 //!
 //! ## Input
 //!
@@ -125,8 +166,9 @@ use gpui::{
     DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
     InteractiveElement, IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render,
-    ScrollDelta, ScrollEvent, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    UTF16Selection, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
+    ScrollDelta, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Task, UTF16Selection, WeakEntity, Window, canvas, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::files::{FileLinks, StatusShown};
@@ -135,7 +177,8 @@ use super::{CellMetrics, CursorPhase, TerminalView, style};
 use crate::actions::{self, KeyOwner};
 use crate::assets::TERMINAL_FONT;
 use crate::components::{
-    Banner, Button, HoverHelp, Role, SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent,
+    Banner, Button, HoverHelp, Role, SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, Spinner, Tier,
+    status_card, status_heading,
 };
 use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
@@ -171,6 +214,32 @@ pub(crate) const CONNECTING_TEXT: &str = "Connecting — catching up on this ter
 const PLACEHOLDER_TEXT: f32 = 14.;
 const PLACEHOLDER_PADDING: f32 = 28.;
 
+/// The reconnect card's heading, the old `paintReconnect`'s words, which SPEC.md quotes.
+pub(crate) const RECONNECTING_TEXT: &str = "Session unavailable — reconnecting";
+
+/// The reconnect card's explanation, the old card's line word for word.
+pub(crate) const RECONNECT_EXPLANATION: &str =
+    "This view reattaches by itself when the connection is back.";
+
+/// Reconnect now's hover help, the old button's tooltip word for word.
+const RECONNECT_NOW_HELP: &str = "Reconnect now: try to reattach this terminal right away";
+
+/// Reconnect now's id, which tests and the test bridge find it by.
+pub(crate) const RECONNECT_NOW_ID: &str = "terminal-reconnect-now";
+
+/// The reconnect card's selector, and its scrim's, for tests and the bridge.
+pub(crate) const RECONNECT_CARD_ID: &str = "terminal-reconnect-card";
+pub(crate) const RECONNECT_SCRIM_ID: &str = "terminal-reconnect-scrim";
+
+/// The red status band's selector, for tests that must tell it from the reconnect card.
+pub(crate) const STATUS_BANNER_ID: &str = "terminal-status-banner";
+
+/// `.session-unavailable-card`'s `max-width: 42rem`.
+const RECONNECT_CARD_MAX_WIDTH: f32 = 672.;
+
+/// The reconnect overlay's `padding: 20px`, between the pane's edge and the card.
+const RECONNECT_SCRIM_PADDING: f32 = 20.;
+
 /// Take control's hover help, the old button's tooltip word for word.
 const TAKE_CONTROL_HELP: &str =
     "Take control: attach this view, detaching any other client attached to this session";
@@ -201,10 +270,25 @@ pub struct StatusLine {
     pub take_control: bool,
 }
 
-/// Says, each time the terminal draws, whether its own notices are held back now (see
+/// How much of a terminal's own notices its owner holds back now ([`AttachedTerminal::hold_notices`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Hold {
+    /// Nothing: every notice shows as the stream and the program are.
+    #[default]
+    Nothing,
+    /// The reconnect card alone, while the owner's own request drops and reattaches the stream as a matter of course
+    /// (a Restart of the session, whose relaunch moves the viewer with a detach that reconnects). The status line and
+    /// the exit line still show.
+    ReconnectCard,
+    /// Every notice: the status line, the exit line and the reconnect card, for something that both kills the program
+    /// and detaches the viewer (a Delete of the session).
+    Everything,
+}
+
+/// Says, each time the terminal draws, how much of its own notices is held back now (see
 /// [`AttachedTerminal::hold_notices`]). Asked rather than told, so the answer comes from wherever the caller keeps it
 /// and this owner keeps no copy that could go stale.
-pub type NoticeHold = Box<dyn Fn(&App) -> bool>;
+pub type NoticeHold = Box<dyn Fn(&App) -> Hold>;
 
 /// Told the pane's size each time the terminal is drawn and measures it (see [`AttachedTerminal::on_measured`]): the
 /// session view's terminal set hands it on to the terminals it is not drawing.
@@ -213,7 +297,7 @@ pub type Measured = Rc<dyn Fn(Bounds<Pixels>, f32, &mut App)>;
 /// The owner of one attached terminal. See the module docs.
 pub struct AttachedTerminal {
     target: TerminalTarget,
-    /// Holds the status line and the exit line back while it says so; `None` holds nothing.
+    /// Holds back as much of the notices as it says; `None` holds nothing.
     hold: Option<NoticeHold>,
     metrics: CellMetrics,
     /// Taken when the stream is opened, and dropped on retirement so a late fit cannot open one.
@@ -223,6 +307,20 @@ pub struct AttachedTerminal {
     pump: Option<Task<()>>,
     /// The stream state last delivered.
     stream: StreamState,
+    /// Whether the stream is coming back from a drop: set by `Reconnecting`, kept through the catch-up of the
+    /// attachment it comes back on, and cleared once that attachment goes live or the stream moves to any state but
+    /// those two. It decides the reconnect card ([`AttachedTerminal::reconnecting`]); `stream` alone cannot, because
+    /// it reads `Attached` during that catch-up exactly as during a first attach's.
+    recovering: bool,
+    /// Whether the current recovery began while the owner held the reconnect card back for its own request (a
+    /// Restart), and so stays held after that request is answered. The helm answers a Restart while the stream is
+    /// still waiting to reattach, so holding the card only until the answer would show it on nearly every Restart.
+    /// Released when the recovery ends, or when an attempt fails (the ladder schedules a second, or a reattach that
+    /// attached drops before it goes live): a reattach that fails is real news the user must see. This assumes the
+    /// Restart's detach reaches the window before the helm's answer, which it does because the supervisor detaches the
+    /// viewer before it relaunches and answers after; if they ever crossed, the hold would already be gone when the
+    /// recovery began, and the card would show for the first wait.
+    recovery_held: bool,
     /// The view on screen: the last attachment whose replay completed, or the first attachment's cut-off replay that a
     /// detach made the snapshot (see `stream_changed`).
     committed: Option<Entity<TerminalView>>,
@@ -333,6 +431,13 @@ pub struct AttachedTerminal {
     /// Whether the terminal is drawn dimmed and takes no input and no focus ([`AttachedTerminal::set_inert`]): set by
     /// the session view while a status card stands over the terminal, as the unreachable-host card does.
     inert: bool,
+    /// The reconnect card's spinner, held exactly while the card is drawn in an active window, and worked out at the top
+    /// of each frame, as the session pane works out its own: what decides it (the stream, the hold, the window's
+    /// activation) redraws the terminal when it changes.
+    spinner: Option<Spinner>,
+    /// The reconnect card's scroll position, for a pane too short to show the whole card. Kept on the owner so it
+    /// survives redraws, and made anew as each outage begins, so every card starts at its top.
+    card_scroll: ScrollHandle,
     /// The host identity color the thin frame around the terminal is drawn in, while the shared **Color terminal
     /// frames by host** preference is on; `None` while it is off or the session's host is not known. Kept by the store
     /// observer ([`AttachedTerminal::follow_store`]), which redraws only when it changes, so the terminal is not redrawn
@@ -422,6 +527,8 @@ impl AttachedTerminal {
             handle: None,
             pump: None,
             stream: StreamState::Attaching,
+            recovering: false,
+            recovery_held: false,
             committed: None,
             staging: None,
             live: false,
@@ -466,6 +573,8 @@ impl AttachedTerminal {
             paste: None,
             _session: subscriptions,
             inert: false,
+            spinner: None,
+            card_scroll: ScrollHandle::new(),
             frame: None,
             _tunnels: tunnel_watch,
             _tunnel_reads: tunnel_reads,
@@ -489,8 +598,8 @@ impl AttachedTerminal {
     /// line included, which takes every press, hover and wheel turn; its grid takes no keys and no actions (no key
     /// context, so Tab and Escape are the window's, not the program's), and nothing the user types, commits or pastes
     /// is sent; its pane is no Tab stop, its cursor is drawn as unfocused, the platform's text input is not handed to
-    /// it, the status line's Take control and the tunnel notice, which Tab could still reach under the veil, are not
-    /// drawn, and neither is the refused-click line. Going inert ends whatever was under way: a selection drag or a press
+    /// it, the status line's Take control, the tunnel notice and the reconnect card, which Tab could still reach under
+    /// the veil, are not drawn, and neither is the refused-click line. Going inert ends whatever was under way: a selection drag or a press
     /// on a link is dropped, and a paste still reading the clipboard is not sent. Going inert sends no release for a
     /// press the program's mouse reporting took (the old app sent none either, and the card this serves stands over a
     /// terminal whose stream is down, where nothing could be sent); a real release while inert is dropped like other
@@ -537,7 +646,8 @@ impl AttachedTerminal {
             .and_then(|view| view.read(cx).terminal_text())
     }
 
-    /// What the status line says now, if anything. `None` while live, while catching up, and once retired.
+    /// What the status line says now, if anything. `None` while live, while catching up, while the stream comes back
+    /// from a drop by itself (the reconnect card says that: [`AttachedTerminal::reconnecting`]), and once retired.
     pub fn status_line(&self) -> Option<StatusLine> {
         let line = |words: String, reason, take_control| {
             Some(StatusLine {
@@ -564,11 +674,10 @@ impl AttachedTerminal {
             );
         }
         match &self.stream {
-            StreamState::Attaching | StreamState::Attached(_) => None,
-            // The heading of the old app's outage card. Its explanation, phase and Reconnect now are the terminal
-            // area's later work.
-            StreamState::Reconnecting(_) => {
-                line("Session unavailable — reconnecting".into(), None, false)
+            // A drop the stream recovers from by itself is the reconnect card's, never the red band's (SPEC.md:
+            // "recoverable drops show no red detach banner").
+            StreamState::Attaching | StreamState::Attached(_) | StreamState::Reconnecting(_) => {
+                None
             }
             // The old app offered Take control only after a takeover. The helm client parks a stalled viewer and a
             // refused attach until Take control as well, and nothing else in this milestone can ask it to try again
@@ -593,9 +702,10 @@ impl AttachedTerminal {
         }
     }
 
-    /// Hold back this terminal's own notices, the status line and the exit line, whenever `hold` says so, and show them
-    /// again, as the stream and program then are, once it stops saying so. Nothing is dropped: the notices are drawn
-    /// from the terminal's current state, so a notice that arose while held appears on release if it still applies.
+    /// Hold back this terminal's own notices, the status line, the exit line and the reconnect card, as far as `hold`
+    /// says ([`Hold`]), and show them again, as the stream and program then are, once it stops saying so. Nothing is
+    /// dropped: the notices are drawn from the terminal's current state, so a notice that arose while held appears on
+    /// release if it still applies.
     ///
     /// The session pane holds them while a Delete of its session is in flight (SPEC.md, "Lifecycle operations": the
     /// terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile), because the Delete
@@ -608,14 +718,43 @@ impl AttachedTerminal {
     /// the lift it had for it. That is accepted because the pane's scrim covers the terminal for exactly as long, and
     /// the notice comes back on release if it still applies.
     ///
+    /// The pane holds the reconnect card alone ([`Hold::ReconnectCard`]) while its Restart of the session is in flight
+    /// (`session_pane.rs` says why). That hold is narrower on purpose: a takeover or a refusal during a Restart is not
+    /// the Restart's doing, so its band still shows.
+    ///
     /// `hold` is asked while drawing, so whatever it reads must notify when its answer changes.
     pub fn hold_notices(&mut self, hold: NoticeHold) {
         self.hold = Some(hold);
     }
 
-    /// Whether the notices are held back now.
+    /// How much of the notices is held back now.
+    fn held(&self, cx: &App) -> Hold {
+        self.hold.as_ref().map_or(Hold::Nothing, |hold| hold(cx))
+    }
+
+    /// Whether every notice is held back now, the status line and the exit line among them.
     fn notices_held(&self, cx: &App) -> bool {
-        self.hold.as_ref().is_some_and(|hold| hold(cx))
+        self.held(cx) == Hold::Everything
+    }
+
+    /// Whether the stream dropped and is coming back by itself, which the reconnect card says (see "The reconnect card"
+    /// in the module docs): from `Reconnecting` until the attachment it comes back on has replayed and gone live. Like
+    /// [`AttachedTerminal::status_line`], this is the stream's own state, held or not, and drawn or not: an inert
+    /// terminal draws no card, and a hold keeps it back.
+    pub fn reconnecting(&self) -> bool {
+        self.recovering && self.fault.is_none() && !self.retired
+    }
+
+    /// The user's Reconnect now: ask the stream to skip what is left of its backoff and attach at once, through the
+    /// non-displacing route, so it never takes the terminal from anyone. Sends nothing unless the stream is coming back
+    /// from a drop. During the catch-up of the attachment it came back on there is no backoff left to skip, and the
+    /// stream ignores the request then.
+    pub fn reconnect_now(&self) {
+        if self.reconnecting()
+            && let Some(handle) = &self.handle
+        {
+            handle.reconnect_now();
+        }
     }
 
     /// How far the shown screen is lifted now (see [`lift`]), for the session pane's tests, which check that held
@@ -882,6 +1021,9 @@ impl AttachedTerminal {
                 // A drag on the replaced view ends with it: its anchor names that view's lines.
                 self.select = None;
                 self.live = true;
+                // Back, if it was coming back: the reconnect card goes in the same redraw that shows the new screen.
+                self.recovering = false;
+                self.recovery_held = false;
                 cx.notify();
                 // As for a state change in `output`: a reconnect that goes live in a hidden window draws nothing.
                 self.report_focus(self.window_focus, cx);
@@ -931,6 +1073,33 @@ impl AttachedTerminal {
                 | StreamState::Refused { .. }
         ) {
             self.resized_since_attach = false;
+        }
+        // An attachment announced during a recovery is the one the stream comes back on, still catching up; every
+        // other state but the drop itself ends the recovery (a detach that waits for the user, a refusal, a close).
+        match &state {
+            StreamState::Reconnecting(status) => {
+                // The reattach attached and then dropped before it went live. The ladder starts over at attempt 1
+                // after any attachment, so the attempt number alone would never show this failure.
+                let reattach_dropped =
+                    self.recovering && matches!(self.stream, StreamState::Attached(_));
+                if !self.recovering {
+                    self.card_scroll = ScrollHandle::new();
+                    self.recovery_held = self.held(cx) == Hold::ReconnectCard;
+                }
+                // An attempt failed: past the owner's request, this outage is the user's to see.
+                if status.attempt > 1 || reattach_dropped {
+                    self.recovery_held = false;
+                }
+                self.recovering = true;
+            }
+            StreamState::Attached(_) => {}
+            StreamState::Attaching
+            | StreamState::Detached { .. }
+            | StreamState::Refused { .. }
+            | StreamState::Closed => {
+                self.recovering = false;
+                self.recovery_held = false;
+            }
         }
         self.stream = state;
         cx.notify();
@@ -1525,6 +1694,71 @@ impl AttachedTerminal {
         })
     }
 
+    /// The reconnect card over its scrim, its spinner at `step` (see "The reconnect card" in the module docs): the old
+    /// `.terminal-connecting.terminal-reconnecting` overlay and its `.session-unavailable-card`, with the heading, the
+    /// explanation and Reconnect now.
+    ///
+    /// The button is the component layer's neutral tier in its compact geometry, the closest to the old
+    /// `.terminal-reconnect-now` (12 pixels of text, `padding: 1px 8px`); it keeps the component's own text size and
+    /// its 2-pixel padding.
+    fn reconnect_card(&self, step: u8, cx: &mut Context<Self>) -> AnyElement {
+        let palette = theme::palette(cx);
+        let owner = cx.weak_entity();
+        let button = Button::new(
+            RECONNECT_NOW_ID,
+            "Reconnect now",
+            HoverHelp::tooltip(RECONNECT_NOW_HELP),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .compact()
+        .on_click(move |_, _, cx| {
+            let _ = owner.update(cx, |owner, _| owner.reconnect_now());
+        });
+        let card = status_card(cx)
+            .id("terminal-reconnect-card")
+            .debug_selector(|| RECONNECT_CARD_ID.into())
+            // `max-width: min(42rem, 100%)`: the cap, and the scrim's row shrinks the card to a narrower pane, wrapping
+            // its words. A fitting card is centered, and a pane too short for it scrolls the card rather than cutting
+            // off its button; the scroll region lets Tab onto the button bring it into view.
+            .max_w(px(RECONNECT_CARD_MAX_WIDTH))
+            .max_h_full()
+            .overflow_y_scroll()
+            // The card takes the pointer: a press on its words must not reach the screen behind it. The scrim around
+            // it does not (see the module docs).
+            .occlude()
+            .child(status_heading(step, RECONNECTING_TEXT, cx))
+            .child(
+                div()
+                    .mt(px(9.))
+                    .text_size(px(12.))
+                    .text_color(theme::color(palette.fg_1))
+                    .child(RECONNECT_EXPLANATION),
+            )
+            // NOTE: The old card's phase and attempt line ("attempt 1 of 6", or background probing) goes here, at
+            // 11.5 pixels in `fg_2` with 7 pixels above it, once the helm client reports the reconnect's phase.
+            .child(div().mt(px(10.)).flex().child(button));
+        // No listener, no focus tracking and no occlusion, so GPUI gives the scrim no hitbox, as the Delete scrim has
+        // none: a press beside the card reaches the terminal.
+        div()
+            .id("terminal-reconnect-scrim")
+            .debug_selector(|| RECONNECT_SCRIM_ID.into())
+            .role(Role::Status)
+            .aria_label(RECONNECTING_TEXT)
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(px(RECONNECT_SCRIM_PADDING))
+            .bg(theme::color(palette.scrim))
+            .child(focus::scroll_region(card, &self.card_scroll))
+            .into_any_element()
+    }
+
     /// The shown screen, lifted to fit its room, with its exit line below its last row.
     fn screen(&self, view: &Entity<TerminalView>, cx: &App) -> Vec<AnyElement> {
         let shown = view.read(cx);
@@ -1582,24 +1816,39 @@ impl Render for AttachedTerminal {
         }
         let state = self.committed.as_ref().and_then(|view| view.read(cx).state);
         let (_, ground) = style::defaults(state);
-        // The placeholder goes by the stream's own line, held or not: while a notice is held back, the pane shows
-        // neither it nor "Connecting", which would claim a catch-up that is not happening.
+        // The placeholder goes by the stream's own line and its own recovery, held or not: while a notice is held back,
+        // the pane shows neither it nor "Connecting", which would claim a catch-up that is not happening.
         let status = self.status_line();
         let banner = status.clone().filter(|_| !self.notices_held(cx));
         let placeholder =
-            (status.is_none() && self.committed.is_none() && !self.retired).then(|| {
-                div()
-                    .debug_selector(|| "terminal-connecting".into())
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .p(px(PLACEHOLDER_PADDING))
-                    .text_size(px(PLACEHOLDER_TEXT))
-                    .text_color(theme::color(theme::palette(cx).fg_dim))
-                    .child(CONNECTING_TEXT)
-            });
+            (status.is_none() && !self.reconnecting() && self.committed.is_none() && !self.retired)
+                .then(|| {
+                    div()
+                        .debug_selector(|| "terminal-connecting".into())
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .p(px(PLACEHOLDER_PADDING))
+                        .text_size(px(PLACEHOLDER_TEXT))
+                        .text_color(theme::color(theme::palette(cx).fg_dim))
+                        .child(CONNECTING_TEXT)
+                });
+        // The reconnect card, never under the veil and only while nothing holds it back (see "The reconnect card" in
+        // the module docs). Its spinner turns only while it shows in an active window, like every spinner.
+        let card = self.reconnecting()
+            && !self.inert
+            && !self.recovery_held
+            && self.held(cx) == Hold::Nothing;
+        let spins = card && ticker::is_active(window, cx);
+        if spins != self.spinner.is_some() {
+            self.spinner = spins.then(|| Spinner::start(window, cx));
+        }
+        let card = card.then(|| {
+            let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
+            self.reconnect_card(step, cx)
+        });
         let owner = cx.weak_entity();
         // Measures the room the screen has, below the status line and inside the padding, handed over after the frame
         // like the pane's fit. It is there before any screen is, so a first screen is placed in its first frame. It
@@ -1824,7 +2073,11 @@ impl Render for AttachedTerminal {
             .flex_col()
             .overflow_hidden()
             .bg(ground.hsla(1.))
-            .children(banner.map(|line| self.banner(line, cx)))
+            .children(banner.map(|line| {
+                div()
+                    .debug_selector(|| STATUS_BANNER_ID.into())
+                    .child(self.banner(line, cx))
+            }))
             .child(
                 div()
                     .relative()
@@ -1839,6 +2092,8 @@ impl Render for AttachedTerminal {
                     .children(overlay),
             )
             .children(placeholder)
+            // Over the screen and the frame, and after the grid's area in Tab's order (see the module docs).
+            .children(card)
             // Last, over everything the pane draws: the status line and the placeholder too.
             .children(self.inert.then(|| inert_scrim(cx)))
             .child(measure)

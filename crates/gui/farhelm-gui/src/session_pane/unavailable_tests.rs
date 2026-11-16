@@ -327,8 +327,8 @@ fn focus_elsewhere_stays_as_the_card_comes_and_goes(cx: &mut TestAppContext) {
 /// The old stylesheet hid the terminal's own banner and reconnect surface under the card (`terminal-multihost.spec.ts`:
 /// "the terminal's red banner hidden", "no detach banner ever showed"): a host that drops away drops the stream too,
 /// and "Session unavailable — reconnecting" under a card that already says why would say it twice. Specified: with a
-/// live, gone stale, and its stream dropped into a reconnect, the terminal's status line says it is reconnecting (the
-/// premise) and nothing paints those words; once a is listed reachable again with the stream still down, they are
+/// live, gone stale, and its stream dropped into a reconnect, the terminal is reconnecting (the premise) and nothing
+/// paints its reconnect card's heading; once a is listed reachable again with the stream still down, the heading is
 /// painted once.
 #[gpui::test]
 fn the_terminals_own_notices_stay_hidden_while_the_card_shows(cx: &mut TestAppContext) {
@@ -338,12 +338,11 @@ fn the_terminals_own_notices_stay_hidden_while_the_card_shows(cx: &mut TestAppCo
     push_a(&mut main, a(true), unreachable());
     main.terminals.borrow_mut()[0].detach(Some(DetachCode::Other), "host gone");
     test_support::settle(main.cx);
-    let words = main.cx.update(|_, cx| {
+    let reconnecting = main.cx.update(|_, cx| {
         let set = pane.update(cx, |pane, cx| pane.terminal_set(cx))?;
-        let line = set.read(cx).agent().read(cx).status_line()?;
-        Some(line.words.to_string())
+        Some(set.read(cx).agent().read(cx).reconnecting())
     });
-    assert_eq!(words.as_deref(), Some(RECONNECTING), "the premise");
+    assert_eq!(reconnecting, Some(true), "the premise");
     let count = |main: &mut MainWindow| {
         painted(&frame(main.cx))
             .iter()

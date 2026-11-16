@@ -1104,6 +1104,11 @@
       "reference": null
     },
     {
+      "golden": "terminal-reconnect",
+      "title": "The reconnect card over a terminal whose stream dropped and is coming back by itself, with room and cut short in a short pane (compared with the old stylesheet; there is no reference picture)",
+      "reference": null
+    },
+    {
       "golden": "session-interrupted-card",
       "title": "The interrupted card in place of an interrupted session's terminal: Restart and Replace for a session that can resume, Replace alone and why for one whose conversation was never captured (compared with the old stylesheet; there is no reference picture)",
       "reference": null
