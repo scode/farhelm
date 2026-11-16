@@ -20,6 +20,7 @@
 
 pub mod attached;
 mod attachments;
+mod blocks;
 mod disclosure;
 mod drag_notice;
 pub(crate) mod files;
@@ -170,8 +171,8 @@ impl CellMetrics {
 /// pixels and so is usually not a whole number of device pixels: 167/9 logical pixels at 14 points for a 9-row grid on
 /// a 2x display, which is 37.11 device pixels. GPUI rounds every glyph's baseline to a device pixel on its own, so
 /// glyphs placed at their row's top land 37 or 38 device pixels below the row above, depending on where the
-/// accumulated fraction crosses a half. A full block is 37 device pixels tall at that size (measured in the styles
-/// golden), so a 38 step leaves a one-device-pixel stripe of background between two rows, once every few rows. Snapping
+/// accumulated fraction crosses a half. The font's full block glyph is 37 device pixels tall at that size (measured in the
+/// styles golden when it still drew that glyph), so a 38 step leaves a one-device-pixel stripe of background between two rows, once every few rows. Snapping
 /// each row on its own to its rounded top does not help: the 38 step only moves to another pair of rows. Stepping by
 /// the character's own height in device pixels removes that seam.
 ///
@@ -180,14 +181,12 @@ impl CellMetrics {
 /// rounded to a whole logical pixel ([`Geometry::for_character`]); at scale 1 there is no drift at all. Backgrounds,
 /// decorations, clipping and the cursor's box stay on the cells.
 ///
-/// NOTE: This closes only the seam between rows, and stacked full blocks (U+2588) still stripe at most text sizes. On
-/// a 2x display they meet only at 14 (the default), 17, 20 and 28 points. At the other sizes measured (9 to 13, 15,
-/// 16, 18, 19, 22, 24 and 26) the font's block glyph is shorter than the cell, so a stripe of background, faint or a
-/// whole device pixel, shows below every row, with or without this. That was measured with a probe scene in the
-/// goldens harness; 1x displays were not measured. Box-drawing verticals met at every size measured, because their
-/// glyphs reach past their box. The old app drew block elements as font glyphs too, so this is parity with it, not a
-/// regression. Drawing the block elements (U+2580 to U+259F) as rectangles filling the cell, as many terminals do,
-/// would close the stripe; that improvement awaits the maintainer's decision.
+/// NOTE: This closes only the seam between rows, which is why the block elements (U+2580 to U+259F) are not glyphs
+/// at all ([`blocks`]). On a 2x display the font's full block met the next row's only at 14 (the default), 17, 20 and
+/// 28 points; at the other sizes measured (9 to 13, 15, 16, 18, 19, 22, 24 and 26) the glyph is shorter than the
+/// cell, so a stripe of background showed below every row with or without this. That was measured with a probe scene
+/// in the goldens harness; 1x displays were not measured. Box-drawing verticals met at every size measured, because
+/// their glyphs reach past their box, so they stay glyphs and this is what keeps them joined.
 #[derive(Clone, Copy, Debug)]
 struct Baselines {
     /// The grid's top edge, in logical pixels.
@@ -244,6 +243,9 @@ struct PaintRun {
     style: ResolvedStyle,
     pieces: Vec<PaintPiece>,
     plain_flow: bool,
+    /// The block element this run's one cell holds, drawn as rectangles of the cell in place of `pieces` (which is
+    /// then empty).
+    block: Option<blocks::Block>,
 }
 
 /// A shaped fragment with its wire-relative column and box width, kept apart from the font's advance so a glyph wider
@@ -935,6 +937,16 @@ impl TerminalElement {
                     .chars()
                     .filter(|c| !c.is_control())
                     .collect();
+                if let Some(block) = blocks::block(&text) {
+                    return PaintRun {
+                        col: run.col,
+                        width: run.width,
+                        style,
+                        pieces: Vec::new(),
+                        plain_flow: false,
+                        block: Some(block),
+                    };
+                }
                 let text_len = text.len();
                 let text_runs = [TextRun {
                     len: text_len,
@@ -970,6 +982,7 @@ impl TerminalElement {
                     style,
                     pieces,
                     plain_flow: run.is_plain_flow(),
+                    block: None,
                 }
             })
             .collect()
@@ -1162,6 +1175,12 @@ impl TerminalElement {
                     size(px(f32::from(run.width) * m.width), px(m.height)),
                 );
                 window.paint_quad(fill(area, run.style.bg.hsla(1.)));
+                if let Some(block) = run.block.filter(|_| !run.style.hidden) {
+                    let ink = run.style.fg.hsla(run.style.alpha * block.opacity);
+                    for rect in block.rects(area) {
+                        window.paint_quad(fill(rect, ink));
+                    }
+                }
                 if !run.style.hidden {
                     for piece in &run.pieces {
                         let origin = origin + point(px(f32::from(piece.col) * m.width), px(0.));
@@ -1173,7 +1192,7 @@ impl TerminalElement {
                         // next one); other text is clipped to its own box.
                         let clip = if run.plain_flow { area } else { cell };
                         // The cell stays the clip; only the glyphs move, by less than half a logical pixel, so
-                        // stacked rows' block and box-drawing glyphs meet (`Baselines`).
+                        // stacked rows' box-drawing glyphs meet (`Baselines`).
                         let glyphs = point(
                             origin.x,
                             px(baselines.origin_y(
@@ -1295,6 +1314,22 @@ impl TerminalElement {
             .flatten()
             .filter(|r| !r.style.hidden)
         {
+            if let Some(block) = run.block
+                && run.col <= cursor.x
+                && cursor.x < run.col + run.width
+            {
+                let cell = Bounds::new(
+                    point(
+                        bounds.origin.x + px(f32::from(run.col) * m.width),
+                        area.origin.y,
+                    ),
+                    size(px(f32::from(run.width) * m.width), area.size.height),
+                );
+                let ink = TerminalColor::of(TERMINAL.cursor_accent).hsla(block.opacity);
+                for rect in block.rects(cell) {
+                    window.paint_quad(fill(rect, ink));
+                }
+            }
             for piece in &run.pieces {
                 let col = run.col + piece.col;
                 if col <= cursor.x && cursor.x < col + piece.width {

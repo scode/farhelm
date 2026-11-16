@@ -345,11 +345,12 @@ fn gpui_baseline(y: f32, cell_height: f32, ascent: f32, descent: f32, scale: f32
     (device.abs() - 0.5).ceil().copysign(device) as i32
 }
 
-/// Stacked rows of full blocks and vertical box-drawing lines must not be split by baseline rounding (blocks still
-/// stripe at most text sizes for another reason: `Baselines`' NOTE). The old app's cell is usually a fraction of a
-/// device pixel off a whole one, and GPUI rounds each glyph row's baseline on its own, so rows placed at their cell's
-/// top step 37 or 38 device pixels while the glyph is 37 tall: every few rows a stripe of background splits a border
-/// that Claude Code or Codex drew. The styles golden shows one such pair; this pins the rule for every row.
+/// Stacked rows of vertical box-drawing lines must not be split by baseline rounding (block elements are drawn as
+/// rectangles of the cell, so they no longer depend on this: `Baselines`' NOTE). The old app's cell is usually a
+/// fraction of a device pixel off a whole one, and GPUI rounds each glyph row's baseline on its own, so rows placed at
+/// their cell's top step 37 or 38 device pixels while the glyph is 37 tall: every few rows a stripe of background
+/// splits a border that Claude Code or Codex drew. The styles golden shows one such pair; this pins the rule for every
+/// row.
 ///
 /// Spec: in the styles golden's geometry (a 9-row grid at 14 points on a 2x display, its top at 16.5 logical pixels:
 /// cells of 167/9 logical pixels, ascent 14.28 and descent 4.2), rows placed at their cell's top step by 38 somewhere
@@ -1106,7 +1107,21 @@ fn drawn(
 /// One shaped run as `paint_rows` places it: the run's wire column and width (its background box), and each glyph
 /// piece's column within the run, width and text. A piece is drawn at the run's column plus its own, times the cell
 /// width, and clipped to its width in cells.
+/// A shaped run as the tests compare it: its column, width and glyph pieces (column, width, text). A block element's
+/// run has no pieces; [`drawn_blocks`] says which runs are blocks.
 type ShapedRun = (u16, u16, Vec<(u16, u16, String)>);
+
+/// The columns of screen row `y`'s runs drawn as block elements (`blocks`), from the last frame's shaping.
+fn drawn_blocks(terminal: &Entity<TerminalView>, y: usize, cx: &mut TestAppContext) -> Vec<u16> {
+    terminal.read_with(cx, |view, _| {
+        let shaped = view.rows[y].shaped.borrow();
+        let runs = shaped.as_ref().expect("the premise: the row was drawn");
+        runs.iter()
+            .filter(|run| run.block.is_some())
+            .map(|run| run.col)
+            .collect()
+    })
+}
 
 /// What the last frame shaped for screen row `y`. Panics when the row was never drawn.
 fn shaped(terminal: &Entity<TerminalView>, y: usize, cx: &mut TestAppContext) -> Vec<ShapedRun> {
@@ -1144,8 +1159,9 @@ fn per_cell(col: u16, text: &str) -> ShapedRun {
 ///
 /// Specified: on a row of box drawing, ASCII pairs, a light shade, a left-to-right mark alone in a cell and an accented
 /// Latin letter, each ASCII pair is a run of two one-cell pieces at its wire column and every other cell is a run of
-/// one whole piece at its own column; the mark's piece is empty; on the next row two Arabic cells are whole pieces at
-/// columns 0 and 1, and the `X` after them is at column 2.
+/// one whole piece at its own column; the mark's piece is empty; the shade, a block element, is a run at its column
+/// with no glyph piece at all, because it is drawn as rectangles of its cell; on the next row two Arabic cells are
+/// whole pieces at columns 0 and 1, and the `X` after them is at column 2.
 #[gpui::test]
 fn non_ascii_runs_draw_as_one_box_at_their_wire_column(cx: &mut TestAppContext) {
     let plain = [0, -1, -1];
@@ -1167,13 +1183,18 @@ fn non_ascii_runs_draw_as_one_box_at_their_wire_column(cx: &mut TestAppContext) 
             whole(1, 1, "\u{253c}"),
             whole(2, 1, "\u{2500}"),
             per_cell(3, "ab"),
-            whole(5, 1, "\u{2591}"),
+            (5, 1, Vec::new()),
             per_cell(6, "cd"),
             whole(8, 1, ""),
             per_cell(9, "ef"),
             whole(11, 1, "\u{e9}"),
             per_cell(12, "gh"),
         ]
+    );
+    assert_eq!(
+        drawn_blocks(&terminal, 0, cx),
+        [5],
+        "the shade is drawn as a block"
     );
     assert_eq!(
         shaped(&terminal, 1, cx),

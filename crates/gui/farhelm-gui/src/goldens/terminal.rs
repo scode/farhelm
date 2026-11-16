@@ -80,10 +80,10 @@ fn terminal_view(
 /// The box drawing is two rows, a box beside shades and a pair of full blocks, so the picture shows whether lines and
 /// blocks meet across cells both ways: programs draw their borders with these characters, and a cell that does not
 /// match the glyph box leaves gaps between them. The two rows are the scene's last, rows 7 and 8: in this scene's
-/// geometry they are the pair whose baselines GPUI would round a device pixel further apart than the glyph is tall
-/// (`Baselines::origin_y` in the terminal module), so the full blocks stacked there show the seam if row baselines stop
-/// stepping by whole device rows. The scene is at 14 points, one of the few sizes at which full blocks meet at all
-/// (`Baselines`' NOTE has the others).
+/// geometry they are the pair whose baselines GPUI would round a device pixel further apart than a glyph row is tall
+/// (`Baselines::origin_y` in the terminal module), so the box's vertical lines show the seam if row baselines stop
+/// stepping by whole device rows. The blocks and shades are drawn as rectangles of their cells (the terminal's
+/// `blocks` module), so they meet at any size; the shades show as flat fills.
 pub(super) fn terminal_styles_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     use farhelm_grid_model::style_flags as f;
     let palette: Vec<_> = (0..16)
@@ -159,8 +159,9 @@ fn box_row(edge: [&str; 4]) -> Vec<serde_json::Value> {
 }
 
 /// The cursor's shapes side by side, each its own small terminal: a focused block re-painting its glyph in the accent
-/// color, a bar, an underline, an unfocused outline, and a block on a wide character's spacer cell covering the whole
-/// two-cell box. The wide run's glyph has no bundled face; the golden pins the cursor's box, not that glyph.
+/// color, a bar, an underline, an unfocused outline, a block on a wide character's spacer cell covering the whole
+/// two-cell box, and a block on a left half block, which re-paints the half in the accent color as it would a glyph.
+/// The wide run's glyph has no bundled face; the golden pins the cursor's box, not that glyph.
 pub(super) fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     let cases = [
         (0, "block", true),
@@ -186,6 +187,24 @@ pub(super) fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mu
         );
         state.terminals.borrow_mut().push(view);
     }
+    let screen = serde_json::json!([screen_row(
+        0,
+        vec![
+            run(0, 1, "a", 0, -1, -1),
+            run(1, 1, "\u{258c}", 0, -1, -1),
+            run(2, 1, "b", 0, -1, -1),
+        ]
+    )]);
+    let cursor = serde_json::json!({"x":1,"y":0,"visible":true,"shape":"block","blink":false});
+    let view = terminal_view(
+        grid_output(6, 2, screen, cursor),
+        CursorPhase {
+            focused: true,
+            on: true,
+        },
+        cx,
+    );
+    state.terminals.borrow_mut().push(view);
 }
 
 /// Two attached terminals the helm detached as stalled viewers, each showing the red status line with the helm's
