@@ -115,6 +115,9 @@ struct Progress {
 ///
 /// Keyed by the run, not by the host alone: the host is new, but matching the run id as well keeps any other run
 /// listed under that id from passing for this launch's.
+///
+/// A wait has no deadline of its own. While the host progress collection is unavailable the run counts as still
+/// running ([`run_end`]), so a wait that starts or stays there ends only with a reset.
 struct RunWait {
     host: i64,
     run: String,

@@ -114,14 +114,28 @@ pub(super) fn window_with(
     hosts: CollectionState,
     preferences: Preferences,
 ) -> (FakeHelm, &mut VisualTestContext) {
+    window_with_more(cx, draft, hosts, preferences, Vec::new())
+}
+
+/// [`window_with`], with `more` collections in the helm's first snapshot: the store ignores a push to a collection
+/// that snapshot did not install, so a test that pushes one (the recipe places) must list it here first.
+pub(super) fn window_with_more(
+    cx: &mut TestAppContext,
+    draft: LaunchDraft,
+    hosts: CollectionState,
+    preferences: Preferences,
+    more: Vec<CollectionState>,
+) -> (FakeHelm, &mut VisualTestContext) {
     let (mut helm, _connection) = started(cx);
-    helm.connect(vec![
+    let mut snapshot = vec![
         listing(&["a"], &[session("a")]),
         hosts,
         preferences_state(preferences),
         catalog(),
         no_runs(),
-    ]);
+    ];
+    snapshot.extend(more);
+    helm.connect(snapshot);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, MainView::new);
     window.update(|window, cx| {

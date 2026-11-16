@@ -38,7 +38,7 @@ use super::{Launcher, host_name_with_phase};
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus;
 use crate::host_text::{HostSentence, HostText};
-use crate::launcher::draft::{Field, Mode, harness_label};
+use crate::launcher::draft::{Field, Mode, RunsOn, harness_label};
 use crate::launcher::recents::{
     ALL_DEFAULTS, DraftDestination, RecentFilter, SetupKey, destination_label,
     explicit_before_permissions, permission_value, selection_summary, setup_key, strip,
@@ -163,6 +163,10 @@ impl Launcher {
         if let Some(refusal) = self.recent_refusal(entry, cx) {
             return Err(refusal);
         }
+        // A recent setup carries its place (SPEC.md, "Creation": recipe and place together). Every setup listed now
+        // ran on an existing host, so taking one while a new environment is chosen goes back to Existing host, as the
+        // old launcher's did, rather than filling a setup whose folder the environment cannot use.
+        self.draft.choose_runs_on(RunsOn::ExistingHost, None);
         self.draft
             .restore_recent(&entry.selection, self.catalog.as_deref());
         // A setup taken replaces the agent choices, so the escalation banner goes, as the old strip took it away: its

@@ -796,6 +796,21 @@
       ]
     },
     {
+      "id": "app-launcher-new-container",
+      "title": "New with Runs on set to New container: the Runs on switch above the Recipe and Container host selects, the note on the recipe's build at that host, Folder fixed to ~ with the container's note under it, and the footer naming the new container and its host. Needs a machine whose rootless Podman the helm finds usable: elsewhere New container is hidden, as SPEC.md has it, and the click finds nothing. Its start options are its own (three sessions, which no other scene uses), so it runs alone and a machine without Podman fails only this scene, never the scenes that share an app run",
+      "reference": null,
+      "mockup": false,
+      "start": ["--sessions", "3"],
+      "steps": [
+        ["click", "id:new-session-button"],
+        ["wait", "--text", "Destination"],
+        ["wait", "--text", "New container"],
+        ["click", "id:launcher-runs-on-New container"],
+        ["wait", "--text", "Container host"],
+        ["wait", "1000"]
+      ]
+    },
+    {
       "id": "app-launcher-managed-checkout",
       "title": "New with Managed checkout chosen on the Where row, on a host with no checkout folder yet: the inline field for the default checkout folder, the repository field holding a typed acme/bar with its suggestions list offering the typed pair, and the read-only folder field waiting for a repository",
       "reference": null,

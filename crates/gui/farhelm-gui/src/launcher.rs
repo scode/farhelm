@@ -19,7 +19,8 @@
 //!   create, or a launch into a new environment (New container), which has its own route and its own reasons.
 //! - [`search`]: the composer search's rules (what a query means, the rows it offers, the row preselected, what an
 //!   empty result says), with no view.
-//! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
+//! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits, the Runs on switch
+//!   and a new environment's Recipe and Container host among them (`view::placement`).
 //! - `words`: the launcher's own words for agent choices (its chip order, docs link and agent notes); the permission
 //!   and effort names other surfaces show too are `crate::permission::words`.
 //!
@@ -64,6 +65,8 @@ mod entry_tests;
 mod environment_launch_tests;
 #[cfg(test)]
 mod environment_tests;
+#[cfg(test)]
+mod environment_view_tests;
 #[cfg(test)]
 mod escalation_tests;
 #[cfg(test)]

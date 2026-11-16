@@ -269,21 +269,31 @@ and
 
 Tests: 8. Covers: active placement segments preserve explicit host recipe and place.
 
-not yet ported. This area's cases, for the launcher's environments (being built by the desktop integration area, with
-this area reviewing): "active placement segments preserve explicit host recipe and place", "restored container placement
-displays the recipe and host it submits", "environment recents hold focused intent until deliberate promotion",
-"environment recents stay independent of a held ordinary folder default", "container launch keeps recipe and place
-through refusal", and the `launcher` surface of "... refreshes recipe places after a delayed probe without a fleet
-notice". The spec's other cases are other areas': "container template quick launch retains its saved place" is the
-templates and quick launch area's, "a connected container's Delete asks its Farhelm and reports the container that
-stays" is the session view's, and "Containers Settings keeps failed cleanup explicit" and the `recipes` surface of the
-delayed-probe case are in [Settings and hosts](settings-and-hosts.md).
+partly (New container). This area's cases, for the launcher's environments (being built by the desktop integration area,
+with this area reviewing): "active placement segments preserve explicit host recipe and place" in
+`launcher::environment_tests::the_chosen_segment_keeps_its_choices_and_existing_host_gives_the_host_back`; "container
+launch keeps recipe and place through refusal" in
+`launcher::environment_launch_tests::a_failed_run_brings_the_launcher_back_with_its_recipe_and_place`; the `launcher`
+surface of "... refreshes recipe places after a delayed probe without a fleet notice", whose Container host select
+follows the pushed Podman checks it asks for on opening and whose note follows the pushed recipe places, in
+`launcher::environment_view_tests::{opening_the_launcher_checks_the_container_hosts, opening_the_launcher_checks_no_host_while_the_hosts_are_unavailable, new_container_shows_its_rows_with_unusable_hosts_disabled, the_note_follows_the_recipe_place}`;
+not yet ported: "restored container placement displays the recipe and host it submits", "environment recents hold
+focused intent until deliberate promotion" and "environment recents stay independent of a held ordinary folder default",
+which come with the environments work's recent setups. The spec's other cases are other areas': "container template
+quick launch retains its saved place" is the templates and quick launch area's, "a connected container's Delete asks its
+Farhelm and reports the container that stays" is the session view's, and "Containers Settings keeps failed cleanup
+explicit" and the `recipes` surface of the delayed-probe case are in [Settings and hosts](settings-and-hosts.md).
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts`
 
 Tests: 16. Covers: recipe placement explains prerequisites and requires billing consent.
 
-not yet ported
+not yet ported: New sandbox is the environments work's next piece. Six of the 16 cases are this area's: "recipe
+placement explains prerequisites and requires billing consent", "an existing-host launch stays nonmodal while its Resume
+is held", "a recipe template quick launch asks before one recipe request" (the question comes with New sandbox; the
+templates area applies the template's target), "template placement keeps Host editable after leaving an environment", "a
+held sandbox Suspend and a launch on another host proceed side by side" and "Hosts refuses a host's Resume and Settings
+while a launch is waking that host". The other ten are the session view's and Hosts'.
 
 ### `tests/github-checkouts.spec.ts`
 
@@ -452,6 +462,15 @@ not yet ported (environments, milestone M3)
 - A command line the shared command-launch check refuses is refused before sending in every launcher mode; the old app
   checked it only in Restart with and left the rest to the helm.
 - A launch on a suspended host is refused until the environments work brings resume-before-create.
+- While a new environment's recipe is chosen, the recent setups strip is hidden; recent setups of new environments come
+  with the environments work's recent setups. The composer search's folder rows and Browse are refused in the old words,
+  and so is a `~` path, which the old search took as a choice of the home the folder already was.
+- New container reads each host's Podman state from its pushed check and asks for a check of every container host as the
+  launcher opens; it does not read `GET /api/environment-places`, so a host never checked says "this host needs a Podman
+  check" until its check answers, where the old select showed the places read's words.
+- With a new environment chosen, the environment's reasons (recipes loading or unreadable, the recipe's own refusal, the
+  container host's) come first, in the host's place, before the destination's and the launch's; the old app checked them
+  after the agent tab's own reasons (a missing harness, say), so a draft with both now says the environment's.
 - The folder field a check or a refusal finds wrong is marked by a warning-colored border and the line under it; the old
   field also set `aria-invalid`, which the GPUI text field does not expose, so a screen reader finds the line (a
   labelled node beside the field) rather than an invalid field.

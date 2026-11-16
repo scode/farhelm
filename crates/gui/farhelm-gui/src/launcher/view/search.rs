@@ -32,7 +32,8 @@
 //!   ([`Launcher::take_recent`]), drawn on two lines, and never launches, from Enter either: the old search row only
 //!   filled, and SPEC.md's Enter that launches is the strip's focused row. A setup carrying a retired container choice,
 //!   or a folder or setup from a history that is no longer the chosen host's, is refused above the box in the old
-//!   words.
+//!   words. While a new environment is chosen, every folder row and Browse is refused there too, in the old words: the
+//!   environment's folder is its fixed home (`environment_refusal`). A recent setup is still taken, with its own place.
 //!
 //! What the box holds besides the draft (the open results, the highlight, the last refusal) is the launcher's alone;
 //! what is typed is the field's own text, read when the rows are needed, never copied.
@@ -211,8 +212,9 @@ impl Launcher {
         cx.notify();
     }
 
-    /// Why taking `row` would change nothing, in the old launcher's words: a field this launcher holds fixed
-    /// ([`Self::held_by_row`]), a recent setup carrying a retired container choice, or a saved folder or recent setup
+    /// Why taking `row` would change nothing, in the old launcher's words where it had some: a field this launcher
+    /// holds fixed ([`Self::held_by_row`]), a folder row or Browse while a new environment is chosen
+    /// ([`environment_refusal`]), a recent setup carrying a retired container choice, or a saved folder or recent setup
     /// from a history that is no longer the chosen host's (the host changed after the row was drawn).
     fn search_row_refusal(&self, row: &Row, cx: &App) -> Option<String> {
         if let Some(field) = self.held_by_row(row) {
@@ -224,6 +226,11 @@ impl Launcher {
             return Some(format!(
                 "{field} cannot change here: this dialog keeps {field} fixed for {mode}"
             ));
+        }
+        if self.draft.target.is_some()
+            && let Some(words) = environment_refusal(row)
+        {
+            return Some(words.to_owned());
         }
         let stale = match row {
             Row::Recent { entry, .. } => match self.recent_refusal(entry, cx)? {
@@ -468,6 +475,29 @@ impl Launcher {
                     .child(tracker),
             )
             .into_any_element()
+    }
+}
+
+/// Why `row` cannot apply while a new environment is chosen, or `None` when it can (SPEC.md, "Container sessions":
+/// Folder destinations "use its home, without Browse or recent folders"). A folder row would move the folder off the
+/// environment's fixed home, and Browse would list a machine that does not exist yet; both are refused in the old
+/// search's words. A recent setup applies: it carries its own place (SPEC.md, "Creation"), so taking one goes back to
+/// that place ([`Launcher::take_recent`]), as the old search did.
+fn environment_refusal(row: &Row) -> Option<&'static str> {
+    match row {
+        Row::UsePath(_) | Row::Folder(_) => {
+            Some("A new sandbox's Folder is fixed to its home directory")
+        }
+        Row::BrowsePath(_) => Some("A new sandbox cannot be browsed before it exists"),
+        Row::Recent { .. }
+        | Row::Name(_)
+        | Row::Host { .. }
+        | Row::Harness(_)
+        | Row::Template(_)
+        | Row::Model { .. }
+        | Row::HistoryModel { .. }
+        | Row::Effort(_)
+        | Row::Permission(_) => None,
     }
 }
 
