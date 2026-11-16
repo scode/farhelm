@@ -119,9 +119,9 @@
 //! ([`row`]'s "Compact rows"), read once per frame like the steps of the animations.
 //!
 //! NOTE: Not ported yet, each with the area that brings it: marking, dragging pins, the row menu's other commands, and
-//! the rail's host status, the foot's controls other than Hosts and Settings, Add host and expansion. New is not yet
-//! where focus rests when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home; that comes with
-//! the session pane's status-card work (M2.12), which decides home when no terminal is on screen.
+//! the rail's expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
+//! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
+//! terminal is on screen.
 
 pub(crate) mod age;
 pub(crate) mod delete;
@@ -226,6 +226,10 @@ pub struct SessionList {
     _following: session::ObservingCurrent,
     /// Settles on a change of the selection, and redraws the list, which draws the selected row.
     _selection: Subscription,
+    /// Redraws the list when the host status the rail draws changes outside the store: a setup or Update warning raised
+    /// or acknowledged ([`crate::hosts::status::observe_changes`]). The rest of that status is read from the store and
+    /// the operation store while drawing, which GPUI already redraws the list for.
+    _host_status: Subscription,
     /// The pulse's ticks (see the module docs), held exactly while the window is active and some listed row pulses.
     /// Taken and dropped at the top of each frame, before the frame reads its step, as the terminal cursor's blink
     /// is: everything that decides it (the store, the connection, the window's activation) redraws the list when it
@@ -369,6 +373,7 @@ impl SessionList {
             current: PerSession::default(),
             _following: following,
             _selection: selection,
+            _host_status: crate::hosts::status::observe_changes(cx),
             pulse: None,
             spinner: None,
             clock: None,
@@ -739,7 +744,7 @@ impl Render for SessionList {
             &self.all_focus,
             &self.rail,
             hosts_shown,
-            palette,
+            cx,
         ));
         // Drawn after the list's column, so Tab reaches the list's controls before the foot (`host_rail`'s docs).
         let foot = host_rail::foot(
@@ -749,7 +754,7 @@ impl Render for SessionList {
             &self.settings_focus,
             &self.notices,
             &self.help,
-            palette,
+            cx,
         );
         let Some(title) = title else {
             // The Hosts panel, in the column's box, which gives it the definite height it scrolls its rows in. The

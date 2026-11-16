@@ -1,8 +1,11 @@
 //! Tests of the host rail: its entries and their names, the session query a choice sends and how the helm's answer
 //! settles it, the chip, the empty sentence of a host with no sessions, the placeholder of a removed host, the status
 //! of a host list never read, a reset, the keyboard, Add host and the keyboard's reach below the rail's fold, the
-//! foot's Hosts control and Settings gear, and the rail's width in the sidebar. The query's status dimension, and the
-//! query's bookkeeping as pure functions, are tested in `filters/tests.rs`, which shares these fixtures.
+//! foot's Hosts control and Settings gear, the rail's width in the sidebar, and each host's status on its avatar and
+//! the Hosts control's update count. The query's status dimension, and the query's bookkeeping as pure functions, are
+//! tested in `filters/tests.rs`, which shares these fixtures. When a host's update badge, live work or warning shows
+//! is `hosts::status`'s rule and tested in `hosts/status/tests.rs`; these tests check that the rail draws and names
+//! what that module reads, with the marks found by their debug selectors (their colors are the goldens' to check).
 //!
 //! Like the list's other tests, these run the real main view over the helm client's fake, which hands the test every
 //! command the window sent, and read controls from GPUI's driver record of the frame by their ids (`host-rail-all`,
@@ -15,9 +18,10 @@ use std::sync::Arc;
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
-    KeyedEntry, ListCounts, SESSION_QUERY_PATH,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostStateView,
+    HostView, KeyedEntry, ListCounts, RefreshView, SESSION_QUERY_PATH,
 };
 use gpui::{
     AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Role, ScrollDelta,
@@ -26,10 +30,14 @@ use gpui::{
 use gpui_component::Root;
 use serde_json::{Value, json};
 
-use super::identity;
+use super::{identity, status};
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::hosts::add::tests::Opened;
 use crate::hosts::identity::LOCAL_NAME;
+use crate::hosts::tests::{
+    connected, connecting, host as status_host, hosts as status_hosts, progress as status_progress,
+    run as status_run, skew,
+};
 use crate::main_view::MainView;
 use crate::session_list::tests::{
     carrying, change, listing, open_main, painted, preferences, session,
@@ -306,7 +314,8 @@ pub(crate) fn hover_help(cx: &mut VisualTestContext, selector: &'static str) -> 
 /// remote, an unaliased one and a session-owned container, the rail draws All, then the three registered hosts in
 /// registry order and nothing for the container, then Add host; All is named "All hosts" and pressed, the avatars are
 /// not pressed and are named "Local (this machine)", the alias with its destination in parentheses, and the bare
-/// destination (which is also its name, so no suffix); each avatar's caption is a node with no role (hidden from
+/// destination (which is also its name, so no suffix), each followed by its state, here ": Connected"; each avatar's
+/// caption is a node with no role (hidden from
 /// assistive technology), and the local caption paints "Local".
 #[gpui::test]
 fn the_rail_lists_all_then_registered_hosts_in_order_with_their_names(cx: &mut TestAppContext) {
@@ -324,14 +333,17 @@ fn the_rail_lists_all_then_registered_hosts_in_order_with_their_names(cx: &mut T
     );
     assert_eq!(label(&nodes, "host-rail-all"), "All hosts");
     assert!(pressed(&nodes, "host-rail-all"));
-    assert_eq!(label(&nodes, "host-rail-host-1"), "Local (this machine)");
+    assert_eq!(
+        label(&nodes, "host-rail-host-1"),
+        "Local (this machine): Connected"
+    );
     assert_eq!(
         label(&nodes, "host-rail-host-3"),
-        "Build fleet with a deliberately long caption (deploy@builder-east.example.invalid)"
+        "Build fleet with a deliberately long caption (deploy@builder-east.example.invalid): Connected"
     );
     assert_eq!(
         label(&nodes, "host-rail-host-2"),
-        "ops@render-west.example.invalid"
+        "ops@render-west.example.invalid: Connected"
     );
     for id in ["host-rail-host-1", "host-rail-host-3", "host-rail-host-2"] {
         assert!(!pressed(&nodes, id), "{id} is not chosen");
@@ -351,15 +363,17 @@ fn the_rail_lists_all_then_registered_hosts_in_order_with_their_names(cx: &mut T
     assert_eq!(local_caption, ["Local"]);
 }
 
-/// The avatar's hover help is the same identity as its name, so a sighted user learns which host a mark stands for
-/// (the state the old tooltip also carried joins it with the host status). Specified: resting the pointer on the
-/// aliased host's avatar shows its alias with its destination in parentheses, and on All shows All's own help.
+/// The avatar's hover help is the same words as its name, so a sighted user learns which host a mark stands for and
+/// what state it is in, as the old tooltip said. Specified: resting the pointer on the aliased host's avatar shows its
+/// alias with its destination in parentheses and its state, and on All shows All's own help.
 #[gpui::test]
-fn an_avatars_hover_help_is_its_identity(cx: &mut TestAppContext) {
+fn an_avatars_hover_help_is_its_name(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot());
     assert_eq!(
         hover_help(cx, "host-rail-host-3").as_deref(),
-        Some("Build fleet with a deliberately long caption (deploy@builder-east.example.invalid)")
+        Some(
+            "Build fleet with a deliberately long caption (deploy@builder-east.example.invalid): Connected"
+        )
     );
     assert_eq!(
         hover_help(cx, "host-rail-all").as_deref(),
@@ -383,7 +397,7 @@ fn a_hosts_names_are_shown_and_named_escaped(cx: &mut TestAppContext) {
     for ((_, shown), id) in SPOOFING_CORPUS.iter().zip(10..) {
         assert_eq!(
             label(&nodes, &format!("host-rail-host-{id}")),
-            format!("{shown} (ops@example.invalid)")
+            format!("{shown} (ops@example.invalid): Connected")
         );
     }
     let texts = painted(&nodes);
@@ -1323,4 +1337,420 @@ fn the_rail_takes_its_56_pixels_of_the_sidebar_and_cuts_long_captions() {
         "fits the caption: {:?}",
         cut.bounds
     );
+}
+
+// ---- Host status ---------------------------------------------------------------------------------------------------
+
+/// A connected remote on build `0.15.0`, older than the helm's, as the helm marks it: an optional update. The host
+/// status golden uses it too.
+pub(crate) fn old_build() -> HostStateView {
+    HostStateView::Connected {
+        identity: Some("id-old".into()),
+        build_version: "0.15.0".into(),
+        old_version: true,
+        newer_version: false,
+        refresh: RefreshView::Ok { sessions: 1 },
+    }
+}
+
+/// A connected host on a build newer than the helm's.
+fn newer_build() -> HostStateView {
+    HostStateView::Connected {
+        identity: Some("id-new".into()),
+        build_version: "9.0.0".into(),
+        old_version: false,
+        newer_version: true,
+        refresh: RefreshView::Ok { sessions: 0 },
+    }
+}
+
+/// A remote the helm cannot reach and keeps re-probing. The host status golden uses it too.
+pub(crate) fn unreachable() -> HostStateView {
+    HostStateView::Unreachable {
+        cause: "transport-failure".into(),
+        last_error: "timed out".into(),
+    }
+}
+
+/// The main view over `listed` (the registry, in that order) with `runs` retained and no sessions, every command sent
+/// at startup answered (the connected hosts' trash reads), so that each test sees only what its own steps change.
+fn status_rail<'a>(
+    cx: &'a mut TestAppContext,
+    listed: &[HostView],
+    runs: &[ProvisioningView],
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![
+            listing(&[], &[]),
+            status_hosts(listed),
+            status_progress(runs),
+        ],
+    );
+    answer_everything(&mut fake);
+    test_support::settle(cx);
+    (fake, cx)
+}
+
+/// Push `listed` as the whole registry, replacing every host, and settle.
+fn push_hosts(fake: &mut FakeHelm, listed: &[HostView], cx: &mut VisualTestContext) {
+    let state = status_hosts(listed);
+    fake.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+}
+
+/// Whether the element recorded under the debug `selector` (a rail mark, see `status::avatar_marks`) was drawn.
+fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
+    cx.debug_bounds(selector).is_some()
+}
+
+/// Why this matters: SPEC.md, "Session list": "Per-host connection state is always visible on each rail avatar, with
+/// its name and phase available on hover and to screen readers", and "an unreachable host's identity mark is dimmed".
+/// The dot is a picture; the phase's words in the avatar's name are what a screen reader hears. Specified: over a
+/// connected local host, a connecting remote and an unreachable one, each avatar draws its connection dot and no other
+/// mark, and is named and helped by its identity, ": " and its phase words ("Connected", "Connecting", "Unreachable,
+/// retrying"); the dimming rule holds the unreachable, suspended and changing phases and no other.
+#[gpui::test]
+fn each_avatar_draws_its_dot_and_names_its_phase(cx: &mut TestAppContext) {
+    let listed = [
+        status_host(1, "local", connected()),
+        status_host(2, "ssh", connecting(2, None)),
+        status_host(3, "ssh", unreachable()),
+    ];
+    let (_fake, cx) = status_rail(cx, &listed, &[]);
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "host-rail-host-1"),
+        "Local (this machine): Connected"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-2"),
+        "dev@build-box.invalid: Connecting"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-3"),
+        "dev@build-box.invalid: Unreachable, retrying"
+    );
+    for (dot, others) in [
+        (
+            "host-rail-dot-1",
+            [
+                "host-rail-update-1",
+                "host-rail-ring-1",
+                "host-rail-warning-1",
+            ],
+        ),
+        (
+            "host-rail-dot-2",
+            [
+                "host-rail-update-2",
+                "host-rail-ring-2",
+                "host-rail-warning-2",
+            ],
+        ),
+        (
+            "host-rail-dot-3",
+            [
+                "host-rail-update-3",
+                "host-rail-ring-3",
+                "host-rail-warning-3",
+            ],
+        ),
+    ] {
+        assert!(drawn(cx, dot), "{dot} is drawn");
+        for other in others {
+            assert!(!drawn(cx, other), "{other} is not drawn");
+        }
+    }
+    assert_eq!(
+        hover_help(cx, "host-rail-host-3").as_deref(),
+        Some("dev@build-box.invalid: Unreachable, retrying")
+    );
+
+    let suspended = HostStateView::Suspended {
+        observed_at: 1,
+        suspended_by_farhelm_at: None,
+        resume_failed: None,
+    };
+    let changing = HostStateView::TensorlakeChanging {
+        starting: false,
+        direction: farhelm_proto::tensorlake::LifecycleDirection::Resuming,
+        requested_at: 1,
+    };
+    for (state, dims) in [
+        (unreachable(), true),
+        (suspended, true),
+        (changing, true),
+        (connected(), false),
+        (connecting(1, None), false),
+        (old_build(), false),
+    ] {
+        assert_eq!(
+            status::dimmed(&status_host(2, "ssh", state.clone())),
+            dims,
+            "{state:?}"
+        );
+    }
+}
+
+/// Why this matters: SPEC.md, "Session list": "an available update adds a badge", and "The Hosts control at the foot of
+/// the rail carries an `↑` whenever any rail avatar has an available-update badge ... its accessible name and hover
+/// help give the number of hosts". The badge follows `hosts::status::update_badge`, so the rail, Hosts' count and the
+/// panel's inline Update agree; the helm's own machine and a host running a newer Farhelm never get one. Specified:
+/// over the local host on an older build, a remote on an older build, a remote refused for a lower protocol and a
+/// remote on a newer build, the two behind remotes draw the update badge and say "; update available" after their
+/// phase ("Old version", "Needs update"), the local host says only "Old version", the newer remote says "Too new" and
+/// the helm's remedy and has no badge; Hosts is named "Hosts: 2 hosts have updates", helped "Hosts: 2 hosts have
+/// updates; show host management", and draws its `↑`.
+#[gpui::test]
+fn behind_remote_hosts_show_the_update_badge_and_hosts_counts_them(cx: &mut TestAppContext) {
+    let listed = [
+        status_host(1, "local", old_build()),
+        status_host(2, "ssh", old_build()),
+        status_host(3, "ssh", skew(28, 29)),
+        status_host(4, "ssh", newer_build()),
+    ];
+    let (_fake, cx) = status_rail(cx, &listed, &[]);
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "host-rail-host-1"),
+        "Local (this machine): Old version"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-2"),
+        "dev@build-box.invalid: Old version; update available"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-3"),
+        "dev@build-box.invalid: Needs update; update available"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-4"),
+        format!(
+            "dev@build-box.invalid: Too new; This host runs Farhelm 9.0.0, which is newer than this helm's {} (both \
+             speak protocol {}); update the helm",
+            farhelm_proto::BUILD_VERSION,
+            farhelm_proto::PROTOCOL_VERSION,
+        )
+    );
+    for (badge, shown) in [
+        ("host-rail-update-1", false),
+        ("host-rail-update-2", true),
+        ("host-rail-update-3", true),
+        ("host-rail-update-4", false),
+    ] {
+        assert_eq!(drawn(cx, badge), shown, "{badge}");
+    }
+    assert_eq!(
+        label(&nodes, "hosts-panel-toggle"),
+        "Hosts: 2 hosts have updates"
+    );
+    assert!(drawn(cx, "hosts-panel-toggle-update"));
+    assert_eq!(
+        hover_help(cx, "hosts-panel-toggle").as_deref(),
+        Some("Hosts: 2 hosts have updates; show host management")
+    );
+}
+
+/// Why this matters: the Hosts control's `↑` and count follow the badges as hosts change, and with none it is the
+/// plain "Hosts" again (the old `toggle_label`), not an empty count. Specified: with one remote on an older build Hosts
+/// is named "Hosts: 1 host has an update" and draws its `↑`; once the helm pushes that host as current, Hosts is named
+/// "Hosts", helped "Hosts: show host management", and draws no `↑`, and the avatar no badge.
+#[gpui::test]
+fn hosts_names_one_update_and_drops_its_arrow_when_none_is_left(cx: &mut TestAppContext) {
+    let (mut fake, cx) = status_rail(cx, &[status_host(2, "ssh", old_build())], &[]);
+    assert_eq!(
+        label(&frame(cx), "hosts-panel-toggle"),
+        "Hosts: 1 host has an update"
+    );
+    assert!(drawn(cx, "hosts-panel-toggle-update"));
+
+    push_hosts(&mut fake, &[status_host(2, "ssh", connected())], cx);
+    assert_eq!(label(&frame(cx), "hosts-panel-toggle"), "Hosts");
+    assert!(!drawn(cx, "hosts-panel-toggle-update"));
+    assert!(!drawn(cx, "host-rail-update-2"));
+    assert_eq!(
+        hover_help(cx, "hosts-panel-toggle").as_deref(),
+        Some("Hosts: show host management")
+    );
+}
+
+/// Why this matters: SPEC.md, "Session list": "setup/update/uninstall adds a ring", and the old rail named the work in
+/// place of "update available", since a host being updated is not still waiting for one. Specified: with an Update run
+/// going on on a remote on an older build, a setup run on a current remote and an uninstall run on a third, each
+/// avatar draws the ring, the first draws no update badge, and they are named "...: Old version; updating", "...:
+/// Connected; setting up" and "...: Connected; uninstalling"; Hosts counts no update.
+#[gpui::test]
+fn running_work_rings_the_avatar_and_names_the_work(cx: &mut TestAppContext) {
+    use farhelm_proto::provisioning::ProvisioningOperation::{Add, Uninstall, Update};
+    use farhelm_proto::provisioning::RunStatus::Running;
+    let listed = [
+        status_host(2, "ssh", old_build()),
+        status_host(3, "ssh", connected()),
+        status_host(4, "ssh", connected()),
+    ];
+    let runs = [
+        status_run(2, Update, Running),
+        status_run(3, Add, Running),
+        status_run(4, Uninstall, Running),
+    ];
+    let (_fake, cx) = status_rail(cx, &listed, &runs);
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "host-rail-host-2"),
+        "dev@build-box.invalid: Old version; updating"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-3"),
+        "dev@build-box.invalid: Connected; setting up"
+    );
+    assert_eq!(
+        label(&nodes, "host-rail-host-4"),
+        "dev@build-box.invalid: Connected; uninstalling"
+    );
+    for ring in ["host-rail-ring-2", "host-rail-ring-3", "host-rail-ring-4"] {
+        assert!(drawn(cx, ring), "{ring} is drawn");
+    }
+    assert!(!drawn(cx, "host-rail-update-2"));
+    assert_eq!(label(&nodes, "hosts-panel-toggle"), "Hosts");
+}
+
+/// Why this matters: SPEC.md, "Session list": "A setup or Update warning has its own mark and hover explanation,
+/// alongside the connection dot", and opening Hosts acknowledges it. The rule of when a warning shows is
+/// `hosts::status`'s and tested there; this is the rail drawing it. Specified: a remote whose Update run failed while
+/// Hosts was closed draws the warning mark beside its dot and is named "...: Connected; setup or update needs
+/// attention; open Hosts for details"; after Hosts is opened and closed again, the mark is gone and the name is
+/// "...: Connected".
+#[gpui::test]
+fn a_failed_update_marks_the_avatar_until_hosts_opens(cx: &mut TestAppContext) {
+    use farhelm_proto::provisioning::ProvisioningOperation::Update;
+    use farhelm_proto::provisioning::RunStatus::Failed;
+    let (_fake, cx) = status_rail(
+        cx,
+        &[status_host(2, "ssh", connected())],
+        &[status_run(2, Update, Failed)],
+    );
+    assert!(drawn(cx, "host-rail-warning-2"));
+    assert!(drawn(cx, "host-rail-dot-2"));
+    assert_eq!(
+        label(&frame(cx), "host-rail-host-2"),
+        "dev@build-box.invalid: Connected; setup or update needs attention; open Hosts for details"
+    );
+
+    test_support::click(cx, "hosts-panel-toggle");
+    test_support::click(cx, "hosts-panel-toggle");
+    assert!(!panel_shown(cx), "the premise: Sessions shows again");
+    assert!(!drawn(cx, "host-rail-warning-2"));
+    assert_eq!(
+        label(&frame(cx), "host-rail-host-2"),
+        "dev@build-box.invalid: Connected"
+    );
+}
+
+/// Why this matters: SPEC.md, "Session list": "A failed registry refresh retains the avatars and names their state as
+/// last-read" (the old app's tooltip suffix, and the `filters.spec.ts` case whose assertion this ports), so an avatar
+/// never presents an old phase as current. Specified: once the helm reports the host list unavailable while keeping
+/// the hosts last read, the avatar is still drawn and is named "...: Connected; last state read, host list refresh
+/// failed"; once the list is available again, the suffix goes.
+#[gpui::test]
+fn a_failed_registry_refresh_names_the_avatars_state_as_last_read(cx: &mut TestAppContext) {
+    let listed = [status_host(2, "ssh", connected())];
+    let (mut fake, cx) = status_rail(cx, &listed, &[]);
+    let mut failed = status_hosts(&listed);
+    failed.meta.availability = Availability::Unavailable {
+        error: "the registry could not be read".into(),
+    };
+    fake.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: failed.meta,
+        upsert: Vec::new(),
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+    assert_eq!(
+        label(&frame(cx), "host-rail-host-2"),
+        "dev@build-box.invalid: Connected; last state read, host list refresh failed"
+    );
+
+    push_hosts(&mut fake, &listed, cx);
+    assert_eq!(
+        label(&frame(cx), "host-rail-host-2"),
+        "dev@build-box.invalid: Connected"
+    );
+}
+
+/// Why this matters: the old tooltip put each explanation in a fixed order after the phase, and a reader scanning the
+/// name relies on the phase coming first. Specified as a pure function: for a remote on an older build with an update
+/// available, after a failed refresh and with a warning, the words are "Old version; update available; last state
+/// read, host list refresh failed; setup or update needs attention; open Hosts for details".
+#[test]
+fn state_words_keep_the_old_tooltips_order() {
+    use crate::hosts::status::{HostStatus, Urgency};
+    let host = status_host(2, "ssh", old_build());
+    let words = status::state_words(
+        &host,
+        &HostStatus {
+            update: Some(Urgency::Optional),
+            live: None,
+            warned: true,
+        },
+        true,
+    );
+    assert_eq!(
+        words,
+        "Old version; update available; last state read, host list refresh failed; setup or update needs \
+         attention; open Hosts for details"
+    );
+}
+
+/// Why this matters: a warning is raised outside the store (a refused Update's completion records it in the hosts
+/// status module's own state), so nothing the list reads while drawing changes, and only the list's subscription to
+/// that state redraws the rail; without it the mark would wait for some unrelated redraw. Specified: with the window
+/// settled and no frame asked for, recording a refused Update for host 2 through `hosts::status::failed` and letting
+/// the app run until idle draws host 2's warning mark.
+#[gpui::test]
+fn a_warning_raised_outside_the_store_redraws_the_rail(cx: &mut TestAppContext) {
+    let (_fake, cx) = status_rail(cx, &[status_host(2, "ssh", connected())], &[]);
+    assert!(
+        !drawn(cx, "host-rail-warning-2"),
+        "the premise: no warning yet"
+    );
+    cx.update(|_, cx| crate::hosts::status::failed(2, crate::hosts::status::Action::Update, cx));
+    test_support::settle(cx);
+    assert!(drawn(cx, "host-rail-warning-2"));
+}
+
+/// Why this matters: the ring has three looks (SPEC.md: "setup/update/uninstall adds a ring"; the old sheet drew it in
+/// the accent, in the inverse ink on the pressed avatar, and in the accent again on the pressed avatar while Hosts
+/// shows), and the Hosts control's `↑` is red only when some update is required ("It is red when any update is
+/// required, amber otherwise"). Inks are not in the driver's record, so these rules are tested as the functions that
+/// pick them. Specified, over both palettes: an avatar not pressed rings in the accent, a pressed one in the inverse
+/// ink, and a pressed one while Hosts shows in the accent; Hosts' `↑` is amber for optional updates only and red as
+/// soon as one is required.
+#[test]
+fn the_rings_and_the_hosts_arrows_inks_follow_the_old_sheet() {
+    use crate::theme::{DARK, LIGHT};
+    for palette in [&DARK, &LIGHT] {
+        assert_eq!(status::ring_ink(false, false, palette), palette.accent);
+        assert_eq!(status::ring_ink(false, true, palette), palette.accent);
+        assert_eq!(status::ring_ink(true, false, palette), palette.on_fill);
+        assert_eq!(status::ring_ink(true, true, palette), palette.accent);
+
+        let mut optional = status::Updates::default();
+        optional.add(Some(crate::hosts::status::Urgency::Optional));
+        optional.add(Some(crate::hosts::status::Urgency::Optional));
+        assert_eq!(status::hosts_badge_ink(optional, palette), palette.warn);
+        let mut required = optional;
+        required.add(Some(crate::hosts::status::Urgency::Required));
+        assert_eq!(
+            status::hosts_badge_ink(required, palette),
+            palette.danger_strong
+        );
+        assert_eq!(required.count, 3);
+    }
 }

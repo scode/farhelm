@@ -38,7 +38,7 @@ use std::path::Path;
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement,
-    Render, Styled, Window, WindowAppearance, div, point, px, size,
+    Pixels, Render, Styled, Window, WindowAppearance, div, point, px, size,
 };
 use gpui_component::Root;
 
@@ -2147,6 +2147,51 @@ fn session_list_selected_stale_setup(state: &SceneState, _: &mut Window, cx: &mu
     session_list_scene_opening(state, &rows, Some("f"), cx);
 }
 
+/// The host rail with every host status it draws, which no reference screen shows, so it is checked against the old
+/// stylesheet's `.host-rail-state`, `.host-rail-update`, `.host-rail-attention`, progress-ring and
+/// `.hosts-toggle-update` rules: the local host connected (a green dot); a remote on an older build (the amber `↑`); a
+/// remote refused for a lower protocol (a red dot and the `↑`, which turns the Hosts control's `↑` red); an unreachable
+/// remote (its mark dimmed, an amber dot); a remote with an Update run going on (the dashed ring), chosen as the
+/// host filter so its ring is drawn in the pressed avatar's inverse ink; and a remote whose Update failed while Hosts
+/// was closed (the warning mark at the lower left).
+fn host_rail_status_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{aliased, connected, host, hosts as registry, progress, run, skew};
+    use crate::session_list::host_rail::tests::{old_build, unreachable};
+    use farhelm_proto::provisioning::ProvisioningOperation::Update;
+    use farhelm_proto::provisioning::RunStatus::{Failed, Running};
+    let remote = |id, alias: &str, state| {
+        aliased(
+            host(id, "ssh", state),
+            alias,
+            &format!("ops@{alias}.example.invalid"),
+        )
+    };
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        listing(&[], &[]),
+        preferences(&[], None),
+        registry(&[
+            host(1, "local", connected()),
+            remote(2, "older", old_build()),
+            remote(3, "skewed", skew(28, 29)),
+            remote(4, "down", unreachable()),
+            remote(5, "busy", connected()),
+            remote(6, "failed", connected()),
+        ]),
+        progress(&[run(5, Update, Running), run(6, Update, Failed)]),
+    ]);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    // Chosen once the list has drawn under its UI session (a choice before that has no session to belong to); it shows
+    // pressed at once, and the helm's answer to its query is not needed for the rail.
+    state.after.set(Some(|list, _, _, cx| {
+        list.update(cx, |list, cx| list.choose_host(Some(5), cx))
+    }));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+}
+
 /// The list in compact density (reference `session-list-compact`): every row one line, with no last line and no ended
 /// line. The open row runs (its inverse inks pinned); then a row on a host the helm cannot reach, its clock after the
 /// title; then each of the four ended marks in the status column, in its ink: a user's stop (the filled square), an
@@ -2286,12 +2331,18 @@ fn session_list_then(state: &SceneState, after: AfterDrawn, cx: &mut App) {
 
 /// [`session_lists`], and the scene's [`AfterDrawn`] once the list has rows to anchor to.
 fn session_lists_then(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    defer_after(state, window, cx);
+    session_lists(state, window, cx)
+}
+
+/// Run the scene's [`AfterDrawn`], if it has one left, after this frame: by then the list has drawn under its UI
+/// session, with rows to anchor to.
+fn defer_after(state: &SceneState, window: &mut Window, cx: &mut App) {
     let list = state.lists.borrow().first().cloned();
     if let (Some(list), Some(after)) = (list, state.after.take()) {
         let staged = state.clone();
         window.defer(cx, move |window, cx| after(&list, &staged, window, cx));
     }
-    session_lists(state, window, cx)
 }
 
 /// The waiting row's actions menu, open beside its button with Rename, its first command, highlighted (reference
@@ -4125,10 +4176,22 @@ fn host_settings_dialog_end(state: &SceneState, window: &mut Window, cx: &mut Ap
 
 /// The session list a scene's setup made, in a column of the sidebar's width and surface.
 fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    session_lists_at(state, px(394.), cx)
+}
+
+/// [`session_lists_then`] in a column tall enough for the host status scene's six avatars above the rail's foot,
+/// which the ordinary column would cover from the third avatar down.
+fn host_rail_lists(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    defer_after(state, window, cx);
+    session_lists_at(state, px(676.), cx)
+}
+
+/// The session list a scene's setup made, in a column of the sidebar's width and surface, `height` tall.
+fn session_lists_at(state: &SceneState, height: Pixels, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
     div()
         .w(theme::metrics::SIDEBAR_WIDTH)
-        .h(px(394.))
+        .h(height)
         .bg(theme::color(palette.bg_1))
         .text_color(theme::color(palette.fg_0))
         .children(state.lists.borrow().iter().cloned())
@@ -4754,6 +4817,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_pinned_setup,
+    },
+    Scene {
+        name: "host-rail-status",
+        size: (420., 700.),
+        draw: host_rail_lists,
+        setup: host_rail_status_setup,
     },
     Scene {
         name: "session-row-menu",
