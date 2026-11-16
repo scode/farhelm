@@ -17,8 +17,9 @@ use gpui::{
 
 use crate::components::dialog::frame_limits;
 use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
-use crate::desktop::linux_title_bar::{HEIGHT, content_area_in};
-use crate::test_support::{bounds, check, click, focused_id, keys, open, redraw};
+use crate::test_support::{
+    bounds, check, click, focused_id, keys, linux_content_area, open, redraw,
+};
 
 use super::{each_scroll_key_scrolls, lines, role_and_name};
 
@@ -638,14 +639,7 @@ fn notices_without_the_opt_in_take_no_keys_from_their_answers(cx: &mut TestAppCo
 /// content area's height, 50 pixels, and is at most 900 tall.
 #[test]
 fn a_dialog_at_its_height_limit_fits_the_linux_content_area() {
-    let area = content_area_in(
-        size(px(1642.), px(1076.)),
-        gpui::Decorations::Client {
-            tiling: gpui::Tiling::default(),
-        },
-        Some(px(20.)),
-        HEIGHT,
-    );
+    let area = linux_content_area();
     assert_eq!(area.size, size(px(1600.), px(1000.)), "the premise");
     let limits = frame_limits(area.size, None, true);
     assert_eq!(limits, size(px(480.), px(952.)));

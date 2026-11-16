@@ -108,8 +108,10 @@ const BELL_GAP: f32 = 4.;
 /// entries are sentences rather than command names.
 const LIST_WIDTH: f32 = 288.;
 
-/// How much of the window's height the list leaves free (`max-height: calc(100vh - 16px)`): a list taller than that
-/// scrolls its entries.
+/// The room the list keeps free below the height of the window's content area
+/// ([`crate::desktop::linux_title_bar::content_area`]): the list is at most that height less this, and a list taller
+/// than that scrolls its entries. The old `max-height: calc(100vh - 16px)` took it from the viewport, which was the old
+/// page and so is the content area here; the name still says window from then.
 const WINDOW_ROOM: f32 = 16.;
 
 /// An entry's text size (`.session-bell-text`).
@@ -676,6 +678,11 @@ fn entry(
 /// surface with 4 pixels at top and bottom (`.host-row-menu-panel`), a column never taller than the window allows
 /// (`max-height: calc(100vh - 16px)`), named as a dialog, which the caller labels. The session bell's list and the
 /// rail's notices panel both draw on it, at their old widths.
+///
+/// The height cap is taken from the window's content area ([`crate::desktop::linux_title_bar::content_area`]), the
+/// old page's viewport, not from the whole window: the layer manager keeps every popover inside that area, so on
+/// Linux, where the window also holds GPUI Kit's frame and the title bar, a panel capped by the window would be taller
+/// than the area and be pushed past its bottom.
 pub(crate) fn list_panel(
     id: &'static str,
     width: gpui::Pixels,
@@ -687,7 +694,12 @@ pub(crate) fn list_panel(
         .debug_selector(move || id.into())
         .role(Role::Dialog)
         .w(width)
-        .max_h(window.viewport_size().height - px(WINDOW_ROOM))
+        .max_h(
+            crate::desktop::linux_title_bar::content_area(window)
+                .size
+                .height
+                - px(WINDOW_ROOM),
+        )
         .flex()
         .flex_col()
         .py(px(4.))

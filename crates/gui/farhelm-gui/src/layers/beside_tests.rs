@@ -17,18 +17,12 @@ use gpui::{
 
 use super::beside::{Placed, at_pointer, place};
 use crate::components::{Button, HoverHelp, Role};
-use crate::desktop::linux_title_bar::{HEIGHT, content_area_in};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, TooltipSide};
-use crate::test_support::{advance, bounds, center, open, redraw};
+use crate::test_support::{advance, bounds, center, linux_content_area, open, rect, redraw};
 use crate::theme;
 
 // ---- The placement's numbers ----------------------------------------------------------------------------------------
-
-/// A rectangle from its left, top, width and height, as the old unit tests' `rect` made one.
-fn rect(left: f32, top: f32, width: f32, height: f32) -> Bounds<Pixels> {
-    Bounds::new(point(px(left), px(top)), size(px(width), px(height)))
-}
 
 /// The old tests' 1000 by 800 window.
 fn viewport() -> gpui::Size<Pixels> {
@@ -198,30 +192,17 @@ fn the_notch_stays_level_with_its_control_on_the_cards_straight_edge() {
 
 // ---- Inside the Linux window's frame --------------------------------------------------------------------------------
 
-/// The content area of the 1642 by 1076 Linux window the 2026-11-15 reports measured, with client decorations and the
-/// window's own title bar: 21, 55, 1600 by 1000, inside GPUI Kit's 21-pixel frame and below the 34-pixel bar.
-fn linux_area() -> Bounds<Pixels> {
-    content_area_in(
-        size(px(1642.), px(1076.)),
-        gpui::Decorations::Client {
-            tiling: gpui::Tiling::default(),
-        },
-        Some(px(20.)),
-        HEIGHT,
-    )
-}
-
 /// Why this matters: on Linux the window holds GPUI Kit's frame and the window's own title bar, and a card placed
 /// against the whole window covered the bar and reached into the frame's shadow (the host progress card, seen by
 /// settings-and-hosts on 2026-11-15, its top at about y 5). The old rules' window edges are the content area's.
 ///
-/// Specification, in [`linux_area`] beside a sidebar whose right edge is at 401: a 310 by 992 card (the tooltip's
+/// Specification, in [`linux_content_area`] beside a sidebar whose right edge is at 401: a 310 by 992 card (the tooltip's
 /// height cap, the area less 8) for a row centered at y 100 sits at left 407, top 59 (4 pixels below the bar) and
 /// bottom 1051 (4 pixels above the frame), its notch still level with the row; a row near the bottom gets the same
 /// top; and the same card placed against the whole window would have started at y 4, over the bar.
 #[test]
 fn a_tall_card_beside_the_sidebar_stays_inside_the_linux_content_area() {
-    let area = linux_area();
+    let area = linux_content_area();
     let card = size(px(310.), area.size.height - px(8.));
     let high = place(px(401.), rect(21., 80., 380., 40.), card, area);
     assert_eq!(high, beside(407., 59., 100.));
@@ -249,7 +230,7 @@ fn a_tall_card_beside_the_sidebar_stays_inside_the_linux_content_area() {
 /// of the content area it must not go up over the title bar, but below the control instead, as it would below the top
 /// of the old page.
 ///
-/// Specification, in [`linux_area`] with nothing fitting beside the sidebar (a 340-pixel card past an edge at 1300):
+/// Specification, in [`linux_content_area`] with nothing fitting beside the sidebar (a 340-pixel card past an edge at 1300):
 /// a 340 by 100 card for a control at 40, 120, 320 by 20 goes below it with the 28-pixel gap (left 30, top 168),
 /// where the whole window would have put it above, at top 14, over the bar.
 #[test]
@@ -257,7 +238,7 @@ fn the_fallback_stays_below_the_title_bar() {
     let control = rect(40., 120., 320., 20.);
     let card = size(px(340.), px(100.));
     assert_eq!(
-        place(px(1300.), control, card, linux_area()),
+        place(px(1300.), control, card, linux_content_area()),
         fallback(30., 168., TooltipSide::Below)
     );
     assert_eq!(
@@ -271,7 +252,7 @@ fn the_fallback_stays_below_the_title_bar() {
 /// window's bottom-right corner; the help must still land in the content area, and in a window with no frame it must
 /// land exactly where GPUI's window snap put it before.
 ///
-/// Specification: help begins 8 pixels right of and 16 below the pointer. In [`linux_area`], for a 200 by 60 card, a
+/// Specification: help begins 8 pixels right of and 16 below the pointer. In [`linux_content_area`], for a 200 by 60 card, a
 /// pointer on the bar at 300, 20 puts it at 308, 55 (the area's top); a pointer at 1630, 1070 puts it flush with the
 /// area's right and bottom edges, at 1421, 995; a pointer at 500, 500 leaves it at 508, 516. In a whole 1642 by 1076
 /// window the corner pointer puts it flush with the window's edges, at 1442, 1016.
@@ -284,9 +265,9 @@ fn help_at_the_pointer_stays_inside_the_content_area() {
         side: TooltipSide::Pointer,
         notch_y: None,
     };
-    assert_eq!(at(300., 20., linux_area()), pointer(308., 55.));
-    assert_eq!(at(1630., 1070., linux_area()), pointer(1421., 995.));
-    assert_eq!(at(500., 500., linux_area()), pointer(508., 516.));
+    assert_eq!(at(300., 20., linux_content_area()), pointer(308., 55.));
+    assert_eq!(at(1630., 1070., linux_content_area()), pointer(1421., 995.));
+    assert_eq!(at(500., 500., linux_content_area()), pointer(508., 516.));
     assert_eq!(
         at(1630., 1070., whole(size(px(1642.), px(1076.)))),
         pointer(1442., 1016.)
