@@ -131,7 +131,7 @@ impl RenderOnce for ListRow {
                     .border_color(theme::color(palette.accent)),
             );
         }
-        let row = super::with_hover_help(row, &self.id, &self.help, true, window, cx);
+        let row = super::with_hover_help(row, &self.id, &self.help, true, Some(&focus), window, cx);
         super::activate_on_click(
             super::activate_on_enter_or_space(
                 focus::track(row, &focus, focus::OnPress::Control),

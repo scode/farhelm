@@ -146,7 +146,7 @@ impl RenderOnce for OptionRow {
             // is drawn.
             .on_any_mouse_down(|_, window, _| window.prevent_default())
             .children(self.children);
-        let row = super::with_hover_help(row, &self.id, &self.help, true, window, cx);
+        let row = super::with_hover_help(row, &self.id, &self.help, true, None, window, cx);
         row.when_some(self.on_click, |row, handler| {
             row.on_click(move |event, window, cx| handler(event, window, cx))
         })

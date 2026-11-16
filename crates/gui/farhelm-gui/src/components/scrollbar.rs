@@ -247,7 +247,7 @@ impl RenderOnce for Scrollbar {
                 drag,
                 painted,
             });
-        super::with_hover_help(bar, &self.id, &self.help, true, window, cx).into_any_element()
+        super::with_hover_help(bar, &self.id, &self.help, true, None, window, cx).into_any_element()
     }
 }
 

@@ -119,6 +119,6 @@ impl RenderOnce for StatusMark {
             Some(content) => mark.child(content),
             None => mark.child(self.text),
         };
-        super::with_hover_help(mark, &self.id, &self.help, self.described, window, cx)
+        super::with_hover_help(mark, &self.id, &self.help, self.described, None, window, cx)
     }
 }

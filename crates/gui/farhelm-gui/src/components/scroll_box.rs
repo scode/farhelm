@@ -57,7 +57,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 
-use super::{HoverHelp, Ring, scroll_handle, scroll_stop};
+use super::{HoverHelp, Ring, scroll_handle, scroll_stop_on};
 use crate::focus;
 use crate::theme::{self, metrics};
 
@@ -165,15 +165,22 @@ impl RenderOnce for ScrollBox {
             .border_color(theme::color(palette.border_row))
             .rounded(metrics::RADIUS_SM)
             .child(focus::scroll_region(scroller, &scroll));
-        let stop = super::with_hover_help(stop, &self.id, &self.help, true, window, cx);
+        // The stop's handle, made here so its help shows on keyboard focus too, and handed to the stop.
+        let handle = focus::control_handle(
+            ElementId::Name(format!("{}-focus", self.id).into()),
+            window,
+            cx,
+        );
+        let stop =
+            super::with_hover_help(stop, &self.id, &self.help, true, Some(&handle), window, cx);
         // The ring covers the one-pixel border and one pixel inside it, as the old outline two pixels in did.
         let ring = Ring {
             inset_x: px(-1.),
             inset_y: px(-1.),
             radius: metrics::RADIUS_SM,
         };
-        scroll_stop(
-            stop, &self.id, &scroll, self.role, self.label, ring, window, cx,
+        scroll_stop_on(
+            stop, &self.id, &handle, &scroll, self.role, self.label, ring, window, cx,
         )
     }
 }

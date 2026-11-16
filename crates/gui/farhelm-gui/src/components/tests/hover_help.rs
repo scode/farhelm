@@ -1,7 +1,7 @@
 //! Tests of hover help, the layer's shared rule in `components/mod.rs` (`HoverHelp` and `with_hover_help`): when a
 //! control's tooltip shows and goes, whose help wins when one control sits inside another, a press putting it away,
-//! and help that names a host value or comes in paragraphs. The tooltip itself is the layer manager's; how paragraph
-//! help is laid out is pinned in `layers/tooltip_tests.rs`.
+//! help that names a host value or comes in paragraphs, and help shown by keyboard focus. The tooltip itself is the
+//! layer manager's; how paragraph help is laid out is pinned in `layers/tooltip_tests.rs`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -16,7 +16,7 @@ use crate::components::{Button, HoverHelp, Role};
 use crate::host_text::tests::{painted_words, paints_isolated};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers;
-use crate::test_support::{advance, bounds, center, check, frame, open, redraw};
+use crate::test_support::{advance, bounds, center, check, frame, keys, open, redraw};
 
 use super::{tooltip, wait_hover_delay};
 
@@ -685,5 +685,239 @@ fn help_in_paragraphs_shows_every_paragraph_and_describes_the_control_with_all_o
     assert!(
         drawn.windows(2).all(|pair| pair[0] < pair[1]),
         "the paragraphs are drawn in the order given: {drawn:?}"
+    );
+}
+
+// ---- Help on keyboard focus -----------------------------------------------------------------------------------------
+
+/// Two buttons with help ("First help", "Second help"), then a plain keyboard stop on `plain` that has no help, in
+/// that Tab order.
+fn focus_scene(
+    plain: gpui::FocusHandle,
+) -> impl Fn(&mut Window, &mut gpui::App) -> gpui::AnyElement {
+    move |_, _| {
+        let stop = div().id("plain").size(px(20.));
+        let stop = crate::focus::track(stop, &plain, crate::focus::OnPress::Control);
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(Button::new(
+                "first",
+                "First",
+                HoverHelp::tooltip("First help"),
+                Role::Button,
+            ))
+            .child(Button::new(
+                "second",
+                "Second",
+                HoverHelp::tooltip("Second help"),
+                Role::Button,
+            ))
+            .child(stop)
+            .into_any_element()
+    }
+}
+
+/// Press `chord` and draw the frame it changes, which is where a control sees focus arrive.
+fn key(cx: &mut VisualTestContext, chord: &str) {
+    keys(cx, chord);
+    redraw(cx);
+}
+
+/// Why this matters: SPEC.md shows the session summary card "on keyboard focus too", and the old app showed every
+/// focus-visible control's help, so a keyboard user learns what a control does; a click focusing a control is not that
+/// (pointer focus is not `:focus-visible`), and help popping up after every click would cover what was clicked.
+///
+/// Specification: Tab onto a control shows nothing before the hover delay and its help once it ends, placed by the old
+/// rule against the control: centered across it, and below it with a 28-pixel gap, since there is no room above a
+/// control at the window's top (measured from the box inside its 1-pixel border, as the focus coordinator records it);
+/// with clicks set to focus controls, as on Linux, a click on another control, with the pointer then moved off it,
+/// focuses it and shows no help however long focus rests there.
+#[gpui::test]
+fn keyboard_focus_shows_a_controls_help_after_the_delay_and_a_click_does_not(
+    cx: &mut TestAppContext,
+) {
+    let plain = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let cx = open(cx, focus_scene(plain));
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    key(cx, "tab");
+    advance(
+        cx,
+        layers::HOVER_DELAY - std::time::Duration::from_millis(1),
+    );
+    assert_eq!(tooltip(cx), None, "nothing before the delay");
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx), Some("First help".into()));
+    let (first, card) = (bounds(cx, "first"), bounds(cx, "tooltip-card"));
+    assert!(
+        (card.center().x - first.center().x).abs() <= px(1.)
+            && card.top() == (first.bottom() - px(1.) + px(28.)).round(),
+        "centered below the control: {card:?} {first:?}"
+    );
+
+    let second = center(cx, "second");
+    cx.simulate_click(second, Modifiers::none());
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    redraw(cx);
+    wait_hover_delay(cx);
+    wait_hover_delay(cx);
+    let second_focused = crate::test_support::focused_id(cx).as_deref() == Some("second");
+    assert!(
+        second_focused,
+        "the premise: the click focused the second control"
+    );
+    assert_eq!(tooltip(cx), None, "a click shows no focus help");
+}
+
+/// Why this matters: help a keyboard user called up must go with the focus that called it, as in the old app, and
+/// once put away with Escape it must not keep coming back while the user stays on the control.
+///
+/// Specification: with focus help showing, Tab on to the next control shows that control's help at once (the grace a
+/// hide leaves); Tab on to a stop without help takes it down; Shift+Tab back shows the help again; Escape puts it away,
+/// and it stays away through further frames and delays while focus rests there; Shift+Tab to another control brings
+/// that control's help back.
+#[gpui::test]
+fn focus_help_goes_with_focus_and_escape_keeps_it_down_until_focus_moves(cx: &mut TestAppContext) {
+    let plain = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let cx = open(cx, focus_scene(plain));
+    key(cx, "tab");
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx), Some("First help".into()), "the premise");
+    key(cx, "tab");
+    assert_eq!(
+        tooltip(cx),
+        Some("Second help".into()),
+        "the next control's, at once"
+    );
+    key(cx, "tab");
+    assert_eq!(tooltip(cx), None, "focus left for a stop without help");
+    key(cx, "shift-tab");
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Second help".into()),
+        "back on the control"
+    );
+
+    key(cx, "escape");
+    wait_hover_delay(cx);
+    redraw(cx);
+    assert_eq!(tooltip(cx), None, "Escape keeps it down while focus rests");
+    key(cx, "shift-tab");
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("First help".into()),
+        "focus moving on brings help back"
+    );
+}
+
+/// Why this matters: the pointer and keyboard focus can each call for help at once, and two tooltips would cover each
+/// other; the old app kept one, the latest call's, and kept focus-called help when the pointer merely left.
+///
+/// Specification: with the pointer's help showing for the second control, Tab onto the first shows the first's help in
+/// its place; the pointer resting on the first and then leaving it for empty space keeps that help (focus owns it);
+/// the pointer coming onto the second control shows the second's instead. One tooltip shows throughout.
+#[gpui::test]
+fn pointer_and_focus_help_share_one_tooltip_and_the_latest_call_wins(cx: &mut TestAppContext) {
+    let plain = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let cx = open(cx, focus_scene(plain));
+    let second = center(cx, "second");
+    cx.simulate_mouse_move(second, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Second help".into()),
+        "the premise: pointer help"
+    );
+    key(cx, "tab");
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("First help".into()),
+        "focus help took its place"
+    );
+    let first = center(cx, "first");
+    cx.simulate_mouse_move(first, None, Modifiers::none());
+    wait_hover_delay(cx);
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    redraw(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("First help".into()),
+        "the pointer leaving the focused control keeps its help"
+    );
+    let second = center(cx, "second");
+    cx.simulate_mouse_move(second, None, Modifiers::none());
+    redraw(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Second help".into()),
+        "the pointer's call is the latest"
+    );
+}
+
+/// Why this matters: a button can be disabled under the user's focus by its own action (Send while sending, Clear
+/// while clearing), and focus then moves on without any key; help it called up must not stay behind, owned by focus
+/// nothing holds any more; and focus coming back to it once it is enabled must count as a landing, which it would not
+/// if the layer manager still took the button for the control last holding focus.
+///
+/// Specification: with a button's focus help showing, the button becoming disabled sends focus to the stop beside it,
+/// the window's home, which has no help, and the help goes; then, with no key pressed since the Tab, the button
+/// enabled again and given focus from code in the same update (as an owner hands focus back to the control it
+/// re-enables) shows its help after the delay.
+#[gpui::test]
+fn focus_help_goes_when_its_control_is_disabled_under_focus(cx: &mut TestAppContext) {
+    let (plain, disabled) = (
+        cx.update(|cx| cx.focus_handle().tab_stop(true)),
+        Rc::new(Cell::new(false)),
+    );
+    let first_focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (off, home, owned) = (disabled.clone(), plain.clone(), first_focus.clone());
+    let cx = open(cx, move |_, _| {
+        let stop = crate::focus::track(
+            div().id("plain").size(px(20.)),
+            &plain,
+            crate::focus::OnPress::Control,
+        );
+        let first = Button::new(
+            "first",
+            "First",
+            HoverHelp::tooltip("First help"),
+            Role::Button,
+        )
+        .focus(&owned);
+        div()
+            .flex()
+            .child(first.disabled(off.get()))
+            .child(stop)
+            .into_any_element()
+    });
+    key(cx, "tab");
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx), Some("First help".into()), "the premise");
+    // Home, so that focus lost by the disabled button recovers there rather than to nothing.
+    cx.update(|window, cx| crate::focus::set_home(Some(&home), window, cx));
+    disabled.set(true);
+    redraw(cx);
+    redraw(cx);
+    assert_eq!(
+        crate::test_support::focused_id(cx).as_deref(),
+        Some("plain"),
+        "the premise: focus moved to the stop without help"
+    );
+    assert_eq!(tooltip(cx), None, "the help went with the focus");
+
+    cx.update(|window, cx| {
+        disabled.set(false);
+        let mark = crate::focus::Mark::take(cx);
+        crate::focus::focus_control(&first_focus, &mark, window, cx);
+    });
+    redraw(cx);
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("First help".into()),
+        "focus back on the enabled button lands"
     );
 }

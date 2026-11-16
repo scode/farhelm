@@ -1629,6 +1629,7 @@ impl Launcher {
             &SharedString::from("launcher-summary-target"),
             &HoverHelp::sentence(target.sentence("launcher-summary-target-help")),
             false,
+            None,
             window,
             cx,
         );

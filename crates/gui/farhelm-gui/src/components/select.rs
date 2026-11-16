@@ -400,7 +400,15 @@ impl RenderOnce for Select {
                     .rounded(metrics::RADIUS_SM + px(3.)),
             );
         }
-        let control = super::with_hover_help(control, &self.id, &self.help, true, window, cx);
+        let control = super::with_hover_help(
+            control,
+            &self.id,
+            &self.help,
+            true,
+            Some(&focus),
+            window,
+            cx,
+        );
         // The anchor's tracker sits on a borderless wrapper rather than on the control: an absolute child is placed
         // inside its parent's border, so on the control it would measure a box one pixel in on every side, and the
         // list would be two pixels narrower than the control and one pixel to the right.

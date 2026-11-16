@@ -105,12 +105,13 @@ use crate::host_text::{HostSentence, Line};
 use crate::layers::{self, BesideCues, BesideTarget, Help, Hint, TooltipOwner};
 use crate::theme;
 
-/// What a control says when the user hovers it or asks assistive technology about it.
+/// What a control says when the user hovers it, moves keyboard focus onto it, or asks assistive technology about it.
 ///
-/// Every control has one: the layer manager shows it as a tooltip on hover, and it doubles as the control's accessible
-/// description. SPEC_impl.md lets a control that already shows its explanation beside itself (a menu item with a
-/// description line) count that text as its hover help instead. That form is not built: [`MenuItem`], the first control
-/// to draw such a description, takes a tooltip as well and makes its description line its accessible description.
+/// Every control has one: the layer manager shows it as a tooltip on hover and on keyboard focus ([`with_hover_help`]),
+/// and it doubles as the control's accessible description. SPEC_impl.md lets a control that already shows its
+/// explanation beside itself (a menu item with a description line) count that text as its hover help instead. That
+/// form is not built: [`MenuItem`], the first control to draw such a description, takes a tooltip as well and makes its
+/// description line its accessible description.
 ///
 /// Help is the app's own wording ([`HoverHelp::tooltip`]), a sentence that names host values beside it
 /// ([`HoverHelp::sentence`]), or several such sentences as paragraphs ([`HoverHelp::paragraphs`], for help such as the
@@ -268,11 +269,27 @@ impl HoverHelp {
 /// Help placed beside the sidebar ([`HoverHelp::beside`]) is placed against the control's own bounds, so for it this
 /// also adds a zero-cost child that records them in every frame ([`BesideTarget::track`]); that is why the element must
 /// take children. Help at the pointer adds nothing.
+///
+/// `focus` is the handle of the control's own keyboard stop, or `None` for a control that never holds focus. Its help
+/// also shows when the keyboard puts focus there ([`layers::focus_drawn`], which says how that and the pointer share
+/// the tooltip), as the old app showed every focus-visible control's help, placed against the control from the bounds
+/// the focus coordinator records for the stop. Every caller says which, so a focusable control cannot leave its
+/// keyboard users without its help by omission. A control that is disabled passes its handle all the same: the layer
+/// manager's record of the control last seen holding focus is cleared only by that control drawn without it, so a
+/// control disabled under focus and given `None` would stay recorded, and focus handed back to it from code in the
+/// update that enables it again would not be seen landing. (A Tab back cannot meet this: Tab reaches the control only
+/// after a frame has drawn it enabled and unfocused, which clears the record.) Focus inside the control on another stop of its own does
+/// not count: only `focus` itself.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one control's help wiring, each part given once; a struct would only repeat them"
+)]
 pub(crate) fn with_hover_help<E: StatefulInteractiveElement + ParentElement>(
     element: E,
     id: &SharedString,
     help: &HoverHelp,
     describe: bool,
+    focus: Option<&FocusHandle>,
     window: &mut Window,
     cx: &mut App,
 ) -> E {
@@ -288,17 +305,17 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement + ParentElement>(
     };
     let (element, help) = match help.beside {
         Some(cues) => {
-            let target = BesideTarget::for_control(
-                ElementId::Name(format!("{id}-tooltip-target").into()),
-                window,
-                cx,
-            );
+            let key = ElementId::Name(format!("{id}-tooltip-target").into());
+            let target = BesideTarget::for_control(key, window, cx);
             let hint = Hint::beside(help.help.clone(), cues, &target);
             (element.child(target.track()), hint)
         }
         None => (element, Hint::from(help.help.clone())),
     };
     layers::help_drawn(&owner, &help, window, cx);
+    if let Some(focus) = focus {
+        layers::focus_drawn(&owner, &help, focus, window, cx);
+    }
     let moved = owner.clone();
     element
         .on_hover(move |hovered, window, cx| {
@@ -564,7 +581,8 @@ pub(crate) fn scroll_stop(
 /// reach, for a region that both scrolls and is a place where focus rests. The session pane's unavailable card is one:
 /// it holds nothing focusable and its remedy can run past a short pane, so it needs the scroll keys, and it is home
 /// while it shows, so the pane must be able to make it home before its first frame (focus reaches it on that frame),
-/// which a handle kept in the stop's element state cannot do ([`focus_stop`] says why). Everything else takes
+/// which a handle kept in the stop's element state cannot do ([`focus_stop`] says why). The scroll box is the other: it
+/// hands the same handle to its hover help, which shows on keyboard focus of it. Everything else takes
 /// [`scroll_stop`], whose handle is its own.
 #[allow(
     clippy::too_many_arguments,

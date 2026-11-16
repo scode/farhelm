@@ -310,7 +310,8 @@ impl RenderOnce for CopyField {
                         })
                     }),
             );
-        let field = super::with_hover_help(field, &self.id, &self.help, true, window, cx);
+        let field =
+            super::with_hover_help(field, &self.id, &self.help, true, Some(&focus), window, cx);
         let field = focus::track(field, &focus, focus::OnPress::Control);
         super::activate_on_click(
             super::activate_on_enter_or_space(field, Some(handler.clone())),

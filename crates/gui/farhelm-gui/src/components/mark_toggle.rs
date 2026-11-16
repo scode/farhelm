@@ -103,7 +103,7 @@ impl RenderOnce for MarkToggle {
             // come after its own mouse-down listeners, and the bubble phase runs them in reverse), so it still fires.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .children(self.mark);
-        let toggle = super::with_hover_help(toggle, &self.id, &self.help, true, window, cx);
+        let toggle = super::with_hover_help(toggle, &self.id, &self.help, true, None, window, cx);
         super::activate_on_click(toggle, self.on_click)
     }
 }

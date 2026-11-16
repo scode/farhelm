@@ -821,7 +821,7 @@ impl PlanBody {
                 .text_size(px(SMALL_TEXT))
                 .font_family(assets::TERMINAL_FONT)
                 .child(host_text::element(short).min_w_0());
-            with_hover_help(chip, &id, &help, false, window, cx).into_any_element()
+            with_hover_help(chip, &id, &help, false, None, window, cx).into_any_element()
         });
         let detail = div()
             .flex_1()

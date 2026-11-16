@@ -17,6 +17,12 @@
 //! opening puts the tooltip away without that grace, as in the old app. After a press made without moving, the help
 //! stays down while the pointer rests on that control, since nothing changes whose help the pointer calls for.
 //!
+//! Keyboard focus calls for help too, on every control that can hold it, as the old app showed every focus-visible
+//! control's help: focus the keyboard moves onto a control shows its help after the same delay, and focus leaving
+//! takes it down ([`focus_drawn`] has how the pointer and focus share the one tooltip). Help shown by focus is placed
+//! against the control by the old ordinary rule, centered above it or else below ([`super::beside`]), or beside the
+//! sidebar for help that asks for it, since the pointer may be anywhere.
+//!
 //! NOTE: Known deviations from the old app's `tooltip.js`, which kept a dismissed control's help down until the pointer
 //! left it: after Escape, the next pointer move brings the help back after the delay; a key other than Escape takes
 //! help down (GPUI ends every hover on a key press, and `tooltip.js` had no key handler but Escape's); after a press, a
@@ -26,15 +32,25 @@
 //! marks and back shows the row's help again. Still to come here: anchoring ordinary help to its control, above it as
 //! the old app placed it. Until then ordinary help sits below and right of where the pointer was, and a pointer moving
 //! inside a control does not restart the wait. Help that asks to sit beside the sidebar (a session row's, the host
-//! progress card) is already placed against its control, with the old notch and ring ([`super::beside`]).
+//! progress card) is already placed against its control, with the old notch and ring ([`super::beside`]), and so is
+//! help keyboard focus owns.
+//!
+//! NOTE: Two more deviations, in help shown on keyboard focus. The old app landed focus quietly in a few host flows,
+//! keeping the ring but showing no help (`focusWithoutTooltip`, from `modal_dialog.rs`'s quiet `FocusTarget`): the
+//! host add dialog's provisioning confirm and Cancel, the remembered first focus of host settings and of the uninstall
+//! confirmation, and the attention row's handoff to a host row's menu. Here every keyboard landing shows help; a quiet
+//! landing can come with those flows' port. And pointer help stays up when the window loses focus, where the old app
+//! hid every tooltip on the window's `blur`; help keyboard focus owns goes then, since GPUI reports focus leaving an
+//! inactive window's controls, but it does not come back when the window regains focus, where the old browser fired
+//! `focusin` again.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    AnyView, App, Bounds, ElementId, Entity, EntityId, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Point, SharedString, Styled, Subscription, WeakEntity, Window, div,
-    point, px,
+    AnyView, App, Bounds, ElementId, Entity, EntityId, FocusHandle, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, Point, SharedString, Styled, Subscription, WeakEntity,
+    Window, div, point, px,
 };
 
 use super::{LayerStack, menu_shadow, stack};
@@ -376,7 +392,8 @@ pub struct ShownTooltip {
     /// names a host value the sentence's accessible text, each host value escaped ([`Help::accessible_text`]). The
     /// card never draws it; it draws `help`.
     pub text: SharedString,
-    /// Where the pointer was when the hover began, in window coordinates.
+    /// Where the pointer was when the tooltip was asked for, in window coordinates. Help keyboard focus owns is placed
+    /// against its control instead and does not use it.
     pub at: Point<Pixels>,
     /// The help the card draws. Host values reach a tooltip only as host sentences (a [`Line::Sentence`], or the
     /// paragraphs of [`Help::Paragraphs`]), whose host parts are drawn by host text's own element, escaped and each in
@@ -572,6 +589,8 @@ fn settle_hover(window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
+    let news = stack.update(cx, |stack, _| stack.focus_news.take());
+    settle_focus(&stack, news, window, cx);
     let change = stack.update(cx, |stack, _| {
         let moved = stack.round.take().unwrap_or_default();
         stack
@@ -588,22 +607,142 @@ fn settle_hover(window: &mut Window, cx: &mut App) {
             .hovered
             .first()
             .and_then(|hovered| Some((hovered.owner.upgrade()?, hovered.help.clone())));
-        Some((previous, next))
+        // The pointer coming onto the control whose help shows already (by focus) changes nothing, and the pointer
+        // leaving keeps help that keyboard focus owns, as the old app's focus-owned hover stayed.
+        match &next {
+            Some((owner, _)) if stack.current_owner() == Some(owner.entity_id()) => None,
+            None if stack.by_focus.is_some() => None,
+            _ => Some((previous, next)),
+        }
     });
     match change {
         None => {}
-        Some((_, Some((owner, help)))) => begin_tooltip(&owner, help, window, cx),
+        Some((_, Some((owner, help)))) => begin_tooltip(&owner, help, None, window, cx),
         Some((previous, None)) => end_tooltip(&stack, previous, cx),
     }
 }
 
+/// Act on keyboard focus news from [`focus_drawn`]: show the help of the control focus landed on, as the pointer
+/// would, replacing any other, or, when that control's help shows already, make it focus-owned.
+fn settle_focus(
+    stack: &Entity<LayerStack>,
+    news: Option<FocusNews>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(FocusNews { owner, help, focus }) = news else {
+        return;
+    };
+    let Some(owner) = owner.upgrade() else {
+        return;
+    };
+    let by_focus = ByFocus::watching(&owner, focus, window, cx);
+    if stack.read(cx).current_owner() == Some(owner.entity_id()) {
+        stack.update(cx, |stack, _| stack.by_focus = Some(by_focus));
+    } else {
+        begin_tooltip(&owner, help, Some(by_focus), window, cx);
+    }
+}
+
+/// Keyboard focus landing on the control `owner`, whose help is `help` and whose focus stop is `focus`, as
+/// [`focus_drawn`] saw it, for [`settle_focus`].
+pub(super) struct FocusNews {
+    owner: WeakEntity<TooltipOwner>,
+    help: Hint,
+    focus: FocusHandle,
+}
+
+/// Keyboard focus owning the tooltip shown or waiting: the control's focus stop, against which the help is placed
+/// ([`super::overlay`]), and the watch that takes the help down once focus leaves that stop, whatever the reason (a
+/// key, a click, the control disabled or gone, the window losing focus) and whatever order the frame draws
+/// controls in. Dropping it ends the watch.
+pub(super) struct ByFocus {
+    pub(super) focus: FocusHandle,
+    _left: Subscription,
+}
+
+impl ByFocus {
+    /// Own the tooltip of `owner` by its focus stop `focus`.
+    fn watching(
+        owner: &Entity<TooltipOwner>,
+        focus: FocusHandle,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> ByFocus {
+        let owner = owner.entity_id();
+        let left = window.on_focus_out(&focus, cx, move |_, window, cx| {
+            if let Some(stack) = stack(window, cx) {
+                end_tooltip(&stack, Some(owner), cx);
+            }
+        });
+        ByFocus { focus, _left: left }
+    }
+}
+
+/// The control `owner`, whose help is `help` and whose focus stop is `focus`, was drawn: the focus half of the
+/// tooltip rule, which [`crate::components::with_hover_help`] wires on every control that can hold focus. Focus
+/// landing on that stop while the user's last input was the keyboard (the old `:focus-visible`, as the focus ring has
+/// it) shows its help as the pointer resting on it would: after [`HOVER_DELAY`], or at once in the warm grace, placed
+/// against the control by the old ordinary rule (centered above it, else below: [`super::beside`]). A click does not,
+/// and nor does a later key press on a control a click focused: only the landing counts, as the old app scheduled
+/// help on `focusin` alone. Focus leaving the stop takes it down ([`ByFocus`]).
+///
+/// Pointer and focus help share the one tooltip, and the latest wins: focus landing on a control replaces the
+/// pointer's help; the pointer coming onto another control replaces focus help; the pointer leaving leaves focus
+/// help up; and focus landing on the control whose help the pointer shows makes that help focus-owned, so it stays
+/// when the pointer goes, as in the old `tooltip.js`. Escape with no layer open, or a press, puts it away until focus
+/// next lands on a control, the same one included; with a layer open, Escape closes that layer instead.
+///
+/// It reads focus as each frame renders the control, which a focus move always causes (it refreshes the window), and
+/// only to notice a landing: [`LayerStack::focused`] is the control last seen holding focus, so the next render of it
+/// holding focus is not news.
+pub fn focus_drawn(
+    owner: &Entity<TooltipOwner>,
+    help: &Hint,
+    focus: &FocusHandle,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let id = owner.entity_id();
+    let focused = focus.is_focused(window);
+    let keyboard = window.last_input_was_keyboard();
+    stack.update(cx, |stack, cx| {
+        if focused == (stack.focused == Some(id)) {
+            return;
+        }
+        if !focused {
+            stack.focused = None;
+            return;
+        }
+        stack.focused = Some(id);
+        if keyboard {
+            stack.focus_news = Some(FocusNews {
+                owner: owner.downgrade(),
+                help: help.clone(),
+                focus: focus.clone(),
+            });
+            stack.settle_after_this_event(cx);
+        }
+    });
+}
+
 /// Start `owner`'s tooltip, now that its help is the one the pointer calls for: after [`HOVER_DELAY`], or at once
 /// while another tooltip is showing or has only just gone. Either way it replaces any other tooltip, shown or waiting.
-fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Hint, window: &mut Window, cx: &mut App) {
+fn begin_tooltip(
+    owner: &Entity<TooltipOwner>,
+    help: Hint,
+    by_focus: Option<ByFocus>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let at = window.mouse_position();
     let Some(stack) = stack(window, cx) else {
         return;
     };
+    stack.update(cx, |stack, _| stack.by_focus = by_focus);
     let at_once = {
         let stack = stack.read(cx);
         stack.tooltip.is_some() || stack.warm
@@ -642,6 +781,7 @@ fn end_tooltip(stack: &Entity<LayerStack>, previous: Option<EntityId>, cx: &mut 
             .is_some_and(|(pending, _)| *pending == previous)
         {
             stack.pending_tooltip = None;
+            stack.by_focus = None;
         }
         if !stack
             .tooltip
@@ -650,6 +790,7 @@ fn end_tooltip(stack: &Entity<LayerStack>, previous: Option<EntityId>, cx: &mut 
         {
             return false;
         }
+        stack.by_focus = None;
         stack.tooltip = None;
         stack.tooltip_release = None;
         cx.notify();
@@ -716,6 +857,7 @@ fn show_tooltip_from(
                 .is_some_and(|shown| shown.owner == owner_id)
             {
                 stack.tooltip = None;
+                stack.by_focus = None;
                 cx.notify();
             }
         }));
@@ -724,6 +866,12 @@ fn show_tooltip_from(
 }
 
 impl LayerStack {
+    /// The control whose tooltip shows or waits, if any.
+    fn current_owner(&self) -> Option<EntityId> {
+        let shown = self.tooltip.as_ref().map(|shown| shown.owner);
+        shown.or(self.pending_tooltip.as_ref().map(|(owner, _)| *owner))
+    }
+
     /// Run [`settle_hover`] once, after the event being handled: GPUI tells each hovered control's listeners about one
     /// pointer move (or one frame's hover changes) in turn, and the help to show depends on all of them. A settle runs
     /// as a deferred effect, which GPUI runs only once the event's listeners have all returned, and the first piece of
@@ -744,6 +892,7 @@ impl LayerStack {
     /// Take the tooltip down, and any waiting one, without the grace that lets the next one skip the delay: after
     /// Escape or a layer opening, the user has just put one away.
     pub(super) fn put_tooltip_away(&mut self) {
+        self.by_focus = None;
         self.tooltip = None;
         self.tooltip_release = None;
         self.pending_tooltip = None;
