@@ -101,8 +101,9 @@ impl Launcher {
     /// What the folder check is about now: the chosen host on its current connection and the folder as it stands, or
     /// `None` when there is nothing to check (no host, a host that is not connected, an empty folder).
     fn check_key(&self, cx: &gpui::App) -> Option<CheckKey> {
-        // A managed checkout's folder does not exist yet, and the helm previews it instead (`checkout`).
-        if self.draft.checkout.is_some() {
+        // A managed checkout's folder does not exist yet, and the helm previews it instead (`checkout`); nor does a new
+        // environment's home, which is fixed.
+        if self.draft.checkout.is_some() || self.draft.target.is_some() {
             return None;
         }
         // The folder exactly as the launch would send it, so the check and the launch ask about the same path.

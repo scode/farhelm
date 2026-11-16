@@ -920,8 +920,9 @@ fn a_shortcut_refusal_shows_over_a_press_reason(cx: &mut TestAppContext) {
 fn a_sequence_in_the_launcher_applies_or_refuses_there(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, None);
     open_new(&mut helm, cx);
-    // Focus starts in the search box; Tab walks on to the host button, after any destination choice drawn before it.
-    for _ in 0..4 {
+    // Focus starts in the search box; Tab walks on to the host button, after any destination choice drawn before it
+    // (the Where row's and the Runs on switch's segments).
+    for _ in 0..8 {
         if focused_id(cx).as_deref() == Some("launcher-host") {
             break;
         }

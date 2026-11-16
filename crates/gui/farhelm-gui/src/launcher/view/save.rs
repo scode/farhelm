@@ -157,7 +157,8 @@ impl Launcher {
     /// first in the action row, then Reset choices where offered, Save as template where offered, and the main action
     /// last"). Replace with does not offer it, and neither does a launch on a host a disposable environment owns, as the
     /// old footer left it out there: that host's identity names the environment, not a place a template can send a later
-    /// launch. Busy while its panel is open, as the old button was disabled then, and while the YOLO question's host
+    /// launch. Nor does a new environment: Save as template from an environment launch is deferred (SPEC.md, "Sandbox
+    /// sessions"). Busy while its panel is open, as the old button was disabled then, and while the YOLO question's host
     /// write is out (`holding`).
     pub(super) fn save_template_button(
         &self,
@@ -167,7 +168,10 @@ impl Launcher {
         let environment_host = self
             .chosen_host(cx)
             .is_some_and(|host| host.is_session_owned);
-        if matches!(self.draft.mode, Mode::ReplaceWith { .. }) || environment_host {
+        if matches!(self.draft.mode, Mode::ReplaceWith { .. })
+            || environment_host
+            || self.draft.target.is_some()
+        {
             return None;
         }
         Some(
