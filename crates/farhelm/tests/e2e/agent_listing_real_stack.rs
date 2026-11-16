@@ -1,6 +1,8 @@
 //! The shipped `farhelm agent` commands, answered by a real helm through
-//! the real assembly — separate processes, a real socket, and no terminal
-//! open on the asking session.
+//! the real assembly — a supervisor process, the helm run through the helm
+//! library's embedded entry, the one the desktop app starts its helm with
+//! (in the test process, without the app's link opener, Downloads or payload
+//! directory), a real socket, and no terminal open on the asking session.
 //!
 //! # What this covers that nothing else can
 //!
@@ -21,7 +23,9 @@
 //! while every shipped `farhelm agent` command fails or marks the wrong
 //! row as the asker's own.
 //!
-//! This module therefore injects NOTHING: it starts the products, creates
+//! This module therefore injects NOTHING: it starts the products (the
+//! helm through `run_embedded`, whose startup sequence is the one the
+//! desktop app's helm runs), creates
 //! a session (or two) through the helm's own API, and runs the built
 //! `farhelm agent` commands as child processes carrying only the credentials a real session's agent is
 //! given — both the two read-only listings (`hosts`/`sessions`) and, in
@@ -75,7 +79,7 @@ pub(crate) fn bare_session_id(reference: &str) -> String {
 /// the guard's task sends a heartbeat every few seconds and reads and discards
 /// everything the helm sends (snapshots, changes, pongs), so that the helm's
 /// writes never stall on a full socket.
-async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> GuiSocket {
+async fn hold_gui_socket(helm: &EmbeddedHelm, secret: &str, path: &str) -> GuiSocket {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let addr = helm.addr();
@@ -296,8 +300,8 @@ async fn await_cli_approval(
 async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -395,8 +399,8 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
 async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     let work = farhelm_teststate::tempdir().expect("link requester workdir");
@@ -671,8 +675,8 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -817,8 +821,8 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -992,8 +996,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -1271,8 +1275,8 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         ("SHELL", fixture.bash_shell()),
     ])
     .await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -1417,8 +1421,8 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
 async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
-    let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path()).await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let secret = helm.secret.clone();
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;

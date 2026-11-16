@@ -4,8 +4,10 @@
 //! device credential. The helm mints those credentials in memory for one
 //! process lifetime and hands them only to callers inside that process: the
 //! desktop app that embeds the helm (one per launch, see
-//! [`crate::EmbeddedReady`]) and, for tests, a standalone helm started with
-//! the hidden `--test-credential-file` flag. Only each secret's SHA-256 digest
+//! [`crate::EmbeddedReady`]) and a standalone helm started with the hidden
+//! `--test-credential-file` flag, which no test uses any more (the
+//! end-to-end tests run the helm in process through `run_embedded`). Only
+//! each secret's SHA-256 digest
 //! is kept, and nothing is written to `helm.db`, so a credential dies with the
 //! process and no HTTP request can obtain one.
 //!

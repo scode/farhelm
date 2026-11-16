@@ -436,8 +436,7 @@ pub(crate) fn farhelm_bin() -> &'static str {
 }
 
 /// The `farhelm-fixtures` binary: the fake agent, the state sweep and the
-/// standalone helm [`helm_process`] starts, which are not part of the
-/// shipped product.
+/// other stand-in programs, which are not part of the shipped product.
 ///
 /// Another package's binary, so Cargo gives integration tests no path to
 /// it. It is found beside [`farhelm_bin`] instead, in the same target
@@ -570,18 +569,21 @@ pub(crate) fn fixture_cmd(args: &str) -> String {
 pub(crate) static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 // ---------------------------------------------------------------
-// The REAL-STACK fixtures: separate `farhelm` processes, a loopback
-// port, and HTTP.
+// The REAL-STACK fixtures: separate `farhelm` supervisor processes, a
+// helm on a loopback port, and HTTP.
 //
 // Everything above this banner drives an in-process `Supervisor` over a
 // duplex pipe, which is the right shape for almost everything: it is fast,
 // it is deterministic, and it still runs real terminals. What it
-// cannot show is that the SHIPPED binary assembles itself correctly —
-// which flags it parses, what it prints, which pieces its startup wires
-// together. The helpers below stand up the product's own processes for the
-// handful of tests whose subject is exactly that, and they live here
-// rather than in one of those modules because more than one now needs
-// them.
+// cannot show is that the SHIPPED pieces assemble themselves correctly —
+// which flags the binary parses, which pieces each startup wires together.
+// The helpers below stand up the product's own supervisor processes, and a
+// helm through the helm library's embedded entry, the one the desktop app
+// starts its helm with (inside this test process, as the app runs it
+// inside its own), but without the app's link opener, Downloads or payload
+// directory. They serve the handful of tests whose subject is exactly
+// that, and live here rather than in one of those modules because more
+// than one needs them.
 // ---------------------------------------------------------------
 
 /// How long a real-stack test waits for a multi-process stack to reach a
@@ -606,8 +608,8 @@ pub(crate) const REAL_STACK_SETTLE: Duration = Duration::from_secs(90);
 /// `kill_on_drop(true)`, so dropping the `Child` is what kills it, and a
 /// wrapper would only restate that. Which matters for the same reason the
 /// order does: a test that fails an assertion never reaches an explicit
-/// teardown, and a leaked helm holding a loopback port is exactly the
-/// debris that makes the NEXT run fail for an unrelated reason.
+/// teardown, and a leaked process holding a socket or a terminal host is
+/// exactly the debris that makes the NEXT run fail for an unrelated reason.
 pub(crate) struct SupervisorProcess {
     _child: tokio::process::Child,
     pub(crate) state: farhelm_teststate::TestDir,
@@ -707,154 +709,279 @@ async fn spawn_supervisor_process(
     }
 }
 
-/// A running helm process and the loopback base URL it printed.
-pub(crate) struct HelmProcess {
-    child: Option<tokio::process::Child>,
+/// A helm running inside this test process through the helm library's
+/// embedded entry (`farhelm_helm::run_embedded`), the one the desktop app
+/// starts its helm with, and the credential it handed back at readiness.
+///
+/// It is not the desktop app's helm in full: it gets no link opener, no
+/// Downloads and no payload directory unless a test sets one (a real opener
+/// would launch a browser), and none of the app's own startup around the
+/// helm (its app lock, its supervisor start, its helm monitor).
+///
+/// The helm owns its runtime on a named thread of its own, as in the desktop
+/// app, so it never depends on the test's runtime being polled. Stopping it
+/// is the orderly stop the desktop performs (the shutdown signal, then the
+/// thread's return), which also releases the helm's claim on the state
+/// directory. Nothing here can kill it abruptly the way the separate helm
+/// process these tests ran before could be killed.
+///
+/// Dropping it stops it the same way and waits for that, bounded by
+/// [`REAL_STACK_SETTLE`], so a test that never calls [`Self::stop`] still
+/// has no helm talking to its supervisors while their fixtures drop. During
+/// a panic the wait still happens but its outcome is not asserted, since a
+/// second panic would abort the test process and lose the first.
+///
+/// NOTE: the helm takes its own executable as the local `farhelm` for a
+/// probe of the local host (`std::env::current_exe()`), and here that is
+/// this e2e test binary, which refuses `internal stdio`. Nothing in the
+/// suite probes the local row; a test that needs that probe cannot use this
+/// helm as it is.
+pub(crate) struct EmbeddedHelm {
+    /// `http://<addr>`, derived from [`Self::addr`] once at start, for
+    /// building request URLs.
     pub(crate) base: String,
+    /// The device credential the helm minted for its owner, the one the
+    /// desktop's GUI presents. Also needed raw (not only as a configured
+    /// [`reqwest::Client`]) because the WebSocket routes carry it in
+    /// `Sec-WebSocket-Protocol`, which no client default header can supply.
+    pub(crate) secret: String,
+    addr: std::net::SocketAddr,
+    running: Option<RunningHelm>,
 }
 
-impl HelmProcess {
-    /// The loopback address behind [`Self::base`], for the one client that
-    /// cannot use an HTTP library: the WebSocket upgrade.
+/// The parts of an [`EmbeddedHelm`] that stop it: the shutdown signal, a
+/// channel that closes once the helm's thread has returned, and the thread.
+///
+/// Signalling and waiting are separate steps so that an async caller can
+/// signal before its first await: a stop whose future is dropped part way
+/// has then still told the helm to stop, and leaves only the wait undone.
+///
+/// The `done` channel exists so the wait for the thread can be bounded: a
+/// `JoinHandle` has no timed join, and polling `is_finished` would need a
+/// sleep loop.
+struct RunningHelm {
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    done: std::sync::mpsc::Receiver<()>,
+    thread: std::thread::JoinHandle<anyhow::Result<()>>,
+}
+
+impl RunningHelm {
+    /// Tell the helm to stop. A send fails only when the helm already
+    /// returned by itself, and the wait reports what it returned.
+    fn signal(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+
+    /// Signal the helm (if not yet) and wait for its thread, at most
+    /// [`REAL_STACK_SETTLE`], returning what the helm returned. Blocking:
+    /// the thread returns only after the helm's runtime has drained and its
+    /// state-directory claim is released.
+    fn stop_blocking(mut self) -> anyhow::Result<()> {
+        self.signal();
+        match self.done.recv_timeout(REAL_STACK_SETTLE) {
+            // Nothing is ever sent on `done`: its sender dropping as the
+            // thread returns is the signal, which reads as a disconnect.
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                anyhow::bail!("the helm did not stop within {REAL_STACK_SETTLE:?}")
+            }
+        }
+        match self.thread.join() {
+            Ok(result) => result,
+            Err(payload) => {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|text| text.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "a non-text panic payload".to_string());
+                anyhow::bail!("the helm's thread panicked: {message}")
+            }
+        }
+    }
+}
+
+impl EmbeddedHelm {
+    /// The loopback address the helm bound, for the clients that cannot use
+    /// an HTTP library: the WebSocket upgrades.
     pub(crate) fn addr(&self) -> std::net::SocketAddr {
-        self.base
-            .trim_start_matches("http://")
-            .parse()
-            .unwrap_or_else(|e| {
-                panic!("the helm's base URL is not an address ({e}): {}", self.base)
-            })
+        self.addr
     }
 
-    /// Stop and reap this owned helm before another process opens the same state.
+    /// An HTTP client carrying this helm's credential on every request.
+    pub(crate) fn client(&self) -> reqwest::Client {
+        client_with_secret(&self.secret)
+    }
+
+    /// Stop this helm and wait until it is gone, failing the test if it does
+    /// not stop cleanly in time.
     ///
-    /// `kill_on_drop` protects panic paths, but a restart test needs a stronger
-    /// boundary: the old process must have exited before the replacement reads
-    /// its database and reconnects to the supervisor. Consuming `self` also
-    /// prevents callers from accidentally retaining a stale base URL.
-    pub(crate) async fn stop_and_reap(mut self) {
-        let mut child = self.child.take().expect("an owned helm child is present");
-        child.start_kill().expect("signal the owned helm");
-        tokio::time::timeout(REAL_STACK_SETTLE, child.wait())
+    /// A restart test needs this boundary: the old helm must have released
+    /// the state directory before the replacement claims it and opens its
+    /// database. Consuming `self` also keeps callers from holding on to a
+    /// stale address or credential.
+    ///
+    /// The shutdown signal goes out before the first await, so if this
+    /// future is dropped (a scenario timeout, say) the helm still stops; only
+    /// the wait for it is left undone.
+    pub(crate) async fn stop(mut self) {
+        let mut running = self.running.take().expect("the helm is running");
+        running.signal();
+        tokio::task::spawn_blocking(move || running.stop_blocking())
             .await
-            .expect("the owned helm exited within the settle budget")
-            .expect("reap the owned helm");
+            .expect("the helm's stop task did not panic")
+            .expect("the helm stopped cleanly");
     }
 }
 
-/// Start a real helm process on an ephemeral port, against a state
-/// directory somebody else owns, and read back the URL it prints.
+impl Drop for EmbeddedHelm {
+    fn drop(&mut self) {
+        if let Some(running) = self.running.take() {
+            let stopped = running.stop_blocking();
+            if !std::thread::panicking() {
+                stopped.expect("the helm stopped cleanly when its fixture dropped");
+            }
+        }
+    }
+}
+
+/// The arguments [`start_helm`] runs a helm with: port 0 (the kernel picks a
+/// free one, as it does for the desktop app), `state_dir`, and nothing else.
 ///
-/// The process is `farhelm-fixtures helm`, the helm library's standalone
-/// entry with its own argument struct: these tests want the serving code
-/// the desktop embeds in a process of its own.
-///
-/// NOTE: the helm code under test is whatever [`fixtures_bin`] was last
-/// built from. Nextest's setup script (`.config/nextest.toml`) and a plain
-/// `cargo build` rebuild it; Cargo does not rebuild another package's
-/// binary for an integration test. A run that skips both (`cargo test`,
-/// another profile or target directory, a hand-built archive) can test an
-/// older helm library than the source, and pass.
-///
-/// `--port 0` plus parsing stdout, rather than picking a port and hoping:
-/// this suite runs concurrently with itself and with whatever else is on
-/// the machine, and a hardcoded port is a flake waiting for a second
-/// worktree.
+/// A test that needs the payload directory or the backstop poll interval
+/// sets that field on the returned struct and calls [`start_helm_with`].
 ///
 /// The state directory is a LOCAL supervisor's, deliberately. The local
 /// row is reached through whatever listens in the helm's own state
 /// directory, so sharing one directory is not a shortcut — it is the
 /// production arrangement, the one where helm.db and `supervisor.sock` are
 /// siblings and the local host needs no registering at all.
-///
-/// `ensure_hosts` is optional because only the fleet tests need a registry
-/// seeded before serving begins; a single-host test passes `None` and gets
-/// the local row alone.
-pub(crate) async fn helm_process(
-    state_dir: &std::path::Path,
-    ensure_hosts: Option<&std::path::Path>,
-) -> HelmProcess {
-    helm_process_with_args(state_dir, ensure_hosts, &[]).await
+pub(crate) fn helm_args(state_dir: &std::path::Path) -> farhelm_helm::HelmArgs {
+    farhelm_helm::HelmArgs {
+        port: 0,
+        state_dir: Some(state_dir.to_path_buf()),
+        ensure_hosts: None,
+        payload_dir: None,
+        release_base_url: None,
+        backstop_refresh_secs: None,
+        test_credential_file: None,
+    }
 }
 
-/// [`helm_process`], with `extra` appended to the helm's own arguments: for
-/// the hidden test-only flags, such as `--backstop-refresh-secs`.
-pub(crate) async fn helm_process_with_args(
-    state_dir: &std::path::Path,
-    ensure_hosts: Option<&std::path::Path>,
-    extra: &[&str],
-) -> HelmProcess {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+/// Start a helm in this process on an ephemeral port, against a state
+/// directory somebody else owns. [`EmbeddedHelm`] says how it runs and
+/// stops.
+///
+/// Port 0 rather than picking a port and hoping: this suite runs
+/// concurrently with itself and with whatever else is on the machine, and a
+/// hardcoded port is a flake waiting for a second worktree.
+pub(crate) async fn start_helm(state_dir: &std::path::Path) -> EmbeddedHelm {
+    start_helm_with(helm_args(state_dir)).await
+}
 
-    // A helm restarted on the same state directory writes a fresh credential;
-    // the file from the previous process would make `create_new` refuse.
-    let credential = test_credential_path(state_dir);
-    match std::fs::remove_file(&credential) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => panic!("removing {}: {error}", credential.display()),
-    }
-    let mut command = tokio::process::Command::new(fixtures_bin());
-    command
-        .args(["helm", "--port", "0", "--state-dir"])
-        .arg(state_dir)
-        .arg("--test-credential-file")
-        .arg(&credential);
-    if let Some(ensure) = ensure_hosts {
-        command.arg("--ensure-hosts").arg(ensure);
-    }
-    command.args(extra);
-    let mut child = command
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .expect("spawn helm");
-    let stdout = child.stdout.take().expect("piped stdout");
-    let mut lines = BufReader::new(stdout).lines();
-    let line = tokio::time::timeout(REAL_STACK_SETTLE, lines.next_line())
+/// [`start_helm`] with the caller's own [`helm_args`], failing the test if
+/// the helm does not become ready within [`REAL_STACK_SETTLE`].
+pub(crate) async fn start_helm_with(args: farhelm_helm::HelmArgs) -> EmbeddedHelm {
+    try_start_helm(args, REAL_STACK_SETTLE)
         .await
-        .expect("the helm printed its URL within the settle budget")
-        .expect("reading the helm's stdout")
-        .expect("the helm printed a line before exiting");
-    let base = line
-        .split_once("http://")
-        .map(|(_, url)| format!("http://{}", url.trim_end_matches('/')))
-        .unwrap_or_else(|| panic!("the helm's first stdout line named no URL: {line:?}"));
-    HelmProcess {
-        child: Some(child),
-        base,
+        .unwrap_or_else(|error| panic!("the helm did not start: {error:#}"))
+}
+
+/// Start a helm with `args` and wait up to `ready_within` for its readiness,
+/// or return the error it returned before becoming ready. A helm still not
+/// ready by then fails the test.
+///
+/// The wait blocks a thread of the blocking pool, so `ready_within` is also
+/// how long a caller that drops this future (its own timeout, say) keeps the
+/// test runtime's shutdown waiting. The helm itself still stops in that
+/// case: its shutdown sender drops with the future.
+///
+/// Refuses `args` without a state directory: the helm would fall back to
+/// the user's real one, where a development build could open and migrate
+/// the live install's helm.db.
+pub(crate) async fn try_start_helm(
+    args: farhelm_helm::HelmArgs,
+    ready_within: Duration,
+) -> anyhow::Result<EmbeddedHelm> {
+    assert!(
+        args.state_dir.is_some(),
+        "a test helm needs its own state directory, never the user's default"
+    );
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+    let (done_tx, done) = std::sync::mpsc::channel::<()>();
+    let thread = std::thread::Builder::new()
+        .name("e2e-embedded-helm".into())
+        .spawn(move || {
+            let _done = done_tx;
+            farhelm_helm::run_embedded(args, None, None, ready_tx, shutdown_rx)
+        })
+        .expect("spawn the helm's thread");
+    let running = RunningHelm {
+        shutdown: Some(shutdown),
+        done,
+        thread,
+    };
+    // Blocking waits run off the test's runtime, which stays free to drive
+    // whatever else the test has in flight.
+    let ready = tokio::task::spawn_blocking(move || ready_rx.recv_timeout(ready_within))
+        .await
+        .expect("the readiness wait did not panic");
+    match ready {
+        Ok(ready) => Ok(EmbeddedHelm {
+            base: format!("http://{}", ready.addr),
+            secret: ready.native_device_secret,
+            addr: ready.addr,
+            running: Some(running),
+        }),
+        // The helm dropped its readiness sender without sending: it returned
+        // before becoming ready, and its thread holds the reason.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            let stopped = tokio::task::spawn_blocking(move || running.stop_blocking())
+                .await
+                .expect("the helm's stop task did not panic");
+            Err(stopped
+                .err()
+                .unwrap_or_else(|| anyhow::anyhow!("the helm returned Ok before becoming ready")))
+        }
+        // `running` drops with this panic, and its shutdown sender with it,
+        // which tells the helm to stop once it reaches serving.
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("the helm did not become ready within {ready_within:?}")
+        }
     }
 }
 
-/// Where [`helm_process`] asks the helm to write its test credential.
+/// Register this machine, reached over the user's own `ssh localhost`, as an
+/// ssh host of `helm`, with the supervisor whose state directory is
+/// `remote_state`, and return the new host's id.
 ///
-/// Inside the state directory, which is private to the test; one helm at a
-/// time owns that directory, so one file name is enough.
-fn test_credential_path(state_dir: &std::path::Path) -> std::path::PathBuf {
-    state_dir.join("test-device-credential")
-}
-
-/// The device secret every later request in a real-stack test carries: the
-/// credential the helm [`helm_process`] started minted for itself and wrote
-/// to its `--test-credential-file`, before printing the address that
-/// [`helm_process`] waits for.
+/// Through the helm's own `POST /api/hosts`, so the running helm writes the
+/// row and starts its connection actor at once. The host stays in helm.db,
+/// so a helm restarted on the same state directory keeps it without
+/// registering it again.
 ///
-/// Returned as the raw secret rather than only as a configured client
-/// because the WebSocket routes cannot use an HTTP client at all: they
-/// carry the credential in `Sec-WebSocket-Protocol` instead of a header a
-/// `reqwest::Client` default can supply.
-pub(crate) async fn device_secret(state_dir: &std::path::Path) -> String {
-    let path = test_credential_path(state_dir);
-    let secret = tokio::fs::read_to_string(&path)
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "reading the helm's test credential {}: {error}",
-                path.display()
-            )
-        });
-    assert!(!secret.is_empty(), "the helm wrote an empty credential");
-    secret
+/// The remote `farhelm` is the built one, and the isolated state directory
+/// keeps a test that says "remote" from ever touching the developer's real
+/// `~/.local/state/farhelm`.
+pub(crate) async fn register_self_ssh_host(
+    helm: &EmbeddedHelm,
+    remote_state: &std::path::Path,
+) -> i64 {
+    let (status, body) = post(
+        &helm.client(),
+        &format!("{}/api/hosts", helm.base),
+        serde_json::json!({
+            "ssh": "localhost",
+            "remote_farhelm": farhelm_bin(),
+            "remote_state_dir": remote_state.to_string_lossy(),
+        }),
+    )
+    .await;
+    assert!(status.is_success(), "registering ssh localhost: {body}");
+    let host: serde_json::Value = serde_json::from_str(&body).expect("the host view is JSON");
+    host["id"].as_i64().expect("the host view names its id")
 }
 
 /// An HTTP client carrying `secret` on every request.
@@ -869,12 +996,6 @@ pub(crate) fn client_with_secret(secret: &str) -> reqwest::Client {
         .default_headers(headers)
         .build()
         .expect("build authenticated client")
-}
-
-/// [`device_secret`] and [`client_with_secret`] together, for the callers
-/// that never need the secret itself.
-pub(crate) async fn authenticated_client(state_dir: &std::path::Path) -> reqwest::Client {
-    client_with_secret(&device_secret(state_dir).await)
 }
 
 /// GET a JSON body from the helm, failing the test on a non-2xx.
