@@ -143,11 +143,11 @@ pub(super) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
     let title = HostText::from_host(row.info.title.as_str());
     let mut question = Question::new(
         "Delete confirmation",
-        Answer {
-            label: "Confirm delete".into(),
-            help: HoverHelp::tooltip("Delete this session and its state now"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Confirm delete",
+            HoverHelp::tooltip("Delete this session and its state now"),
+            Tier::Danger,
+        ),
         Frozen {
             key: key.to_owned(),
             guard,

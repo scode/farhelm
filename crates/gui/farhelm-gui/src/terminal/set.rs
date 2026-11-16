@@ -174,22 +174,22 @@ fn ask_to_close(
     }
     let question = Question::new(
         format!("Close {label}?"),
-        Answer {
-            label: "Confirm close".into(),
-            help: HoverHelp::tooltip(format!(
+        Answer::new(
+            "Confirm close",
+            HoverHelp::tooltip(format!(
                 "Close {label}, ending its shell and everything it started"
             )),
-            tier: Tier::Danger,
-        },
+            Tier::Danger,
+        ),
         id.to_owned(),
     )
     .line(CLOSE_TAB_CONSEQUENCE)
     .line(label.to_owned())
-    .cancel_answer(Answer {
-        label: "Cancel".into(),
-        help: HoverHelp::tooltip("Cancel: keep the tab open"),
-        tier: Tier::Neutral,
-    });
+    .cancel_answer(Answer::new(
+        "Cancel",
+        HoverHelp::tooltip("Cancel: keep the tab open"),
+        Tier::Neutral,
+    ));
     let confirmed = set.downgrade();
     prompt::ask_anchored(
         question,

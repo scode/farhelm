@@ -223,11 +223,11 @@ fn a_question_starts_on_the_answer_the_rules_pick(cx: &mut TestAppContext) {
 
 /// An extra answer for the test questions: "Keep it", a neutral answer that runs its own action.
 fn keep_it_answer() -> Answer {
-    Answer {
-        label: "Keep it".into(),
-        help: HoverHelp::tooltip("Keep it, and stop asking"),
-        tier: Tier::Neutral,
-    }
+    Answer::new(
+        "Keep it",
+        HoverHelp::tooltip("Keep it, and stop asking"),
+        Tier::Neutral,
+    )
 }
 
 /// One extra-answers case: its name, how the question is adjusted, the keys pressed, and which answer ran.
@@ -316,11 +316,11 @@ fn a_question_can_word_its_own_cancel(cx: &mut TestAppContext) {
         let mark = Mark::take(cx);
         prompt::ask_for_test(
             Presentation::Centered,
-            question("alpha").cancel_answer(Answer {
-                label: "Cancel".into(),
-                help: HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
-                tier: Tier::Neutral,
-            }),
+            question("alpha").cancel_answer(Answer::new(
+                "Cancel",
+                HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
+                Tier::Neutral,
+            )),
             None,
             &mark,
             move |_, _, _| record.set(record.get() + 1),
@@ -682,11 +682,11 @@ fn a_summary_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestApp
 
 /// A question titled `title`, as the host setup confirmation is ("Set up host · <name>"), frozen at "alpha".
 fn titled(title: impl Into<Line>) -> Question<String> {
-    let set_up = Answer {
-        label: "Set up".into(),
-        help: HoverHelp::tooltip("Set this host up"),
-        tier: Tier::Primary,
-    };
+    let set_up = Answer::new(
+        "Set up",
+        HoverHelp::tooltip("Set this host up"),
+        Tier::Primary,
+    );
     Question::new(title, set_up, "alpha".to_string())
         .summary("Farhelm installs its supervisor there.")
 }
@@ -1292,38 +1292,38 @@ fn yolo(ran: &Ran, attempts: &Attempts) -> Question<String> {
     let (guarded, always, kept) = (ran.clone(), ran.clone(), attempts.clone());
     Question::new(
         "Confirm YOLO launch",
-        Answer {
-            label: "Start YOLO session anyway".into(),
-            help: HoverHelp::tooltip(
+        Answer::new(
+            "Start YOLO session anyway",
+            HoverHelp::tooltip(
                 "Start the session in YOLO mode, where the agent acts without asking",
             ),
-            tier: Tier::Danger,
-        },
+            Tier::Danger,
+        ),
         "codex on build-box".to_string(),
     )
     .summary("YOLO means the agent bypasses its safety checks.")
     .line("Nothing has been started.")
-    .cancel_answer(Answer {
-        label: "Cancel".into(),
-        help: HoverHelp::tooltip("Cancel: go back without starting anything"),
-        tier: Tier::Neutral,
-    })
+    .cancel_answer(Answer::new(
+        "Cancel",
+        HoverHelp::tooltip("Cancel: go back without starting anything"),
+        Tier::Neutral,
+    ))
     .alternative(
-        Answer {
-            label: "Start guarded session instead".into(),
-            help: HoverHelp::tooltip("Start this session in guarded mode instead"),
-            tier: Tier::Primary,
-        },
+        Answer::new(
+            "Start guarded session instead",
+            HoverHelp::tooltip("Start this session in guarded mode instead"),
+            Tier::Primary,
+        ),
         move |frozen, _, _| guarded.borrow_mut().push(format!("guarded {frozen}")),
     )
     .fallible_alternative(
-        Answer {
-            label: "Start, and don't ask again on this host".into(),
-            help: HoverHelp::tooltip(
+        Answer::new(
+            "Start, and don't ask again on this host",
+            HoverHelp::tooltip(
                 "Start it, and start YOLO sessions on this host without asking from now on",
             ),
-            tier: Tier::DangerOutline,
-        },
+            Tier::DangerOutline,
+        ),
         move |frozen, attempt, _, _| {
             always.borrow_mut().push(format!("always {frozen}"));
             kept.borrow_mut().push(attempt);

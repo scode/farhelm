@@ -97,11 +97,11 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: SessionStopRequest) -
     let title = HostText::from_host(row.info.title.as_str());
     Question::new(
         "Stop confirmation",
-        Answer {
-            label: "Confirm stop".into(),
-            help: HoverHelp::tooltip("Stop this session's agent and close its terminal tabs"),
-            tier: Tier::Danger,
-        },
+        Answer::new(
+            "Confirm stop",
+            HoverHelp::tooltip("Stop this session's agent and close its terminal tabs"),
+            Tier::Danger,
+        ),
         Frozen {
             key: key.to_owned(),
             guard,
@@ -114,11 +114,11 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: SessionStopRequest) -
             .host(&title)
             .text("\""),
     )
-    .cancel_answer(Answer {
-        label: "Cancel".into(),
-        help: HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
-        tier: Tier::Neutral,
-    })
+    .cancel_answer(Answer::new(
+        "Cancel",
+        HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
+        Tier::Neutral,
+    ))
     .keeps_focus_on_empty_click()
 }
 

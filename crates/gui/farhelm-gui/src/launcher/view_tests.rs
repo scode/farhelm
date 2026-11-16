@@ -2,27 +2,23 @@
 //! reaches the draft, the tabs, and what a press of the main action shows.
 //!
 //! The launcher is opened through [`super::view::open`] from inside the window, as an entry point will open it; the
-//! tests reach the open launcher through [`Opened`], which only test builds record. Every step ends in one of the
-//! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//! tests reach the open launcher through [`layers::last_opened`] (test builds only). Every step ends in one
+//! of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{Collection, CollectionState, HostView, KeyedEntry};
 use farhelm_proto::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionLaunch,
 };
-use gpui::{Global, TestAppContext, VisualTestContext, WeakEntity};
+use gpui::{TestAppContext, VisualTestContext};
 
 use super::draft::{LaunchDraft, Tab};
 use super::view::{Launcher, open};
 use crate::focus::Mark;
+use crate::layers;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences, session};
 use crate::test_support::{self, focused_id, keys, meta, settle, started};
-
-/// The launcher [`super::view::open`] opened last, recorded in test builds only.
-pub(super) struct Opened(pub(super) WeakEntity<Launcher>);
-
-impl Global for Opened {}
 
 /// The helm's pinned host-list fixture's first host (id 1, "host1", connected), as the hosts collection.
 fn hosts() -> CollectionState {
@@ -96,10 +92,7 @@ pub(crate) fn read<T>(
     read: impl FnOnce(&Launcher, &gpui::Window, &gpui::App) -> T,
 ) -> T {
     cx.update(|window, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher = layers::last_opened::<Launcher>(cx).expect("a launcher is open");
         read(launcher.read(cx), window, cx)
     })
 }
@@ -149,10 +142,7 @@ pub(crate) fn draft(cx: &mut VisualTestContext) -> LaunchDraft {
 /// Whether the launcher is still open: its view lives as long as its layer does, until a press launches it; a launcher
 /// whose create is out lives on hidden (`launch_tests` checks the layer instead).
 fn is_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .is_some_and(|opened| opened.0.upgrade().is_some())
-    })
+    cx.update(|_, cx| layers::last_opened::<Launcher>(cx).is_some())
 }
 
 /// The text fields a test clicks into.

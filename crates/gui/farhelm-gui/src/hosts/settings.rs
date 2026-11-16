@@ -168,7 +168,7 @@ pub fn open_settings(
     )?;
     dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
     #[cfg(test)]
-    cx.set_global(tests::Opened(dialog.downgrade()));
+    layers::record_opened(&dialog, cx);
     Some(layer)
 }
 

@@ -692,13 +692,11 @@ pub(crate) fn ask_consent_about(
 /// `127.0.0.1` pages into the standalone helm, is left out: it was about the browser interface, which is gone. Focus
 /// starts on Cancel, since Allow widens what a remote page can do on this Mac.
 pub(crate) fn consent_question<T: Clone + 'static>(frozen: T) -> Question<T> {
-    let allow = Answer {
-        label: "Allow tunnels".into(),
-        help: HoverHelp::tooltip(
-            "Allow tunnels from remote sessions; Settings can turn them off again",
-        ),
-        tier: Tier::Primary,
-    };
+    let allow = Answer::new(
+        "Allow tunnels",
+        HoverHelp::tooltip("Allow tunnels from remote sessions; Settings can turn them off again"),
+        Tier::Primary,
+    );
     Question::new("Allow tunnels from remote sessions?", allow, frozen)
         .summary("Remote pages share this Mac's local browser trust")
         .line(

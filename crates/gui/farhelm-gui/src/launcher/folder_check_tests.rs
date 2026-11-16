@@ -11,7 +11,8 @@ use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
 use super::draft::{LaunchDraft, Tab};
-use super::view_tests::{Opened, answer_catalog, launcher_on, name_of};
+use super::view_tests::{answer_catalog, launcher_on, name_of};
+use crate::layers;
 use crate::test_support::{self, settle};
 
 /// New on host1 in `folder`, on the Command tab with a complete command.
@@ -41,10 +42,8 @@ fn problem(cx: &mut VisualTestContext) -> Option<String> {
 /// Type `text` as the folder, as an edit of the draft.
 fn edit_folder(cx: &mut VisualTestContext, text: &str) {
     cx.update(|_, cx| {
-        let launcher = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a launcher is open");
+        let launcher =
+            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
         launcher.update(cx, |launcher, cx| {
             launcher.draft.edit_folder(text.to_owned());
             cx.notify();

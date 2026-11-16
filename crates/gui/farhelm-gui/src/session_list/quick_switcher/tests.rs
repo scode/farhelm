@@ -2,9 +2,9 @@
 //! over the helm client's fake, which hands the test the switcher's read to answer, fail or hold.
 //!
 //! The switcher is opened the way the user opens it, with the chord, mostly from the open session's terminal; the
-//! tests reach the open switcher through [`Opened`], which only test builds record. Its rows are found by their ids,
-//! `quick-switcher-row-<key>`, and its field by the `quick-switcher-field` selector. Every step ends in one of the
-//! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//! tests reach the open switcher through [`layers::last_opened`] (test builds only). Its rows are found by
+//! their ids, `quick-switcher-row-<key>`, and its field by the `quick-switcher-field` selector. Every step ends in one
+//! of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
 //! Later tests pick sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the
 //! session list makes once the pick has opened the session (`filters.rs`). Then come the `tl:` templates section and
@@ -23,7 +23,7 @@ use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
     Preferences, SESSION_QUERY_PATH, SessionRow,
 };
-use gpui::{DriverNode, Entity, Global, TestAppContext, VisualTestContext, WeakEntity};
+use gpui::{DriverNode, Entity, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::{
@@ -46,11 +46,6 @@ use crate::session_pane::details::BAR_ID;
 use crate::test_support::{
     self, any_open, click, focused_id, frame, keys, open_main, settle, terminal_focused,
 };
-
-/// The switcher [`super::open`] opened last, recorded in test builds only, so a test can read its state.
-pub(super) struct Opened(pub(super) WeakEntity<QuickSwitcher>);
-
-impl Global for Opened {}
 
 /// The chord on this platform (SPEC.md, "Desktop window chrome").
 const CHORD: &str = QUICK_SWITCHER_CHORD;
@@ -235,10 +230,7 @@ impl Main<'_> {
 
 /// The switcher opened last, which must still be open.
 pub(super) fn switcher(cx: &mut VisualTestContext) -> Entity<QuickSwitcher> {
-    let switcher = cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-    });
+    let switcher = cx.update(|_, cx| layers::last_opened::<QuickSwitcher>(cx));
     switcher.expect("the premise: a switcher is open")
 }
 
@@ -490,7 +482,8 @@ fn the_chord_does_nothing_over_a_menu(cx: &mut TestAppContext) {
     assert!(any_open(main.cx), "the menu is still open");
     assert_eq!(main.reads(), [], "nothing was read");
     assert!(
-        main.cx.update(|_, cx| cx.try_global::<Opened>().is_none()),
+        main.cx
+            .update(|_, cx| layers::last_opened_weak::<QuickSwitcher>(cx).is_none()),
         "and no switcher opened"
     );
 }

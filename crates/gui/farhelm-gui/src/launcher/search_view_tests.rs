@@ -17,6 +17,7 @@ use super::view_tests::{
     answer_catalog, codex, draft, fixture_hosts, launcher_on, launcher_with_hosts, name_of, read,
     search_focused, search_text, selected_state, shown_refusal,
 };
+use crate::layers;
 use crate::test_support::{self, keys, settle};
 
 /// Whether the search results were drawn in the last frame.
@@ -169,9 +170,7 @@ fn escape_closes_the_results_and_keeps_the_query(cx: &mut TestAppContext) {
     assert_eq!(draft(cx).agent.harness, None, "without taking a row");
     keys(cx, "escape escape");
     assert!(
-        cx.update(|_, cx| cx
-            .try_global::<super::view_tests::Opened>()
-            .is_none_or(|opened| opened.0.upgrade().is_none())),
+        cx.update(|_, cx| layers::last_opened::<super::view::Launcher>(cx).is_none()),
         "Escape with the results closed closes the launcher"
     );
 }

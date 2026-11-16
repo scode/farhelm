@@ -69,11 +69,7 @@ pub(in crate::settings) enum Departure {
 
 /// One answer's button.
 fn answer(label: &'static str, help: &'static str, tier: Tier) -> Answer {
-    Answer {
-        label: label.into(),
-        help: HoverHelp::tooltip(help),
-        tier,
-    }
+    Answer::new(label, HoverHelp::tooltip(help), tier)
 }
 
 impl Editor {

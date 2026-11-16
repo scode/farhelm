@@ -71,9 +71,7 @@ pub(super) fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx:
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::hosts::add::open(&opener, &mark, window, cx);
-            let dialog = cx
-                .try_global::<crate::hosts::add::tests::Opened>()
-                .and_then(|opened| opened.0.upgrade());
+            let dialog = layers::last_opened::<crate::hosts::add::AddHostDialog>(cx);
             if let Some(dialog) = dialog {
                 let input = dialog.read(cx).destination_input();
                 input.set_text("dev@new-box", window, cx);

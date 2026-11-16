@@ -20,9 +20,10 @@ use super::recipe_tests::{answer_account, catalog, entry, idle, push};
 use super::recipes::Editor;
 use super::recipes::draft::Draft;
 use super::tests::{
-    Opened, available, drawn, fill, label_of, open_rail_with, open_settings, painted, reach,
+    available, drawn, fill, label_of, open_rail_with, open_settings, painted, reach,
     section_button, sent, switch_on,
 };
+use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{bounds, click, focused_id, keys, settle};
@@ -80,7 +81,7 @@ pub(super) fn open_editor_with(
 /// The open recipe editor.
 pub(super) fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx).expect("Settings is open");
         let recipes = dialog.read(cx).recipes.clone().expect("Recipes was shown");
         recipes.read(cx).editor().expect("an editor is open")
     })

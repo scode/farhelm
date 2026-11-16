@@ -92,11 +92,7 @@ pub(in crate::launcher) struct YoloState {
 
 /// One answer button.
 fn answer(label: &'static str, help: &'static str, tier: Tier) -> Answer {
-    Answer {
-        label: label.into(),
-        help: HoverHelp::tooltip(help),
-        tier,
-    }
+    Answer::new(label, HoverHelp::tooltip(help), tier)
 }
 
 /// The words the question shows when the permanent answer's host write fails (the old `stop_asking`): the helm's

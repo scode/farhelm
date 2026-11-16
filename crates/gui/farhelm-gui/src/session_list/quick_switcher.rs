@@ -328,7 +328,7 @@ pub(crate) fn open(
     };
     switcher.update(cx, |switcher, _| switcher.layer = Some(layer));
     #[cfg(test)]
-    cx.set_global(tests::Opened(switcher.downgrade()));
+    layers::record_opened(&switcher, cx);
     match mode {
         Mode::Sessions => read_sessions(switcher.downgrade(), cx),
         // The template list lists no session, so it reads none; its read stays loading, unseen.

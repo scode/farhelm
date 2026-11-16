@@ -4,8 +4,8 @@
 //!
 //! The dialog is opened the way the user opens it: a click on a Hosts panel row's toggle, then on the menu's Settings.
 //! The hosts are the reference screens' three (the local host as 1, `build-box` at `dev@build-box` as 2, `gpu-1` as
-//! 3). The tests reach the open dialog through [`Opened`], which only test builds record. Every step ends in one of the
-//! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//! 3). The tests reach the open dialog through [`layers::last_opened`] (test builds only). Every step ends
+//! in one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
 //! Every opening reads the host's checkout folder, and the fake answers commands only in the order they were sent, so
 //! [`open_from_menu`] answers that read before a test sends anything else; the Checkouts tests answer it themselves
@@ -15,23 +15,17 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{CollectionChanges, HostView};
-use gpui::{
-    DriverNode, Entity, Global, TestAppContext, Toggled, VisualTestContext, WeakEntity, px, size,
-};
+use gpui::{DriverNode, Entity, TestAppContext, Toggled, VisualTestContext, px, size};
 use serde_json::{Value, json};
 
 use super::{FOLDER_NOTE, Field, HostSettingsDialog};
 use crate::focus;
 use crate::hosts::tests::{hosts, nothing_in_flight, open_panel, reference_hosts, start_work};
+use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::settings::Refused;
 use crate::test_support::{any_open, click, focused_id, frame, keys, settle};
-
-/// The dialog [`super::open_settings`] opened last, recorded in test builds only, so a test can read its fields.
-pub(super) struct Opened(pub(super) WeakEntity<HostSettingsDialog>);
-
-impl Global for Opened {}
 
 /// Kit's select-all in a text field on this platform.
 const SELECT_ALL: &str = if cfg!(target_os = "macos") {
@@ -93,10 +87,7 @@ fn open_with_folder(
 
 /// The dialog opened last, which must still be open.
 fn dialog(cx: &mut VisualTestContext) -> Entity<HostSettingsDialog> {
-    let dialog = cx.update(|_, cx| {
-        cx.try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-    });
+    let dialog = cx.update(|_, cx| layers::last_opened::<HostSettingsDialog>(cx));
     dialog.expect("the dialog is open")
 }
 

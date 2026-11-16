@@ -14,9 +14,10 @@ use serde_json::{Value, json};
 use super::Section;
 use super::tensorlake::{ASK_ID, EXPERIMENTAL_WARNING, USAGE_CREDITS_NOTE};
 use super::tests::{
-    Opened, available, drawn, fill, into_view, label_of, open_rail, open_settings, painted,
+    available, drawn, fill, into_view, label_of, open_rail, open_settings, painted,
     preference_work, reach, section_button, sent, switch_on,
 };
+use crate::layers;
 use crate::operations::Work;
 use crate::test_support::{advance, bounds, click, focused_id, frame, keys, settle};
 use std::time::Duration;
@@ -97,7 +98,7 @@ pub(super) fn press(cx: &mut VisualTestContext, id: &str) {
 /// The key the Tensorlake section's key form holds as typed. The field is masked, so what it paints cannot show it.
 fn typed_here(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx).expect("Settings is open");
         let section = dialog
             .read(cx)
             .tensorlake_section
@@ -111,7 +112,7 @@ fn typed_here(cx: &mut VisualTestContext) -> String {
 /// The key the Credentials section's key form holds as typed.
 fn typed_in_credentials(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
+        let dialog = layers::last_opened::<super::SettingsDialog>(cx).expect("Settings is open");
         let credentials = dialog
             .read(cx)
             .credentials

@@ -161,6 +161,24 @@ pub struct Answer {
     pub tier: Tier,
 }
 
+impl Answer {
+    /// An answer button labelled `label`, with `help` as its hover help and `tier` as its look: the one way to build
+    /// an answer, since every question builds two or more. The help stays a [`HoverHelp`]
+    /// rather than a string, so the label and the help cannot be swapped without a type error, and help in any of its
+    /// forms (a host sentence included) still goes in:
+    ///
+    /// ```ignore
+    /// let delete = Answer::new("Delete", HoverHelp::tooltip("Delete it for good"), Tier::Danger);
+    /// ```
+    pub fn new(label: impl Into<SharedString>, help: HoverHelp, tier: Tier) -> Self {
+        Answer {
+            label: label.into(),
+            help,
+            tier,
+        }
+    }
+}
+
 /// A question to ask, frozen at the moment it opens. `T` is what the confirming answer acts on: the targets by stable
 /// id and whatever else the action needs, as the user was shown them.
 pub struct Question<T> {
@@ -214,11 +232,11 @@ impl<T: Clone + 'static> Question<T> {
             summary: None,
             lines: Vec::new(),
             confirm,
-            cancel: Answer {
-                label: "Cancel".into(),
-                help: HoverHelp::tooltip("Close this without doing anything"),
-                tier: Tier::Neutral,
-            },
+            cancel: Answer::new(
+                "Cancel",
+                HoverHelp::tooltip("Close this without doing anything"),
+                Tier::Neutral,
+            ),
             alternatives: Vec::new(),
             on_alternatives: Vec::new(),
             confirm_enabled: true,

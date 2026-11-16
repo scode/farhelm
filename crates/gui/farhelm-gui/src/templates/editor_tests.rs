@@ -17,11 +17,11 @@ use farhelm_proto::{LaunchEffort, LaunchHarness};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
-use super::dialog::Opened;
 use super::dialog_tests::{open_header, painted, push, template};
 use super::fields::Draft;
 use crate::components::EditCommand;
 use crate::focus;
+use crate::layers;
 use crate::test_support::{self, any_open, click, frame, keys, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -86,10 +86,8 @@ pub(super) fn open_editor(helm: &mut FakeHelm, opener: &'static str, cx: &mut Vi
 /// The open editor's draft.
 pub(super) fn draft(cx: &mut VisualTestContext) -> Draft {
     cx.update(|_, cx| {
-        let dialog = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a dialog is open");
+        let dialog =
+            layers::last_opened::<super::dialog::TemplatesDialog>(cx).expect("a dialog is open");
         let dialog = dialog.read(cx);
         dialog
             .editor
@@ -103,10 +101,8 @@ pub(super) fn draft(cx: &mut VisualTestContext) -> Draft {
 /// Whether the open editor's name field holds focus.
 pub(super) fn name_focused(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| {
-        let dialog = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a dialog is open");
+        let dialog =
+            layers::last_opened::<super::dialog::TemplatesDialog>(cx).expect("a dialog is open");
         let dialog = dialog.read(cx);
         dialog
             .editor
@@ -1027,10 +1023,8 @@ fn custom_words_that_do_not_parse_refuse_save_and_each_template_shows_its_own(
 /// What the open editor's Custom words field holds.
 fn flags_text(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        let dialog = cx
-            .try_global::<Opened>()
-            .and_then(|opened| opened.0.upgrade())
-            .expect("a dialog is open");
+        let dialog =
+            layers::last_opened::<super::dialog::TemplatesDialog>(cx).expect("a dialog is open");
         let dialog = dialog.read(cx);
         dialog
             .editor
