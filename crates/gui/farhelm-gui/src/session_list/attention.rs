@@ -15,11 +15,11 @@
 //!   diagnostics and controls" for it). Every fact is [`crate::hosts::status`]'s, read per frame: the update badge's
 //!   test, the work going on, and the setup or Update warning.
 //! - **Problem rows** ([`problem_words`]) say what is wrong and offer Details; **working rows** say "Setting up",
-//!   "Updating" or "Uninstalling" and the current step, over a progress bar, with no button; **update rows** offer
-//!   Update, and a required one says sessions stay unreachable until it is updated. Details, or a press anywhere on a
-//!   row outside its button, shows Hosts through [`SessionList::show_hosts`] (which acknowledges the hosts' warnings)
-//!   and asks the panel to bring that host's row into view with its menu toggle focused
-//!   ([`crate::hosts::HostsPanel::reveal`]); the session filter stays as it is.
+//!   "Updating" or "Uninstalling" and the current step (or "Deleting" for an environment being destroyed, below),
+//!   over a progress bar, with no button; **update rows** offer Update, and a required one says sessions stay
+//!   unreachable until it is updated. Details, or a press anywhere on a row outside its button, shows Hosts through
+//!   [`SessionList::show_hosts`] (which acknowledges the hosts' warnings) and asks the panel to bring that host's row
+//!   into view with its menu toggle focused ([`crate::hosts::HostsPanel::reveal`]); the session filter stays as it is.
 //! - **The header** counts the rows ("N hosts need attention") and offers Update all only while more than one row
 //!   offers Update, Always update while "Update remote hosts automatically" reads off and some row offers Update, and
 //!   the close control while some row is an optional update. Each acts on exactly the hosts drawn
@@ -55,9 +55,33 @@
 //! Keyboard focus on a working row's open control shows the same card (SPEC.md), since the layer manager shows a
 //! control's help on keyboard focus as well as on hover, beside the sidebar where the help sits there.
 //!
-//! NOTE: Not ported yet, waiting for the environments work: a sandbox or container host's own problems (a failed
-//! resume, a stopped or failed-to-delete environment, credentials not delivered, tunnels failed) and its deletion as
-//! work going on. Such a host shows here only for the problems and updates every host has.
+//! **Sandbox and container hosts** get rows of their own, ported from the same `classify` and `problem_words`. This
+//! list is how a user finds a stuck environment, since a host a session owns has no rail avatar to warn them:
+//!
+//! - An environment being destroyed (`Deleting` with no failure: a sealed environment, or one deleted from Hosts) is a
+//!   working row, "Deleting", with an empty bar, no button and always the plain hover help (it never has a run, so
+//!   never a progress card). As a reason it ranks after live work and above any problem, so a warned or
+//!   credential-less machine that is going away is still only "Deleting"; it is drawn in the working group.
+//! - A failed deletion ("Deleting failed") and a stopped environment ("Stopped") are problem rows in their phase's own
+//!   words ([`phase::words`]), and a suspended one whose resume failed reads "Resume failed". An environment that is
+//!   merely suspended, suspending, resuming or starting has no row: that is routine, and SPEC.md lists it among the
+//!   hosts that need none.
+//! - "Credentials not delivered" ([`phase::credential_warning`]) and "Tunnels failed" ([`phase::tunnels_failed`],
+//!   which counts only while the host reads connected, so stale forwarding health of a host that is away claims
+//!   nothing) follow the phase's words on any row, before the setup warning, joined by "; " as the old line was. They
+//!   are the same tests the Hosts row and the rail read, so the three cannot disagree about one host.
+//!
+//! These rows offer Details like every problem row, and nothing else: the old list never had an inline Retry or Resume.
+//! Hosts offers Retry for a failed deletion, in the host's menu (`hosts/remedies.rs`).
+//!
+//! NOTE: SPEC.md, "Sandbox sessions", has the attention area show a failed deletion "with the reason and **Retry**".
+//! That sentence was already there at the old app's reference commit, whose row offered only Details, so the old app
+//! is its reference reading (decided by the GPUI migration's orchestrator on 2026-11-16): the row shows the failure and
+//! leads to Hosts, which shows the reason and Retry, with no Retry in the row. SPEC.md's wording is to be revised to
+//! say so.
+//!
+//! NOTE: Hosts' Resume is not ported yet (its menu's NOTE), so Details on a "Resume failed" or "Stopped" row reaches no
+//! Resume there for now; the session's own card in the session pane offers one.
 
 #[cfg(test)]
 mod tests;
@@ -123,9 +147,10 @@ const REQUIRED: &str = "Sessions stay unreachable until this host is updated.";
 /// Why a host has a row; each host has at most one, by [`classify`]'s precedence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
-    /// Something is wrong that Details shows (the phase's own trouble, or an unacknowledged setup or Update warning).
+    /// Something is wrong that Details shows (the phase's own trouble, an environment's undelivered credentials or
+    /// failed forwards, or an unacknowledged setup or Update warning).
     Problem,
-    /// A setup, Update or uninstall is going on.
+    /// A setup, Update or uninstall is going on, or the host's sandbox or container is being destroyed.
     Working,
     /// The host has an update by the rail badge's test; `required` when its sessions cannot be reached until then.
     Update { required: bool },
@@ -157,7 +182,9 @@ pub(super) struct Row {
 /// The rows for `hosts` (each with what [`crate::hosts::status`] reads about it, in the registry's order), grouped and
 /// in order, with the optional update rows left out while `dismissed`. A host appears once, for its first reason of:
 /// work going on, a problem, an update (SPEC.md: "Live setup, update or uninstall progress takes precedence over a
-/// problem, which takes precedence over an available update"). Pure, so the rules are tested without a window.
+/// problem, which takes precedence over an available update"). An environment being destroyed counts as work going on:
+/// as a reason it ranks after a live run and above a problem, as the old `classify` ranked it, and its row is drawn in
+/// the working group. Pure, so the rules are tested without a window.
 pub(super) fn classify<'a>(
     hosts: impl IntoIterator<Item = (&'a HostView, &'a HostStatus)>,
     dismissed: bool,
@@ -171,6 +198,9 @@ pub(super) fn classify<'a>(
                     live.activity.verb().to_owned(),
                     live.steps.clone(),
                 )
+            } else if matches!(host.state, HostStateView::Deleting { failure: None }) {
+                // The destruction has no steps to show, so the bar stays empty, as the old row's did.
+                (Kind::Working, "Deleting".to_owned(), None)
             } else if let Some(words) = problem_words(host, status) {
                 (Kind::Problem, words, None)
             } else {
@@ -201,9 +231,11 @@ pub(super) fn classify<'a>(
 /// What is wrong with `host`, or `None` when nothing is: its phase's words for a phase that waits for someone (SPEC.md:
 /// "Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified, Duplicate, Retired"), a
 /// protocol skew where the host is the newer side ("Too new; update the helm") or has no Update on offer to fix it,
-/// and "Setup or update needs attention" for an unacknowledged warning, after the phase's words when both apply.
-/// Connecting, a connected host (also one on a newer build, which is usable) and a skew whose required Update is on
-/// offer (an update row says it) are not problems.
+/// an environment's trouble ("Stopped", "Deleting failed", "Resume failed"), then "Credentials not delivered" and
+/// "Tunnels failed" for a sandbox or container whose helm says so, and last "Setup or update needs attention" for an
+/// unacknowledged warning, every part that applies joined by "; ". Connecting, a connected host (also one on a newer
+/// build, which is usable), a skew whose required Update is on offer (an update row says it), and an environment
+/// suspended, changing or being deleted without a failure are not problems in themselves.
 pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<String> {
     // Exhaustive, so a new phase decides here whether it needs a row.
     let phase = match &host.state {
@@ -211,7 +243,13 @@ pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<Stri
         | HostStateView::IdentityMismatch { .. }
         | HostStateView::IdentityUnverified { .. }
         | HostStateView::Duplicate { .. }
-        | HostStateView::Retired { .. } => Some(phase::words(&host.state)),
+        | HostStateView::Retired { .. }
+        | HostStateView::Stopped { .. }
+        | HostStateView::Deleting { failure: Some(_) } => Some(phase::words(&host.state)),
+        HostStateView::Suspended {
+            resume_failed: Some(_),
+            ..
+        } => Some("Resume failed"),
         HostStateView::VersionSkew { .. } if runs_newer_version(&host.state) => {
             Some("Too new; update the helm")
         }
@@ -221,14 +259,26 @@ pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<Stri
         HostStateView::VersionSkew { .. }
         | HostStateView::Connecting { .. }
         | HostStateView::Connected { .. } => None,
-        // The environments' own phases wait for the environments work (the module docs' NOTE).
+        // Routine lifecycle: a suspension the user or the provider chose, a change on its way, and a destruction that
+        // `classify` has already made a working row.
         HostStateView::TensorlakeChanging { .. }
-        | HostStateView::Suspended { .. }
-        | HostStateView::Stopped { .. }
-        | HostStateView::Deleting { .. } => None,
+        | HostStateView::Suspended {
+            resume_failed: None,
+            ..
+        }
+        | HostStateView::Deleting { failure: None } => None,
     };
+    // Delivery and forwarding fail independently of the phase, so they are added to its words rather than replacing
+    // them, as the old line kept a connection failure beside them.
+    let credentials = phase::credential_warning(host).map(|_| "Credentials not delivered");
+    let tunnels = phase::tunnels_failed(host).then_some("Tunnels failed");
     let warning = status.warned.then_some("Setup or update needs attention");
-    let words: Vec<&str> = phase.into_iter().chain(warning).collect();
+    let words: Vec<&str> = phase
+        .into_iter()
+        .chain(credentials)
+        .chain(tunnels)
+        .chain(warning)
+        .collect();
     (!words.is_empty()).then(|| words.join("; "))
 }
 
