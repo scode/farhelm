@@ -402,7 +402,10 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
 /// (`approvals.rs` at `24bc0580`), not across the window.
 fn is_banner(notice: Notice) -> bool {
     match notice {
-        Notice::ConnectionLost | Notice::LaunchNotStarted | Notice::LaunchMayStillStart => true,
+        Notice::ConnectionLost
+        | Notice::LaunchNotStarted
+        | Notice::LaunchMayStillStart
+        | Notice::EnvironmentLaunchUnknown => true,
         Notice::LateAnswer { .. } => false,
     }
 }
@@ -446,6 +449,11 @@ pub(crate) fn banner(notice: Notice) -> AnyElement {
         Notice::LaunchMayStillStart => open_launcher_banner(
             notice,
             "Open launcher: show the launch with its settings and the helm's reply",
+        ),
+        // So is an environment launch whose end is unknown (its launcher holds what is known of it).
+        Notice::EnvironmentLaunchUnknown => open_launcher_banner(
+            notice,
+            "Open launcher: show the launch with its settings and what is known of how it ended",
         ),
     };
     banner

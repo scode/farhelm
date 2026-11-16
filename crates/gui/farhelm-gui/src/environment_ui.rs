@@ -7,14 +7,16 @@
 //! surface has needed so far, starting with an agent's environment-launch approval card; the launcher's and host
 //! management's environment surfaces add their own methods here as they are ported, rather than starting a second
 //! module. The session list's and the session view's environment session rows, controls and suspended card take theirs
-//! from the section on a session's own environment below. The launcher's refusals take their words from here
-//! (`recipe_refusal`).
+//! from the section on a session's own environment below. The launcher's refusals and its name for a new environment
+//! take their words from here (`recipe_refusal`, [`target_label`]).
 
 use farhelm_proto::recipes::{RecipeBase, RecipeView};
+use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchTarget, Place, ProviderKind};
 
 use crate::assets::Icon;
 use crate::host_text::{HostSentence, HostText};
+use crate::hosts::identity::display_name;
 use crate::local_time::{self, Zone};
 
 /// One provider, seen through the GUI's vocabulary.
@@ -364,6 +366,18 @@ pub(crate) fn recipe_build_help(base: &RecipeBase) -> &'static str {
         }
         RecipeBase::ContainerImage { .. } => ProviderUi(ProviderKind::Podman).recipe_build_help(),
     }
+}
+
+/// What the launcher's footer and progress pill name a new environment by: [`target_label`], with a container host
+/// named as everywhere else ([`display_name`]) from the pushed hosts list, or "host <id>" once the registry no longer
+/// lists it. The recipe and the host's name are host values, so the whole label is host text.
+pub(crate) fn launch_target_label(target: &LaunchTarget, hosts: &[HostView]) -> HostText {
+    let place_name = target
+        .place()
+        .container_host()
+        .and_then(|id| hosts.iter().find(|host| host.id == id))
+        .map(|host| display_name(host).raw().to_owned());
+    HostText::from_host(target_label(target, place_name.as_deref()))
 }
 
 /// A provider's words for a recipe's per-place line, as [`ProviderUi::recipe_place`] chooses them.

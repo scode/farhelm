@@ -19,6 +19,13 @@
 //!   as the old pill hid its ticking line from assistive technology.
 //! - **Time from the ticker.** The seconds are worked out from the ticker's wall clock while the pill renders, and the
 //!   pill holds the ticker's once-a-second clock to redraw, so tests move it with GPUI's simulated clock.
+//! - **An environment create's steps.** Once the helm has accepted a create in a new environment and named the run it
+//!   lands on (`launch::followed_run`), the pill names that run's running step instead ("Preparing <recipe> on
+//!   <host>…", "Creating a <recipe> container on <host>…"), with the step's explanation beside it and in its accessible
+//!   name, and the seconds counted from when the pill first saw the step (the first one it sees, from the press), read
+//!   from the pushed host progress as it draws (SPEC.md: "Existing launch progress names … each with elapsed time"; the
+//!   old `PendingLaunch::observe_stage`). The steps' words are the helm's and name a recipe and a host, so they are
+//!   drawn as host text.
 
 use std::time::{Duration, SystemTime};
 
@@ -27,10 +34,13 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use farhelm_proto::provisioning::{ProvisioningView, StepStatus};
+use farhelm_proto::ui_channel::HostView;
+
 use crate::components::{Spinner, dialog_shadow, spinner_icon};
-use crate::host_text::{HostSentence, HostText};
+use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, metrics};
-use crate::ticker;
+use crate::{session, ticker};
 
 /// How long a launch waits before its progress pill shows: the old `LaunchProgress`'s two whole seconds, so a quick
 /// reply never flashes a spinner.
@@ -55,6 +65,9 @@ pub(super) struct ProgressPill {
     /// The session name the request carries; `None` for a request that leaves the name to the helm.
     title: Option<HostText>,
     sent: SystemTime,
+    /// The run's step the pill names, and when it first saw that step running, which its seconds count from. Kept
+    /// between steps, so the pill goes on naming the last one until the next starts, as the old pill did.
+    stage: Option<(String, SystemTime)>,
     /// Held only while the window is active, as every spinner is (`components::Spinner`): a live spinner
     /// keeps the ticker's timer firing ten times a second, which a window behind others has no use for. The seconds
     /// clock below runs either way, since a wait is about the user's time.
@@ -79,9 +92,26 @@ impl ProgressPill {
                 .filter(|title| !title.is_empty())
                 .map(HostText::from_host),
             sent,
+            stage: None,
             spinner: None,
             _seconds: ticker::every_second(cx),
         }
+    }
+
+    /// The running step of the run the launch waits on, if it is an accepted environment create
+    /// (`launch::followed_run`), as the store shows it now: its name and its explanation, if it has one.
+    fn running_step(&self, cx: &gpui::App) -> Option<(String, Option<String>)> {
+        let (host, run) = super::launch::followed_run(cx)?;
+        let store = session::current_store(cx)?;
+        let collections = store.read(cx).collections();
+        let view = collections
+            .get::<ProvisioningView>(&HostView::key(host))
+            .filter(|view| view.run_id.as_deref() == Some(run.as_str()))?;
+        let step = view
+            .steps
+            .iter()
+            .find(|step| step.status == StepStatus::Running)?;
+        Some((step.name.clone(), step.explanation.clone()))
     }
 
     /// The pill's words without the seconds: "Launching “name” on host…" (or "Replacing ..."), or without the name when
@@ -106,13 +136,44 @@ impl Render for ProgressPill {
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
         let palette = theme::palette(cx);
         let ink = theme::color(palette.fg_0);
-        let seconds = ticker::wall_now(cx)
-            .duration_since(self.sent)
+        let now = ticker::wall_now(cx);
+        // A step seen running for the first time starts the seconds over (the old `observe_stage`). Kept here, in the
+        // pill's own state, because the helm publishes no step timestamps. The first step the pill sees counts from
+        // the press instead: the run starts as the helm admits the launch, just after it, and the pill first draws two
+        // seconds later. Strictly, the first step it sees may be a later one, if an earlier step ended before the pill
+        // saw it running; that step is then counted from the press too, the earlier steps' time included.
+        let running = self.running_step(cx);
+        let detail = running
+            .as_ref()
+            .and_then(|(_, detail)| detail.clone())
+            .map(HostText::from_host);
+        if let Some((name, _)) = running
+            && self.stage.as_ref().is_none_or(|(shown, _)| *shown != name)
+        {
+            let seen = if self.stage.is_none() { self.sent } else { now };
+            self.stage = Some((name, seen));
+        }
+        let since = self.stage.as_ref().map_or(self.sent, |(_, seen)| *seen);
+        let seconds = now
+            .duration_since(since)
             .map_or(0, |waited| waited.as_secs());
-        let words = self.words();
+        let words = match &self.stage {
+            Some((name, _)) => {
+                HostSentence::new("launch-progress-label").host(&HostText::from_host(name.as_str()))
+            }
+            None => self.words(),
+        };
+        // The step's explanation is part of what the status says, as it is part of what it shows.
+        let name = match &detail {
+            Some(detail) => {
+                let detail = HostSentence::new("launch-progress-detail").host(detail);
+                format!("{} {}", words.accessible_name(), detail.accessible_name())
+            }
+            None => words.accessible_name().to_string(),
+        };
         capsule("launch-progress", palette)
             .role(Role::Status)
-            .aria_label(words.accessible_name())
+            .aria_label(SharedString::from(name))
             .flex()
             .flex_row()
             .items_center()
@@ -120,6 +181,11 @@ impl Render for ProgressPill {
             .min_w_0()
             .child(spinner_icon(step, px(SPINNER), ink))
             .child(div().flex_1().min_w_0().overflow_hidden().child(words))
+            .children(
+                detail
+                    .as_ref()
+                    .map(|detail| host_text::element(detail).min_w_0().overflow_hidden()),
+            )
             .child(div().flex_none().child(format!("{seconds} s")))
     }
 }
