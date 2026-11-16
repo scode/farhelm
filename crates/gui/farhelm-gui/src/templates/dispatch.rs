@@ -12,8 +12,10 @@
 //! the handler of the user's press, which is the answer the launch's completion counts from:
 //!
 //! - **Where the press lands.** In the session launcher, when it is the dialog holding the keyboard, the press applies
-//!   to its draft and leaves Launch to the user. On the page it launches or opens New. Under any other dialog or menu
-//!   it does nothing (SPEC.md: "Other visible dialogs keep the keyboard"), and while the launcher is busy (a quick
+//!   to its draft and leaves Launch to the user. On the page it launches or opens New. Under any other layer that
+//!   takes the keyboard, a dialog or a menu with focus, it does nothing (SPEC.md: "Other visible dialogs keep the
+//!   keyboard"); a list that never takes focus, as the launcher's Host and Folder lists, does not stop it, which is
+//!   the old app's rule too (its shortcuts yielded only to a modal dialog). And while the launcher is busy (a quick
 //!   launch being prepared, a launch pending, a refused launch waiting behind its notice, a host change in flight) it is
 //!   taken and changes nothing.
 //! - **Resolving.** Each reference becomes the template the store holds under that name now. On the page, a ⚡ or number

@@ -128,6 +128,19 @@ pub(crate) fn shown_draft(cx: &mut VisualTestContext) -> LaunchDraft {
     })
 }
 
+/// Whether the shown launcher's Name field holds focus, and whether it has text selected, found as [`shown_draft`]
+/// finds the launcher, so it works for a launcher a quick launch revealed.
+pub(crate) fn shown_name_focus_and_selection(cx: &mut VisualTestContext) -> (bool, bool) {
+    cx.update(|window, cx| {
+        let launcher = super::entry::open_launcher(window, cx).expect("a launcher is shown");
+        let name = &launcher.read(cx).name;
+        (
+            name.focus_handle(cx).is_focused(window),
+            !name.selection_empty(cx),
+        )
+    })
+}
+
 /// The open launcher's draft.
 pub(crate) fn draft(cx: &mut VisualTestContext) -> LaunchDraft {
     read(cx, |launcher, _, _| launcher.draft.clone())

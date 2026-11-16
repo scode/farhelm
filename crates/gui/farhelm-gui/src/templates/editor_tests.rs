@@ -534,10 +534,11 @@ fn replace_name_clears_the_name_and_focuses_it(cx: &mut TestAppContext) {
     assert_eq!(draft(cx).name, "plain");
 }
 
-/// The session name's kind and the destination's kind are choices beside their text (SPEC.md: "base name | fixed
-/// name"; "a folder or a managed checkout"), and both reach the saved template: Fixed is stored, Base is the kind's
-/// absence, and switching the destination keeps its text. Specified: a new template with a fixed session name and a
-/// managed checkout saves exactly those.
+/// The session name's kind and the destination's kind are choices beside their text (SPEC.md: "base name | fixed name";
+/// "a folder or a managed checkout"), and both reach the saved template: Fixed is stored, Base is the kind's absence,
+/// and switching the destination keeps its text. Specified: a new template with a fixed session name and a managed
+/// checkout saves exactly those, and the managed checkout shows its hint that each session gets its own checkout, which
+/// moves to the trash when the session is deleted (the old editor's `.templates-hint`).
 #[gpui::test]
 fn the_name_kind_and_destination_kind_are_saved(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
@@ -573,6 +574,12 @@ fn the_name_kind_and_destination_kind_are_saved(cx: &mut TestAppContext) {
             ))
         ),
         "the premise: the destination was typed and switched"
+    );
+    assert!(drawn(cx, "templates-checkout-hint"), "the checkout's hint");
+    assert!(
+        painted(cx).contains("moves to the trash"),
+        "{}",
+        painted(cx)
     );
     // Four fields with their hints run the editor past the dialog's height; a taller window keeps Save in view, where a
     // click reaches it.
@@ -1032,6 +1039,189 @@ fn flags_text(cx: &mut VisualTestContext) -> String {
             .flags_text()
             .to_owned()
     })
+}
+
+/// The old "older template resume_command / name stays read-only without bypassing save refusal" cases: a field shown
+/// escaped is read-only, and a save of an unrelated edit must still refuse its raw value, or the editor would write a
+/// template the helm refuses, or one whose launch shows characters the field could not. The command's case is
+/// `an_escaped_field_keeps_its_raw_value_until_replaced`. Specified: for a command template whose resume command holds
+/// a carriage return and line feed, and one whose session name holds an emoji joiner, typing into the escaped field
+/// changes nothing, and Save after an added YOLO answer sends nothing and says "A template's resume command" (or
+/// "session name") "cannot contain control or invisible formatting characters".
+#[gpui::test]
+fn read_only_resume_and_session_name_still_refuse_an_unrelated_save(cx: &mut TestAppContext) {
+    let raw = |name: &str, fields: TemplateFields| {
+        template(
+            name,
+            TemplateFields {
+                kind: Some(LauncherKind::Command),
+                command: Some("echo safe".into()),
+                ..fields
+            },
+        )
+    };
+    let list = vec![
+        raw(
+            "raw-name",
+            TemplateFields {
+                name: Some("joined \u{1F469}\u{200D}\u{1F4BB}".into()),
+                ..TemplateFields::default()
+            },
+        ),
+        raw(
+            "raw-resume",
+            TemplateFields {
+                resume_command: Some(Some("echo 'first\r\nsecond'".into())),
+                ..TemplateFields::default()
+            },
+        ),
+    ];
+    let (mut helm, cx) = open_header(cx, &list, None);
+    // Two escaped hints and an added row run the editor past the dialog's height; a taller window keeps Save in view.
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1600.)));
+    settle(cx);
+    let cases = [
+        (
+            "raw-name",
+            "templates-session-name",
+            "templates-name-escaped",
+            "session name",
+        ),
+        (
+            "raw-resume",
+            "templates-resume",
+            "templates-resume-escaped",
+            "resume command",
+        ),
+    ];
+    for (round, (name, input, escaped, label)) in cases.into_iter().enumerate() {
+        if round == 0 {
+            open_editor(&mut helm, "template-open-raw-name", cx);
+        } else {
+            // The previous round's added YOLO answer is unsaved: leaving asks, and Discard goes on.
+            click(cx, "template-open-raw-resume");
+            click(cx, "prompt-alternative-0");
+            settle(cx);
+        }
+        assert_eq!(draft(cx).name, name, "the premise: {name} is open");
+        assert!(
+            drawn(cx, escaped),
+            "the premise: {name}'s field is shown escaped"
+        );
+        let before = draft(cx).fields;
+        click(cx, input);
+        settle(cx);
+        cx.simulate_input("x");
+        settle(cx);
+        // Wherever focus is, the stray `x` must reach nothing that would be saved: the fields and the template's own
+        // name are as they were.
+        assert_eq!(draft(cx).fields, before, "{name}: typing changed nothing");
+        assert_eq!(draft(cx).name, name, "{name}: nor the template's name");
+        click(cx, "templates-add");
+        click(cx, "templates-add-yolo");
+        click(cx, "templates-save");
+        assert!(saves(&mut helm).is_empty(), "{name}: nothing was saved");
+        let expected = format!(
+            "A template's {label} cannot contain control or invisible formatting characters"
+        );
+        assert!(painted(cx).contains(&expected), "{name}: {}", painted(cx));
+    }
+}
+
+/// The old "unsafe template model and folder stay raw until explicitly replaced" for the folder, and "initial prompt
+/// template escapes formatting while preserving raw saved text": an escaped field's raw value must reach the helm
+/// unchanged through a save of an unrelated edit, since the editor saves the whole template and an escaped spelling
+/// written back would change the folder a launch starts in. A catalog model is offered escaped too, so a suggestion
+/// never hides what it would write. Specified: a Codex template whose folder holds U+202E and whose prompt holds
+/// U+202E, with a catalog offering `gpt` + zero-width space + `x`, shows both fields escaped and the suggestion as
+/// `gpt<U+200B>x`; Save after an added effort reset sends the folder and the prompt byte for byte.
+#[gpui::test]
+fn escaped_folder_and_prompt_save_raw_and_a_hidden_suggestion_is_escaped(cx: &mut TestAppContext) {
+    let list = vec![template(
+        "raw-folder",
+        TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            agent: Some(LaunchHarness::Codex),
+            // A model field, so the catalog's suggestions are drawn under it.
+            model: Some(None),
+            destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                "/tmp/\u{202E}project".into(),
+            )),
+            prompt: Some("hidden\u{202E}text".into()),
+            ..TemplateFields::default()
+        },
+    )];
+    let (mut helm, cx) = open_header(cx, &list, None);
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1600.)));
+    settle(cx);
+    click(cx, "templates-button");
+    click(cx, "template-open-raw-folder");
+    settle(cx);
+    let (id, _) = one(&mut helm, Method::Get, "/api/launch-catalog");
+    helm.reply(
+        id,
+        200,
+        Some(json!([{"id": "gpt\u{200B}x", "harness": "codex", "efforts": ["high"]}])),
+    );
+    settle(cx);
+    assert!(
+        drawn(cx, "templates-destination-escaped"),
+        "the folder is escaped"
+    );
+    assert!(
+        drawn(cx, "templates-prompt-escaped"),
+        "the prompt is escaped"
+    );
+    assert!(painted(cx).contains("gpt<U+200B>x"), "{}", painted(cx));
+    click(cx, "templates-add");
+    click(cx, "templates-add-effort");
+    click(cx, "templates-save");
+    let saved = saves(&mut helm);
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert_eq!(
+        saved[0].1["destination"],
+        json!({"folder": "/tmp/\u{202E}project"})
+    );
+    assert_eq!(saved[0].1["prompt"], json!("hidden\u{202E}text"));
+}
+
+/// The editor's quick-launch line tells the user what ⚡ does for the template in front of them, judging the mark on the
+/// stored name and eligibility on the draft, as the old editor did (the old "the template mark moves …" case read it).
+/// A wrong line would send the user to mark a template that is marked, or one that cannot launch. Specified: with ⚡ on
+/// `codex-deep`, its editor says it "starts a session from this saved template"; `webbuilder`'s says "Not the quick
+/// launch. The ⚡ in the list makes it one."; an agent template with no agent type says it "Can't be the quick launch".
+#[gpui::test]
+fn the_quick_launch_line_says_whether_the_template_holds_the_mark(cx: &mut TestAppContext) {
+    let mut list = templates();
+    list.push(template(
+        "no-agent",
+        TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            ..TemplateFields::default()
+        },
+    ));
+    let (mut helm, cx) = open_header(cx, &list, Some("codex-deep"));
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    let marked = "starts a session from this saved template";
+    let unmarked = "Not the quick launch. The ⚡ in the list makes it one.";
+    let ineligible = "Can't be the quick launch";
+    let shown = painted(cx);
+    assert!(
+        shown.contains(marked) && !shown.contains(unmarked),
+        "{shown}"
+    );
+    click(cx, "template-open-webbuilder");
+    let shown = painted(cx);
+    assert!(
+        shown.contains(unmarked) && !shown.contains(marked),
+        "{shown}"
+    );
+    click(cx, "template-open-no-agent");
+    let shown = painted(cx);
+    assert!(
+        shown.contains(ineligible) && !shown.contains(unmarked),
+        "{shown}"
+    );
 }
 
 /// A wrapper prefix that does not parse stays as typed, so a half-typed quote is never lost, and refuses saving rather

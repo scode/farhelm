@@ -760,6 +760,115 @@ fn bindings_that_never_arrived_refuse_a_key_write(cx: &mut TestAppContext) {
     );
 }
 
+/// The helm stores and pushes number keys `keys` (each a digit and the template name it holds), with no ⚡ mark.
+fn push_keys(helm: &mut FakeHelm, keys: &[(&str, &str)], cx: &mut VisualTestContext) {
+    let preferences = Preferences {
+        template_shortcuts: keys
+            .iter()
+            .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
+            .collect(),
+        ..Preferences::default()
+    };
+    push_state(
+        helm,
+        cx,
+        crate::session_list::tests::preferences_state(preferences),
+    );
+}
+
+/// The key menu says which template holds each key, and a template's own key must read as its own ("This template"),
+/// not as a key to move to it, or the user would take it from themselves (the old "number keys move, follow rename …"
+/// case read it). Specified: with key 2 on `my-codex`, `my-codex`'s menu says "This template" for key 2 and "No
+/// template uses this key" for the others, and offers no "(moves here)".
+#[gpui::test]
+fn the_key_menu_names_the_templates_own_key_as_this_template(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    push_keys(&mut helm, &[("2", "my-codex")], cx);
+    click(cx, "templates-button");
+    click(cx, "template-key-my-codex");
+    assert!(any_open_menu(cx), "the premise: the menu is open");
+    let text = painted(cx);
+    assert!(text.contains("This template"), "{text}");
+    assert!(text.contains("No template uses this key"), "{text}");
+    assert!(!text.contains("(moves here)"), "{text}");
+}
+
+/// A refused number-key write is said as the write it answers, in the helm's words, and the list goes on showing the
+/// keys the helm stores (SPEC.md, "One GUI at a time": a failed save is reported, then discarded). The ⚡ write's twin
+/// is `a_refused_write_is_reported_and_nothing_changes`; the old "a failed number-key save is reported and never saved
+/// later" ran it for the keys. Specified: choosing key 1 for `my-codex`, refused with 503, shows "The number key was
+/// not saved: fixture key save refused", and `my-codex`'s key menu, opened again, shows no key as its own.
+#[gpui::test]
+fn a_refused_key_write_is_reported_and_the_stored_keys_stay(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    click(cx, "templates-button");
+    click(cx, "template-key-my-codex");
+    click(cx, "templates-key-1-item");
+    let (id, body) = one_write(&mut helm);
+    assert_eq!(
+        body,
+        serde_json::json!({"template_shortcuts": {"1": "my-codex"}}),
+        "the premise: the key write went out"
+    );
+    helm.reply(id, 503, Some(serde_json::json!("fixture key save refused")));
+    settle(cx);
+    let text = painted(cx);
+    assert!(
+        text.contains("The number key was not saved: fixture key save refused"),
+        "{text}"
+    );
+    click(cx, "template-key-my-codex");
+    assert!(any_open_menu(cx), "the premise: the menu opened again");
+    assert!(
+        !painted(cx).contains("This template"),
+        "no key is shown as my-codex's"
+    );
+}
+
+/// A second click on the key button whose menu is open only closes it, as the old toggle did (its pointerdown timing is
+/// superseded). Reopening it at once would leave no way to close the menu by the button that opened it. Specified: a
+/// click on `template-key-my-codex` opens its menu, and a second click closes it with no menu open.
+#[gpui::test]
+fn a_second_click_on_the_key_button_closes_its_menu(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_header(cx, &templates(), None);
+    click(cx, "templates-button");
+    click(cx, "template-key-my-codex");
+    assert!(any_open_menu(cx), "the premise: the menu is open");
+    click(cx, "template-key-my-codex");
+    assert!(!any_open_menu(cx), "the second click closed it");
+    assert!(any_open(cx), "the dialog stays");
+}
+
+/// A summary longer than its row must be cut at the row's edge (a recorded deviation: no ellipsis), or the row's opener
+/// would grow with its text and run under the editor beside the list (the old "long summaries stay reachable …"). The
+/// row itself always takes the list's width, so it is the opener, the element that would overflow, whose bounds are
+/// checked. Specified: a command template whose command is 400 characters long draws its opener, bolt and key button
+/// inside the `templates-list` column.
+#[gpui::test]
+fn a_long_summary_stays_inside_its_row(cx: &mut TestAppContext) {
+    let mut list = templates();
+    list[1].fields.command = Some("x".repeat(400));
+    let (_helm, cx) = open_header(cx, &list, None);
+    click(cx, "templates-button");
+    let nodes = frame(cx);
+    let bounds_of = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| node.bounds)
+            .unwrap_or_else(|| panic!("{id} is drawn"))
+    };
+    let column = bounds_of("templates-list");
+    for control in [
+        "template-open-webbuilder",
+        "template-bolt-webbuilder",
+        "template-key-webbuilder",
+    ] {
+        let bounds = bounds_of(control);
+        assert!(bounds.right() <= column.right(), "{control}: {bounds:?}");
+    }
+}
+
 /// Whether a popover menu is open over the dialog.
 fn any_open_menu(cx: &mut VisualTestContext) -> bool {
     frame(cx)
