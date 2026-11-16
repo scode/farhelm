@@ -4231,12 +4231,9 @@ fn host_progress_card_preview_setup(state: &SceneState, _: &mut Window, cx: &mut
     progress_card_scene(state, &long, Some(&long), cx);
 }
 
-/// The width the progress card's hover help is to give it, the old 310 pixels (`.farhelm-tooltip[data-kind="card"]`).
-const PROGRESS_CARD_WIDTH: f32 = 310.;
-
 /// The progress card of host 4 inside a stand-in of the chrome the layer manager's card form of hover help draws
-/// around it (the tooltip's raised ground, border, radius and menu shadow, at [`PROGRESS_CARD_WIDTH`]), which the card
-/// fills. Made once the scene's snapshot has reached the store, which happens after the setup runs.
+/// around it (the tooltip's raised ground, border, radius and menu shadow, at the width its hover help gives it), which
+/// the card fills. Made once the scene's snapshot has reached the store, which happens after the setup runs.
 fn progress_cards(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
     let kept = state.keep.borrow().iter().find_map(|kept| {
@@ -4249,7 +4246,7 @@ fn progress_cards(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElemen
         Some(card)
     });
     div()
-        .w(px(PROGRESS_CARD_WIDTH))
+        .w(crate::hosts::progress::card::WIDTH)
         .bg(theme::color(palette.bg_2))
         .border_1()
         .border_color(theme::color(palette.border))
