@@ -359,19 +359,20 @@ and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` be
 preferences supersede the old client's reread of shared preferences before an automatic pick: the GUI picks from the
 preferences as last pushed, since the helm pushes them together with the session changes that prompt a pick (decided by
 the migration's orchestrator on 2026-11-15). The snapshot sent when a channel opens never waits on a remote host. Every
-other read (directory browse, repository lists, the trash list, launch history) is an ordinary GET command whose reply
-body is the result. File stat is not: it is an HTTP request of the helm client's transfers,
-`POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled on its own. A hover
-check sent on the channel would keep running after the pointer left the link, and count against the channel's watchdog
-meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is cancelled by dropping it. Data the
-old GUI polled stays a query that the GUI issues again; it does not become a replicated collection. There are two
-exceptions, both for work whose progress Settings follows while it runs: the Podman check's readiness, which rides each
-local and ssh host's entry so its start and end reach the GUI (see "Podman places, creation and images"), and the recipe
-catalog and recipe places, so a recipe build's steps reach Settings → Recipes as they move (decided by the migration's
-orchestrator on 2026-11-15). A pushed read must start nothing, because it runs after every bump; that is why
-`/api/environment-places`, whose read schedules Podman checks, stays a query. Neither recipe collection follows the
-clock: a prepared artifact that passes its freshness window reads stale at the next re-read, not when it passes. Host
-progress also lists the failed environment launches kept after their host was removed (see "The UI channel").
+other read (directory browse, repository lists, the trash list, launch history) is an ordinary command, a GET or, for
+directory browse and repository lists, a POST, whose reply body is the result. File stat is not: it is an HTTP request
+of the helm client's transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot
+be cancelled on its own. A hover check sent on the channel would keep running after the pointer left the link, and count
+against the channel's watchdog meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is
+cancelled by dropping it. Data the old GUI polled stays a query that the GUI issues again; it does not become a
+replicated collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman
+check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
+creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
+they move (decided by the migration's orchestrator on 2026-11-15). A pushed read must start nothing, because it runs
+after every bump; that is why `/api/environment-places`, whose read schedules Podman checks, stays a query. Neither
+recipe collection follows the clock: a prepared artifact that passes its freshness window reads stale at the next
+re-read, not when it passes. Host progress also lists the failed environment launches kept after their host was removed
+(see "The UI channel").
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in

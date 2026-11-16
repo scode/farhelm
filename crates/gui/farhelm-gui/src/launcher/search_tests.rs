@@ -627,10 +627,19 @@ fn rows_are_grouped_and_the_exact_word_is_preselected() {
 #[test]
 fn a_path_offers_use_this_path() {
     let draft = Draft::agent(None);
-    assert_eq!(draft.rows("~/src"), vec![Row::UsePath("~/src".to_owned())]);
+    assert_eq!(
+        draft.rows("~/src"),
+        vec![
+            Row::UsePath("~/src".to_owned()),
+            Row::BrowsePath("~/src".to_owned())
+        ]
+    );
     assert_eq!(
         draft.rows("folder: ./a b "),
-        vec![Row::UsePath("./a b".to_owned())]
+        vec![
+            Row::UsePath("./a b".to_owned()),
+            Row::BrowsePath("./a b".to_owned())
+        ]
     );
     assert!(draft.rows("folder:plain").is_empty());
     assert!(
@@ -650,7 +659,8 @@ fn a_path_offers_use_this_path() {
         mixed.rows("org/"),
         vec![
             model("org/model", LaunchHarness::Codex),
-            Row::UsePath("org/".to_owned())
+            Row::UsePath("org/".to_owned()),
+            Row::BrowsePath("org/".to_owned())
         ]
     );
 }
@@ -741,6 +751,7 @@ fn a_typed_path_comes_before_the_saved_folders() {
         draft.rows("~/work/helm"),
         vec![
             Row::UsePath("~/work/helm".to_owned()),
+            Row::BrowsePath("~/work/helm".to_owned()),
             Row::Folder("~/work/helm".to_owned()),
             Row::Folder("~/work/helm-old".to_owned()),
         ]
