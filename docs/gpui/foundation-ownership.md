@@ -130,6 +130,7 @@ conflicted across all of it.
 | Session rename                  | `crates/gui/farhelm-gui/src/session_list/rename.rs`                                                                                                                                                                                                                                                                            | [reported](#session-rename)              | none                                  |
 | Template rows                   | `crates/gui/farhelm-gui/src/templates/rows.rs`                                                                                                                                                                                                                                                                                 | [reported](#template-rows)               | none                                  |
 | Template dispatch               | `crates/gui/farhelm-gui/src/templates/dispatch.rs`                                                                                                                                                                                                                                                                             | [reported](#template-dispatch)           | none                                  |
+| Template checkout name          | `crates/gui/farhelm-gui/src/templates/checkout_name.rs`                                                                                                                                                                                                                                                                        | [reported](#template-checkout-name)      | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -514,7 +515,9 @@ Lint exceptions: none.
 
 Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it, and shared
 with the areas that show a template's summary or the permission label in it (the approvals area's cards import
-`permission_label`). Another area's change follows the pattern already there, and the review gate judges it.
+`permission_label`; the sidebar's quick switcher draws a template row's summary through `line` and sizes its Quick
+launch row's ⚡ chord with `CHORD_TEXT`). Another area's change follows the pattern already there, and the review gate
+judges it.
 
 Lint exceptions: none.
 
@@ -754,11 +757,12 @@ Lint exceptions: none.
 ### Templates dialog entry
 
 Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it. Other areas
-use four of its items: the session list's Templates button opens the dialog and shows its help (`open`, `button_help`,
-sidebar-and-session-view), and the launcher opens the dialog on a template its Save as template just stored and hands a
-quick launch's new session over to be named (`open_at`, `name_quick_launched`). The table holds only whole paths, so the
-row covers the whole module root and the owner's own changes to it are reported too; the review gate passes those that
-leave the shared items alone. Another area's change follows the pattern already there, and the review gate judges it.
+use five of its items: the session list's Templates button opens the dialog and shows its help (`open`, `button_help`,
+sidebar-and-session-view), its quick switcher names the quick-launch shortcut (`QUICK_LAUNCH_SHORTCUT_NAME`), and the
+launcher opens the dialog on a template its Save as template just stored and hands a quick launch's new session over to
+be named (`open_at`, `name_quick_launched`). The table holds only whole paths, so the row covers the whole module root
+and the owner's own changes to it are reported too; the review gate passes those that leave the shared items alone.
+Another area's change follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -872,9 +876,11 @@ Lint exceptions: none.
 ### Template rows
 
 Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it as the template
-search the template lists are to share (neither the quick switcher's templates section nor the Cmd+J list is built yet),
-and shared with the launcher, whose `tl:` search lists and matches templates through it (`rows`, `Row`, `matches`).
-Another area's change follows the pattern already there, and the review gate judges it.
+search the template lists share, and shared with the launcher, whose `tl:` search lists and matches templates through it
+(`rows`, `Row`, `matches`), and with sidebar-and-session-view, whose quick switcher lists templates and acts on a pick
+through it (`template_query`, `rows`, `Row`, `pick_from_switcher`, `quick_launch_row_label`,
+`quick_launch_from_switcher`). The Cmd+J list, the other list it was built for, is not built yet. Another area's change
+follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -883,6 +889,15 @@ Lint exceptions: none.
 Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it, and shared
 with the launcher, whose `tl:` search applies a taken template row through it (`search_row_batch`). Another area's
 change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
+### Template checkout name
+
+Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it, and shared
+with the launcher, whose Name field shows a template's base name as numbered if taken, and says when the base was taken
+(`template_base`, `pill`, `taken_note`). Another area's change follows the pattern already there, and the review gate
+judges it.
 
 Lint exceptions: none.
 
@@ -968,78 +983,79 @@ instead. In a reported file both are fine. The lists areas append to there (`Ico
 changed with every addition, and during two rebases jj's automatic merge left the golden scenes' length wrong without a
 conflict marker.
 
-| Foundation             | Extension path                                         | Rule          |
-| ---------------------- | ------------------------------------------------------ | ------------- |
-| Bootstrap              | `crates/gui/farhelm-gui/src/lib.rs`                    | `reported`    |
-| Bootstrap              | `crates/gui/farhelm-gui/Cargo.toml`                    | `reported`    |
-| Theme                  | `crates/gui/farhelm-gui/src/theme.rs`                  | `reported`    |
-| Component layer        | `crates/gui/farhelm-gui/src/components/`               | `reported`    |
-| Actions and keymap     | `crates/gui/farhelm-gui/src/actions.rs`                | `reported`    |
-| Actions and keymap     | `crates/gui/farhelm-gui/src/actions_tests.rs`          | `reported`    |
-| Operation store        | `crates/gui/farhelm-gui/src/operations.rs`             | `append-only` |
-| Notice center          | `crates/gui/farhelm-gui/src/notices.rs`                | `append-only` |
-| Test harness           | `crates/gui/farhelm-gui/src/goldens.rs`                | `reported`    |
-| Test harness           | `crates/gui/farhelm-gui/src/test_support.rs`           | `append-only` |
-| Assets                 | `crates/gui/farhelm-gui/src/assets.rs`                 | `reported`    |
-| Assets                 | `crates/gui/farhelm-gui/assets/icons/`                 | `new-files`   |
-| Main view              | `crates/gui/farhelm-gui/src/main_view.rs`              | `reported`    |
-| Harness marks          | `crates/gui/farhelm-gui/src/marks.rs`                  | `append-only` |
-| Harness marks          | `crates/gui/farhelm-gui/src/marks/`                    | `new-files`   |
-| Test-automation bridge | `scripts/gui-agent.py`                                 | `reported`    |
-| Test-automation bridge | `scripts/test-gui-agent.py`                            | `reported`    |
-| Test-automation bridge | `docs/gui-agent.md`                                    | `reported`    |
-| Test-automation bridge | `scripts/gui-screenshot-batch.py`                      | `reported`    |
-| Test-automation bridge | `scripts/test-gui-screenshot-batch.py`                 | `reported`    |
-| Test-automation bridge | `scripts/gui-e2e-smoke.py`                             | `reported`    |
-| Test-automation bridge | `scripts/test-gui-e2e-smoke.py`                        | `reported`    |
-| Host identity          | `crates/gui/farhelm-gui/src/hosts/identity.rs`         | `reported`    |
-| Host identity          | `crates/gui/farhelm-gui/src/hosts/identity/`           | `reported`    |
-| Harness answers        | `crates/gui/farhelm-gui/src/harness.rs`                | `reported`    |
-| Permission shield      | `crates/gui/farhelm-gui/src/permission.rs`             | `reported`    |
-| Permission words       | `crates/gui/farhelm-gui/src/permission/words.rs`       | `reported`    |
-| Provider wording       | `crates/gui/farhelm-gui/src/environment_ui.rs`         | `reported`    |
-| Template summary       | `crates/gui/farhelm-gui/src/templates/summary.rs`      | `reported`    |
-| Save as template       | `crates/gui/farhelm-gui/src/templates/save.rs`         | `reported`    |
-| Save as template       | `crates/gui/farhelm-gui/src/templates/save_panel.rs`   | `reported`    |
-| Terminal tunnels       | `crates/gui/farhelm-gui/src/terminal/tunnels.rs`       | `reported`    |
-| Terminal text size     | `crates/gui/farhelm-gui/src/terminal/text_size.rs`     | `reported`    |
-| Terminal set           | `crates/gui/farhelm-gui/src/terminal/set.rs`           | `reported`    |
-| Add host dialog        | `crates/gui/farhelm-gui/src/hosts/add.rs`              | `reported`    |
-| Hosts panel            | `crates/gui/farhelm-gui/src/hosts.rs`                  | `reported`    |
-| Host offers            | `crates/gui/farhelm-gui/src/hosts/offers.rs`           | `reported`    |
-| Approval region        | `crates/gui/farhelm-gui/src/approvals/region.rs`       | `reported`    |
-| Approval answers       | `crates/gui/farhelm-gui/src/approvals/answers.rs`      | `reported`    |
-| Approval answers       | `crates/gui/farhelm-gui/src/approvals/host_add.rs`     | `reported`    |
-| Title band             | `crates/gui/farhelm-gui/src/desktop/title_band.rs`     | `reported`    |
-| Updater window side    | `crates/gui/farhelm-gui/src/desktop/updates.rs`        | `reported`    |
-| Launcher entry         | `crates/gui/farhelm-gui/src/launcher/entry.rs`         | `reported`    |
-| Launcher view          | `crates/gui/farhelm-gui/src/launcher/view.rs`          | `reported`    |
-| Launch draft           | `crates/gui/farhelm-gui/src/launcher/draft.rs`         | `reported`    |
-| Launch models          | `crates/gui/farhelm-gui/src/launcher/model.rs`         | `reported`    |
-| Session replace        | `crates/gui/farhelm-gui/src/session_list/replace.rs`   | `reported`    |
-| Operation outcomes     | `crates/gui/farhelm-gui/src/session_list/outcome.rs`   | `reported`    |
-| Session age            | `crates/gui/farhelm-gui/src/session_list/age.rs`       | `reported`    |
-| Host settings          | `crates/gui/farhelm-gui/src/hosts/settings.rs`         | `reported`    |
-| SSH help               | `crates/gui/farhelm-gui/src/hosts/ssh_help.rs`         | `reported`    |
-| Open-source notices    | `crates/gui/farhelm-gui/src/desktop/licenses.rs`       | `reported`    |
-| Version readout view   | `crates/gui/farhelm-gui/src/update_readout/view.rs`    | `reported`    |
-| Trash cue              | `crates/gui/farhelm-gui/src/trash/cue.rs`              | `reported`    |
-| Notices bell           | `crates/gui/farhelm-gui/src/notices_bell.rs`           | `reported`    |
-| Help menu              | `crates/gui/farhelm-gui/src/help_menu.rs`              | `reported`    |
-| Trash button           | `crates/gui/farhelm-gui/src/trash.rs`                  | `reported`    |
-| Templates dialog entry | `crates/gui/farhelm-gui/src/templates.rs`              | `reported`    |
-| Settings dialog        | `crates/gui/farhelm-gui/src/settings.rs`               | `reported`    |
-| Terminal cell metrics  | `crates/gui/farhelm-gui/src/terminal.rs`               | `reported`    |
-| Session selection      | `crates/gui/farhelm-gui/src/session_list/selection.rs` | `reported`    |
-| Session list           | `crates/gui/farhelm-gui/src/session_list.rs`           | `reported`    |
-| Status sounds          | `crates/gui/farhelm-gui/src/sounds.rs`                 | `reported`    |
-| Status sounds          | `crates/gui/farhelm-gui/src/sounds/rules.rs`           | `reported`    |
-| Session restart        | `crates/gui/farhelm-gui/src/session_list/restart.rs`   | `reported`    |
-| Session menu           | `crates/gui/farhelm-gui/src/session_list/menu.rs`      | `reported`    |
-| Session delete         | `crates/gui/farhelm-gui/src/session_list/delete.rs`    | `reported`    |
-| Rail notices           | `crates/gui/farhelm-gui/src/rail_notices.rs`           | `reported`    |
-| Launching              | `crates/gui/farhelm-gui/src/launcher/launch.rs`        | `reported`    |
-| Template shortcuts     | `crates/gui/farhelm-gui/src/templates/shortcuts.rs`    | `reported`    |
-| Session rename         | `crates/gui/farhelm-gui/src/session_list/rename.rs`    | `reported`    |
-| Template rows          | `crates/gui/farhelm-gui/src/templates/rows.rs`         | `reported`    |
-| Template dispatch      | `crates/gui/farhelm-gui/src/templates/dispatch.rs`     | `reported`    |
+| Foundation             | Extension path                                          | Rule          |
+| ---------------------- | ------------------------------------------------------- | ------------- |
+| Bootstrap              | `crates/gui/farhelm-gui/src/lib.rs`                     | `reported`    |
+| Bootstrap              | `crates/gui/farhelm-gui/Cargo.toml`                     | `reported`    |
+| Theme                  | `crates/gui/farhelm-gui/src/theme.rs`                   | `reported`    |
+| Component layer        | `crates/gui/farhelm-gui/src/components/`                | `reported`    |
+| Actions and keymap     | `crates/gui/farhelm-gui/src/actions.rs`                 | `reported`    |
+| Actions and keymap     | `crates/gui/farhelm-gui/src/actions_tests.rs`           | `reported`    |
+| Operation store        | `crates/gui/farhelm-gui/src/operations.rs`              | `append-only` |
+| Notice center          | `crates/gui/farhelm-gui/src/notices.rs`                 | `append-only` |
+| Test harness           | `crates/gui/farhelm-gui/src/goldens.rs`                 | `reported`    |
+| Test harness           | `crates/gui/farhelm-gui/src/test_support.rs`            | `append-only` |
+| Assets                 | `crates/gui/farhelm-gui/src/assets.rs`                  | `reported`    |
+| Assets                 | `crates/gui/farhelm-gui/assets/icons/`                  | `new-files`   |
+| Main view              | `crates/gui/farhelm-gui/src/main_view.rs`               | `reported`    |
+| Harness marks          | `crates/gui/farhelm-gui/src/marks.rs`                   | `append-only` |
+| Harness marks          | `crates/gui/farhelm-gui/src/marks/`                     | `new-files`   |
+| Test-automation bridge | `scripts/gui-agent.py`                                  | `reported`    |
+| Test-automation bridge | `scripts/test-gui-agent.py`                             | `reported`    |
+| Test-automation bridge | `docs/gui-agent.md`                                     | `reported`    |
+| Test-automation bridge | `scripts/gui-screenshot-batch.py`                       | `reported`    |
+| Test-automation bridge | `scripts/test-gui-screenshot-batch.py`                  | `reported`    |
+| Test-automation bridge | `scripts/gui-e2e-smoke.py`                              | `reported`    |
+| Test-automation bridge | `scripts/test-gui-e2e-smoke.py`                         | `reported`    |
+| Host identity          | `crates/gui/farhelm-gui/src/hosts/identity.rs`          | `reported`    |
+| Host identity          | `crates/gui/farhelm-gui/src/hosts/identity/`            | `reported`    |
+| Harness answers        | `crates/gui/farhelm-gui/src/harness.rs`                 | `reported`    |
+| Permission shield      | `crates/gui/farhelm-gui/src/permission.rs`              | `reported`    |
+| Permission words       | `crates/gui/farhelm-gui/src/permission/words.rs`        | `reported`    |
+| Provider wording       | `crates/gui/farhelm-gui/src/environment_ui.rs`          | `reported`    |
+| Template summary       | `crates/gui/farhelm-gui/src/templates/summary.rs`       | `reported`    |
+| Save as template       | `crates/gui/farhelm-gui/src/templates/save.rs`          | `reported`    |
+| Save as template       | `crates/gui/farhelm-gui/src/templates/save_panel.rs`    | `reported`    |
+| Terminal tunnels       | `crates/gui/farhelm-gui/src/terminal/tunnels.rs`        | `reported`    |
+| Terminal text size     | `crates/gui/farhelm-gui/src/terminal/text_size.rs`      | `reported`    |
+| Terminal set           | `crates/gui/farhelm-gui/src/terminal/set.rs`            | `reported`    |
+| Add host dialog        | `crates/gui/farhelm-gui/src/hosts/add.rs`               | `reported`    |
+| Hosts panel            | `crates/gui/farhelm-gui/src/hosts.rs`                   | `reported`    |
+| Host offers            | `crates/gui/farhelm-gui/src/hosts/offers.rs`            | `reported`    |
+| Approval region        | `crates/gui/farhelm-gui/src/approvals/region.rs`        | `reported`    |
+| Approval answers       | `crates/gui/farhelm-gui/src/approvals/answers.rs`       | `reported`    |
+| Approval answers       | `crates/gui/farhelm-gui/src/approvals/host_add.rs`      | `reported`    |
+| Title band             | `crates/gui/farhelm-gui/src/desktop/title_band.rs`      | `reported`    |
+| Updater window side    | `crates/gui/farhelm-gui/src/desktop/updates.rs`         | `reported`    |
+| Launcher entry         | `crates/gui/farhelm-gui/src/launcher/entry.rs`          | `reported`    |
+| Launcher view          | `crates/gui/farhelm-gui/src/launcher/view.rs`           | `reported`    |
+| Launch draft           | `crates/gui/farhelm-gui/src/launcher/draft.rs`          | `reported`    |
+| Launch models          | `crates/gui/farhelm-gui/src/launcher/model.rs`          | `reported`    |
+| Session replace        | `crates/gui/farhelm-gui/src/session_list/replace.rs`    | `reported`    |
+| Operation outcomes     | `crates/gui/farhelm-gui/src/session_list/outcome.rs`    | `reported`    |
+| Session age            | `crates/gui/farhelm-gui/src/session_list/age.rs`        | `reported`    |
+| Host settings          | `crates/gui/farhelm-gui/src/hosts/settings.rs`          | `reported`    |
+| SSH help               | `crates/gui/farhelm-gui/src/hosts/ssh_help.rs`          | `reported`    |
+| Open-source notices    | `crates/gui/farhelm-gui/src/desktop/licenses.rs`        | `reported`    |
+| Version readout view   | `crates/gui/farhelm-gui/src/update_readout/view.rs`     | `reported`    |
+| Trash cue              | `crates/gui/farhelm-gui/src/trash/cue.rs`               | `reported`    |
+| Notices bell           | `crates/gui/farhelm-gui/src/notices_bell.rs`            | `reported`    |
+| Help menu              | `crates/gui/farhelm-gui/src/help_menu.rs`               | `reported`    |
+| Trash button           | `crates/gui/farhelm-gui/src/trash.rs`                   | `reported`    |
+| Templates dialog entry | `crates/gui/farhelm-gui/src/templates.rs`               | `reported`    |
+| Settings dialog        | `crates/gui/farhelm-gui/src/settings.rs`                | `reported`    |
+| Terminal cell metrics  | `crates/gui/farhelm-gui/src/terminal.rs`                | `reported`    |
+| Session selection      | `crates/gui/farhelm-gui/src/session_list/selection.rs`  | `reported`    |
+| Session list           | `crates/gui/farhelm-gui/src/session_list.rs`            | `reported`    |
+| Status sounds          | `crates/gui/farhelm-gui/src/sounds.rs`                  | `reported`    |
+| Status sounds          | `crates/gui/farhelm-gui/src/sounds/rules.rs`            | `reported`    |
+| Session restart        | `crates/gui/farhelm-gui/src/session_list/restart.rs`    | `reported`    |
+| Session menu           | `crates/gui/farhelm-gui/src/session_list/menu.rs`       | `reported`    |
+| Session delete         | `crates/gui/farhelm-gui/src/session_list/delete.rs`     | `reported`    |
+| Rail notices           | `crates/gui/farhelm-gui/src/rail_notices.rs`            | `reported`    |
+| Launching              | `crates/gui/farhelm-gui/src/launcher/launch.rs`         | `reported`    |
+| Template shortcuts     | `crates/gui/farhelm-gui/src/templates/shortcuts.rs`     | `reported`    |
+| Session rename         | `crates/gui/farhelm-gui/src/session_list/rename.rs`     | `reported`    |
+| Template rows          | `crates/gui/farhelm-gui/src/templates/rows.rs`          | `reported`    |
+| Template dispatch      | `crates/gui/farhelm-gui/src/templates/dispatch.rs`      | `reported`    |
+| Template checkout name | `crates/gui/farhelm-gui/src/templates/checkout_name.rs` | `reported`    |
