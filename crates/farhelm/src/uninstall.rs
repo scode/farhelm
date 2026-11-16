@@ -3,16 +3,20 @@
 //! On macOS the installation is the app bundle with its side-by-side versions
 //! (see `app`); on Linux it is a standalone bin directory an earlier installer
 //! left (see `ownership`). File ownership is established before confirmation
-//! and re-checked after it, under the locks install, setup and (on macOS) the
+//! and re-checked after it, under the locks install and (on macOS) the
 //! runtime use; see `locks`.
 //! Runtime shutdown is an operator prerequisite; this command does not inspect
-//! processes or sessions, with two exceptions: setup-owned services, and the
-//! supervisor the desktop app started (which outlives the app, so quitting the
-//! app no longer stops it). That supervisor is stopped only when the app's own
+//! processes or sessions, with one exception: the supervisor the desktop app
+//! started (which outlives the app, so quitting the app no longer stops it).
+//! That supervisor is stopped only when the app's own
 //! record identifies the live process exactly and its program is one of the
 //! versions inside the app being removed
 //! (`farhelm_supervisor::managed_supervisor`), the orderly way and never by
 //! force.
+//!
+//! Systemd user units an earlier release's `farhelm helm setup` wrote are not
+//! touched: that command is gone, and with it uninstall's removal of its
+//! units.
 
 use anyhow::{Context as _, Result, bail};
 use std::{
@@ -41,7 +45,6 @@ pub(crate) struct Options {
 /// Capture invocation facts once so the implementation needs no ambient reads.
 struct Inputs {
     ownership: ownership::InspectionInputs,
-    xdg_config_home: Option<OsString>,
     xdg_state_home: Option<OsString>,
     interactive: bool,
     /// How long uninstall waits for the desktop app's supervisor to stop
@@ -69,7 +72,6 @@ pub(crate) fn run(options: Options) -> Result<()> {
                 ownership::PlatformArtifacts::Linux
             },
         },
-        xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         xdg_state_home: std::env::var_os("XDG_STATE_HOME"),
         interactive: stdin.is_terminal(),
         supervisor_stop_grace: farhelm_supervisor::managed_supervisor::ORDERLY_STOP_GRACE,
@@ -77,7 +79,6 @@ pub(crate) fn run(options: Options) -> Result<()> {
     run_with_inputs(
         &inputs,
         &options,
-        &mut crate::setup::SystemctlUnitManager,
         &mut stdin.lock(),
         &mut std::io::stdout().lock(),
     )
@@ -90,45 +91,17 @@ pub(crate) fn run(options: Options) -> Result<()> {
 fn run_with_inputs(
     inputs: &Inputs,
     options: &Options,
-    manager: &mut dyn crate::setup::UnitManager,
     input: &mut dyn BufRead,
     output: &mut dyn Write,
 ) -> Result<()> {
-    let home = inputs.ownership.home.as_deref().context(
-        "HOME is not set; cannot determine the app bundle, service or retained data locations",
-    )?;
+    let home =
+        inputs.ownership.home.as_deref().context(
+            "HOME is not set; cannot determine the app bundle or retained data locations",
+        )?;
     let plan = ownership::inspect(&inputs.ownership)?;
-    let services = match &plan {
-        ownership::OwnershipPlan::Flat(flat) => {
-            let directory =
-                farhelm_helm::units::user_unit_dir(inputs.xdg_config_home.as_deref(), home);
-            Some(crate::setup::preflight_selected_services(
-                std::slice::from_ref(&flat.cli),
-                &directory,
-                manager,
-            )?)
-        }
-        ownership::OwnershipPlan::App(_) => None,
-    };
     let mut preview = String::from(
         "Stop local sessions and additional terminals, quit Farhelm Desktop, and stop manually started Farhelm processes before continuing. Sessions and their terminals keep running without Farhelm Desktop or the supervisor, and uninstall does not end them. Uninstall does not check whether sessions or manually started processes are running.\n\n",
     );
-    if let Some(services) = &services {
-        for service in services.selected() {
-            writeln!(
-                preview,
-                "stop and disable {}; remove {}",
-                service.name(),
-                path_text(service.path())
-            )?;
-        }
-        for path in services.retained_paths() {
-            writeln!(preview, "retain integration {}", path_text(path))?;
-        }
-        if !services.manager_available() {
-            preview.push_str("No user service manager was available; no known service files were found in the selected configuration directory.\n");
-        }
-    }
     match &plan {
         ownership::OwnershipPlan::Flat(flat) => {
             if let Some(path) = &flat.desktop {
@@ -205,28 +178,15 @@ fn run_with_inputs(
     // Held until the removal below has finished, and released before the
     // report is written, so a blocked output pipe cannot keep them; see
     // `locks`.
-    let mut held = lock_and_recheck(
-        inputs,
-        home,
-        &state,
-        &plan,
-        services.as_ref(),
-        &app_supervisors,
-        manager,
-    )?;
+    let mut held = lock_and_recheck(inputs, home, &state, &plan, &app_supervisors)?;
     let mut report = String::new();
-    let result = (|| {
-        if let Some(services) = &services {
-            crate::setup::remove_selected_services_locked(services, false, manager, &mut report)?;
+    let result = match &plan {
+        ownership::OwnershipPlan::App(app) => remove_app_locked(app, &mut held, &mut report)
+            .map_err(|error| after_stop(error, held.stopped_supervisor)),
+        ownership::OwnershipPlan::Flat(_) => {
+            removal::remove(&plan, &held.running_records, &mut report)
         }
-        match &plan {
-            ownership::OwnershipPlan::App(app) => remove_app_locked(app, &mut held, &mut report)
-                .map_err(|error| after_stop(error, held.stopped_supervisor)),
-            ownership::OwnershipPlan::Flat(_) => {
-                removal::remove(&plan, &held.running_records, &mut report)
-            }
-        }
-    })();
+    };
     drop(held);
     if result.is_err() {
         match &plan {
@@ -377,7 +337,6 @@ struct HeldLocks {
     /// running from them.
     running_records: Vec<PathBuf>,
     _runtime: Option<locks::RuntimeLocks>,
-    _setup: Option<crate::setup::SetupLock>,
     /// The installation lock and the older installers' lock folder (macOS),
     /// whose `~/Applications` descriptor the removal uses for leftovers
     /// beside the app.
@@ -391,19 +350,17 @@ struct HeldLocks {
 /// confirm that what uninstall is about to remove is still exactly the plan
 /// the user confirmed.
 ///
-/// The re-check is what makes the locks sufficient: an install, update or
-/// setup that ran between the plan and the locks may have changed the
-/// binaries, the app bundle or the service files, and once the locks are
-/// held nothing else can. A plan that changed refuses rather than removing
-/// something the user was not shown. See `locks` for which locks and why.
+/// The re-check is what makes the locks sufficient: an install or update
+/// that ran between the plan and the locks may have changed the binaries or
+/// the app bundle, and once the locks are held nothing else can. A plan
+/// that changed refuses rather than removing something the user was not
+/// shown. See `locks` for which locks and why.
 fn lock_and_recheck(
     inputs: &Inputs,
     home: &Path,
     state: &Path,
     plan: &ownership::OwnershipPlan,
-    services: Option<&crate::setup::SelectedServicePlan>,
     app_supervisors: &[AppSupervisor],
-    manager: &mut dyn crate::setup::UnitManager,
 ) -> Result<HeldLocks> {
     let macos = inputs.ownership.platform == ownership::PlatformArtifacts::Macos;
     // The installer's bin-directory lock exists only for the flat layout;
@@ -430,10 +387,6 @@ fn lock_and_recheck(
         }
         ownership::OwnershipPlan::Flat(_) => None,
     };
-    let setup = match services {
-        Some(services) => crate::setup::lock_for_selected_services(services)?,
-        None => None,
-    };
     // Only the helm locks for now: an open desktop app holds its helm's, so
     // uninstall refuses here, before it has stopped anything. The supervisor
     // locks follow once the re-check below has passed and the app's own
@@ -451,8 +404,8 @@ fn lock_and_recheck(
     };
     let changed = |what: &str| {
         anyhow::anyhow!(
-            "{what} changed after you confirmed (for example, an install, update or setup ran in \
-             the meantime); nothing was removed; run uninstall again to see the current plan"
+            "{what} changed after you confirmed (for example, an install or update ran in the \
+             meantime); nothing was removed; run uninstall again to see the current plan"
         )
     };
     let fresh = ownership::inspect(&inputs.ownership)
@@ -472,18 +425,6 @@ fn lock_and_recheck(
             path_text(root)
         )));
     }
-    if let (Some(services), ownership::OwnershipPlan::Flat(flat)) = (services, plan) {
-        let directory = farhelm_helm::units::user_unit_dir(inputs.xdg_config_home.as_deref(), home);
-        let fresh = crate::setup::preflight_selected_services(
-            std::slice::from_ref(&flat.cli),
-            &directory,
-            manager,
-        )
-        .context("re-checking Farhelm's services after confirmation; nothing was removed")?;
-        if fresh != *services {
-            return Err(changed("the Farhelm services set up for this installation"));
-        }
-    }
     let mut stopped_supervisor = false;
     if let Some(runtime) = &mut runtime {
         stopped_supervisor = stop_app_supervisors(app_supervisors, inputs.supervisor_stop_grace)?;
@@ -497,7 +438,6 @@ fn lock_and_recheck(
         _install: install,
         installation,
         app_folder,
-        _setup: setup,
         _runtime: runtime,
     })
 }
@@ -659,14 +599,6 @@ mod tests {
     use app::tests::AppFixture;
     use ownership::{PlatformArtifacts, tests::Fixture};
 
-    /// A unit manager for the macOS path, which never consults one.
-    struct NoUnits;
-    impl crate::setup::UnitManager for NoUnits {
-        fn run(&mut self, args: &[&str]) -> Result<crate::setup::UnitCommand> {
-            panic!("the macOS uninstall path ran systemctl {args:?}");
-        }
-    }
-
     /// A confirmation that answers "y" and, as it is read, runs `meanwhile`:
     /// the window between the user confirming and uninstall taking its
     /// locks, made deterministic.
@@ -702,7 +634,6 @@ mod tests {
         std::fs::create_dir_all(state.join("farhelm")).expect("state directory");
         Inputs {
             ownership: fixture.inputs(),
-            xdg_config_home: None,
             xdg_state_home: Some(state.as_os_str().to_os_string()),
             interactive: true,
             supervisor_stop_grace: std::time::Duration::from_secs(10),
@@ -739,7 +670,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -767,7 +697,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -908,7 +837,6 @@ mod tests {
                 dry_run: false,
                 yes: false,
             },
-            &mut NoUnits,
             &mut input,
             &mut Vec::new(),
         )
@@ -960,7 +888,6 @@ mod tests {
                 dry_run: false,
                 yes: false,
             },
-            &mut NoUnits,
             &mut input,
             &mut Vec::new(),
         )
@@ -984,15 +911,6 @@ mod tests {
         );
     }
 
-    /// A user unit manager that is not there, for the Linux path: with no
-    /// known service files, uninstall plans no services.
-    struct NoUserManager;
-    impl crate::setup::UnitManager for NoUserManager {
-        fn run(&mut self, _args: &[&str]) -> Result<crate::setup::UnitCommand> {
-            anyhow::bail!("no user service manager in this test")
-        }
-    }
-
     /// A held install lock refuses a Linux uninstall before anything is
     /// removed.
     ///
@@ -1005,14 +923,12 @@ mod tests {
     fn a_held_install_lock_refuses_without_removing() {
         let fixture = Fixture::new();
         fixture.flat(None);
-        let config = tempfile::tempdir().expect("config");
         let lock = fixture.install.join(".farhelm-install.lock");
         std::fs::create_dir(&lock).expect("installer lock");
         std::fs::write(lock.join("pid"), "1\n").expect("installer pid");
         let error = run_with_inputs(
             &Inputs {
                 ownership: fixture.inputs(PlatformArtifacts::Linux),
-                xdg_config_home: Some(config.path().as_os_str().to_os_string()),
                 xdg_state_home: None,
                 interactive: true,
                 supervisor_stop_grace: std::time::Duration::from_secs(10),
@@ -1021,7 +937,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUserManager,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -1066,7 +981,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut output,
         )
@@ -1117,7 +1031,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -1148,7 +1061,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -1190,7 +1102,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -1350,7 +1261,6 @@ mod tests {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut output,
         );
@@ -1515,7 +1425,6 @@ mod tests {
                 dry_run: false,
                 yes: false,
             },
-            &mut NoUnits,
             &mut input,
             &mut Vec::new(),
         )
@@ -1553,7 +1462,6 @@ mod tests {
                 dry_run: true,
                 yes: false,
             },
-            &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
             &mut output,
         )
@@ -1669,7 +1577,6 @@ mod tests {
                 dry_run: false,
                 yes: false,
             },
-            &mut NoUnits,
             &mut input,
             &mut Vec::new(),
         )

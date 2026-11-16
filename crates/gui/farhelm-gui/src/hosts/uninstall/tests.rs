@@ -322,7 +322,7 @@ fn cancel_sends_nothing_and_owes_no_notice(cx: &mut TestAppContext) {
 // ---- Refusals --------------------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Topology": uninstall refuses, naming them, while the host has sessions or tabs, a host it cannot check, a
-/// `farhelm helm setup` unit, a foreign supervisor path and a symlinked lib directory, and "when the host list already
+/// foreign supervisor path and a symlinked lib directory, and "when the host list already
 /// shows incompatible versions, an unverified or changed identity, or two entries reaching the same machine, uninstall's
 /// refusal also explains the remedy and offers Remove". The helm words every refusal and marks the ones that offer
 /// Remove; the GUI's part is to show the words in the host refusal dialog and Remove exactly for the marker (the old

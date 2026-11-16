@@ -35,16 +35,11 @@ serde_json.workspace = true
 # streams claimed artifacts through this shared implementation before it can
 # authorize a later remover to name them.
 sha2.workspace = true
-# Setup's copied sign-in command, and `internal stdio`'s start command for an
-# absent supervisor, must preserve a chosen state directory as one shell
-# argument, using the same quoting rules as token recovery advice.
+# `farhelm agent`'s template listing shows a template's custom permission
+# flags as one shell-quoted line (render.rs), and `internal stdio`'s start
+# command for an absent supervisor must preserve a chosen state directory as
+# one shell argument; both use the quoting rules a shell reads back.
 shell-words.workspace = true
-# `farhelm helm setup` publishes each unit file through a uniquely named,
-# exclusively created staging file in the unit directory (setup.rs). A
-# predictable staging name is a symlink target and a race between two
-# setups; tempfile is the same crate the tests already used, promoted to a
-# regular dependency so the product path can use it too.
-tempfile.workspace = true
 # The terminal host, run as `farhelm internal terminal-host` so it ships inside
 # this binary rather than as an artifact of its own.
 terminal-host.workspace = true
@@ -79,6 +74,8 @@ farhelm-testtrace.workspace = true
 # a hand-rolled HTTP client would be a second, worse thing to maintain.
 # Loopback only; the workspace's reqwest serves as it is.
 reqwest.workspace = true
+# Temporary directories for the unit and integration tests' fixtures.
+tempfile.workspace = true
 # The e2e listing-poll tests run on Tokio's virtual clock. Their timeout
 # assertions must not depend on a loaded machine scheduling real sleeps, and
 # `test-util` keeps that test-only support out of the shipped binary.

@@ -400,7 +400,7 @@ impl GridViewer {
 /// A bare `farhelm supervisor run` creates a new session's agent and a new
 /// tab in terminal hosts.
 ///
-/// Why: `farhelm helm setup`'s units, the desktop app and a hand-started
+/// Why: remote provisioning's unit, the desktop app and a hand-started
 /// supervisor all run the bare command, so this is what every user's
 /// terminals run in. Spec: a created session is a confirmed host row whose
 /// socket a host process serves; its agent terminal attaches as a grid

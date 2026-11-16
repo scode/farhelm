@@ -48,7 +48,6 @@ mod agent_instructions;
 mod goose_hook;
 mod hook;
 mod render;
-mod setup;
 mod uninstall;
 
 #[derive(Parser)]
@@ -1162,9 +1161,6 @@ fn read_agent_prompt(path: &str) -> Result<String, String> {
 enum HelmCmd {
     /// Serve the API on loopback, connected to the registered fleet.
     Run(farhelm_helm::HelmArgs),
-    /// Install (or remove) the systemd user units that run this helm and
-    /// its supervisor on this machine.
-    Setup(setup::SetupOptions),
     /// View or change where fresh checkouts are created (the working-copy
     /// root) and what runs after cloning (an optional post-clone command),
     /// globally or per registered host. Edits stored configuration only:
@@ -1262,8 +1258,8 @@ enum SupervisorCmd {
         /// kernel. Lets a test harness simulate a reboot against a real
         /// supervisor process by rewriting the file between restarts.
         ///
-        /// Hidden because no production launch passes it: `farhelm helm
-        /// setup`'s units, the desktop launcher, and a hand-started
+        /// Hidden because no production launch passes it: the desktop
+        /// launcher, remote provisioning's units and a hand-started
         /// supervisor all read the real boot id, and a supervisor pointed at
         /// a file that never changes would never classify a genuine reboot.
         #[arg(long, hide = true, value_name = "PATH")]
@@ -1732,9 +1728,6 @@ fn main() -> anyhow::Result<()> {
             init_tracing();
             farhelm_helm::run(args)
         }
-        Cmd::Helm {
-            command: HelmCmd::Setup(options),
-        } => run_helm_setup(options),
         Cmd::Helm {
             command: HelmCmd::CheckoutConfig { command },
         } => {
@@ -2551,55 +2544,6 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
     Ok(())
 }
 
-/// Capture the whole environment `farhelm helm setup` is allowed to
-/// depend on, once, and hand it to the command.
-///
-/// This is the ONLY place those variables are read. Everything the setup
-/// path decides — the unit directory, the default state directory, where
-/// relative paths point, whether the binary looks like a build artifact —
-/// follows from this one capture, which is what makes the command testable
-/// without a test ever mutating its own process environment.
-///
-/// No tokio runtime: setup is synchronous, spawns `systemctl` with
-/// `std::process::Command`, and has nothing to await.
-#[cfg(target_os = "linux")]
-fn run_helm_setup(options: setup::SetupOptions) -> anyhow::Result<()> {
-    use anyhow::Context as _;
-
-    let home = std::env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .context("HOME is not set, so farhelm helm setup cannot tell where your units belong")?;
-    let context = setup::SetupContext {
-        exe: std::env::current_exe().context("locating the running farhelm binary")?,
-        home: PathBuf::from(home),
-        cwd: std::env::current_dir()
-            .context("locating the directory farhelm helm setup was run from")?,
-        xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
-        xdg_state_home: std::env::var_os("XDG_STATE_HOME"),
-        temp_dir: std::env::temp_dir(),
-    };
-    let mut units = setup::SystemctlUnitManager;
-    let mut out = std::io::stdout().lock();
-    setup::run_setup(&context, &options, &mut units, &mut out)
-}
-
-/// What a non-Linux `farhelm helm setup` says before exiting 2.
-///
-/// A constant so the text is testable on every platform: the arm that
-/// prints it calls `process::exit`, so only a child process can observe
-/// the real thing, and the wording is the whole behaviour there.
-pub const NON_LINUX_SETUP_MESSAGE: &str = "farhelm helm setup manages systemd user units and only runs on Linux; on macOS run \
-     farhelm-desktop, which starts its own helm and supervisor";
-
-/// systemd user units are a Linux mechanism, and the Mac has its own
-/// answer (the desktop app owns a helm and a supervisor of its own), so
-/// there is nothing here to degrade gracefully into.
-#[cfg(not(target_os = "linux"))]
-fn run_helm_setup(_options: setup::SetupOptions) -> anyhow::Result<()> {
-    eprintln!("{NON_LINUX_SETUP_MESSAGE}");
-    std::process::exit(2);
-}
-
 /// A multi-threaded tokio runtime, built per subcommand rather than by a
 /// `#[tokio::main]` on `main`: `internal launch` execs and must never pay
 /// for (or be complicated by) a runtime it will replace, and `main` stays
@@ -3143,20 +3087,6 @@ mod tests {
             std::time::Duration::from_secs(5)
         );
         assert_eq!(hook_budget_from(Some("999999")), hook::HOOK_BUDGET);
-    }
-
-    /// On a Mac, this message IS `farhelm helm setup` — the arm prints it
-    /// and exits 2, and nothing else happens. Only a child process can
-    /// observe that exit, so the wording is pinned here instead, on every
-    /// platform, where a rewrite that dropped the pointer to the desktop
-    /// app would fail the build rather than ship silently.
-    #[farhelm_testtrace::test]
-    fn the_non_linux_setup_message_names_the_platform_and_the_alternative() {
-        assert_eq!(
-            NON_LINUX_SETUP_MESSAGE,
-            "farhelm helm setup manages systemd user units and only runs on Linux; on macOS run \
-             farhelm-desktop, which starts its own helm and supervisor"
-        );
     }
 
     /// Every checkout-config verb accepts `--host` and `--state-dir`, and

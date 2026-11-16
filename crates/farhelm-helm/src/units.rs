@@ -1,62 +1,30 @@
-//! The systemd user units Farhelm writes, and the one renderer that fills
-//! them in.
+//! The systemd user unit Farhelm writes, and the one renderer that fills
+//! it in.
 //!
-//! Two callers share this module and they must not drift: remote
-//! provisioning, which renders a supervisor unit and pushes it to a host
-//! over SSH, and `farhelm helm setup`, which renders the same unit plus a
-//! helm unit into the local user's `systemd/user` directory. The templates
-//! under `crates/farhelm-helm/units/` are the canonical policy — lifecycle
-//! behaviour lives in one reviewed file rather than in two code paths that
-//! happen to agree today.
+//! Remote provisioning renders the supervisor unit and pushes it to a host
+//! over SSH. The template under `crates/farhelm-helm/units/` is the
+//! canonical policy: lifecycle behaviour lives in one reviewed file rather
+//! than in the code that writes it.
 //!
-//! Ownership is the other half of what lives here. Setup marks every file
-//! it writes with [`MANAGED_MARKER`] as the very first line and will only
-//! ever overwrite or delete a file carrying that marker, so a unit written
-//! by hand — or by a distribution package — is never silently replaced.
-//! Provisioning deliberately does NOT mark the units it installs on remote
-//! hosts: those files are owned by the provisioning workflow, not by
-//! setup, and marking them would invite setup on a host machine to adopt
-//! and rewrite them.
+//! The other half of what lives here is reading the systemd user manager's
+//! environment ([`ManagerEnvironment`]), which provisioning and podman do.
 //!
 //! Everything here is pure: no environment reads, no filesystem access,
 //! no process spawning. Callers pass the paths they resolved.
 
 use anyhow::{Context as _, bail};
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// The first line of every unit file `farhelm helm setup` writes, and the
-/// entire basis of its ownership rule.
-///
-/// Setup refuses to touch a unit file that does not start with exactly
-/// this line, so the marker is a compatibility surface: changing it
-/// orphans every unit already installed, which then has to be moved aside
-/// by hand before setup will run again.
-pub const MANAGED_MARKER: &str = "# managed-by: farhelm helm setup";
-
-/// The supervisor unit `farhelm helm setup` installs, and the ONE unit the
-/// hosts panel's local-row protection rule looks for: the panel's question
-/// is only ever "is a supervisor on this machine already somebody's?".
+/// The supervisor unit provisioning installs on a host.
 pub const SUPERVISOR_UNIT_NAME: &str = "farhelm-supervisor.service";
-
-/// The helm unit `farhelm helm setup` installs. Setup owns it like the
-/// supervisor unit, but no provisioning path ever reads it — the panel has
-/// no opinion about helms.
-pub const HELM_UNIT_NAME: &str = "farhelm-helm.service";
 
 /// The supervisor unit as reviewed, with `@…@` placeholders for the two
 /// paths [`SupervisorUnitInputs`] supplies plus the `@PATH@` this module
-/// derives from the program's. Shared with remote provisioning.
+/// derives from the program's.
 const SUPERVISOR_UNIT_TEMPLATE: &str = include_str!("../units/farhelm-supervisor.service.in");
 
-/// The helm unit as reviewed. `@HELM_ARGS@` is what makes it a template
-/// rather than the static file it used to be: the flags a helm needs
-/// depend on how setup was invoked.
-const HELM_UNIT_TEMPLATE: &str = include_str!("../units/farhelm-helm.service.in");
-
-/// The tail of the SUPERVISOR unit's search path, after the directory its
-/// own executable lives in. The helm unit sets no `PATH` at all — it shells
-/// out to nothing.
+/// The tail of the supervisor unit's search path, after the directory its
+/// own executable lives in.
 const BASE_PATH: [&str; 3] = ["/usr/local/bin", "/usr/bin", "/bin"];
 
 /// The paths the supervisor unit pins.
@@ -71,28 +39,7 @@ pub struct SupervisorUnitInputs<'a> {
     pub state_dir: &'a Path,
 }
 
-/// The paths and flags the helm unit pins.
-///
-/// `state_dir` is REQUIRED, and deliberately so. Leaving it out would let
-/// the helm resolve its own default at start time, from the environment
-/// the systemd user manager was started with — which is not the
-/// environment setup ran in. A one-shot `XDG_STATE_HOME=/srv/state farhelm
-/// helm setup` would then pin `/srv/state/farhelm` into the supervisor
-/// unit (whose template has no way to omit it) while the helm kept using
-/// `~/.local/state/farhelm`, and the two would look for each other's
-/// socket in different trees. One resolved directory, written into both
-/// units, is what makes that impossible.
-///
-/// `port` stays optional: nothing else derives a path from it, so an
-/// omitted `--port` can safely mean "whatever the helm defaults to".
-pub struct HelmUnitInputs<'a> {
-    pub farhelm: &'a Path,
-    pub state_dir: &'a Path,
-    pub port: Option<u16>,
-}
-
-/// Render the supervisor unit. The result is UNMARKED; setup wraps it in
-/// [`managed`], provisioning does not.
+/// Render the supervisor unit.
 ///
 /// `PATH` is composed here: the directory holding the Farhelm program the
 /// unit runs, then [`BASE_PATH`]. A systemd user manager does not
@@ -156,254 +103,9 @@ pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<S
     ))
 }
 
-/// Render the helm unit. The result is UNMARKED; setup wraps it in
-/// [`managed`].
-///
-/// The state directory is always written out (see [`HelmUnitInputs`] for
-/// why an omitted one would be a bug rather than a default), `--port`
-/// only when pinned, and the two always appear in the same order, so an
-/// unchanged configuration renders byte-identically and setup's
-/// write-if-changed check stays meaningful.
-///
-/// Refuses a Farhelm program path containing `$`: unlike arguments, the
-/// program position does not decode `$$`. Other text-boundary refusals are
-/// the same as [`render_supervisor_unit`]'s.
-pub fn render_helm_unit(inputs: &HelmUnitInputs) -> anyhow::Result<String> {
-    let farhelm = systemd_program(inputs.farhelm)?;
-    let mut args = String::new();
-    args.push_str(" --state-dir ");
-    args.push_str(&systemd_arg(inputs.state_dir)?);
-    if let Some(port) = inputs.port {
-        args.push_str(&format!(" --port {port}"));
-    }
-    Ok(render_template(
-        HELM_UNIT_TEMPLATE,
-        &[("@FARHELM@", &farhelm), ("@HELM_ARGS@", &args)],
-    ))
-}
-
-/// Stamp a rendered unit as owned by `farhelm helm setup`.
-pub fn managed(unit: String) -> String {
-    format!("{MANAGED_MARKER}\n{unit}")
-}
-
-/// Whether setup may overwrite or delete this unit file.
-///
-/// Exact first-line equality, on purpose. A file whose marker line picked
-/// up trailing whitespace, a `\r`, or a second comment above it is a file
-/// somebody edited, and the safe answer for an ownership check is "not
-/// mine" — the cost is a refusal the operator can resolve by hand, while
-/// the cost of guessing generously is clobbering somebody's unit.
-pub fn is_managed(unit_text: &str) -> bool {
-    unit_text.split('\n').next() == Some(MANAGED_MARKER)
-}
-
-/// The program the unit's EFFECTIVE `[Service] ExecStart=` runs, or `None`
-/// when the file names none this parser is willing to read.
-///
-/// Used to answer one question: does this unit run THIS farhelm? The
-/// caller compares the result against its own executable, so an
-/// unrecognized spelling yields `None` — and the caller must treat that as
-/// "cannot tell", never as "not ours". Getting this wrong in the generous
-/// direction means the hosts panel overwriting a unit somebody wrote by
-/// hand, which is exactly the outcome the ownership rule exists to prevent.
-///
-/// Only the effective `Type=simple` is recognized; an absent `Type=` uses
-/// that default, and an empty `Type=` is refused (see [`is_simple_service`]).
-/// A `oneshot` unit can run several commands, so reading one program from it
-/// cannot establish which installation owns the unit. Type assignments use
-/// exact section scope and last-assignment-wins.
-///
-/// Command selection is deliberately narrower than systemd's list parser:
-///
-/// - Section scoping. Only `[Service]` counts. `ExecStart=` under
-///   `[Unit]`, `[Install]`, or a `[X-…]` section is not a command.
-/// - The last nonempty command is selected. Farhelm writes one command,
-///   and systemd rejects several commands for the supported `simple` type;
-///   this does not validate every possible malformed unit.
-/// - An empty `ExecStart=` RESETS the list. A file that sets a command and
-///   then clears it has no effective command, and reporting the cleared
-///   one would name a binary that never runs.
-///
-/// What it does NOT do: expand systemd specifiers. A unit whose
-/// `ExecStart=` begins with `%h/...` (as Farhelm's own pre-setup unit file
-/// did) comes back with the `%h` still in it; the caller's canonicalisation
-/// then fails to resolve it, which is the safe direction — see
-/// `local_supervisor_is_not_ours`. Line continuations (`\` at end of line)
-/// are not joined either; a continued first line still yields its program,
-/// which is all this answers.
-pub fn exec_start_program(unit_text: &str) -> Option<PathBuf> {
-    if !is_simple_service(unit_text) {
-        return None;
-    }
-    let mut in_service = false;
-    let mut effective: Option<Option<PathBuf>> = None;
-    for line in unit_text.lines() {
-        let line = line.trim();
-        if let Some(section) = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.strip_suffix(']'))
-        {
-            in_service = section == "Service";
-            continue;
-        }
-        if !in_service {
-            continue;
-        }
-        let Some(value) = line.strip_prefix("ExecStart=").map(str::trim) else {
-            continue;
-        };
-        if value.is_empty() {
-            // The reset spelling: everything assigned so far is discarded.
-            effective = Some(None);
-            continue;
-        }
-        effective = Some(exec_start_value_program(value));
-    }
-    effective.flatten()
-}
-
-/// Whether the effective service type is the one Farhelm supports.
-///
-/// Only exact `[Service]` sections count. The last `Type` assignment wins;
-/// an absent one uses the `simple` default, and whitespace around `=` is
-/// accepted as systemd accepts it. An empty `Type=` is refused: systemd logs
-/// it as invalid and keeps the EARLIER type, so a unit with `Type=oneshot`
-/// then `Type=` still runs as oneshot, and reading it as simple would let a
-/// second command stand for the whole unit. Refusing is the safe direction. This checks only the type, not
-/// command validity or installation ownership, so local setup can refuse
-/// unsupported edits without adopting the reader's command restrictions.
-pub fn is_simple_service(unit_text: &str) -> bool {
-    let mut in_service = false;
-    let mut service_type = "simple";
-    for line in unit_text.lines().map(str::trim) {
-        if let Some(section) = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.strip_suffix(']'))
-        {
-            in_service = section == "Service";
-        } else if in_service
-            && let Some((key, value)) = line.split_once('=')
-            && key.trim() == "Type"
-        {
-            // An empty value is not "simple": see the doc comment above.
-            service_type = value.trim();
-        }
-    }
-    service_type == "simple"
-}
-
-/// The program named by one `ExecStart=` value.
-fn exec_start_value_program(value: &str) -> Option<PathBuf> {
-    // Systemd allows a set of modifier characters ahead of the program:
-    // `@` supplies argv[0] separately, `-` tolerates failure, `:` disables
-    // variable expansion for the arguments, and `+`/`!`/`!!` change
-    // privileges. They say nothing about WHICH binary runs, so they are
-    // skipped rather than parsed. `:` was missing here once — a valid
-    // spelling that made a matching unit read as unclassifiable.
-    let value = value.trim_start_matches(['@', '-', ':', '+', '!']).trim();
-    let program = first_systemd_token(value)?;
-    (!program.is_empty()).then(|| PathBuf::from(program))
-}
-
-/// Read one systemd command-line token, undoing the quoting
-/// [`systemd_arg`] applies.
-///
-/// Deliberately narrow: double and single quotes, `\\` and `\"` escapes,
-/// `%%`, and `$$`. Systemd's full C-style escape set (`\n`, `\x41`, …) is not
-/// handled, because a unit using it against a path is not a unit this
-/// project wrote and the honest answer for the ownership check above is
-/// "unrecognized".
-///
-/// The existing `$$` decoder is retained, matching [`systemd_arg`]'s
-/// argument encoding. It is not systemd's program-position dollar behavior;
-/// our renderers refuse dollars there through [`systemd_program`].
-fn first_systemd_token(value: &str) -> Option<String> {
-    let mut chars = value.chars().peekable();
-    let mut token = String::new();
-    let quote = match chars.peek() {
-        Some('"') => Some('"'),
-        Some('\'') => Some('\''),
-        _ => None,
-    };
-    if quote.is_some() {
-        chars.next();
-    }
-    let mut closed = quote.is_none();
-    while let Some(character) = chars.next() {
-        match character {
-            '\\' => match chars.next()? {
-                escaped @ ('\\' | '"') => token.push(escaped),
-                _ => return None,
-            },
-            '%' if chars.peek() == Some(&'%') => {
-                chars.next();
-                token.push('%');
-            }
-            '$' if chars.peek() == Some(&'$') => {
-                chars.next();
-                token.push('$');
-            }
-            character if Some(character) == quote => {
-                closed = true;
-                break;
-            }
-            character if quote.is_none() && character.is_whitespace() => break,
-            character => token.push(character),
-        }
-    }
-    closed.then_some(token)
-}
-
-/// The directory the calling user's systemd manager searches for unit
-/// files: `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`.
-///
-/// This is the same rule provisioning's remote reach check derives on the
-/// host, and the two must agree — a unit written to the wrong one of these
-/// looks perfectly valid and is never loaded.
-///
-/// A relative `XDG_CONFIG_HOME` is ignored rather than joined, per the XDG
-/// base directory spec, which is also what provisioning's reach check
-/// treats as unsupported. An empty value counts as unset, matching the
-/// shell's `${VAR:-default}`.
-pub fn user_unit_dir(xdg_config_home: Option<&OsStr>, home: &Path) -> PathBuf {
-    user_unit_dir_for(xdg_config_home, Some(home))
-        .expect("a known home directory always yields a unit directory")
-}
-
-/// [`user_unit_dir`] for a caller that may not know `HOME`.
-///
-/// An absolute `XDG_CONFIG_HOME` answers on its own — it names the
-/// directory outright, and systemd's user manager reads it the same way
-/// whether or not `HOME` happens to be set. Only when neither value is
-/// usable is the directory genuinely indeterminate, and then this fails
-/// rather than guessing: the caller that reads unit files for an OWNERSHIP
-/// decision must not mistake "I could not tell where to look" for "there
-/// is no unit there".
-pub fn user_unit_dir_for(
-    xdg_config_home: Option<&OsStr>,
-    home: Option<&Path>,
-) -> anyhow::Result<PathBuf> {
-    let config = match xdg_config_home
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-    {
-        Some(xdg) => xdg,
-        None => match home {
-            Some(home) => home.join(".config"),
-            None => bail!(
-                "neither an absolute XDG_CONFIG_HOME nor HOME is set, so the systemd user unit \
-                 directory cannot be located"
-            ),
-        },
-    };
-    Ok(config.join("systemd").join("user"))
-}
-
 /// Quote a supported program path without applying argument-only semantics.
 ///
-/// Both setup and provisioning must refuse dollars before publishing a unit:
+/// Provisioning must refuse dollars before publishing a unit:
 /// systemd preserves dollars in the program position, while [`systemd_arg`]
 /// doubles them for argument expansion. Keeping this check separate preserves
 /// supported dollar spellings in the state directory and environment values.
@@ -772,6 +474,7 @@ fn plain(value: &str) -> ManagerValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     /// Proxy inputs are copied into another environment, so an explicitly
     /// empty assignment and every escaped byte must survive the fallback.
@@ -879,22 +582,17 @@ mod tests {
         assert_eq!(stripped, markers);
     }
 
-    /// The complete text of both units, pinned.
+    /// The complete text of the supervisor unit, pinned.
     ///
-    /// These templates ARE the lifecycle policy — `KillMode=process` is
-    /// what keeps a supervisor restart from killing the terminals it
-    /// manages, `WantedBy=default.target` is what makes either unit start
-    /// at all — and a substring test would stay green while any of those
-    /// directives silently disappeared. The expectations are written out
-    /// by hand rather than derived from the templates so that a mistake
-    /// in the renderer cannot update the implementation and the
-    /// expectation together.
-    ///
-    /// Both renders are UNMARKED: [`managed`] is setup's own step, and
-    /// provisioning must never emit the marker. That property is asserted
-    /// separately, below.
+    /// The template IS the lifecycle policy — `KillMode=process` is what
+    /// keeps a supervisor restart from killing the terminals it manages,
+    /// `WantedBy=default.target` is what makes the unit start at all — and
+    /// a substring test would stay green while any of those directives
+    /// silently disappeared. The expectation is written out by hand rather
+    /// than derived from the template so that a mistake in the renderer
+    /// cannot update the implementation and the expectation together.
     #[farhelm_testtrace::test]
-    fn both_units_render_to_their_exact_reviewed_text() {
+    fn the_supervisor_unit_renders_to_its_exact_reviewed_text() {
         let supervisor = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/home/u/.local/bin/farhelm"),
             state_dir: Path::new("/home/u/.local/state/farhelm"),
@@ -919,67 +617,14 @@ mod tests {
                 "WantedBy=default.target\n",
             )
         );
-
-        let helm = render_helm_unit(&HelmUnitInputs {
-            farhelm: Path::new("/home/u/.local/bin/farhelm"),
-            state_dir: Path::new("/home/u/.local/state/farhelm"),
-            port: None,
-        })
-        .unwrap();
-        assert_eq!(
-            helm,
-            concat!(
-                "[Unit]\n",
-                "Description=Farhelm helm\n",
-                "\n",
-                "[Service]\n",
-                "ExecStart=\"/home/u/.local/bin/farhelm\" helm run --state-dir ",
-                "\"/home/u/.local/state/farhelm\"\n",
-                "Restart=on-failure\n",
-                "\n",
-                "[Install]\n",
-                "WantedBy=default.target\n",
-            )
-        );
-
-        assert!(!is_managed(&supervisor));
-        assert!(!is_managed(&helm));
-        assert!(is_managed(&managed(supervisor)));
-    }
-
-    /// The helm unit's flags are the whole reason it became a template.
-    /// The state directory is always there — an omitted one would let the
-    /// helm resolve its own from the user manager's environment and drift
-    /// away from the supervisor's — while `--port` appears only when
-    /// pinned. Order is fixed so that an unchanged configuration
-    /// re-renders byte-identically and setup keeps reporting `unchanged`.
-    #[farhelm_testtrace::test]
-    fn the_helm_unit_always_pins_state_and_only_pins_a_given_port() {
-        let both = render_helm_unit(&HelmUnitInputs {
-            farhelm: Path::new("/bin/farhelm"),
-            state_dir: Path::new("/state"),
-            port: Some(7433),
-        })
-        .unwrap();
-        assert!(
-            both.contains(
-                "ExecStart=\"/bin/farhelm\" helm run --state-dir \"/state\" --port 7433\n"
-            )
-        );
-        let no_port = render_helm_unit(&HelmUnitInputs {
-            farhelm: Path::new("/bin/farhelm"),
-            state_dir: Path::new("/state"),
-            port: None,
-        })
-        .unwrap();
-        assert!(no_port.contains("ExecStart=\"/bin/farhelm\" helm run --state-dir \"/state\"\n"));
     }
 
     /// Dollar arguments must still survive the program-path refusal.
     /// Systemd expands arguments, so applying the program restriction to
-    /// them would reject supported state directories.
+    /// them would reject supported state directories. Spec: each dollar in
+    /// the state directory is written doubled, as `$$`.
     #[farhelm_testtrace::test]
-    fn dollars_are_escaped_in_commands_and_decoded_on_read_back() {
+    fn dollars_in_the_state_directory_are_escaped() {
         for path in [
             "/state/$NAME",
             "/state/${NAME}",
@@ -995,61 +640,31 @@ mod tests {
                 unit.contains(&format!("--state-dir \"{}\"", path.replace('$', "$$"))),
                 "{unit}"
             );
-            assert_eq!(
-                exec_start_program(&unit),
-                Some(PathBuf::from("/usr/bin/farhelm"))
-            );
-            assert_eq!(
-                first_systemd_token(&systemd_arg(Path::new(path)).unwrap()),
-                Some(path.to_string())
-            );
-            let helm = render_helm_unit(&HelmUnitInputs {
-                farhelm: Path::new("/usr/bin/farhelm"),
-                state_dir: Path::new(path),
-                port: None,
-            })
-            .unwrap();
-            assert!(
-                helm.contains(&format!("--state-dir \"{}\"", path.replace('$', "$$"))),
-                "{helm}"
-            );
-            assert_eq!(
-                exec_start_program(&helm),
-                Some(PathBuf::from("/usr/bin/farhelm"))
-            );
         }
     }
 
-    /// Both local units must refuse the path before writing an unusable
-    /// service. The shared argument formatter must remain permissive for
+    /// The unit must refuse the path before writing an unusable service.
+    /// The shared argument formatter must remain permissive for
     /// dollar-bearing state paths, so this belongs at the program input.
     #[farhelm_testtrace::test]
-    fn both_units_refuse_dollars_in_the_program_path() {
+    fn the_supervisor_unit_refuses_dollars_in_the_program_path() {
         for path in [
             "/opt/$NAME/farhelm",
             "/opt/${NAME}/farhelm",
             "/opt/$$literal/farhelm",
         ] {
-            let supervisor = render_supervisor_unit(&SupervisorUnitInputs {
+            let message = render_supervisor_unit(&SupervisorUnitInputs {
                 farhelm: Path::new(path),
                 state_dir: Path::new("/state"),
             })
-            .unwrap_err();
-            let helm = render_helm_unit(&HelmUnitInputs {
-                farhelm: Path::new(path),
-                state_dir: Path::new("/state"),
-                port: None,
-            })
-            .unwrap_err();
-            for error in [supervisor, helm] {
-                let message = error.to_string();
-                assert!(message.contains(path), "{message}");
-                assert!(
-                    message.contains("contains '$'")
-                        && message.contains("install farhelm at a path without '$'"),
-                    "{message}"
-                );
-            }
+            .unwrap_err()
+            .to_string();
+            assert!(message.contains(path), "{message}");
+            assert!(
+                message.contains("contains '$'")
+                    && message.contains("install farhelm at a path without '$'"),
+                "{message}"
+            );
         }
     }
 
@@ -1172,242 +787,5 @@ mod tests {
             unit.contains("Environment=\"PATH=/usr/local/bin:/usr/bin:/bin\""),
             "{unit}"
         );
-    }
-
-    /// The ownership rule is exact-match by construction. These are the
-    /// near misses that must NOT be adopted, because adopting one means
-    /// overwriting a file somebody else wrote.
-    #[farhelm_testtrace::test]
-    fn only_an_exact_first_line_marker_counts_as_managed() {
-        assert!(is_managed(&managed("[Unit]\n".to_string())));
-        assert!(is_managed(MANAGED_MARKER));
-        assert!(!is_managed(""));
-        assert!(!is_managed("[Unit]\n# managed-by: farhelm helm setup\n"));
-        assert!(!is_managed("# managed-by: farhelm helm setup \n"));
-        assert!(!is_managed("# managed-by: farhelm helm setup\r\n"));
-        assert!(!is_managed("#managed-by: farhelm helm setup\n"));
-    }
-
-    /// The local-row protection rule stands on this parse: a unit whose
-    /// `ExecStart=` names the running helm's own binary is a unit the
-    /// hosts panel must not touch. It has to survive our own quoting and
-    /// reject spellings it cannot resolve.
-    #[farhelm_testtrace::test]
-    fn exec_start_program_reads_back_what_the_renderer_wrote() {
-        let unit = render_supervisor_unit(&SupervisorUnitInputs {
-            farhelm: Path::new("/home/u/we ird/%farhelm\"\\bin"),
-            state_dir: Path::new("/state"),
-        })
-        .unwrap();
-        assert_eq!(
-            exec_start_program(&unit),
-            Some(PathBuf::from("/home/u/we ird/%farhelm\"\\bin"))
-        );
-        assert_eq!(
-            exec_start_program("[Service]\nExecStart=/usr/bin/farhelm supervisor run\n"),
-            Some(PathBuf::from("/usr/bin/farhelm"))
-        );
-        assert_eq!(
-            exec_start_program("[Service]\nExecStart=-@/usr/bin/farhelm argv0 run\n"),
-            Some(PathBuf::from("/usr/bin/farhelm"))
-        );
-        // `:` (no variable expansion for the arguments) is as valid a
-        // modifier as the rest. Missing it made a matching unit read as
-        // unclassifiable, which fails closed but reports the wrong thing.
-        assert_eq!(
-            exec_start_program("[Service]\nExecStart=:+/usr/bin/farhelm supervisor run\n"),
-            Some(PathBuf::from("/usr/bin/farhelm"))
-        );
-        // The parser preserves an unexpanded specifier literally rather
-        // than guessing what systemd would substitute. The ownership
-        // comparison is what rejects it: canonicalising `%h/...` cannot
-        // resolve, so it never matches the running binary.
-        assert_eq!(
-            exec_start_program("[Service]\nExecStart=%h/.local/lib/farhelm/farhelm helm run\n"),
-            Some(PathBuf::from("%h/.local/lib/farhelm/farhelm"))
-        );
-        assert_eq!(exec_start_program("[Service]\nRestart=always\n"), None);
-        assert_eq!(
-            exec_start_program("[Service]\nExecStart=\"/unterminated\n"),
-            None
-        );
-        assert_eq!(exec_start_program("[Service]\nExecStart=\n"), None);
-    }
-
-    /// Ownership reads only exact Service sections and discards commands
-    /// before an empty reset. The last command selection is retained for
-    /// malformed simple units; valid multi-command oneshot units are refused
-    /// separately rather than assigned to one of their installations.
-    #[farhelm_testtrace::test]
-    fn only_the_effective_service_assignment_is_reported() {
-        // An assignment outside [Service] is not a command at all.
-        assert_eq!(
-            exec_start_program("[Unit]\nExecStart=/usr/bin/farhelm run\n"),
-            None
-        );
-        assert_eq!(
-            exec_start_program(
-                "[Unit]\nExecStart=/decoy/farhelm run\n[Service]\nExecStart=/real/farhelm run\n"
-            ),
-            Some(PathBuf::from("/real/farhelm"))
-        );
-        // Leaving [Service] ends its scope.
-        assert_eq!(
-            exec_start_program(
-                "[Service]\nExecStart=/real/farhelm run\n[Install]\nExecStart=/decoy/farhelm\n"
-            ),
-            Some(PathBuf::from("/real/farhelm"))
-        );
-        // Retained selection for a malformed simple unit; systemd itself
-        // rejects multiple commands for that type.
-        assert_eq!(
-            exec_start_program(
-                "[Service]\nExecStart=/first/farhelm run\nExecStart=/second/farhelm run\n"
-            ),
-            Some(PathBuf::from("/second/farhelm"))
-        );
-        // The empty spelling resets the list; nothing runs afterwards.
-        assert_eq!(
-            exec_start_program("[Service]\nExecStart=/first/farhelm run\nExecStart=\n"),
-            None
-        );
-        // ...and a reset can itself be followed by the real command.
-        assert_eq!(
-            exec_start_program(
-                "[Service]\nExecStart=/first/farhelm\nExecStart=\nExecStart=/third/farhelm\n"
-            ),
-            Some(PathBuf::from("/third/farhelm"))
-        );
-        // Systemd ignores unknown sections, including case variants. A later
-        // typo must not replace the program named by the real [Service].
-        assert_eq!(
-            exec_start_program("[service]\nExecStart=/real/farhelm run\n"),
-            None
-        );
-        assert_eq!(
-            exec_start_program(
-                "[Service]\nExecStart=/real/farhelm run\n[service]\nExecStart=/decoy/farhelm run\n"
-            ),
-            Some(PathBuf::from("/real/farhelm"))
-        );
-    }
-
-    /// Other service types cannot establish ownership from one start
-    /// command. Type can appear after the command, reset to the default,
-    /// or occur in repeated Service sections; only its effective value counts.
-    #[farhelm_testtrace::test]
-    fn exec_start_program_requires_the_effective_simple_type() {
-        for service_type in ["oneshot", "forking", "notify", "exec", "Simple"] {
-            let unit = format!(
-                "[Service]\nExecStart=/first/farhelm run\nExecStart=/second/farhelm run\nType={service_type}\n"
-            );
-            assert_eq!(exec_start_program(&unit), None, "{unit}");
-        }
-        for assignment in [
-            "Type = oneshot",
-            "Type\t=oneshot",
-            "Type=simple\nType = oneshot",
-            // systemd ignores an empty Type= and keeps oneshot.
-            "Type=oneshot\nType=",
-            "Type=oneshot\nType = ",
-        ] {
-            let unit = format!(
-                "[Service]\n{assignment}\nExecStart=/first/farhelm\nExecStart=/second/farhelm\n"
-            );
-            assert!(!is_simple_service(&unit), "{unit}");
-            assert_eq!(exec_start_program(&unit), None, "{unit}");
-        }
-        for prefix in [
-            "",
-            "Type=simple\n",
-            "Type=oneshot\nType=simple\n",
-            "Type=oneshot\nType\t= simple\n",
-        ] {
-            let unit = format!("[Service]\n{prefix}ExecStart=/real/farhelm run\n");
-            assert!(is_simple_service(&unit), "{unit}");
-            assert_eq!(
-                exec_start_program(&unit),
-                Some(PathBuf::from("/real/farhelm")),
-                "{unit}"
-            );
-        }
-        assert_eq!(
-            exec_start_program(
-                "[Service]\nType=simple\nExecStart=/real/farhelm\n[Service]\nType=oneshot\n"
-            ),
-            None
-        );
-        assert_eq!(
-            exec_start_program(
-                "[Service]\nExecStart=/real/farhelm\n[Unit]\nType=oneshot\n[service]\nType=oneshot\n"
-            ),
-            Some(PathBuf::from("/real/farhelm"))
-        );
-    }
-
-    /// Unsupported escapes must refuse ownership rather than invent a path.
-    /// Systemd decodes these spellings, while dropping their backslash would
-    /// name a different installation during setup or uninstall. Both quoting
-    /// forms must keep that ambiguity from becoming ownership evidence.
-    #[farhelm_testtrace::test]
-    fn exec_start_program_refuses_unsupported_escapes() {
-        for program in [
-            r"/opt/space\x20install/farhelm",
-            r#""/opt/space\x20install/farhelm""#,
-            r"/opt/line\ninstall/farhelm",
-            r#""/opt/line\ninstall/farhelm""#,
-        ] {
-            let unit = format!("[Service]\nExecStart={program} supervisor run\n");
-            assert_eq!(exec_start_program(&unit), None, "{program}");
-        }
-    }
-
-    /// Unit discovery has to land in the directory the user manager
-    /// actually searches. Both branches of the `${XDG_CONFIG_HOME:-…}`
-    /// rule are pinned here because a wrong answer produces a
-    /// valid-looking unit that is never loaded.
-    #[farhelm_testtrace::test]
-    fn user_unit_dir_follows_the_xdg_rule_in_both_directions() {
-        let home = Path::new("/home/u");
-        assert_eq!(
-            user_unit_dir(None, home),
-            PathBuf::from("/home/u/.config/systemd/user")
-        );
-        assert_eq!(
-            user_unit_dir(Some(OsStr::new("")), home),
-            PathBuf::from("/home/u/.config/systemd/user")
-        );
-        assert_eq!(
-            user_unit_dir(Some(OsStr::new("/xdg")), home),
-            PathBuf::from("/xdg/systemd/user")
-        );
-        // Relative values are ignored by the XDG spec, and treated as
-        // unsupported by provisioning's reach check.
-        assert_eq!(
-            user_unit_dir(Some(OsStr::new("relative")), home),
-            PathBuf::from("/home/u/.config/systemd/user")
-        );
-    }
-
-    /// The ownership lookup runs where `HOME` may be absent, and there
-    /// the difference between "no unit" and "I cannot tell where units
-    /// live" is a safety property: the first permits the panel to
-    /// install, the second must not. An absolute `XDG_CONFIG_HOME`
-    /// answers on its own; nothing usable at all is an error.
-    #[farhelm_testtrace::test]
-    fn an_indeterminate_unit_directory_is_an_error_not_an_absence() {
-        assert_eq!(
-            user_unit_dir_for(Some(OsStr::new("/xdg")), None).unwrap(),
-            PathBuf::from("/xdg/systemd/user")
-        );
-        assert_eq!(
-            user_unit_dir_for(None, Some(Path::new("/home/u"))).unwrap(),
-            PathBuf::from("/home/u/.config/systemd/user")
-        );
-        assert!(user_unit_dir_for(None, None).is_err());
-        assert!(user_unit_dir_for(Some(OsStr::new("")), None).is_err());
-        // A relative XDG value is ignored, which with no HOME leaves
-        // nothing to resolve against.
-        assert!(user_unit_dir_for(Some(OsStr::new("relative")), None).is_err());
     }
 }
