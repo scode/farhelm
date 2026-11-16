@@ -178,9 +178,8 @@ fn open_card(
 }
 
 /// Mark the card seen in the helm's shared preferences: a keyless, best-effort `PUT /api/preferences` that names only
-/// `welcome_seen` (SPEC_impl.md: a write is a sparse patch, so another client's fields are untouched). A failure is
-/// logged and nothing else: the card is already closed, and SPEC.md lets it appear again at a later window start or
-/// reset.
+/// `welcome_seen` (SPEC_impl.md: a write is a sparse patch, so no other field is touched). A failure is logged and
+/// nothing else: the card is already closed, and SPEC.md lets it appear again at a later window start or reset.
 fn mark_seen(cx: &mut App) {
     let path = match ApiPath::api(&["preferences"]) {
         Ok(path) => path,

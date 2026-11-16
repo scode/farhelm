@@ -912,7 +912,8 @@ async fn assert_stop_tab_consent(h: Harness) {
 }
 
 /// An ended-agent Stop display cannot authorize killing a host agent that
-/// another client restarted, whether the display named tabs or was tabless.
+/// an agent or the command line restarted, whether the display named tabs or
+/// was tabless.
 /// The unchanged tab ID and live shell round trip distinguish a refusal
 /// from a Stop that killed only the agent or only its tabs.
 #[farhelm_testtrace::test]

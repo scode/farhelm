@@ -186,10 +186,10 @@ fn letter(key: &str, kc: u32) -> (GridInput, bool) {
 // ---- Attaching -----------------------------------------------------------------------------------------------------
 
 /// Opening a session shows its agent's terminal (SPEC.md, "Session view"), and only that one: a pane that attached
-/// every listed session, or attached before the selection settled, would take each session's terminal from whatever
-/// other client holds it. The startup choice is automatic, and its terminal is home, so with nothing else holding
-/// focus it takes focus. Specified: with a and b listed and a last visited, the pane opens exactly one stream, for a's
-/// agent terminal (no tab), and that terminal holds focus.
+/// every listed session, or attached before the selection settled, would hold terminals nobody is looking at. The
+/// startup choice is automatic, and its terminal is home, so with nothing else holding focus it takes focus. Specified:
+/// with a and b listed and a last visited, the pane opens exactly one stream, for a's agent terminal (no tab), and that
+/// terminal holds focus.
 #[gpui::test]
 fn selecting_a_session_attaches_it_and_only_it(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -227,10 +227,10 @@ fn switching_sessions_drops_the_old_stream_and_attaches_the_new_one(cx: &mut Tes
 /// the first terminal was ready: a mount retry for the first session outlived the switch (old `terminal.spec.ts`,
 /// "switching sessions before the first terminal is ready mounts the second session's socket"). Here the moment is a
 /// switch while the first stream is still attaching, which the test above does not reach because it makes a live
-/// first. A stream left open then would take the session's terminal from any other client and keep feeding a view
-/// nobody shows. Specified: with a's stream still attaching (no socket open, nothing replayed), a click on b's row
-/// closes a's stream, so nothing a's side sends later has a reader, and opens one stream, for b; once b is live, a
-/// typed letter reaches b's program, and a's stream never received anything.
+/// first. A stream left open then would keep a's terminal attached and keep feeding a view nobody shows. Specified:
+/// with a's stream still attaching (no socket open, nothing replayed), a click on b's row closes a's stream, so nothing
+/// a's side sends later has a reader, and opens one stream, for b; once b is live, a typed letter reaches b's program,
+/// and a's stream never received anything.
 #[gpui::test]
 fn switching_while_the_first_stream_attaches_closes_it(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -402,10 +402,10 @@ fn an_automatic_choice_never_takes_focus_from_a_control(cx: &mut TestAppContext)
     assert_eq!(text.as_ref(), "x");
 }
 
-/// SPEC.md, "Cases that settled disputed points": "The user's session is deleted from another window while they type
-/// in it. The next session is selected and its terminal takes the rest of their typing (the terminal is home)."
-/// Specified: with a's terminal live and typed into, a complete listing pushed without a opens b, closes a's stream
-/// and attaches b's, whose terminal holds focus; once live, a typed letter reaches b's program.
+/// SPEC.md, "Cases that settled disputed points": "The user's session is deleted from the command line or by an agent
+/// while they type in it. The next session is selected and its terminal takes the rest of their typing (the terminal is
+/// home)." Specified: with a's terminal live and typed into, a complete listing pushed without a opens b, closes a's
+/// stream and attaches b's, whose terminal holds focus; once live, a typed letter reaches b's program.
 #[gpui::test]
 fn a_removal_pushed_from_elsewhere_selects_the_next_session_whose_terminal_takes_focus(
     cx: &mut TestAppContext,

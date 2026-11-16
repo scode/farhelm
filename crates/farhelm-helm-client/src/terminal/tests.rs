@@ -141,11 +141,11 @@ async fn replay(socket: &mut WebSocketStream<TcpStream>) {
         .unwrap();
 }
 
-/// The lease is how the supervisor tells this stream's own reattach (replaced quietly) from another client's takeover,
-/// and a takeover notice is the one detach the stream must not answer by attaching again, so both are pinned on the
-/// wire: every attach (the first, a reconnect after a drop, and take-control) goes to the one terminal route with the
-/// same lease, a reconnect asks for the latest size, a takeover notice stops the stream instead of fighting back, and
-/// only an explicit take-control attaches again. Every attach is the ordinary one because the app is single-UI
+/// The lease is how the supervisor tells this stream's own reattach (replaced quietly) from an attach under another
+/// lease, and a takeover notice is the one detach the stream must not answer by attaching again, so both are pinned on
+/// the wire: every attach (the first, a reconnect after a drop, and take-control) goes to the one terminal route with
+/// the same lease, a reconnect asks for the latest size, a takeover notice stops the stream instead of fighting back,
+/// and only an explicit take-control attaches again. Every attach is the ordinary one because the app is single-UI
 /// (SPEC_impl.md, "The seat: one UI per helm").
 #[tokio::test]
 async fn every_attach_takes_the_one_route_and_a_takeover_stops_the_stream() {
@@ -239,7 +239,7 @@ async fn every_attach_takes_the_one_route_and_a_takeover_stops_the_stream() {
         );
         assert_eq!(next_event(&mut events).await, TerminalEvent::ReplayComplete);
 
-        // Another client took the terminal: the stream stops and says why.
+        // An attach under another lease took the terminal: the stream stops and says why.
         let notice =
             r#"{"type":"detached","reason":"another client took over","code":"taken_over"}"#;
         second.socket.send(Message::text(notice)).await.unwrap();
@@ -384,9 +384,11 @@ async fn until_event(events: &mut TerminalEvents, wanted: TerminalEvent) {
 }
 
 /// Which detach codes stop the stream is the whole reconnect policy (SPEC.md, "Terminal experience"): a takeover, a
-/// closed tab or a stall waits for the user, because reattaching would fight another client, chase a tab that is gone,
-/// or walk back into the wedge that stalled it. `replaced` and `other` carry trouble that keeps recovering (a lost
-/// supervisor, an unreachable host), so they wait their rung and reattach. Pinned per code, on the wire.
+/// closed tab or a stall waits for the user, because reattaching would fight whatever took the terminal, chase a tab
+/// that is gone, or walk back into the wedge that stalled it. In the single-UI app a takeover's only source is a
+/// just-displaced window's reconnect landing before its Displaced notice (SPEC_impl.md, "The seat: one UI per helm").
+/// `replaced` and `other` carry trouble that keeps recovering (a lost supervisor, an unreachable host), so they wait
+/// their rung and reattach. Pinned per code, on the wire.
 #[tokio::test]
 async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
     tokio::time::timeout(Duration::from_secs(60), async {

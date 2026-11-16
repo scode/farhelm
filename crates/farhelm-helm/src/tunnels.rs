@@ -545,7 +545,7 @@ pub(crate) async fn open_tunnel(
 
 /// An idempotent local close never borrows another session's listener or needs a live host.
 /// The router owns removal through shutdown and invalidation: dropping a caller
-/// while the accept task is ending must not leave other clients' lists stale.
+/// while the accept task is ending must not leave the window's list stale.
 pub(crate) async fn close_tunnel(
     State(state): State<Arc<AppState>>,
     Path((session, id)): Path<(String, String)>,

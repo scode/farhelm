@@ -223,7 +223,7 @@ fn the_wordmark_is_the_file_for_the_appearances_ground() {
 // ---- The stored width ----------------------------------------------------------------------------------------------
 
 /// The width is a helm preference shared by every client (SPEC.md, "Session list"), so the sidebar must draw what the
-/// helm stores and follow it when another client changes it, and fall back to the default where nothing is stored.
+/// helm stores and follow it when the helm pushes a change, and fall back to the default where nothing is stored.
 /// Specified: with nothing stored the sidebar is 396 pixels wide; a pushed 500 redraws it at 500; a pushed unset
 /// returns it to 396; a pushed 9000, outside the range (which no helm sends, since it reads such a stored value back as
 /// unset), draws 396 too; and drawing writes nothing. (A window opened over a stored width is the next test.)
@@ -283,10 +283,10 @@ fn the_divider_is_a_named_separator_whose_value_is_the_width(cx: &mut TestAppCon
 }
 
 /// A drag must follow the pointer on every move (the sidebar is what the user is looking at while dragging) and tell
-/// the helm only the width it ended at: writing every pointer sample would flood the channel and every other client
-/// with widths nobody chose. The width stays within the helm's range, which refuses anything outside it. Specified:
-/// from the default, moves of +30 and +90 draw 426 and 486 with nothing written; the release writes 486 once and the
-/// sidebar stays at 486; a second drag of +500 draws 656 and writes 656; a third of -500 draws 296 and writes 296.
+/// the helm only the width it ended at: writing every pointer sample would flood the channel and the helm's store with
+/// widths nobody chose. The width stays within the helm's range, which refuses anything outside it. Specified: from the
+/// default, moves of +30 and +90 draw 426 and 486 with nothing written; the release writes 486 once and the sidebar
+/// stays at 486; a second drag of +500 draws 656 and writes 656; a third of -500 draws 296 and writes 296.
 #[gpui::test]
 fn a_drag_follows_every_move_writes_once_and_clamps_at_both_ends(cx: &mut TestAppContext) {
     let (mut fake, cx) = open(cx, None);

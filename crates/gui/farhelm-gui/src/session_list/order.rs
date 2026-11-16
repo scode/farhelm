@@ -10,8 +10,8 @@
 //! [`super::filters`] never does). So choosing an order is a preference write and nothing else: a sparse `PUT
 //! /api/preferences` with `{"list_sort": <word>}`, as Settings writes a preference, saved through a [`Draft`] under
 //! the preference row's key ([`OpKey::preferences`]). The helm re-sorts the pushed list as part of that write, before
-//! its reply, and an order chosen in another window or by the command line reaches this one the same way. Re-choosing
-//! the order in force sends nothing.
+//! its reply, and an order the helm stores any other way reaches this window the same way. Re-choosing the order in
+//! force sends nothing.
 //!
 //! **What the title says.** While the write is in flight the title names the order being saved; at every other moment
 //! it names the stored order, an unknown or missing word reading as Recently active (the helm's own default for the
@@ -200,7 +200,7 @@ impl Order {
 }
 
 /// `PUT /api/preferences` naming only `list_sort`, set to `order`'s word: a sparse write, so it never puts back a stale
-/// copy of a field another client changed.
+/// copy of any other field.
 fn command(order: Order) -> Result<Command, PathError> {
     preferences_write(serde_json::json!({ "list_sort": order.word() }))
 }
@@ -488,7 +488,7 @@ impl SessionList {
 }
 
 /// The open menu of orders: drawn from the store and the order state while it is open, so the checked order follows a
-/// change another client makes meanwhile.
+/// change the helm pushes meanwhile.
 pub(crate) struct OrderMenu {
     list: WeakEntity<SessionList>,
     state: Entity<OrderState>,

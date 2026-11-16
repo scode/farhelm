@@ -584,11 +584,11 @@ fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext
 // ---- Saving the switches -------------------------------------------------------------------------------------------
 
 /// Each switch writes one field of the shared preference row, and a sparse body naming only it keeps a stale copy of
-/// another field from being written back over an agent's or another client's change (the helm's `put_preferences`). It
-/// is one request under the preference row's key, so the store shows it busy while it runs. Specified: for every switch,
-/// in its section, a click sends `PUT /api/preferences` with only its field, set to the opposite of the stored value,
-/// while the preference row's key holds a save; once the helm pushes the new row and answers, the switch shows the new
-/// value and the key is free.
+/// another field from being written back over a change made since (an agent's, say): the helm's `put_preferences`
+/// merges only the fields named. It is one request under the preference row's key, so the store shows it busy while it
+/// runs. Specified: for every switch, in its section, a click sends `PUT /api/preferences` with only its field, set to
+/// the opposite of the stored value, while the preference row's key holds a save; once the helm pushes the new row and
+/// answers, the switch shows the new value and the key is free.
 #[gpui::test]
 fn each_switch_saves_its_own_preference_field_under_the_preferences_key(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -1620,9 +1620,9 @@ fn a_refused_appearance_save_shows_the_stored_choice_and_a_failure_line(cx: &mut
     );
 }
 
-/// Another client's choice (or one made through the helm's API) reaches the open window as it happens, as every shared
-/// preference does, and the group reads it from the store rather than a copy taken at opening. A copy would only show
-/// on a push that comes with no save of the dialog's own. Specified: with Appearance open showing System, the helm
+/// A choice made outside this dialog (through the helm's API, say) reaches the open window as it happens, as every
+/// shared preference does, and the group reads it from the store rather than a copy taken at opening. A copy would only
+/// show on a push that comes with no save of the dialog's own. Specified: with Appearance open showing System, the helm
 /// pushing `light` with nothing sent shows Light, and pushing an empty row shows System again.
 #[gpui::test]
 fn an_open_appearance_section_follows_a_choice_made_elsewhere(cx: &mut TestAppContext) {
@@ -1674,14 +1674,14 @@ fn dark(cx: &mut VisualTestContext) -> bool {
     cx.update(|_, cx| theme::palette(cx).dark)
 }
 
-/// SPEC.md: the choice is a helm preference "and a change reaches every open client live". The main view's
-/// subscription hands the stored row to the theme; a palette that followed only this window's own saves would leave
-/// other clients, the first snapshot and a reconnect's new snapshot unpainted. It also records what the window shows
-/// before the first snapshot, which is a deviation from the old app (the parity file): the connecting screen is in the
-/// operating system's palette. Specified: on a light system, the connecting window's palette is light; the first
-/// snapshot storing Dark turns it dark; a push storing Light, with nothing sent, turns it light; a push storing nothing
-/// (System) after a stored Dark leaves the system's light; after a reset the inert window keeps the palette in use
-/// (Dark), and the reconnect's snapshot storing Light turns it light.
+/// SPEC.md: the choice is a helm preference "and a change applies live in the open window". The main view's
+/// subscription hands the stored row to the theme; a palette that followed only this window's own saves would leave the
+/// first snapshot and a reconnect's new snapshot unpainted. It also records what the window shows before the first
+/// snapshot, which is a deviation from the old app (the parity file): the connecting screen is in the operating
+/// system's palette. Specified: on a light system, the connecting window's palette is light; the first snapshot storing
+/// Dark turns it dark; a push storing Light, with nothing sent, turns it light; a push storing nothing (System) after a
+/// stored Dark leaves the system's light; after a reset the inert window keeps the palette in use (Dark), and the
+/// reconnect's snapshot storing Light turns it light.
 #[gpui::test]
 fn the_stored_appearance_paints_the_window_from_the_first_snapshot_on(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_main(cx);

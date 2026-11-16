@@ -2175,7 +2175,7 @@ const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Both go through one input sequence
 /// (`crate::hosts::HostTerminal::input_sequence`), the paste as one
 /// `send_paste`, which the runtime writes whole, with nothing between its
-/// pieces (another viewer's keys and the terminal's answers to the
+/// pieces (the viewer's keys and the terminal's answers to the
 /// program's queries queue before or after it), and closes if a lost
 /// connection cuts it short. The submit is sent only once the whole paste
 /// was written to the pty: a paste that did not arrive whole must not be

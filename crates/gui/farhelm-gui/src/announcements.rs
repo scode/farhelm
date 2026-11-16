@@ -228,8 +228,8 @@ fn open(
 /// `entries` is a copy of the store's queue taken at opening, an exception to the rule that a view reads shared state
 /// from the store when it draws. The automatic batch must record exactly the entries its dialog showed when it is
 /// dismissed (SPEC.md: "dismissal records only the entries that dialog showed"), so what is drawn cannot follow later
-/// pushes. The history uses the same dialog: an announcement another window shows while this history is open appears
-/// at its next opening.
+/// pushes. The history uses the same dialog: an announcement the helm pushes while this history is open appears at
+/// its next opening.
 struct AnnouncementsDialog {
     entries: Vec<Announcement>,
     got_it: FocusHandle,

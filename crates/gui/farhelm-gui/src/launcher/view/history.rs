@@ -14,9 +14,9 @@
 //!   earlier key never replaces a newer one. Reads are not held one at a time, as the folder check's are: the helm
 //!   answers this one from its own store, never asking the host, so overlapping reads cost nothing worth queuing for.
 //! - **Read when asked, not followed.** The old browser app also re-read on every activity-feed notice and on a timer;
-//!   the desktop app has no feed, and an open launcher's history changes only by another window's launch, so it is read
-//!   on the changes above only. A failed read offers no history: the folder list says it has no recent folders, which
-//!   is what it says for a host with none.
+//!   the desktop app has no feed; while the launcher is open its history changes only by an agent's or the command
+//!   line's launch, which it does not follow, so it is read on the changes above only. A failed read offers no history:
+//!   the folder list says it has no recent folders, which is what it says for a host with none.
 //! - **New's folder default** (`LaunchDraft::folder_default`): New without the open session's folder starts in `~` and
 //!   waits for the first answer for its host, which seeds the folder the newest plain-folder launch started in
 //!   ([`remembered_folder`]); a failed read settles it on `~`. It is settled while drawing, and from the answer itself

@@ -708,8 +708,8 @@ async fn wait_for_resume_connections_to_drain(sup: &Arc<Supervisor>) {
 /// by the supervisor's own unit test, where the reading can be set.
 ///
 /// This is the TOCTOU guard, not a redundancy: a client's cached status can
-/// say "idle" or "exited" while the agent is working (another client
-/// relaunched it, or the status was simply stale), and the flag is what
+/// say "idle" or "exited" while the agent is working (an agent or the
+/// command line relaunched it, or the status was simply stale), and the flag is what
 /// tells the supervisor "the user was actually asked". So the assertion that matters
 /// is the process still being alive afterwards, not just the error.
 #[farhelm_testtrace::test]

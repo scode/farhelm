@@ -375,8 +375,8 @@ async fn second_attach_detaches_first() {
 }
 
 /// Two DISTINCT leases are two clients, so the second attach takes the
-/// first over — SPEC.md's one-attached-client rule, now enforced by lease
-/// identity rather than by "any second attach wins" (PLAN_M4.md item 3).
+/// first over — SPEC.md's one-viewer-per-session rule, now enforced by
+/// lease identity rather than by "any second attach wins" (PLAN_M4.md item 3).
 ///
 /// The loser must learn about it (the takeover reason on its own channel)
 /// AND stop being able to type: a takeover that detached the stream but
@@ -3413,7 +3413,7 @@ async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
 
 /// Why this matters: a delete prompt that warned only about open tabs
 /// (the agent had ended) authorizes closing tabs, not killing an agent that
-/// another client or an agent restarted before the click. Spec
+/// the command line or an agent restarted before the click. Spec
 /// (`farhelm_proto::DeleteGuard::AgentEnded`, SPEC.md "Lifecycle
 /// operations"): with that guard the supervisor refuses with `Conflict`
 /// while the agent is running, and once the agent has ended it deletes the
