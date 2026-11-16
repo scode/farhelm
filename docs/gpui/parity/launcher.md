@@ -269,7 +269,15 @@ and
 
 Tests: 8. Covers: active placement segments preserve explicit host recipe and place.
 
-not yet ported
+not yet ported. This area's cases, for the launcher's environments (being built by the desktop integration area, with
+this area reviewing): "active placement segments preserve explicit host recipe and place", "restored container placement
+displays the recipe and host it submits", "environment recents hold focused intent until deliberate promotion",
+"environment recents stay independent of a held ordinary folder default", "container launch keeps recipe and place
+through refusal", and the `launcher` surface of "... refreshes recipe places after a delayed probe without a fleet
+notice". The spec's other cases are other areas': "container template quick launch retains its saved place" is the
+templates and quick launch area's, "a connected container's Delete asks its Farhelm and reports the container that
+stays" is the session view's, and "Containers Settings keeps failed cleanup explicit" and the `recipes` surface of the
+delayed-probe case are in [Settings and hosts](settings-and-hosts.md).
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts`
 
@@ -346,6 +354,15 @@ hides while its create is out (`launcher::launch_tests::launching_sends_one_crea
 These specs' rows sit in another area's parity file; their launcher cases are this area's (orchestrator's answer of
 2026-11-14). Each case is listed by its title at reference commit `24bc0580`.
 
+### `tests/claude-trust.spec.ts`
+
+Tests: 4. Covers: Claude trust hint preserves the terminal and opens the opt-in caveats.
+
+not this area's: the Claude trust hint band is drawn by the session view, so its cases belong to the sidebar and session
+view area (decided by the migration's orchestrator on 2026-11-14); the Settings half of the spec (the switch its
+"Settings and caveats" opens) is ported in [Settings and hosts](settings-and-hosts.md), under
+`tests/workspace-trust.spec.ts`
+
 ### `tests/sidebar.spec.ts` (sidebar)
 
 Case: the 35 `composer ...` cases (from "composer search reconciles a custom model like a harness button" to "composer
@@ -370,7 +387,7 @@ and
 `launcher::search_view_tests::{a_recent_setup_from_search_fills_and_launches_nothing, a_saved_folder_from_search_sets_the_folder, a_past_model_from_search_chooses_its_agent_type, history_rows_are_refused_where_they_cannot_apply, a_history_answer_resets_the_search_highlight}`,
 except "composer search recents keep complete 44px two-line rows" (a deviation below); Browse ("composer path actions
 keep typing inert and browse the selected remote host", "composer rejects held and queued stale browse activation after
-destination changes", and Browse's place beside the host in "composer destination block keeps host, browse, folder, and
+destination changes", and Browse's place under the host in "composer destination block keeps host, browse, folder, and
 grouped choices together") in `launcher::browse_tests`, Browse's place in Tab order in
 `launcher::view_tests::cancel_and_the_host_button_are_tab_stops`
 
@@ -490,14 +507,14 @@ not yet ported (environments, milestone M3)
   old list's buttons were 32 pixels high with a 1.5-pixel edge.
 - The model field does not report the old combobox states to assistive technology (expanded, the highlighted row as its
   active descendant, invalid while an error shows); the field and the list's rows have their names and roles.
-- The host list is exactly as wide as its button; the old list could be wider than the button for long host names.
+- The host list takes its width from its hosts' names, at least 12em and at most 30em; the old list was also at least as
+  wide as its button, which differs only when the chosen host's name is the longest and wraps.
 - The host button's accessible name is "Host: <host>"; the old combobox was named "Host" and reported the host as its
   value.
 - Neither the host button nor the model field reports its list as expanded or its highlighted row as the active
   descendant to assistive technology; the rows themselves report their selected state. The shared button's expanded
   state also draws its pressed look, which the old host button never had, so the host button reports neither.
-- The host button is drawn as a neutral button with the host's mark, name and a chevron; the old `.create-session-host`
-  look and width are not yet compared against the reference screens.
+- The host button, Browse and Browse's listing entries have the frame's 1-pixel edge; the old ones had 1.5 pixels.
 - The composer search's results are drawn as one flat list under group headings; the old area nested each group in a
   `role="group"` node named by its heading. Flat, every row is the list's own child, so the arrows keep the highlighted
   row itself in view rather than its whole group. The box does not report the old combobox states (expanded, the

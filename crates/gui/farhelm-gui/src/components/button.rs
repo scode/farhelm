@@ -46,9 +46,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
+    AnyElement, App, ClickEvent, ElementId, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, RenderOnce,
+    Role, SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
     prelude::FluentBuilder as _, px, svg,
 };
 
@@ -138,6 +138,11 @@ pub enum Tier {
     /// control hover fill under the pointer. The cells draw their own inks (the agent's name in the primary ink). Its
     /// keyboard ring is drawn inside its edge, since the well clips anything outside it.
     RecentSetup,
+    /// `.launch-composer-browser > button`: one entry of the launcher's Browse listing (Use, Parent, or a folder), as
+    /// wide as the listing and at least 38 pixels high, on the recessed `--well` fill with the `--border` edge, its
+    /// words centered in the primary ink at 14 pixels and semibold, the look the old stylesheet shared with its native
+    /// selects, with no hover fill. The old edge was 1.5 pixels; this one is the frame's 1. Nothing disables one.
+    BrowseRow,
     /// `.templates-remove`: the ✕ that removes a field from a template, a ghost 30 pixels wide and 34 high (the height
     /// of the field's control beside it, so the ✕ is centered on the control), in the quiet `--fg-1` ink that turns
     /// `--danger` with the control hover fill under the pointer.
@@ -196,6 +201,8 @@ const TEMPLATE_ROW_PAD: (f32, f32) = (10., 12.);
 /// 1-pixel (transparent) edge, so the padding is a pixel less to keep the content 14 pixels in.
 const RECENT_SETUP_HEIGHT: f32 = 36.;
 const RECENT_SETUP_PAD_X: f32 = 13.;
+/// The [`Tier::BrowseRow`] box's least height (`min-height: 38px`).
+const BROWSE_ROW_MIN_HEIGHT: f32 = 38.;
 
 /// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
 const ROW_MENU_HEIGHT: f32 = 19.6;
@@ -683,6 +690,13 @@ impl Button {
                 Some(palette.danger_soft),
                 palette.on_fill,
             ),
+            // No hover change: the old entries were bare buttons, without the `.btn` hover fill.
+            Tier::BrowseRow => (
+                Some(palette.well),
+                palette.well,
+                Some(palette.border),
+                palette.fg_0,
+            ),
             Tier::Neutral | Tier::Chip if self.busy => retired,
             Tier::Neutral | Tier::Chip => (
                 Some(palette.bg_2),
@@ -799,7 +813,8 @@ impl RenderOnce for Button {
             | Tier::Primary
             | Tier::Danger
             | Tier::DangerOutline
-            | Tier::PrimaryOutline => metrics::BUTTON_PAD,
+            | Tier::PrimaryOutline
+            | Tier::BrowseRow => metrics::BUTTON_PAD,
         };
         // A fixed square centers what it shows instead of padding it.
         let (pad_y, pad_x) = if self.side.is_some() {
@@ -828,6 +843,7 @@ impl RenderOnce for Button {
             | Tier::NumberKey { .. }
             | Tier::TemplateRow
             | Tier::RecentSetup
+            | Tier::BrowseRow
             | Tier::FieldRemove
             | Tier::IconChoice
             | Tier::ColorChoice
@@ -990,6 +1006,14 @@ impl RenderOnce for Button {
                     .rounded_none()
                     .text_size(metrics::TEXT_MD)
             })
+            .when(self.tier == Tier::BrowseRow, |button| {
+                button
+                    .w_full()
+                    .min_w_0()
+                    .min_h(px(BROWSE_ROW_MIN_HEIGHT))
+                    .text_size(metrics::TEXT_ROW_TITLE)
+                    .font_weight(FontWeight::SEMIBOLD)
+            })
             .when(self.tier == Tier::FieldRemove, |button| {
                 button
                     .w(px(FIELD_REMOVE_SIZE.0))
@@ -1093,6 +1117,7 @@ impl RenderOnce for Button {
                     | Tier::NumberKey { .. }
                     | Tier::TemplateRow
                     | Tier::RecentSetup
+                    | Tier::BrowseRow
                     | Tier::FieldRemove
                     | Tier::IconChoice
                     | Tier::ColorChoice

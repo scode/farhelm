@@ -1389,6 +1389,54 @@ fn the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one(cx: &mut
     );
 }
 
+/// The host button is as wide as the chosen host's words (at least the old 12em), not the row, and 36 pixels high;
+/// Browse, as high, sits on its own line right under the Host row, from the row's left edge; the host list is as wide
+/// as the hosts it offers, not the button. Why: the old launcher drew a compact picker (`min-width: 12em; height:
+/// 36px`) and its block layout put Browse under the row, and the port first stretched the button across the row with
+/// Browse beside it, which the bridge drive caught beside the reference pictures; a list tied to the narrow button
+/// would squeeze longer host names.
+#[gpui::test]
+fn the_host_button_is_as_wide_as_its_host_with_browse_under_it(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "/seeded");
+    let (button, browse, row) = (
+        test_support::bounds(cx, "launcher-host"),
+        test_support::bounds(cx, "launcher-browse"),
+        test_support::bounds(cx, "launcher-host-row"),
+    );
+    assert!(
+        button.size.width >= gpui::px(168.) && button.size.width < row.size.width / 2.,
+        "compact, not the row's width: {button:?} in the row {row:?}"
+    );
+    assert_eq!(
+        button.size.height,
+        gpui::px(36.),
+        "the host button's height"
+    );
+    assert_eq!(browse.size.height, gpui::px(36.), "Browse's height");
+    assert_eq!(
+        browse.top(),
+        row.bottom(),
+        "Browse sits right under the Host row"
+    );
+    assert_eq!(browse.left(), row.left(), "from the row's left edge");
+    assert_eq!(
+        name_of(cx, "launcher-host").as_deref(),
+        Some("Host: host1"),
+        "the premise: the button names the chosen host before the click"
+    );
+    test_support::click(cx, "launcher-host");
+    // Read from the drawn frame, as `has_node` reads the list; `test_support::bounds` found no debug bounds for it.
+    let list = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-host-list"))
+        .map(|node| node.bounds)
+        .expect("the click opened the list");
+    assert!(
+        list.size.width > button.size.width,
+        "the list widens for host3 (Unreachable, retrying): {list:?} against {button:?}"
+    );
+}
+
 /// SPEC.md, "Launch templates": Save as template checks the host "only after a hand pick", and the old picker counted
 /// re-picking the host already shown as one. A picker that skipped the shown host would leave New's prefilled host
 /// unchecked however the user confirmed it. Specified: picking host1, already chosen, marks the host the user's own
@@ -1502,7 +1550,7 @@ pub(super) fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<boo
 /// Cancel and the host button are reached with Tab like every other control: the launcher owns their focus handles (it
 /// starts Restart with on Cancel and watches the host button's focus), and a handle that was not a tab stop would leave
 /// a keyboard user unable to reach them. Specified: Tab from the launch kind's tabs eventually reaches Cancel, and
-/// Shift+Tab from the folder field reaches the host button, past Browse beside it.
+/// Shift+Tab from the folder field reaches the host button, past Browse under it.
 #[gpui::test]
 fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));

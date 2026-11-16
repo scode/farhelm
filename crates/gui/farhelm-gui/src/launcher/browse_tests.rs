@@ -3,16 +3,30 @@
 //!
 //! Ported from the old `e2e/tests/sidebar.spec.ts` ("composer path actions keep typing inert and browse the selected
 //! remote host", "composer rejects held and queued stale browse activation after destination changes", and Browse's
-//! place in "composer destination block keeps host, browse, folder, and grouped choices together") and `launcher-enter.spec.ts` ("launcher action-button Enter keeps reset browse and cancel") at
-//! reference commit `24bc0580`.
+//! place in "composer destination block keeps host, browse, folder, and grouped choices together") and
+//! `launcher-enter.spec.ts` ("launcher action-button Enter keeps reset browse and cancel") at reference commit
+//! `24bc0580`.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{Modifiers, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point, px};
 use serde_json::{Value, json};
 
 use super::draft::{DestinationKind, LaunchDraft};
 use super::view_tests::{draft, fixture_hosts, launcher_with_hosts, name_of};
 use crate::test_support::{self, keys, settle};
+
+/// Scroll the launcher's body to its end with the wheel, where the listing sits: its entries are 38 pixels high, so the
+/// later ones can lie past the body's visible end, where a click would land on whatever covers that point instead.
+fn scroll_body_to_end(cx: &mut VisualTestContext) {
+    let at = test_support::center(cx, "launcher-body");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_event(ScrollEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(0.), px(-4000.))),
+        ..Default::default()
+    });
+    settle(cx);
+}
 
 /// New on host1 in `/tmp`.
 fn new_in_tmp(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
@@ -58,9 +72,9 @@ fn tmp_listing() -> Value {
 
 /// Browse asks the chosen host, on its connection, for the folder as typed, and lists what it answers: the folder
 /// itself, its parent, that there are more, then each folder (a host value drawn escaped); taking one makes it the
-/// folder as the user's own choice and closes the listing. Browse sits in the Host row, beside the picker. Why: SPEC.md, "explicit browsing
-/// asks the selected supervisor for one bounded directory level" (old "composer path actions … browse the selected
-/// remote host" and "launcher action-button Enter keeps reset browse and cancel").
+/// folder as the user's own choice and closes the listing. Browse sits right under the Host row. Why: SPEC.md,
+/// "explicit browsing asks the selected supervisor for one bounded directory level" (old "composer path actions …
+/// browse the selected remote host" and "launcher action-button Enter keeps reset browse and cancel").
 #[gpui::test]
 fn browse_lists_one_level_and_taking_a_folder_chooses_it(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_in_tmp(cx);
@@ -69,10 +83,14 @@ fn browse_lists_one_level_and_taking_a_folder_chooses_it(cx: &mut TestAppContext
         "the premise: opening asks nothing"
     );
     let (button, host_row) = (
-        test_support::center(cx, "launcher-browse"),
+        test_support::bounds(cx, "launcher-browse"),
         test_support::bounds(cx, "launcher-host-row"),
     );
-    assert!(host_row.contains(&button), "Browse sits in the Host row");
+    assert_eq!(
+        button.top(),
+        host_row.bottom(),
+        "Browse sits right under the Host row"
+    );
     test_support::click(cx, "launcher-browse");
     let request = browse_request(&mut helm, cx).expect("Browse asked the host");
     assert_eq!(
@@ -101,6 +119,7 @@ fn browse_lists_one_level_and_taking_a_folder_chooses_it(cx: &mut TestAppContext
         Some("/tmp/b<U+202E>"),
         "a host value is shown escaped"
     );
+    scroll_body_to_end(cx);
     test_support::click(cx, "launcher-browse-1");
     let taken = draft(cx);
     assert_eq!(
@@ -278,10 +297,10 @@ fn browse_is_not_offered_where_the_folder_cannot_change(cx: &mut TestAppContext)
     );
 }
 
-/// Replace with holds its host but not its folder, so Browse sits beside the held host. Why: the old launcher showed it
+/// Replace with holds its host but not its folder, so Browse sits under the held host. Why: the old launcher showed it
 /// there.
 #[gpui::test]
-fn browse_is_offered_beside_replace_withs_held_host(cx: &mut TestAppContext) {
+fn browse_is_offered_under_replace_withs_held_host(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
     let (_helm, cx) = launcher_with_hosts(
         cx,
@@ -293,7 +312,15 @@ fn browse_is_offered_beside_replace_withs_held_host(cx: &mut TestAppContext) {
         "the premise: Replace with holds its host"
     );
     test_support::frame(cx);
-    assert!(cx.debug_bounds("launcher-browse").is_some());
+    let (button, host_row) = (
+        test_support::bounds(cx, "launcher-browse"),
+        test_support::bounds(cx, "launcher-host-row"),
+    );
+    assert_eq!(
+        button.top(),
+        host_row.bottom(),
+        "Browse sits right under the held host"
+    );
 }
 
 /// Choosing another host forgets the listing: it named the folders of the host it was asked of. Why: taking one would
@@ -328,4 +355,33 @@ fn a_host_change_forgets_the_listing(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(draft(cx).host, Some(other), "the premise: the host changed");
     assert_eq!(name_of(cx, "launcher-browse-use"), None);
+}
+
+/// The listing's entries are the old `.launch-composer-browser > button`s: each as wide as the listing and at least 38
+/// pixels high, taller than an ordinary button. Why: the old listing drew its entries as wide wells that read as one
+/// list of places, and the port first drew them as ordinary buttons, which the side-by-side check with the old app
+/// caught.
+#[gpui::test]
+fn the_listings_entries_are_wide_and_tall(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_in_tmp(cx);
+    test_support::click(cx, "launcher-browse");
+    let request = browse_request(&mut helm, cx).expect("Browse asked the host");
+    helm.reply(request.id, 200, Some(tmp_listing()));
+    settle(cx);
+    let list = test_support::bounds(cx, "launcher-browse-list");
+    for entry in [
+        "launcher-browse-use",
+        "launcher-browse-parent",
+        "launcher-browse-0",
+    ] {
+        let bounds = test_support::bounds(cx, entry);
+        assert_eq!(
+            bounds.size.width, list.size.width,
+            "{entry} spans the listing"
+        );
+        assert!(
+            bounds.size.height >= gpui::px(38.),
+            "{entry} is at least 38 pixels high: {bounds:?}"
+        );
+    }
 }
