@@ -29,9 +29,9 @@
 //! tooltip's ground, border, radius and shadow) at the width its caller passes, the old 310 pixels
 //! (`.farhelm-tooltip[data-kind="card"]`), and the card fills that width.
 //!
-//! The Hosts row's running status offers the card as lazy card help placed beside the sidebar
-//! ([`super::status_mark`]), which builds it with [`view`] when the tooltip shows and drops it when it hides. The
-//! attention list's working rows are to offer it the same way.
+//! Both of its places offer the card as lazy card help placed beside the sidebar, which builds it with [`view`] when the
+//! tooltip shows and drops it when it hides: the Hosts row's running status ([`super::status_mark`]) and the attention
+//! list's working rows (`components::HoverHelp::card_with`).
 //!
 //! ## The fit
 //!

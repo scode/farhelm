@@ -818,22 +818,27 @@ systemd or SSH substrate ran.
   typed line echoed live; and on a session of its own, the Larger terminal text chord makes the helm store a size one
   point larger and the program's `stty size` answer fewer columns and no more rows than before, and Smaller stores the
   starting size again; and on a session of its own, resting the pointer on its row's title shows the row's summary card,
-  and moving it off the rows takes the card away. A failed run keeps its run directory under `/tmp` for its logs. An
-  interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, and the second run if one is up, for
-  which the recorder's `--termination-grace` leaves it time: 30 s covers the two `stop`s in a row, each a few seconds
-  normally. Its 46 steps (one skipped on Linux) took longer than the 42 before the two terminal steps came: 43 of them
-  took 305 s on a loaded development machine shared with other agents on 2026-11-15, the second run's start and stop
-  included (42 took 137 s on a build worker that day; 114 s for 39, 98 s for 37 and 91 s for 34 steps earlier, 62 s for
-  24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first unless given
-  `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a
-  logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row menu,
-  session header, Delete, Rename, Stop, Restart, Replace (its YOLO question included), Mark read and Mark unread, quick
-  switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host
-  menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog, Welcome card or the start
-  dialogs (the Welcome card and announcements at a window start), Trash button and dialog, Keyboard shortcuts overview,
-  approval cards or their region, the helm's approval path, sidebar width or divider, terminal attach, replay, paste,
-  text input, scrollback or text size, the order menu (Compact included), compact rows, pins and the order hold, the
-  heading's New, the row's summary card, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  and moving it off the rows takes the card away; on a fake SSH host of its own whose scripted setup fails while Hosts
+  is closed, the host's rail avatar is named with the setup or update warning until opening Hosts acknowledges it; and
+  on another such host, the Hosts attention list above the sessions shows the failed setup's row ("Setup or update needs
+  attention"), whose Details opens Hosts with that host's menu toggle focused, and the row is gone once Hosts closes
+  again. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
+  recorder) still stops its app run, and the second run if one is up, for which the recorder's `--termination-grace`
+  leaves it time: 30 s covers the two `stop`s in a row, each a few seconds normally. Its 47 steps (one skipped on Linux)
+  took longer than the 42 before the two terminal steps came: 46 of them took 150 s on a build worker on 2026-11-15, and
+  43 of them took 305 s on a loaded development machine shared with other agents on 2026-11-15, the second run's start
+  and stop included (42 took 137 s on a build worker that day; 114 s for 39, 98 s for 37 and 91 s for 34 steps earlier,
+  62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first
+  unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux,
+  or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row
+  menu, session header, Delete, Rename, Stop, Restart, Replace (its YOLO question included), Mark read and Mark unread,
+  quick switcher, host rail (Add host among its entries, and an avatar's setup or update warning) and its foot (Hosts
+  and the Settings gear), the Hosts attention list, status segments, host menu, Remove host, host Update and host
+  Uninstall, Help menu or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and announcements at
+  a window start), Trash button and dialog, Keyboard shortcuts overview, approval cards or their region, the helm's
+  approval path, sidebar width or divider, terminal attach, replay, paste, text input, scrollback or text size, the
+  order menu (Compact included), compact rows, pins and the order hold, the heading's New, the row's summary card, the
+  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

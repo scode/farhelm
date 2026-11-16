@@ -1247,6 +1247,60 @@ fn host_text_is_drawn_escaped(cx: &mut TestAppContext) {
     }
 }
 
+// ---- Revealing a host ----------------------------------------------------------------------------------------------
+
+/// Why this matters: the attention list's Details opens Hosts "with that host's row in view and its menu button
+/// focused" (SPEC.md, "Session list"), which only the panel can do, since it alone draws the row; and a reveal that
+/// outlives its row must not land on a later host that reuses the id. Specified: in a short window over thirty hosts,
+/// revealing the last one focuses its menu toggle and scrolls it into the panel's visible part, with the Details switch
+/// still off and no menu open; revealing a host the registry does not list changes nothing, and nothing happens either
+/// when a host with that id is then added.
+#[gpui::test]
+fn reveal_focuses_a_far_rows_toggle_and_scrolls_it_into_view(cx: &mut TestAppContext) {
+    let mut listed: Vec<HostView> = (10..40).map(|id| host(id, "ssh", connected())).collect();
+    let (mut fake, panel, cx) = open_panel_in_column(cx, vec![hosts(&listed)]);
+    cx.simulate_resize(size(px(800.), px(400.)));
+    test_support::settle(cx);
+    let in_view = |cx: &mut VisualTestContext| {
+        let shown = test_support::bounds(cx, "hosts-panel");
+        let toggle = test_support::bounds(cx, "host-menu-toggle-39");
+        toggle.top() >= shown.top() && toggle.bottom() <= shown.bottom()
+    };
+    assert!(!in_view(cx), "the premise: the last row is below the fold");
+    let reveal = |host: i64, cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            let mark = crate::focus::Mark::take(cx);
+            panel.update(cx, |panel, cx| panel.reveal(host, &mark, window, cx));
+        });
+        test_support::settle(cx);
+    };
+
+    reveal(39, cx);
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("host-menu-toggle-39")
+    );
+    assert!(in_view(cx));
+    assert!(!details_switch(&frame(cx)));
+    assert!(!test_support::any_open(cx));
+
+    reveal(99, cx);
+    listed.push(host(99, "ssh", connected()));
+    let state = hosts(&listed);
+    fake.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("host-menu-toggle-39"),
+        "the reveal of a host without a row was dropped"
+    );
+}
+
 // ---- Layout, with the real text system -----------------------------------------------------------------------------
 
 /// Why this matters: a host's name is unbounded user data, and the old row let the name give way first (its 4em floor
