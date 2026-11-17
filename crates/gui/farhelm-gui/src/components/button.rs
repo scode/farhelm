@@ -45,8 +45,8 @@
 //!
 //! The focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only
 //! after keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost
-//! button's box is visible to a keyboard user. The Settings section list's entries (`Tier::Nav`) are the exception:
-//! their old rules drew the ring alone, one pixel inside the edge, with no focus fill.
+//! button's box is visible to a keyboard user. A few tiers keep their resting fill under the ring instead, as their old
+//! rules did; `Button::fill` lists them.
 
 use std::rc::Rc;
 
@@ -124,6 +124,7 @@ pub enum Tier {
     /// in the quiet `--fg-2` until it holds ⚡, then in the warning amber (`lit`). The old sheet drew no fill under the
     /// pointer, only an edge; here the pointer gets the ghost tier's hover fill, the nearest look the button draws. A
     /// lit bolt is also reported pressed ([`Button::pressed`]), without the pressed fill: the amber glyph is its look.
+    /// Under the keyboard ring a bolt, lit or not, has no fill, as the old one had none ([`Button::fill`]).
     QuickMark { lit: bool },
     /// `.templates-number-key`: a template's number-key button, a ghost in a tight 4-pixel box whose text (a chord, in
     /// the monospace face, given as [`Button::content`]) is the quiet `--fg-2` with no key and the accent once one is
@@ -133,9 +134,10 @@ pub enum Tier {
     /// content (the template's name over its summary, given as [`Button::content`]) sits at its left, 10 by 12 pixels
     /// in, in the primary ink, with the control hover fill under the pointer. The row whose template the editor holds is
     /// drawn through [`Button::pressed`] as the old sheet drew it: the accent fill inside the accent edge, one step up
-    /// the accent family under the pointer, and the inverse ring inside the edge. The content draws its own lines, so a
-    /// pressed row's summary takes `--on-accent-dim` there, not here. The Templates editor's "+ Add field" menu draws its
-    /// entries in this tier too, left-aligned with the same hover fill.
+    /// the accent family under the pointer, and the inverse ring inside the edge over the resting accent
+    /// ([`Button::fill`]). The content draws its own lines, so a pressed row's summary takes `--on-accent-dim` there,
+    /// not here. The Templates editor's "+ Add field" menu draws its entries in this tier too, left-aligned with the
+    /// same hover fill.
     TemplateRow,
     /// `.launch-composer-recent-slots > button`: one row of the launcher's recent setups, a ghost as wide as its well and
     /// 36 pixels high, with square corners (the well rounds the strip), 14 pixels in at the sides, its content (the
@@ -154,9 +156,10 @@ pub enum Tier {
     FieldRemove,
     /// `.host-icon-choice`: one of the host settings' icon choices, a 36-pixel square on the well with a dim edge, its
     /// content (the host's mark) centered, and the control hover fill under the pointer. Chosen
-    /// ([`Button::pressed`]), it takes the accent fill with the accent edge, as a [`Tier::Nav`] entry does, and keeps
-    /// the fill's hover. The content is the caller's, so a chosen choice draws its mark in the inverse ink itself (the
-    /// old sheet's one `!important` over the mark's own tint).
+    /// ([`Button::pressed`]), it takes the accent fill with the accent edge, as a [`Tier::Nav`] entry does, keeps the
+    /// fill's hover, and keeps its resting fill under the keyboard ring ([`Button::fill`]). The content is the caller's,
+    /// so a chosen choice draws its mark in the inverse ink itself (the old sheet's one `!important` over the mark's own
+    /// tint).
     IconChoice,
     /// `.session-tunnel-toggle`: the open-tunnels pill in the session's top row, the row's one distinctively colored
     /// control: the tunnel ink on the tunnel fill inside the tunnel edge, rounded to 8 pixels, padded 2 by 4 pixels at
@@ -165,7 +168,7 @@ pub enum Tier {
     /// `.tab`: one terminal of the session view's tab strip (the agent's or a shell tab's), a ghost in the old tab's box
     /// (`padding: 3px 10px` at 12 pixels) that never shrinks, so a long strip scrolls rather than squeezing its tabs.
     /// The shown terminal's tab is drawn through [`Button::pressed`], the accent fill with the inverse ink
-    /// (`.tab.selected`).
+    /// (`.tab.selected`); [`Button::fill`] has its one exception under the keyboard ring.
     TerminalTab,
     /// `.tab-close`: the × beside a shell tab in the session view's tab strip, a ghost in a tight box (`padding: 3px 7px`
     /// at 12 pixels) that never shrinks, in the quiet `--fg-1` ink that turns `--danger` on the subdued red fill
@@ -536,7 +539,8 @@ impl Button {
     /// `[aria-pressed="true"]` look, the accent fill with the inverse ink and an inverse focus ring drawn inside the
     /// edge. A pressed button keeps that fill under the pointer and the keyboard ring (one step up the accent family),
     /// where the old sheet's later `.btn` hover and focus fills replaced it and left white ink on a light fill; a
-    /// pressed `Tier::Nav` entry keeps its fill unchanged under the pointer, as the old section list did.
+    /// pressed `Tier::Nav` entry keeps its fill unchanged under the pointer, as the old section list did
+    /// ([`Button::fill`] lists the pressed tiers that keep their resting fill under the ring).
     pub fn pressed(mut self, pressed: bool) -> Self {
         self.pressed = Some(pressed);
         self
@@ -833,12 +837,44 @@ impl Button {
             ),
         }
     }
+
+    /// The fill the button draws, from the fills [`Button::colors`] gives it: `hovered` says the pointer is over an
+    /// active button, `focused` that an enabled one shows the keyboard ring. The pointer draws the hover fill, and so
+    /// does the ring, which the old sheet gave every `.btn` (`.btn:focus-visible`) so a ghost button's box shows. These
+    /// keep their resting fill under the ring instead, as the old sheet drew them (decided by the migration's
+    /// orchestrator on 2026-11-16 for the tab and 2026-11-17 for the rest):
+    ///
+    /// - the shown terminal's tab, even with the pointer over it, so a keyboard user can still tell which terminal is
+    ///   shown (`.tab.selected:focus-visible { background: var(--accent-fill) }`, which outranked its hover rule);
+    /// - a template row and a host icon choice, chosen or not, whose old buttons were not `.btn` and whose focus rules
+    ///   drew only the ring, so the pointer still draws their hover fill over it;
+    /// - a quick-launch bolt, lit or not, also not a `.btn`, which drew no fill at all (the pointer still draws the
+    ///   hover fill, the departure [`Tier::QuickMark`] describes);
+    /// - the Settings section list's entries, which drew the ring alone, and the readout's controls but the update-menu
+    ///   toggle (see [`Tier::Readout`]).
+    ///
+    /// NOTE: The unit tests call this directly. Its two call sites in `render` (the background away from the pointer
+    /// and the hover style) have no render-level test: nothing in the test harness reads a drawn background, and no
+    /// golden draws any of the tiers above focused in the state listed. A change there must keep passing `focused` to
+    /// both.
+    pub(super) fn fill(&self, palette: &Palette, hovered: bool, focused: bool) -> Option<Token> {
+        let (rest, hover, _, _) = self.colors(palette);
+        match self.tier {
+            Tier::TerminalTab if self.pressed == Some(true) && focused => rest,
+            _ if hovered => Some(hover),
+            _ if !focused => rest,
+            Tier::Nav | Tier::Readout { focus_fill: false } | Tier::QuickMark { .. } => rest,
+            Tier::TemplateRow | Tier::IconChoice => rest,
+            Tier::Readout { focus_fill: true } => Some(palette.control_hover),
+            _ => Some(hover),
+        }
+    }
 }
 
 impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let (fill, hover_fill, edge, text) = self.colors(palette);
+        let (_, _, edge, text) = self.colors(palette);
         let focus = self.focus.clone().unwrap_or_else(|| {
             focus::control_handle(
                 ElementId::Name(format!("{}-focus", self.id).into()),
@@ -1106,20 +1142,12 @@ impl RenderOnce for Button {
                     .h(px(FIELD_REMOVE_SIZE.1))
                     .flex_none()
             });
-        button = button.when_some(fill, |button, fill| button.bg(theme::color(fill)));
-        // The old navigation entries showed keyboard focus by their ring alone, without `.btn`'s focus fill; of the
-        // readout's controls only the update-menu toggle has it.
-        let focus_fill = match self.tier {
-            Tier::Nav | Tier::Readout { focus_fill: false } => None,
-            Tier::Readout { focus_fill: true } => Some(palette.control_hover),
-            _ => Some(hover_fill),
-        };
-        if ring
-            && enabled
-            && let Some(focus_fill) = focus_fill
-        {
-            button = button.bg(theme::color(focus_fill));
-        }
+        // The fill away from the pointer, and (for an active button, below) the one under it: both from `fill`, which
+        // says how keyboard focus changes each.
+        let focused = ring && enabled;
+        button = button.when_some(self.fill(palette, false, focused), |button, fill| {
+            button.bg(theme::color(fill))
+        });
         if ring && pressed {
             // A pressed button's ring is the inverse ink inside its edge (`outline-color: var(--on-fill);
             // outline-offset: -4px`), as the old rail drew it: the accent ring would not read against the accent fill.
@@ -1176,8 +1204,12 @@ impl RenderOnce for Button {
             // A tab's × does too (`.tab-close:hover`).
             let hover_ink = matches!(self.tier, Tier::FieldRemove | Tier::TerminalTabClose)
                 .then_some(palette.danger);
+            let hover_fill = self.fill(palette, true, focused);
             button = button.cursor_pointer().hover(move |style| {
-                let style = style.bg(theme::color(hover_fill));
+                let style = match hover_fill {
+                    Some(fill) => style.bg(theme::color(fill)),
+                    None => style,
+                };
                 match hover_ink {
                     Some(ink) => style.text_color(theme::color(ink)),
                     None => style,
