@@ -614,8 +614,7 @@ partly: a copied model, Custom flags and command text holding invisible characte
 showed them, in
 `launcher::view_tests::{agent_launch_text_holding_invisible_characters_shows_escaped, copied_command_text_holding_invisible_characters_shows_escaped_and_editable}`
 (the first test's read-only prompt half is the old templates spec's "initial prompt launcher template stacking and save
-selection", in the templates area's file); a copied folder and session name holding one are not yet spelled out, as the
-old prefill did; the prefill, host fallback and its note, and refusals in
+selection", in the templates area's file); the prefill, host fallback and its note, and refusals in
 `launcher::entry_tests::{clone_prefills_the_sources_host_folder_title_and_launch, clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so, clone_of_a_sandbox_session_with_nothing_to_carry_falls_back_and_says_so, clone_opens_nothing_over_a_dialog_or_for_an_unknown_session, clone_brings_back_a_refused_launch_waiting_behind_its_notice}`;
 "each clone restores every field after an intervening draft edit" and "closing a clone without submitting, or submitting
 it, both leave the next New Session with fresh defaults" in
@@ -642,6 +641,9 @@ and `launcher::environment_tests::a_seeded_environment_has_the_segments_effects_
   supervisor's, in `crates/farhelm/tests/e2e/structured_launches.rs`.
 - "a failed catalog read shows a retry and leaves the clone launchable", its Retry:
   `launcher::view_tests::a_failed_catalog_read_says_so_and_retry_reads_it_again`.
+- Clone spells out invisible characters in the copied folder and session name. The unchanged fields send the raw bytes
+  from the source, and edits show what the user types:
+  `launcher::entry_tests::{clone_shows_its_copied_folder_and_name_escaped_and_editable, a_managed_clones_numbered_name_spells_out_its_source_title}`.
 
 ### `tests/destination-authority.spec.ts`
 
@@ -1359,9 +1361,6 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
 - A host removed from the registry while New has it chosen stays chosen, and Launch is refused with "Choose a connected
   host before launching", the words any unconnected host gets. The old launcher said the host was no longer registered,
   in a note under its host field, which then stopped showing the removed host.
-- A Clone's copied folder and session name holding a hidden character are shown as they are, not spelled out as the old
-  prefill showed them; the copied model, Custom flags and command text are spelled out. The folder and name are listed
-  as not yet ported in the clone entry; until they are ported, this is how they show.
 - The host button, Browse and Browse's listing entries have the frame's 1-pixel edge; the old ones had 1.5 pixels.
 - The composer search's results are drawn as one flat list under group headings; the old area nested each group in a
   `role="group"` node named by its heading. Flat, every row is the list's own child, so the arrows keep the highlighted

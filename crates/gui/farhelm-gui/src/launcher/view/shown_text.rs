@@ -1,7 +1,7 @@
 //! How the launcher's text fields show a value holding characters that change how text reads (a direction override, a
 //! zero-width space; [`farhelm_proto::text::is_presentation_unsafe`]): with each such character spelled `<U+XXXX>`. The
-//! wrapper prefix, initial prompt, Custom flags, command line and resume command go through here; the closed model
-//! field's display does the same (`model_field`).
+//! wrapper prefix, initial prompt, Custom flags, command line, resume command and Clone's copied folder and name go
+//! through here. The closed model field's display does the same (`model_field`).
 //!
 //! Why: these values often come from somewhere other than the user's typing (a session's stored launch, which may
 //! have come from another host or an agent, a remembered prefix, a template), and a field showing them raw could hide or
@@ -20,7 +20,8 @@
 //!   it is still the one the launcher opened with, such as the ones Clone and Replace with copy from their source
 //!   (`create_form/draft.rs`'s `seed_invocation` and `seed_command_fields`, which spelled out only the copied value). A
 //!   command the user typed or pasted is shown as typed: it reaches Bash as written (SPEC.md, "Command launch"), and
-//!   the `<` and `>` of a spelling would be redirections there.
+//!   the `<` and `>` of a spelling would be redirections there. Clone's copied folder and session name follow the same
+//!   opened-value rule.
 //!
 //! An editable spelling escapes only the hidden characters, as `editable_peer` did, so an edit never turns a literal
 //! `<U+` the user typed into an escape of its own; a read-only one uses the app's full host-text spelling
@@ -44,14 +45,15 @@ pub(super) struct FieldText {
     pub(super) read_only: bool,
 }
 
-/// The command line and resume command the launcher opened with: what a Clone or Replace with copied from its source,
-/// or a Restart with's stored launch. Only these are spelled out while editable; text typed since is the user's own,
-/// and so is a template's command, which is applied after the launcher is made and so is shown as typed, as the old
-/// launcher showed it.
+/// The opening command fields, folder and name. The command fields may come from Clone, Replace with or Restart with.
+/// Only Clone uses the folder and name here. An edited value is shown as entered, including a template's value when
+/// it differs from the one the launcher opened with.
 #[derive(Default)]
 pub(super) struct Opened {
     command: String,
     resume: String,
+    folder: String,
+    name: String,
 }
 
 impl Opened {
@@ -60,6 +62,8 @@ impl Opened {
         Opened {
             command: draft.command.command.clone(),
             resume: draft.command.resume.clone(),
+            folder: draft.folder.value().clone(),
+            name: draft.name.value().clone(),
         }
     }
 }
@@ -143,6 +147,34 @@ pub(super) fn command(draft: &LaunchDraft, opened: &Opened) -> FieldText {
 /// The resume command, under [`command`]'s rule.
 pub(super) fn resume(draft: &LaunchDraft, opened: &Opened) -> FieldText {
     as_opened(&draft.command.resume, &opened.resume, &draft.mode)
+}
+
+/// Clone's copied working directory stays editable, with its hidden characters visible until the value changes.
+pub(super) fn folder(draft: &LaunchDraft, opened: &Opened) -> String {
+    copied(draft.folder.value(), &opened.folder, &draft.mode)
+}
+
+/// Show the draft's effective name, spelling out a copied title or the checkout name it produces. Once a checkout
+/// name is edited it is exact, so the field shows the new text rather than treating it as another numbered default.
+pub(super) fn name(draft: &LaunchDraft, opened: &Opened) -> String {
+    let name = draft.shown_name();
+    if matches!(draft.mode, Mode::Clone)
+        && draft.name.value() == &opened.name
+        && (draft.checkout.is_none() || !draft.name.is_touched())
+    {
+        shown(&name, false, false).text
+    } else {
+        name
+    }
+}
+
+/// The display of an editable copied value. The draft still holds its raw bytes, just as it does for a command.
+fn copied(value: &str, opened: &str, mode: &Mode) -> String {
+    if matches!(mode, Mode::Clone) && value == opened {
+        shown(value, false, false).text
+    } else {
+        value.to_owned()
+    }
 }
 
 /// `value` against what its field `opened` with: [`command`]'s rule.
