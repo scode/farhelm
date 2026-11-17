@@ -53,7 +53,7 @@ impl Cleanups {
 }
 
 /// Return the creator tag only for the product resource namespaces. The
-/// browser harness's farhelm-sbx names must never become cleanup candidates.
+/// Tensorlake test harness's farhelm-sbx names must never become cleanup candidates.
 fn creator(name: &str) -> Option<&str> {
     let suffix = name
         .strip_prefix(HOST_PREFIX)
@@ -409,7 +409,7 @@ mod tests {
         .unwrap()
         .sandbox_id
     }
-    /// The product namespaces carry a helm tag; the browser harness and
+    /// The product namespaces carry a helm tag; the Tensorlake test harness and
     /// unrelated sandbox names must never be offered for deletion.
     #[test]
     fn only_product_names_have_creator_tags() {
@@ -430,7 +430,7 @@ mod tests {
     /// A local host and every saved recipe reserve their names, including
     /// an unsettled host create and a builder with no recorded ID. Another
     /// helm is visible but marked;
-    /// browser harness resources and unrelated sandboxes are never offered.
+    /// the Tensorlake test harness's sandboxes and unrelated ones are never offered.
     #[farhelm_testtrace::test]
     async fn list_excludes_local_owners_and_harness_and_marks_other_helms() {
         let (_dir, store, service, fake) = fixture().await;

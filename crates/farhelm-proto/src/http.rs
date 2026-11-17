@@ -1,4 +1,4 @@
-//! Machine-read tokens the helm's HTTP API hands the browser UI.
+//! Machine-read tokens the helm's HTTP API hands its client.
 //!
 //! The helm's error bodies are prose shown verbatim, and its replies are JSON
 //! the UI decodes into its own types, so some of the places where the UI
@@ -86,9 +86,9 @@ pub const HOST_BUSY_OPERATION: &str = "operation-in-progress";
 /// Marks an environment session Delete on which nothing was decided because
 /// the environment's own Farhelm could not be asked (the sandbox or container
 /// is suspended, paused or unreachable, or runs a Farhelm this helm cannot
-/// talk to) or did not answer in time. The page answers it by offering the
-/// warned whole-environment Delete; it never destroys anything on its own.
-/// Only the helm sets this header, from its own typed refusal. The only value
+/// talk to) or did not answer in time. The marker asks a client to offer the
+/// warned whole-environment Delete, never to destroy anything on its own. The
+/// desktop app does not handle it yet. Only the helm sets this header, from its own typed refusal. The only value
 /// it carries is [`ENVIRONMENT_UNASKED`].
 pub const ENVIRONMENT_UNASKED_HEADER: &str = "x-farhelm-environment-unasked";
 /// The one value of [`ENVIRONMENT_UNASKED_HEADER`].
@@ -112,8 +112,10 @@ pub const AUTH_REQUIRED_CODE: &str = "device_auth_required";
 
 /// Response header carrying the helm's build version on every reply.
 ///
-/// The UI compares it with its own build to notice that it is running
-/// against a different helm build (version skew). Lowercase because the helm
+/// The removed browser UI compared it with its own build to notice version
+/// skew. No Farhelm client reads it today, since the desktop app embeds its
+/// own helm; the release workflow's check of a published binary reads it from
+/// the helm that binary starts. Lowercase because the helm
 /// builds the header name with `HeaderName::from_static`, which rejects
 /// uppercase.
 pub const BUILD_STAMP_HEADER: &str = "x-farhelm-build";

@@ -1181,7 +1181,7 @@ impl Fixture {
         assert_eq!(self.inspect(&container).await["State"]["Paused"], true);
         // SPEC.md, "Container sessions": while the container is paused the
         // helm cannot ask its Farhelm, so a session Delete decides nothing
-        // and says so with the marker that makes the page offer the warned
+        // and says so with the marker that asks a client to offer the warned
         // whole-container Delete instead. Nothing may be deleted or resumed.
         let (status, unasked, body) = self
             .delete_session(&session.id, "delete_environment_session=true")
@@ -1423,7 +1423,7 @@ impl Fixture {
     /// Send the user's `DELETE /api/sessions/{reference}?{query}` and return
     /// its status, the helm's "unasked" marker if any, and the bounded body.
     /// The marker is returned apart from the text because it, not any prose,
-    /// is what tells a page that nothing was decided.
+    /// is what tells a client, by contract, that nothing was decided.
     async fn delete_session(
         &self,
         reference: &str,

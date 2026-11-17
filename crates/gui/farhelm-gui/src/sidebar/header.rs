@@ -1,5 +1,6 @@
 //! The app header: the row across the top of the sidebar with the wordmark at its left and the build's version at its
-//! right (the old `.app-bar`, without the updater's controls, which are the desktop-integration area's).
+//! right (the old `.app-bar`). While the desktop updater runs, the version is its readout with the updater's controls
+//! (`update_readout::view`); without one it is the plain build text below.
 //!
 //! Geometry and colors are the old stylesheet's: at least 40 pixels high, 8 by 12 pixels of padding, the sidebar's
 //! `--bg-1` with a `--border-row` hairline under it. In the macOS window it is the app bar half of the window's title

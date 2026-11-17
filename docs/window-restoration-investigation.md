@@ -1,6 +1,8 @@
 # Native window restoration investigation
 
-NOTE: This records the native API limits that shape Farhelm's release persistence behavior.
+NOTE: This is a historical investigation record from the old Dioxus desktop app and is not maintained. It records the
+native API limits that shaped that app's window persistence; the window it describes, its webview and its Dioxus and Tao
+hooks are gone.
 
 Farhelm created its desktop window through `desktop_window()` in `crates/farhelm-ui/src/desktop.rs` (deleted with the
 Dioxus app; read it at the GPUI port's reference commit `24bc0580`). The geometry record and its restore rules now live

@@ -3,8 +3,9 @@
 //! supervisor, which deletes the session and, if it was the last, seals
 //! itself so the helm can destroy the environment (SPEC_impl.md, "Environment
 //! Delete and the seal"); the helm never counts sessions itself. When that
-//! supervisor cannot be asked, the page offers the warned whole-environment
-//! Delete, which destroys the resource without any count. Replace's internal
+//! supervisor cannot be asked, the helm's marker asks a client to offer the
+//! warned whole-environment Delete, which destroys the resource without any
+//! count. Replace's internal
 //! source removal remains a supervisor session operation that never seals.
 //! Stop and suspend chains the ordinary Stop and the host's Suspend under one
 //! reply bound ([`stop_and_suspend`]). Both environment Deletes and the Retry
@@ -124,8 +125,8 @@ pub(crate) async fn create_environment_session(
 /// environment's supervisor could not be asked (the environment is suspended,
 /// paused or unreachable, or its Farhelm is a version this helm cannot talk
 /// to), or the request got no answer in time. The HTTP edge marks it with
-/// `ENVIRONMENT_UNASKED_HEADER`, which is what makes the page offer the
-/// warned whole-environment Delete; the helm itself never escalates.
+/// `ENVIRONMENT_UNASKED_HEADER`, which asks a client to offer the warned
+/// whole-environment Delete; the helm itself never escalates.
 ///
 /// The text says what is known: an unanswered request may still have been
 /// acted on, which the next listing shows (a seal included, which the helm

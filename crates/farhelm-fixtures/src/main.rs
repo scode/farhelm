@@ -1,11 +1,11 @@
 //! `farhelm-fixtures`: the stand-in programs Farhelm's tests run, kept out
 //! of the product binary.
 //!
-//! The e2e tests and the browser suite need an "agent" that behaves
+//! The e2e tests and the GUI's end-to-end scripts need an "agent" that behaves
 //! deterministically (prompts, colors, terminal modes, conversation records,
 //! floods), and a sweep that reaps the state directories dead test runs
-//! leave under `/tmp`; the browser stack's cleanup test also starts real
-//! terminal hosts from a shell (`spawn-terminal-host`). The first two used
+//! leave under `/tmp`; the e2e terminal host cleanup tests also start real
+//! terminal hosts through a command line (`spawn-terminal-host`). The first two used
 //! to be hidden `farhelm internal` subcommands, which shipped several
 //! thousand lines of test fixtures in every release and made the product
 //! binary depend on `farhelm-teststate`. This package is never shipped (`dist = false`).

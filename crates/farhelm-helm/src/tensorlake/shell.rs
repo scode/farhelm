@@ -4,10 +4,10 @@
 //! [`SandboxShell`] runs one script under `sh -c` as the sandbox's login user
 //! and reports how it ended. The real implementation, [`SshSandboxShell`],
 //! shells out to `ssh` through Tensorlake's gateway with Farhelm's own key
-//! and a one-shot connection (see `ssh.rs` for why it never shares one). The
-//! browser suite substitutes a fake on the same gate as its Tensorlake API
-//! fake (`e2e.rs`), and the engine's unit tests a scripted one, so nothing
-//! above this seam knows whether ssh ran.
+//! and a one-shot connection (see `ssh.rs` for why it never shares one).
+//! Tests substitute the filesystem fake that also stands in for the
+//! Tensorlake API (`e2e.rs`) or a scripted one, so nothing above this seam
+//! knows whether ssh ran.
 //!
 //! Route lowering is shared with provisioning and supervisor connections.
 //! This caller still owns its named build steps, one-shot policy, process

@@ -21,8 +21,7 @@
 [graph]
 # Every feature of every workspace member, so a crate that only an optional feature pulls in is checked too, although
 # no default build compiles it. cargo-deny resolves features the way a build does, so lockfile entries that no feature
-# combination of the workspace ever compiles (dioxus-fullstack and its dependencies, for example, which `cargo tree`
-# never shows) are still left out.
+# combination of the workspace ever compiles are still left out.
 all-features = true
 
 [licenses]
@@ -37,13 +36,14 @@ allow = [
   "0BSD",
   "Apache-2.0",
   # The exception only relaxes Apache-2.0's terms for compiled object code. target-lexicon (through cfg-expr and
-  # system-deps, a build dependency of the GTK -sys crates) is under it alone.
+  # system-deps, a build dependency of the GLib -sys crates behind the desktop app's GIO) is under it alone.
   "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
   "BSD-3-Clause",
-  # Boost Software License, permissive. clipboard-win and error-code (arboard, on Windows).
+  # Boost Software License, permissive. Today only through OR (ryu).
   "BSL-1.0",
-  # Public-domain dedication with a permissive fallback. notify (the supervisor's file watching).
+  # Public-domain dedication with a permissive fallback. notify (the supervisor's file watching) and tiny-keccak
+  # (through const-random and ahash).
   "CC0-1.0",
   # Community Data License Agreement, Permissive, a license for data rather than code. webpki-root-certs (through
   # rustls-platform-verifier and reqwest), which is Mozilla's CA certificate list.
@@ -52,11 +52,9 @@ allow = [
   "MIT",
   # Weak copyleft at file level: whoever distributes a binary must make the source of the MPL-covered files available,
   # including any changes to them. SPEC_impl.md allows MPL-2.0 only as an unmodified dependency, so do not vendor or
-  # patch these crates; this check cannot see a patch. cssparser, cssparser-macros, dtoa-short and selectors (wry, the
-  # desktop app's webview) and option-ext (dirs).
+  # patch these crates; this check cannot see a patch. cbindgen (a build dependency of GPUI's shared Apple platform
+  # crate, gpui-pre-apple), dwrote (zed-font-kit, GPUI's fonts on Windows) and option-ext (dirs).
   "MPL-2.0",
-  # University of Illinois/NCSA license, BSD-style. libfuzzer-sys (rav1e, through image and dioxus-desktop).
-  "NCSA",
   # Unicode's data license. The icu_* crates (url's IDNA handling), unicode-ident and the zerovec family.
   "Unicode-3.0",
   "Zlib",

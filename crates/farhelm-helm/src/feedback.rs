@@ -6,8 +6,8 @@
 //! content, and it exists only for this route: nothing else calls
 //! [`FeedbackForwarder::forward`], no agent request verb reaches it, and the
 //! route sits inside the ordinary protected group, so only an authenticated
-//! UI can send. The browser and the desktop webview never post to the
-//! internet themselves; the helm does it for them, which keeps the one
+//! UI can send. The desktop app never posts feedback to the internet
+//! itself; the helm does it for the app, which keeps the one
 //! feedback edge in one place. Ntfy waiting alerts have their own bounded sender.
 //!
 //! The submission is forwarded exactly as the UI composed and displayed it:
