@@ -39,7 +39,7 @@ fn window(
 
 /// SPEC.md, "Creation": "A segment with no usable place is hidden". A segment offered with nothing to create on would
 /// only lead to a refusal. Specified: with host1's Podman usable, the switch shows Existing host and New container, and
-/// no New sandbox, whose account prerequisites come with the launcher's New sandbox.
+/// no New sandbox while the Tensorlake account read is still out (`sandbox_view_tests` has the account's own cases).
 #[gpui::test]
 fn segments_without_a_usable_place_are_hidden(cx: &mut TestAppContext) {
     let (_helm, cx) = window(cx);

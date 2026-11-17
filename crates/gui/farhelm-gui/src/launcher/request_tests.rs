@@ -13,10 +13,13 @@ use farhelm_proto::{
 };
 
 use super::draft::{LaunchDraft, Tab};
-use super::request::{Preview, Recipes, Target};
+use super::request::{Account, Preview, Recipes, Target};
 
 /// The recipe catalog these tests check against: none read yet, which only a new environment's launch looks at.
 static NO_CATALOG: Recipes = Recipes::Loading;
+
+/// The Tensorlake account these tests check against: still being read, which only a new sandbox's launch looks at.
+static NO_ACCOUNT: Account = Account::Reading;
 
 /// Host 1 connected with connection 4, as the helm's pinned host list serves it; host 2 the same row never
 /// connected (connection 0) and not connected now.
@@ -53,6 +56,7 @@ fn target<'a>(hosts: &'a [HostView], catalog: Option<&'a [LaunchCatalogModel]>) 
         catalog,
         preview: Preview::Waiting,
         recipes: &NO_CATALOG,
+        account: &NO_ACCOUNT,
     }
 }
 

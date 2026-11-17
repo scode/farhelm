@@ -1,12 +1,15 @@
 //! Tests of a launch into a new environment on the draft and its request, with no window: the Runs on edits and their
-//! effects, the folder rules a recipe target skips, the reasons a new container cannot launch, and the body it sends.
+//! effects, the folder rules a recipe target skips, the reasons a new container or sandbox cannot launch, the body it
+//! sends, and New sandbox's registration note. New sandbox's segment, recipe listing and press are
+//! `sandbox_view_tests`'.
 //!
 //! SPEC.md, "Creation" (the Runs on bullet), "Container sessions" and "Sandbox sessions"; the old app's
-//! `create_form/draft.rs` (`select_target`, `choose_target`) and `sandbox_reason` in `create_form.rs` at reference
-//! commit `24bc0580`.
+//! `create_form/draft.rs` (`select_target`, `choose_target`), `sandbox_reason` in `create_form.rs` and
+//! `recipe_refusal` in `sandbox_sessions.rs` at reference commit `24bc0580`.
 
 use farhelm_proto::launcher::TemplateNameKind;
 use farhelm_proto::recipes::RecipeView;
+use farhelm_proto::tensorlake::{Settings, SshKeyStatus};
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{
     CommandLaunch, LaunchTarget, Place, ProviderKind, SessionInfo, SessionLaunch, parse_github_repo,
@@ -17,9 +20,10 @@ use super::draft::{
     DestinationKind, ENVIRONMENT_HOME, FolderDefault, Install, LaunchDraft, Mode, RunsOn, Tab,
 };
 use super::request::{
-    CHOOSE_RECIPE, CONTAINER_HOST_UNAVAILABLE, LOADING_RECIPES, Preview, Recipes,
-    SELECT_REPOSITORY, Target,
+    Account, CHOOSE_RECIPE, CONTAINER_HOST_UNAVAILABLE, LOADING_ACCOUNT, LOADING_RECIPES, Preview,
+    Recipes, SELECT_REPOSITORY, Target,
 };
+use crate::environment_ui::ProviderUi;
 
 /// The helm's pinned host-list fixture's first three hosts (`view_tests::fixture_hosts`): host1 (connected, Podman
 /// usable), host2 (Podman not installed) and host3 (an SSH host carrying no Podman check, as one the helm cannot route
@@ -89,13 +93,27 @@ fn in_container() -> LaunchDraft {
     draft
 }
 
-/// What the draft is checked against: `hosts`, no catalog read, and `recipes`.
+/// The Tensorlake account while its read is out: what every container check here runs against, since a container
+/// must not wait for an account it does not use.
+static READING: Account = Account::Reading;
+
+/// What the draft is checked against: `hosts`, no catalog read, `recipes`, and the account still being read.
 fn target<'a>(hosts: &'a [HostView], recipes: &'a Recipes) -> Target<'a> {
+    target_with(hosts, recipes, &READING)
+}
+
+/// [`target`], with the Tensorlake account as `account`.
+fn target_with<'a>(
+    hosts: &'a [HostView],
+    recipes: &'a Recipes,
+    account: &'a Account,
+) -> Target<'a> {
     Target {
         hosts,
         catalog: None,
         preview: Preview::Waiting,
         recipes,
+        account,
     }
 }
 
@@ -580,5 +598,158 @@ fn a_clones_default_name_goes_to_a_new_environment_as_a_base() {
         sent_name(&draft),
         (Some("mine".to_owned()), Some("mine".to_owned()), None),
         "a typed name"
+    );
+}
+
+// ---- New sandbox: the account's prerequisites -----------------------------------------------------------------------
+
+/// [`recipe_json`] on managed Ubuntu with a snapshot built, as a sandbox starts from.
+pub(super) fn built_json(name: &str) -> serde_json::Value {
+    let mut view = recipe_json(name, json!({ "kind": "tensorlake_ubuntu" }));
+    view["snapshot"] = json!({
+        "id": "snap", "built_at": 1, "base": { "kind": "tensorlake_ubuntu" }, "disk_gb": 20, "packages": [],
+        "claude_version": null, "codex_version": null,
+    });
+    view
+}
+
+/// [`built_json`] decoded.
+fn built(name: &str) -> RecipeView {
+    serde_json::from_value(built_json(name)).unwrap()
+}
+
+/// A Tensorlake account as the helm answers it: an API key saved or not, and Farhelm's SSH key as `ssh_key`.
+pub(super) fn account(api_key_set: bool, ssh_key: SshKeyStatus) -> Settings {
+    Settings {
+        api_key_set,
+        create_without_asking: false,
+        helm_tag: "tag".into(),
+        ssh_key,
+    }
+}
+
+/// Farhelm's SSH key, made, with `command` as its registration command.
+pub(super) fn ready_key(command: &str) -> SshKeyStatus {
+    SshKeyStatus::Ready {
+        public_key: "ssh-ed25519 AAAA fixture".into(),
+        public_key_path: "/state/tensorlake.pub".into(),
+        name: "fixture".into(),
+        register_command: command.into(),
+    }
+}
+
+/// A new sandbox of `recipe`, on the Tensorlake account.
+pub(super) fn sandbox(recipe: &str) -> LaunchTarget {
+    LaunchTarget::Environment {
+        recipe: recipe.into(),
+        place: Place::TensorlakeAccount,
+    }
+}
+
+/// [`complete`] in a new sandbox of `recipe`.
+fn in_sandbox(recipe: &str) -> LaunchDraft {
+    let mut draft = complete();
+    draft.choose_runs_on(RunsOn::New(ProviderKind::Tensorlake), Some(sandbox(recipe)));
+    draft
+}
+
+/// SPEC.md, "Sandbox sessions": "A recipe without a built snapshot is disabled with No snapshot yet. A missing API key
+/// or absent or unreadable local Farhelm SSH key also disables it." A sandbox launched without them only fails minutes
+/// later at the helm, so each is said before the press, and one at a time in the old launcher's order, so the user
+/// fixes the first thing first. Specified: a sandbox of a built recipe says "Loading Tensorlake settings…" while the
+/// account read is out, the read's own words once it failed, the API key before the SSH key when both are missing, then
+/// "Create Farhelm's SSH key in Settings → Tensorlake", then the helm's reason for an unreadable key written escaped
+/// (it is the helm's text); with the key ready, an unbuilt recipe says "No snapshot yet", a base Tensorlake cannot
+/// run says so before any account reason, and a built recipe launches.
+#[test]
+fn a_new_sandbox_is_refused_for_each_missing_prerequisite_in_the_old_order() {
+    let hosts = fixture_hosts();
+    let recipes = Recipes::Listed(vec![
+        built("ready"),
+        recipe("unbuilt", json!({ "kind": "tensorlake_ubuntu" })),
+        recipe(
+            "boxed",
+            json!({ "kind": "container_image", "reference": "ubuntu", "user": "dev" }),
+        ),
+    ]);
+    let check = |draft: &LaunchDraft, account: Account| {
+        draft.refusal(target_with(&hosts, &recipes, &account), None)
+    };
+    let ready = in_sandbox("ready");
+    assert_eq!(
+        ready.target,
+        Some(sandbox("ready")),
+        "the premise: a sandbox draft"
+    );
+    assert_eq!(
+        check(&ready, Account::Reading).as_deref(),
+        Some(LOADING_ACCOUNT)
+    );
+    assert_eq!(
+        check(&ready, Account::Unreadable("the helm is gone".into())).as_deref(),
+        Some("the helm is gone")
+    );
+    assert_eq!(
+        check(
+            &ready,
+            Account::Read(account(false, SshKeyStatus::NotCreated))
+        )
+        .as_deref(),
+        Some("Set a Tensorlake API key in Settings"),
+        "the API key first"
+    );
+    assert_eq!(
+        check(
+            &ready,
+            Account::Read(account(true, SshKeyStatus::NotCreated))
+        )
+        .as_deref(),
+        Some("Create Farhelm's SSH key in Settings → Tensorlake")
+    );
+    let reason = "disk \u{202e}full";
+    let unavailable = SshKeyStatus::Unavailable {
+        reason: reason.into(),
+    };
+    let escaped = farhelm_proto::text::escaped(reason);
+    assert_ne!(
+        escaped, reason,
+        "the premise: the reason holds a character shown escaped"
+    );
+    assert_eq!(
+        check(&ready, Account::Read(account(true, unavailable))),
+        Some(format!("Farhelm's local SSH key is unavailable: {escaped}"))
+    );
+    let usable = || Account::Read(account(true, ready_key("tl sbx ssh keys add")));
+    assert_eq!(
+        check(&in_sandbox("unbuilt"), usable()).as_deref(),
+        Some("No snapshot yet")
+    );
+    assert_eq!(
+        check(&in_sandbox("boxed"), Account::Reading).as_deref(),
+        Some("This recipe's base cannot run as a sandbox"),
+        "a base it cannot run, before any account reason"
+    );
+    assert_eq!(check(&ready, usable()), None);
+}
+
+/// SPEC.md, "Sandbox sessions": the registration note shows "the existing copyable SSH-key registration command", so
+/// it needs a key to register; a note naming a command that does not exist would send the user to a dead end. The note
+/// with a made key, and none before the key is created, are `sandbox_view_tests`'. Specified: with Farhelm's key
+/// unreadable, or no account read, there is no note, and a container has none even with a made key.
+#[test]
+fn the_registration_note_needs_a_readable_key() {
+    let tensorlake = ProviderUi(ProviderKind::Tensorlake);
+    let unreadable = account(
+        true,
+        SshKeyStatus::Unavailable {
+            reason: "unreadable".into(),
+        },
+    );
+    assert_eq!(tensorlake.registration_note(Some(&unreadable)), None);
+    assert_eq!(tensorlake.registration_note(None), None);
+    let made = account(true, ready_key("tl sbx ssh keys add"));
+    assert_eq!(
+        ProviderUi(ProviderKind::Podman).registration_note(Some(&made)),
+        None
     );
 }
