@@ -38,8 +38,10 @@ use crate::main_view::MainView;
 use crate::operations::{Command, OpKey, Work};
 use crate::session::Connection;
 use crate::session_list::SessionList;
-use crate::session_list::host_rail::tests::node;
-use crate::session_list::tests::{change, listing, listing_meta, painted, preferences, session};
+use crate::session_list::host_rail::tests::{answer_everything, filtered, node, one_query};
+use crate::session_list::tests::{
+    carrying, change, listing, listing_meta, painted, preferences, preferences_state, session,
+};
 use crate::terminal::attached::{AttachedTerminal, STATUS_RECONNECT_ID};
 use crate::test_support::{self, click, keys, settle, terminal_focused};
 use crate::test_support::{frame, meta, started};
@@ -253,6 +255,50 @@ fn switching_while_the_first_stream_attaches_closes_it(cx: &mut TestAppContext) 
     keys(fleet.cx, "x");
     assert_eq!(fleet.input(1), [letter("x", 88)]);
     assert_eq!(fleet.input(0), [], "a's stream never carried anything");
+}
+
+/// The old `sidebar.spec.ts` case "filtering out the active session preserves its terminal and restores its selected
+/// row", which held the very terminal element across a filter and back. SPEC.md: "Hiding the selected session changes
+/// neither that selection nor its open terminal". Here the terminal's identity is its stream: a pane that rebuilt the
+/// terminal when the list stopped drawing its row would open a second stream and replay the screen, and one that let
+/// go of it would close the first. `carried_tests.rs` pins that the terminal stays drawn; this pins that it is the same
+/// one. Specified: with a open and live, Waiting (which matches neither session, the helm carrying a outside the list)
+/// leaves a's row undrawn and a selected; All and the helm's listing of a and b then draw a's row selected again; across
+/// both, the pane opened no other stream and a's stream stayed attached.
+#[gpui::test]
+fn a_filter_that_hides_the_open_session_keeps_its_stream_and_reselects_its_row(
+    cx: &mut TestAppContext,
+) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    answer_everything(&mut fleet.helm);
+
+    click(fleet.cx, "session-status-Waiting");
+    let (query, _) = one_query(&mut fleet.helm);
+    fleet
+        .helm
+        .push(change(carrying(filtered(&[], 2, 0), "a"), &[], &["b"]));
+    fleet.helm.reply(query.id, 204, None);
+    settle(fleet.cx);
+    assert!(
+        node(&frame(fleet.cx), "session-row-a").is_none(),
+        "the premise: Waiting hides a"
+    );
+    assert_eq!(fleet.selected().as_deref(), Some("a"), "a stays open");
+
+    click(fleet.cx, "session-status-All");
+    let (query, _) = one_query(&mut fleet.helm);
+    fleet.helm.push(change(
+        listing_meta(&["a", "b"], 2, false),
+        &[session("a"), session("b")],
+        &[],
+    ));
+    fleet.helm.reply(query.id, 204, None);
+    settle(fleet.cx);
+    let item = node(&frame(fleet.cx), "session-item-a").map(|item| item.selected);
+    assert_eq!(item, Some(Some(true)), "a's row is back, selected");
+    assert_eq!(fleet.attached(), ["a"], "no second stream");
+    assert_eq!(fleet.phase(0), FakePhase::Attached, "a's stream stayed");
 }
 
 // ---- Focus ---------------------------------------------------------------------------------------------------------
@@ -825,6 +871,99 @@ fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_progra
         terminal_focused(fleet.cx),
         "closing the question gave focus back"
     );
+}
+
+/// The old `session-action-shortcuts.spec.ts` case "browser Delete chord honors skipped confirmations and deletes the
+/// open session". The chord is the header's Delete "with its ordinary confirmation" (SPEC.md, "Desktop window chrome"),
+/// and Skip session confirmations is part of that: a chord that still asked would make the setting useless from the
+/// terminal, where the user's hands are. Specified: with Skip on and a's terminal live and focused, the chord sends
+/// exactly one Delete, of a, opens no question and reaches the program with nothing; a's row stays drawn while the
+/// Delete is unanswered; once the helm removes a and answers, b is open.
+#[gpui::test]
+fn the_delete_shortcut_with_questions_skipped_deletes_the_open_session_at_once(
+    cx: &mut TestAppContext,
+) {
+    let skipping = farhelm_proto::ui_channel::Preferences {
+        visit_history: vec!["a".to_owned()],
+        skip_session_confirmations: Some(true),
+        welcome_seen: Some(true),
+        ..Default::default()
+    };
+    let mut fleet = open_main(
+        cx,
+        vec![
+            listing(&["a", "b"], &[session("a"), session("b")]),
+            preferences_state(skipping),
+        ],
+    );
+    fleet.go_live(0);
+    assert!(
+        terminal_focused(fleet.cx),
+        "the premise: a's terminal has focus"
+    );
+    fleet.deletes();
+
+    keys(fleet.cx, DELETE_SESSION_CHORD);
+    // As `Fleet::deletes`, but keeping each Delete's path: every other command is answered at once, in order.
+    let mut deletes = Vec::new();
+    for command in fleet.helm.commands() {
+        if command.method == Method::Delete {
+            deletes.push(command);
+        } else {
+            fleet.helm.reply(command.id, 200, None);
+        }
+    }
+    let [delete] = &deletes[..] else {
+        panic!("one Delete was sent, not {}", deletes.len());
+    };
+    assert_eq!(delete.path.split('?').next(), Some("/api/sessions/a"));
+    assert!(fleet.cx.debug_bounds("prompt").is_none(), "nothing asked");
+    assert_eq!(fleet.input(0), [], "the chord never reached the program");
+    assert!(
+        node(&frame(fleet.cx), "session-row-a").is_some(),
+        "a's row stays while the Delete runs"
+    );
+
+    fleet
+        .helm
+        .push(change(listing_meta(&["b"], 1, false), &[], &["a"]));
+    fleet.helm.reply(delete.id, 200, None);
+    settle(fleet.cx);
+    assert_eq!(fleet.selected().as_deref(), Some("b"));
+}
+
+/// The modal half of the old `session-action-shortcuts.spec.ts` case "browser Delete chord yields to a visible modal
+/// and an ordinary text field" (the text field half is `actions_tests.rs`'s): SPEC.md, "A visible modal keeps keyboard
+/// ownership". A chord that reached the header from under a dialog would ask, or with questions skipped delete, behind
+/// the dialog the user is working in. The session list's tests pin an open menu; this pins a dialog over a live
+/// terminal. Specified, under the Linux click rule: with a's terminal live, a click on the Settings gear opens
+/// Settings with focus on its first switch; the chord then leaves Settings open with focus on that switch, opens no
+/// question, sends no Delete and reaches the program with nothing.
+#[gpui::test]
+fn the_delete_shortcut_does_nothing_under_an_open_dialog(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet
+        .cx
+        .update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    fleet.go_live(0);
+    fleet.deletes();
+    click(fleet.cx, "app-settings-toggle");
+    let first_switch = "settings-skip-session-confirmations";
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some(first_switch),
+        "the premise: Settings is open with focus on its first switch"
+    );
+
+    keys(fleet.cx, DELETE_SESSION_CHORD);
+    assert!(test_support::any_open(fleet.cx), "Settings is still open");
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some(first_switch)
+    );
+    assert!(fleet.cx.debug_bounds("prompt").is_none(), "nothing asked");
+    assert!(fleet.deletes().is_empty(), "no Delete was sent");
+    assert_eq!(fleet.input(0), [], "the chord never reached the program");
 }
 
 // ---- A Delete of the open session ---------------------------------------------------------------------------------

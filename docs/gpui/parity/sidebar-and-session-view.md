@@ -89,9 +89,9 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
 
 - `external deletion disables rename without discarding its draft`: session_list/rename/tests.rs
   `a_complete_listing_without_the_session_disables_save_and_keeps_the_draft`.
-- `filtered-list absence retains an enabled rename editor and its draft`: partly, session_list/rename/tests.rs
-  `a_listing_that_proves_nothing_keeps_save_enabled`, which never types; a typed draft and the field's focus surviving
-  the filtered listing: test to port (raised 2026-11-16).
+- `filtered-list absence retains an enabled rename editor and its draft`: session_list/rename/tests.rs
+  `a_listing_that_proves_nothing_keeps_save_enabled` (a typed draft and the field's focus surviving a filtered, a
+  truncated and an unavailable listing, Save still enabled).
 - `the sidebar hides its scrollbar without giving up scrolling`: the scrolling by session_list/list_tests.rs
   `only_the_rows_in_view_are_drawn_and_scrolling_reaches_every_row`; the list draws no scrollbar by construction
   (nothing in the session list uses the scrollbar component).
@@ -181,10 +181,11 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
 - `a host-filtered-out row's open menu stays closed when it returns`: session_list/menu_tests.rs
   `a_pushed_removal_of_the_row_closes_its_menu` (the row going closes the menu, and its return leaves it closed;
   choosing a host is itself a press outside the menu, so a push is the one way the row leaves under it).
-- `filtering out the active session preserves its terminal and restores its selected row`: partly,
-  session_list/seen_tests.rs `the_seen_memory_survives_a_host_filter_that_hides_the_open_session` and
-  session_pane/carried_tests.rs `a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename`; the
-  stream not attached again across the filter and the returned row reading selected: test to port (raised 2026-11-16).
+- `filtering out the active session preserves its terminal and restores its selected row`: session_list/seen_tests.rs
+  `the_seen_memory_survives_a_host_filter_that_hides_the_open_session`, session_pane/carried_tests.rs
+  `a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename` and session_pane/tests.rs
+  `a_filter_that_hides_the_open_session_keeps_its_stream_and_reselects_its_row` (no second stream across a status filter
+  and back, where the old case used a host filter, the returned row reading selected).
 - `the host list counts every host, humanizes phases, and clips long names`: hosts/tests.rs
   `the_heading_counts_the_hosts_the_helm_lists`, `every_row_shows_its_name_mark_and_phase_words` and
   `a_long_name_gives_way_before_the_phase_words`.
@@ -200,11 +201,12 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   `a_click_into_the_terminal_with_a_menu_open_focuses_it_under_the_linux_rule` and
   `a_click_into_the_terminal_with_a_menu_open_focuses_it_under_the_macos_rule`, and
   `an_anchored_question_sits_below_its_anchor_and_closes_like_a_menu`.
-- `visit history chooses and remembers the next session after ${mode} deletion`: partly, session_list/menu_tests.rs
-  `the_next_session_opens_only_once_the_delete_has_settled`, session_pane/carried_tests.rs
+- `visit history chooses and remembers the next session after ${mode} deletion`: session_list/menu_tests.rs
+  `the_next_session_opens_only_once_the_delete_has_settled` and
+  `after_a_delete_the_visit_history_beats_a_newer_session_and_an_ended_one_counts` (a two-entry history choosing an
+  ended session over a newer one), session_pane/carried_tests.rs
   `this_windows_delete_of_a_hidden_open_session_opens_the_next_session` and session_pane/tests.rs
-  `a_removal_pushed_from_elsewhere_selects_the_next_session_whose_terminal_takes_focus`; a history of more than one
-  entry choosing over a newer session after a Delete: test to port (raised 2026-11-16).
+  `a_removal_pushed_from_elsewhere_selects_the_next_session_whose_terminal_takes_focus`.
 - `a second client's launch alone takes the terminal over`: superseded (decided by the migration's orchestrator on
   2026-11-16): SPEC.md, "One GUI at a time", has a second window take the helm's seat and the first go inert as a whole
   (crates/farhelm-helm/src/ui_channel_tests.rs
@@ -212,11 +214,10 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   `a_displaced_window_waits_for_take_back_then_rebuilds`).
 - `the back button and titlebar rename do not come back`: dropped (decided by the migration's orchestrator on
   2026-11-16): the GPUI app never had either. Rename in the row menu is `the_menus_rename_opens_the_editor_for_its_row`.
-- `the empty-fleet placeholder appears only when proven and yields to auto-select`: partly, session_list/tests.rs
-  `an_empty_fleet_says_so_in_the_list_and_the_pane`, `only_a_complete_available_empty_listing_is_an_empty_fleet` and
-  `a_selection_settles_only_on_evidence`, and session_pane/tests.rs
-  `a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal`; a session pushed from elsewhere replacing the
-  placeholder: test to port (raised 2026-11-16).
+- `the empty-fleet placeholder appears only when proven and yields to auto-select`: session_list/tests.rs
+  `an_empty_fleet_says_so_in_the_list_and_the_pane`, `only_a_complete_available_empty_listing_is_an_empty_fleet`,
+  `a_selection_settles_only_on_evidence` and `a_session_pushed_into_an_empty_fleet_replaces_the_placeholder_and_opens`,
+  and session_pane/tests.rs `a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal`.
 - `a retained refusal stays inside a bottom-row menu's scrolling panel`: session_list/menu_tests.rs
   `a_long_refusal_scrolls_inside_a_menu_that_stays_in_a_small_window`, with the old case's 120-word refusal on a Delete
   rather than a Stop, on any row, since the menu's height cap does not depend on where its top is placed. Its pointer
@@ -448,9 +449,11 @@ host dialog's own cases are in the settings-and-hosts parity file.
 - `rail Help menu points at its footer button`: belongs to [Other dialogs](other-dialogs.md) (not yet listed there;
   raised 2026-11-16), whose Help menu is crates/gui/farhelm-gui/src/help_menu/tests.rs
   `the_menu_opens_beside_the_button_and_escape_returns_focus_to_it`.
-- `registry changes retain the selected host ID and rail entry`: partly, its removal step by
-  `a_removed_chosen_host_keeps_a_pressed_inert_placeholder`; a rename and a reorder keeping the choice pressed and focus
-  on its avatar, and the removed host coming back pressed and live: test to port (raised 2026-11-16).
+- `registry changes retain the selected host ID and rail entry`:
+  `a_removed_chosen_host_keeps_a_pressed_inert_placeholder` and
+  `a_registry_change_keeps_the_chosen_host_by_id_through_rename_reorder_and_return` (a rename and a reorder keeping the
+  choice pressed and focus on its avatar, the removed host coming back pressed and live with focus left on All, and no
+  query sent).
 
 ### `tests/status-filter.spec.ts`
 
@@ -948,7 +951,9 @@ crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs):
   2026-11-16).
 - `plain Replace YOLO question excludes only its source (${surface})`: lifecycle_tests.rs
   `an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions`.
-- `plain Replace preserves two sources' YOLO questions and answers independently`: test to port (raised 2026-11-16).
+- `plain Replace preserves two sources' YOLO questions and answers independently`: lifecycle_tests.rs
+  `two_sources_yolo_questions_wait_and_answer_independently` (the first source's refusal arrives first, since the fake
+  helm answers in order; the second source's question is answered first).
 - `${label} ${behavior}`, its two plain Replace variants:
   `plain Replace selects its replacement after an earlier complete fleet refresh` by lifecycle_tests.rs
   `a_replace_of_the_open_session_opens_its_replacement_and_focuses_it` (the helm pushes its list before it replies), and
@@ -1020,12 +1025,14 @@ crates/gui/farhelm-gui/src/session_pane/carried_tests.rs
 view, crates/gui/farhelm-gui/src/session_list/list_tests.rs
 `the_delete_shortcut_asks_under_the_headers_delete_with_the_open_row_out_of_view`.
 
-- `browser Delete chord honors skipped confirmations and deletes the open session`: test to port (raised 2026-11-16);
-  the header's tests drive the chord with the preference off only.
-- `browser Delete chord yields to a visible modal and an ordinary text field`: partly, the text field half by
+- `browser Delete chord honors skipped confirmations and deletes the open session`:
+  crates/gui/farhelm-gui/src/session_pane/tests.rs
+  `the_delete_shortcut_with_questions_skipped_deletes_the_open_session_at_once`.
+- `browser Delete chord yields to a visible modal and an ordinary text field`: the text field half by
   crates/gui/farhelm-gui/src/actions_tests.rs `the_linux_delete_chord_leaves_a_text_field_alone`,
   `the_linux_delete_chord_leaves_the_field_that_keeps_line_breaks_alone` and
-  `the_linux_delete_chord_leaves_this_field_alone`; the modal half: test to port (raised 2026-11-16).
+  `the_linux_delete_chord_leaves_this_field_alone`; the modal half by crates/gui/farhelm-gui/src/session_pane/tests.rs
+  `the_delete_shortcut_does_nothing_under_an_open_dialog`.
 
 ### `tests/header.spec.ts`
 
@@ -1311,7 +1318,9 @@ crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs):
 - `don't ask again on a refused YOLO replace marks the host, then replaces with the override`:
   crates/gui/farhelm-gui/src/session_pane/card_tests.rs `a_yolo_refused_replace_from_the_card_asks_in_the_card` and
   lifecycle_tests.rs `the_permanent_answer_writes_the_host_setting_then_replaces_with_consent`.
-- `Cancel queued behind don't ask again keeps a refused Replace save visible`: test to port (raised 2026-11-16).
+- `Cancel queued behind don't ask again keeps a refused Replace save visible`:
+  crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+  `a_cancel_during_the_host_write_keeps_the_question_for_its_refusal`.
 - `don't ask again on a refused YOLO replace from the row menu marks the host first`:
   `the_permanent_answer_writes_the_host_setting_then_replaces_with_consent`.
 - `a YOLO question for a row with no known host offers no don't-ask-again`: superseded (decided by the migration's
@@ -1770,24 +1779,31 @@ no managed checkout, so no `app_scenes` entry pictures it.
 
 Case: header Clone from Hosts reveals Sessions and restores launcher focus.
 
-not yet ported: the session header's Clone, and its Replace with… and Restart with…, open the launcher
-(`launcher::entry::open_clone`, `open_replace_with`) without showing Sessions in place of the Hosts panel, where New and
-quick launch show it (`session_list::open_new`). SPEC.md names "an accepted quick-switcher pick or New handoff" as what
-returns to Sessions and does not plainly count Clone; the migration's orchestrator decided on 2026-11-16 that the
-header's launcher handoffs count, as in the old app, and the fix and its test come in a PR now being written. The focus
-half, Cancel back on New, is the launcher deviation below ("Closing the launcher returns focus to what held focus when
-it opened").
+ported: the session header's Clone, Replace with… and Restart with…, and the interrupted card's Replace with…, are New
+handoffs, which show Sessions in place of the Hosts panel once the launcher opens (`session_pane/header.rs` and
+`session_pane/card.rs`, through `session_list::show_sessions`), as in the old app, whose card went through the header's
+path (the header's three decided by the migration's orchestrator on 2026-11-16; the card applied by this area on
+2026-11-17 because it took the same path in the old app; SPEC.md says so). The focus half, Cancel back on New, is the
+launcher deviation below ("Closing the launcher returns focus to what held focus when it opened").
+
+- crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+  `clone_and_the_with_choices_from_hosts_show_sessions_and_a_refusal_leaves_hosts` (each of the three shows Sessions;
+  Clone's handler, run while a host change is in flight, opens nothing and leaves Hosts)
+- crates/gui/farhelm-gui/src/session_pane/card_tests.rs `the_cards_replace_with_from_hosts_shows_sessions`
+- the `app-hosts-clone-shows-sessions` scene in docs/gpui/screenshot-scenes.json (Hosts, then the header's Clone)
 
 ### `tests/provisioning.spec.ts` (settings and hosts)
 
 Case: the rail's half of "accepted ADD registers before execution and releases the page lock while running".
 
-partly: a running Add's ringed avatar and its words, from a snapshot, and the rail's Add host never disabled (a
-deviation below). The pushed registration adding the ringed avatar, the ring going when the run completes with Hosts
-closed, and another avatar's menu staying open through that: test to port (raised 2026-11-16). The Hosts panel's row
-belongs to [Settings and hosts](settings-and-hosts.md) (not yet listed there; raised 2026-11-16).
+ported (the rail's half): a running Add's ringed avatar and its words, from a snapshot and from the pushed registration,
+the ring going when the run completes with Hosts closed, another avatar's menu staying open through that, and the rail's
+Add host never disabled (a deviation below). The Hosts panel's row belongs to
+[Settings and hosts](settings-and-hosts.md) (not yet listed there; raised 2026-11-16).
 
-- crates/gui/farhelm-gui/src/session_list/host_rail/tests.rs `running_work_rings_the_avatar_and_names_the_work`
+- crates/gui/farhelm-gui/src/session_list/host_rail/tests.rs `running_work_rings_the_avatar_and_names_the_work`,
+  `a_registered_hosts_ring_goes_with_its_run_and_leaves_another_avatars_menu_open` (the other avatar's menu opened by a
+  right press, not Shift+F10)
 
 ### `tests/workspace-trust.spec.ts` (settings and hosts)
 
