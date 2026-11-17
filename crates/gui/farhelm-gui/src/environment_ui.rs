@@ -10,7 +10,8 @@
 //! (`host_delete_label`, `delete_consequence`, `deleting_detail`, `locality_label`). The session list's and the session
 //! view's environment session rows, controls and suspended card take theirs from the section on a session's own
 //! environment below. The launcher's Runs on switch, its note and its refusals take their words from here (`segment`,
-//! `launch_help`, `recipe_refusal`, [`target_label`]).
+//! `launch_help`, `recipe_refusal`, [`target_label`]), and so does the template editor's copy of the switch, with its
+//! own authoring rules (`template_place`, `base_refusal`).
 
 use farhelm_proto::recipes::{RecipeBase, RecipeView};
 use farhelm_proto::ui_channel::HostView;
@@ -248,11 +249,8 @@ impl ProviderUi {
     /// Farhelm's local SSH key) need the Tensorlake settings read, which comes with the launcher's New sandbox. A
     /// container place builds a missing image on first launch, so Podman has none.
     pub(crate) fn recipe_refusal(self, recipe: &RecipeView) -> Option<String> {
-        if !recipe.base.supports(self.0) {
-            return Some(format!(
-                "This recipe's base cannot run as a {}",
-                self.noun()
-            ));
+        if let Some(reason) = self.base_refusal(recipe) {
+            return Some(reason);
         }
         match self.0 {
             ProviderKind::Tensorlake => recipe
@@ -260,6 +258,29 @@ impl ProviderUi {
                 .is_none()
                 .then(|| "No snapshot yet".to_owned()),
             ProviderKind::Podman => None,
+        }
+    }
+
+    /// Why `recipe` cannot make this provider's environment at all, whatever the account or place: its base is one
+    /// the provider cannot run. The first of [`ProviderUi::recipe_refusal`]'s reasons, and the only one the template
+    /// editor's Recipe select disables an option for, as the old `PlacementPicker` did in its authoring mode: a
+    /// template stores a recipe's name for later launches, which check the rest when they are made.
+    pub(crate) fn base_refusal(self, recipe: &RecipeView) -> Option<String> {
+        (!recipe.base.supports(self.0))
+            .then(|| format!("This recipe's base cannot run as a {}", self.noun()))
+    }
+
+    /// Where the template editor's Runs on switch puts this provider's environment when its segment is entered, or
+    /// `None` when there is nowhere to name one, which hides the segment. `container_hosts` are every host that can
+    /// hold containers, in the registry's order, usable now or not. The old `PlacementPicker`'s authoring mode, which
+    /// counted places by name, not by readiness ("Authoring needs names, not account readiness", its editor said): New
+    /// container shows while any container host is listed and enters the first (the editor passed no last container
+    /// host), and New sandbox always shows, entering the Tensorlake account with its prerequisites unchecked. The
+    /// launcher's own rule, which counts only usable places, is [`ProviderUi::launch_place`].
+    pub(crate) fn template_place(self, container_hosts: &[i64]) -> Option<Place> {
+        match self.0 {
+            ProviderKind::Tensorlake => Some(Place::TensorlakeAccount),
+            ProviderKind::Podman => container_hosts.first().copied().map(Place::PodmanHost),
         }
     }
 
