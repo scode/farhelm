@@ -2011,6 +2011,44 @@ fn host_picker_on<'a>(cx: &'a mut TestAppContext, folder: &str) -> &'a mut Visua
     cx
 }
 
+/// The registry can lose a manually picked host while New is open. Keep the draft on that id and refuse Launch,
+/// so a registry push cannot silently redirect the create to the local host.
+#[gpui::test]
+fn launch_refuses_after_the_chosen_host_disappears(cx: &mut TestAppContext) {
+    let mut draft = super::launch_tests::command_draft();
+    draft.edit_folder("/tmp".into());
+    let (mut helm, cx) = launcher_with_hosts(cx, draft, fixture_hosts(&[0, 8]));
+    test_support::click(cx, "launcher-host");
+    test_support::click(cx, "launcher-host-option-9");
+    assert_eq!(read(cx, |launcher, _, _| launcher.draft.host), Some(9));
+    assert!(name_of(cx, "launcher-host").is_some_and(|name| name.contains("host9")));
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some("Launch: start the session")
+    );
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["1"]),
+        upsert: Vec::new(),
+        remove: vec!["9".into()],
+    });
+    settle(cx);
+    assert_eq!(read(cx, |launcher, _, _| launcher.draft.host), Some(9));
+    assert_eq!(name_of(cx, "launcher-host").as_deref(), Some("Host"));
+    assert_eq!(
+        name_of(cx, "launcher-summary-target").as_deref(),
+        Some("Command · Unavailable host · /tmp"),
+    );
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. Choose a connected host before launching")
+    );
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+}
+
 /// Whether the host button holds focus.
 fn host_focused(cx: &mut VisualTestContext) -> bool {
     read(cx, |launcher, window, _| {

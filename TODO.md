@@ -46,13 +46,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 What the GPUI migration left when its area sessions ended on 2026-11-17, planned for the planning system.
 
-- **Launcher and session-pane fixes and the launcher's remaining parity tests.** A launch onto a suspended sandbox or
-  container is refused with the generic "Choose a connected host before launching"; it should name the host and say to
-  resume it (the full resume before create is the Near term entry below). The suspended session card says "Asked the
-  environment ..." where Hosts names the provider. A Clone's copied folder and session name holding a hidden character
-  are not spelled out as the old app did. About forty old launcher test cases are still listed as not yet ported in
-  `docs/gpui/parity/launcher.md`. Plan: `plans/queue/gpui-last-mile-fixes.md`.
-
 - **One shared placement picker.** The template editor's environment choice is a near-copy of the launcher's Runs on
   controls (about 130 lines), differing only in authoring rules; the old app had one picker. Share it, with no visible
   change. Plan: `plans/queue/gpui-shared-placement.md`.
