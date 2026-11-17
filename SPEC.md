@@ -359,10 +359,10 @@ confirms suspension. Only then does the host show **Suspended**, with Farhelm's 
 fails before it answers shows its error and reconnects rather than claiming the sandbox is suspended. Resume similarly
 shows **Resuming…** during the Tensorlake call, then **Connecting…** while a fresh connection is established. A Suspend
 or Resume that has not finished within 20 seconds answers that it carries on, and the host keeps showing **Suspending…**
-or **Resuming…** until it ends (decided by the migration's orchestrator on 2026-11-15). A failure after that answer ends
-as it would have before it, a failed Suspend reconnecting the host and a failed Resume leaving it **Suspended**, with
-the reason only in the helm's log. Neither transition offers a competing lifecycle action or host setup/update.
-Repeating Resume on an already-running, connected sandbox preserves its live sessions' connections.
+or **Resuming…** until it ends. A failure after that answer ends as it would have before it, a failed Suspend
+reconnecting the host and a failed Resume leaving it **Suspended**, with the reason only in the helm's log. Neither
+transition offers a competing lifecycle action or host setup/update. Repeating Resume on an already-running, connected
+sandbox preserves its live sessions' connections.
 
 The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanation below the heading and **Cancel** /
 **Suspend** in the footer. Its close control, Escape and Cancel dismiss without suspending. The sandbox name, recipe and
@@ -488,18 +488,17 @@ connection or credential replacement retries; there is no periodic retry. Saving
 waits at most the helm's 20-second host reply bound for delivery (including lock waits), and reports
 `Saved; not delivered to <host>: <reason>` for failures; a host still being delivered to when the bound passes is
 reported as not delivered because it did not answer in time, while its delivery carries on and shows its outcome in the
-host's warning (decided by the GPUI migration's orchestrator on 2026-11-15). Ending the connected phase cancels its
-pending pushes before further transport work. The list shows each recipe's name, supported providers, base, package
-count, tunnel count and build status per place, with Rebuild per place. Size is labelled **Tensorlake sandboxes only**.
-The editor's Software block offers managed Ubuntu, Tensorlake image and snapshot bases, and a container image with its
-login user, each stating its supported providers, plus Ubuntu packages for every base. The custom-base note explains
-that the base must run systemd as its init system, allow passwordless sudo, be Ubuntu or Debian with apt, and include
-bash, curl and git. The build checks these requirements first and stops with the missing requirement. Help explains that
-Farhelm then installs Claude Code and Codex with their official installers and saves a snapshot or image at that place.
-The editor replaces the list in place. Leaving it with unsaved changes, whether by its own Back or Cancel or by closing
-Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding then
-completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be out
-of date, and offers **Retry loading**.
+host's warning. Ending the connected phase cancels its pending pushes before further transport work. The list shows each
+recipe's name, supported providers, base, package count, tunnel count and build status per place, with Rebuild per
+place. Size is labelled **Tensorlake sandboxes only**. The editor's Software block offers managed Ubuntu, Tensorlake
+image and snapshot bases, and a container image with its login user, each stating its supported providers, plus Ubuntu
+packages for every base. The custom-base note explains that the base must run systemd as its init system, allow
+passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git. The build checks these requirements
+first and stops with the missing requirement. Help explains that Farhelm then installs Claude Code and Codex with their
+official installers and saves a snapshot or image at that place. The editor replaces the list in place. Leaving it with
+unsaved changes, whether by its own Back or Cancel or by closing Settings with Escape or a close control, asks whether
+to save, discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A
+list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
@@ -574,11 +573,11 @@ and the row says when something still awaits deletion; nothing cleans up at helm
 running build and deletes its builder and snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm
 asked for in the last 15 minutes may still appear, the recipe stays, with the reason, so a retry finishes the job. A
 deletion still going after 20 seconds, such as one waiting for a build sandbox Tensorlake has not finished creating,
-says it carries on (decided by the GPUI migration's orchestrator on 2026-11-15): the recipe leaves the list once it is
-deleted, and if the deletion then fails, the recipe stays, its reason reaches only the helm's log, and deleting it again
-shows why. Until the deletion ends, saving or building the recipe is refused. Changing a base keeps the built snapshot
-until a successful rebuild replaces it. A recipe cannot select a snapshot Farhelm built for a recipe as its base, its
-own included, because Farhelm deletes those when their recipe moves on; that save is refused.
+says it carries on: the recipe leaves the list once it is deleted, and if the deletion then fails, the recipe stays, its
+reason reaches only the helm's log, and deleting it again shows why. Until the deletion ends, saving or building the
+recipe is refused. Changing a base keeps the built snapshot until a successful rebuild replaces it. A recipe cannot
+select a snapshot Farhelm built for a recipe as its base, its own included, because Farhelm deletes those when their
+recipe moves on; that save is refused.
 
 Preparation takes a second filesystem snapshot on top of that built snapshot, with Farhelm's supervisor installed and
 its user unit enabled to start at boot. A short-lived `farhelm-prepare-<helm tag>-<recipe>` sandbox uses the confirmed
@@ -606,9 +605,9 @@ The recipe row shows preparation below its built-snapshot status: **Ready for ne
 version and the 24-hour policy in the positive tone; a pulsing current phase and step count while preparing; the reason
 when stale; and the failed phase or an interrupted attempt with the next-new-host-or-session retry explanation. A recipe
 whose base Tensorlake cannot run promises nothing there, since no new host or session there can start from it: idle, it
-shows only that it is not prepared, and a failed or interrupted attempt has no retry explanation (decided by the
-migration's orchestrator on 2026-11-17). An idle row qualifies readiness as last checked, since age display can advance
-without a new helm read. The helm always checks freshness before reuse.
+shows only that it is not prepared, and a failed or interrupted attempt has no retry explanation. An idle row qualifies
+readiness as last checked, since age display can advance without a new helm read. The helm always checks freshness
+before reuse.
 
 A sandbox matching a recipe's build name is recovered only from an outstanding create request; a recorded sandbox ID
 permits cleaning up that sandbox alone. A build start without either record does not establish ownership. An unrelated
@@ -1005,9 +1004,8 @@ agent choice is independent of that destination:
   row names another installation, a folder the user took is refused at Launch with "The remembered folder belongs to a
   different installation; choose the host or folder again before launching", said under the host too, until the user
   chooses the host or a folder again; New's folder, while untouched, is decided again for the new installation instead.
-  A path that exists on both installations may hold different work, and the helm refuses only a missing one (the
-  migration's orchestrator decided this on 2026-11-15, porting the old app's rule). A directory picker/completer against
-  the target host's filesystem is provided.
+  A path that exists on both installations may hold different work, and the helm refuses only a missing one (as in the
+  old app). A directory picker/completer against the target host's filesystem is provided.
 - Title: optional; auto-generated when omitted. Renameable later. A title is a single-line label, so a title you supply
   is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
   character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did
@@ -1192,34 +1190,33 @@ agent choice is independent of that destination:
   editor; errors preserve the launcher draft. Replace with does not offer this action. Templates are created, edited,
   duplicated, and deleted in the Templates dialog beside New. A list of names and summaries sits beside the selected
   template's editor (the old browser app's phone-width layout, list or editor with a back link, has no place in the
-  desktop app, whose window is never that narrow; decided by the migration's orchestrator on 2026-11-14). The editor
-  shows only fields the template sets, with labeled controls and explicit add/remove actions. The session-name label row
-  offers "base name | fixed name" with help explaining numbering and conflicts. Adding the name starts on base; removing
-  it removes its kind. Duplicate and delete undo retain the kind, and saving a base name leaves no unsaved changes. Its
-  "switches launcher to" choice is agent, command, or don't switch; don't switch offers only host, destination and
-  session name. Agent and command choices store their matching launch kind, so applying the template switches tabs.
-  Existing kindless templates keep applying as stored; opening one infers its switch in an unsaved draft, and saving
-  stores that switch. Choices follow the agent type when one is set, while model text may be arbitrary and other fields
-  need no agent type. The initial prompt uses a multiline box that grows with its text up to a cap and then scrolls,
-  offered on the agent tab when the template's agent supports it or no agent is set. It explains that the message is
-  sent on every launch from the template and can be edited in the launcher first; the list summary mentions it. Newline
-  and tab remain editable. Invisible formatting is shown escaped and read-only, retaining its raw value through
-  unrelated saves; removing and adding the field replaces it. Incompatible fields stay visible and prevent saving until
-  corrected or removed. Saving is explicit; Save is greyed out and does nothing while there are no unsaved changes, and
-  keeps keyboard focus after saving. A save the helm refuses is reported, and the editor keeps the draft for correction,
-  never treating it as saved and never retrying it (decided by the GPUI migration's coordinator on 2026-11-14). Leaving
-  an unsaved draft asks Keep editing, Discard, or Save in that reading order, with initial focus still on Save. Its
-  shared header supplies Close; the complete editor keeps scrolling within the dialog, including its editor-local action
-  footer. Template names are unique. Creating a template or renaming one refuses any whitespace in its name, including
-  Unicode whitespace; existing names with whitespace remain usable, can keep their name when other fields are saved, and
-  retain delete undo. The agent's template create command follows the same new-name rule. Duplicate opens an unsaved
-  copy named `<name>-copy`, then `<name>-copy-2` and so on until free, replacing whitespace in the source name with `-`
-  in that suggestion. A workspace-trust field in an older template remains readable but is ignored when applied and
-  omitted on every save, including duplicate and delete undo. Delete takes effect immediately and offers undo inside the
-  dialog for about ten seconds; undo refuses if its old name has been taken. For a stored template that fails current
-  save rules, the control says "Delete permanently" before deletion and no undo is offered. The label the user saw
-  decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete" always does, even if the
-  template list changed in between. Closing the dialog ends its undo notice.
+  desktop app, whose window is never that narrow). The editor shows only fields the template sets, with labeled controls
+  and explicit add/remove actions. The session-name label row offers "base name | fixed name" with help explaining
+  numbering and conflicts. Adding the name starts on base; removing it removes its kind. Duplicate and delete undo
+  retain the kind, and saving a base name leaves no unsaved changes. Its "switches launcher to" choice is agent,
+  command, or don't switch; don't switch offers only host, destination and session name. Agent and command choices store
+  their matching launch kind, so applying the template switches tabs. Existing kindless templates keep applying as
+  stored; opening one infers its switch in an unsaved draft, and saving stores that switch. Choices follow the agent
+  type when one is set, while model text may be arbitrary and other fields need no agent type. The initial prompt uses a
+  multiline box that grows with its text up to a cap and then scrolls, offered on the agent tab when the template's
+  agent supports it or no agent is set. It explains that the message is sent on every launch from the template and can
+  be edited in the launcher first; the list summary mentions it. Newline and tab remain editable. Invisible formatting
+  is shown escaped and read-only, retaining its raw value through unrelated saves; removing and adding the field
+  replaces it. Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; Save
+  is greyed out and does nothing while there are no unsaved changes, and keeps keyboard focus after saving. A save the
+  helm refuses is reported, and the editor keeps the draft for correction, never treating it as saved and never retrying
+  it. Leaving an unsaved draft asks Keep editing, Discard, or Save in that reading order, with initial focus still on
+  Save. Its shared header supplies Close; the complete editor keeps scrolling within the dialog, including its
+  editor-local action footer. Template names are unique. Creating a template or renaming one refuses any whitespace in
+  its name, including Unicode whitespace; existing names with whitespace remain usable, can keep their name when other
+  fields are saved, and retain delete undo. The agent's template create command follows the same new-name rule.
+  Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free, replacing whitespace
+  in the source name with `-` in that suggestion. A workspace-trust field in an older template remains readable but is
+  ignored when applied and omitted on every save, including duplicate and delete undo. Delete takes effect immediately
+  and offers undo inside the dialog for about ten seconds; undo refuses if its old name has been taken. For a stored
+  template that fails current save rules, the control says "Delete permanently" before deletion and no undo is offered.
+  The label the user saw decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete"
+  always does, even if the template list changed in between. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts
   it directly in the desktop app when no dialog is open, without showing the launcher on success. While the session
@@ -1294,27 +1291,27 @@ agent choice is independent of that destination:
   then a unique case-insensitive prefix, using Rust's Unicode lowercase. Unknown or ambiguous words refuse the whole
   sequence, naming the word and, for ambiguity, the competing candidates; a word's refusal wins over an unbound number
   key in the same sequence. Outside the launcher it opens New with that error; in the launcher it appears above the
-  search box without changing the draft (above rather than beneath, matching the old app; decided by the orchestrator on
-  2026-11-15). While armed, typed characters never reach the terminal's program. Enter applies the templates in that
-  order, later edits winning, and directly launches through the same defaults, validation and admission as quick launch.
-  In the session launcher, Enter instead applies the queued templates to the current draft without launching; each
-  completed sequence is one refusal unit, and the pill says "apply" instead of "launch". An unbound key opens Templates
-  at Enter with the binding hint outside the launcher; inside the launcher it shows a refusal above the search box
-  without changing the draft. A refusal names its template and reveals New with the draft outside the launcher; an
-  incomplete result opens New with a prominent banner saying "This sequence doesn't make a complete setup; complete it
-  below", whether one or several templates were queued. A YOLO question uses the same fallback. The banner follows the
-  number-key banner's expiry and dismissal rules. Bindings refresh when the prefix starts; Enter captures the bound
-  names currently shown in the pill. Enter with nothing queued cancels without opening anything. A non-modal amber
-  status pill is centered over the terminal area, or the main area with no session open, showing queued entries as chips
-  and the word in progress. Its hint names typing, Tab, Enter and Escape. While a word is in progress, a list below the
-  pill shows at most five matching template names, exact matches before prefixes and catalog order within each tier;
-  non-matches are absent. Candidates and Tab use an independent catalog read when the prefix starts, which never gates
-  Enter or decides what Enter launches. Neither the pill nor the list takes focus or pointer input. While the launcher
-  is open, the pill stays at the bottom of the main area so it does not cover the launcher. It is larger, with a soft
-  amber halo and a short fade/scale entrance that is disabled for reduced motion; it never loops or takes pointer input.
-  There is no timeout. Escape cancels and is consumed; a click, switching windows or opening a dialog cancels.
-  Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their normal target; Meta, Control
-  and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
+  search box without changing the draft (above rather than beneath, matching the old app). While armed, typed characters
+  never reach the terminal's program. Enter applies the templates in that order, later edits winning, and directly
+  launches through the same defaults, validation and admission as quick launch. In the session launcher, Enter instead
+  applies the queued templates to the current draft without launching; each completed sequence is one refusal unit, and
+  the pill says "apply" instead of "launch". An unbound key opens Templates at Enter with the binding hint outside the
+  launcher; inside the launcher it shows a refusal above the search box without changing the draft. A refusal names its
+  template and reveals New with the draft outside the launcher; an incomplete result opens New with a prominent banner
+  saying "This sequence doesn't make a complete setup; complete it below", whether one or several templates were queued.
+  A YOLO question uses the same fallback. The banner follows the number-key banner's expiry and dismissal rules.
+  Bindings refresh when the prefix starts; Enter captures the bound names currently shown in the pill. Enter with
+  nothing queued cancels without opening anything. A non-modal amber status pill is centered over the terminal area, or
+  the main area with no session open, showing queued entries as chips and the word in progress. Its hint names typing,
+  Tab, Enter and Escape. While a word is in progress, a list below the pill shows at most five matching template names,
+  exact matches before prefixes and catalog order within each tier; non-matches are absent. Candidates and Tab use an
+  independent catalog read when the prefix starts, which never gates Enter or decides what Enter launches. Neither the
+  pill nor the list takes focus or pointer input. While the launcher is open, the pill stays at the bottom of the main
+  area so it does not cover the launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is
+  disabled for reduced motion; it never loops or takes pointer input. There is no timeout. Escape cancels and is
+  consumed; a click, switching windows or opening a dialog cancels. Non-sequence keys, including arrows, other chords
+  and Shift+Enter, cancel and reach their normal target; Meta, Control and Shift on their own do not cancel. Repeated
+  held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
@@ -1560,16 +1557,16 @@ read the seal shows no sessions until the helm reaches it again; **Delete sandbo
 **Delete sandbox** in Hosts always destroys the whole sandbox after its own confirmation, whether or not its Farhelm
 answers.
 
-A session's Delete, the whole-sandbox Delete and **Retry** each answer within 20 seconds and carry on past that (decided
-by the GPUI migration's orchestrator on 2026-11-16, under the maintainer's preference for bounded replies). A Delete of
-one session still running then answers that it may still delete the session, and the sandbox with it if it was the last;
-the list then shows how it ended, without the count of other sessions the sandbox holds, and a Delete that decided
-nothing leaves the session listed to delete again. Such a late "nothing decided" does not offer the whole-sandbox Delete
-at once: the next Delete offers it once the sandbox shows as not connected. While the sandbox stays connected but its
-Farhelm does not answer, **Delete sandbox** in Hosts is the way out, once the earlier Delete has ended. A whole-sandbox
-Delete still running then shows the sandbox as being deleted until it ends; if it then fails, the sandbox stays listed
-in its ordinary state, with the reason only in the helm's log, as for a host removal. A Retry still running shows its
-outcome on the sandbox in Hosts, a new failure with its reason and **Retry** again.
+A session's Delete, the whole-sandbox Delete and **Retry** each answer within 20 seconds and carry on past that,
+following the maintainer's preference for bounded replies. A Delete of one session still running then answers that it
+may still delete the session, and the sandbox with it if it was the last; the list then shows how it ended, without the
+count of other sessions the sandbox holds, and a Delete that decided nothing leaves the session listed to delete again.
+Such a late "nothing decided" does not offer the whole-sandbox Delete at once: the next Delete offers it once the
+sandbox shows as not connected. While the sandbox stays connected but its Farhelm does not answer, **Delete sandbox** in
+Hosts is the way out, once the earlier Delete has ended. A whole-sandbox Delete still running then shows the sandbox as
+being deleted until it ends; if it then fails, the sandbox stays listed in its ordinary state, with the reason only in
+the helm's log, as for a host removal. A Retry still running shows its outcome on the sandbox in Hosts, a new failure
+with its reason and **Retry** again.
 
 Bulk Delete sends one such request per marked session of a sandbox the helm is connected to; its Farhelm takes them one
 at a time, and the last one seals if nothing else remains. Marked sessions of a sandbox the helm could not ask when the
@@ -1855,12 +1852,11 @@ cleanup, the row stays marked as removing until a later listing confirms it is g
 row-disappearance behavior. Close, header close and Escape remain available during that request. A trash delete answers
 once the host has moved the selected folders aside, with each entry's result; the removal itself runs on, and its
 progress shows as ordinary state, so nothing in the window waits on it. A delete on a host that does not answer within
-the usual wait gets a timeout reply while its cleanup goes on, and Trash then shows the checkouts it removes (decided by
-the GPUI migration's orchestrator on 2026-11-14). Trash deletes do not block other actions, while the trash control
-prevents overlapping deletes of its own. The listing is rechecked after the deletes settle. Refusals the helm reports
-remain visible on the next dialog opening, and the trash button's tooltip tells the user to open the trash to see why.
-Notices for a host disappear when a successful host registry refresh confirms that the host has been removed;
-disconnection or a failed refresh does not acknowledge them.
+the usual wait gets a timeout reply while its cleanup goes on, and Trash then shows the checkouts it removes. Trash
+deletes do not block other actions, while the trash control prevents overlapping deletes of its own. The listing is
+rechecked after the deletes settle. Refusals the helm reports remain visible on the next dialog opening, and the trash
+button's tooltip tells the user to open the trash to see why. Notices for a host disappear when a successful host
+registry refresh confirms that the host has been removed; disconnection or a failed refresh does not acknowledge them.
 
 While a trash delete the helm accepted is still running or a host reports that it is freeing space, only the trash
 button's can turns upside down and bobs (static but still upside down under Reduce Motion). Its tooltip names the hosts
@@ -2309,31 +2305,30 @@ and Help swaps session content for complete host management; hosts needing atten
 above sessions while management is closed. Sessions is shown initially; opening or closing Hosts keeps the current
 query, sort, selected session and details choice. The control keeps focus and exposes its pressed and expanded state.
 All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff, the header's Clone,
-Restart with… and Replace with… included (as in the old app; decided by the GPUI migration's orchestrator on
-2026-11-16), and the interrupted card's Replace with… too, which took the same path in the old app (applied by the
-sidebar-and-session-view area on 2026-11-17); a refused handoff leaves the panel as it was. Host reading, session
-reading, sounds and in-flight host work continue while their ordinary content is concealed. Rail menus and host dialogs
-remain available over Sessions. The list can be ordered independently by most recent activity, by creation time, or by
-title; the order someone picks is remembered by the helm as one preference shared by every client, together with the
-last-selected session, visit history and compact-row choice, and most recent activity is what a client shows until
-someone picks otherwise. The same shared preference row carries terminal web-link click ownership, the quick-launch
-template name and number-key bindings, the session-confirmation opt-out, the quick-launch naming choice, terminal-frame
-coloring, the desktop download-opening types, automatic remote-host updates, and whether host setup or host removal
-confirmation should be skipped after an explicit permanent answer. A change to these preferences, by an agent or the
-command line included, reaches the open window as it happens; automatic session selection chooses from the visits as the
-helm last pushed them, template shortcuts read their bindings on each invocation and the desktop helm reads the current
-file-opening list for each hover and open request. The gear at the foot of the host rail opens a settings dialog. Its
-left sidebar lists **Sessions**, **Appearance**, **Hosts**, **Recipes**, **Tensorlake**, **Containers**,
-**Credentials**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only in a
-desktop app whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One
-selected section appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts**
-sub-headings. The dialog keeps one height across sections, capped by the window; short sections leave space below their
-content, and longer sections scroll inside the pinned header and footer. At 620px wide and below, the dialog shows
-either the selected section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses
-its first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its
-block into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields,
-outcome lines and pending saves; closing discards unsaved fields. Escape and either close control return focus to the
-gear.
+Restart with… and Replace with… included (as in the old app), and the interrupted card's Replace with… too, which took
+the same path in the old app (applied by the sidebar-and-session-view area on 2026-11-17); a refused handoff leaves the
+panel as it was. Host reading, session reading, sounds and in-flight host work continue while their ordinary content is
+concealed. Rail menus and host dialogs remain available over Sessions. The list can be ordered independently by most
+recent activity, by creation time, or by title; the order someone picks is remembered by the helm as one preference
+shared by every client, together with the last-selected session, visit history and compact-row choice, and most recent
+activity is what a client shows until someone picks otherwise. The same shared preference row carries terminal web-link
+click ownership, the quick-launch template name and number-key bindings, the session-confirmation opt-out, the
+quick-launch naming choice, terminal-frame coloring, the desktop download-opening types, automatic remote-host updates,
+and whether host setup or host removal confirmation should be skipped after an explicit permanent answer. A change to
+these preferences, by an agent or the command line included, reaches the open window as it happens; automatic session
+selection chooses from the visits as the helm last pushed them, template shortcuts read their bindings on each
+invocation and the desktop helm reads the current file-opening list for each hover and open request. The gear at the
+foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**, **Hosts**,
+**Recipes**, **Tensorlake**, **Containers**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust** and
+**Notifications**, followed by **App** only in a desktop app whose updater is active. Each section has an icon; the
+selected one uses the solid selection fill. One selected section appears beside the list, with a matching heading;
+notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by
+the window; short sections leave space below their content, and longer sections scroll inside the pinned header and
+footer. At 620px wide and below, the dialog shows either the selected section or the list; **‹ Settings** returns to the
+list. The gear always opens sessions and focuses its first switch, including at phone width. Trust hints instead open
+agent trust at the relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab
+rules. Switching sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields.
+Escape and either close control return focus to the gear.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can
@@ -2403,41 +2398,40 @@ the click on (the default), open in Farhelm and also pass the click on, or only 
 choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
 choice is the helm's and takes effect in every mounted terminal immediately. In the Mac app, where tunnels open (see
 [Terminal experience](#terminal-experience)), the **Terminal** section also has tunnel consent; other desktop apps,
-which open no tunnels, leave it out (decided by the migration's orchestrator on 2026-11-14). In every desktop app, the
-**Terminal** section also has a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
-outside macOS). It defaults to `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables
-opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in the
-shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`, `txt`,
-`json`, `log` and the image types in that default; HTML-like types have a browser-specific warning, and all other
-unrecognized types have a generic warning. The warnings follow the draft as typed, including when another entry is
-malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Under
-**Notifications**, sounds has three switches, shared helm preferences (see Status), and **ntfy alerts** has an
-off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
-Default, High, Urgent; default Default). These ntfy settings are explicitly saved helm configuration, shared by every
-client, outside the preference row. Save refusals appear inline. The stored token is never returned: the form shows
-whether one exists and allows replacing or clearing it. Changing to another server clears a saved token unless a new one
-is entered, and the form says so before saving. **Send test** uses the saved configuration, even while disabled, and
-reports success or failure inline. The **Checkouts** section holds the explicitly saved **Default checkout folder** and,
-below it, a monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster
-launches** switch (see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk
-space per repository and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard
-on the next create or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains
-expansion on each host, first-use folder creation, and that the default applies to hosts without their own folder, set
-in each host's settings. The command's help explains that it runs in each new checkout on its host, after cloning and
-before the agent starts, that changes affect future checkouts only, and that command-line host overrides keep their
-command. The installed desktop app's dialog also has an **App** section with a switch for installing updates
-automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
-that app installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host
-and client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy:
-the helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
-change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
-persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences, including welcome-card and announcement dismissal and the host rail's expansion. The sound switches
-are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather than
-per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
-hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
-implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
-`farhelm agent create` and `clone` need not record the asking session.
+which open no tunnels, leave it out. In every desktop app, the **Terminal** section also has a free-form,
+comma-separated **File types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to
+`md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables opening while downloads still save.
+This field requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows
+one prominent warning beside the field for each listed type outside `md`, `txt`, `json`, `log` and the image types in
+that default; HTML-like types have a browser-specific warning, and all other unrecognized types have a generic warning.
+The warnings follow the draft as typed, including when another entry is malformed. A refused save leaves the draft and
+current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has three switches, shared
+helm preferences (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`),
+topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These ntfy settings are
+explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear inline.
+The stored token is never returned: the form shows whether one exists and allows replacing or clearing it. Changing to
+another server clears a saved token unless a new one is entered, and the form says so before saving. **Send test** uses
+the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts** section holds the
+explicitly saved **Default checkout folder** and, below it, a monospace multi-line post-clone command field and the
+default-on **Keep a checkout ready for faster launches** switch (see [Managed checkouts](#managed-checkouts)). The
+switch's help explains one extra checkout's disk space per repository and host, promptless login-shell preparation,
+earlier file times and Git hooks/filters, and discard on the next create or after 30 days unused; it links the full
+earlier-clone caveats. The folder's help explains expansion on each host, first-use folder creation, and that the
+default applies to hosts without their own folder, set in each host's settings. The command's help explains that it runs
+in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts only,
+and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App** section
+with a switch for installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike
+the host choices it is a setting of that app installation, kept with the app rather than by the helm. The two host
+confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
+stay there. No client keeps its own copy: the helm pushes its preferences to the window when it connects and whenever
+they change, and the window writes one on change, so a window opens in the same order and on the same session after a
+reconnect as before it. Per-client persistence — a desktop state file, anything that lets two clients remember different
+answers — is not wanted for these shared preferences, including welcome-card and announcement dismissal and the host
+rail's expansion. The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they
+are helm preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -2607,22 +2601,22 @@ Update without confirmation; inline progress replaces the button. Local hosts, h
 and hosts occupied by setup or another run retain the plain words. The helm's own machine is not updated from the panel:
 its row menu shows Update greyed out wherever it would otherwise be offered, saying how that machine is updated instead,
 and choosing it sends nothing. The words differ by platform: on macOS they say to run the installer again, and on Linux,
-which has no desktop installer, "Install a newer Farhelm on this machine to update it" (decided by the migration's
-orchestrator on 2026-11-17). The installed desktop app is the exception: there the local row always offers Update, and
-choosing it checks for a newer release and installs it (see [Installation and updates](#installation-and-updates)). A
-host whose supervisor is newer than the helm (a newer build on the same protocol, or a higher protocol version) says
-`Too new` instead, is not offered Update, and its hover names the host's version, the helm's, and their protocol
-versions. If either build string cannot be parsed as a semantic version, or the helm is an unreleased development build,
-age is unknown and the row stays `Connected`. The host count, its unpersisted details switch, and the secondary add
-action share one header row in Hosts, alongside Update all. Every expanded host row shows its phase words, including
-Connected. Host actions open on demand from the row menu or the same menu on its rail avatar, with the older-host update
-button also available inline; details reveals the version, identity, session count, remedies, diagnostics, and
-provisioning progress under every row. Templates use the neutral secondary tier for routine row actions and the primary
-tier for popup affirmatives; the rail uses native buttons with an explicit selected state, and session creation remains
-the filled primary action. Destructive confirmations use the danger tier, and explicit menu, tab, and composer controls
-retain their purpose-built styling. Sessions on an unreachable host stay in the list from the helm's last-known
-knowledge (which survives helm restarts), with a neutral cause mark such as `Waiting for supervisor` or
-`Host needs update`, rather than vanishing. Compact rows carry the same cause in accessible text and hover help.
+which has no desktop installer, "Install a newer Farhelm on this machine to update it". The installed desktop app is the
+exception: there the local row always offers Update, and choosing it checks for a newer release and installs it (see
+[Installation and updates](#installation-and-updates)). A host whose supervisor is newer than the helm (a newer build on
+the same protocol, or a higher protocol version) says `Too new` instead, is not offered Update, and its hover names the
+host's version, the helm's, and their protocol versions. If either build string cannot be parsed as a semantic version,
+or the helm is an unreleased development build, age is unknown and the row stays `Connected`. The host count, its
+unpersisted details switch, and the secondary add action share one header row in Hosts, alongside Update all. Every
+expanded host row shows its phase words, including Connected. Host actions open on demand from the row menu or the same
+menu on its rail avatar, with the older-host update button also available inline; details reveals the version, identity,
+session count, remedies, diagnostics, and provisioning progress under every row. Templates use the neutral secondary
+tier for routine row actions and the primary tier for popup affirmatives; the rail uses native buttons with an explicit
+selected state, and session creation remains the filled primary action. Destructive confirmations use the danger tier,
+and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an unreachable host stay
+in the list from the helm's last-known knowledge (which survives helm restarts), with a neutral cause mark such as
+`Waiting for supervisor` or `Host needs update`, rather than vanishing. Compact rows carry the same cause in accessible
+text and hover help.
 
 The Hosts control at the foot of the rail carries an `↑` whenever any rail avatar has an available-update badge. It is
 red when any update is required, amber otherwise; its accessible name and hover help give the number of hosts.
@@ -2750,14 +2744,13 @@ session's activity advancing while it stays open re-records the new value — wi
 session open in a window behind other apps is still recorded as seen the same way one in a focused window is. Both
 moments apply to every session but one, a stale or ended one included: the maintainer decided on 2026-11-16 that opening
 any session marks it seen, reversing the earlier rule that skipped stale and ended sessions. The one exception is a
-retired containerized session (see Retired containerized sessions), which supports Delete only. The helm refuses to
-record such a session as seen, so neither moment marks it; the GUI migration's orchestrator accepted on 2026-11-16 that
-this stays so, with no change to the helm. The stamp can also be set or cleared by hand: a "Mark unread"/"Mark read"
-toggle, reachable from the session's row, sets or clears the stamp directly. A manual mark unread on the session
-currently open STICKS — the automatic rule does not immediately re-record it as seen — until the user leaves and returns
-to it, or new output arrives. A failed automatic mark is logged but silent, the same best-effort exception the
-list-order/last-selection preference gets (see Errors and diagnostics); a failed manual toggle surfaces to the row like
-any other operation.
+retired containerized session (see Retired containerized sessions), which supports Delete only. The helm still refuses
+to record such a session as seen, so neither moment marks it. The stamp can also be set or cleared by hand: a "Mark
+unread"/"Mark read" toggle, reachable from the session's row, sets or clears the stamp directly. A manual mark unread on
+the session currently open STICKS — the automatic rule does not immediately re-record it as seen — until the user leaves
+and returns to it, or new output arrives. A failed automatic mark is logged but silent, the same best-effort exception
+the list-order/last-selection preference gets (see Errors and diagnostics); a failed manual toggle surfaces to the row
+like any other operation.
 
 Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
 timestamp available on the row. Last active means the last time the agent was seen working, or the moment it started
@@ -2990,27 +2983,26 @@ whatever the agent renders is what you see. There is no composer, no message abs
   exited sessions and sessions on disconnected hosts still count. The helm keeps the 32 most recent distinct visits
   across resets and restarts. Row clicks, quick switching, creation, replacement and automatic selection record visits.
   An automatic pick uses the shared preferences as the helm last pushed them, with no reread, and remembers the result
-  (the migration's orchestrator decided this on 2026-11-15: the helm pushes preferences together with the session
-  changes that prompt a pick). Removing an unselected session leaves the pane alone; removing the last session leaves it
-  empty. Existing removal detection still needs a complete, unfiltered fleet reply to infer an external deletion or host
-  removal, with one exception for the open session: the client's list query names it, and once the helm has answered
-  that query it keeps the open session in every reply while the session exists and its host's list reaches it, and says
-  so when that host's list was cut before reaching it; so a successful, filtered reply without it and without that mark
-  means it was deleted elsewhere, and the client moves on as for any removal (the maintainer decided this on
-  2026-11-15). Otherwise filtering does not unselect an already-open session, and neither does a capped reply or one the
-  helm marks as cut at the open session's host. Under a filter, a deletion elsewhere of an open session on a host past
-  its 500-session cap is not noticed through the list. Replace selects its replacement if its source is still selected
-  when it finishes, and closing a terminal tab is not a session removal. Launching the app is itself the deliberate act
-  the attach semantics below key off. Opening the app therefore attaches its chosen session exactly as clicking that
-  session there would, including when the new window takes the seat from one that held it (One GUI at a time). The
-  attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size sticks when
-  nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the client stayed
-  attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and replay covers, at
-  least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected session's row
-  whenever that session is listed, so which session the main pane is interacting with is readable at a glance rather
-  than only from the bottom bar's session name. A filter that excludes the selected session leaves no row to mark — the
-  bottom bar's session name remains the identifier in that state, and the main pane deliberately stays put (filtering
-  the list is not deselecting).
+  (the helm pushes preferences together with the session changes that prompt a pick). Removing an unselected session
+  leaves the pane alone; removing the last session leaves it empty. Existing removal detection still needs a complete,
+  unfiltered fleet reply to infer an external deletion or host removal, with one exception for the open session: the
+  client's list query names it, and once the helm has answered that query it keeps the open session in every reply while
+  the session exists and its host's list reaches it, and says so when that host's list was cut before reaching it; so a
+  successful, filtered reply without it and without that mark means it was deleted elsewhere, and the client moves on as
+  for any removal (the maintainer decided this on 2026-11-15). Otherwise filtering does not unselect an already-open
+  session, and neither does a capped reply or one the helm marks as cut at the open session's host. Under a filter, a
+  deletion elsewhere of an open session on a host past its 500-session cap is not noticed through the list. Replace
+  selects its replacement if its source is still selected when it finishes, and closing a terminal tab is not a session
+  removal. Launching the app is itself the deliberate act the attach semantics below key off. Opening the app therefore
+  attaches its chosen session exactly as clicking that session there would, including when the new window takes the seat
+  from one that held it (One GUI at a time). The attached client owns input and terminal dimensions: the PTY resizes to
+  that client, and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks
+  as it would have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side
+  terminal retains, and replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly
+  marks the selected session's row whenever that session is listed, so which session the main pane is interacting with
+  is readable at a glance rather than only from the bottom bar's session name. A filter that excludes the selected
+  session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and the main pane
+  deliberately stays put (filtering the list is not deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
   (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
   terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary
@@ -3305,8 +3297,7 @@ takes focus back is a possible later mitigation, not a rule.
 With no terminal on screen, focus rests on New when there are no sessions, and on a stopped session's card when the
 selected session has stopped. Enter on that card does nothing, so typing that was already under way cannot restart
 anything; Tab reaches its Restart and Replace. While the selected session's host cannot be reached, focus rests on its
-Session unavailable card, whose text the keys scroll (the GPUI migration's coordinator decided this on 2026-11-15; the
-old app left nothing focused there).
+Session unavailable card, whose text the keys scroll (the old app left nothing focused there).
 
 Choosing a session, including the one already selected, focuses its terminal.
 
@@ -3468,11 +3459,11 @@ show the template name, summary and its ⚡ or number shortcut when assigned. En
 through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the trimmed query
 (case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to another row changes
 that choice. With no match and no template already chosen, Enter does nothing; a chosen template deleted while the list
-is open gives the missing-name error below (decided by the orchestrator on 2026-11-15, matching the old app). A partial
-template opens New with its choices applied. A pick uses the template currently holding that name, including a template
-edited or recreated since the list opened; a name missing from the current catalog shows a preparation error in New. The
-chord never reaches the terminal's program and does nothing while any modal is open, including New, Clone, Replace with
-and hidden quick-launch preparation, or before preferences finish loading.
+is open gives the missing-name error below (matching the old app). A partial template opens New with its choices
+applied. A pick uses the template currently holding that name, including a template edited or recreated since the list
+opened; a name missing from the current catalog shows a preparation error in New. The chord never reaches the terminal's
+program and does nothing while any modal is open, including New, Clone, Replace with and hidden quick-launch
+preparation, or before preferences finish loading.
 
 Cmd+/ on macOS, Ctrl+Shift+/ on Linux, opens **Keyboard shortcuts**, including from a focused terminal. Matching uses
 the physical Slash key, with no extra modifiers; repeat and composition do not open it. The chord never reaches the
@@ -4383,14 +4374,13 @@ inside the environment the first attempt created, where a retry could not find i
   the choice). Closing Settings before the save settles drops that error. The error stays until that switch's next save
   starts. Quick-launch naming, terminal-frame colors, terminal link-click behavior and trust-hint visibility instead put
   back the saved choice and show an adjacent error when their newest save fails. So do the host setup and removal
-  confirmation choices and turning the session-confirmation opt-out on, which were silent before (the migration's
-  orchestrator decided this on 2026-11-14): with no optimistic copy a failed save never took effect, and silence would
-  hide why the switch snapped back. For naming, frame colors and link clicks, closing Settings drops only the alert: the
-  shared choice still reverts, so mounted terminals and later actions cannot keep using a failed save. Superseded
-  results neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another
-  mounted hint also stops being current when its save fails; reopening while that save is pending does not keep the
-  failed choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable
-  rather than treating unknown trust as off.
+  confirmation choices and turning the session-confirmation opt-out on, which were silent before: with no optimistic
+  copy a failed save never took effect, and silence would hide why the switch snapped back. For naming, frame colors and
+  link clicks, closing Settings drops only the alert: the shared choice still reverts, so mounted terminals and later
+  actions cannot keep using a failed save. Superseded results neither report nor revert a newer choice. A trust-hint
+  choice copied by a reopened Settings dialog or another mounted hint also stops being current when its save fails;
+  reopening while that save is pending does not keep the failed choice alive or inherit the closed dialog's alert. A
+  failed corrective read leaves trust settings unavailable rather than treating unknown trust as off.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
@@ -4916,9 +4906,8 @@ at once, and a listing or Delete that waits on a container host for more than 20
 time. Such a Delete carries on, and the list shows whether the container is gone when it is read again. Deleting a
 container's own host (Host-level Delete container, or Containers' Delete of a leftover that has a host row) answers the
 same way: the host leaves Hosts once its container is deleted, and if that deletion fails after the reply, the host
-stays listed and the reason reaches only the helm's log. Decided by the migration's orchestrator on 2026-11-15, under
-its rule that every host-waiting route the GUI sends is bounded. There is no Add host → Podman, Docker support or macOS
-container host support.
+stays listed and the reason reaches only the helm's log. These replies follow the rule that every host-waiting route the
+GUI sends is bounded. There is no Add host → Podman, Docker support or macOS container host support.
 
 ### Retired containerized sessions
 
