@@ -357,14 +357,7 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   is 722 by 596, since it is set before the compositor says whether it draws the bar.
 - **No debug Help menu.** The old app's debug builds had a Help menu with the web view's developer tools and Float on
   Top; both went with the web view.
-
-## Known risks
-
-- **The version readout's hover can cut off the install command it asks the user to run.** The hover is the shared
-  tooltip, 280 px wide and cut at eight lines, as the old app's was. Each reinstall notice ends with
-  `curl -fsSL https://get.farhelm.io/install.sh | sh` for the user to retype. The verification-failure notice at a
-  version as short as 0.39.0 fills exactly eight lines, so a longer version or a withdrawal reason in front of it pushes
-  the command past the cut; the upgrade-floor notice and the interrupted-install and interrupted-uninstall notices are
-  longer still, so their command is cut whenever they show. The migration's coordinator decided on 2026-11-14 to keep
-  the old app's cut. Giving the readout the paragraph hover help (440 px wide, with no cut) is a one-line change in the
-  readout view if the maintainer prefers it.
+- **The version readout's hover is the wider paragraph help.** The old app showed it in the short tooltip, 280 px wide
+  and cut at eight lines, which hid the command at the end of the reinstall, upgrade-floor and interrupted install or
+  uninstall advice (`curl -fsSL https://get.farhelm.io/install.sh | sh`, for the user to retype). It is now up to 440 px
+  wide with no line limit, so that command shows; the maintainer decided this on 2026-11-16.

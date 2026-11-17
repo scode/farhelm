@@ -269,7 +269,7 @@ impl VersionReadout {
         Button::new(
             "app-version-check",
             "Check for updates",
-            HoverHelp::tooltip(check_help(&readout.tooltip)),
+            readout_help(check_help(&readout.tooltip)),
             Role::Button,
         )
         .tier(Tier::Readout { focus_fill: false })
@@ -311,7 +311,7 @@ impl VersionReadout {
         Button::new(
             "app-version-toggle",
             "Update ready",
-            HoverHelp::tooltip(readout.tooltip.clone()),
+            readout_help(readout.tooltip.clone()),
             Role::Button,
         )
         .tier(Tier::Readout { focus_fill: true })
@@ -368,7 +368,7 @@ impl VersionReadout {
                 Button::new(
                     "app-update-failure",
                     shown.text(),
-                    HoverHelp::tooltip(readout.tooltip.clone()),
+                    readout_help(readout.tooltip.clone()),
                     Role::Button,
                 )
                 .tier(Tier::Readout { focus_fill: false })
@@ -395,7 +395,7 @@ impl VersionReadout {
                     StatusMark::new(
                         "app-update-status",
                         shown.text(),
-                        HoverHelp::tooltip(readout.tooltip.clone()),
+                        readout_help(readout.tooltip.clone()),
                         Role::Status,
                         shown.text(),
                     )
@@ -619,6 +619,15 @@ impl Render for UpdateMenu {
 /// version readout's tooltip golden draws exactly the words a real hover shows.
 pub(crate) fn check_help(tooltip: &str) -> String {
     format!("Select this to check for updates. {tooltip}")
+}
+
+/// The readout's hover help, on whichever control shows it: the paragraph help, up to 440 pixels wide with no line
+/// limit, rather than the short tooltip, which the old app used and which cuts at eight lines in 280 pixels. Several of
+/// the readout's notices (the reinstall, upgrade-floor and interrupted install or uninstall advice) end with the
+/// command the user is asked to run, and the cut could hide it; the maintainer chose the wider help on 2026-11-16 so it
+/// shows. The words are the updater's own, so they go in as one paragraph of the app's text.
+fn readout_help(text: String) -> HoverHelp {
+    HoverHelp::paragraphs([HostSentence::new("app-version-help").text(text)])
 }
 
 #[cfg(test)]
