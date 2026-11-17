@@ -1,5 +1,5 @@
 ---
-kind: breaking
+kind: changed
 ---
 
 Farhelm's GUI is now a native desktop app for macOS and Linux, which replaces both the browser interface and the old Mac
@@ -60,3 +60,5 @@ already was for the others; templates saved earlier still apply. (Curator: this 
 released versions and belongs under Fixed, not with the GUI migration above. The same wider set is also dropped from
 ntfy alerts and from Tensorlake error messages, escaped in the helm's audit log and in the error of a launch that never
 started, and replaced with `_` in the supervisor's hook log; those are probably not worth an entry of their own.)
+
+(Curator: the maintainer ruled on 2026-11-17 that the move to the desktop app is not a breaking change; list it under Changed in a normal release.)
