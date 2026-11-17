@@ -1,5 +1,5 @@
-//! Tests of the grid stream format: the golden fixtures the browser's grid
-//! client also reads, every bound at and just past its limit, the size
+//! Tests of the grid stream format: the golden fixtures the desktop app's
+//! grid model also reads, every bound at and just past its limit, the size
 //! limits, colors, and the cross-message rules of [`GridStreamCheck`].
 
 use super::*;
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Every fixture under `grid-fixtures/`, by path relative to it.
 ///
-/// The fixtures are the contract the browser's grid client is tested
+/// The fixtures are the contract the desktop app's grid model is tested
 /// against, so a file the tests do not know about would be one the Rust side
 /// never checked, and a listed file that is missing would be a case that
 /// silently stopped being tested. The directory must hold exactly these.
@@ -111,7 +111,7 @@ fn fixtures_in(prefix: &str) -> Vec<(&'static str, Vec<u8>)> {
 /// The fixture directory holds exactly the listed fixtures.
 ///
 /// Why: the round-trip and rejection tests check only the fixtures they are
-/// given, and the browser's tests read the directory as it is. A file added
+/// given, and the grid model's tests read the directory as it is. A file added
 /// without a listing entry would be tested on one side only, and a listed
 /// file deleted would quietly drop a case. Spec: the files under
 /// `grid-fixtures/` are exactly [`FIXTURES`] plus the paired binary
@@ -140,7 +140,7 @@ fn the_fixture_directory_holds_exactly_the_listed_fixtures() {
 /// Every valid JSON control/input fixture decodes and encodes back to the
 /// same JSON. Binary descriptions and exact bytes are checked separately.
 ///
-/// Why: the fixtures are the format as the browser sees it. Decoding proves
+/// Why: the fixtures are the format as a client sees it. Decoding proves
 /// the Rust types accept what the format document describes; encoding back
 /// to the same value proves the supervisor's sender produces that same shape
 /// (no extra fields, no renamed keys, optional parts left out exactly when
@@ -191,15 +191,16 @@ fn tolerated_fixtures_decode() {
 ///
 /// Without it, a fixture broken by accident (a typo that makes it non-JSON,
 /// a field its rule does not need) would still pass as "refused", and the
-/// rule it was written for would go untested on both sides. The text is the
-/// Rust side's own wording; the browser's tests decide their own.
+/// rule it was written for would go untested. The text is the Rust side's
+/// own wording.
 ///
 /// The input size fixtures' reasons name the limit as well as the size
-/// ("over 16384"): the browser copies those limits by hand and is checked
-/// against these fixtures, which are one byte past them. Pinning the limit
-/// makes a changed constant fail here until the fixture is made again at
-/// the new limit, rather than leave a fixture that still passes on both
-/// sides while the client keeps sending messages the supervisor refuses.
+/// ("over 16384"). Pinning the limit makes a changed constant fail here until
+/// the fixture is made again at the new limit. The rule dates from the old
+/// browser client, which copied those limits by hand and was checked against
+/// these fixtures (one byte past them): without the pin, a fixture could
+/// still pass on both sides while that client kept sending messages the
+/// supervisor refused.
 const INVALID_REASONS: &[(&str, &str)] = &[
     (
         "input/invalid/code-too-long.json",
@@ -539,8 +540,9 @@ fn binary_fixture_cases() -> Vec<BinaryFixture> {
             },
         },
     );
-    // A field-leading BOM is actual terminal/link data. Browser decoders
-    // must preserve it rather than apply TextDecoder's default BOM removal.
+    // A field-leading BOM is actual terminal/link data. Decoders must
+    // preserve it; the old browser client had to avoid TextDecoder's default
+    // BOM removal.
     add_valid(
         "field-leading-bom".into(),
         GridOutput::History {

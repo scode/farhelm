@@ -9,7 +9,7 @@
 //! them recoverable too, that a new process's startup finds them, that the
 //! socket paths it binds stay within the bound every state directory
 //! already lives under, and that a helm relays a host terminal's grid stream
-//! and its input over the browser's WebSocket. So these tests start the
+//! and its input over the client's WebSocket. So these tests start the
 //! supervisor as a process, and the helm through the desktop app's embedded
 //! entry, as `prompt_running_agent` and `agent_listing_real_stack` do, and
 //! look only through what a viewer sees:
@@ -318,7 +318,7 @@ fn row_text(row: &Row) -> String {
     text
 }
 
-/// The two messages a browser sends to type `line` and press Enter: the
+/// The two messages a client sends to type `line` and press Enter: the
 /// characters as `text`, and Enter as the `key` the grid client sends.
 fn typed_line(line: &str) -> [Vec<u8>; 2] {
     let enter = GridInput::Key {
@@ -337,7 +337,7 @@ fn typed_line(line: &str) -> [Vec<u8>; 2] {
 }
 
 /// A grid attachment through the supervisor's own client, as the helm
-/// makes one for a browser.
+/// makes one for a client.
 struct GridViewer {
     channel: u32,
     stream: TermStream,
@@ -733,7 +733,7 @@ async fn a_state_directory_at_the_socket_path_bound_holds_its_hosts() {
 
 // ---- Through the helm's WebSocket ----------------------------------------------------------
 
-/// The browser's end of the helm's terminal WebSocket, hand-rolled down to
+/// The client's end of the helm's terminal WebSocket, hand-rolled down to
 /// the frames for want of a WebSocket client among this workspace's
 /// dependencies: the upgrade, whole server messages (reassembled from
 /// fragments), and masked client binary frames.
@@ -892,10 +892,10 @@ impl BrowserSocket {
     }
 }
 
-/// A host terminal reaches a browser through the helm's terminal WebSocket
-/// as a grid stream, and the browser's typing reaches the program.
+/// A host terminal reaches a client through the helm's terminal WebSocket
+/// as a grid stream, and the client's typing reaches the program.
 ///
-/// Why: this is the whole path a user's browser takes to a terminal in a
+/// Why: this is the whole path the desktop app takes to a terminal in a
 /// host: the helm relays the supervisor's grid messages unread, and carries
 /// each grid input message up as one frame. The helm's own tests run
 /// against stand-in supervisors and the supervisor's against its own

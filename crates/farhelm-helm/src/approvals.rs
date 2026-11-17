@@ -151,7 +151,7 @@ pub(crate) struct Approvals {
 #[derive(Default)]
 struct Inner {
     /// Arrival order. Ids handed to clients are random (`Entry::view.id`), so
-    /// an answer from a page that outlived a helm restart can never name a
+    /// an answer from a client that outlived a helm restart can never name a
     /// request of the new process; this only orders the listing.
     next_seq: u64,
     pending: BTreeMap<u64, Entry>,
@@ -461,8 +461,8 @@ pub(crate) async fn ask_with_answer(
             if allowed && state.link_opener.is_some() {
                 return Ok(Allowed::Raw);
             }
-            // Web clients still need a click to preserve browser user activation. This
-            // reduced card waives the trust question, never the gesture needed to open.
+            // Without the native opener, a granted link still waits for a click: the old browser client
+            // needed one to open it. This reduced card waives the trust question, never the click.
             *preapproved = allowed;
         }
         _ if !direct_allow
@@ -698,7 +698,7 @@ pub(crate) async fn list_approvals(
 /// target, the requesting connection/session ownership and recorded consent
 /// must all still hold before that answer removes the pending entry.
 /// The authenticated router owns persistence through answer delivery, so a
-/// disconnected browser cannot strand an accepted setting before its answer.
+/// disconnected client cannot strand an accepted setting before its answer.
 pub(crate) async fn answer_approval(
     State(state): State<std::sync::Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -1029,7 +1029,7 @@ pub(crate) mod tests {
     }
 
     /// Expiry remains the held wait's authority. A later complete edited
-    /// answer is Gone, rather than a false successful browser continuation.
+    /// answer is Gone, rather than a false successful continuation in the client.
     #[farhelm_testtrace::test]
     async fn expired_host_add_cannot_acknowledge_a_late_answer() {
         let harness = rest_harness::FleetBuilder::new()
@@ -2466,7 +2466,7 @@ pub(crate) mod tests {
     /// Spec: a card's id is a fresh random value, so it cannot name a request
     /// of another helm process.
     ///
-    /// Why: a browser can keep a card across a helm restart and answer it
+    /// Why: the old browser client could keep a card across a helm restart and answer it
     /// before its next listing arrives. Ids counted from 1 in every process
     /// would let that answer approve whatever unrelated request the new
     /// process numbered the same.

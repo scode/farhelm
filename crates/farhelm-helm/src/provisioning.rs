@@ -2262,7 +2262,7 @@ mod tests {
     /// and is on the host the confirmed add registers.
     ///
     /// Why it matters: a host without Farhelm goes through a confirmation
-    /// page before anything is registered, and an alias dropped there would
+    /// step before anything is registered, and an alias dropped there would
     /// leave the person renaming the host by hand right after adding it.
     /// Specified: a probe that finds nothing yields a confirmable plan, and
     /// confirming it registers the destination with the alias.
@@ -2293,7 +2293,7 @@ mod tests {
     /// refused when the add is confirmed, before anything is installed.
     ///
     /// Why it matters: the check before ssh ran when the plan was made; the
-    /// same destination can be added meanwhile (another tab, the command
+    /// same destination can be added meanwhile (an agent's request, the command
     /// line). Confirming must not then converge onto that entry and run an
     /// install under it. Specified: the confirmation fails as `AlreadyAdded`,
     /// no run starts, and the other entry is unchanged.
@@ -2335,7 +2335,7 @@ mod tests {
     /// its request is dropped after the host's row is saved.
     ///
     /// Why it matters: registration saves the row and then starts the host's
-    /// connection actor. Run on the request's task, a reload or closed tab
+    /// connection actor. Run on the request's task, a dropped request
     /// between the two left a saved host with no actor, missing from the host
     /// list and never dialed until something unrelated re-read the registry
     /// (SPEC_impl.md "Who owns an accepted action"). Specified: with the
@@ -3305,7 +3305,7 @@ mod tests {
     ///
     /// Why it matters: starting a run marks the host busy and then waits for
     /// the lock before spawning the run that clears the mark, all on the
-    /// request's task. A page reload in that window left the host refusing
+    /// request's task. A dropped request in that window left the host refusing
     /// every later setup or update as busy until the helm restarted
     /// (SPEC_impl.md "Who owns an accepted action"). An Update's confirmation
     /// no longer waits for the lock
@@ -7054,7 +7054,7 @@ mod tests {
         wait_forgotten(&harness, host).await;
     }
 
-    /// Why this matters: the browser speaks to uninstall over HTTP, and its
+    /// Why this matters: the client speaks to uninstall over HTTP, and its
     /// two halves (show the plan, then confirm it) must keep the update
     /// route's shape and status codes so the client can treat them alike.
     ///
@@ -10517,7 +10517,7 @@ mod tests {
     ///
     /// Why: the backend starts the probe in its own process group and kills
     /// that group only on its own exit paths. Run on the request's task, a
-    /// page closed or reloaded during a probe dropped those paths; only the
+    /// request dropped during a probe dropped those paths; only the
     /// direct child was killed, and a helper it started (an ssh
     /// `ProxyCommand`, say) kept running. The stand-in waits until the test
     /// has dropped the request, then closes its output without exiting: the
@@ -12560,7 +12560,7 @@ mod tests {
     /// has sampled the pane. Wait for that readiness boundary rather than
     /// treating the provisional status as evidence that the session died.
     ///
-    /// The terminal is driven the way the browser drives it, as a grid
+    /// The terminal is driven the way the desktop app drives it, as a grid
     /// viewer typing `text` and an Enter `key`, and the typed line must then
     /// show its output in the grid's rows.
     async fn assert_session_operable(client: &crate::client::SupervisorClient, session_id: &str) {
@@ -12616,7 +12616,7 @@ mod tests {
         let token = format!("farhelmoperable{}", uuid::Uuid::new_v4().simple());
         let marker = token.to_ascii_uppercase();
         let command = format!("printf '%s\\n' '{token}' | tr '[:lower:]' '[:upper:]'");
-        // The browser's grid client sends typed characters as `text` and
+        // The desktop app's grid client sends typed characters as `text` and
         // Enter as a `key`, and the supervisor encodes them for the program
         // from the terminal's modes.
         use farhelm_proto::grid::GridInput;

@@ -112,7 +112,7 @@ use tracing::{debug, error, info, warn};
 
 /// A bounded, canonical view of one directory on the supervisor host.
 ///
-/// Browser clients receive complete child paths because those are the only
+/// Clients receive complete child paths because those are the only
 /// values that can later be submitted unchanged to create. Entries whose
 /// names cannot cross the UTF-8/control-character path boundary are omitted.
 pub(crate) struct DirectoryBrowse {
@@ -300,7 +300,7 @@ pub const UPLOAD_DISK_STAGE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Thirty seconds is generous for what a helm actually does here — the
 /// two read-only verbs answer from memory and helm.db, with no fan-out to
 /// hosts — and the generosity is on purpose: an agent's request racing a
-/// helm that is busy serving a browser should wait, not fail. What the
+/// helm that is busy serving its clients should wait, not fail. What the
 /// bound protects is the other direction, a helm that has stopped
 /// answering without its connection dying, where the alternative is an
 /// agent's shell command wedged forever.
@@ -5249,8 +5249,10 @@ pub struct SupervisorStartup {
     /// `None`, which every production launch passes, keeps
     /// [`BootIdSource`]'s default of reading the real boot id.
     ///
-    /// Exists so a browser-driven test can simulate a reboot against a real
-    /// supervisor process: the Rust suite injects a [`BootIdSource`] closure
+    /// Exists so a test that drives a real supervisor process can simulate a
+    /// reboot (the old browser-driven tests did; nothing in the tree starts a
+    /// supervisor process with `--boot-id-file` now): the Rust suite injects
+    /// a [`BootIdSource`] closure
     /// directly, but a supervisor launched as a child process has no such
     /// seam, and the only other way to change the boot id it reads is to
     /// reboot the machine. The file is read the way `/proc`'s entry is
@@ -5491,7 +5493,7 @@ impl Supervisor {
     /// This is deliberately a nonrecursive browse operation. It expands `~`
     /// using this daemon's resolved home and canonicalizes the accepted
     /// directory, which gives history a verified path identity without ever
-    /// resolving a remote path on the helm or browser machine. Ownership is
+    /// resolving a remote path on the helm or client machine. Ownership is
     /// read from the registry for that same canonical answer, not guessed from
     /// a configured root. It is a composition snapshot, not an admission lease.
     #[cfg(test)]
@@ -9301,7 +9303,7 @@ impl Supervisor {
     ///   existing-ancestor rule as preview; missing directories are created
     ///   only after the binding agrees, then re-resolution must still agree;
     /// - the preview binding must name exactly this root and the exact
-    ///   `root/basename` cwd the browser was shown (a stale preview is
+    ///   `root/basename` cwd the client was shown (a stale preview is
     ///   refused, never re-aimed);
     /// - the repo identity is re-parsed from owner/name
     ///   (`farhelm_proto::parse_github_repo`) and must match the carried
@@ -13440,8 +13442,9 @@ impl Supervisor {
     /// that matter all resolve: two conditional renames from the same
     /// observed title serialize, so one commits and the other sees a
     /// conflict, while neither a delete nor a restart can slip between the
-    /// row update and the map install. Browser rename passes no expected
-    /// title and retains its unconditional last-write-wins behavior.
+    /// row update and the map install. A rename through the helm's HTTP API
+    /// (the desktop app's) passes no expected title and retains its
+    /// unconditional last-write-wins behavior.
     ///
     /// The claim ends WITH THE COMMIT, before any reply is built. A claim
     /// is exclusive against stop, delete and restart, so holding one across
@@ -20180,11 +20183,11 @@ pub(crate) mod tests {
     /// map while it detaches the previous terminal and relaunches, and a listing
     /// in that window used to leave the session out. The helm passes that
     /// listing on, and a client that had the session open deselects it and
-    /// never selects it again (the browser build's sidebar closes it, the
-    /// open view goes away). Specified: a listing taken while the restart is
-    /// held inside that window carries the session with the row the previous
-    /// listing gave it, status included, and the session is listed again,
-    /// once, after the restart finishes.
+    /// never selects it again (in the old browser build, its sidebar closed
+    /// it and the open view went away). Specified: a listing taken while the
+    /// restart is held inside that window carries the session with the row
+    /// the previous listing gave it, status included, and the session is
+    /// listed again, once, after the restart finishes.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_listing_during_a_restart_keeps_the_session_as_last_listed() {
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();

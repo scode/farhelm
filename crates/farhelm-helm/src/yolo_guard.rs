@@ -9,8 +9,8 @@
 //! any one client: no client can skip it. A plain restart or resume relaunches a choice the
 //! user already made and is not checked.
 //!
-//! A refused launch is never dispatched. The browser answers the refusal
-//! with a loud confirmation and retries the same request with the override
+//! A refused launch is never dispatched. The desktop app answers the refusal
+//! with its YOLO question and retries the same request with the override
 //! set. An agent has no override: its launches go through [`check_agent_wrapper`]
 //! instead, which refuses outright what [`check`] would ask about, and more
 //! (SPEC.md, Agent-spawned sessions).
@@ -22,7 +22,7 @@ use crate::store::HostId;
 /// not carry the override.
 ///
 /// A distinct type so the HTTP layer can recognize it (and only it) and mark
-/// the response with the confirmation header the browser acts on; the
+/// the response with the confirmation header the desktop app acts on; the
 /// message is what the command line and agents show.
 #[derive(Debug, thiserror::Error)]
 #[error(

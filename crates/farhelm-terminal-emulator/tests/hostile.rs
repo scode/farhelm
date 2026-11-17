@@ -81,7 +81,7 @@ fn a_combining_character_flood_is_capped_per_cell() {
 /// whole; one over the limit is dropped whole rather than truncated; and the
 /// parser is back to normal after both.
 ///
-/// Why: the limit sits above every copy the browser terminal accepts, so a
+/// Why: the limit was set above every copy the old browser terminal accepted, so a
 /// real 8 MB copy still works, while a larger payload stops being buffered
 /// and must not reach the clipboard as corrupt, truncated data.
 #[test]

@@ -1,5 +1,5 @@
 //! `POST /api/sessions/{id}/attachments` — an attachment's bytes, streamed
-//! from the browser to the host the session lives on.
+//! from the client to the host the session lives on.
 //!
 //! The only route in the helm that moves a body of unbounded size, and the
 //! only one whose failure modes are interesting enough to need their own
@@ -10,7 +10,7 @@
 //!
 //! ## Three ways a transfer stops that are not "it finished"
 //!
-//! The browser streams a body, this handler rechunks it onto the wire, and
+//! The client streams a body, this handler rechunks it onto the wire, and
 //! the supervisor acks what it has written. Each of those can stop without
 //! saying so, and each needs its own answer:
 //!
@@ -22,12 +22,12 @@
 //!   [`crate::client`]'s upload guard sends `AbortUpload` from its `Drop`.
 //!   The explicit arm is the ordinary path; the guard is the one that
 //!   cannot be skipped.
-//! - **The browser stops producing body items.** The relay's
-//!   `CLIENT_UPLOAD_STALL_TIMEOUT` bounds that browser-only wait, so an
+//! - **The client stops producing body items.** The relay's
+//!   `CLIENT_UPLOAD_STALL_TIMEOUT` bounds that client-only wait, so an
 //!   idle request cannot hold its upload open forever.
 //! - **The supervisor stops acking.** Credit stops flowing and
 //!   `UploadGuard::wait_for_credit`'s own deadline ends the transfer
-//!   rather than blaming a browser that already sent its bytes.
+//!   rather than blaming a client that already sent its bytes.
 //! - **The supervisor aborts.** Its reason is what the caller is told, via
 //!   `upload_ended_error`, because a supervisor's own words are always
 //!   more actionable than a generic failure.
@@ -58,17 +58,17 @@ pub(crate) struct UploadQuery {
     filename: String,
 }
 
-/// How long the relay may wait for the browser to produce the next request
-/// body item before it gives up on that browser→helm hop.
+/// How long the relay may wait for the client to produce the next request
+/// body item before it gives up on that client→helm hop.
 ///
 /// This is the helm's own leg of PLAN_M4.md item 4's per-hop progress
 /// timeout (the pinned REST contract's "per-hop progress timeout per
 /// proto docs"), and it is genuinely a different bound from the
 /// supervisor-facing credit stall `UploadGuard::send_upload_chunk`
-/// applies. This one catches a browser that stops SENDING (a stalled paste,
+/// applies. This one catches a client that stops SENDING (a stalled paste,
 /// a dead network path), which would otherwise park this handler — and the
 /// supervisor's upload channel behind it — forever, with nothing but the
-/// browser's own disconnect to ever notice. It deliberately does not run
+/// client's own disconnect to ever notice. It deliberately does not run
 /// while forwarding an item already received: waiting for supervisor credit
 /// is a different hop with its own acknowledgement-based deadline.
 ///
@@ -90,7 +90,7 @@ const CLIENT_UPLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// pinned REST contract promises: "500-class with the reason text",
 /// because a receiver-side abort is a server-side fault the caller could
 /// not have avoided by sending a different request — never a 4xx, which
-/// would wrongly suggest the browser's request was itself the problem.
+/// would wrongly suggest the client's request was itself the problem.
 fn upload_ended_error(reason: String) -> axum::response::Response {
     http_error(anyhow::Error::new(SupervisorError::helm(
         ErrorKind::Internal,
@@ -118,7 +118,7 @@ fn upload_ended_error(reason: String) -> axum::response::Response {
 /// supervisor's own half of this path.
 ///
 /// "Every exit path" includes the one that runs no code here at all: a
-/// browser resetting the connection cancels this future outright, so the
+/// client resetting the connection cancels this future outright, so the
 /// obligation to abort belongs to the `UploadGuard` that `begin_upload`
 /// returns rather than to the branches below (see its docs). The branches
 /// exist to report accurately, not to be the only thing standing between a
@@ -141,10 +141,10 @@ fn upload_ended_error(reason: String) -> axum::response::Response {
 /// - `UploadAborted` mid-stream (the supervisor's own stall timeout, a
 ///   storage error, the session deleted mid-transfer): raced against the
 ///   body read, so it ends the request when it arrives rather than
-///   whenever the browser next sends something, and the reason is mapped
+///   whenever the client next sends something, and the reason is mapped
 ///   through [`upload_ended_error`].
 /// - The supervisor's own `Error` replies to `BeginUpload`/`CommitUpload`
-///   (unknown session, size mismatch, storage failure) reach the browser
+///   (unknown session, size mismatch, storage failure) reach the client
 ///   through the same `http_error` every other endpoint uses — the
 ///   supervisor's message verbatim, sentinel-testable.
 /// - Success: `CommitUpload` answers with the published path, returned as
@@ -159,7 +159,7 @@ pub(crate) async fn upload_attachment(
     use futures_util::{FutureExt, StreamExt};
 
     // Declared size = Content-Length (the pinned contract's own words):
-    // the browser sets this from the Blob it is uploading, so an absent
+    // the client sets this from the file it is uploading, so an absent
     // or unparsable value means this was never a conformant upload
     // request at all, and there is nothing to declare to `BeginUpload`.
     let Some(size) = request
@@ -204,13 +204,13 @@ pub(crate) async fn upload_attachment(
     // `UPLOAD_CHUNK_BYTES` is split, and several smaller ones are
     // coalesced — because the protocol's frame size is the SENDER's
     // decision, not an echo of however hyper happened to slice the
-    // request. Without the coalescing half, a browser trickling 8 KiB
+    // request. Without the coalescing half, a client trickling 8 KiB
     // pieces would put tens of thousands of undersized frames on a
     // connection whose framing discipline exists to bound exactly that.
     let mut pending: Vec<u8> = Vec::new();
     // An empty body item is not progress, so its next wait inherits this
     // deadline. A non-empty item clears it before forwarding can wait for
-    // credit; the next actual browser wait then starts a fresh interval.
+    // credit; the next actual client wait then starts a fresh interval.
     let mut browser_deadline = None;
     loop {
         // Coalescing must never become buffering: bytes are held back
@@ -239,9 +239,9 @@ pub(crate) async fn upload_attachment(
                         return upload_ended_error(reason);
                     }
                 }
-                // This deadline measures only an absent browser body item.
+                // This deadline measures only an absent client body item.
                 // It is armed after flushing because that flush can wait on
-                // supervisor credit; charging such a wait to the browser
+                // supervisor credit; charging such a wait to the client
                 // would turn a slow acknowledgement into a false client
                 // stall on the next select.
                 let deadline = *browser_deadline.get_or_insert_with(|| {
@@ -261,7 +261,7 @@ pub(crate) async fn upload_attachment(
         let chunk = match step {
             // The transfer ended upstream — the supervisor gave up, or
             // the connection to it died. Nothing left to abort in either
-            // case, and the reason is what the browser must see.
+            // case, and the reason is what the client must see.
             UploadStep::Ended(reason) => return upload_ended_error(reason),
             // No body progress within the stall window — this hop's own
             // leg of PLAN_M4.md item 4's per-hop timeout.
@@ -291,7 +291,7 @@ pub(crate) async fn upload_attachment(
                     .into_response();
             }
             // The body ended normally: every declared byte arrived (or
-            // the browser's framing said so), so it is time to publish.
+            // the client's framing said so), so it is time to publish.
             UploadStep::Body(None) => break,
         };
         // An empty chunk selected by the wait path is legal but carries no
@@ -304,9 +304,9 @@ pub(crate) async fn upload_attachment(
             tokio::task::yield_now().await;
             continue;
         }
-        // The received bytes end the browser wait. Any time spent checking,
+        // The received bytes end the client wait. Any time spent checking,
         // buffering, or forwarding them belongs to this relay or the
-        // supervisor, never to the browser's next-body-item deadline.
+        // supervisor, never to the client's next-body-item deadline.
         browser_deadline = None;
         if sent.saturating_add(chunk.len() as u64) > size {
             warn!(
@@ -748,7 +748,7 @@ mod tests {
     /// The pinned contract requires a size mismatch to fail, and this
     /// direction has to fail HERE: past `UploadStarted` the supervisor has
     /// no pending `req_id` left to answer with a correlated
-    /// `InvalidRequest`, so an overrun would reach the browser as an
+    /// `InvalidRequest`, so an overrun would reach the client as an
     /// uncorrelated 500-class abort — the wrong class for a request whose
     /// own framing was wrong. The peer proves the excess never reached the
     /// wire: after the in-bounds prefix it must see `AbortUpload`, not
@@ -1012,19 +1012,19 @@ mod tests {
         assert_eq!(response.status(), axum::http::StatusCode::OK);
     }
 
-    /// A credit wait is supervisor-side work, even when the browser body
+    /// A credit wait is supervisor-side work, even when the client body
     /// has already delivered every declared byte. An advancing but
     /// insufficient acknowledgement keeps `wait_for_credit` alive; a later
     /// acknowledgement releases the final chunk. The relay must then wait
-    /// for the body's end rather than reuse the browser deadline that
+    /// for the body's end rather than reuse the client deadline that
     /// elapsed while it was parked on supervisor credit.
     ///
     /// Paused time makes the competing deadlines explicit. The first ack
     /// arrives at thirty seconds and rearms the supervisor-credit deadline;
-    /// the final ack arrives at sixty-one seconds, after the browser's
+    /// the final ack arrives at sixty-one seconds, after the client's
     /// sixty-second deadline but before the rearmed supervisor deadline.
-    /// That ordering used to make the next body wait report browser stall
-    /// even though the browser had already supplied the whole body.
+    /// That ordering used to make the next body wait report a client stall
+    /// even though the client had already supplied the whole body.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn upload_attachment_waiting_for_credit_does_not_stall_the_browser() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -1208,7 +1208,7 @@ mod tests {
 
     /// An `UploadAborted` arriving mid-stream (the supervisor giving up —
     /// a storage error, its own stall timeout, session deletion) must
-    /// reach the browser as the mapped error carrying the reason text —
+    /// reach the client as the mapped error carrying the reason text —
     /// the pinned REST contract's "500-class with the reason text", never
     /// a bare disconnect or a success.
     #[farhelm_testtrace::test]
@@ -1277,7 +1277,7 @@ mod tests {
     }
 
     /// An `UploadAborted` that arrives while the relay is waiting on the
-    /// BROWSER — not on credit — must still end the request promptly and
+    /// CLIENT — not on credit — must still end the request promptly and
     /// carry the supervisor's reason verbatim.
     ///
     /// This is where a transfer spends most of its life, and the case the
@@ -1285,7 +1285,7 @@ mod tests {
     /// happened to be parked with a receiver subscribed at the exact
     /// instant the abort landed. Here the body is GATED — one chunk, then
     /// nothing, forever — so an implementation that only noticed aborts
-    /// while sending would sit until the browser's stall timeout and then
+    /// while sending would sit until the client's stall timeout and then
     /// report a stall instead of the storage failure that actually ended
     /// the upload.
     #[farhelm_testtrace::test]
@@ -1667,7 +1667,7 @@ mod tests {
     }
 
     /// A `BeginUpload` refusal (admission cap, a vanished attachments
-    /// directory, any supervisor-side precondition) must reach the browser
+    /// directory, any supervisor-side precondition) must reach the client
     /// through the same `http_error` mapping every other endpoint uses,
     /// with the supervisor's message verbatim — the pinned REST contract's
     /// "sentinel-testable" promise, exercised here specifically for the

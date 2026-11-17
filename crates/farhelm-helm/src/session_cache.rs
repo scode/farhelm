@@ -36,9 +36,11 @@ pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_BARE_SESSION_ID_BYTES
 /// - past [`MAX_SESSION_ID_BYTES`]: outside the helm's UUID-sized ID contract;
 /// - a control character: the agent relay prints ids on a CLI's stdout,
 ///   where a newline forges a second line and an ESC reaches a terminal;
-/// - `.` or `..`: the browser percent-encodes an id into a path segment,
-///   but under the WHATWG URL Standard `%2E` still counts as a dot, so a
-///   request about such a session would resolve to a different helm route.
+/// - `.` or `..`: no client can address such a session. The old browser
+///   client percent-encoded an id into a path segment, but under the WHATWG
+///   URL Standard `%2E` still counts as a dot, so a request about such a
+///   session would have resolved to a different helm route; the desktop
+///   app's `ApiPath` refuses `.` and `..` segments outright.
 ///
 /// Only those. A UUID-only character set was considered and not adopted:
 /// nothing on this side needs it, and it would refuse ids from any
@@ -250,8 +252,9 @@ mod tests {
     }
 
     /// Why: list and create ingress used to apply different id rules, and
-    /// neither refused a dot segment the browser cannot keep from
-    /// resolving. Spec: the one rule refuses an empty id, a control
+    /// neither refused a dot segment, which the old browser client could
+    /// not keep from resolving and the desktop app's `ApiPath` refuses
+    /// outright. Spec: the one rule refuses an empty id, a control
     /// character and exactly `.` or `..`, and nothing else a supervisor
     /// could plausibly mint, so ids that merely contain dots still pass.
     #[farhelm_testtrace::test]

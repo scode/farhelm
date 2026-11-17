@@ -107,7 +107,7 @@ impl OpenExtensions {
     ///
     /// The safe set is plain text and the common raster image formats the
     /// default lists. SVG is not among the images: it is HTML-like and can carry
-    /// scripts, so it gets the browser warning.
+    /// scripts, so it gets the HTML warning.
     pub fn warning_kind(extension: &str) -> WarningKind {
         match extension {
             "md" | "txt" | "json" | "log" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
@@ -148,7 +148,7 @@ mod tests {
     }
 
     /// The warning vocabulary is independent of the open policy: users may
-    /// list unfamiliar types, but the settings page must call them out.
+    /// list unfamiliar types, but the settings UI must call them out.
     #[test]
     fn classifies_each_listed_type() {
         let list = OpenExtensions::parse("md, log, html, svg, command").unwrap();

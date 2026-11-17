@@ -13,7 +13,7 @@
 //!
 //! Not here: the upload's own request. Its bytes are the raw body and its proposed name is the `filename` query
 //! parameter, which the client builds through [`crate::ui_channel::ApiPath`]'s percent-encoding rather than a serde
-//! type, so there is no shared struct to hold it. The browser download's octet body is not JSON either.
+//! type, so there is no shared struct to hold it. The download's octet body is not JSON either.
 
 use serde::{Deserialize, Serialize};
 

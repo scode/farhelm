@@ -222,7 +222,7 @@ pub fn build_is_newer(peer: &str, ours: &str) -> bool {
     !is_development_build(ours) && release_order(peer, ours) == Some(std::cmp::Ordering::Greater)
 }
 
-// The browser's wording and the helm's release decisions share one predicate.
+// The desktop app's wording and the helm's release decisions share one predicate.
 // Re-export it here to preserve the helm's existing public API for native users.
 pub use farhelm_proto::is_development_build;
 
@@ -1651,7 +1651,7 @@ mod tests {
     /// admits to being a third copy of one vocabulary — the manager's
     /// `HostState::phase`, the serde renames, and itself — and a copy is
     /// only safe while something compares it to the original. Without this
-    /// test, a renamed phase would reach the browser under its new word and
+    /// test, a renamed phase would reach the client under its new word and
     /// reach an agent under its old one, with both sides looking correct.
     #[farhelm_testtrace::test]
     fn phase_matches_the_serialized_tag() {
@@ -1755,9 +1755,9 @@ mod tests {
     /// Spec: an unreachable host's `cause` goes out on the host list as
     /// exactly `"local-supervisor-not-running"` or `"transport-failure"`.
     ///
-    /// The browser UI keys its diagnosis and its manual-start remedy for the
-    /// local row off the first of these, and nothing else on the Rust side
-    /// pins it: the browser specs that use it are not run in CI. The labels are
+    /// The desktop app keys its diagnosis and its manual-start remedy for the
+    /// local row off the first of these, through the shared constant, so its
+    /// own tests cannot notice the label changing. The labels are
     /// spelled out here rather than taken from `farhelm_proto::http` so that
     /// editing the shared constant fails this test instead of silently changing
     /// what the API sends.

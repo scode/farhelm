@@ -231,7 +231,7 @@ impl Transport for HttpTransport {
 /// release server sent us, which for an object store is routinely a signed
 /// URL carrying a token in its query string.
 /// These errors are rendered into provisioning progress that reaches the
-/// browser, so a redirect target must not ride along. Nothing is lost: every
+/// client, so a redirect target must not ride along. Nothing is lost: every
 /// message built from these already names the validated base URL separately.
 fn transport_error(error: reqwest::Error) -> anyhow::Error {
     anyhow::Error::new(error.without_url())
@@ -3837,7 +3837,7 @@ mod tests {
     /// sends us next, and object stores routinely redirect to signed URLs
     /// with a token in the query. `reqwest::Error`'s own `Display` carries
     /// that URL, and these errors are rendered into provisioning progress
-    /// the browser shows — so the URL is stripped before wrapping. The
+    /// the client shows — so the URL is stripped before wrapping. The
     /// sentinel here would appear verbatim without that.
     #[farhelm_testtrace::test]
     async fn a_failing_redirect_never_renders_its_target_url() {

@@ -2,8 +2,8 @@
 //! reply types, and the error classification every caller branches on.
 //!
 //! The trait is the seam. Production talks HTTP ([`super::http`]); the helm's
-//! unit tests point that same implementation at a stub server; the browser
-//! suite swaps in a filesystem-controlled fake ([`super::e2e`]); and a helm
+//! unit tests point that same implementation at a stub server; other tests
+//! swap in a filesystem-controlled fake ([`super::e2e`]); and a helm
 //! built without either answers every call as offline. Callers never learn
 //! which one they hold.
 //!
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 /// A Tensorlake API key, passed explicitly to every call.
 ///
 /// Deliberately neither `Debug` nor `Display`: the key must never reach a log
-/// line, an error message or a reply to the browser, and a type that cannot
+/// line, an error message or a reply to the client, and a type that cannot
 /// be formatted cannot be logged by accident. [`Self::expose`] is the one way
 /// out, for the `Authorization` header and the e2e fake's comparison.
 #[derive(Clone)]

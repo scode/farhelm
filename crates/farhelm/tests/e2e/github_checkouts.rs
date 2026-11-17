@@ -741,7 +741,7 @@ impl CheckoutStack {
         );
     }
 
-    /// Reboot only the helm, then obtain a fresh browser credential and claim.
+    /// Reboot only the helm, then obtain a fresh client credential and claim.
     ///
     /// The old helm gets the orderly stop the desktop app gives it on quit,
     /// not a kill, since it runs in the test process (`EmbeddedHelm`). That

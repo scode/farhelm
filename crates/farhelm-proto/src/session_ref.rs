@@ -84,7 +84,7 @@ impl fmt::Display for SessionRef {
     }
 }
 
-/// Validate the fixed ASCII prefix without adding UUID randomness support to browser builds.
+/// Validate the fixed ASCII prefix by hand, which kept UUID randomness support out of the old browser client's builds.
 /// UUID version and variant do not participate in routing; canonical spelling does.
 pub fn is_entry_uuid(value: &str) -> bool {
     value.len() == 36
@@ -96,7 +96,7 @@ pub fn is_entry_uuid(value: &str) -> bool {
 
 /// The helm's bare-ID admission rule, shared by its ingress and full-reference parser.
 /// Opaque text remains allowed within the small bound; control characters and URL dot
-/// segments cannot safely identify a session in CLI output or a browser path.
+/// segments cannot safely identify a session in CLI output or a URL path.
 pub fn bare_session_id_problem(value: &str) -> Option<&'static str> {
     if value.is_empty() {
         Some("the session id is empty")

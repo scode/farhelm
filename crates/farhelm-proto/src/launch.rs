@@ -196,7 +196,7 @@ impl LaunchHarness {
     /// ([`LaunchSelection::model`]).
     ///
     /// A harness without one (Grok, whose CLI model contract this release
-    /// does not carry) takes neither a model nor an effort: the browser hides
+    /// does not carry) takes neither a model nor an effort: the launcher hides
     /// its model control, lists no models for it, clears both fields when the
     /// user switches to it, and treats a selection carrying either as
     /// incompatible. The helm validates the final request on its own.
@@ -246,12 +246,12 @@ impl LaunchHarness {
     }
 
     /// Whether this harness has an effort vocabulary
-    /// ([`LaunchSelection::effort`]), which decides whether the browser shows
+    /// ([`LaunchSelection::effort`]), which decides whether the launcher shows
     /// an effort control at all.
     ///
     /// Which efforts a harness accepts is release catalog data the helm owns
     /// and serves; this only says whether there is any such choice, which the
-    /// browser needs before (and regardless of whether) a catalog arrived.
+    /// launcher needs before (and regardless of whether) a catalog arrived.
     pub const fn offers_effort(self) -> bool {
         match self {
             LaunchHarness::Codex
@@ -423,7 +423,7 @@ impl LaunchHarness {
     /// ([`LaunchSelection::permissions`]).
     ///
     /// The one statement of the per-harness permission sets: the helm refuses
-    /// any other explicit permission, and the browser only offers, keeps, and
+    /// any other explicit permission, and the launcher only offers, keeps, and
     /// considers compatible the ones this allows. Before it existed each of
     /// those kept its own table, and adding OMP's Approve had to touch every
     /// one. Exhaustive over harnesses so a new one has to decide here rather
@@ -1088,7 +1088,7 @@ mod tests {
     /// Approve, and every other harness offers only YOLO (SPEC.md's
     /// structured-launch permission rules).
     ///
-    /// Why: this is the table both the helm's validation and the browser's
+    /// Why: this is the table both the helm's validation and the launcher's
     /// buttons and normalization read, so a slip here changes what users can
     /// pick and what the helm accepts at once. The matrix is spelled out
     /// rather than derived so the test states the rule independently, and an

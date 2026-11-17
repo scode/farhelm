@@ -818,8 +818,8 @@ mod tests {
     use std::time::Duration;
     use tower::ServiceExt;
 
-    /// A terminal from an old browser tab must explain its stale reference on the socket,
-    /// without attaching the live session whose bare suffix happens to match.
+    /// A terminal attach naming a bare session ID (as an old browser tab did) must explain its stale
+    /// reference on the socket, without attaching the live session whose bare suffix happens to match.
     #[farhelm_testtrace::test]
     async fn bare_terminal_target_is_refused_before_supervisor_dispatch() {
         let (client, server) = tokio::io::duplex(64 * 1024);
@@ -857,7 +857,7 @@ mod tests {
         peer.await.unwrap();
     }
 
-    /// Public references stop at attachment admission. A later browser resize must use the
+    /// Public references stop at attachment admission. A later client resize must use the
     /// same connection and bare ID, or an initially working terminal fails only after resizing.
     #[farhelm_testtrace::test]
     async fn qualified_terminal_attach_and_later_resize_keep_bare_wire_ids() {
@@ -934,16 +934,16 @@ mod tests {
     /// This is a regression test for a live bug, not a test of tokio: the
     /// old teardown polled the handle in the `select!` and then again in
     /// the timeout and again in a trailing `await`, so an ordinary page
-    /// navigation — the drain finishing inside the grace period — panicked
-    /// the connection task with "JoinHandle polled after completion". A
-    /// panic there is invisible from the browser side (the socket is
-    /// already closing either way), which is exactly why it survived until
-    /// someone read the webserver log, and why the property is pinned here
-    /// at the seam instead of end to end.
+    /// navigation in the old browser client — the drain finishing inside
+    /// the grace period — panicked the connection task with "JoinHandle
+    /// polled after completion". A panic there is invisible from the client
+    /// side (the socket is already closing either way), which is exactly why
+    /// it survived until someone read the webserver log, and why the
+    /// property is pinned here at the seam instead of end to end.
     ///
     /// All three shapes run, because each reaches the handle differently:
     /// already-driven-to-completion by the caller, completing inside the
-    /// grace, and never completing at all (the wedged browser the grace
+    /// grace, and never completing at all (the wedged client the grace
     /// exists for).
     #[farhelm_testtrace::test]
     async fn outbound_teardown_never_polls_a_finished_join_handle() {
@@ -1066,7 +1066,7 @@ mod tests {
     }
 
     /// For a completed initial attach catch-up, the marker's ordering
-    /// property is: it must reach the browser AFTER the binary replay
+    /// property is: it must reach the client AFTER the binary replay
     /// bytes it describes and BEFORE any binary live byte, on the exact
     /// same socket (PLAN_M5.md item 4) — not the marker's whole contract,
     /// which also covers attaches a takeover/detach/stall ends before a
@@ -1138,8 +1138,8 @@ mod tests {
     }
 
     /// The attachment trace reports an admitted attachment starting, with the
-    /// session as the browser named it and `terminal=agent`, and reports its
-    /// end once when the browser closes the socket.
+    /// session as the client named it and `terminal=agent`, and reports its
+    /// end once when the client closes the socket.
     ///
     /// Why: the desktop smoke test tells which session the relaunched window
     /// has open only through these two events, since a terminal in a terminal host shows no
@@ -1149,7 +1149,7 @@ mod tests {
     /// agent terminal, exactly one `terminal attached` event on the
     /// `farhelm_helm::terminal_attachments` target names that session and
     /// `agent` by the time the attachment's first data frame arrives, and
-    /// none says it ended; after the browser drops the socket, exactly one
+    /// none says it ended; after the client drops the socket, exactly one
     /// `terminal ended` event names it, within a bound.
     #[farhelm_testtrace::test]
     async fn the_attachment_trace_reports_an_attachment_start_and_end_once() {
@@ -1177,7 +1177,7 @@ mod tests {
         let (mut ws, peer) = tokio::join!(WsTestClient::connect(addr, &path), peer);
         let (_reader, mut writer, channel) = peer.unwrap();
         // The handler traces the start before it relays anything, so the
-        // first frame reaching the browser is the point by which it has.
+        // first frame reaching the client is the point by which it has.
         writer
             .write_frame(&Frame::data(channel, b"first".to_vec()))
             .await
@@ -1255,13 +1255,13 @@ mod tests {
         );
     }
 
-    /// A browser that stops reading must not pin the WebSocket handler:
-    /// the stall detach has to end it even while a send to that browser is
+    /// A client that stops reading must not pin the WebSocket handler:
+    /// the stall detach has to end it even while a send to that client is
     /// blocked.
     ///
     /// This is the teardown half of the detach-not-block design. The
     /// failure it guards is specific and quiet: `serve_term` parked in
-    /// `ws_tx.send()` to a browser that stopped reading cannot observe a
+    /// `ws_tx.send()` to a client that stopped reading cannot observe a
     /// detach that arrives through the terminal's data queue, because that
     /// queue is backed up behind the very send it is parked in. Handler,
     /// socket, queued frames, and the notification task would then stay
@@ -1269,7 +1269,7 @@ mod tests {
     /// pin the stall detach exists to end.
     ///
     /// The premise is a handler parked mid-send with its attachment still
-    /// live. The browser socket's receive buffer is kept small, so the
+    /// live. The test client's receive buffer is kept small, so the
     /// server's sends block after a few MiB, and the flood stops short of
     /// the helm's own overflow detach, which would end the attachment by
     /// another path. Both are observed: the stand-in stops at the helm's own
@@ -1277,17 +1277,17 @@ mod tests {
     /// mark (so the handler is not draining it), and that pause must be the
     /// first thing it hears, so no overflow detach came first.
     ///
-    /// The oracle is the handler's own end. The client acknowledges the
-    /// supervisor's stalled `Detached` with one `Detach` of its own at once,
-    /// in addition to the handler's; a second
+    /// The oracle is the handler's own end. The helm's supervisor client
+    /// acknowledges the supervisor's stalled `Detached` with one `Detach` of
+    /// its own at once, in addition to the handler's; a second
     /// `Detach` comes only from `serve_term`'s teardown, after its outbound
     /// half got past the blocked send (racing the detach signal) and past
-    /// the notice it then tries to send to the same browser (bounded by the
-    /// grace). The browser is not read before that, so a regression in
+    /// the notice it then tries to send to the same socket (bounded by the
+    /// grace). The socket is not read before that, so a regression in
     /// either hangs here instead of passing. Spec: after the stalled
     /// `Detached` the supervisor receives exactly two `Detach` frames for the
     /// channel and nothing else, within twice the teardown grace plus
-    /// headroom, and the browser socket then closes.
+    /// headroom, and the WebSocket then closes.
     #[farhelm_testtrace::test]
     async fn a_wedged_browser_is_torn_down_by_the_stall_detach() {
         let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
@@ -1302,7 +1302,7 @@ mod tests {
         let (reader, mut writer, channel) = peer.unwrap();
 
         // Read exactly one frame, proving the socket works, and then stop
-        // reading until the handler has ended — the wedged browser.
+        // reading until the handler has ended — the wedged client.
         writer
             .write_frame(&Frame::data(channel, b"first".to_vec()))
             .await
@@ -1382,7 +1382,7 @@ mod tests {
         .expect("the ended handler must close the browser socket");
     }
 
-    /// A panic in the browser-to-supervisor task must still leave the
+    /// A panic in the client-to-supervisor task must still leave the
     /// supervisor-side attachment cleaned up. The `panic` message exists only
     /// in test builds because deployed clients' malformed messages are
     /// intentionally ignored rather than treated as a fault injection path.
@@ -1460,7 +1460,7 @@ mod tests {
     /// its data even before the reply, a robustness case beyond what a
     /// supervisor does, which a helm that registered the channel only on
     /// the reply would drop. Spec: the supervisor sends a data frame and
-    /// then `Attached`; the browser's first frame is that data frame, as a
+    /// then `Attached`; the client's first frame is that data frame, as a
     /// binary frame, unchanged.
     #[farhelm_testtrace::test]
     async fn data_that_beat_the_attach_reply_reaches_the_browser_first() {
@@ -1541,7 +1541,7 @@ mod tests {
     }
 
     /// A grid stream crosses the helm unread in both directions: large
-    /// frames reach the browser whole, each browser message reaches the
+    /// frames reach the client whole, each client message reaches the
     /// supervisor as one frame, and the control messages keep their meaning.
     ///
     /// Why: an attachment carries one grid message per data frame both ways
@@ -1550,12 +1550,12 @@ mod tests {
     /// part is ordinary traffic. The large frame is sent before the
     /// `Attached` reply, as a supervisor starts streaming before its reply is
     /// read, so the bound in force before the reply is the one under test.
-    /// Spec: the browser receives a 200 KiB data frame byte for byte, then
+    /// Spec: the client receives a 200 KiB data frame byte for byte, then
     /// `replay_complete`; a binary message of exactly the 64 KiB input bound
     /// reaches the supervisor as one identical data frame, and of a resize, a
     /// pause, a resume and a second resize sent after it, only the two
     /// resizes follow, in order: flow control is the helm's own, so a
-    /// browser's pause and resume are not forwarded (the second resize shows
+    /// client's pause and resume are not forwarded (the second resize shows
     /// they were read and dropped, since the socket's messages are forwarded
     /// in arrival order).
     #[farhelm_testtrace::test]
@@ -1671,15 +1671,15 @@ mod tests {
     }
 
     /// A grid input message over the input bound ends the attachment, as
-    /// the supervisor would, and nothing the browser sends after it is
+    /// the supervisor would, and nothing the client sends after it is
     /// forwarded.
     ///
     /// Why: the helm cannot cut a grid message into frames, and forwarding a
-    /// browser message whole can exceed what the connection's writer can
+    /// client message whole can exceed what the connection's writer can
     /// encode, which would end every attachment sharing the connection;
     /// dropping it and carrying on would deliver later input without what
     /// came before it. Spec: a binary message of 64 KiB + 1
-    /// and then a small one, in one write; the browser gets a `detached`
+    /// and then a small one, in one write; the client gets a `detached`
     /// notice with code `other` whose reason begins "terminal input failed",
     /// then the close; the supervisor receives a `Detach` for the channel and
     /// no data frame.
@@ -1749,7 +1749,7 @@ mod tests {
         }
     }
 
-    /// The receive buffer a test's wedged or slow browser asks for: small,
+    /// The receive buffer a test's wedged or slow client asks for: small,
     /// so the server's sends block after the kernel's own send buffer
     /// rather than after megabytes of loopback autotuning.
     const SMALL_RECEIVE_BUFFER: u32 = 16 * 1024;
@@ -1819,21 +1819,21 @@ mod tests {
         }
     }
 
-    /// A grid stream whose browser falls behind is paused by the helm, and
-    /// resumed once the browser catches up, without losing a frame, at the
+    /// A grid stream whose client falls behind is paused by the helm, and
+    /// resumed once the client catches up, without losing a frame, at the
     /// supervisor's message size and with its writer queue's worth still
     /// arriving after the pause.
     ///
     /// Why: the grid client sends no pause of its own, and the helm reads
     /// the supervisor connection without waiting on any one terminal, so
-    /// without this pause a browser slower than the supervisor fills its
+    /// without this pause a client slower than the supervisor fills its
     /// terminal's queue and is detached as stalled at the first large
     /// catch-up or flood. What was already on its way when the pause went
     /// out still arrives, and must fit. Spec: a stand-in supervisor writes
-    /// 32 KiB frames (its sender's packing) to a browser that is not
+    /// 32 KiB frames (its sender's packing) to a client that is not
     /// reading, and 64 more (its writer queue) once it hears from the helm;
     /// what it hears first is `PauseOutput` for the channel, not a `Detach`.
-    /// The browser then reads every frame written, in order, after which the
+    /// The client then reads every frame written, in order, after which the
     /// supervisor receives `ResumeOutput` for the channel and nothing before
     /// it.
     #[farhelm_testtrace::test]
@@ -1841,19 +1841,19 @@ mod tests {
         slow_browser_pauses_and_resumes(32 * 1024, 64, false).await;
     }
 
-    /// A browser's own resume and pause, sent while the
+    /// A client's own resume and pause, sent while the
     /// helm holds the stream paused, neither lift the helm's pause nor
     /// reach the supervisor; the helm still resumes the stream itself once
-    /// the browser catches up.
+    /// the client catches up.
     ///
     /// Why: the supervisor keeps one paused flag per attachment. A
-    /// forwarded browser resume would lift the pause the helm needs to keep
+    /// forwarded client resume would lift the pause the helm needs to keep
     /// its queue within bounds, and a forwarded pause the helm never sent
     /// would hold the stream paused until the stall detach, since the helm
     /// resumes only its own pauses. Spec: as the 32 KiB case, but once the
-    /// helm's `PauseOutput` is heard the browser sends `resume`, `pause`
+    /// helm's `PauseOutput` is heard the client sends `resume`, `pause`
     /// and then a resize; the supervisor's next message is that `Resize`,
-    /// with nothing before it, and after the browser reads every frame the
+    /// with nothing before it, and after the client reads every frame the
     /// helm's `ResumeOutput` still arrives with nothing before it.
     #[farhelm_testtrace::test]
     async fn a_browser_pause_or_resume_never_touches_a_grid_streams_flow() {
@@ -1874,7 +1874,7 @@ mod tests {
     }
 
     /// One run of the slow-browser tests: frames of `size`, and `after`
-    /// more once the helm has spoken. With `browser_flow`, the browser sends
+    /// more once the helm has spoken. With `browser_flow`, the client sends
     /// its own `resume` and `pause` (then a resize as a marker) while the
     /// helm's pause holds, and the supervisor must hear only the resize.
     async fn slow_browser_pauses_and_resumes(size: usize, after: u32, browser_flow: bool) {
@@ -1950,12 +1950,12 @@ mod tests {
     /// (PLAN_M6.md item 7).
     ///
     /// Both halves are the contract, and each fails differently. Without
-    /// the answer, a browser on a healthy-but-quiet socket would time its
+    /// the answer, a client on a healthy-but-quiet socket would time its
     /// own probe out, tear a perfectly good terminal down, and reattach on
     /// a ladder — turning the check that exists to catch dead sockets into
     /// a generator of spurious reconnects. Without the non-relay, every
     /// idle terminal in a fleet would put a periodic message on its host's
-    /// control path forever, and a probe about the BROWSER's socket would
+    /// control path forever, and a probe about the CLIENT's socket would
     /// be answered by the health of something else entirely.
     ///
     /// The non-relay is proven positively rather than by waiting for an
@@ -2211,14 +2211,14 @@ mod tests {
     /// any other attach failure (PLAN_M4.md item 5): a
     /// `{"type":"detached",...}` notice carrying the supervisor's own
     /// `NotFound` message, then the socket closes — never a bare
-    /// disconnect a browser would blame on the network instead of the
+    /// disconnect a client would blame on the network instead of the
     /// session. The supervisor owns the real "does this tab exist" check
     /// (see `resolve_attach_request`'s docs, including for why `?tab=`
     /// gets no local shape check at all); this test is what proves its
     /// `NotFound` reaches the client rather than being swallowed
     /// somewhere in the WS plumbing this PR adds. The notice's code is
     /// `tab_closed`, because a tab the supervisor cannot find is gone and
-    /// the browser must stop trying to attach it (see
+    /// the client must stop trying to attach it (see
     /// `refused_as_missing_tab`). Both the notice recv
     /// AND the close recv are wrapped in a bounded timeout: a regression
     /// that left either one pending must fail this test, not hang it.
@@ -2295,7 +2295,7 @@ mod tests {
     }
 
     /// Attach `path` against a scripted supervisor that refuses with `kind`,
-    /// and return the browser's detach notice.
+    /// and return the client's detach notice.
     async fn detach_notice_for_refused_attach(
         path: &str,
         kind: farhelm_proto::ErrorKind,

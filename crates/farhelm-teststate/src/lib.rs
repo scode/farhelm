@@ -89,7 +89,7 @@ const DESKTOP_SMOKE_PREFIX: &str = "fh-smoke.";
 
 /// The test recorder's prefix (scripts/record-test-run.py's
 /// `CHILD_TMP_PREFIX`): each recorded command's own TMPDIR, so that the
-/// plain `tempfile` directories, nested builds and browser profiles its tests
+/// plain `tempfile` directories and nested builds its tests
 /// leave behind go with it. The recorder holds the lock and removes the
 /// directory when the command ends; the sweep reaps one whose recorder was
 /// killed, or that still held a socket when its run ended.

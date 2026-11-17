@@ -9,7 +9,7 @@
 //! silent success on the wrong machine:
 //!
 //! A create names its host by REGISTRY ID, and a registry id outlives the
-//! install it points at — a retarget or an adoption in another tab replaces
+//! install it points at — a retarget or an adoption made elsewhere replaces
 //! what answers on the id without the id changing, so the action can succeed
 //! on the WRONG installation.
 //! The client checks before it sends; the window it cannot close is between

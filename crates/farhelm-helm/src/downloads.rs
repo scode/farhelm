@@ -1,5 +1,5 @@
 //! Authenticated file reads routed to the host that owns the session.
-//! Browser bodies stream through the helm; only the browser buffers a Blob.
+//! A relayed body streams through the helm, which never buffers it.
 //! The embedded desktop helm instead stages in Downloads and publishes only
 //! after EOF. An explicit open request may dispatch only that completed save,
 //! under one shared extension policy. Neither a hover nor a previous successful
@@ -158,9 +158,9 @@ pub(crate) async fn stat_file(
     }
 }
 
-/// Reopen on click and either relay bytes or save natively. Browser errors
-/// after headers become body errors, so fetch must finish the whole Blob
-/// before offering it to the browser's save action. No opening Content-Length
+/// Reopen on click and either relay bytes or save natively. An error
+/// after the headers becomes a body error, so a client must read a relayed
+/// body to its end before treating the file as saved. No opening Content-Length
 /// is promised: a file may grow or shrink while it is read, up to the cap.
 pub(crate) async fn download_file(
     State(state): State<Arc<AppState>>,
@@ -542,7 +542,7 @@ mod tests {
             .unwrap()
     }
 
-    /// A stale browser's bare ID must fail locally, even while an identically named session
+    /// A stale client's bare ID must fail locally, even while an identically named session
     /// is routable. The silent peer distinguishes refusal from supervisor-side validation.
     #[farhelm_testtrace::test]
     async fn bare_file_targets_are_refused_before_supervisor_dispatch() {
@@ -1009,7 +1009,7 @@ mod tests {
 
     /// The hover's capability answer uses the same extension rule as opening,
     /// and is absent on servers. Only the desktop's own window can reach the
-    /// embedded helm, so a server helm's browsers never see an opening hint.
+    /// embedded helm, so a server helm's clients never see an opening hint.
     #[farhelm_testtrace::test]
     async fn stat_exposes_open_hint_only_with_native_capability() {
         for (native, name, policy, expected) in [

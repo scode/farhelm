@@ -447,7 +447,7 @@ pub(crate) fn quoted(field: &str) -> String {
 /// One cell as a single printable line.
 ///
 /// Unsafe means [`farhelm_proto::text::is_presentation_unsafe`]: the set every
-/// surface that shows peer-supplied text shares, so a character the browser
+/// surface that shows peer-supplied text shares, so a character the desktop app
 /// escapes is never printed raw here. Table cells and peer-supplied error
 /// prose both come through this function.
 ///

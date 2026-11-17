@@ -1239,7 +1239,8 @@ pub fn exec_launch_spec_with_seam(
 }
 
 /// Build the final agent command, including Farhelm's private launch
-/// contract and the truecolor capability agents need to match the browser.
+/// contract and the truecolor capability agents need to match the client's
+/// terminal.
 /// The inherited environment remains untouched outside this child process.
 fn agent_command(spec: &LaunchSpec) -> std::process::Command {
     let inherited = std::env::var_os("BROWSER");

@@ -70,15 +70,15 @@
 //!
 //! SPEC.md's session list filters by host, directory, status and
 //! title, and every one of those predicates is applied in this merged view
-//! — not in the drains, and not in the browser.
+//! — not in the drains, and not in the client.
 //!
 //! Not in the DRAINS: a filtered drain would cache a partial list, and the
 //! cache's whole job is to be the complete last-known state of a host that
 //! may be gone by the time anyone asks. Host filters, identity-less
 //! sessions, and stale retained rows only exist merged anyway.
 //!
-//! Not in the BROWSER: the count has to be a claim about the whole view,
-//! and the browser only ever holds what it was sent. Applied here, "N
+//! Not in the CLIENT: the count has to be a claim about the whole view,
+//! and the client only ever holds what it was sent. Applied here, "N
 //! matching of M" is computed from the same array the rows come out of.
 //!
 //! So both sources are narrowed by one predicate ([`store::SessionFilter`]),
