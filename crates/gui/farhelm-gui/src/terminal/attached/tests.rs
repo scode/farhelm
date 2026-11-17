@@ -97,7 +97,7 @@ impl Render for Pane {
                     .h(px(PILL_ROW))
                     .flex()
                     .items_center()
-                    .child(pill)
+                    .child(pill.element)
             });
         let content = div()
             .size_full()

@@ -52,7 +52,7 @@ use std::collections::VecDeque;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, Global,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder as _, px, svg,
 };
@@ -812,6 +812,16 @@ const PILL_MIN_WIDTH: f32 = 154.;
 /// The pill's glyphs' side (`.session-tunnel-toggle svg`: 12 pixels).
 const PILL_GLYPH: f32 = 12.;
 
+/// The open-tunnels pill as [`pill`] builds it, with the narrowest it is built to shrink to. The top row's fit leaves
+/// the pill that width beside the tab strip and takes it from here rather than measuring the pill, so one value sets
+/// both the pill's style and the room the row keeps for it.
+pub(crate) struct TunnelPill {
+    pub(crate) element: AnyElement,
+    /// The pill's minimum width: [`PILL_MIN_WIDTH`] while it shows one tunnel's mapping, and `None` for a count, which
+    /// has no width to give up without cutting its words.
+    pub(crate) shrink_floor: Option<Pixels>,
+}
+
 /// The pill for the session's open tunnels, for the top row's left region: `None` while there are none (SPEC.md: "No
 /// pill appears when no listeners remain"). One tunnel shows its mapping, the host cut short before either port;
 /// several show their count. Its hover help and accessible name carry the mapping in full. Pressing it opens or closes
@@ -820,13 +830,13 @@ pub(crate) fn pill(
     tunnels: &Entity<Tunnels>,
     window: &mut Window,
     cx: &mut App,
-) -> Option<AnyElement> {
+) -> Option<TunnelPill> {
     let state = tunnels.read(cx);
     let listeners = state.listeners();
     if listeners.is_empty() {
         return None;
     }
-    let shows_mapping = listeners.len() == 1;
+    let shrink_floor = (listeners.len() == 1).then_some(px(PILL_MIN_WIDTH));
     let host = state.host();
     let open = state
         .list
@@ -909,17 +919,19 @@ pub(crate) fn pill(
         });
     // It gives up width before the row's actions do (`flex: 0 1 auto`), down to the width that keeps a mapping's ports
     // readable, or to nothing for a count: the host's name is what gets cut short.
-    Some(
-        div()
-            .relative()
-            .flex_shrink(1.)
-            .min_w_0()
-            .max_w(px(PILL_MAX_WIDTH))
-            .when(shows_mapping, |pill| pill.min_w(px(PILL_MIN_WIDTH)))
-            .child(button)
-            .child(anchor.track())
-            .into_any_element(),
-    )
+    let element = div()
+        .relative()
+        .flex_shrink(1.)
+        .min_w_0()
+        .max_w(px(PILL_MAX_WIDTH))
+        .when_some(shrink_floor, |pill, floor| pill.min_w(floor))
+        .child(button)
+        .child(anchor.track())
+        .into_any_element();
+    Some(TunnelPill {
+        element,
+        shrink_floor,
+    })
 }
 
 // ---- The list -------------------------------------------------------------------------------------------------------
