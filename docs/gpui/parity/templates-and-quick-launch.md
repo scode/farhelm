@@ -324,9 +324,6 @@ orchestrator.
   their look and focus and ignore presses (the button component's busy state), since a dimmed, disabled button gives up
   focus, which would fall to the dialog and lose the user's place. Tested by
   `templates::dialog_tests::a_write_in_flight_leaves_focus_and_the_dialog_alone`.
-- **A recipe-and-place target's summary.** The old summary named a template's environment target by the environment
-  code's label for it; until the launcher's environments work brings that label, the summary names the target's recipe
-  ("New dev").
 - **One binding hint for a sequence's unbound keys.** When Enter outside the launcher finds both an unbound number key
   and an unbound ⚡ in a sequence, the old app opened Templates with both hint lines; the GPUI dialog opens with one
   hint, for whichever unbound reference came first in the queue. Tested by
