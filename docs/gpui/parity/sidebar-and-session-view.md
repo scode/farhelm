@@ -2207,11 +2207,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 - The unavailable card's "Resume host" has hover help, "Resume host: this session continues when its host resumes",
   where the old button had none; every GPUI control has help. A refused Resume shows on the card, and the lines above
   the terminal leave it out while the card shows it.
-- While a Suspend or Resume waits for its provider, the unavailable card's evidence line says "Asked the environment
-  provider to suspend at …" (or resume), the Hosts row's shared phase words (`hosts::identity::phase`), where the old
-  card named who was asked: "Asked Tensorlake …" for a sandbox, "Asked the container host …" for a container. The
-  per-provider words wait for an answer for them in the provider wording module (`environment_ui.rs`), which the Hosts
-  details are to share; the card takes it up then, with a test of the exact words for a sandbox and a container.
 - The interrupted card's Restart and Replace are the component layer's ordinary buttons, with 6 pixels of padding, where
   the old card's had 4. SPEC.md names no size for them; the component layer's condensed look, which gives up padding, is
   used only by the header, under a tunnel pill's pressure, which the card never meets.

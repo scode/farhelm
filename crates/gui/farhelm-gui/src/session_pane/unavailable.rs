@@ -222,15 +222,9 @@ pub(crate) fn notice(
     };
     let explanation = HostSentence::new(EXPLANATION_ID);
     let detail = HostSentence::new(DETAIL_ID);
-    // The Hosts panel's evidence line after the host's name: the old card's `{name}: {host_state_detail}`.
-    let evidence = |host: &HostView| {
-        phase::evidence(
-            named(detail.clone(), false).text(": "),
-            &host.state,
-            &twin,
-            zone,
-        )
-    };
+    // The card's evidence line after the host's name. A lifecycle request names the provider as Hosts does.
+    let evidence_line = || named(detail.clone(), false).text(": ");
+    let evidence = |host: &HostView| phase::evidence(evidence_line(), &host.state, &twin, zone);
     let (explanation, detail) = match lookup {
         HostLookup::Pending => (named(explanation.text("Checking "), true).text("…"), None),
         HostLookup::Failed => (
@@ -266,7 +260,7 @@ pub(crate) fn notice(
                         " is resuming; this view reconnects when the host is ready."
                     }
                 }),
-                Some(evidence(host)),
+                Some(phase::host_evidence(evidence_line(), host, &twin, zone)),
             ),
             HostStateView::Connecting { .. }
             | HostStateView::Unreachable { .. }
