@@ -5,10 +5,9 @@ The docs screenshot runner captures regions of the real GPUI desktop app against
 `scripts/docs-screenshots.sh` and `scripts/publish-docs-shots.sh`. Pages show a shot with the `Screenshot` component in
 `website/src/components/`.
 
-NOTE: Capture is local only until the Mac path lands with the first published page. Only Launch templates has been
-ported, with two unannotated crops; no page is published yet. Linux runs exercise staging and capture checks, then stop
-at the size check because headless Mutter renders at scale 1 and the scenario requires scale 2. This is not a visual
-regression fixture: nothing in CI captures or compares the images.
+NOTE: Only Launch templates has been ported, with two unannotated crops. No page is published yet. Linux runs exercise
+staging and capture checks, then stop at the size check because headless Mutter renders at scale 1 and the scenario
+requires scale 2. This is not a visual regression fixture: nothing in CI captures or compares the images.
 
 ## Why screenshots, and who owns them
 
@@ -38,7 +37,7 @@ even after a failure.
 
 ## Where the images live
 
-PNGs are never committed on main. Local captures go to the gitignored
+PNGs are never committed on main. Captures made locally or fetched from a Mac go to the gitignored
 `website/public/docs-shots-local/<page>/<shot>.png`, where the docs preview can show them. A failed run prints its run
 directory, retained with its full capture and failure messages.
 
@@ -62,8 +61,7 @@ differs from main or which used `--no-build`. Such a full run still captures for
 The harness asks cargo where it builds, so `CARGO_TARGET_DIR` does not affect this decision.
 
 The publisher refuses a partial record, a referenced shot the run did not produce, or a shot whose bytes changed after
-capture. This preserves one identifiable UI version across the published set. Publishing remains out of scope until the
-Mac path lands.
+capture. This preserves one identifiable UI version across the published set.
 
 ## Release shots are frozen
 
@@ -91,10 +89,14 @@ the alt text explains what the image shows.
 
 ## Refreshing
 
-Until the Mac capture path lands, use local runs to port and check page modules; a full published refresh is
-unavailable. When it becomes available, the bulk publishing contract above still applies: read UI changes since the
-manifest's `captured_from`, update the affected modules and page wording, capture every page, inspect the pictures, then
-publish and commit the manifest with the page changes. Published release material stays frozen.
+Run `scripts/docs-screenshots.sh --mac <destination>` to capture at 2x, on a Mac whose display fits the scenario's
+window (the test Mac's did not on 2026-11-17; `.agents/docs-media.md`, "Docs screenshots"). The command shares the
+README hero's SSH settings, preflight and Mac-wide lock. It checks Git provenance in the originating checkout and
+records the fetched images there. Use `--only <page>` to work on one page.
+
+For a bulk refresh, read UI changes since the manifest's `captured_from`, update the affected modules and page wording,
+capture every page, inspect the pictures, then publish and commit the manifest with the page changes. Published release
+material stays frozen.
 
 ## Prerequisites
 
