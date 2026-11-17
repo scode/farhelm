@@ -18,9 +18,14 @@
 //! The data itself is the helm client's [`Collections`]: one generic apply for every collection, decoded once by the
 //! channel. A store belongs to one UI session. A reset drops it with the session, and the next snapshot builds a new
 //! one, so nothing pushed by an earlier connection survives a reset.
+//!
+//! NOTE: An agent build staging a docs-media scenario rewrites a few sessions' age and folder on the way in
+//! (`agent_startup`, "Staged session values"); every other build stores exactly what the helm sent.
 
 use farhelm_helm_client::{Collections, PushedChanges, PushedState};
-use gpui::Context;
+use gpui::{App, Context};
+
+use crate::agent_startup;
 
 /// One UI session's copy of the pushed collections.
 pub struct HelmStore {
@@ -28,10 +33,11 @@ pub struct HelmStore {
 }
 
 impl HelmStore {
-    /// A store holding `snapshot`, the whole pushed state one connection opened with.
-    pub(crate) fn from_snapshot(snapshot: &[PushedState]) -> HelmStore {
+    /// A store holding `snapshot`, the whole pushed state one connection opened with (through
+    /// [`agent_startup::staged_snapshot`]).
+    pub(crate) fn from_snapshot(snapshot: &[PushedState], cx: &App) -> HelmStore {
         let mut collections = Collections::default();
-        collections.install(snapshot);
+        collections.install(&agent_startup::staged_snapshot(snapshot, cx));
         HelmStore { collections }
     }
 
@@ -40,9 +46,11 @@ impl HelmStore {
         &self.collections
     }
 
-    /// Apply one collection's changes, in channel order, and notify the views that read the store.
+    /// Apply one collection's changes, in channel order (through [`agent_startup::staged_changes`], like the
+    /// snapshot), and notify the views that read the store.
     pub(crate) fn apply(&mut self, changes: &PushedChanges, cx: &mut Context<HelmStore>) {
-        self.collections.apply(changes);
+        self.collections
+            .apply(&agent_startup::staged_changes(changes, cx));
         cx.notify();
     }
 }

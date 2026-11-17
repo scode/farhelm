@@ -1198,7 +1198,9 @@ class ScenarioTest(unittest.TestCase):
         a fleet that differs from the design. Specified, each by its message: a session on a host the file does not
         define, a transcript that is not a file beside it, `$USER` with no account to expand it to, and the old
         loader's other checks on what is staged (a second local host, a duplicated title, no or two open sessions, an
-        idle session without seen state, an unknown wrapper or status)."""
+        idle session without seen state, an unknown wrapper or status, and for the values the app pins on a row, a
+        missing or empty `cwd`, an `age` that is missing, negative, fractional, a string or a boolean, and an age
+        younger than the one above it)."""
         remote = '{ key: "r", alias: "r", kind: "remote", ssh: "$USER@localhost" }'
         second_local = LOCAL_HOST.replace("local", "l2", 1)
         closed = OPEN_SESSION.replace(", open: true", "")
@@ -1215,6 +1217,15 @@ class ScenarioTest(unittest.TestCase):
             ("needs seen", LOCAL_HOST, OPEN_SESSION.replace('"running"', '"idle"')),
             ("wrapper must be one of", LOCAL_HOST, OPEN_SESSION.replace('"claude"', '"cursor-agent"')),
             ("status must be one of", LOCAL_HOST, OPEN_SESSION.replace('"running"', '"busy"')),
+            ("cwd is required", LOCAL_HOST, OPEN_SESSION.replace('cwd: "~/a", ', "")),
+            ("cwd is required", LOCAL_HOST, OPEN_SESSION.replace('"~/a"', '""')),
+            ("age must be a non-negative integer", LOCAL_HOST, OPEN_SESSION.replace("age: 0", "age: -1")),
+            ("age must be a non-negative integer", LOCAL_HOST, OPEN_SESSION.replace("age: 0", "age: 1.5")),
+            ("age must be a non-negative integer", LOCAL_HOST, OPEN_SESSION.replace("age: 0", 'age: "2m"')),
+            ("age must be a non-negative integer", LOCAL_HOST, OPEN_SESSION.replace("age: 0", "age: true")),
+            ("age must be a non-negative integer", LOCAL_HOST, OPEN_SESSION.replace("age: 0, ", "")),
+            ("ages must not decrease down the list", LOCAL_HOST,
+             OPEN_SESSION.replace("age: 0", "age: 60") + ", " + closed.replace('title: "a"', 'title: "b"')),
         ]
         for message, hosts, sessions in cases:
             path = self.write(hosts, sessions)
@@ -1222,6 +1233,37 @@ class ScenarioTest(unittest.TestCase):
             with self.subTest(message=message), self.assertRaisesRegex(gui_agent.UsageError, message) as raised:
                 gui_agent.load_scenario(path, user)
             self.assertTrue(str(raised.exception).startswith(f"{path}: "), raised.exception)
+
+    def test_the_pins_file_carries_each_sessions_title_age_and_folder(self):
+        """A scenario's sessions really run in scratch directories under the run and were active moments ago; the app
+        shows the scenario's folder and age instead only for the sessions the pins file names, by title. Specified for
+        the README hero: the file `start` writes into the run directory lists all seven sessions in the scenario's order
+        with their title, age and folder exactly as the scenario gives them (the folder unexpanded, as the row shows
+        it), and the path reaches the app under the variable its agent build reads (`SESSION_PINS_ENV` in
+        `agent_startup.rs`, read from that source); a run that writes none leaves the variable unset, so every other
+        run shows sessions as the helm pushes them."""
+        source = (REPO / "crates/gui/farhelm-gui/src/agent_startup.rs").read_text()
+        names = re.findall(r'^pub const SESSION_PINS_ENV: &str = "([^"]+)";$', source, re.MULTILINE)
+        self.assertEqual(names, [gui_agent.SESSION_PINS_ENV])
+        plan = gui_agent.load_scenario(HERO, "someone")
+        run = self.dir / "run"
+        run.mkdir()
+        path = gui_agent.write_session_pins(run, plan)
+        self.assertEqual(path, run / "session-pins.json")
+        self.assertEqual(json.loads(path.read_text()), {"sessions": [
+            {"title": "fix flaky attach test", "age": 120, "cwd": "~/src/farhelm"},
+            {"title": "migrate auth tokens", "age": 480, "cwd": "~/src/api"},
+            {"title": "readme rewrite", "age": 2460, "cwd": "~/work/docs"},
+            {"title": "bench tokenizer on H100", "age": 3600, "cwd": "~/work/tok"},
+            {"title": "triage crash reports", "age": 10800, "cwd": "~/src/api"},
+            {"title": "release 0.3.1", "age": 86400, "cwd": "~/src/farhelm"},
+            {"title": "port ci to nextest", "age": 172800, "cwd": "~/src/ci"},
+        ]})
+        args = gui_agent.app_env_args(run, {"farhelm": "/t/f"}, session_pins=path)
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertEqual(pairs[gui_agent.SESSION_PINS_ENV], str(path))
+        args = gui_agent.app_env_args(run, {"farhelm": "/t/f"})
+        self.assertNotIn(gui_agent.SESSION_PINS_ENV, dict(arg.split("=", 1) for arg in args[1::2]))
 
     def test_a_scenario_run_is_staged(self):
         """A scenario's sessions are launched as `claude` and `codex` by bare name, which only a staged run's wrappers
@@ -1271,8 +1313,8 @@ class ScenarioTest(unittest.TestCase):
         whose node is missing or doubled is not drawn yet, and a wrong shield is reported naming the session."""
         plan = gui_agent.plan_scenario(
             {"viewport": {"width": 1, "height": 1}, "hosts": [{"key": "l", "alias": "l", "kind": "local"}],
-             "sessions": [{"title": t, "host": "l", "wrapper": "claude", "status": "running", "yolo": yolo,
-                           "open": t == "y"} for t, yolo in (("y", True), ("n", False))]},
+             "sessions": [{"title": t, "host": "l", "cwd": "~/a", "wrapper": "claude", "status": "running", "age": 0,
+                           "yolo": yolo, "open": t == "y"} for t, yolo in (("y", True), ("n", False))]},
             self.dir, None, "synthetic")
         said = "as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — x"
 

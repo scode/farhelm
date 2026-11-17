@@ -196,14 +196,13 @@ with two remote hosts, and with the README hero's scenario.
 
 ## Scenario runs
 
-NOTE: Not everything a scenario says is staged yet. Session ages and folders, which the old browser capture rewrote in
-the session listing on its way to the page, have no counterpart in the desktop app, so every row shows its session's
-real activity and its real scratch folder. The viewport's `scale` is not applied either. Sessions are created at the
-helm's default terminal size and resized when the window first attaches them; the old staging created them at the pane's
-measured size instead, because that first resize, landing while the replay was drawn, doubled the spinner line and lost
-a transcript line in its first captures. That probe is not ported, since the hero's transcripts fit 80x24 and its live
-runs replayed cleanly; if a capture shows a doubled spinner line or a missing transcript line, port it (pass the pane's
-`cols` and `rows` on each create, which the helm's create still takes).
+NOTE: Not everything a scenario says is staged yet. The viewport's `scale` is not applied, and the list's order is the
+app's own, not the file's (see "Pinned ages and folders" below). Sessions are created at the helm's default terminal
+size and resized when the window first attaches them; the old staging created them at the pane's measured size instead,
+because that first resize, landing while the replay was drawn, doubled the spinner line and lost a transcript line in
+its first captures. That probe is not ported, since the hero's transcripts fit 80x24 and its live runs replayed cleanly;
+if a capture shows a doubled spinner line or a missing transcript line, port it (pass the pane's `cols` and `rows` on
+each create, which the helm's create still takes).
 
 `start --scenario FILE` stages the fleet a docs-media `scenario.json5` describes (`docs/readme-hero/SPEC.md` has what is
 staged and why, and the file's own comments say what each field does). It is how the README hero, the demo video and the
@@ -232,6 +231,18 @@ to the helm's `last_selected`) before it creates the rest. The old staging set t
 here the window is up before the helm has any session, and it opens the first session it lists and keeps it, so creating
 the open one first is what makes the window's own choice the scenario's. The window does not give that terminal focus (a
 fresh window's focus is on New session), so `terminal-text` needs a click or Tab into the terminal first.
+
+Pinned ages and folders: a session's `age` and `cwd` cannot be real, since it was created moments ago in its scratch
+directory under the run, so `start` writes them, with each session's title, to `session-pins.json` in the run directory
+and hands the file to the app (`FARHELM_DESKTOP_AGENT_SESSION_PINS`). An agent build reads it at startup and shows the
+scenario's age and folder for each named session everywhere in the window, while the helm's API still answers with the
+real ones (the staged session values in `crates/gui/farhelm-gui/src/agent_startup.rs` say how and why). The ages count
+back from the app's start, so they read older by however long staging took. The order is the app's, not the file's: the
+helm sorts the list by its real statuses and work starts, running and waiting sessions first, and the pins change no
+order. Sessions are matched by their current title, so a renamed session shows its real scratch folder, a machine path,
+and a Clone, which keeps its source's title, shows the pinned values too. The pinned folder is also where New session
+(from the open session), Clone and Replace with start, a folder that does not exist on this machine. The summary card's
+start time stays real, so it reads later than the pinned last activity.
 
 The window starts at the viewport's size as the app's own drawing: on Linux `start` asks for a window larger by the
 frame and title bar the screenshot batch crops off (1322x876 for the hero's 1280x800), unless `--window-size` says
