@@ -1,6 +1,7 @@
 //! Tests of the session view's terminal set: which streams it opens for a session's tabs and under which lease, what
 //! the strip lists and chooses, where focus goes, how tabs opened, closed and reaped elsewhere come and go, that a
-//! terminal whose stream stopped holds back no other, and the bound on attached tabs.
+//! terminal whose stream stopped holds back no other, the bound on attached tabs, and New terminal and each tab's ×
+//! (its question, which tab it closes, and a refused close).
 //!
 //! The window is the real main view over the helm client's fake channel, and its connection hands out fake terminals
 //! (`Connection::serve_terminals`), which play the helm's side of every stream and record what each was asked. A tab
@@ -18,7 +19,9 @@ use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, 
 use gpui::{Entity, TestAppContext, VisualTestContext};
 use serde_json::json;
 
-use super::{AGENT_TAB_ID, MAX_ATTACHED_TABS, NOT_ATTACHED_ID, TerminalSet, tab_element_id};
+use super::{
+    AGENT_TAB_ID, MAX_ATTACHED_TABS, NOT_ATTACHED_ID, STRIP_ID, TerminalSet, tab_element_id,
+};
 use crate::focus::Mark;
 use crate::main_view::MainView;
 use crate::session::Connection;
@@ -235,6 +238,42 @@ impl Window<'_> {
             }
         }
     }
+
+    /// The left edges of every × the strip paints, in order. Found by the painted "×" anywhere inside the strip
+    /// rather than by the shell tabs' close ids, so a close control beside the Agent tab counts whatever it is named.
+    fn strip_closes(&mut self) -> Vec<f32> {
+        let nodes = test_support::frame(self.cx);
+        let in_strip = |mut at: usize| loop {
+            if nodes[at].element_id.as_deref() == Some(STRIP_ID) {
+                return true;
+            }
+            match nodes[at].parent {
+                Some(parent) => at = parent,
+                None => return false,
+            }
+        };
+        let mut closes: Vec<f32> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(at, node)| node.texts.iter().any(|text| text.text == "×") && in_strip(*at))
+            .map(|(_, node)| f32::from(node.bounds.origin.x))
+            .collect();
+        closes.sort_by(f32::total_cmp);
+        closes
+    }
+
+    /// The accessible name of the open question (its title, "Close Terminal 2?" for a tab's close), and how many
+    /// questions are drawn, so a test can tell one question that moved from a second one beside the first.
+    fn questions(&mut self) -> (Option<String>, usize) {
+        let nodes = test_support::frame(self.cx);
+        let mut drawn = nodes
+            .iter()
+            .filter(|node| node.element_id.as_deref() == Some("prompt"));
+        let first = drawn
+            .next()
+            .and_then(|node| node.label.as_ref().map(ToString::to_string));
+        (first.clone(), drawn.count() + usize::from(first.is_some()))
+    }
 }
 
 // ---- Attaching -----------------------------------------------------------------------------------------------------
@@ -275,6 +314,29 @@ fn every_tab_attaches_under_the_views_lease_at_the_shown_terminals_size(cx: &mut
     }
     assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
     assert_eq!(window.chosen(), None);
+}
+
+/// SPEC.md, "Session view": a shell tab "can be closed individually, which kills that shell and its processes"; the
+/// agent terminal is not such a tab, and its agent stops only through the session's own Stop or Delete, each with its
+/// own question. A × beside Agent would offer to kill the agent from a control that reads as closing a shell (old
+/// `terminal-tabs.spec.ts`, "the strip labels tabs positionally and gives the agent terminal no close control").
+/// Specified: with no shell tabs the strip paints "Agent" and no ×; once the row lists t1 and t2, it paints "Agent",
+/// "Terminal 1" and "Terminal 2" and exactly two ×, each to the right of Terminal 1's tab, so none sits beside Agent.
+#[gpui::test]
+fn the_agent_terminals_tab_has_no_close_control(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&[]));
+    assert_eq!(window.strip_labels(), ["Agent"]);
+    assert_eq!(window.strip_closes(), [] as [f32; 0], "no × beside Agent");
+
+    window.push_tabs(&["t1", "t2"]);
+    assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
+    let closes = window.strip_closes();
+    assert_eq!(closes.len(), 2, "one × per shell tab: {closes:?}");
+    let first_tab = f32::from(test_support::bounds(window.cx, T1_TAB).right());
+    assert!(
+        closes.iter().all(|x| *x >= first_tab),
+        "every × is past Terminal 1's tab, none beside Agent: {closes:?} from {first_tab}"
+    );
 }
 
 /// Choosing a tab shows its terminal and puts focus there, so typing reaches its shell without a click on the pane
@@ -1041,6 +1103,181 @@ fn closing_a_tab_asks_first_then_sends_one_delete(cx: &mut TestAppContext) {
     window.helm.reply(sent[0].0, 200, Some(json!({})));
     settle(window.cx);
     assert_eq!(window.chosen(), None, "the agent terminal shows");
+}
+
+/// The DELETE requests for session a's tabs among [`tab_requests`], as the closed tabs' ids, in the order sent.
+fn deleted(helm: &mut FakeHelm) -> Vec<String> {
+    tab_requests(helm)
+        .into_iter()
+        .filter(|(_, method, _)| *method == farhelm_helm_client::Method::Delete)
+        .filter_map(|(_, _, path)| {
+            path.strip_prefix("/api/sessions/a/tabs/")
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// A user who opened one tab's close question and then presses another tab's × has changed their mind about which
+/// shell to kill. The second press must leave one question, about the second tab, with its confirming answer focused,
+/// so that Enter closes the tab the user last pointed at and nothing else (old `terminal-tabs.spec.ts`, "retargeting an
+/// open tab-close question focuses the new answer"). A first question left behind, or Enter still bound to it, would
+/// kill the shell the user moved away from. "Retargeting" here is close-then-open: the second × is a press outside the
+/// open question, which closes it unanswered on the mouse-down, so by the ×'s click no question is open, and a guard
+/// inside `ask_to_close` against an open question never runs. Specified: with t1 and t2, Terminal 1's × opens one
+/// question named "Close
+/// Terminal 1?", hung under that ×, with focus on its confirm; Terminal 2's × then leaves one question, named "Close
+/// Terminal 2?" and hung under Terminal 2's ×, with focus on its confirm and nothing sent; Enter sends exactly one
+/// DELETE, for t2.
+#[gpui::test]
+fn a_second_tabs_close_takes_over_the_question_and_enter_closes_that_tab(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    tab_requests(&mut window.helm);
+    // Where a question hangs: an anchored question sits aligned with the left edge of the control it is about.
+    let hangs_under = |window: &mut Window, close: &'static str| {
+        test_support::bounds(window.cx, "prompt").left()
+            == test_support::bounds(window.cx, close).left()
+    };
+    click(window.cx, "session-terminal-close-t1");
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 1?".to_owned()), 1),
+        "the premise: Terminal 1's question is open"
+    );
+    assert!(
+        hangs_under(&mut window, "session-terminal-close-t1"),
+        "the premise: it hangs under Terminal 1's ×"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: its confirm has focus"
+    );
+
+    click(window.cx, "session-terminal-close-t2");
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 2?".to_owned()), 1),
+        "one question, now Terminal 2's"
+    );
+    assert!(
+        hangs_under(&mut window, "session-terminal-close-t2"),
+        "it hangs under Terminal 2's ×"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the new question's confirm has focus"
+    );
+    assert_eq!(
+        deleted(&mut window.helm),
+        [] as [String; 0],
+        "nothing sent yet"
+    );
+
+    keys(window.cx, "enter");
+    assert_eq!(deleted(&mut window.helm), ["t2"]);
+}
+
+/// The close question acts on the tab it was opened for, by its id, not on whatever tab now sits at the place its name
+/// gave: tabs come and go from other clients while the question is open, and a question that followed the place would
+/// kill a shell the user never chose (old `terminal-tabs.spec.ts`, "a confirm prompt renumbers with the strip while
+/// still targeting its own tab"; here the question keeps the name it opened with, a recorded deviation). A tab list
+/// push is not an answer either, so the question stays open through it. Specified: with t1, t2 and t3, Terminal 2's ×
+/// opens "Close Terminal 2?"; a push listing t2 and t3 renumbers the strip to "Terminal 1" (t2) and "Terminal 2" (t3)
+/// and leaves the question open, still named "Close Terminal 2?"; confirming it sends exactly one DELETE, for t2.
+#[gpui::test]
+fn a_close_question_closes_its_own_tab_after_the_strip_renumbers(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2", "t3"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-terminal-close-t2");
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 2?".to_owned()), 1),
+        "the premise: t2's question is open"
+    );
+
+    window.push_tabs(&["t2", "t3"]);
+    let set = window.set();
+    assert_eq!(
+        window.cx.update(|_, cx| set.read(cx).tab_ids()),
+        ["t2", "t3"],
+        "the premise: t1 went"
+    );
+    assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 2?".to_owned()), 1),
+        "the renumbering did not close the question, which keeps its name"
+    );
+
+    click(window.cx, "prompt-confirm");
+    assert_eq!(
+        deleted(&mut window.helm),
+        ["t2"],
+        "t2, not t3 now at its place"
+    );
+}
+
+/// A refused close must change nothing but say so: the tab stays listed, its terminal stays attached and takes typing,
+/// the reason shows on that tab, and its × works again (old `terminal-tabs.spec.ts`, "a failed close surfaces on that
+/// tab and leaves it attached"). A view that dropped the tab's terminal on the press, ahead of the helm's answer, would
+/// leave a shell running that the window no longer shows, and a × left busy would leave no way to try again. The old
+/// case's other half, a later successful close of the other tab leaving the refusal shown, is covered in part by
+/// [`skipped_questions_close_at_once_side_by_side_and_a_refusal_shows_on_its_tab`], where the sibling's close succeeds
+/// alongside the refused one. Specified: with t1 and t2 live, Terminal 1's close confirmed and refused with a 500 and
+/// the helm's words draws t1's refusal line with "Close tab: " and those words; t1 is still listed and its stream is
+/// still attached; choosing Terminal 1 and typing reaches t1's stream; Terminal 1's × then opens "Close Terminal 1?"
+/// again.
+#[gpui::test]
+fn a_refused_close_leaves_its_tab_listed_attached_and_live(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    window.go_live(agent, "agent");
+    window.go_live(t1, "shell");
+    assert_eq!(
+        window.phase(t1),
+        FakePhase::Attached,
+        "the premise: t1 is live"
+    );
+    tab_requests(&mut window.helm);
+
+    click(window.cx, "session-terminal-close-t1");
+    click(window.cx, "prompt-confirm");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "the premise: one DELETE, for t1: {sent:?}");
+    window.helm.reply(
+        sent[0].0,
+        500,
+        Some(json!({ "error": "injected close failure" })),
+    );
+    settle(window.cx);
+
+    assert!(
+        window
+            .cx
+            .debug_bounds("session-terminal-close-refusal-t1")
+            .is_some(),
+        "t1's refusal line"
+    );
+    let painted = painted(&test_support::frame(window.cx)).join(" ");
+    assert!(
+        painted.contains("Close tab: ") && painted.contains("injected close failure"),
+        "{painted}"
+    );
+    assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
+    assert_eq!(window.phase(t1), FakePhase::Attached, "t1 stays attached");
+
+    window.received(t1);
+    click(window.cx, T1_TAB);
+    keys(window.cx, "x");
+    assert!(window.typed_into(t1), "t1 still takes typing");
+
+    click(window.cx, "session-terminal-close-t1");
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 1?".to_owned()), 1),
+        "t1's × asks again"
+    );
 }
 
 /// SPEC.md: Skip session confirmations skips "terminal-tab Close", which then runs on the first press; each tab closes
