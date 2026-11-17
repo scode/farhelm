@@ -763,10 +763,10 @@
     },
     {
       "id": "app-launcher-new-container",
-      "title": "New with Runs on set to New container: the Runs on switch above the Recipe and Container host selects, the note on the recipe's build at that host, Folder fixed to ~ with the container's note under it, and the footer naming the new container and its host. Needs a machine whose rootless Podman the helm finds usable: elsewhere New container is hidden, as SPEC.md has it, and the click finds nothing. Its start options are its own (three sessions, which no other scene uses), so it runs alone and a machine without Podman fails only this scene, never the scenes that share an app run",
+      "title": "New with Runs on set to New container: the Runs on switch above the Recipe and Container host selects, the note on the recipe's build at that host, Folder fixed to ~ with the container's note under it, and the footer naming the new container and its host. Needs a machine whose rootless Podman the helm finds usable, and `--user-session` so the helm's Podman check can reach the user's systemd manager (docs/gui-agent.md, \"User-session runs\"): elsewhere New container is hidden, as SPEC.md has it, and the click finds nothing. Its start options are its own (three sessions, which no other scene uses), so it runs alone and a machine without Podman fails only this scene, never the scenes that share an app run",
       "reference": null,
       "mockup": false,
-      "start": ["--sessions", "3"],
+      "start": ["--sessions", "3", "--user-session"],
       "steps": [
         ["click", "id:new-session-button"],
         ["wait", "--text", "Destination"],

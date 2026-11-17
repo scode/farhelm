@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 
 spec = importlib.util.spec_from_file_location("gui_agent", pathlib.Path(__file__).with_name("gui-agent.py"))
 gui_agent = importlib.util.module_from_spec(spec)
@@ -636,6 +637,223 @@ class RemoteSupervisorTest(unittest.TestCase):
                          (ours.pid, start))
         self.assertIsNone(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": ours.pid, "start": "x"}))
         self.assertIsNone(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": 2**22 + 1, "start": "1"}))
+
+
+# Stand-ins for `systemctl` and `podman`, for what `stop` runs in a user-session run. `systemctl --user list-units ...`
+# prints one `<unit> loaded active running stand-in` line per line of the file `units` beside it; `systemctl --user stop
+# -- UNIT` appends UNIT to `stopped` and drops it from `units`, unless the file `stuck` names it. `podman ...` appends
+# its arguments as one JSON line to `podman.log`. Both append the XDG_RUNTIME_DIR they were given to `runtimes`.
+USER_MANAGER_STANDIN = """\
+import json, os, pathlib, sys
+here = pathlib.Path(sys.argv[0]).parent
+args = sys.argv[1:]
+with open(here / "runtimes", "a") as log:
+    log.write(os.environ.get("XDG_RUNTIME_DIR", "") + "\\n")
+if pathlib.Path(sys.argv[0]).name == "podman":
+    with open(here / "podman.log", "a") as log:
+        log.write(json.dumps(args) + "\\n")
+    sys.exit(0)
+units = (here / "units").read_text().split()
+if args[:2] == ["--user", "list-units"]:
+    print("".join(f"{unit} loaded active running stand-in\\n" for unit in units), end="")
+elif args[:3] == ["--user", "stop", "--"]:
+    with open(here / "stopped", "a") as log:
+        log.write(args[3] + "\\n")
+    stuck = (here / "stuck").read_text().split() if (here / "stuck").exists() else []
+    if args[3] not in stuck:
+        (here / "units").write_text("".join(f"{unit}\\n" for unit in units if unit != args[3]))
+else:
+    sys.exit(f"stand-in systemctl: unexpected {args}")
+"""
+
+
+class UserSessionTest(unittest.TestCase):
+    """A `--user-session` run gives the app the caller's runtime directory and session bus, so its helm's Podman check
+    reaches the user's systemd manager, and in return shares that manager and the account's Podman storage. These pin
+    both halves: exactly those two variables cross over and nothing else of the run's isolation moves, and what `stop`
+    removes from the shared account is exactly what the run's own helm and supervisor named, never another run's or the
+    live install's."""
+
+    SESSION = "2b1f0e4c-0000-4000-8000-000000000001"
+    TAB = "9c3d5a71-0000-4000-8000-0000000000ff"
+    CONTAINER = "farhelm-sess-k3x9q2m7a1bz-dev-1"
+    NONCE = "0123456789abcdef0123456789abcdef"
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.caller = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/home/caller",
+            "XDG_RUNTIME_DIR": "/run/user/1234",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1234/bus",
+            "WAYLAND_DISPLAY": "wayland-0",
+            "DISPLAY": ":0",
+            "FARHELM_DESKTOP_STATE_DIR": "/home/caller/.local/state/farhelm",
+        }
+        # The compositor's facts, as `start` records them on Linux.
+        self.record = {"runtime": "/tmp/run/runtime", "display": "wayland-fh-x", "dbus": "unix:path=/tmp/run/bus"}
+
+    def test_the_option_passes_the_callers_runtime_and_bus_through(self):
+        """Specified: the app gets the caller's XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS, as `check_user_session`
+        took them from the caller at `start`; its Wayland display is the run's own compositor, named by the socket's
+        absolute path since a bare name would be looked up in the caller's runtime directory; and the caller's own
+        display and `FARHELM_*` variables are still dropped, with rendering still pinned to lavapipe."""
+        user = gui_agent.check_user_session(self.caller, "linux", staged=False)
+        self.assertEqual(user, {"runtime": "/run/user/1234", "dbus": "unix:path=/run/user/1234/bus"})
+        env = gui_agent.run_env(self.dir, dict(self.record, user_session=user), base=self.caller, platform="linux")
+        self.assertEqual(env["XDG_RUNTIME_DIR"], "/run/user/1234")
+        self.assertEqual(env["DBUS_SESSION_BUS_ADDRESS"], "unix:path=/run/user/1234/bus")
+        self.assertEqual(env["WAYLAND_DISPLAY"], "/tmp/run/runtime/wayland-fh-x")
+        self.assertNotIn("DISPLAY", env)
+        self.assertNotIn("FARHELM_DESKTOP_STATE_DIR", env)
+        self.assertEqual(env["VK_ICD_FILENAMES"], gui_agent.LAVAPIPE_ICD)
+        self.assertEqual(env["HOME"], "/home/caller")
+
+    def test_a_plain_run_still_isolates_the_runtime_and_bus(self):
+        """Without the option nothing changes: the app gets the run's private runtime directory, its compositor's bus
+        and the display's bare name, never the caller's runtime directory or bus. Specified against the same caller
+        environment the option's test uses, so a change that leaked the caller's session into every run fails here."""
+        env = gui_agent.run_env(self.dir, self.record, base=self.caller, platform="linux")
+        self.assertEqual(
+            (env["XDG_RUNTIME_DIR"], env["DBUS_SESSION_BUS_ADDRESS"], env["WAYLAND_DISPLAY"]),
+            ("/tmp/run/runtime", "unix:path=/tmp/run/bus", "wayland-fh-x"),
+        )
+
+    def test_the_option_is_refused_where_it_cannot_work(self):
+        """Specified: refused on a Mac (whose runs already use the GUI session's environment), for a caller without an
+        absolute runtime directory or without a bus, and for a staged run, whose private HOME would give Podman a
+        storage of its own sharing the account's run root. Each refusal is checked by its message, since all are the
+        same exception type."""
+        cases = [
+            (self.caller, "darwin", False, "Linux only"),
+            (self.caller, "linux", True, "a staged run"),
+            ({**self.caller, "XDG_RUNTIME_DIR": "run/user/1234"}, "linux", False, "needs XDG_RUNTIME_DIR"),
+            ({"XDG_RUNTIME_DIR": "/run/user/1234"}, "linux", False, "needs XDG_RUNTIME_DIR"),
+        ]
+        for base, platform, staged, message in cases:
+            with self.subTest(message=message, platform=platform), self.assertRaisesRegex(gui_agent.UsageError,
+                                                                                            message):
+                gui_agent.check_user_session(base, platform, staged)
+
+    def test_a_staged_start_with_the_option_is_refused_before_anything_starts(self):
+        """The combination fails as a usage error before `start` creates the run or dials any destination over ssh.
+        Driven through `start` itself with the ssh check replaced by a recorder (a module attribute, not the
+        environment), so a refusal moved after the ssh checks or the run's creation fails here."""
+        dialed = []
+        real_check = gui_agent.check_ssh
+        gui_agent.check_ssh = dialed.append
+        try:
+            with self.assertRaisesRegex(gui_agent.UsageError, "--user-session"):
+                gui_agent.start(self.dir / "run", ["--user-session", "--remote-host", "localhost"])
+        finally:
+            gui_agent.check_ssh = real_check
+        self.assertEqual(dialed, [])
+        self.assertFalse((self.dir / "run").exists())
+
+    def test_only_the_runs_own_units_match(self):
+        """The user manager is shared with every other run and with the live install, whose units all start with
+        `farhelm-` too. Specified: a recorded session's launch scopes (any generation) and tab scopes match; another
+        session's scopes, a near miss on the name, the retired container scope, a Podman command's scope, the throwaway
+        probe scopes and services do not."""
+        ours = [
+            f"farhelm-{self.SESSION}-0.scope",
+            f"farhelm-{self.SESSION}-12.scope",
+            f"farhelm-{self.SESSION}-tab-{self.TAB}.scope",
+        ]
+        other = "5e6f7a8b-0000-4000-8000-000000000002"
+        strangers = [
+            f"farhelm-{other}-0.scope",
+            f"farhelm-{self.SESSION}.scope",
+            f"farhelm-{self.SESSION}-tab-x.scope",
+            f"farhelm-{self.SESSION}-0x.scope",
+            f"farhelm-{self.SESSION}-0.service",
+            f"farhelm-{self.SESSION}-container.scope",
+            f"farhelm-env-{self.CONTAINER}-{self.NONCE}.scope",
+            f"farhelm-env-probe-{self.NONCE}.scope",
+            f"farhelm-probe-{other}.scope",
+            "farhelm-supervisor.service",
+        ]
+        for unit in ours:
+            self.assertTrue(gui_agent.run_owned_unit(unit, [self.SESSION]), unit)
+        for unit in strangers:
+            self.assertFalse(gui_agent.run_owned_unit(unit, [self.SESSION]), unit)
+
+    def test_stop_records_only_the_local_hosts_sessions_and_containers(self):
+        """A user-session run keeps the caller's HOME and ssh setup, so a host added while it is driven can be this
+        machine's own installation over ssh, whose sessions' scopes sit on the same user manager: recording them would
+        make `stop` end the live install's sessions. Specified: of the sessions the helm lists as `<host entry>:<id>`
+        (the shape a live run's helm answered with), only the bare ids of those on the `kind: local` host are recorded,
+        and only UUID-shaped ones; of the containers, only those placed on the local host with the helm's name prefix;
+        a podman row without `environment` is skipped rather than losing the record; and a later stop that finds the
+        helm gone keeps what was recorded, with a warning."""
+        entry, other = "313fe647-22b9-4525-acd6-7f4519854719", "5e6f7a8b-0000-4000-8000-000000000002"
+
+        def placed(host_id: int, name: str, place: int) -> dict:
+            target = {"kind": "environment", "recipe": "dev", "place": {"kind": "podman_host", "host": place}}
+            return {"id": host_id, "kind": "podman", "environment": {"name": name, "target": target}}
+
+        def answer(_run, _method, path, _body=None):
+            if path == "/api/sessions":
+                return {"sessions": [{"id": f"{entry}:{self.SESSION}", "host": 1},
+                                     {"id": f"{entry}:not-a-uuid", "host": 1},
+                                     {"id": f"{entry}:{other}", "host": 2},
+                                     {"id": f"{entry}:{self.TAB}", "host": 3}]}
+            return {"hosts": [{"id": 1, "kind": "local"}, {"id": 2, "kind": "ssh"},
+                              placed(3, self.CONTAINER, 1), placed(4, "farhelm-sess-k3x9-dev-2", 2),
+                              placed(5, "someone-elses", 1), {"id": 6, "kind": "podman"}]}
+
+        def gone(*_args, **_kwargs):
+            raise urllib.error.URLError("connection refused")
+
+        run = self.dir / "run"
+        run.mkdir()
+        (run / "helm.json").write_text("{}")
+        record = {"user_session": {"runtime": "/run/user/1234", "dbus": "unix:path=/b"}}
+        self.assertIsNone(gui_agent.record_user_session_objects(run, record, request=answer))
+        self.assertIn("removing only what an earlier stop recorded",
+                      gui_agent.record_user_session_objects(run, record, request=gone))
+        user = record["user_session"]
+        self.assertEqual((user["sessions"], user["containers"]), ([self.SESSION], [self.CONTAINER]))
+        self.assertEqual(json.loads((run / "run.json").read_text()), record)
+
+    def test_stop_removes_exactly_what_was_recorded(self):
+        """What `stop` takes from the shared account is what it recorded from the run's helm before the app quit.
+        Specified: removal runs `podman rm --force --ignore` once per recorded container and stops by exact name every
+        listed unit of a recorded session and no other, with the recorded runtime directory; a unit that will not stop
+        is reported; and with nothing recorded it runs nothing, so an unreachable user manager cannot fail `stop` (and
+        keep its lock) for a run that made nothing. The premise is checked first: the listing holds both the run's units
+        and strangers'."""
+        user = {"runtime": "/run/user/1234", "dbus": "unix:path=/b", "sessions": [self.SESSION],
+                "containers": [self.CONTAINER]}
+        bin_dir = self.dir / "bin"
+        systemctl = write_executable(bin_dir / "systemctl", f"#!{sys.executable}\n{USER_MANAGER_STANDIN}")
+        podman = write_executable(bin_dir / "podman", f"#!{sys.executable}\n{USER_MANAGER_STANDIN}")
+        ours = [f"farhelm-{self.SESSION}-0.scope", f"farhelm-{self.SESSION}-tab-{self.TAB}.scope"]
+        strangers = ["farhelm-5e6f7a8b-0000-4000-8000-000000000002-0.scope",
+                     f"farhelm-env-{self.CONTAINER}-{self.NONCE}.scope"]
+        (bin_dir / "units").write_text("\n".join(ours + strangers) + "\n")
+        listed = subprocess.run([systemctl, "--user", "list-units"], capture_output=True, text=True).stdout
+        self.assertEqual([line.split()[0] for line in listed.splitlines()], ours + strangers, "premise")
+        # The premise listing ran in this process's own environment; only the removal's runtimes are checked.
+        (bin_dir / "runtimes").unlink()
+
+        problems = gui_agent.remove_user_session_objects(user, {"PATH": "/usr/bin:/bin"}, str(podman), str(systemctl))
+        self.assertEqual(problems, [])
+        self.assertEqual([json.loads(line) for line in (bin_dir / "podman.log").read_text().splitlines()],
+                         [["rm", "--force", "--ignore", "--", self.CONTAINER]])
+        self.assertEqual((bin_dir / "stopped").read_text().split(), ours)
+        self.assertEqual((bin_dir / "units").read_text().split(), strangers)
+        self.assertEqual(set((bin_dir / "runtimes").read_text().split()), {"/run/user/1234"})
+
+        (bin_dir / "units").write_text(ours[0] + "\n")
+        (bin_dir / "stuck").write_text(ours[0] + "\n")
+        problems = gui_agent.remove_user_session_objects(user, {"PATH": "/usr/bin:/bin"}, str(podman), str(systemctl))
+        self.assertEqual(problems, [f"the run's units are still on the user manager: {ours[0]}"])
+
+        nothing = {"runtime": "/run/user/1234", "dbus": "unix:path=/b"}
+        missing = str(self.dir / "no-such-systemctl")
+        self.assertEqual(gui_agent.remove_user_session_objects(nothing, {}, missing, missing), [])
 
 
 class SeedTest(unittest.TestCase):
