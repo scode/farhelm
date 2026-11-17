@@ -120,21 +120,19 @@ partly: `launcher::view_tests::the_tabs_switch_fields_and_keep_each_draft`,
 `launcher::draft_tests::each_tab_keeps_its_own_draft_across_switches`; the remembered wrapper prefix on an agent switch,
 shown escaped when it holds an invisible character, in
 `launcher::view_tests::an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`; search moving to the Agent tab in
-`launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`; not yet ported: a folder row
-keeping the typed command ("search on the command tab switches to the agent tab only for an agent choice"; a folder row
-keeping the tab is in the bullet below), and an unparsable wrapper left on the Agent tab not blocking Save as template
-on the Command tab ("a dormant invalid wrapper does not block saving a command template"; its test would sit with Save
-as template's in `templates::save_tests`)
+`launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`.
 
 - New opening on the Agent tab with focus in the search box:
   `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`.
 - "search on the command tab switches to the agent tab only for an agent choice", its `name:` half: naming the session
   keeps the Command tab and its typed command, in
   `launcher::search_view_tests::a_name_row_on_the_command_tab_keeps_the_tab_and_its_command`.
-- "search on the command tab switches to the agent tab only for an agent choice", a folder row: a saved folder taken
-  from search on the Command tab sets the folder and keeps the tab, in
-  `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout` (its draft holds no command, so
-  the command's survival is not asserted).
+- "search on the command tab switches to the agent tab only for an agent choice", a typed path: taking "Use this path"
+  sets the folder and keeps the Command tab and command in
+  `launcher::search_view_tests::host_and_folder_rows_set_the_destination`. A saved folder keeps the Command tab in
+  `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout`.
+- "a dormant invalid wrapper does not block saving a command template":
+  `templates::save_tests::a_dormant_invalid_wrapper_does_not_block_saving_a_command_template`.
 - "the arrow keys move between the launch-kind tabs": Right and Home in
   `launcher::view_tests::the_tabs_switch_fields_and_keep_each_draft`, and the strip as one tab stop in
   `components::tests::tab_strip::the_tab_strip_moves_with_the_arrows_and_enter_chooses_then_launches`.
@@ -406,9 +404,8 @@ button, and "first harness does not escalate passive ${remembered ?? "default"} 
 in `components::tests::transition`; the passive default variant of "first harness does not escalate passive ${remembered
 ?? "default"} permission", and the Undo of "first harness escalation warns after Guarded chosen by ${source}" bringing
 back the deliberate Guarded with no agent, so that choosing the agent again warns again, in
-`launcher::draft_tests::undo_of_the_first_agents_warning_keeps_the_choice_deliberate`; not yet ported: the model
-picker's path (258's second run) drawn, the banner shown after a click on another agent's model in the list; its draft
-half, a cross-agent model pick raising the banner and Undo restoring the draft exactly, is
+`launcher::draft_tests::undo_of_the_first_agents_warning_keeps_the_choice_deliberate`; the model pick's draft half (a
+cross-agent model pick raising the banner and Undo restoring the draft exactly) is
 `launcher::draft_tests::{a_cross_agent_model_pick_can_raise_the_banner, undo_after_a_cross_agent_model_pick_restores_the_draft_exactly}`;
 the drawn band is layout, shown in the `app-launcher-escalation-banner` scene
 
@@ -417,6 +414,8 @@ the drawn band is layout, shown in the `app-launcher-escalation-banner` scene
   to OMP in the shared rule's `farhelm_proto::launcher::tests::switching_a_guarded_agent_to_omp_keeps_guarded`.
 - "permission banner lifetime pauses for hover and focus and survives reduced-motion styling", the outline's lifetime
   under reduced motion: `launcher::escalation_tests::under_reduced_motion_the_outline_lasts_as_long_as_the_banner`.
+- "permission escalation through model picker warns and direct permission choices do not": the banner after a click on
+  Pi's model and Undo afterward in `launcher::escalation_tests::a_cross_agent_model_pick_shows_the_escalation_banner`.
 
 ### `tests/remembered-permissions.spec.ts`
 
@@ -450,10 +449,7 @@ partly: "New sends a named conversation outside the reusable launch and preserve
 retry-key half of "initial prompt launcher follows capabilities and binds literal request retries" is superseded, since
 the GUI keeps no launch request keys (SPEC.md, "Losing the connection to the helm"); each agent's label for the
 conversation field ("named conversation labels and reporting help follow the selected agent") is wording, not separately
-tested, since one table in the launcher's view names it per agent and no behavior depends on the words; not yet ported:
-which agents draw the prompt box and the conversation row, and neither drawn on the Command tab, and which agents show
-the note that Farhelm will not capture a named start's conversation (Cursor, Goose and OpenCode), since the note follows
-whether Farhelm captures that agent's conversation, and so whether Restart can find it later
+tested, since one table in the launcher's view names it per agent and no behavior depends on the words.
 
 - "New sends a named conversation outside the reusable launch and preserves refusal edits": the conversation at the
   create's top level, outside the launch, in `launcher::request_tests::an_agent_create_body_carries_the_draft`, and the
@@ -463,6 +459,9 @@ whether Farhelm captures that agent's conversation, and so whether Restart can f
   cannot take stays out of the body (`launcher::request_tests::a_prompt_the_agent_cannot_take_stays_out_of_the_body`),
   and Enter in the prompt adds a line the footer counts
   (`launcher::view_tests::the_footer_reads_an_agent_launchs_choices`).
+- Both cases' capability and reporting controls in
+  `launcher::view_tests::prompt_and_conversation_rows_follow_the_agents_capabilities`: which agents offer a prompt,
+  which name a conversation and which warn that Restart cannot find a named start. The Command tab draws neither row.
 
 ### `tests/nonblocking-launch.spec.ts`
 

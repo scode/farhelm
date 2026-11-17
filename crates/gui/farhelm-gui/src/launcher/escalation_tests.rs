@@ -181,6 +181,37 @@ fn a_direct_permission_choice_raises_no_banner(cx: &mut TestAppContext) {
     assert_eq!(banner(cx), None);
 }
 
+/// Taking another agent's model from Show all also changes the agent. The banner must explain an automatic
+/// permission escalation from this path just as it does when the user picks the agent itself.
+#[gpui::test]
+fn a_cross_agent_model_pick_shows_the_escalation_banner(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    super::view_tests::answer_catalog(
+        &mut helm,
+        cx,
+        Some(serde_json::json!([{ "id": "pi-warning-model", "harness": "pi", "efforts": [] }])),
+    );
+    search(cx, "harness:claude");
+    search(cx, "perms:guarded");
+    let before = draft(cx);
+    assert_eq!(before.agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(before.agent.permissions, Some(LaunchPermission::Guarded));
+    assert!(before.agent.permissions_explicit);
+    assert_eq!(banner(cx), None);
+
+    test_support::click(cx, "launcher-model-row");
+    test_support::click(cx, "launcher-model-show-all");
+    test_support::click(cx, "launcher-model-option-Pi-pi-warning-model");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("pi-warning-model"));
+    assert_eq!(
+        banner(cx).as_deref(),
+        Some("Permission changed: Guarded → YOLO, because Pi does not support Guarded.")
+    );
+    test_support::click(cx, "launcher-escalation-undo");
+    assert_eq!(draft(cx), before);
+    assert_eq!(banner(cx), None);
+}
+
 /// Reset choices empties the search box and closes its results, as the old button did, besides resetting the agent
 /// choices. Why: Reset starts the agent choices over, and a half-typed word in the box belongs to the choices it
 /// replaces.
