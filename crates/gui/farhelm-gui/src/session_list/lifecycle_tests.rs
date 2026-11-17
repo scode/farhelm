@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::DeleteGuard;
+use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AppContext as _, Modifiers, Pixels, ScrollDelta, ScrollEvent, TestAppContext,
     VisualTestContext, point, px,
@@ -1111,12 +1113,12 @@ fn the_question_names_the_sources_host(cx: &mut TestAppContext) {
 }
 
 /// SPEC.md: the GUI "retries with the override only when the user confirms", and the retry is the same Replace (the
-/// source and the Delete guard the user's Replace question froze, here the old app's "keeps its confirmed nothing-alive
-/// answer" case). Exactly once: a second Replace would be refused for a source the first already removed, after
-/// creating a second replacement. Its success follows Replace's own rule. Specified: on an ended a without tabs, the
-/// one-off answer sends one Replace of a, the body pinned with `confirm_yolo` set and `only_if_nothing_alive` as its
-/// question froze it; the question goes; the helm's replacement n opens and its terminal takes focus; nothing else is
-/// sent.
+/// source and the Delete guard the user's Replace question froze; that the frozen guard survives the source coming back
+/// to life is [`nothing_alive_guard_survives`]'s). Exactly once: a second Replace would be refused for a source the
+/// first already removed, after creating a second replacement. Its success follows Replace's own rule. Specified: on an
+/// ended a without tabs, the one-off answer sends one Replace of a, the body pinned with `confirm_yolo` set and
+/// `only_if_nothing_alive` as its question froze it; the question goes; the helm's replacement n opens and its terminal
+/// takes focus; nothing else is sent.
 #[gpui::test]
 fn the_one_off_answer_replaces_again_with_consent_exactly_once(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_open(cx, ended("a"));
@@ -1175,6 +1177,179 @@ fn the_permanent_answer_writes_the_host_setting_then_replaces_with_consent(
     fake.reply(write.id, 200, Some(json!({})));
     test_support::settle(cx);
     assert_eq!(requests(pending(&mut fake)), [consented("a", false, false)]);
+}
+
+/// Where a test asks a plain Replace, which is where its YOLO question shows and where its refusal is read.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ReplaceFrom {
+    /// The Replace of the source's row menu, with another session open: the old sidebar case never opened the source.
+    Row,
+    /// The Replace of the open session's header.
+    Header,
+}
+
+/// Which of the YOLO question's two answers that send the Replace again a test gives.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Consent {
+    /// The one-off answer (`prompt-confirm`), which sends the Replace again at once.
+    Once,
+    /// The permanent answer (`prompt-alternative-0`), which first writes the host's "Start YOLO sessions without
+    /// asking" and sends the Replace again only once that write succeeds.
+    StopAsking,
+}
+
+/// The Delete guard a Replace asked of `key`'s row now would send ([`super::delete::guard`]), read from the store, or
+/// `None` while the store lists no such row.
+fn guard_now(cx: &mut VisualTestContext, key: &str) -> Option<DeleteGuard> {
+    cx.update(|_, cx| {
+        session::current_store(cx)?
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(key)
+            .map(super::delete::guard)
+    })
+}
+
+/// The old `yolo-guard.spec.ts` cases "a header replace keeps its confirmed nothing-alive answer" and "a sidebar
+/// replace keeps its confirmed nothing-alive answer" (reference commit `24bc0580`), each answered "when confirmed once"
+/// or "when told not to ask again": the body their thin tests share, here for the row's and in
+/// `session_pane::header_tests` for the header's.
+///
+/// The Replace question that said nothing was alive is what the user agreed to, so the Replace sent again after the YOLO
+/// question must carry that question's guard, and the supervisor then refuses to remove a source that came back to life
+/// meanwhile. The old app once recomputed the guard when the YOLO answer arrived, so a session restarted in the meantime
+/// lost the precondition, and its new agent was killed after a question that said nothing was running.
+///
+/// Specified, on an ended a without tabs beside a running b (b open for a Replace from a's row, a open for one from the
+/// header): the Replace question says nothing is alive; the helm refuses the confirmed Replace for YOLO and the YOLO
+/// question is drawn; the helm then pushes a running, so that its row now gives no guard, and the question is still
+/// drawn; `consent` (the permanent answer once its host write succeeds) sends one Replace of a with `confirm_yolo` and
+/// `only_if_nothing_alive` set; the helm's refusal saying both sessions still exist shows as "Replace: …" where the
+/// Replace was asked (a's row line, or the header's); and the refusal moves nothing: the open session stays the same
+/// and a is still listed.
+pub(crate) fn nothing_alive_guard_survives(
+    cx: &mut TestAppContext,
+    from: ReplaceFrom,
+    consent: Consent,
+) {
+    const NOTHING_ALIVE: &str = "Replacing discards the conversation; a fresh session with the same settings takes its \
+         place:";
+    // The first session of the snapshot is the open one, and the refusal shows on the line of where it was asked.
+    let (rows, order, open, line) = match from {
+        ReplaceFrom::Row => (
+            [(session("b"), 0), (ended("a"), 0)],
+            ["b", "a"],
+            "b",
+            "session-outcome-a",
+        ),
+        ReplaceFrom::Header => (
+            [(ended("a"), 0), (session("b"), 0)],
+            ["a", "b"],
+            "a",
+            "session-header-outcome-a",
+        ),
+    };
+    let (mut fake, cx) = open_main(cx, snapshot(&rows, false));
+    pending(&mut fake);
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some(open),
+        "the premise: {open} is open"
+    );
+
+    match from {
+        ReplaceFrom::Row => choose(cx, "session-menu-a", "session-menu-replace"),
+        ReplaceFrom::Header => test_support::click(cx, "session-header-replace"),
+    }
+    assert!(
+        texts(cx).iter().any(|text| text == NOTHING_ALIVE),
+        "the premise: the question says nothing is alive"
+    );
+    test_support::click(cx, "prompt-confirm");
+    let sent = pending(&mut fake);
+    let [(id, _, _)] = sent[..] else {
+        panic!("one Replace was sent, not {}", sent.len());
+    };
+    refuse_for_yolo(&mut fake, cx, id);
+    // Only the YOLO question has a permanent answer; the Replace question has closed.
+    assert!(
+        drawn(cx, "prompt-alternative-0"),
+        "the premise: the YOLO question is drawn"
+    );
+
+    // a comes back to life from outside the window while the question is open, as a Restart from the command line
+    // would bring it back. A guard read again at the answer would now send no precondition.
+    push(&mut fake, &order, &[(session("a"), 0)], cx);
+    assert_eq!(
+        guard_now(cx, "a"),
+        Some(DeleteGuard::Unconditional),
+        "the premise: a's row now shows something alive"
+    );
+    assert!(
+        drawn(cx, "prompt-alternative-0"),
+        "the premise: the YOLO question is still drawn"
+    );
+
+    match consent {
+        Consent::Once => test_support::click(cx, "prompt-confirm"),
+        Consent::StopAsking => {
+            test_support::click(cx, "prompt-alternative-0");
+            let sent = fake.commands();
+            let [write] = &sent[..] else {
+                panic!("only the host write is out, not {} commands", sent.len());
+            };
+            fake.reply(write.id, 200, Some(json!({})));
+            test_support::settle(cx);
+        }
+    }
+    let sent = pending(&mut fake);
+    let [(again, _, _)] = sent[..] else {
+        panic!("one Replace was sent again, not {}", sent.len());
+    };
+    assert_eq!(
+        requests(sent),
+        [consented("a", true, false)],
+        "the question's guard, with consent"
+    );
+
+    // The helm's words when the supervisor refuses the source's removal after the replacement was made
+    // (`farhelm-helm`'s `sessions.rs`); the reason between the colon and "both sessions still exist" stands in for the
+    // supervisor's own.
+    let words = "created replacement session a2 but could not remove the original a: the session is alive; both \
+                 sessions still exist";
+    fake.reply(again, 500, Some(json!(words)));
+    test_support::settle(cx);
+    assert_eq!(label_of(cx, line), Some(format!("Replace: {words}")));
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some(open),
+        "the selection stays where it was"
+    );
+    assert!(
+        frame(cx)
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some("session-row-a")),
+        "a's row is still drawn"
+    );
+}
+
+/// [`nothing_alive_guard_survives`] for the row's Replace answered once: the old "a sidebar replace keeps its confirmed
+/// nothing-alive answer when confirmed once". See the driver for why and what is specified.
+#[gpui::test]
+fn a_sidebar_replace_keeps_its_confirmed_nothing_alive_answer_when_confirmed_once(
+    cx: &mut TestAppContext,
+) {
+    nothing_alive_guard_survives(cx, ReplaceFrom::Row, Consent::Once);
+}
+
+/// [`nothing_alive_guard_survives`] for the row's Replace answered with "Start, and don't ask again on this host", which
+/// sends the Replace again from its host write's reply and must carry the same guard: the old "a sidebar replace keeps
+/// its confirmed nothing-alive answer when told not to ask again".
+#[gpui::test]
+fn a_sidebar_replace_keeps_its_confirmed_nothing_alive_answer_when_told_not_to_ask_again(
+    cx: &mut TestAppContext,
+) {
+    nothing_alive_guard_survives(cx, ReplaceFrom::Row, Consent::StopAsking);
 }
 
 /// SPEC.md, "Lifecycle operations": "an open lifecycle confirmation or a pending request refuses another lifecycle

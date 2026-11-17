@@ -1,6 +1,6 @@
 //! Tests of the interrupted card (`card.rs`): when the pane shows it in place of the open session's terminals and mounts
-//! none, how it gives way to a new terminal once the session recovers, its one-click Restart and inline Replace, the
-//! lines it takes over from the header, and the card as where focus rests.
+//! none, how it gives way to a new terminal once the session recovers, its one-click Restart and inline Replace, a
+//! legacy session's Replace with, the lines it takes over from the header, and the card as where focus rests.
 //!
 //! Everything runs in the real main view over the helm client's fake, whose connection hands out fake terminal streams
 //! and records them (`test_support::open_main`), and reads what the window sent from the fake and what it drew from
@@ -18,7 +18,7 @@ use gpui::TestAppContext;
 use serde_json::{Value, json};
 
 use crate::actions::{DELETE_SESSION_CHORD, FocusNextControl};
-use crate::launcher::draft::{LaunchDraft, Tab};
+use crate::launcher::draft::{LaunchDraft, Mode, Tab};
 use crate::launcher::launch_tests::{HostChange, creates_answering, start_host_change};
 use crate::launcher::view_tests::fixture_hosts;
 use crate::session_list::lifecycle_tests::{consented, drawn_inside, refuse_for_yolo, replace};
@@ -780,6 +780,30 @@ fn a_legacy_sessions_card_offers_replace_with_in_place_of_replace(cx: &mut TestA
     let main = open_main(cx, snapshot(&[(interrupted("a").launch(legacy), 0)], false));
     assert!(drawn(main.cx, "session-card-replace-with"));
     assert!(!drawn(main.cx, "session-card-replace"));
+}
+
+/// The rest of the same old case, "prefilled with its command": the card's words promise that "Replace with opens the
+/// launcher with its command to start it over", and a legacy launch keeps nothing else to start from, so the launcher
+/// must open on that command, for this session. Specified: on an interrupted legacy session a whose stored command is
+/// `claude`, a click on the card's Replace with opens the launcher in Replace with of a, on the Command tab, its Agent
+/// command field showing `claude`.
+#[gpui::test]
+fn the_cards_replace_with_opens_the_launcher_on_the_sessions_command(cx: &mut TestAppContext) {
+    let legacy = json!({"kind": "legacy", "invocation": "claude", "agent_kind": "claude", "resume_template": null});
+    let mut main = open_main(cx, snapshot(&[(interrupted("a").launch(legacy), 0)], false));
+    lifecycle(&mut main.helm);
+    assert!(!launcher_drawn(main.cx), "the premise: no launcher is open");
+    test_support::click(main.cx, "session-card-replace-with");
+    assert!(launcher_drawn(main.cx), "Replace with opened the launcher");
+    let draft = crate::launcher::view_tests::draft(main.cx);
+    assert_eq!(draft.mode, Mode::ReplaceWith { source: "a".into() });
+    assert_eq!(draft.tab, Tab::Command);
+    let command: Vec<String> =
+        crate::session_list::host_rail::tests::texts_within(&frame(main.cx), "launcher-command")
+            .into_iter()
+            .map(|text| text.text.to_string())
+            .collect();
+    assert_eq!(command, ["claude"], "the Agent command field");
 }
 
 /// SPEC.md: "an open lifecycle confirmation or a pending request refuses another lifecycle action". The card's inline
