@@ -239,40 +239,38 @@ create bound their host wait at 20 seconds (`HOST_REPLY_BOUND` in the helm's ses
 host timed out while the work continues; the GUI's watchdog therefore waits longer than that. The launcher's host reads
 (Browse and its folder check, the checkout preview, the repository search) stop waiting at the same bound and drop the
 read, since nothing is left to finish; the host's own scan may still run as long as SPEC.md's "Slow hosts" allows, and a
-repository search that times out keeps its recent repositories. The trash routes are bounded the same way (decided by
-the migration's orchestrator on 2026-11-14, in place of an accepted form for trash deletion): a listing drops its read,
-and a delete replies that the host timed out while its cleanup runs on, a late answer that accepted a checkout advancing
-the host's Trash epoch so the Trash button and dialog read the host again, while a listing still queued behind such a
-cleanup when the bound passes says that, not that the host timed out; a supervisor of the helm's protocol moves the
-selected folders aside and answers without waiting for their removal, so only a hung host meets the bound. Host
-management's routes that can wait as long answer within the same bound, each saying where its late outcome shows: a host
-probe (a supervisor that answers late is still registered, so it appears in the pushed hosts list; otherwise the user
-probes again), an Update's plan (nothing changed, so the user asks again), an uninstall's plan (nothing changed, so the
-user chooses uninstall again), and a destination or alias change, which waits for any setup or update running on that
-host (SPEC.md, "Waiting between operations on one host") and lands when the run ends; those two first refuse at once
-what the registry already refuses, so the reply that they are still waiting is not given for a change that cannot land
-as things stand. Settings → Containers' routes and host removal answer within the same bound (decided by the migration's
-orchestrator on 2026-11-15, under its rule that every host-waiting route the GUI sends is bounded): the leftover listing
-asks the container hosts concurrently, so the bound applies to the slowest of them, and drops its read at the bound; a
-leftover's Delete replies that its cleanup carries on, and the list's next read shows whether the container is gone; and
-removing a host whose removal deletes its machine replies the same way, the host leaving the hosts list once its removal
-finishes, or staying listed with the reason only in the helm's log if it fails. An environment host's Suspend and Resume
+repository search that times out keeps its recent repositories. The trash routes are bounded the same way (in place of
+an accepted form for trash deletion): a listing drops its read, and a delete replies that the host timed out while its
+cleanup runs on, a late answer that accepted a checkout advancing the host's Trash epoch so the Trash button and dialog
+read the host again, while a listing still queued behind such a cleanup when the bound passes says that, not that the
+host timed out; a supervisor of the helm's protocol moves the selected folders aside and answers without waiting for
+their removal, so only a hung host meets the bound. Host management's routes that can wait as long answer within the
+same bound, each saying where its late outcome shows: a host probe (a supervisor that answers late is still registered,
+so it appears in the pushed hosts list; otherwise the user probes again), an Update's plan (nothing changed, so the user
+asks again), an uninstall's plan (nothing changed, so the user chooses uninstall again), and a destination or alias
+change, which waits for any setup or update running on that host (SPEC.md, "Waiting between operations on one host") and
+lands when the run ends; those two first refuse at once what the registry already refuses, so the reply that they are
+still waiting is not given for a change that cannot land as things stand. Settings → Containers' routes and host removal
+answer within the same bound because every host-waiting route the GUI sends is bounded: the leftover listing asks the
+container hosts concurrently, so the bound applies to the slowest of them, and drops its read at the bound; a leftover's
+Delete replies that its cleanup carries on, and the list's next read shows whether the container is gone; and removing a
+host whose removal deletes its machine replies the same way, the host leaving the hosts list once its removal finishes,
+or staying listed with the reason only in the helm's log if it fails. An environment host's Suspend and Resume
 (`POST /api/hosts/{id}/suspend` and `/resume`) and a session's Stop and suspend
-(`POST /api/sessions/{id}/stop-and-suspend`) answer within the same bound, counted from their handler's start (decided
-by the migration's orchestrator on 2026-11-15, in place of the accepted form, because their outcome already lands in the
-pushed host state). A Tensorlake Suspend may wait 60 seconds for its sandbox and a Resume 120, and a container's change
-waits on its container host's commands, so a change still running at the bound replies 504 that it carries on. The
-change keeps the host's provisioning lock until it ends, and the host's state in the hosts and session lists then shows
-how it ended, a late failure reaching only the helm's log. Tensorlake's refusals before anything changes (a busy host, a
-host that is not an environment, no account key) are local and answer as before; a container host checks its container
-over SSH first, inside the bound. Stop and suspend is one command with one reply, so one bound covers its Stop and its
-Suspend together; its reply at the bound says only that the environment is suspended once the agent has stopped cleanly,
-which holds whichever half is still running, and a Stop that fails or leaves cleanup undone after the reply leaves the
-environment running. A session's environment Delete (`DELETE /api/sessions/{id}?delete_environment_session=true`), the
-warned whole-environment Delete (`?delete_sandbox=true`) and the Retry of a failed destruction
-(`POST /api/hosts/{id}/retry-delete`) answer within the same bound, counted from their handler's start (decided by the
-GPUI migration's orchestrator on 2026-11-16, under the maintainer's preference for bounded replies, in place of the
-accepted form). The first can wait 60 seconds for its host's turn among environment Deletes and 240 for the
+(`POST /api/sessions/{id}/stop-and-suspend`) answer within the same bound, counted from their handler's start (in place
+of the accepted form, because their outcome already lands in the pushed host state). A Tensorlake Suspend may wait 60
+seconds for its sandbox and a Resume 120, and a container's change waits on its container host's commands, so a change
+still running at the bound replies 504 that it carries on. The change keeps the host's provisioning lock until it ends,
+and the host's state in the hosts and session lists then shows how it ended, a late failure reaching only the helm's
+log. Tensorlake's refusals before anything changes (a busy host, a host that is not an environment, no account key) are
+local and answer as before; a container host checks its container over SSH first, inside the bound. Stop and suspend is
+one command with one reply, so one bound covers its Stop and its Suspend together; its reply at the bound says only that
+the environment is suspended once the agent has stopped cleanly, which holds whichever half is still running, and a Stop
+that fails or leaves cleanup undone after the reply leaves the environment running. A session's environment Delete
+(`DELETE /api/sessions/{id}?delete_environment_session=true`), the warned whole-environment Delete
+(`?delete_sandbox=true`) and the Retry of a failed destruction (`POST /api/hosts/{id}/retry-delete`) answer within the
+same bound, counted from their handler's start (following the maintainer's preference for bounded replies, in place of
+the accepted form). The first can wait 60 seconds for its host's turn among environment Deletes and 240 for the
 environment's supervisor, and the other two make host removal's provider calls, so each answers 504 at the bound and
 carries on. Refusals before anything is asked (not an environment session, a guarded or two-flag request, a busy
 provisioning lock once the Delete has its turn, a Retry for a host whose deletion has not failed) and a "nothing
@@ -281,31 +279,28 @@ Past the bound, a late `Deleted` removes the session from the pushed list withou
 the seal record (the host `Deleting`, then gone or failed with Retry), as does a late Retry, and a late "nothing
 decided" or refusal leaves the session listed, the next Delete taking the warned lane once the host shows as not
 connected. A late failure of the whole-environment Delete reaches only the helm's log, as host removal's does. A
-credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts (decided by the
-migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still being delivered to
-are reported as not delivered (see "Named credential catalog"). The Tensorlake settings routes, which wait on
-Tensorlake's API rather than on a host, answer within the same bound, counted from their handler's start (decided by the
-migration's orchestrator on 2026-11-15): the API key's Test and the list of Sandboxes not on this helm stop listing and
-answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover sandbox's
-Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then shows (see
-"Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same bound, counted
-from its handler's start (decided by the GPUI migration's orchestrator on 2026-11-15, under its rule that every
-host-waiting route the GUI sends is bounded): `ssh-keygen` may run for up to its own 30 seconds, so a generation still
-running at the bound replies 504 that the creation carries on, and the settings read reports the key once it is written;
-a Create sent again meanwhile waits for that generation and answers its key. A recipe's Delete
-(`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from its handler's start (decided by
-the GPUI migration's orchestrator on 2026-11-15): an unknown recipe, one a host uses and one already being deleted are
-refused at once from local state, before anything is cancelled; once its cleanup has started, a deletion still running
-at the bound replies that it carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup
-fails, stays listed with the reason only in the helm's log until a second Delete runs the cleanup again and answers it.
-While the deletion runs, the recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then
-lost with the row. An Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it
-does not wait (decided by the migration's orchestrator on 2026-11-17): it takes the host's provisioning lock without
-waiting and is refused at once while another operation (such as a Tensorlake host's Suspend, Resume or removal, or a
-destination or alias change) holds it, saying to choose Update again once that finishes, as a sandbox's setup rerun is
-(see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so a failed earlier run and its Re-run
-stay as they were, and carries no busy marker, since its plan is already spent. The automatic update still waits for the
-lock.
+credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts; being already
+saved, it is not refused, and the hosts still being delivered to are reported as not delivered (see "Named credential
+catalog"). The Tensorlake settings routes, which wait on Tensorlake's API rather than on a host, answer within the same
+bound, counted from their handler's start: the API key's Test and the list of Sandboxes not on this helm stop listing
+and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover
+sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then
+shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
+bound, counted from its handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run
+for up to its own 30 seconds, so a generation still running at the bound replies 504 that the creation carries on, and
+the settings read reports the key once it is written; a Create sent again meanwhile waits for that generation and
+answers its key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from
+its handler's start: an unknown recipe, one a host uses and one already being deleted are refused at once from local
+state, before anything is cancelled; once its cleanup has started, a deletion still running at the bound replies that it
+carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup fails, stays listed with the
+reason only in the helm's log until a second Delete runs the cleanup again and answers it. While the deletion runs, the
+recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then lost with the row. An
+Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it does not wait: it takes
+the host's provisioning lock without waiting and is refused at once while another operation (such as a Tensorlake host's
+Suspend, Resume or removal, or a destination or alias change) holds it, saying to choose Update again once that
+finishes, as a sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so
+a failed earlier run and its Re-run stay as they were, and carries no busy marker, since its plan is already spent. The
+automatic update still waits for the lock.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -376,22 +371,21 @@ id, hosts by registry id; preferences and the announcement queue travel as one e
 recipes are `GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe
 and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` beside the channel's. The pushed
 preferences supersede the old client's reread of shared preferences before an automatic pick: the GUI picks from the
-preferences as last pushed, since the helm pushes them together with the session changes that prompt a pick (decided by
-the migration's orchestrator on 2026-11-15). The snapshot sent when a channel opens never waits on a remote host. Every
-other read (directory browse, repository lists, the trash list, launch history) is an ordinary command, a GET or, for
-directory browse and repository lists, a POST, whose reply body is the result. File stat is not: it is an HTTP request
-of the helm client's transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot
-be cancelled on its own. A hover check sent on the channel would keep running after the pointer left the link, and count
-against the channel's watchdog meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is
-cancelled by dropping it. Data the old GUI polled stays a query that the GUI issues again; it does not become a
-replicated collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman
-check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
-creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
-they move (decided by the migration's orchestrator on 2026-11-15). A pushed read must start nothing, because it runs
-after every bump, so none schedules a Podman check: the GUI asks for each check with a command of its own. Neither
-recipe collection follows the clock: a prepared artifact that passes its freshness window reads stale at the next
-re-read, not when it passes. Host progress also lists the failed environment launches kept after their host was removed
-(see "The UI channel").
+preferences as last pushed, since the helm pushes them together with the session changes that prompt a pick. The
+snapshot sent when a channel opens never waits on a remote host. Every other read (directory browse, repository lists,
+the trash list, launch history) is an ordinary command, a GET or, for directory browse and repository lists, a POST,
+whose reply body is the result. File stat is not: it is an HTTP request of the helm client's transfers,
+`POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled on its own. A hover
+check sent on the channel would keep running after the pointer left the link, and count against the channel's watchdog
+meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is cancelled by dropping it. Data the
+old GUI polled stays a query that the GUI issues again; it does not become a replicated collection. There are two
+exceptions, both for work whose progress Settings follows while it runs: the Podman check's readiness, which rides each
+local and ssh host's entry so its start and end reach the GUI (see "Podman places, creation and images"), and the recipe
+catalog and recipe places, so a recipe build's steps reach Settings → Recipes as they move. A pushed read must start
+nothing, because it runs after every bump, so none schedules a Podman check: the GUI asks for each check with a command
+of its own. Neither recipe collection follows the clock: a prepared artifact that passes its freshness window reads
+stale at the next re-read, not when it passes. Host progress also lists the failed environment launches kept after their
+host was removed (see "The UI channel").
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -489,13 +483,12 @@ upload the reset cut off, saying whether it was sent, which the session's next a
 dropping them with the UI session would lose them. They go when that agent terminal takes them, or once the current UI
 session's store proves their session gone (a complete session listing without it, checked by every terminal's
 attachments whenever the store changes, a new snapshot included), so a deleted session's lines do not stay for the life
-of the app (decided on 2026-11-15 by the area porting attachments, with the foundations owner's agreement). The window
-itself, its size included, is not part of the UI session and is untouched. The settings the old app kept per device
-(appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new app, so
-they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no longer
-calls the sidebar width, appearance, terminal text size or status sounds per device; it still calls the host rail per
-device until the change that moves it. The store fed by the channel holds only helm state. Half-typed drafts do not
-survive, and neither do open dialogs and menus: going inert closes every layer through the layer manager
+of the app. The window itself, its size included, is not part of the UI session and is untouched. The settings the old
+app kept per device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in
+the new app, so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13).
+SPEC.md no longer calls the sidebar width, appearance, terminal text size or status sounds per device; it still calls
+the host rail per device until the change that moves it. The store fed by the channel holds only helm state. Half-typed
+drafts do not survive, and neither do open dialogs and menus: going inert closes every layer through the layer manager
 (`layers::close_all`). Menus would close anyway with the ground they are anchored to, but a dialog closes only when its
 opener or its subject says so, and one left open would keep its veil over the inert window, taking the clicks and Tab
 presses meant for Take back or Retry. Work the helm accepted continues independently of the reset.
@@ -524,19 +517,18 @@ back.
 Enforcing the seat is a small check when a channel is accepted. If it ever needs more than that, enforcement is deferred
 (the maintainer accepted that) while the code keeps assuming a single UI and adds nothing to cope with several.
 
-The maintainer and the migration's orchestrator decided on 2026-11-15 that the app is single-UI. So every terminal
-attach is the ordinary one, which takes the terminal from whoever holds it, and the helm serves no non-displacing
-terminal route; the supervisor keeps its non-displacing attach only for older helms. Code must not add handling for
-several UIs, or for several viewers of one session through one helm: the window holding the seat is the only UI and the
-only viewer (SPEC.md, "One GUI at a time"), and a displaced window keeps no terminal screen. The one way a terminal can
-still be taken from the window holding the seat is a race: a window that was just displaced can have a terminal
-reconnect land before its Displaced notice. The migration's orchestrator decided on 2026-11-15 that the window holding
-the seat then reattaches through the same path as for a replaced attachment, after the same reconnect wait, with no
-state, flag or branch of its own for the case. The displaced window's terminal is then taken over in turn and would
-reattach the same way a wait later, until its Displaced notice arrives and tears its terminals down. The supervisor's
-lease sweep stays all the same: it serves several helm connections (older helms among them) and lets a view's agent
-terminal and tabs share one lease, and when a window that takes the seat opens a session whose terminals the displaced
-window has not closed yet, it is what detaches them; none of that is support for several UIs.
+The maintainer decided on 2026-11-15 that the app is single-UI. So every terminal attach is the ordinary one, which
+takes the terminal from whoever holds it, and the helm serves no non-displacing terminal route; the supervisor keeps its
+non-displacing attach only for older helms. Code must not add handling for several UIs, or for several viewers of one
+session through one helm: the window holding the seat is the only UI and the only viewer (SPEC.md, "One GUI at a time"),
+and a displaced window keeps no terminal screen. The one way a terminal can still be taken from the window holding the
+seat is a race: a window that was just displaced can have a terminal reconnect land before its Displaced notice. The
+window holding the seat then reattaches through the same path as for a replaced attachment, after the same reconnect
+wait, with no state, flag or branch of its own for the case. The displaced window's terminal is then taken over in turn
+and would reattach the same way a wait later, until its Displaced notice arrives and tears its terminals down. The
+supervisor's lease sweep stays all the same: it serves several helm connections (older helms among them) and lets a
+view's agent terminal and tabs share one lease, and when a window that takes the seat opens a session whose terminals
+the displaced window has not closed yet, it is what detaches them; none of that is support for several UIs.
 
 Whether a window is open, for agent approvals, is the live seat, released on disconnect and on takeover. It is not a
 count of feed subscribers: the helm's own internal subscriptions to the feed never count as windows.
@@ -551,23 +543,20 @@ each can fail independently of the helm. File uploads and downloads use plain HT
 own visible outcome, and the user retries it. Neither touches the command path, so a large upload never delays a click.
 
 A terminal stream's reconnects climb a ladder of their own, the old app's: 0.5, 1, 2, 4, 8 and 15 s, then a probe every
-30 s forever (the terminal area asked for it and the migration's orchestrator approved it on 2026-11-15; the UI channel
-keeps its 1 to 8 s doubling). That is SPEC.md's bounded retries, then periodic re-probing. As on the UI channel, only a
-link that answered a heartbeat reconnects at once, and an attachment starts the ladder over. The stream reports each
-wait and each attempt to the terminal's card as it goes: the attempt number, the six retries it counts against, the
-phase (retrying or probing) and the next attempt's delay. A 5xx answer to the attach's upgrade is retried on the ladder,
-because a helm restarting usually gives one for a moment (the orchestrator decided this on 2026-11-15); any other
-refusal waits for the user. Every attach is the ordinary one under the view's lease, the first and every reconnect
-alike, because the app is single-UI ("The seat: one UI per helm"). `crates/farhelm-helm-client/src/terminal.rs` has the
-rules.
+30 s forever (the UI channel keeps its 1 to 8 s doubling). That is SPEC.md's bounded retries, then periodic re-probing.
+As on the UI channel, only a link that answered a heartbeat reconnects at once, and an attachment starts the ladder
+over. The stream reports each wait and each attempt to the terminal's card as it goes: the attempt number, the six
+retries it counts against, the phase (retrying or probing) and the next attempt's delay. A 5xx answer to the attach's
+upgrade is retried on the ladder, because a helm restarting usually gives one for a moment; any other refusal waits for
+the user. Every attach is the ordinary one under the view's lease, the first and every reconnect alike, because the app
+is single-UI ("The seat: one UI per helm"). `crates/farhelm-helm-client/src/terminal.rs` has the rules.
 
 A protocol fault, a message the terminal's grid model refuses, is not a lost connection, and the stream never sees it:
 the terminal closes the stream itself, keeps its last screen under the reconnect card and opens a fresh one, which
 replays from nothing (`crates/gui/farhelm-gui/src/terminal/attached.rs`). It waits the same six rungs between restarts,
 but the seventh fault in a row stops on the red "Terminal stream error" band with Reconnect instead of probing every 30
 s, as the old app did: a peer that breaks the format will not be fixed by a full replay every 30 s, which would also
-spend idle CPU for nothing (decided by the migration's orchestrator on 2026-11-16). A restart that stays live for 15 s
-has its count forgotten.
+spend idle CPU for nothing. A restart that stays live for 15 s has its count forgotten.
 
 ### The store, and how views redraw
 
@@ -584,23 +573,23 @@ The sessions collection can hold one entry its list does not show: the open sess
 looks a session up by key finds it, so the open session's pane reads the store like any other view (the collection's
 metadata names it, as `selected_outside_query`).
 
-A session terminal is the one deliberate exception to store-fed, wrapper-cached views (the migration's orchestrator
-decided this on 2026-11-13): its grid is bulk data streamed for one attachment, not shared state, and its inputs are the
-whole grid, which the wrapper's comparison of computed inputs cannot express. The terminal view
-(`crates/gui/farhelm-gui/src/terminal.rs`) owns its grid model, is never cached, and notifies itself through the methods
-that change what it shows; render-count tests pin that shown output redraws it and output it does not show does not.
+A session terminal is the one deliberate exception to store-fed, wrapper-cached views: its grid is bulk data streamed
+for one attachment, not shared state, and its inputs are the whole grid, which the wrapper's comparison of computed
+inputs cannot express. The terminal view (`crates/gui/farhelm-gui/src/terminal.rs`) owns its grid model, is never
+cached, and notifies itself through the methods that change what it shows; render-count tests pin that shown output
+redraws it and output it does not show does not.
 
-The sidebar's width is the first of two values a view shows ahead of the store (decided by the migration's orchestrator
-on 2026-11-14; `crates/gui/farhelm-gui/src/sidebar.rs`). It covers only the width the user is moving, and only until its
-write's reply: during a drag, and from each divider write until the helm replies to it, the sidebar shows the width the
-user set rather than the stored one, because falling back to the stored width for the round trip would snap the sidebar
-back and resize the terminal twice, and a second arrow press would step from the stale width. Only the latest write's
-reply ends it, a refused write falls back to the stored width, and a reset forgets it. The terminal text size is the
-second such value, held the same way and for the same reasons (decided by the migration's orchestrator on 2026-11-14;
-`crates/gui/farhelm-gui/src/terminal/text_size.rs`): a step, from a button or a held shortcut, is shown at once and held
-until the helm replies to the latest `terminal_text_size` write, because falling back for the round trip would refit
-every terminal twice per step and a held chord would step from a stale size. The two holds are separate code on purpose
-for now: one shared mechanism waits until a third such value needs it. No other view keeps such a copy.
+The sidebar's width is the first of two values a view shows ahead of the store
+(`crates/gui/farhelm-gui/src/sidebar.rs`). It covers only the width the user is moving, and only until its write's
+reply: during a drag, and from each divider write until the helm replies to it, the sidebar shows the width the user set
+rather than the stored one, because falling back to the stored width for the round trip would snap the sidebar back and
+resize the terminal twice, and a second arrow press would step from the stale width. Only the latest write's reply ends
+it, a refused write falls back to the stored width, and a reset forgets it. The terminal text size is the second such
+value, held the same way and for the same reasons (`crates/gui/farhelm-gui/src/terminal/text_size.rs`): a step, from a
+button or a held shortcut, is shown at once and held until the helm replies to the latest `terminal_text_size` write,
+because falling back for the round trip would refit every terminal twice per step and a held chord would step from a
+stale size. The two holds are separate code on purpose for now: one shared mechanism waits until a third such value
+needs it. No other view keeps such a copy.
 
 The session list builds only the rows in view and a few beyond its edges (GPUI's variable-height `list`), because an
 uncached view re-renders on every window redraw and the running pulse and the terminal's cursor blink redraw the window
@@ -633,7 +622,7 @@ once the sidebar makes it one, while it is disabled during a launch or a host ch
 So the coordinator gives such a home no focus, leaves focus on the window's root (a dialog that returns focus home
 included), and after every frame sends a window resting on its root home once that frame draws it. The per-step focus
 invariant also fails a test whose focus rests on anything the frame does not draw. Desktop-integration found the dead
-keys with New as home, and the orchestrator approved this rule on 2026-11-15.
+keys with New as home.
 
 GPUI also focuses any element that tracks a focus handle when it is pressed, with any mouse button, so tracking focus
 goes through the coordinator too (`focus::track`), which applies its own press rule in place of GPUI's to a press of
@@ -681,12 +670,11 @@ in the window was a key rather than a mouse button (`focus::last_input_was_keybo
 of any mouse button clears it; pointer movement, the wheel and a modifier pressed alone leave it, as the old ring stayed
 through pointer movement. GPUI's own `last_input_was_keyboard` does not decide this, because GPUI clears it on any
 pointer movement, which took the ring from a keyboard user who nudged the mouse while the help their Tab had shown
-stayed up; GPUI's own uses of it (hover styles held back while the keyboard is in use) are unchanged. The migration's
-orchestrator decided this on 2026-11-16. Clippy bans GPUI's `Window::last_input_was_keyboard` in the GUI crates, so
-their code reads the coordinator's flag; one test reads GPUI's, to show the two differ. A menu item the pointer
-highlights after keyboard use keeps the ring, as the old scripted focus matched `:focus-visible` then, but its help
-stays the pointer's (`focus::focus_came_by_keyboard`), as the old `tooltip.js` told that focus apart (`menu-focus.js` at
-`24bc0580`).
+stayed up; GPUI's own uses of it (hover styles held back while the keyboard is in use) are unchanged. Clippy bans GPUI's
+`Window::last_input_was_keyboard` in the GUI crates, so their code reads the coordinator's flag; one test reads GPUI's,
+to show the two differ. A menu item the pointer highlights after keyboard use keeps the ring, as the old scripted focus
+matched `:focus-visible` then, but its help stays the pointer's (`focus::focus_came_by_keyboard`), as the old
+`tooltip.js` told that focus apart (`menu-focus.js` at `24bc0580`).
 
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
@@ -754,30 +742,30 @@ drag-copy notice, which SPEC.md has the pointer pass through apart from its ×. 
 press, hover or wheel turn reaches whatever it covers, and only a control inside it that takes the pointer (the ×) is
 its own. Neither an outside press nor Escape closes it, and a dialog's veil skips it when deciding whether a press is
 the dialog's to answer; only its owner, its anchor going and a reset do. It is an ordinary layer otherwise, so a dialog
-opened later covers it. The layer manager's owner approved this one on 2026-11-16; a second such popover is that owner's
-decision, as is a second popover placed by its owner's own rule, which the notice also is, three terminal rows from the
-pointer. A popover may also take focus without trapping Tab, for SPEC.md's tunnel list ("Tab follows its ordinary
-controls and leaving the list closes it without reclaiming focus"): it starts on its first control and Escape returns
-focus to the toggle its opener names, but Tab walks its controls as if they stood right after that toggle in the page
-and goes on out of it, and focus leaving it (Tab, a press elsewhere) closes it with no focus returned; focus on the
-toggle, as in the old list, which lived inside the pill's element, is not leaving. GPUI orders Tab by paint order and
-paints overlays after the page, so the focus coordinator splices the popover's controls in after the toggle itself. Such
-a popover holds focus, so it counts as a layer that holds the keyboard (a shortcut that refuses under a menu refuses
-under it too, also while focus is on its toggle) and focus recovers inside it, but it is not a trap: Tab's trap concerns
-only the layers that keep Tab in, and the focus invariant's "topmost modal" is the topmost dialog, which such a popover
-is not. Whether a click on a dialog's empty space (label text included) keeps focus on the control in use is a property
-of each dialog, set as SPEC.md's list says; a dialog without it takes focus itself, so Enter then presses its main
-action. Whether a terminal link's destination disclosure is covered is a hit test, never a hand-kept list of covering
-surfaces. A popover that lets the pointer through registers no hit area, so it is invisible to that hit test, and its
-owner must keep it off the disclosure: the drag-copy notice does not open while its terminal's disclosure is open.
-Things the user did not start never open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open
-carries the mark its feature took when the user acted. The one exception is SPEC.md's window-start dialogs (the Welcome
-card, and the first batch of announcements when nothing is open ahead of it). Each takes its mark through its own
-constructor, `focus::Mark::at_ui_session_start`, when its owner first sees a new UI session, before that session's first
-snapshot is drawn. If the user types or clicks before the open, the layer manager refuses it and the dialog stays unseen
-until a later window start or reset, as the maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the
-Welcome card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a mark taken
-when the last of them closes, which always follows a press of the user's.
+opened later covers it. A second such popover is the layer manager's owner's decision, as is a second popover placed by
+its owner's own rule, which the notice also is, three terminal rows from the pointer. A popover may also take focus
+without trapping Tab, for SPEC.md's tunnel list ("Tab follows its ordinary controls and leaving the list closes it
+without reclaiming focus"): it starts on its first control and Escape returns focus to the toggle its opener names, but
+Tab walks its controls as if they stood right after that toggle in the page and goes on out of it, and focus leaving it
+(Tab, a press elsewhere) closes it with no focus returned; focus on the toggle, as in the old list, which lived inside
+the pill's element, is not leaving. GPUI orders Tab by paint order and paints overlays after the page, so the focus
+coordinator splices the popover's controls in after the toggle itself. Such a popover holds focus, so it counts as a
+layer that holds the keyboard (a shortcut that refuses under a menu refuses under it too, also while focus is on its
+toggle) and focus recovers inside it, but it is not a trap: Tab's trap concerns only the layers that keep Tab in, and
+the focus invariant's "topmost modal" is the topmost dialog, which such a popover is not. Whether a click on a dialog's
+empty space (label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list
+says; a dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's
+destination disclosure is covered is a hit test, never a hand-kept list of covering surfaces. A popover that lets the
+pointer through registers no hit area, so it is invisible to that hit test, and its owner must keep it off the
+disclosure: the drag-copy notice does not open while its terminal's disclosure is open. Things the user did not start
+never open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open carries the mark its feature took
+when the user acted. The one exception is SPEC.md's window-start dialogs (the Welcome card, and the first batch of
+announcements when nothing is open ahead of it). Each takes its mark through its own constructor,
+`focus::Mark::at_ui_session_start`, when its owner first sees a new UI session, before that session's first snapshot is
+drawn. If the user types or clicks before the open, the layer manager refuses it and the dialog stays unseen until a
+later window start or reset, as the maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the Welcome
+card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a mark taken when the
+last of them closes, which always follows a press of the user's.
 
 One feature-supplied element is drawn above every layer without being one: the pill (`layers::show_pill`), for SPEC.md's
 quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil while taking neither
@@ -800,7 +788,7 @@ old launch pills, except the tunnel consent dialog at 50, which was always above
 decided, so the launcher, the quick switcher, the templates dialog, the checkout trash dialog and the Hosts panel's
 dialogs sat under the pills, and Delete, Stop, Rename and the app bar's dialogs (Settings and the help menu's) covered
 them. Drawing the launch pill above every dialog but the raised tunnel consent dialog, which matches the launcher and
-the other dialogs that start a launch, is a deviation chosen by the foundations owner on 2026-11-15.
+the other dialogs that start a launch, is a deliberate deviation.
 
 Another feature-supplied element is drawn above every dialog and popover but a raised one (the z-order ladder, below)
 without being a layer: the approval region (`layers::install_approval_region`), where SPEC.md's independent agent
@@ -817,11 +805,11 @@ rule of its own, and tests show it: a press on a card is the card's, since it is
 dialog closing, or its subject going, leaves focus on a card; the dialog's late focus moves refuse while focus is on a
 card; Tab from a card goes back into the dialog, while the dialog's own Tab never reaches it; and a focused card control
 going away sends focus into the topmost dialog, or home. Escape on a card does nothing, so it cannot close the dialog
-behind it, as the old app's keyboard safety net passed over the cards (decided by the GPUI migration's foundations
-owner, 2026-11-14). A view that reads `drawn_bounds` picks its anchor from its own state, not from `None`: the bounds
-turn `None` only after the frame that stopped drawing the element, and nothing redraws then. Not built yet, for want of
-anything to build them against: counting a card as covering a terminal link's disclosure (an occluding card counts with
-no change if that hit test uses occlusion), and raising a refused link's explanation above the cards.
+behind it, as the old app's keyboard safety net passed over the cards. A view that reads `drawn_bounds` picks its anchor
+from its own state, not from `None`: the bounds turn `None` only after the frame that stopped drawing the element, and
+nothing redraws then. Not built yet, for want of anything to build them against: counting a card as covering a terminal
+link's disclosure (an occluding card counts with no change if that hit test uses occlusion), and raising a refused
+link's explanation above the cards.
 
 One layer's box is drawn above the approval region: SPEC.md's tunnel warning, whose opener raises it as it opens
 (`layers::above_approval_region`), however it was asked (a terminal Cmd-click, Settings' switch, a card's Tunnel and
@@ -830,15 +818,15 @@ the cards at 45 (`.tunnel-consent-backdrop` in `app.css` at `24bc0580`). Its vei
 dialog's does, but above the launch pill, which the old warning's backdrop covered too, so a press on a card beside the
 warning is the card's and focus may rest there, while a press on the warning's box where it overlaps a card is the
 warning's. The old warning's backdrop sat at 50 with it and blocked every card while it was up, against SPEC.md's
-"Opening and closing" ("independent agent approval cards remain usable" while a modal dialog is open): decided by the
-foundations owner on 2026-11-15, SPEC.md's "remain usable" wins over the old app's blocking backdrop. Every layer opened
-over the raised one goes above the region with it, whole, veil included (the z-order ladder, below), so the drawn order
-stays the stack's and "the topmost layer" names the same layer for drawing, presses, Tab's trap and Escape. The old app
-would have drawn a dialog opened over the warning at 40, under it. While a layer opened over the raised one is up, its
-veil covers the cards too, the one case where they do not remain usable over a dialog: under the region, its veil would
-sit under the raised box, which would then take presses meant for the dialog above it. No other opener raises its layer:
-every other layer a card opens draws under the cards, as the old hosts dialog a card opened sat at 40; a question or
-menu anchored to a card would too, and raising one is not built.
+"Opening and closing" ("independent agent approval cards remain usable" while a modal dialog is open): SPEC.md's "remain
+usable" wins over the old app's blocking backdrop. Every layer opened over the raised one goes above the region with it,
+whole, veil included (the z-order ladder, below), so the drawn order stays the stack's and "the topmost layer" names the
+same layer for drawing, presses, Tab's trap and Escape. The old app would have drawn a dialog opened over the warning at
+40, under it. While a layer opened over the raised one is up, its veil covers the cards too, the one case where they do
+not remain usable over a dialog: under the region, its veil would sit under the raised box, which would then take
+presses meant for the dialog above it. No other opener raises its layer: every other layer a card opens draws under the
+cards, as the old hosts dialog a card opened sat at 40; a question or menu anchored to a card would too, and raising one
+is not built.
 
 The z-order ladder is the one order in which a window draws everything, bottom to top; each rung names what the old app
 drew there and at what z-index (the ladder comment at `.header-confirm` in the old `app.css`, which `layers.rs`'s module
@@ -973,11 +961,10 @@ owns it (the launcher's YOLO question in its body, the template editor's leave q
 rules in all three. An inline question is not a layer: its owner decides where it is drawn, and the prompt decides how
 it looks and answers. It takes focus on its starting answer when it opens, unless the user has moved on, and an answer
 returns focus to what held it before, inside the owner's dialog. Escape on it is Cancel and does not reach the owner's
-dialog. It draws plain, or loud as the YOLO confirmation is (decided by the migration's orchestrator on 2026-11-14). An
-anchored question's text stops at about twelve lines so its answers stay in the window, its own words always whole while
-a line naming a host value (a quoted session title) gives up the height and scrolls, with the wheel and with Page Up,
-Page Down, Home and End from the answers, so the keyboard reaches it with no stop of its own (decided by the migration's
-orchestrator on 2026-11-16).
+dialog. It draws plain, or loud as the YOLO confirmation is. An anchored question's text stops at about twelve lines so
+its answers stay in the window, its own words always whole while a line naming a host value (a quoted session title)
+gives up the height and scrolls, with the wheel and with Page Up, Page Down, Home and End from the answers, so the
+keyboard reaches it with no stop of its own.
 
 A centered question can be reworded in place while it is open, for SPEC.md's bulk Stop and Delete question, which
 rewords itself when an accepted target changes. Closing it and asking the replacement moved focus back to the starting
@@ -1007,18 +994,16 @@ answer pressed, which the refusal re-arms, so leaving focus there would let Ente
 the macOS click rule a click focuses no control, so a click on another control during the attempt also leaves focus on
 the answer pressed, and the refusal still moves focus to Cancel, for the same reason. The move to Cancel came in on
 2026-11-15 as the port of the old dialog's. The maintainer directed on 2026-11-16 that the refusal not take focus back
-from a user who moved on, with presses on the question itself not counting; the migration's settings-and-hosts area
-chose to compare where focus is when the refusal arrives rather than take the press's mark, and the foundations owner
-agreed to the rule on 2026-11-16. An extra answer that can fail may sit on an inline question or a centered one that
-keeps focus on an empty-space click; a confirming answer that can fail only on such a centered question (an inline
-question's confirming answer runs once). Any other question with one refuses to open. An inline question's owner keeps
-itself open while the attempt is unsettled through its dismissal hook, as an editor whose save is in flight stays, so
-the owner cannot close under the running action. A centered question's veil takes a press without dismissing it, the
-prompt's own dismissal hook holds Escape and every other dismissal while the attempt is unsettled, and the empty-click
-rule keeps focus on the busy answer. An anchored question closes on a press outside it or its anchor going, which
-nothing can veto. A centered question still closes when its subject goes or the connection resets, mid-attempt too; for
-the host remove confirmation the subject going is the success. The centered case was added by the migration's
-orchestrator on 2026-11-14.
+from a user who moved on, with presses on the question itself not counting; the app compares where focus is when the
+refusal arrives rather than taking the press's mark. An extra answer that can fail may sit on an inline question or a
+centered one that keeps focus on an empty-space click; a confirming answer that can fail only on such a centered
+question (an inline question's confirming answer runs once). Any other question with one refuses to open. An inline
+question's owner keeps itself open while the attempt is unsettled through its dismissal hook, as an editor whose save is
+in flight stays, so the owner cannot close under the running action. A centered question's veil takes a press without
+dismissing it, the prompt's own dismissal hook holds Escape and every other dismissal while the attempt is unsettled,
+and the empty-click rule keeps focus on the busy answer. An anchored question closes on a press outside it or its anchor
+going, which nothing can veto. A centered question still closes when its subject goes or the connection resets,
+mid-attempt too; for the host remove confirmation the subject going is the success.
 
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
 prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an
@@ -1056,21 +1041,20 @@ store's keyless send, which words a refusal the same way and hands the caller th
 the caller decides what, if anything, to show. The read helper is that send plus a decode. A reset drops the wait of a
 read or a keyless send like any other. Where an area says that a start was refused because its key already has work in
 flight, it gives one shared reason (`NotStarted::BUSY_REASON`) after a lead-in of its own that names what did not happen
-("Not saved:", "Not started:"), as the migration's orchestrator decided on 2026-11-14, so that a refused save never
-reads as a start that did not happen. The shared reason is for busy lines with no old-app wording to port: a line that
-ports the old app's words verbatim keeps them (the terminal's "Another tunnel action is still waiting", for one), as the
-migration's orchestrator decided the same day.
+("Not saved:", "Not started:"), so that a refused save never reads as a start that did not happen. The shared reason is
+for busy lines with no old-app wording to port: a line that ports the old app's words verbatim keeps them (the
+terminal's "Another tunnel action is still waiting", for one).
 
 Whether a kind of work creates a session, and whether it changes the host registry, is answered by the kind of work
 itself (`Work::creates_a_session`, `Work::changes_host_registry`), each an exhaustive classification that a new kind of
 work decides when it is added. SPEC.md has launches and changes to the host registry exclude each other: each side
 refuses its own action while the other side's work is in flight anywhere in the store, with no shared lock, and reads
 the other side's set from these answers. A host's destination save is the one-sided case: it refuses while a launch is
-in flight, but launches do not refuse during it, so it is not in the host-registry set (the migration's orchestrator,
-2026-11-14). Areas ask these methods whether work creates a session or changes the host registry, rather than keeping
-their own match over kinds of work for either, so the two sides cannot drift apart when a new kind of work arrives.
-Other questions about work are not these sets and keep their own matches: a view's wording per kind of work (a session
-row's progress line, say), or the session list's check for a Delete in flight.
+in flight, but launches do not refuse during it, so it is not in the host-registry set. Areas ask these methods whether
+work creates a session or changes the host registry, rather than keeping their own match over kinds of work for either,
+so the two sides cannot drift apart when a new kind of work arrives. Other questions about work are not these sets and
+keep their own matches: a view's wording per kind of work (a session row's progress line, say), or the session list's
+check for a Delete in flight.
 
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
@@ -1098,9 +1082,9 @@ the draft, shows a pushed value only while the draft follows it, is read-only wh
 refused save takes up the last pushed value if the user had not touched it. An editor that saves a whole object in one
 request (the template editor, whose fields are typed and come and go) instead keeps one draft for the object with plain
 inputs it binds itself, and in such an editor an untouched field need not follow a pushed change while it is open, since
-the save replaces the object anyway (decided by the GPUI migration's coordinator on 2026-11-14). While a save is in
-flight its Save button is busy rather than disabled: it keeps focus and its place in Tab's order and ignores presses, as
-the old app's Save did, because a disabled button gives up focus.
+the save replaces the object anyway. While a save is in flight its Save button is busy rather than disabled: it keeps
+focus and its place in Tab's order and ignores presses, as the old app's Save did, because a disabled button gives up
+focus.
 
 Enforced by draft tests that push a change under a touched field, by save tests that load, save untouched and compare,
 by a save under a template's key, by tests of the bound field (a push under a touched field, a push and a keystroke
@@ -1151,51 +1135,49 @@ Owner: the component layer, over GPUI Kit.
 Component constructors require a label, hover help and an accessibility role, so the old rule that every control has a
 tooltip becomes something the compiler checks; the test bridge also reads roles and labels to find controls. Where the
 old coverage rule exempted items that carry a visible description, a constructor's description counts as its hover help.
-One exception to keyboard reach per control, decided by the migration's orchestrator on 2026-11-14: a list's options
-driven by the field that owns them (`OptionRow`; Up and Down move the selection, Enter picks, focus stays in the field)
-are reached through that field and never take focus, as the old quick switcher's rows did. The next such list reuses
-`OptionRow`. A second exception, decided by the migration's orchestrator on 2026-11-14: a pointer control whose action
-its owner offers by keyboard may take no focus. Two controls use it: `MarkToggle`, a session row's status dot that marks
-it read or unread, which the row's menu item does by keyboard, and the terminal's `Scrollbar`, whose terminal pages its
-history with Shift+PageUp and Shift+PageDown. A region whose content holds nothing focusable gets its named tab stop
-(SPEC.md, "Reaching everything by keyboard") from one scroll stop in the component layer, drawn either as a `ScrollBox`
-around a card's bounded text, a stop whenever drawn as the old labelled box was, or through `DialogFrame::scroll_stop`
-for a dialog's body, a stop whenever the body holds no tab stop (a button counts), as the old region was; the focus
-coordinator detects that as the body is laid out, so the stop follows one frame behind with one redraw, rather than each
-dialog declaring it. Both take the region role, the old inset ring and the old browser's scroll keys, and both count as
-text fields for macOS's Tab reach: WebKit kept an element focusable through `tabindex="0"` in plain Tab's order whatever
-the Keyboard navigation setting. Both are built on the layer's focus stop (`components::focus_stop`): the same ring,
-accessible role and name, and Tab reach without the keys, with the role and the ring's geometry given by the caller, on
-a focus handle its caller passes in (a scroll stop passes one kept in its element state). A place where focus rests that
-does not scroll (the session pane's interrupted card, SPEC.md's stopped session's card, once it lands) is to use it
-alone, with a handle it owns, so it can make the stop home before the stop is first drawn; a place where focus rests
-that scrolls (the session pane's unavailable card) takes the scroll stop on a handle it owns
-(`components::scroll_stop_on`) for the same reason. A stop's keys are its own only while the stop itself holds focus. A
-dialog's notices region can take the body's stop too (`DialogFrame::notices_stop`), as the old Trash dialog's global
-confirmation was the same old region; its ring reaches out to the card's sides, where the old full-width region's lay,
-since the notices sit inside the footer's padding. A scrolling region that opts in through one rule in the component
-layer (`components::scroll_from_controls`) scrolls with Page Up, Page Down, Home and End from a control inside it, as
-WebKit scrolled the container around a focused control (decided by the migration's orchestrator on 2026-11-16). That
-covers a dialog's scrolling body, which opts in by default, the notices region once given its stop, as its question's
-answers need, an anchored question's capped host-value line from its answers ("Questions: the prompt"), and any area's
-region drawn through it. The exceptions: a control keeps a key it uses itself (a text field its Home and End, a
-multi-line box Page Up and Page Down too, a tab strip its Home and End), and notices without the stop (the launcher's)
-take none. The rule is narrower than WebKit, which also scrolled on Up and Down from a button and went on to scroll the
-containers outside once the region reached its end: here the arrows and Space stay the control's, and the keys scroll
-the nearest region that takes them and stop at its end. Colors come only from theme tokens, which are copied from the
-old stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons
-pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The
-window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
+One exception to keyboard reach per control: a list's options driven by the field that owns them (`OptionRow`; Up and
+Down move the selection, Enter picks, focus stays in the field) are reached through that field and never take focus, as
+the old quick switcher's rows did. The next such list reuses `OptionRow`. A second exception: a pointer control whose
+action its owner offers by keyboard may take no focus. Two controls use it: `MarkToggle`, a session row's status dot
+that marks it read or unread, which the row's menu item does by keyboard, and the terminal's `Scrollbar`, whose terminal
+pages its history with Shift+PageUp and Shift+PageDown. A region whose content holds nothing focusable gets its named
+tab stop (SPEC.md, "Reaching everything by keyboard") from one scroll stop in the component layer, drawn either as a
+`ScrollBox` around a card's bounded text, a stop whenever drawn as the old labelled box was, or through
+`DialogFrame::scroll_stop` for a dialog's body, a stop whenever the body holds no tab stop (a button counts), as the old
+region was; the focus coordinator detects that as the body is laid out, so the stop follows one frame behind with one
+redraw, rather than each dialog declaring it. Both take the region role, the old inset ring and the old browser's scroll
+keys, and both count as text fields for macOS's Tab reach: WebKit kept an element focusable through `tabindex="0"` in
+plain Tab's order whatever the Keyboard navigation setting. Both are built on the layer's focus stop
+(`components::focus_stop`): the same ring, accessible role and name, and Tab reach without the keys, with the role and
+the ring's geometry given by the caller, on a focus handle its caller passes in (a scroll stop passes one kept in its
+element state). A place where focus rests that does not scroll (the session pane's interrupted card, SPEC.md's stopped
+session's card, once it lands) is to use it alone, with a handle it owns, so it can make the stop home before the stop
+is first drawn; a place where focus rests that scrolls (the session pane's unavailable card) takes the scroll stop on a
+handle it owns (`components::scroll_stop_on`) for the same reason. A stop's keys are its own only while the stop itself
+holds focus. A dialog's notices region can take the body's stop too (`DialogFrame::notices_stop`), as the old Trash
+dialog's global confirmation was the same old region; its ring reaches out to the card's sides, where the old full-width
+region's lay, since the notices sit inside the footer's padding. A scrolling region that opts in through one rule in the
+component layer (`components::scroll_from_controls`) scrolls with Page Up, Page Down, Home and End from a control inside
+it, as WebKit scrolled the container around a focused control. That covers a dialog's scrolling body, which opts in by
+default, the notices region once given its stop, as its question's answers need, an anchored question's capped
+host-value line from its answers ("Questions: the prompt"), and any area's region drawn through it. The exceptions: a
+control keeps a key it uses itself (a text field its Home and End, a multi-line box Page Up and Page Down too, a tab
+strip its Home and End), and notices without the stop (the launcher's) take none. The rule is narrower than WebKit,
+which also scrolled on Up and Down from a button and went on to scroll the containers outside once the region reached
+its end: here the arrows and Space stay the control's, and the keys scroll the nearest region that takes them and stop
+at its end. Colors come only from theme tokens, which are copied from the old stylesheet
+(`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons pinned and
+scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The window's minimum
+size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
 `enter_choice`. A control takes it only when its owner hands it the dialog's main action, through an `on_enter` builder
-on the radio group, the checkbox and the select. The launcher draws its own Agent and Command tab strip, as the
-migration's orchestrator decided on 2026-11-14, and gives its tabs the rule through `components::on_enter_choice`; that
-decision is no general exception to the constructor rule above. With the action, a plain Enter applies the focused
-choice and runs that action: a segment or chip applies its option first, while a radio, a checkbox and a closed select
-apply nothing and run it with the values shown, as the old launcher did. A held Enter is taken and does nothing, a
-modified Enter goes on under the shared key rule, and Space and a click only choose. Without the action, every control
-keeps its own Enter.
+on the radio group, the checkbox and the select. The launcher draws its own Agent and Command tab strip and gives its
+tabs the rule through `components::on_enter_choice`; that decision is no general exception to the constructor rule
+above. With the action, a plain Enter applies the focused choice and runs that action: a segment or chip applies its
+option first, while a radio, a checkbox and a closed select apply nothing and run it with the values shown, as the old
+launcher did. A held Enter is taken and does nothing, a modified Enter goes on under the shared key rule, and Space and
+a click only choose. Without the action, every control keeps its own Enter.
 
 GPUI Kit is used for `Root`, text inputs and named primitives, as the prototype did. Kit's own overlays (dialogs,
 sheets, popovers, menus, notifications, tooltips) are not used, not even inside the component layer: Kit moves focus
@@ -1287,29 +1269,28 @@ whole list at display rate.
 One-shot transitions are the exception to the ten-a-second rule, and they do not go through the ticker. One owner in the
 component layer draws them (`components::entrance`, `slide_down` and `outline_fade`, in
 `crates/gui/farhelm-gui/src/components/transition.rs`), the only caller of GPUI's `with_animation` in the GUI crates'
-own code (GPUI Kit's internals animate inside the dependency, where the bans do not reach). The migration's orchestrator
-approved such an owner on 2026-11-14, for the quick-launch pill's entrance (SPEC.md: "a short fade and scale entrance",
-the old `launch-sequence-enter 200ms ease-out`), should the ticker be unable to carry it. It cannot. At ten ticks a
-second a 200 ms entrance is two or three drawn frames (its first, one step, its last), which reads as a jump rather than
-a fade, against 12 at 60 Hz and 24 at 120 Hz; a ticker handle carries no elapsed time to draw from, and needs a view to
-subscribe, which a component's element-building function does not have; and an inactive window gets no ticks, so an
-entrance started there would sit on its first, invisible frame until something else redrew the window, the trap the old
-stylesheet's note on paused animations describes. GPUI's animation works out its value from the executor's clock each
-time it draws, so it shows the state for the time that has passed, ends on its final state on time whether or not the
-window was active or drew in between, and asks for no frame once it ends: a bounded burst at the display's rate. Its
-callers pass no animation of their own, so none is told to repeat; a caller must keep the entrance's id the same from
-frame to frame, since an id that changes every frame starts a new entrance each frame, which never finishes and asks for
-a frame on every display frame. An inactive window gets the same transition as an active one: pausing it there leaves it
-invisible, and skipping it there would replay it when the window is activated. Under reduced motion the owner draws no
-motion, taking the setting from the ticker (`ticker::reduced_motion`) rather than from GPUI's own flag, so that all of
-the motion the app's own code draws follows one reading: the host's, read once at startup, which tests can drive. GPUI's
-flag holds GPUI Kit's own reading of the platform (on Linux from the desktop portal, followed live), which can differ
-from the host's, and under the test scheduler nothing writes it. The launcher's permission-escalation banner uses the
-same owner for its two motions, which SPEC.md "Creation" names: `components::slide_down`, the banner sliding into place
-over 200 ms, and `components::outline_fade`, the permission control's red outline fading over 2.5 s; the migration's
-orchestrator approved both on 2026-11-15. Under reduced motion the entrance and the slide draw their final state at
-once, while the outline keeps its first, full color for as long as it is drawn: SPEC.md's "static outline while the
-banner is shown". `with_animations` and `with_spring` have no owner.
+own code (GPUI Kit's internals animate inside the dependency, where the bans do not reach). The quick-launch pill's
+entrance (SPEC.md: "a short fade and scale entrance", the old `launch-sequence-enter 200ms ease-out`) uses this owner
+because the ticker cannot carry it. At ten ticks a second a 200 ms entrance is two or three drawn frames (its first, one
+step, its last), which reads as a jump rather than a fade, against 12 at 60 Hz and 24 at 120 Hz; a ticker handle carries
+no elapsed time to draw from, and needs a view to subscribe, which a component's element-building function does not
+have; and an inactive window gets no ticks, so an entrance started there would sit on its first, invisible frame until
+something else redrew the window, the trap the old stylesheet's note on paused animations describes. GPUI's animation
+works out its value from the executor's clock each time it draws, so it shows the state for the time that has passed,
+ends on its final state on time whether or not the window was active or drew in between, and asks for no frame once it
+ends: a bounded burst at the display's rate. Its callers pass no animation of their own, so none is told to repeat; a
+caller must keep the entrance's id the same from frame to frame, since an id that changes every frame starts a new
+entrance each frame, which never finishes and asks for a frame on every display frame. An inactive window gets the same
+transition as an active one: pausing it there leaves it invisible, and skipping it there would replay it when the window
+is activated. Under reduced motion the owner draws no motion, taking the setting from the ticker
+(`ticker::reduced_motion`) rather than from GPUI's own flag, so that all of the motion the app's own code draws follows
+one reading: the host's, read once at startup, which tests can drive. GPUI's flag holds GPUI Kit's own reading of the
+platform (on Linux from the desktop portal, followed live), which can differ from the host's, and under the test
+scheduler nothing writes it. The launcher's permission-escalation banner uses the same owner for its two motions, which
+SPEC.md "Creation" names: `components::slide_down`, the banner sliding into place over 200 ms, and
+`components::outline_fade`, the permission control's red outline fading over 2.5 s. Under reduced motion the entrance
+and the slide draw their final state at once, while the outline keeps its first, full color for as long as it is drawn:
+SPEC.md's "static outline while the banner is shown". `with_animations` and `with_spring` have no owner.
 
 The banner's slide is a layout offset, `top` going from -12 pixels to 0 on an element drawn `relative`, in place of the
 old `translateY(-12px)`, for the same reason the pill is not scaled (a deviation). Only the fade is drawn (a deviation
@@ -1346,11 +1327,10 @@ reads as the clock read then. The GUI crates do not query the platform, so the d
 every test and the screenshot goldens, writes UTC.
 
 The platform reads its zone setting when the app starts and again at most once a minute, on a draw that finds the last
-reading a minute old; turning an instant into an offset in between reads no file. Nothing wakes the app to read it: the
-migration's orchestrator decided on 2026-11-16 that this re-read must not add a wakeup to an idle app, so a view that
-nothing redraws keeps its times until it draws again (the ages' 30-second clock redraws the session list anyway). A view
-reads the zone once per draw and hands it to its pure helpers with the time now; tests pin the zone with an offset of
-their own and never read the machine's.
+reading a minute old; turning an instant into an offset in between reads no file. Nothing wakes the app to read it: this
+re-read must not add a wakeup to an idle app, so a view that nothing redraws keeps its times until it draws again (the
+ages' 30-second clock redraws the session list anyway). A view reads the zone once per draw and hands it to its pure
+helpers with the time now; tests pin the zone with an offset of their own and never read the machine's.
 
 Enforced by review (no lint stops a view from formatting a time by hand), and by tests of the formatting across midnight
 both ways, before 1970 and on leap days, of an instant on each side of a daylight saving change, of a platform that
@@ -1366,8 +1346,7 @@ version-mismatch and outage cards, and its own generic notices. The surfaces loo
 added only where SPEC.md requires one, and each is drawn in an existing style; the generic connection-lost notice after
 a reset was the first. The session rows' bells with their lists and the rail's notices panel are not its surfaces: they
 draw the notification records the helm keeps and pushes, straight from the store, with no notice-center step, and the
-three status sounds (chimes) are decided by the one sound owner, not here (decided by the migration's orchestrator on
-2026-11-14).
+three status sounds (chimes) are decided by the one sound owner, not here.
 
 Enforced by the review gate.
 
@@ -1482,7 +1461,7 @@ Traps that an earlier rule already prevents get one line pointing at it.
   parent re-renders (zed#66451), a cached view is laid out from its style alone so it needs an explicit size, and
   per-frame paint callbacks are skipped on replay, and so are the view's accessibility nodes, focus report and actions
   while assistive technology is active. Rule: flat, explicitly sized cached views behind the wrapper, and none with
-  accessibility roles until replay restores them (decided by the migration's orchestrator on 2026-11-14).
+  accessibility roles until replay restores them.
 - **`focus()` clears pending keystrokes and refreshes the whole window;** see "Focus: the focus coordinator".
 - **A control an action shows is not drawn while the action runs,** nor when a `window.defer` queued there runs, which
   is before the next frame, so a focus move to it then has no position to scroll to and no layer to check it against.
@@ -1501,10 +1480,9 @@ Traps that an earlier rule already prevents get one line pointing at it.
   answers of two scrolling questions (the launch notices' YOLO buttons and the global trash confirmation's answer row).
   What showed the help there was probably WebKit's own focus scroll, which, as far as is known, centers a control that
   lies wholly out of view instead of moving it the least distance, and so takes a last control's body to its end; that
-  has not been checked in WebKit. Known gap, recorded rather than fixed as the migration's orchestrator asked on
-  2026-11-14: the component layer cannot tell which help belongs to which control, because Settings draws its help lines
-  itself, so a fix needs either area code to declare each control's block or a different alignment in the coordinator's
-  reveal, which every scrolling region would feel.
+  has not been checked in WebKit. Known gap, recorded rather than fixed: the component layer cannot tell which help
+  belongs to which control, because Settings draws its help lines itself, so a fix needs either area code to declare
+  each control's block or a different alignment in the coordinator's reveal, which every scrolling region would feel.
 - **GPUI keeps a frame's input handler past that frame,** and with it a strong handle to whatever implements it. A view
   that was its own `ElementInputHandler` outlived its retirement, focus handle included, so focus stayed on an element
   nobody drew and the coordinator's recovery never ran (found when the terminal got its input handler). Rule: the
@@ -1557,17 +1535,17 @@ Traps that an earlier rule already prevents get one line pointing at it.
   window it opens (`test_support.rs`, `activate_and_check`); GPUI's test platform opens windows inactive, so a test that
   opens its own window without the harness meets the same trap.
 - **A `cfg(test)` branch in production code tests a program that does not ship.** Past the branch, a test exercises code
-  the app never runs, so its pass says nothing about the code the branch skips. Rule (decided by the migration's
-  orchestrator on 2026-11-15): pass the dependency in, so the production path reads it the same way in every build and a
-  test hands it a different one, as the ticker reads "active" through `ticker::set_active_override` and the connection
-  opens terminals through the source `Connection::serve_terminals` installs. A test-only setter for such a value, and a
-  test-only accessor or entry point that adds nothing to a production path (`layers::top_is_above_approval_region`,
-  `layers::show_tooltip_at`), are not branches. Where a branch is still needed, two places limit it to reading. In a
-  render path it must not change what is drawn or done, or the frame a test checks differs from the one the app draws.
-  In a refused-tier foundation file (`docs/gpui/foundation-ownership.md`) it must not change what is drawn or done
-  either, or it changes, under test, a rule every area's tests build on. Recording into state that only test builds have
-  counts as reading and is allowed anywhere: the render counter's `record`, which views call first thing in `render`, is
-  one such recording, and needs no exception.
+  the app never runs, so its pass says nothing about the code the branch skips. Rule: pass the dependency in, so the
+  production path reads it the same way in every build and a test hands it a different one, as the ticker reads "active"
+  through `ticker::set_active_override` and the connection opens terminals through the source
+  `Connection::serve_terminals` installs. A test-only setter for such a value, and a test-only accessor or entry point
+  that adds nothing to a production path (`layers::top_is_above_approval_region`, `layers::show_tooltip_at`), are not
+  branches. Where a branch is still needed, two places limit it to reading. In a render path it must not change what is
+  drawn or done, or the frame a test checks differs from the one the app draws. In a refused-tier foundation file
+  (`docs/gpui/foundation-ownership.md`) it must not change what is drawn or done either, or it changes, under test, a
+  rule every area's tests build on. Recording into state that only test builds have counts as reading and is allowed
+  anywhere: the render counter's `record`, which views call first thing in `render`, is one such recording, and needs no
+  exception.
 - **The test context's text system is fake.** Every character advances 0.6 em (1.2 em outside the BMP), there is one
   font, no fallback and no wide CJK. Rule: tests whose outcome depends on layout (wrapping, truncation, the terminal
   cell grid) use the real text system (`HeadlessAppContext` with a real text system).
@@ -3253,12 +3231,11 @@ cannot stat or read files.
 The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/files/download`, with a `path` field. The
 GPUI app sends both as plain HTTP through the helm client, never as UI channel commands (see "The UI channel"). Their
 JSON bodies, and the attachment upload's answer, are `farhelm_proto::file_transfers` types that the helm and the helm
-client both use, so neither restates the other's (asked for by the migration's orchestrator on 2026-11-15). Both use
-session-owner routing and sit with attachments behind the same device-credential layer (`api_router` in
-`crates/farhelm-helm/src/lib.rs`); none of the three answers a preflight. Stat returns the host display name alongside
-the protocol's resolved path, size and typed status. Download reopens independently and streams an octet body with an
-encoded basename attachment disposition. It promises no opening Content-Length: a file may change within the cap, and a
-later stream failure invalidates the whole body.
+client both use, so neither restates the other's. Both use session-owner routing and sit with attachments behind the
+same device-credential layer (`api_router` in `crates/farhelm-helm/src/lib.rs`); none of the three answers a preflight.
+Stat returns the host display name alongside the protocol's resolved path, size and typed status. Download reopens
+independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
+Content-Length: a file may change within the cap, and a later stream failure invalidates the whole body.
 
 The desktop supplies its platform Downloads directory to the embedded helm. A download request with
 `save_to_downloads: true` stages privately on that filesystem and publishes only after successful EOF, returning the
@@ -5719,11 +5696,10 @@ delivery after saving. One absolute SSH timeout bounds all candidates, mutex wai
 hosts processed concurrently. The reply does not wait that long: it is due at the helm's host reply bound counted from
 the handler's start, and a host whose delivery has not finished by then is reported with a reason saying it did not
 answer in time. The deliveries run on their own task, so that delivery carries on until it finishes or meets the SSH
-timeout, and its outcome reaches only the host's warning (decided by the GPUI migration's orchestrator on 2026-11-15).
-`SavedCredential` acknowledges the committed metadata plus per-host fixed failure reasons; create still returns metadata
-directly. Runtime warning attempt ordering prevents an older timeout replacing a newer result. Warning changes
-invalidate the host feed and project through host details, rail color and attention grouping independently of connection
-phase. No timer or separate retry worker is added.
+timeout, and its outcome reaches only the host's warning. `SavedCredential` acknowledges the committed metadata plus
+per-host fixed failure reasons; create still returns metadata directly. Runtime warning attempt ordering prevents an
+older timeout replacing a newer result. Warning changes invalidate the host feed and project through host details, rail
+color and attention grouping independently of connection phase. No timer or separate retry worker is added.
 
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
 metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.
