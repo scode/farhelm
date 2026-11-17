@@ -338,6 +338,34 @@ fn a_containers_menu_offers_delete_container_in_its_own_words(cx: &mut TestAppCo
     assert_eq!(answers(cx), ["Cancel", "Delete container"]);
 }
 
+/// Why this matters: SPEC.md, "Opening and closing": "A risky action that cannot be undone starts on Cancel", and a
+/// machine's deletion destroys everything in it. The old dialog started on its Delete, so a habitual Enter deleted the
+/// machine; this pins SPEC's start for every provider, where an SSH host's Remove, which only forgets the entry, keeps
+/// focus on Remove (`hosts/remove/tests.rs`, `remove_asks_naming_the_host_its_destination_and_what_removal_keeps`).
+///
+/// Specified: for `gpubox` (Delete sandbox) and `crate-1` (Delete container) in turn, the menu's Delete opens the
+/// question with focus on Cancel, and Enter closes it with nothing sent.
+#[gpui::test]
+fn a_machines_deletion_starts_on_cancel_and_enter_keeps_it(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    // The selectors are literal because the test bridge's click takes a `'static` selector.
+    for (id, toggle) in [("4", "host-menu-toggle-4"), ("5", "host-menu-toggle-5")] {
+        click(cx, toggle);
+        click(cx, "host-menu-delete");
+        assert!(any_open(cx), "host {id}: the question opened");
+        // Confirm is enabled here, since the menu's Delete and the question's confirm read the same offer, so the start
+        // on Cancel is the deletion's rule and not the one for a disabled confirm, which would also start there.
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("prompt-cancel"),
+            "host {id}: focus starts on Cancel"
+        );
+        keys(cx, "enter");
+        assert!(!any_open(cx), "host {id}: Enter answered Cancel");
+        assert!(helm.commands().is_empty(), "host {id}: nothing was sent");
+    }
+}
+
 /// Why this matters: a deletion is a host registry change, which the migration keeps out of the way of a session
 /// launch, with a reason rather than a disabled item.
 ///

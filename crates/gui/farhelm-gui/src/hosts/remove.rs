@@ -57,9 +57,11 @@
 //! body where an SSH host's destination is, then "<name> Delete the whole sandbox? Every session, … This cannot be
 //! undone." (`crate::environment_ui::ProviderUi::delete_consequence`), and the answer "Delete sandbox". It always asks,
 //! whatever "Remove hosts without asking" says, and offers no permanent answer: that preference covers forgetting an
-//! entry, and deleting a machine takes its files and sessions with it. The same `DELETE /api/hosts/{id}` goes out, and
-//! the helm answers within its reply bound, so a deletion still running then is refused with "the removal carries on",
-//! shown in the question as any refusal is, while the pushed hosts list shows how it ends.
+//! entry, and deleting a machine takes its files and sessions with it. For the same reason its focus starts on Cancel,
+//! as SPEC.md, "Opening and closing", asks of a risky action that cannot be undone, where the old dialog started on its
+//! Delete. The same `DELETE /api/hosts/{id}` goes out, and the helm answers within its reply bound, so a deletion still
+//! running then is refused with "the removal carries on", shown in the question as any refusal is, while the pushed
+//! hosts list shows how it ends.
 
 #[cfg(test)]
 mod tests;
@@ -256,6 +258,14 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
             HoverHelp::tooltip("Cancel: keep this host"),
             Tier::Neutral,
         ));
+    // SPEC.md, "Opening and closing": a risky action that cannot be undone starts on Cancel, so a stray Enter keeps the
+    // machine. Whether the removal deletes one is the host kind's answer (`HostKind::provider`), and every provider's
+    // deletion takes the machine's sessions and files with it. An SSH host's Remove only forgets the entry, which adding
+    // it again undoes, so it keeps the start on the answer the user just asked for. The old dialog started on its
+    // confirming answer for both; SPEC overrides it (the parity file's "Remove host" deviations).
+    if deletes {
+        question = question.starts_on_cancel();
+    }
     // Only beside an available Remove: with Remove unavailable it would be the one way left to remove the host. The
     // footer note names this answer, so it goes with it. Never for a machine's deletion, which always asks.
     if enabled && !deletes {
