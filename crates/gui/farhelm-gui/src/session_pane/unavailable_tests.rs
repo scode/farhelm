@@ -765,8 +765,7 @@ fn lines(notice: &Notice) -> (String, String, Option<String>) {
     )
 }
 
-/// [`notice_in`] with its times in UTC: no notice here gives a time but the suspended one's, which these tests only
-/// check the start of.
+/// [`notice_in`] with its times in UTC, so phase evidence can be compared without the viewer's time zone.
 fn notice(
     host_name: &str,
     lookup: HostLookup<'_>,
@@ -782,6 +781,43 @@ fn words_for(state: HostStateView) -> (String, String, Option<String>) {
     lines(&notice("buildbox", HostLookup::Known(&host), None, |_| {
         Some(HostText::from_host("other-box"))
     }))
+}
+
+/// The unavailable card identifies who is handling the request, so leaving Hosts for a session keeps the same
+/// evidence visible. Pin the provider, direction and time for both kinds of environment.
+#[test]
+fn the_card_names_the_provider_asked_to_change_the_host() {
+    for (kind, asked, direction, verb) in [
+        (
+            "tensorlake",
+            "Tensorlake",
+            LifecycleDirection::Resuming,
+            "resume",
+        ),
+        (
+            "podman",
+            "the container host",
+            LifecycleDirection::Suspending,
+            "suspend",
+        ),
+    ] {
+        let host = crate::hosts::tests::host(
+            2,
+            kind,
+            HostStateView::TensorlakeChanging {
+                direction,
+                requested_at: 1_700_000_000_000,
+                starting: false,
+            },
+        );
+        let card = notice("buildbox", HostLookup::Known(&host), None, |_| None);
+        assert_eq!(
+            lines(&card).2,
+            Some(format!(
+                "buildbox: Asked {asked} to {verb} at 2023-11-14 22:13:20; waiting for confirmation"
+            ))
+        );
+    }
 }
 
 /// The card's words are the only place a session on an unreachable host says why and what to do, and the old card's are
