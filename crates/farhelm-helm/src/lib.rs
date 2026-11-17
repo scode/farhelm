@@ -739,7 +739,6 @@ fn api_router(state: Arc<AppState>) -> Router {
         // exactly one thing, and naming the thing is clearer than inventing
         // a partial-update shape this API has nowhere else.
         .route("/api/hosts", get(hosts::list_hosts).post(hosts::add_host))
-        .route("/api/environment-places", get(hosts::environment_places))
         .route("/api/recipe-places", get(hosts::recipe_places))
         .route(
             "/api/recipes/{name}/rebuild",

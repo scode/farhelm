@@ -220,9 +220,8 @@ pub(crate) struct Projected {
 /// across host I/O, and the Podman check's cache) and never waits on a host,
 /// so the snapshot sent when a channel opens never waits on one either. A
 /// collection added here must keep that true, and its read must start
-/// nothing: it runs after every bump, so a read that schedules work (as
-/// `/api/environment-places` schedules Podman checks) would start it over and
-/// over.
+/// nothing: it runs after every bump, so a read that schedules work (a
+/// Podman check, say) would start it over and over.
 #[derive(Clone, Copy)]
 pub(crate) struct CollectionSpec {
     pub(crate) collection: Collection,
@@ -301,8 +300,8 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
             selected: None,
         },
         // Both recipe reads are pure projections of the store and the build
-        // registry: unlike `/api/environment-places`, neither starts a Podman
-        // check, so re-reading them on every bump starts nothing.
+        // registry: neither starts a Podman check, so re-reading them on every
+        // bump starts nothing.
         CollectionSpec {
             collection: Collection::Recipes,
             path: |_| "/api/tensorlake/recipes".to_string(),

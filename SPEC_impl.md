@@ -382,7 +382,7 @@ replicated collection. There are two exceptions, both for work whose progress Se
 check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
 creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
 they move (decided by the migration's orchestrator on 2026-11-15). A pushed read must start nothing, because it runs
-after every bump; that is why `/api/environment-places`, whose read schedules Podman checks, stays a query. Neither
+after every bump, so none schedules a Podman check: the GUI asks for each check with a command of its own. Neither
 recipe collection follows the clock: a prepared artifact that passes its freshness window reads stale at the next
 re-read, not when it passes. Host progress also lists the failed environment launches kept after their host was removed
 (see "The UI channel").
@@ -5826,10 +5826,10 @@ Launch progress and errors reuse the existing operation surfaces, with no placeh
 Probe only local and ordinary SSH hosts through their base route. Cache timestamped Linux, architecture, absolute Podman
 path and the results of `podman info` and a working transient user scope. Require Podman 4.9.3 or later, rootless,
 cgroup v2 and `cgroupManager: systemd`. Refresh in the background when the launcher opens, keeping unusable hosts with
-their reasons. No synchronous probe fan-out gates opening the launcher. Each local and ssh host's `/api/hosts` entry
-carries the cached check's readiness as `container_check` (checked time, whether a check is running, usable, reason),
-and a check's start and its end bump the fleet feed, so the hosts collection brings both to a connected GUI.
-`/api/environment-places` is not pushed: reading it schedules checks.
+their reasons: the GUI asks for each host's refresh with `POST /api/hosts/{id}/podman-probe`, which answers at once, and
+no read schedules one. No synchronous probe fan-out gates opening the launcher. Each local and ssh host's `/api/hosts`
+entry carries the cached check's readiness as `container_check` (checked time, whether a check is running, usable,
+reason), and a check's start and its end bump the fleet feed, so the hosts collection brings both to a connected GUI.
 
 Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
 with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside

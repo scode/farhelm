@@ -3046,10 +3046,6 @@ consequences.
   — Lost-create test does not observe its promised pre-send durability boundary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-delayed-probe-test-unfenced-initial-feed-consumer.md`](trailing-delayed-probe-test-unfenced-initial-feed-consumer.md)
-  — Fence the initial feed greeting before measuring silent probe invalidation. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md`](trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md)
   — Source-verified conditional SSH bootstrap cleanup gap. Abbreviated collection; confidence, proposed dismissals and
   unresolved consequences are preserved in the entry.
@@ -3077,10 +3073,6 @@ consequences.
 - [`trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md`](trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md)
   — The detach timeout test yields before establishing writer backpressure. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-environment-place-reader-discards-probe-refresh-intent.md`](trailing-ui-environment-place-reader-discards-probe-refresh-intent.md)
-  — Refresh can be silently reduced to a cached read. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
 
 - [`trailing-ui-agent-environment-launch-last-session-consequence.md`](trailing-ui-agent-environment-launch-last-session-consequence.md)
   — Last-session wording matches the later revision's changed deletion contract. Abbreviated collection; confidence,
@@ -3129,10 +3121,6 @@ consequences.
 - [`trailing-environment-pending-launch-label-resolves-with-empty-places.md`](trailing-environment-pending-launch-label-resolves-with-empty-places.md)
   — Container launch progress loses the selected host name. Abbreviated collection; confidence, proposed dismissals and
   unresolved consequences are preserved in the entry.
-
-- [`trailing-container-place-footer-omits-peer-format-escaping.md`](trailing-container-place-footer-omits-peer-format-escaping.md)
-  — Container placement footer renders host formatting characters verbatim. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md)
   — Clone wire documentation still forbids the new environment clone form. Abbreviated collection; confidence, proposed

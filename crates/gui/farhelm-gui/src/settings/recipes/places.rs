@@ -25,7 +25,7 @@
 //!   `environment/podman_probe.rs`), and every announced change re-runs every pushed read, the places' included, whose
 //!   reasons come from that same check cache. So a finished check reaches the lines with the next push, and the section
 //!   watches no hosts for it, as it did while the places were read.
-//! - **A place's name is the host's.** The old rows took it from `GET /api/environment-places`, whose read also asks
+//! - **A place's name is the host's.** The old rows took it from `GET /api/environment-places`, whose read also asked
 //!   the helm to check every container host that was never checked. Here it comes from the pushed hosts collection,
 //!   by the place's host id, through the one rule every host name follows ([`crate::hosts::identity::display_name`]),
 //!   so naming a place starts no check, and a place reads as its host does everywhere else in the app (the local host

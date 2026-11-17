@@ -1517,8 +1517,9 @@ pub(crate) async fn retry_host(
     }
 }
 
-/// Read cached place status without contacting the host. The launcher can
-/// render immediately and schedule a separate refresh when it opens.
+/// Read one host's cached Podman check without contacting the host, so the
+/// answer never waits on it. `POST` on the same path asks for a fresh check
+/// in the background ([`refresh_podman_probe`]).
 pub(crate) async fn podman_probe(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
@@ -4273,58 +4274,6 @@ impl HostKind {
                 },
             }),
         }
-    }
-}
-
-/// Read provider-owned cached availability and schedule ordinary-host probes.
-/// Refresh joins return immediately; opening a launcher never waits for fan-out.
-pub(crate) async fn environment_places(
-    State(state): State<Arc<AppState>>,
-) -> axum::response::Response {
-    let result = async {
-        let rows = state.store.list_hosts().await?;
-        for row in rows.iter().filter(|row| row.kind.can_host_environments()) {
-            let cached = state.podman_places.view(row)?;
-            if cached.checked_at.is_none() && !cached.refreshing {
-                state
-                    .podman_places
-                    .refresh(state.store.clone(), row.id)
-                    .await?;
-            }
-        }
-        let places = state.manager.providers().places().await?;
-        Ok::<_, anyhow::Error>(
-            places
-                .into_iter()
-                .map(|place| {
-                    let row = place
-                        .place
-                        .host()
-                        .and_then(|host| rows.iter().find(|row| row.id == host));
-                    farhelm_proto::EnvironmentPlaceView {
-                        place: place.place,
-                        reason: place.reason,
-                        name: row
-                            .map(|row| {
-                                host_display_name(
-                                    row.kind,
-                                    row.destination.as_deref(),
-                                    row.alias.as_deref(),
-                                )
-                            })
-                            .unwrap_or_default(),
-                        refreshing: row
-                            .and_then(|row| state.podman_places.view(row).ok())
-                            .is_some_and(|view| view.refreshing),
-                    }
-                })
-                .collect::<Vec<_>>(),
-        )
-    }
-    .await;
-    match result {
-        Ok(places) => axum::Json(places).into_response(),
-        Err(error) => http_error(error),
     }
 }
 
