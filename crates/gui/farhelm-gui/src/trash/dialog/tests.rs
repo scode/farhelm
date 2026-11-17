@@ -834,8 +834,8 @@ fn delete_all_waits_for_every_reachable_host(cx: &mut TestAppContext) {
 /// Delete all"), also on macOS, where a click does not focus the button it presses, so the dialog has to put focus on
 /// the asking button itself, and the question's band must go with it. Specified, under the macOS click rule: Escape on
 /// the global question cancels it, keeps the dialog open and returns focus to Delete all, and the question and the
-/// footer's notices region are gone; Cancel on build-box's question, reached and pressed by keyboard, returns focus to
-/// its "Delete all on", and its band is gone.
+/// footer's notices region are gone; a pointer click on Cancel in build-box's question, which under that rule focuses
+/// no button and leaves the press on the dialog, returns focus to its "Delete all on", and its band is gone.
 #[gpui::test]
 fn cancelling_returns_focus_to_the_asking_button_and_takes_the_band_away(cx: &mut TestAppContext) {
     let (_helm, _, cx) = opened(cx);
@@ -860,10 +860,13 @@ fn cancelling_returns_focus_to_the_asking_button_and_takes_the_band_away(cx: &mu
 
     test_support::click(cx, "trash-host-delete-2");
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
-    // A macOS click on Cancel would leave focus on the dialog, not in the question: the keyboard reaches it.
-    test_support::keys(cx, "shift-tab");
-    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
-    test_support::keys(cx, "enter");
+    assert!(
+        cx.debug_bounds("trash-host-confirmation-2").is_some(),
+        "the premise: build-box's band is drawn"
+    );
+    // A macOS click focuses no button: the press lands on the dialog, which takes focus, so the answer must still
+    // return focus to the asking button.
+    test_support::click(cx, "prompt-cancel");
     assert_eq!(focused_id(cx).as_deref(), Some("trash-host-delete-2"));
     assert!(cx.debug_bounds("trash-host-confirmation-2").is_none());
 }
