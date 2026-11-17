@@ -42,10 +42,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tests first, which would save perhaps 100 to 150 lines, still be over 1,000, and likely shorten the explanation of why
   a stale suspended state right after a Resume is not a new suspension.
 
-## GPUI last mile
-
-What the GPUI migration left when its area sessions ended on 2026-11-17, planned for the planning system.
-
 ## Near term
 
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
@@ -112,6 +108,13 @@ What the GPUI migration left when its area sessions ended on 2026-11-17, planned
   hero and docs-screenshot capture run on the GPUI screenshot tooling; the demo video (`scripts/readme-video.sh`,
   `docs/readme-video/`) still drives the deleted browser UI. Its `intent.md` is still the throwaway sample and needs a
   real design first. The rebuild then needs an in-app overlay for the pointer, captions and cards, and a frame recorder.
+
+- **Make the docs screenshot capture finish on the Mac.** `scripts/docs-screenshots.sh --mac` now fits its window on the
+  test Mac (with the Dock set to hide itself) and brings back the Launch templates page's full-window shots at 2x, but
+  no run has finished. Two runs on 2026-11-17 each then failed at a later step of that page, a different one each time:
+  once a click into the launcher's search box focused no field, and once the search box was not found on screen. It
+  looks like a timing problem in the page's capture steps. Until it is fixed, the docs screenshots cannot be refreshed
+  (`.agents/docs-media.md`, "Docs screenshots").
 
 - **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
   managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
