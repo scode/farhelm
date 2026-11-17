@@ -104,14 +104,18 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
 - `switching sessions directly tears the old view down and mounts the new one`: session_pane/tests.rs
   `switching_sessions_drops_the_old_stream_and_attaches_the_new_one` and
   `switching_while_the_first_stream_attaches_closes_it`.
-- `a pending header Restart survives switching and permits another session's Stop`: test to port (raised 2026-11-16).
+- `a pending header Restart survives switching and permits another session's Stop`: session_pane/header_tests.rs
+  `a_pending_restart_survives_opening_another_session_and_leaves_its_stop_alone`; the terminal's reattach after the
+  Restart is session_pane/tests.rs `a_restart_reattaches_without_a_card_or_a_red_band`.
 - `row actions exist only inside the open actions panel`: the commands are drawn only inside the open menu, a layer, by
   construction; Delete's question in their place, session_list/menu_tests.rs
   `delete_then_enter_asks_about_a_live_session_and_enter_deletes_it`; its Cancel returning to the ⋯ rather than to the
   menu is a deviation below.
-- `the actions menu exposes a real menu-button relationship`: partly, the items' names by session_list/menu_tests.rs
-  `the_menus_clone_and_replace_with_open_the_launcher_on_their_row`; the menu's role and its name ("Session actions for
-  <title>"): test to port (raised 2026-11-16). GPUI cannot express `aria-haspopup`, as for the order menu (below).
+- `the actions menu exposes a real menu-button relationship`: partly, session_list/menu_tests.rs
+  `the_menu_and_its_commands_say_whose_they_are_and_what_each_does` (the button's and the menu's name "Session actions
+  for <title>", the menu's role, each command's role and name, and Delete's question as a dialog). GPUI cannot express
+  `aria-haspopup`, as for the order menu (below), and the driver record carries no expanded state. The question is named
+  "Delete confirmation", without the title the old one's name carried; the title is on a line of its own in it.
 - `the actions menu walks every item and wraps at both ends`: session_list/menu_tests.rs
   `the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection`,
   `delete_then_enter_asks_about_a_live_session_and_enter_deletes_it`,
@@ -142,16 +146,22 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   `a_pushed_removal_of_the_row_closes_its_menu`, session_list/delete_notice_tests.rs
   `an_open_row_menu_stays_open_and_follows_its_button_when_the_band_appears` and layers_tests.rs
   `an_anchors_drawn_bounds_follow_its_element_in_the_frame_that_moves_it`.
-- `a reopened busy menu stays navigable while refusing to act`: partly, session_list/lifecycle_tests.rs
+- `a reopened busy menu stays navigable while refusing to act`: session_list/lifecycle_tests.rs
   `a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actions` and session_list/seen_tests.rs
-  `a_pending_toggle_makes_the_sessions_other_actions_unavailable`; the keys walking through the unavailable commands:
-  test to port (raised 2026-11-16).
-- `an open menu leaves the other rows' toggles clickable`: test to port (raised 2026-11-16); the menu's place beside its
-  button is `the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection`.
+  `a_pending_toggle_makes_the_sessions_other_actions_unavailable`; the keys walking through the unavailable commands,
+  Enter and a click on one doing nothing, and Escape back to the ⋯: session_list/lifecycle_tests.rs
+  `a_busy_menu_walks_its_unavailable_commands_without_filling_or_running_them`. GPUI cannot report the item unavailable
+  to assistive technology; the old `aria-disabled` is not ported.
+- `an open menu leaves the other rows' toggles clickable`: session_list/menu_tests.rs
+  `another_rows_menu_button_takes_a_click_while_a_menu_is_open`; the menu's place beside its button is
+  `the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection`.
 - `the actions menu has a raised surface and inset choices`: the `session-row-menu` golden, and the hover by
   `the_pointer_and_the_arrows_move_one_highlight_and_enter_runs_it`.
-- `the session flyout sits beside its row with a titled, described menu` (the menu-geometry case above): partly; the
-  menu's accessible name and every command's description: test to port (raised 2026-11-16).
+- `the session flyout sits beside its row with a titled, described menu` (the menu-geometry case above): partly, the
+  menu's accessible name, every command's description and opening it not moving its row, session_list/menu_tests.rs
+  `the_menu_and_its_commands_say_whose_they_are_and_what_each_does`; the title's weight is the `session-row-menu`
+  golden's, and the pointer notch is a deviation below. Rename's keyboard help placed clear of the panel: test to port
+  (raised 2026-11-16).
 - `the actions panel stays inside a narrow viewport` and
   `opening the last visible row's menu in a scrolled list stays inside the viewport`: the layer manager's clamp,
   layers_tests.rs `a_popover_beside_an_anchor_near_the_edges_is_kept_inside_and_never_flips` and
@@ -168,9 +178,9 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   `hosts_swaps_the_list_for_the_panel_and_back_keeping_focus`, hosts/tests.rs
   `the_heading_counts_the_hosts_the_helm_lists` and `every_row_shows_its_name_mark_and_phase_words`.
 - `host details reveal every row's version line together`: hosts/tests.rs `details_open_and_close_every_row`.
-- `a host-filtered-out row's open menu stays closed when it returns`: partly,
-  `a_pushed_removal_of_the_row_closes_its_menu`; the row's return leaving the menu closed: test to port (raised
-  2026-11-16).
+- `a host-filtered-out row's open menu stays closed when it returns`: session_list/menu_tests.rs
+  `a_pushed_removal_of_the_row_closes_its_menu` (the row going closes the menu, and its return leaves it closed;
+  choosing a host is itself a press outside the menu, so a push is the one way the row leaves under it).
 - `filtering out the active session preserves its terminal and restores its selected row`: partly,
   session_list/seen_tests.rs `the_seen_memory_survives_a_host_filter_that_hides_the_open_session` and
   session_pane/carried_tests.rs `a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename`; the
@@ -184,9 +194,8 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   2026-11-16).
 - `opening one row's menu closes the other row kind's open one`: its session-row and Hosts-row pairing is superseded
   (decided by the migration's orchestrator on 2026-11-16), since Hosts replaces the list, so the two rows are never
-  drawn together; a row's menu against a rail avatar's menu: test to port (raised 2026-11-16)
-  (session_list/host_rail/avatar_menu_tests.rs `a_second_secondary_click_on_the_same_avatar_leaves_one_menu` covers one
-  avatar only).
+  drawn together; a row's menu against a rail avatar's menu, both ways: session_list/host_rail/avatar_menu_tests.rs
+  `a_session_menu_and_a_host_menu_each_close_the_other`.
 - `a click outside an open row menu closes it and leaves focus where it landed`: focus_tests.rs
   `a_click_into_the_terminal_with_a_menu_open_focuses_it_under_the_linux_rule` and
   `a_click_into_the_terminal_with_a_menu_open_focuses_it_under_the_macos_rule`, and
@@ -208,7 +217,10 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   `a_selection_settles_only_on_evidence`, and session_pane/tests.rs
   `a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal`; a session pushed from elsewhere replacing the
   placeholder: test to port (raised 2026-11-16).
-- `a retained refusal stays inside a bottom-row menu's scrolling panel`: test to port (raised 2026-11-16).
+- `a retained refusal stays inside a bottom-row menu's scrolling panel`: test to port with the row menu's height fix
+  that follows the parity test PRs (raised 2026-11-16). The old menu capped its height to the room below its clamped top
+  and scrolled, the refusal inside the scroll; the GPUI menu has no cap and no scroll, so a long refusal in a bottom
+  row's menu runs past the window.
 - `scrolling the sidebar closes an open row menu` and `resizing the viewport closes an open row menu`: superseded
   (decided by the migration's orchestrator on 2026-11-16): the menu stays open (the deviation "An open row menu stays
   open and moves with its button" below). A resize re-places it every frame, layers_tests.rs
@@ -223,10 +235,10 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   session_list/filters/tests.rs `the_heading_and_segments_are_drawn_before_the_first_listing`; the rail's All reading
   pressed and no count line in that state: test to port (raised 2026-11-16).
 - `opening the create-session form closes an open row menu`, and the prior-menu half of
-  `opening New focuses search and immediate typing lands there, with or without a prior menu`: test to port (raised
-  2026-11-16). The launcher half of the second, and
-  `the launch composer autofocuses search and returns focus to New after Escape`, belong to [Launcher](launcher.md) (not
-  yet listed there; raised 2026-11-16).
+  `opening New focuses search and immediate typing lands there, with or without a prior menu`:
+  session_list/menu_tests.rs `new_with_a_row_menu_open_closes_it_and_typing_reaches_the_search_box`. The launcher half
+  of the second, and `the launch composer autofocuses search and returns focus to New after Escape`, belong to
+  [Launcher](launcher.md) (not yet listed there; raised 2026-11-16).
 - `a listing refresh with nothing layout-relevant to report leaves an open row menu open`:
   `an_open_menu_follows_its_button_through_what_the_helm_pushes`.
 - `model picks discard another harness's default YOLO`: belongs to [Launcher](launcher.md) (not yet listed there; raised
@@ -764,12 +776,19 @@ highlight, wrapping at both ends), with Home and End in crates/gui/farhelm-gui/s
 crates/gui/farhelm-gui/src/session_pane/header_tests.rs
 `a_caret_menu_walks_its_choices_and_escape_or_tab_returns_to_the_caret`.
 
-- `host menu hover transfers focus and disabled actions never fill or run`: partly, by the rule above; an unavailable
-  item under the pointer neither filling nor running: test to port (raised 2026-11-16).
-- `restart and replace menus keep one highlight and Enter uses the hovered choice`: partly, by the rule above; Enter on
-  the hovered choice of a caret menu: test to port (raised 2026-11-16).
+- `host menu hover transfers focus and disabled actions never fill or run`: the rule above, and an unavailable item
+  under the pointer taking focus but neither filling nor running by
+  crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs
+  `a_busy_menu_walks_its_unavailable_commands_without_filling_or_running_them`, on the session row's menu, whose item
+  the host menu shares. GPUI cannot report the item unavailable to assistive technology; the old `aria-disabled` is not
+  ported.
+- `restart and replace menus keep one highlight and Enter uses the hovered choice`: the rule above, and the painted fill
+  and Enter on the hovered choice by crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+  `a_caret_menus_pointer_and_arrows_move_one_fill_and_enter_runs_the_hovered_choice`, on Restart's menu, which is the
+  same menu as Replace's.
 - `sort and help menus follow the same hover and keyboard highlight`: the rule above.
-- `menu hover help stays pointer owned after keyboard focus`: test to port (raised 2026-11-16);
+- `menu hover help stays pointer owned after keyboard focus`: crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+  `a_menus_hover_help_stays_the_pointers_after_keyboard_focus`;
   crates/gui/farhelm-gui/src/components/tests/hover_help.rs
   `a_pointer_moving_over_a_control_leaves_a_wait_keyboard_focus_began` is the converse.
 

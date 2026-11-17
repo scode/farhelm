@@ -1,12 +1,11 @@
 //! Tests of the open session's top row: the actions' order, labels and hover help, Restart's offer and its request,
 //! that Stop, Replace and Delete from the header ask the row's questions and send the row's preconditions, a pending
-//! Delete and Stop, exclusion, where Escape and Cancel leave focus, the row's layout at the 650-pixel floor with the
-//! real text system (its actions condensed beside a tunnel pill there, and not in a wide pane, and the tab strip's
-//! floor beside the pill), and the terminal text size group at the start of the actions (its steps, readout, range,
-//! shortcut, the size a terminal opens at, its buttons' places as the readout and the session change, and its height
-//! beside the buttons in both looks). The header of an open
-//! session the list does not show is
-//! `carried_tests.rs`'s.
+//! Delete and Stop, a pending Restart across opening another session, exclusion, where Escape and Cancel leave focus,
+//! the caret menus' one highlight and pointer-owned help, the row's layout at the 650-pixel floor with the real text
+//! system (its actions condensed beside a tunnel pill there, and not in a wide pane, and the tab strip's floor beside
+//! the pill), and the terminal text size group at the start of the actions (its steps, readout, range, shortcut, the
+//! size a terminal opens at, its buttons' places as the readout and the session change, and its height beside the
+//! buttons in both looks). The header of an open session the list does not show is `carried_tests.rs`'s.
 //!
 //! Everything but the layout test runs in the real main view over the helm client's fake, as the session list's own
 //! lifecycle tests do (whose fixtures these share), and reads what the window sent from the fake and what it drew from
@@ -26,8 +25,8 @@ use farhelm_proto::ui_channel::{
 };
 use gpui::{
     AppContext as _, Context, Entity, HeadlessAppContext, IntoElement, Modifiers,
-    ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, px,
-    size,
+    ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point,
+    px, size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
@@ -42,7 +41,7 @@ use crate::session_list::SessionList;
 use crate::session_list::lifecycle_tests::{
     consented, drawn_inside, node_bounds, refuse_for_yolo, replace,
 };
-use crate::session_list::menu_tests::{any_layer, drawn, ended, entry, label_of};
+use crate::session_list::menu_tests::{any_layer, drawn, ended, entry, label_of, lit};
 use crate::session_list::outcome::{self, PROGRESS_SHOWS_AFTER};
 use crate::session_list::tests::{
     Fixture, change, launcher_drawn, listing_meta, open_main, painted, selected, session,
@@ -784,6 +783,120 @@ fn a_request_from_the_row_leaves_the_headers_actions_unavailable(cx: &mut TestAp
     );
 }
 
+/// Whether the control drawn under `id` in a fresh frame takes clicks: a disabled header button draws no click
+/// listener. Fails if nothing was drawn under `id`.
+fn takes_clicks(cx: &mut VisualTestContext, id: &str) -> bool {
+    frame(cx)
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| node.flags.click)
+        .unwrap_or_else(|| panic!("{id} was not drawn"))
+}
+
+/// The old `sidebar.spec.ts` "a pending header Restart survives switching and permits another session's Stop"
+/// (reference commit `24bc0580`): a Restart waits on its own session's key, so opening another session must neither
+/// drop it nor hold that session back, and coming back must find it still refusing a second lifecycle action (SPEC.md:
+/// "Each session excludes its own competing actions"). The fake answers in order, so what is sent behind the waiting
+/// Restart is read now and answered after it. The reattach after a Restart is `session_pane/tests.rs`
+/// `a_restart_reattaches_without_a_card_or_a_red_band`'s.
+///
+/// Specified: with an idle a open, its header's Restart is sent and left unanswered; with b opened, b's header Stop
+/// takes clicks and sends b's Stop at once (b has no tabs, so nothing asks); with a opened again, its header's Restart
+/// and Stop take no clicks, and a click on each asks and sends nothing; once the Restart is answered, both take clicks
+/// again, and the Restart was sent once in all.
+#[gpui::test]
+fn a_pending_restart_survives_opening_another_session_and_leaves_its_stop_alone(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(
+        cx,
+        snapshot_of(vec![entry(&idle("a"), 0), entry(&session("b"), 0)], false),
+    );
+    pending(&mut fake);
+    test_support::click(cx, "session-header-restart");
+    let (restart, _) =
+        test_support::one_command(&mut fake, Method::Post, "/api/sessions/a/restart");
+    // Everything sent behind the Restart, in order, to answer once the Restart is answered.
+    let mut behind: Vec<FakeCommand> = Vec::new();
+
+    test_support::click(cx, "session-row-b");
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    behind.extend(fake.commands());
+    assert!(
+        takes_clicks(cx, "session-header-stop"),
+        "b's Stop is available"
+    );
+    test_support::click(cx, "session-header-stop");
+    let sent_now = fake.commands();
+    let stops: Vec<(String, Value)> = sent_now
+        .iter()
+        .filter(|command| is_lifecycle(command))
+        .map(|command| {
+            (
+                command.path.clone(),
+                command.body.clone().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        stops,
+        [stop("b", true, false)],
+        "b's Stop went out with a's Restart still pending"
+    );
+    behind.extend(sent_now);
+
+    test_support::click(cx, "session-row-a");
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a is open again"
+    );
+    behind.extend(fake.commands());
+    for action in [Action::Restart, Action::Stop] {
+        assert!(
+            !takes_clicks(cx, action.id()),
+            "{action:?} is unavailable while the Restart is out"
+        );
+        test_support::click(cx, action.id());
+        assert!(!any_layer(cx), "{action:?} asks nothing");
+    }
+    let late = fake.commands();
+    assert!(
+        late.iter().all(|command| !is_lifecycle(command)),
+        "nothing more was sent: {late:?}"
+    );
+    behind.extend(late);
+    let lifecycle: Vec<&str> = behind
+        .iter()
+        .filter(|command| is_lifecycle(command))
+        .map(|command| command.path.as_str())
+        .collect();
+    assert_eq!(
+        lifecycle,
+        ["/api/sessions/b/stop"],
+        "no second Restart behind the first"
+    );
+
+    fake.reply(restart, 200, Some(json!({})));
+    for command in behind {
+        let body = is_lifecycle(&command).then(|| json!({}));
+        fake.reply(command.id, 200, body);
+    }
+    test_support::settle(cx);
+    for action in [Action::Restart, Action::Stop] {
+        assert!(
+            takes_clicks(cx, action.id()),
+            "{action:?} is available once the Restart is answered"
+        );
+    }
+    assert!(
+        fake.commands()
+            .iter()
+            .all(|command| !command.path.ends_with("/restart")),
+        "one Restart in all"
+    );
+}
+
 /// Restart and Replace start sessions, so they are launches, and SPEC.md, "Creation", says "Launches and changes to the
 /// host registry still exclude each other": a launch that picked its host while the registry was changing could aim at
 /// an entry the change is about to rewrite. The migration's orchestrator decided on 2026-11-15 that they wait for a
@@ -1262,6 +1375,175 @@ fn a_caret_menu_walks_its_choices_and_escape_or_tab_returns_to_the_caret(cx: &mu
     assert!(!any_layer(cx));
     assert_eq!(focused_id(cx).as_deref(), Some(RESTART_CARET), "Shift+Tab");
     assert_eq!(pending(&mut fake), []);
+}
+
+/// SPEC.md, "Things changing underneath": "A menu has one highlight. Whichever moved last, the pointer or the keys, sets
+/// it, and Enter acts on the highlighted item." The old `menu-highlight.spec.ts` pinned it for the split menus
+/// ("restart and replace menus keep one highlight and Enter uses the hovered choice", reference commit `24bc0580`):
+/// with two choices the arrows wrap at once while the pointer rests on the variant, which is where a hover fill of its
+/// own once lit a second item. Restart's menu stands for Replace's, which is the same menu type. The fill is read from
+/// the painted frame ([`lit`]), so a second fill fails even when focus is right.
+///
+/// Specified, on a running session under the Linux click rule: a click on Restart's caret opens its menu on Restart,
+/// the only choice filled; the pointer entering Restart with… moves focus and the fill there; with the pointer resting
+/// on it, Down, Up and Up move focus to Restart, Restart with… and Restart, the focused one alone filled each time; the
+/// pointer leaving the menu moves nothing, and coming back onto Restart with… moves focus there; Enter then opens the
+/// launcher in restart mode (its action starting "Stop and restart"), never Restart's question. Nothing is sent.
+#[gpui::test]
+fn a_caret_menus_pointer_and_arrows_move_one_fill_and_enter_runs_the_hovered_choice(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    let menu = "session-header-restart-options-menu";
+    let plain = "session-header-restart-options-plain";
+    let with = "session-header-restart-options-with";
+
+    test_support::click(cx, RESTART_CARET);
+    assert_eq!(focused_id(cx).as_deref(), Some(plain), "the premise");
+    assert_eq!(lit(cx, menu), [plain]);
+    let on_with = test_support::center(cx, with);
+    cx.simulate_mouse_move(on_with, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some(with));
+    assert_eq!(lit(cx, menu), [with]);
+    for (key, target) in [("down", plain), ("up", with), ("up", plain)] {
+        test_support::keys(cx, key);
+        assert_eq!(focused_id(cx).as_deref(), Some(target), "after {key}");
+        assert_eq!(lit(cx, menu), [target], "after {key}");
+    }
+
+    // Left of the menu, level with the variant: over the terminal, which shows no help.
+    let bounds = test_support::bounds(cx, menu);
+    let away = point(bounds.left() - px(40.), on_with.y);
+    assert!(!bounds.contains(&away), "the premise: outside the menu");
+    cx.simulate_mouse_move(away, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(plain),
+        "leaving moved nothing"
+    );
+    assert_eq!(lit(cx, menu), [plain], "leaving left the fill where it was");
+    cx.simulate_mouse_move(on_with, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some(with));
+
+    test_support::keys(cx, "enter");
+    assert!(launcher_drawn(cx), "Enter ran the hovered choice");
+    assert!(!drawn(cx, menu), "and closed the menu");
+    assert!(!drawn(cx, "prompt"), "not Restart's question");
+    let action = launch_action(cx);
+    assert!(action.starts_with("Stop and restart"), "{action}");
+    assert!(
+        fake.commands().iter().all(|command| !is_lifecycle(command)),
+        "nothing was sent"
+    );
+}
+
+/// Help the pointer calls up stays the pointer's after keyboard use: it waits for the pointer to rest, motion inside
+/// the item restarts the wait, and the pointer leaving takes it down while the item keeps the highlight. Were the
+/// highlight's focus move taken for keyboard focus, the help would ignore the motion and outlive the pointer
+/// (`layers/tooltip.rs`, `focus_drawn`). The old `menu-highlight.spec.ts` "menu hover help stays pointer owned after
+/// keyboard focus" (reference commit `24bc0580`), its sequence followed on Restart's caret menu by the executor's
+/// clock; `components/tests/hover_help.rs` `a_pointer_moving_over_a_control_leaves_a_wait_keyboard_focus_began` is
+/// the converse.
+///
+/// Specified, with the pointer parked over the terminal: Down on the focused caret opens the menu on Restart, and Down
+/// moves to Restart with…, with no help showing; the pointer entering Restart moves focus there; 200 ms later no help
+/// shows, the pointer moves 2 pixels inside Restart, and 200 ms after that still none shows; Down moves focus to
+/// Restart with…, and the pointer moving 2 pixels more inside Restart brings focus back to it; 299 ms later no help
+/// shows, and 1 ms after that Restart's help shows, in its description's words; the pointer going back to the parking
+/// point takes the help down and leaves focus on Restart.
+#[gpui::test]
+fn a_menus_hover_help_stays_the_pointers_after_keyboard_focus(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    let plain = "session-header-restart-options-plain";
+    let with = "session-header-restart-options-with";
+    let shown = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text.to_string())
+    };
+    let ms = Duration::from_millis;
+
+    // The click focuses the caret and opens its menu; Escape closes it with focus left on the caret.
+    test_support::click(cx, RESTART_CARET);
+    test_support::keys(cx, "escape");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(RESTART_CARET),
+        "the premise: the caret holds focus"
+    );
+    let grid = node_bounds(cx, "terminal-grid");
+    let park = point(grid.left() + px(10.), grid.bottom() - px(10.));
+    cx.simulate_mouse_move(park, None, Modifiers::none());
+    test_support::settle(cx);
+
+    test_support::keys(cx, "down down");
+    assert_eq!(focused_id(cx).as_deref(), Some(with), "the premise");
+    assert!(
+        !test_support::bounds(cx, "session-header-restart-options-menu").contains(&park),
+        "the premise: the parking point is outside the menu"
+    );
+    assert_eq!(shown(cx), None, "no time has passed, so no help shows");
+    // Restart's help is its description, the line it paints under its label.
+    let words = crate::session_list::host_rail::tests::texts_within(&frame(cx), plain)
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .find(|text| text != "Restart")
+        .expect("Restart paints a description");
+
+    let at = test_support::center(cx, plain);
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(plain),
+        "the pointer took the highlight"
+    );
+    test_support::advance(cx, ms(200));
+    assert_eq!(shown(cx), None);
+    cx.simulate_mouse_move(at + point(px(2.), px(0.)), None, Modifiers::none());
+    test_support::advance(cx, ms(200));
+    assert_eq!(
+        shown(cx),
+        None,
+        "moving inside Restart started the pointer's wait again"
+    );
+
+    test_support::keys(cx, "down");
+    assert_eq!(focused_id(cx).as_deref(), Some(with));
+    cx.simulate_mouse_move(at + point(px(4.), px(0.)), None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(plain),
+        "the pointer moved last, so it has the highlight"
+    );
+    test_support::advance(cx, layers::HOVER_DELAY - ms(1));
+    assert_eq!(
+        shown(cx),
+        None,
+        "nothing just before the pointer's wait ends"
+    );
+    test_support::advance(cx, ms(1));
+    assert_eq!(
+        shown(cx),
+        Some(words),
+        "Restart's help, a full delay after the pointer came to rest"
+    );
+
+    cx.simulate_mouse_move(park, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(shown(cx), None, "the pointer leaving took the help down");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(plain),
+        "and left the highlight where it was"
+    );
 }
 
 /// The menu's plain choice is the main part's action, not a copy of it: the same ask-or-send rule, the same question
