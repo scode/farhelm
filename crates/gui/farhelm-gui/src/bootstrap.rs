@@ -289,7 +289,7 @@ pub struct Host {
 }
 
 /// The part of the [`Host`] that [`start`] uses: everything but the quit wiring, which [`run`] installs before it, and
-/// the startup failure handler, which `run` calls when `start` fails.
+/// the startup failure handler, which [`start_or_refuse`] calls when `start` fails.
 struct Startup {
     tab_reach: focus::TabReachSource,
     helm: Option<farhelm_helm_client::HelmEndpoint>,
@@ -404,12 +404,19 @@ pub fn run(host: Host) {
                 _requested: requested,
                 _on_quit: on_quit,
             });
-            if let Err(error) = start(startup, cx) {
-                tracing::error!("the window could not open: {error:#}");
-                on_startup_failure(format!("{error:#}"));
-                cx.quit();
-            }
+            start_or_refuse(startup, on_startup_failure, cx);
         });
+}
+
+/// [`start`], with a failure handed to the host's [`Host::on_startup_failure`] and the app quit: a startup that failed
+/// has no window to say why in, so the host's refusal is the only report the user gets. Split out of [`run`] so a test
+/// can make the window fail to open on GPUI's test platform and see the failure reach the host.
+fn start_or_refuse(startup: Startup, on_startup_failure: Box<dyn FnOnce(String)>, cx: &mut App) {
+    if let Err(error) = start(startup, cx) {
+        tracing::error!("the window could not open: {error:#}");
+        on_startup_failure(format!("{error:#}"));
+        cx.quit();
+    }
 }
 
 #[cfg(test)]
@@ -511,6 +518,43 @@ mod tests {
                 "1970-01-01 00:00:00",
                 "UTC without the host's zone"
             );
+        });
+    }
+
+    /// A window that cannot open leaves the app with nowhere to show why, so the host's refusal is the user's only
+    /// report: the desktop binary's refusal prints one `farhelm-desktop: ` line and exits 1, killing the helm it
+    /// already started. The old native smoke test's missing-initialize leg checked the same for a web view that never
+    /// initialized. Nothing else reaches this branch; `run`'s one-line call into it and the desktop binary's own
+    /// handler are not run by any test (`scripts/gui-lifecycle.py` step 02 shows the same `refuse_and_exit` from the
+    /// pre-window path). Specified: on a test platform whose window renderer cannot be made (a machine with no usable
+    /// graphics driver), the whole startup gets past installing the app's state and fails at the window, that error
+    /// reaches `on_startup_failure` once, whole, and no window is left open. The quit that follows is not seen: GPUI's
+    /// test platform does nothing on quit.
+    #[test]
+    fn a_window_that_cannot_open_reaches_the_hosts_startup_failure_once() {
+        use std::sync::Arc;
+        let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+            assets::UI_FONT,
+        ));
+        let mut cx = gpui::HeadlessAppContext::with_platform(text_system, Arc::new(Assets), || {
+            Err(anyhow::anyhow!("no usable renderer"))
+        });
+        let reported = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = reported.clone();
+        cx.update(|cx| {
+            let failed = Box::new(move |error: String| record.borrow_mut().push(error));
+            start_or_refuse(startup_without_host_values(), failed, cx);
+        });
+        cx.run_until_parked();
+        let reported = reported.borrow();
+        assert_eq!(reported.len(), 1, "reported once: {reported:?}");
+        assert!(reported[0].contains("no usable renderer"), "{reported:?}");
+        cx.update(|cx| {
+            assert!(
+                cx.has_global::<local_state::LocalState>(),
+                "the premise: the startup installed the app's state before the window failed"
+            );
+            assert!(cx.windows().is_empty(), "no window is left open");
         });
     }
 
