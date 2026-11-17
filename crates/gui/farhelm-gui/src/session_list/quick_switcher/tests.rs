@@ -33,7 +33,8 @@ use serde_json::{Value, json};
 
 use super::{
     CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QUICK_ROW_HELP, QUICK_ROW_ID, QuickSwitcher, Read,
-    Selected, TEMPLATE_ROW_HELP, TEMPLATE_ROW_ID, mark_positions, matching_positions, ranked,
+    Selected, TEMPLATE_ROW_HELP, TEMPLATE_ROW_ID, Tier, best_match, mark_positions,
+    matching_positions, ranked,
 };
 use crate::actions::{QUICK_SWITCHER_CHORD, TEMPLATE_LIST_CHORD};
 use crate::focus::{self, TabReach};
@@ -85,14 +86,68 @@ fn row(fixture: Fixture, host: &str) -> SessionRow {
     serde_json::from_value(value).unwrap()
 }
 
-/// SPEC.md: "title matches come before matches only in host name or directory, with most recent activity first within
-/// each group", and nothing else reorders them. The old case is the spec: a scattered title match outranks a newer
-/// contiguous match in the host's name, and title matches keep the helm's order among themselves. Specified: over
-/// host (its host named `api-host`), scattered, contiguous and folder (its directory `/api`), in that activity order,
-/// `api` lists scattered, contiguous, host, folder; an empty query (and one of spaces, which is trimmed) lists all in
-/// the helm's order; a query nothing has lists nothing; an empty title does not match its own key.
+/// The tier decides where a row ranks within its group and which characters it marks, so the boundaries between the
+/// tiers are the spec's rules (SPEC.md's Cmd+K paragraph), not tuning. A word start that took camelCase into account,
+/// or that looked at lowered rather than original characters, would rank rows the rules put lower. Specified:
+/// - word starts: at the start of the value, after a space, after punctuation (`/`), after a combining accent written
+///   as its own character, and the first word-start occurrence even when an earlier mid-word one exists (`xapi api`
+///   marks the second `api`);
+/// - substring only: mid-word (`rapid`), at a camelCase boundary (`refactorTool`), after `İ`, whose last lowered
+///   character is a combining dot that is not a letter, and an occurrence starting partway through `İ`'s lowering;
+/// - scattered: the old leftmost alignment;
+/// - an empty query matches at a word start at no positions, and characters out of order match in no tier.
 #[test]
-fn title_matches_come_first_and_each_group_keeps_the_helms_order() {
+fn tiers_split_word_starts_from_substrings_from_scattered_matches() {
+    let best = best_match;
+    assert_eq!(best("api", "api"), Some((Tier::WordStart, vec![0, 1, 2])));
+    assert_eq!(
+        best("fix the API", "api"),
+        Some((Tier::WordStart, vec![8, 9, 10]))
+    );
+    assert_eq!(
+        best("/work/api", "api"),
+        Some((Tier::WordStart, vec![6, 7, 8]))
+    );
+    assert_eq!(
+        best("xapi api", "api"),
+        Some((Tier::WordStart, vec![5, 6, 7]))
+    );
+    // A combining accent written as its own character is not a letter, so the rule taken literally starts a word
+    // after it; `Tier::WordStart` documents this reading.
+    assert_eq!(
+        best("cafe\u{301}bar", "bar"),
+        Some((Tier::WordStart, vec![5, 6, 7]))
+    );
+
+    assert_eq!(best("rapid", "api"), Some((Tier::Substring, vec![1, 2, 3])));
+    assert_eq!(
+        best("refactorTool", "tool"),
+        Some((Tier::Substring, vec![8, 9, 10, 11]))
+    );
+    assert_eq!(best("İx", "x"), Some((Tier::Substring, vec![1])));
+    // ` İx` lowers to space, `i`, a combining dot, `x`: the query begins at the dot, inside `İ`'s lowering, and the
+    // character before `İ` is a space, so only the "begins its character" rule keeps this out of the word-start tier.
+    assert_eq!(best(" İx", "\u{307}x"), Some((Tier::Substring, vec![1, 2])));
+
+    assert_eq!(
+        best("a project implementation", "api"),
+        Some((Tier::Scattered, vec![0, 2, 10]))
+    );
+
+    assert_eq!(best("api", ""), Some((Tier::WordStart, vec![])));
+    assert_eq!(best("api", "pa"), None);
+}
+
+/// SPEC.md: title matches come before matches only in host name or directory, and within each group a word-start
+/// match before a substring match before a scattered one, with most recent activity first among equals. Without the
+/// tiers a scattered title match from a newer session is listed above a title holding exactly the query, which is
+/// what the user typed it to find. Specified: over host (its host named `api-host`), scattered, contiguous and folder
+/// (its directory `/api`), in that activity order, `api` lists contiguous, scattered, host, folder (the group still
+/// beats the tier, so a scattered title stays above an exact host); an empty query (and one of spaces, which is
+/// trimmed) lists all in the helm's order; a query nothing has lists nothing; an empty title does not match its own
+/// key.
+#[test]
+fn title_matches_come_first_and_each_group_ranks_by_tier() {
     let sessions = [
         row(session("host").title("first").cwd("/work"), "api-host"),
         row(
@@ -110,12 +165,55 @@ fn title_matches_come_first_and_each_group_keeps_the_helms_order() {
             .map(|index| sessions[index].info.id.as_str())
             .collect()
     };
-    assert_eq!(keys("api"), ["scattered", "contiguous", "host", "folder"]);
+    assert_eq!(keys("api"), ["contiguous", "scattered", "host", "folder"]);
     assert_eq!(keys(""), ["host", "scattered", "contiguous", "folder"]);
     assert_eq!(keys("   "), ["host", "scattered", "contiguous", "folder"]);
     assert_eq!(keys("absent"), Vec::<&str>::new());
     let empty = [row(session("empty").title("").cwd("/work"), "build")];
     assert_eq!(ranked(&empty, "empty"), Vec::<usize>::new());
+}
+
+/// Ties within a tier must keep the helm's activity order, or two equally good matches would swap places for no reason
+/// the user can see; and in the second group the better of host and directory must count, or a session whose host
+/// starts with the query would rank by its folder's weaker match. Both directions are pinned, so neither value is
+/// merely a fallback for the other. Specified: over, in activity order, a mid-word title (`rapid fix`), a scattered
+/// title, two word-start titles, a folder-only substring match (`/work/rapid`), a session matching at a word start in
+/// its host (`api-host`) but only mid-word in its folder (`/work/rapid`), and one matching only mid-word in its host
+/// (`rapid-host`) but at a word start in its folder (`/srv/api`), `api` lists the two word starts in activity order,
+/// then the mid-word title, the scattered title, the two sessions whose better value is a word start, and the
+/// folder-only substring match last.
+#[test]
+fn ties_keep_activity_order_and_the_second_group_takes_the_better_value() {
+    let sessions = [
+        row(session("mid").title("rapid fix").cwd("/work"), "build"),
+        row(
+            session("scattered")
+                .title("a project implementation")
+                .cwd("/work"),
+            "build",
+        ),
+        row(session("start").title("fix the api").cwd("/work"), "build"),
+        row(session("start2").title("api docs").cwd("/work"), "build"),
+        row(session("folder").title("x").cwd("/work/rapid"), "build"),
+        row(session("host").title("y").cwd("/work/rapid"), "api-host"),
+        row(session("dir").title("z").cwd("/srv/api"), "rapid-host"),
+    ];
+    let keys: Vec<&str> = ranked(&sessions, "api")
+        .into_iter()
+        .map(|index| sessions[index].info.id.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "start",
+            "start2",
+            "mid",
+            "scattered",
+            "host",
+            "dir",
+            "folder"
+        ]
+    );
 }
 
 /// Matching must read the host's raw value, never its escaped spelling: otherwise a session whose title hides a
@@ -178,6 +276,38 @@ fn marks_are_found_on_the_shown_spelling_of_a_matched_value() {
         mark_positions("anything", "anything", ""),
         Vec::<usize>::new()
     );
+}
+
+/// The marks tell the user why a row ranks where it does, so they must be the occurrence that earned the row's tier
+/// rather than the leftmost alignment, and the tier must come from the raw value: an escape is text with word starts
+/// of its own, and taking the best match on the shown spelling would mark inside an escape, which draws nothing.
+/// Specified: `xapi api` marks the word-start `api` at 5 to 7, not the earlier mid-word one; `rapid` marks its
+/// substring; a scattered title marks the leftmost alignment; and `v2` followed by U+200B, shown `v2<U+200B>`, marks
+/// the `2` at index 1 for the query `2` although the shown spelling's best match is the word start inside the escape.
+#[test]
+fn marks_show_the_occurrence_that_earned_the_tier() {
+    assert_eq!(mark_positions("xapi api", "xapi api", "api"), [5, 6, 7]);
+    assert_eq!(mark_positions("rapid", "rapid", "api"), [1, 2, 3]);
+    let scattered = "a project implementation";
+    assert_eq!(mark_positions(scattered, scattered, "api"), [0, 2, 10]);
+
+    let raw = "v2\u{200B}";
+    let shown = farhelm_proto::text::escaped(raw);
+    assert_eq!(
+        shown, "v2<U+200B>",
+        "the premise: the character shows as its escape"
+    );
+    assert_eq!(
+        best_match(raw, "2"),
+        Some((Tier::Substring, vec![1])),
+        "the premise: the raw title matches mid-word"
+    );
+    assert_eq!(
+        best_match(&shown, "2"),
+        Some((Tier::WordStart, vec![5])),
+        "the premise: the shown spelling's best match is inside the escape"
+    );
+    assert_eq!(mark_positions(raw, &shown, "2"), [1]);
 }
 
 // ---- The window ----------------------------------------------------------------------------------------------------

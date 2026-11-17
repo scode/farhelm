@@ -16,15 +16,21 @@
 //!   switcher closed reaches nobody, and never a switcher opened since. The read is a
 //!   plain command, not an operation: nothing waits on it but this dialog. Until it answers the switcher says
 //!   "Loading sessions…" and Enter picks nothing; a refusal says "Couldn't load sessions:" and the helm's words.
-//! - **Matching.** The old matcher exactly ([`matching_positions`], [`ranked`]): the trimmed query as a
+//! - **Matching.** Which sessions match is the old matcher's rule ([`matching_positions`]): the trimmed query as a
 //!   case-insensitive subsequence (lowercase mapping, not full case folding) of the title, the row's `host_name` or
-//!   its raw working directory; title matches first, then matches only in the host or the directory, each group in
-//!   the helm's activity order. Matching reads the raw values, so how a value is escaped on screen never changes
-//!   which sessions match.
+//!   its raw working directory. The order ([`ranked`]) puts title matches first, then matches only in the host or the
+//!   directory, and within each group ranks a row by how well it matched ([`Tier`]): the query at a word start, then
+//!   the query as an unbroken substring, then scattered. In the second group the better of the host and the directory
+//!   counts. The helm's activity order breaks ties. The tiers exist because activity order alone lists a scattered
+//!   title match from a recently active session above a title holding exactly what the user typed, which is usually
+//!   the one they are looking for. Matching reads the raw values, so how a value is escaped on screen never changes
+//!   which sessions match or how they rank.
 //! - **Marks.** A value whose raw form matched has its matched characters drawn in the accent at weight 600 (the old
-//!   `mark`; the fill's ink on the selected row), found again on the escaped spelling the user sees
-//!   ([`mark_positions`], [`host_text::marked`]). A value that did not match is never marked; one that matched only
-//!   through a character shown as an escape marks less or nothing, since no escape is drawn partly marked.
+//!   `mark`; the fill's ink on the selected row): the occurrence that earned the value its tier, found again on the
+//!   escaped spelling the user sees ([`mark_positions`], [`host_text::marked`]). Each drawn value (title, host,
+//!   directory) is marked at its own best occurrence, not only the value that decided the row's place. A value that
+//!   did not match is never marked; one that matched only through a character shown as an escape marks less or
+//!   nothing, since no escape is drawn partly marked.
 //! - **Host marks.** A session row draws its host's chosen mark before the host's name, the sidebar row's own mark
 //!   ([`row_marks::HostMark::of`], drawn by [`row_marks::host_mark`]) in the `--on-fill` ink on the selected row. The
 //!   switcher's read names each session's host only by id, so the mark comes from the registry the store holds as the
@@ -194,7 +200,8 @@ const KEY_CHIP_GAP: Pixels = px(5.);
 // ---- Matching -----------------------------------------------------------------------------------------------------------
 
 /// Where `query` occurs in `text` as a case-insensitive subsequence, as the original characters' indices; `None` when
-/// it does not. Ported unchanged from the old matcher, whose rules are the spec.
+/// it does not. This is the old matcher unchanged. It decides which values match at all, and it is the
+/// [`Tier::Scattered`] alignment that marks a value no better tier found.
 ///
 /// Both sides are compared through `char::to_lowercase`, which is lowercase mapping, not full case folding or
 /// Unicode normalization. Each query character takes the first matching character after the previous one (leftmost,
@@ -215,41 +222,139 @@ pub(crate) fn matching_positions(text: &str, query: &str) -> Option<Vec<usize>> 
     Some(positions)
 }
 
-/// The characters to mark in `shown`, the escaped spelling the user sees of the value `raw`: none unless `query` matches
-/// `raw` itself (the value took part in the match), and then where `query` occurs in `shown`, which may be nowhere. A
-/// value is matched on its raw form ([`ranked`]) but marked on what is shown, so a title found by typing an invisible
-/// character, which shows as its `<U+…>` escape, is listed with nothing marked, and a value that did not match is not
-/// marked because its escapes happen to spell the query, as in the old switcher.
-pub(crate) fn mark_positions(raw: &str, shown: &str, query: &str) -> Vec<usize> {
-    if matching_positions(raw, query).is_none() {
-        return Vec::new();
+/// How well a query matched one value, best first. This is the order rows take within a group ([`ranked`]), so the
+/// derived `Ord` is load-bearing: `WordStart < Substring < Scattered`.
+///
+/// Every value a query matches at all is in one of these tiers, because an unbroken occurrence is also a subsequence.
+/// The tiers only reorder what [`matching_positions`] already found; they never add or drop a match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Tier {
+    /// The query occurs unbroken starting at a word start: the start of the value, or right after a character that is
+    /// not a letter or digit (`char::is_alphanumeric`). There are no camelCase boundaries, so `factor` does not start
+    /// a word in `refactorTool` and `tool` does not either. The rule is taken literally for characters that are
+    /// neither: a combining accent written as its own character (`e` followed by U+0301) is not a letter, so `bar`
+    /// starts a word in such a `cafébar`, and a query starting with punctuation (`/api`) matches `/work/api` only as a
+    /// substring, because the `k` before its `/` is a letter.
+    WordStart,
+    /// The query occurs unbroken somewhere, but never at a word start.
+    Substring,
+    /// The query's characters occur in order with gaps, and nowhere unbroken.
+    Scattered,
+}
+
+impl Tier {
+    /// The tiers in the order a value is tried against them, best first.
+    const BEST_FIRST: [Tier; 3] = [Tier::WordStart, Tier::Substring, Tier::Scattered];
+}
+
+/// Where `query` occurs in `text` the way `tier` asks, as the original characters' indices; `None` when it does not.
+///
+/// The unbroken tiers take the first (leftmost) occurrence that qualifies. For [`Tier::Substring`] any unbroken
+/// occurrence qualifies, a word-start one included, since a caller asks for it only when it wants "the first
+/// substring occurrence" of a value no word start was found in, or on a spelling ([`mark_positions`]) that may differ
+/// from the one the tier was earned on. [`Tier::Scattered`] is [`matching_positions`]. Comparison is the same
+/// lowercase mapping as there, over the same sequence of lowered characters: an occurrence may begin or end partway
+/// through a character that lowercases to several, and its positions are the original characters it touches, each
+/// listed once. An empty query matches at no positions in every tier.
+fn find(text: &str, query: &str, tier: Tier) -> Option<Vec<usize>> {
+    if tier == Tier::Scattered {
+        return matching_positions(text, query);
     }
-    matching_positions(shown, query).unwrap_or_default()
+    let wanted: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
+    if wanted.is_empty() {
+        // `windows(0)` would panic, and the row-drawing code does ask with an empty query.
+        return Some(Vec::new());
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let folded: Vec<(usize, char)> = chars
+        .iter()
+        .enumerate()
+        .flat_map(|(index, ch)| ch.to_lowercase().map(move |ch| (index, ch)))
+        .collect();
+    // A word start is judged on the original characters, not the lowered ones: in `İx` the character before `x` is
+    // `İ`, a letter, even though the last lowered character is a combining dot, which is not. An occurrence that
+    // begins partway through a character's lowering starts no word, since its first character is not one the user
+    // can see on its own.
+    let starts_word = |start: usize| {
+        let index = folded[start].0;
+        let begins_its_character = start == 0 || folded[start - 1].0 != index;
+        begins_its_character && (index == 0 || !chars[index - 1].is_alphanumeric())
+    };
+    folded
+        .windows(wanted.len())
+        .enumerate()
+        .find(|(start, window)| {
+            window.iter().map(|(_, ch)| *ch).eq(wanted.iter().copied())
+                && (tier == Tier::Substring || starts_word(*start))
+        })
+        .map(|(_, window)| {
+            let mut positions: Vec<usize> = window.iter().map(|(index, _)| *index).collect();
+            positions.dedup();
+            positions
+        })
+}
+
+/// The best tier `query` reaches in `text`, with the occurrence that earned it: the first word-start occurrence,
+/// otherwise the first unbroken one, otherwise the leftmost scattered alignment. `None` when `query` does not match
+/// `text` at all.
+fn best_match(text: &str, query: &str) -> Option<(Tier, Vec<usize>)> {
+    Tier::BEST_FIRST
+        .into_iter()
+        .find_map(|tier| find(text, query, tier).map(|positions| (tier, positions)))
+}
+
+/// The characters to mark in `shown`, the escaped spelling the user sees of the value `raw`: none unless `query` matches
+/// `raw` itself (the value took part in the match), and then the occurrence in `shown` of the tier `raw` earned, which
+/// may be nowhere. A value is matched on its raw form ([`ranked`]) but marked on what is shown, so a title found by
+/// typing an invisible character, which shows as its `<U+…>` escape, is listed with nothing marked, and a value that
+/// did not match is not marked because its escapes happen to spell the query, as in the old switcher.
+///
+/// The tier comes from `raw` rather than from the best match in `shown` because an escape is itself text with word
+/// starts in it: `v2` followed by U+200B shows as `v2<U+200B>`, and the best match of `2` there is the word start
+/// inside the escape, which is never drawn marked, while the `2` that earned the title its substring tier is index 1.
+/// What remains is a smaller miss the old switcher had too: an earlier occurrence of the same tier inside an escape
+/// still marks nothing.
+pub(crate) fn mark_positions(raw: &str, shown: &str, query: &str) -> Vec<usize> {
+    let Some((tier, _)) = best_match(raw, query) else {
+        return Vec::new();
+    };
+    find(shown, query, tier).unwrap_or_default()
 }
 
 /// The sessions of `sessions` (the helm's activity order) that `query` finds, as indices into it, in the order the
-/// switcher lists them: every title match first, then every session that matches only in its host's name or its
-/// working directory, each group keeping the helm's order. No score and no other sort: a scattered title match still
-/// comes before a contiguous match in a folder, and among title matches the most recently active comes first.
+/// switcher lists them. Every title match comes first, then every session that matches only in its host's name or its
+/// working directory. Within each group rows are ordered by [`Tier`], the title's tier in the first group and the
+/// better of the host's and the directory's in the second, and rows of the same tier keep the helm's order, so among
+/// equally good matches the most recently active comes first. A scattered title match still comes before an exact
+/// match in a folder: the group outranks the tier.
 ///
 /// The query is trimmed first. Matching reads the raw values (the title, `host_name` and `cwd` as the host wrote
 /// them), so a hidden character in a title is found by typing it, and typing its escaped spelling (`<U+200B>`) finds
-/// nothing.
+/// nothing. An empty query matches every row in one tier, which leaves the helm's order as it is.
 pub(crate) fn ranked(sessions: &[SessionRow], query: &str) -> Vec<usize> {
-    let query = query.trim();
-    let mut titles = Vec::new();
-    let mut elsewhere = Vec::new();
-    for (index, row) in sessions.iter().enumerate() {
-        if matching_positions(&row.info.title, query).is_some() {
-            titles.push(index);
-        } else if matching_positions(&row.host_name, query).is_some()
-            || matching_positions(&row.info.cwd, query).is_some()
-        {
-            elsewhere.push(index);
-        }
+    /// Which group a row is in, title matches first; the derived `Ord` is the group order.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Group {
+        Title,
+        Elsewhere,
     }
-    titles.extend(elsewhere);
-    titles
+    let query = query.trim();
+    let tier = |text: &str| best_match(text, query).map(|(tier, _)| tier);
+    let mut found: Vec<(Group, Tier, usize)> = sessions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| match tier(&row.info.title) {
+            Some(title) => Some((Group::Title, title, index)),
+            None => [tier(&row.host_name), tier(&row.info.cwd)]
+                .into_iter()
+                .flatten()
+                .min()
+                .map(|elsewhere| (Group::Elsewhere, elsewhere, index)),
+        })
+        .collect();
+    // Stable, so the helm's activity order survives within each (group, tier).
+    found.sort_by_key(|(group, tier, _)| (*group, *tier));
+    found.into_iter().map(|(_, _, index)| index).collect()
 }
 
 // ---- Opening ------------------------------------------------------------------------------------------------------------
