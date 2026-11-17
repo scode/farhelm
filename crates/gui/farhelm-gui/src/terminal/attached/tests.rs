@@ -1606,6 +1606,48 @@ fn detached_refused_and_closed_streams_keep_the_red_band(cx: &mut TestAppContext
     assert!(!h.card_drawn());
 }
 
+/// Why: the helm detaches a viewer as stalled because it stopped reading its output; an attach that came back by
+/// itself would stall again and again behind the user's back, so after a stall only the user's Reconnect may attach
+/// (the stream stops in its detached state for exactly this). The owner has two ways it could attach on its own, the
+/// stream's take-control and a fresh stream through its opener, and must use neither. Spec (old `grid-attach.spec.ts`,
+/// "a grid attachment detached as stalled shows why and does not reconnect"): a live terminal detached as stalled shows
+/// "Detached: " with the helm's reason; a minute later, well past the stream's longest reconnect wait and the
+/// restarts' last rung, the owner has sent the stream nothing (no take-control, no reconnect now, no close), the stream
+/// is still detached, and the band still shows the reason; the user's Reconnect then sends one take-control.
+#[gpui::test]
+fn a_stalled_detach_attaches_again_only_when_the_user_asks(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    drop(h.fake().received());
+    h.fake()
+        .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
+    settle(h.cx);
+    let detached = |h: &mut Harness| {
+        h.status()
+            .map(|line| (line.words, line.reason.as_ref().map(|r| r.raw().to_owned())))
+    };
+    let shown = Some(("Detached: ".into(), Some(DETACH_REASON_STALLED.to_owned())));
+    assert_eq!(detached(&mut h), shown, "the premise: the band says why");
+
+    // An absence over a window of the test clock. The longest wait of either way of attaching again is 15 s (the
+    // stream ladder's last active rung, and the restarts' after a fault), so a minute covers any timer that would fire.
+    advance(h.cx, Duration::from_secs(60));
+    assert_eq!(
+        h.fake().received(),
+        [],
+        "nothing asked the stream to attach again"
+    );
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Detached,
+        "and no new stream replaced it"
+    );
+    assert_eq!(detached(&mut h), shown);
+
+    click(h.cx, STATUS_RECONNECT_ID);
+    assert_eq!(h.fake().received(), [FakeTerminalRequest::TakeControl]);
+}
+
 // ---- Protocol faults -----------------------------------------------------------------------------------------------
 
 /// The grid model's words for the fault these tests make: a second hello on one attachment.
@@ -2682,8 +2724,19 @@ impl Harness<'_> {
     }
 
     /// Whether the shown screen follows the bottom.
-    fn following(&mut self) -> bool {
+    pub(in crate::terminal) fn following(&mut self) -> bool {
         self.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).is_following())
+    }
+
+    /// Scroll the shown screen by `lines` whole lines (negative into history), as the wheel, the page keys and the
+    /// scrollbar all end up doing, and draw the frame after it. For tests outside this module that need the view moved
+    /// under a resting pointer without going through one of those inputs' own rules.
+    pub(in crate::terminal) fn scroll_view(&mut self, lines: i64) {
+        let view = self.read(|owner, _| owner.committed.clone().unwrap());
+        self.cx
+            .update(|_, cx| view.update(cx, |view, cx| view.scroll_lines(lines, cx)));
+        settle(self.cx);
+        redraw(self.cx);
     }
 
     /// One wheel event over the middle of the grid: `lines` notches, positive toward older lines.
