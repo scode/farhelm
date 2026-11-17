@@ -768,7 +768,8 @@ systemd or SSH substrate ran.
   scenes), a failed or timed-out step, a failed `stop`, a golden the manifest names for no platform or a named picture
   the fetched directory lacks failing the batch, every platform's goldens copied wherever the batch runs, and run
   directories removed when clean and kept when not, and scenes with their own `start` options getting an app run of
-  their own while the rest share the list's `app_start`. Seconds; needs neither the app nor the reference set. The batch
+  their own while the rest share the list's `app_start`, and a scene whose `sizes` limits it run only at those sizes,
+  with the page giving its `sizes_why` for the others. Seconds; needs neither the app nor the reference set. The batch
   itself is a tool, not a gate. Run the tests when the script or the scene list changes, or the golden manifest gains or
   loses a scene.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits

@@ -27,11 +27,14 @@ otherwise from what `scripts/gui-goldens.py fetch` writes. App scenes are captur
 per app variant the list names (a theme and a window size): the bridge has no theme or resize command, so each variant
 is its own app run, started with `gui-agent.py start --appearance --window-size`. The list's `app_start` names the
 start options (the fleet to seed) its scenes share; a scene that needs another fleet (none at all, say) names its own
-`start`, and the scenes with the same options share an app run, in list order. On Linux each capture is cropped to
-the app's own drawing (`LINUX_FRAME` says why). A reference scene not marked ported is listed on the page as "not yet
-ported"; a capture that this batch did not make says "not captured in this batch" instead, so a missing picture is
-never read as missing work. An entry marked as a mockup is labelled one and never counts as evidence that something is
-built. `--touched` lists scenes changed since the last batch first, so a reviewer sees what moved.
+`start`, and the scenes with the same options share an app run, in list order. A scene that cannot be shown at some
+window size (a pane too narrow for what it shows) lists the size names it is captured at in `sizes`, with a one-line
+`sizes_why`: it is not run, and not counted as failed, in the other sizes' variants. On Linux each capture is cropped
+to the app's own drawing (`LINUX_FRAME` says why). A reference scene not marked ported is listed on the page as "not
+yet ported"; a capture that this batch did not make says "not captured in this batch" instead, and a size a scene's
+`sizes` leaves out says "not captured at <size>" with its `sizes_why`, so a missing picture is never read as missing
+work. An entry marked as a mockup is labelled one and never counts as evidence that something is built. `--touched`
+lists scenes changed since the last batch first, so a reviewer sees what moved.
 
 Each app run's directory (its state, logs and the helm credential `gui-agent.py` writes for seeding) lives in a fresh
 directory under /tmp, never under OUT_DIR, so the output can be handed on as is. A run that stopped cleanly is deleted;
@@ -137,7 +140,8 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
     The page's sections are keyed by scene id, so ids must be unique across app scenes, goldens (`golden-<name>`) and
     reference scenes. A `reference` must name a listed reference scene, or the page would show "unknown reference
     scene" only once someone looks. Every golden the manifest names must be listed and every listed golden in the
-    manifest, so the page shows the whole foundation set.
+    manifest, so the page shows the whole foundation set. An app scene's `sizes` must name sizes the variants have and
+    come with its `sizes_why` ([`size_problems`]), or a typo would drop a scene from every variant without a word.
     """
     problems: list[str] = []
     for key in ("reference_commit", "app_variants", "app_scenes", "foundation_goldens", "reference_scenes"):
@@ -181,6 +185,7 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
             problems.append(f"app scene {entry['id']}: start must be a list of strings")
         elif owned := owned_options(start):
             problems.append(f"app scene {entry['id']}: start may not set {', '.join(owned)}, which the batch sets")
+        problems += size_problems(entry, {size for _, size in variants})
     for entry in scenes["foundation_goldens"]:
         if not {"golden", "title"} <= set(entry):
             problems.append(f"foundation golden needs golden and title: {entry}")
@@ -214,6 +219,42 @@ def owned_options(start: list[str]) -> list[str]:
     without `=value`, or an abbreviation of one, since argparse takes any unambiguous prefix (`--appear dark`)."""
     names = {word.split("=", 1)[0] for word in start if word.startswith("--") and len(word) > 2}
     return sorted(option for option in BATCH_START_OPTIONS if any(option.startswith(name) for name in names))
+
+
+def size_problems(entry: dict, size_names: set[str]) -> list[str]:
+    """What is wrong with an app scene's `sizes` and `sizes_why`, given the size names the list's variants have.
+
+    `sizes` limits a scene to the variants of those sizes, for a scene that cannot be shown at the others (a window too
+    small for what it shows), so it must be a non-empty list of known size names: an empty list or a misspelt size
+    would quietly drop the scene from variants it was meant for. `sizes_why` is the one line the page shows where the
+    skipped capture would be, so a skip is never read as missing work: `sizes` without it would leave a hole the page
+    cannot explain, and it without `sizes` would explain nothing.
+    """
+    has_sizes, has_why = "sizes" in entry, "sizes_why" in entry
+    if not has_sizes and not has_why:
+        return []
+    scene = f"app scene {entry['id']}"
+    if not has_sizes:
+        return [f"{scene}: sizes_why needs sizes, the sizes the scene is captured at"]
+    problems = []
+    sizes, why = entry["sizes"], entry.get("sizes_why")
+    if not (isinstance(sizes, list) and sizes and all(isinstance(size, str) for size in sizes)):
+        problems.append(f"{scene}: sizes must be a non-empty list of size names")
+    elif unknown := sorted(set(sizes) - size_names):
+        problems.append(f"{scene}: sizes names {', '.join(unknown)}, which no app variant has")
+    elif size_names <= set(sizes):
+        # Listing every size limits nothing, and leaves a reason the page never shows to outlive whatever it explained.
+        problems.append(f"{scene}: sizes leaves no size out; drop sizes and sizes_why")
+    if not has_why:
+        problems.append(f"{scene}: sizes needs sizes_why, the one-line reason it is not captured at the other sizes")
+    elif not (isinstance(why, str) and why.strip() and "\n" not in why):
+        problems.append(f"{scene}: sizes_why must be a non-empty string of one line")
+    return problems
+
+
+def captured_at(entry: dict, size: str) -> bool:
+    """Whether an app scene is captured in the variants of `size`: always, unless the scene's `sizes` leaves it out."""
+    return size in entry.get("sizes", [size])
 
 
 def load_scenes(path: Path = SCENE_LIST, manifest: Path = GOLDEN_MANIFEST) -> dict:
@@ -398,7 +439,9 @@ def capture(
     so an interrupted or failed start is still followed by `stop` whenever it made the run directory. A start that
     failed is recorded under `start_failures` (also when the list has no app scenes to blame it on) and a `stop` that
     failed under `stop_failures`. `lock` is passed to every `start` (a shared GUI session's lock, as on the test Mac).
-    Only the first run builds. On Linux each capture is cropped to the app's own drawing (`LINUX_FRAME` says why).
+    Only the first run builds. On Linux each capture is cropped to the app's own drawing (`LINUX_FRAME` says why). A
+    scene whose `sizes` does not list a variant's size is left out of that variant's runs (the comment in the loop
+    below says how).
 
     `agent`, `runs`, `manifest`, `platform`, `commit` and `step_timeout` exist so the self-test can drive a fake harness
     without touching the real checkout.
@@ -445,7 +488,12 @@ def capture(
         # The window is asked larger by the frame (and, on Linux, the window's own title bar) so that, once they are
         # cropped, the app's drawing is the size the variant names (and the size the old app's pictures of it have).
         window = (width + 2 * frame, height + 2 * frame + bar)
-        for group, (extra, group_scenes) in enumerate(start_groups(scenes["app_scenes"], scenes.get("app_start", []))):
+        # A scene whose `sizes` leaves this size out is dropped before grouping rather than skipped inside its run, so
+        # it is neither run nor recorded as failed here, and a start group left with no scene at this size makes no
+        # app run of its own (the page names the skipped size instead). When no scene at all is left at this size, the
+        # variant gets the one bare run `start_groups` gives an empty list, which still proves the app starts.
+        variant_scenes = [entry for entry in scenes["app_scenes"] if captured_at(entry, size)]
+        for group, (extra, group_scenes) in enumerate(start_groups(variant_scenes, scenes.get("app_start", []))):
             # The first group keeps the plain `<theme>-<size>` name; a later one, its own app run, is numbered.
             run = runs / (f"{theme}-{size}" if group == 0 else f"{theme}-{size}-{group}")
             label = f"{theme} {size}" + (f" ({' '.join(extra)})" if extra else "")
@@ -562,11 +610,16 @@ def build_page(
     word; the page names them, and `page` repeats them on stderr). Pure apart from reading image headers and copying
     references when asked.
 
-    Three labels keep a reviewer from misreading an empty slot: "not yet ported" (a reference scene the scene list does
+    Four labels keep a reviewer from misreading an empty slot: "not yet ported" (a reference scene the scene list does
     not mark ported), "not captured in this batch" (an app scene or golden this batch has no picture of, with no
-    recorded failure) and "capture failed: ..." (a recorded failure).
+    recorded failure), "capture failed: ..." (a recorded failure) and "not captured at <size>: <sizes_why>" (a size an
+    app scene's `sizes` leaves out, which the scene list decides, so it shows whatever the batch captured). The last
+    is shown once per size, not per theme, and beside the other labels rather than in place of them: a page made
+    without a capture still says "not captured in this batch" for the sizes the scene does list.
     """
     by_id = {s["id"]: s for s in reference}
+    # The variants' size names in list order, once each, so a skipped size's label comes in the order the list names it.
+    variant_sizes = list(dict.fromkeys(variant["size"] for variant in scenes["app_variants"]))
     ported = {s["id"] for s in scenes["reference_scenes"] if s.get("ported")}
     listed = {s["id"] for s in scenes["reference_scenes"]}
 
@@ -596,21 +649,29 @@ def build_page(
         parts = [img(ref_src(rel), f"{theme} {size}") for theme, sizes in files.items() for size, rel in sizes.items()]
         return "".join(parts) or f'<p class="none">not captured: {html.escape(scene.get("reason", ""))}</p>'
 
-    def capture_cell(paths: list[tuple[str, str]], errors: list[str], mockup: bool) -> str:
+    def capture_cell(paths: list[tuple[str, str]], errors: list[str], mockup: bool, skipped: list[str]) -> str:
         parts = []
         for rel, label in paths:
             size = png_size(out / rel)
             tag = f"{label} ({size[0]}x{size[1]})" if size else label
             parts.append(img(rel, ("MOCKUP " if mockup else "") + tag))
         parts += [f'<p class="missing">capture failed: {html.escape(e)}</p>' for e in errors]
-        return "".join(parts) or '<p class="none">not captured in this batch</p>'
+        # The skipped sizes' notes come after the fallback is decided, so they never stand in for it.
+        return ("".join(parts) or '<p class="none">not captured in this batch</p>') + "".join(skipped)
+
+    def skipped_sizes(entry: dict) -> list[str]:
+        """The "not captured at <size>" notes for the sizes an app scene's `sizes` leaves out, in grey like the other
+        notes that are not failures (`none`, not `missing`)."""
+        why = html.escape(entry.get("sizes_why", ""))
+        return [f'<p class="none">not captured at {html.escape(size)}: {why}</p>'
+                for size in variant_sizes if not captured_at(entry, size)]
 
     errors = captures.get("errors", {})
     rows: list[tuple[str, str]] = []
     for entry in scenes["app_scenes"]:
         shots = captures.get("app", {}).get(entry["id"], {})
         paths = [(rel, f"{theme} {size}") for theme, sizes in shots.items() for size, rel in sizes.items()]
-        cell = capture_cell(paths, errors.get(entry["id"], []), entry.get("mockup", False))
+        cell = capture_cell(paths, errors.get(entry["id"], []), entry.get("mockup", False), skipped_sizes(entry))
         rows.append((entry["id"], row(entry["id"], entry["title"], cell, reference_cell(entry.get("reference")),
                                       "mockup" if entry.get("mockup") else "app")))
     for entry in scenes["foundation_goldens"]:
@@ -619,7 +680,7 @@ def build_page(
         # Goldens are copies, so every platform's are shown wherever the batch ran; the label says whose each one is.
         paths = [(rel, f"golden, {platform}, {theme}") for platform, themes in sorted(shots.items())
                  for theme, rel in sorted(themes.items())]
-        cell = capture_cell(paths, errors.get(key, []), False)
+        cell = capture_cell(paths, errors.get(key, []), False, [])
         rows.append((key, row(key, entry["title"], cell, reference_cell(entry.get("reference")), "foundation")))
     for scene in reference:
         state = "ported" if scene["id"] in ported else "not yet ported"

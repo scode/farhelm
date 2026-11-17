@@ -71,12 +71,13 @@ those stay unported with their app scenes beside them.
 reference set's, and the window size in pixels), `app_start` (the `gui-agent.py start` options, such as the fleet to
 seed, of every app run whose scenes name none), `reference_scenes` (each reference id and whether it is ported),
 `app_scenes` (an id, a title, the related reference id, whether it is a mockup, the bridge commands that reach the scene
-before the screenshot, and, for a scene that needs another app run than `app_start`'s, its own `start` options) and
-`foundation_goldens`. When an area ports a scene, it adds the app scene that shows it and marks the reference scene
-ported once that scene's subject is complete. Both `capture` and `page` refuse a list that is not well formed (duplicate
-ids, a reference to an unlisted scene, malformed steps or variants, `start` options the batch sets itself, a golden the
-golden manifest names but the list lacks, or a listed one the manifest does not name), and the page flags any reference
-scene the list forgot.
+before the screenshot, for a scene that needs another app run than `app_start`'s its own `start` options, and for a
+scene limited to some window sizes its `sizes` and `sizes_why`) and `foundation_goldens`. When an area ports a scene, it
+adds the app scene that shows it and marks the reference scene ported once that scene's subject is complete. Both
+`capture` and `page` refuse a list that is not well formed (duplicate ids, a reference to an unlisted scene, malformed
+steps or variants, `start` options the batch sets itself, a malformed `sizes` or one without its `sizes_why`, a golden
+the golden manifest names but the list lacks, or a listed one the manifest does not name), and the page flags any
+reference scene the list forgot.
 
 The scenes that share start options share one app run per variant and run in list order, so each scene's steps begin
 where the one before it left the app (the Delete scene closes the menu the row-menu scene opened, the rename scene
@@ -84,6 +85,17 @@ answers Cancel to the Delete question). A scene that needs another fleet names i
 for the empty one, and gets an app run of its own; the template and quick-launch scenes start with `--templates`, which
 seeds their launch templates (`docs/gui-agent.md`, "Seeded templates"). A new scene goes into the group whose state it
 can start from, and its steps leave the app the way the next scene in that group expects.
+
+A scene that cannot be shown at some window size lists the size names it is captured at in `sizes` (a non-empty list of
+sizes the app variants have) and says why in `sizes_why`, one line; each needs the other. `app-terminal-tabs` is
+captured only at `wide`, for example: the narrow window's terminal pane is below the width down to which SPEC.md keeps
+the session's top row whole, so its tab strip has no room for New terminal. Such a scene is not run in the other sizes'
+variants and is not counted as failed there, and the page says "not captured at narrow" with the reason where that
+capture would be, never "not captured in this batch" or "not yet ported" for that size. In those variants every later
+scene of its group runs without the limited scene's steps (from where the scene before it left the app, or from a fresh
+app when the limited scene was the group's first), so none may depend on what a limited scene leaves behind. A `sizes`
+that lists every size is refused: it limits nothing. Keep `sizes` for a scene the size cannot hold at all, not one that
+fails there for a reason that can be fixed.
 
 `python3 -B scripts/test-gui-screenshot-batch.py` tests the page from fixtures and the capture step against a fake
 harness; it needs neither the app nor the reference set.

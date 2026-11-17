@@ -651,6 +651,8 @@
       "reference": null,
       "mockup": false,
       "start": ["--sessions", "1"],
+      "sizes": ["wide"],
+      "sizes_why": "the narrow window's terminal pane (about 500 px) is below SPEC.md's 650 px floor for the session's top row, where the tab strip may shrink to nothing",
       "steps": [
         ["click", "text:Fixture 1"],
         ["terminal-text", "--wait", "\n>"],
