@@ -17,8 +17,8 @@ its size and software in a saved recipe, then start [sessions](/docs/using/start
 When it is suspended, its processes and sessions stay intact, and you [resume it](#suspend-and-resume) where you left
 off.
 
-An agent can also [give a session its own sandbox](#give-each-session-its-own-sandbox), created when the session starts
-and deleted together with the last session in it.
+You can also [give a session its own sandbox](#give-each-session-its-own-sandbox), created when the session starts and
+deleted together with the last session in it.
 
 Sandboxes bill while running, including while their agents are idle. Snapshot storage also costs money, including while
 a sandbox is suspended; see [Tensorlake pricing](https://www.tensorlake.ai/pricing) for current terms. Building a
@@ -184,18 +184,43 @@ images still in use must be released first.
 
 ## Give each session its own sandbox
 
-A sandbox session runs in a Tensorlake sandbox of its own, created from a recipe when the session starts. An agent
-starts one with `farhelm agent create --recipe <name>`, and Farhelm shows a card for it every time
-([New sandboxes and containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers)). If you type the
-command in a session's terminal yourself, it asks the same way. The recipe needs a built Tensorlake snapshot first. The
-session starts in the sandbox's home directory, or with `--gh` in a fresh
-[managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) there. **Restart** and **Replace** keep
-the existing sandbox and its files.
+A sandbox session runs in a Tensorlake sandbox of its own, created from a recipe when the session starts. The recipe
+needs a built Tensorlake snapshot first.
 
-**Suspend** freezes the entire sandbox with its processes intact; **Resume** continues them. **Stop** ends the agent and
-its terminal tabs while the sandbox keeps running and billing. **Stop and suspend** does both. A session sandbox uses a
-30-minute idle timeout after its connection from Farhelm ends. (On Tensorlake's Usage Credits plan, an ordinary host
-sandbox instead suspends after 24 hours without a connection from Farhelm.)
+In the [session launcher](/docs/using/start-a-session/#choose-where-it-runs), choose **New sandbox** under **Runs on**,
+then a **Recipe**. **New sandbox** shows once a Tensorlake API key is saved. Each recipe is listed with its CPUs and
+memory, and one that cannot start a sandbox yet is unavailable with the reason, such as **No snapshot yet** or a missing
+SSH key that you create in Settings → **Tensorlake**. **Folder** is fixed to the sandbox's home directory, without
+**Browse** or recent directories; choose **Managed checkout** to clone a repository inside the sandbox instead. Below
+**Folder**, once Farhelm's SSH key exists, the launcher shows the command that registers that key with Tensorlake, with
+**Copy registration command**, because Farhelm cannot check whether you have run it. The **Agent** and **Command** tabs
+both work.
+
+**Launch** first asks **Create a sandbox for this session?** under the launcher's buttons. The question names the recipe
+with its CPU, memory and disk, says what bills while the sandbox runs and while it is suspended, and links Tensorlake
+pricing. **Cancel**, where focus starts, creates nothing and keeps your choices; **Create and launch** creates the
+sandbox and starts the session. Changing anything in the launcher withdraws the question, and the next **Launch** asks
+again. **Create Tensorlake sandboxes without asking** in Settings → **Tensorlake** skips it. While the sandbox is
+created, the launch's progress names each step: preparing the recipe's snapshot when needed, creating the sandbox, and
+starting Farhelm in it.
+
+A [launch template](/docs/using/launch-templates/) can choose **New sandbox** and a recipe too. Started with its
+[quick-launch or number key](/docs/using/launch-templates/#quick-launch), it opens the launcher on the same question,
+unless that setting skips it. **Save as template** is not offered for a new sandbox. **Clone** of a sandbox session does
+not make a new sandbox: it opens the launcher on an ordinary host, with a note under **Host** saying the source's host
+was not carried over. Opening **+** (New session) while a sandbox session is open starts on the machine you are using,
+not on the sandbox or its recipe.
+
+An agent starts a sandbox session with `farhelm agent create --recipe <name>`, and Farhelm shows a card for it every
+time ([New sandboxes and containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers)). If you type the
+command in a session's terminal yourself, it asks the same way. The session starts in the sandbox's home directory, or
+with `--gh` in a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) there.
+
+**Restart** and **Replace** keep the existing sandbox and its files. **Suspend** freezes the entire sandbox with its
+processes intact; **Resume** continues them. **Stop** ends the agent and its terminal tabs while the sandbox keeps
+running and billing. **Stop and suspend** does both. A session sandbox uses a 30-minute idle timeout after its
+connection from Farhelm ends. (On Tensorlake's Usage Credits plan, an ordinary host sandbox instead suspends after 24
+hours without a connection from Farhelm.)
 
 These sandboxes appear in **Hosts** and the sidebar's update and problem notices, without permanent navigation rail
 icons. A sandbox left by interrupted setup or failed cleanup stays listed there. Agents in sandbox sessions can ask
@@ -266,13 +291,18 @@ removes Farhelm's token file, leaving any Git authentication you configured your
 
 ## Suspend and resume
 
-Suspending keeps a sandbox's processes, files and sessions intact. Farhelm cannot suspend a sandbox host; delete it to
-stop its billing. **Hosts** shows a suspended host as **Suspended**. To continue it, open one of its sessions and choose
-**Resume host**: Farhelm shows **Resuming…**, then **Connecting** until it can reach the host again. A suspended host
-with no sessions cannot be resumed from Farhelm; you can only [delete it](#delete-a-sandbox).
+Suspending keeps a sandbox's processes, files and sessions intact, and stops its CPU and memory billing; snapshot
+storage still bills. To suspend a sandbox host, choose **Suspend** in its `⋯` menu in **Hosts**. Farhelm checks the
+host's sessions first and suspends at once only when none of their agents is working. Otherwise, or when it cannot check
+them, it asks first, with focus on **Cancel**, because suspending freezes any agent still at work. The host shows
+**Suspending…** while Tensorlake suspends it, then **Suspended**.
 
-A [sandbox session](#give-each-session-its-own-sandbox) has its own **Suspend** and **Resume**, and its sandbox shows
-**Suspending…** or **Resuming…** while they run.
+A suspended host has **Resume** on its row in **Hosts** and in its menu, and an open session on it offers **Resume
+host**. Resume does not ask. Farhelm shows **Resuming…**, then **Connecting** until it can reach the host again, and the
+open session's terminal reconnects as soon as the host is back.
+
+A [sandbox session](#give-each-session-its-own-sandbox) has its own **Suspend** and **Resume** in its menu too, which
+act on the whole sandbox, and the same **Suspend** and **Resume** in **Hosts** work on its sandbox.
 
 On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm, for
 example while the helm's machine is asleep. An idle agent while Farhelm stays connected does not start that countdown.

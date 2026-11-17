@@ -30,17 +30,19 @@ keeps the host, directory, and name.
 ## Choose where it runs
 
 **Where** chooses between an existing directory (**Folder**) and a new [managed
-checkout](#start-from-a-managed-checkout). When you have a host that can run containers, **Runs on** also chooses
-between **Existing host** and **New container**. [Container sessions](/docs/agents/containerized-sessions/) use a recipe
-and a Linux container host, and can clone a managed checkout inside or start in the new container's home. The host and
-directory controls below apply to **Existing host**.
+checkout](#start-from-a-managed-checkout). **Runs on** chooses between **Existing host** and a new environment made for
+this session: **New container** when you have a host that can run containers, and **New sandbox** once a Tensorlake API
+key is saved. [Container sessions](/docs/agents/containerized-sessions/) use a recipe and a Linux container host;
+[sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) use a recipe and your Tensorlake
+account, and Farhelm asks before creating the billed sandbox. Either can clone a managed checkout inside or start in
+the new environment's home. The host and directory controls below apply to **Existing host**.
 
 With no session open, the **Host** menu starts on the machine you are using, listed as **Local (this machine)**. A host
 that is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch
 on it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
 The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
-you have not launched an agent there yet; a launch into a new managed checkout or a new container does not count. With
+you have not launched an agent there yet; a launch into a new managed checkout, a new container or a new sandbox does not count. With
 a session open on the same host, it starts at that session's directory instead. Changing the host switches to that
 host's directory, unless you typed or picked one yourself. With **Folder** chosen, the launcher also checks the
 directory on a connected host: if it does not exist there, or is not a directory, a warning under the field names the
@@ -197,7 +199,7 @@ can also type `gh:owner/repo` in the search box and choose **Managed checkout: o
 repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 On an existing connected host, the launcher shows the directory the clone will go into before launch, and the launch
-button waits until it does. A new container picks its directory inside after the container is ready.
+button waits until it does. A new container or sandbox picks its directory inside once it is ready.
 [Quick launch](/docs/using/launch-templates/#quick-launch) creates that directory directly: marking the template means
 you have chosen to start it without seeing the path first. Giving it a number key makes the same choice.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
@@ -295,6 +297,12 @@ There is no supported Claude switch for this. Farhelm edits Claude's own setting
 a Claude session exiting at the same instant can lose either program's update, and a future Claude version can change
 how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
 trust allows the repository's own Claude hooks and commands to run.
+
+While that setting is off and Claude asks its question in a managed checkout, a note above the session's terminal says
+that Farhelm can answer it for you. **Settings and caveats** opens **Agent trust** at the setting, × hides the note
+until the question leaves the screen, and **Don't show again** stops it for every session. To bring it back, turn on
+**Show the hint when Claude asks about a managed checkout** in **Agent trust**. The note goes away once you turn the
+setting on. Farhelm answers nothing from the note itself; the question waits in the terminal as before.
 
 ### Checkout management
 
