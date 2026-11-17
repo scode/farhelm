@@ -61,8 +61,12 @@
 //! refusal does, and the next click picks its lane from the hosts read again. Nothing remembers the answer, so if the
 //! host still reads connected then (a read that lags the helm's own view), that click asks in the session lane once
 //! more and meets "unasked" again. The old app's question could wait on a closed menu; a GPUI question cannot open
-//! behind the user's back. Bulk Delete of environment sessions, which sends one request per marked session and one
-//! whole Delete per unconnected environment, comes with the bulk environment work (`super::bulk`'s NOTE).
+//! behind the user's back.
+//!
+//! The bulk Delete of marked sessions (`super::bulk`) sends these same two Deletes, frozen with its own question,
+//! through [`start`]: one session-lane Delete per marked session of a connected environment, and one whole-lane Delete
+//! per environment the helm cannot ask. It settles each the same way but never asks again: an "unasked" answer leaves
+//! the helm's words on the row, as the old bulk Delete did.
 
 use std::rc::Rc;
 
@@ -78,7 +82,7 @@ use crate::components::{HoverHelp, Tier};
 use crate::environment_ui::ProviderUi;
 use crate::focus::Mark;
 use crate::host_text::HostSentence;
-use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
+use crate::operations::{Command, HelmMarker, NotStarted, OpKey, Outcome, Settled, Work};
 use crate::prompt::Answer;
 use crate::session;
 
@@ -134,7 +138,12 @@ pub(super) fn lane(collections: &Collections, host: i64) -> Lane {
 /// What a Delete of `row` would freeze now, or `None` for a session that is not an environment session (an ordinary
 /// host, or a host the registry does not list), read from the current UI session's store.
 pub(crate) fn asked(row: &SessionRow, cx: &App) -> Option<Asked> {
-    let collections = session::current_store(cx)?.read(cx).collections();
+    asked_in(row, session::current_store(cx)?.read(cx).collections())
+}
+
+/// [`asked`] from `collections`, the store's as the caller already holds them: the bulk Delete freezes each marked
+/// session's lane this way, from the one hosts read the press saw (`super::bulk`).
+pub(super) fn asked_in(row: &SessionRow, collections: &Collections) -> Option<Asked> {
     let environment = Environment::of(row, collections)?;
     Some(Asked {
         host: environment.host.id,
@@ -166,17 +175,22 @@ impl Asked {
         Answer::new(label, HoverHelp::tooltip(help), Tier::Danger)
     }
 
+    /// The lane's consequence in the provider's words: the session lane's both outcomes, or the whole lane's warning.
+    /// The bulk question's row for this session says this alone, as the old bulk row did, with no resource name.
+    pub(super) fn lane_consequence(&self) -> &'static str {
+        match self.lane {
+            Lane::Session => self.ui.session_delete_consequence(),
+            Lane::Whole => self.ui.whole_delete_warning(),
+        }
+    }
+
     /// The question's first line, for the session filed under `key`: the lane's consequence, then the environment's own
     /// name when the helm gave one, as the old consequence ended with its `resource_label`.
     pub(super) fn consequence(&self, key: &str) -> HostSentence {
-        let consequence = match self.lane {
-            Lane::Session => self.ui.session_delete_consequence(),
-            Lane::Whole => self.ui.whole_delete_warning(),
-        };
         let line = HostSentence::new(SharedString::from(format!(
             "session-delete-consequence-{key}"
         )))
-        .text(consequence);
+        .text(self.lane_consequence());
         if self.name.is_empty() {
             line
         } else {
@@ -207,34 +221,62 @@ pub(crate) fn command(session: &str, lane: Lane) -> Result<Command, PathError> {
 /// ([`settle`]) with `again` as the way to ask the whole lane if the helm answers "unasked". Nothing is sent for a
 /// session with a request in flight or whose environment is being deleted now.
 pub(super) fn send(frozen: Frozen, again: Option<AskAgain>, cx: &mut App) {
-    let Some(asked) = frozen.environment.clone() else {
+    if frozen.environment.is_none() {
         return;
-    };
+    }
     if environment::deleting_reason(&frozen.key, cx).is_some() {
         return;
     }
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let Ok(command) = command(&frozen.key, asked.lane) else {
-        tracing::warn!("a session key that cannot be a path segment was not deleted");
-        return;
-    };
-    let key = OpKey::session(&frozen.key);
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&key, command, cx, move |settled, cx| {
-            settle(frozen, asked, again, settled, cx)
-        })
-    });
-    if let Err(refused) = started {
+    if let Err(refused) = start(frozen, again, |_, _| {}, cx) {
         tracing::debug!(?refused, "an environment Delete was not sent");
     }
 }
 
+/// [`send`] for a caller that has to know what happened, the bulk Delete (`super::bulk`): send `frozen`'s environment
+/// Delete in the lane it froze, with no check of the environment's phase (the bulk Delete's admission refuses a session
+/// being deleted through `super::menu::refused`), and say why nothing was sent. A `frozen` with no environment Delete
+/// sends nothing and reads as [`NotStarted::Retired`], the refusal that shows nothing on a row; no caller passes one.
+/// Once it has settled ([`settle`]), `then` runs, told whether the helm answered the 504 that says the Delete carries on
+/// past its bound: the bulk Delete sends nothing more into that environment then. A reset drops `then` with the
+/// Delete's own waiting.
+pub(super) fn start(
+    frozen: Frozen,
+    again: Option<AskAgain>,
+    then: impl FnOnce(bool, &mut App) + 'static,
+    cx: &mut App,
+) -> Result<(), NotStarted> {
+    let Some(asked) = frozen.environment.clone() else {
+        tracing::warn!("an environment Delete without its environment was not sent");
+        return Err(NotStarted::Retired);
+    };
+    let Some(operations) = session::current_operations(cx) else {
+        return Err(NotStarted::Retired);
+    };
+    let command = command(&frozen.key, asked.lane).map_err(|error| {
+        tracing::warn!("a session key that cannot be a path segment was not deleted");
+        NotStarted::Path(error)
+    })?;
+    let key = OpKey::session(&frozen.key);
+    operations.update(cx, |operations, cx| {
+        operations.start(&key, command, cx, move |settled, cx| {
+            let carries_on = settle(frozen, asked, again, settled, cx);
+            then(carries_on, cx);
+        })
+    })
+}
+
 /// `frozen`'s environment Delete, asked as `asked`, settled (the module docs' "Settling"). A refusal this shows some
 /// other way (a 404 as a deletion, a 504 as routine, an "unasked" answer as the whole-lane question) is forgotten from
-/// the session's key; any other stays there for the row and the header.
-fn settle(frozen: Frozen, asked: Asked, again: Option<AskAgain>, settled: &Settled, cx: &mut App) {
+/// the session's key; any other stays there for the row and the header. With no `again`, as the bulk Delete sends it,
+/// an "unasked" answer is an ordinary refusal: the helm's words stay on the row and nothing opens. Says whether the
+/// answer was the 504 at the helm's bound, the Delete still running.
+fn settle(
+    frozen: Frozen,
+    asked: Asked,
+    again: Option<AskAgain>,
+    settled: &Settled,
+    cx: &mut App,
+) -> bool {
     let refusal = match &settled.outcome {
         Outcome::Done(reply) => {
             delete::record_deleted_here(&frozen.key, cx);
@@ -252,17 +294,18 @@ fn settle(frozen: Frozen, asked: Asked, again: Option<AskAgain>, settled: &Settl
                 Lane::Whole => (None, None),
             };
             delete_notice::publish_environment(asked.host, kept, notice, cx);
-            return;
+            return false;
         }
         // These routes never accept long work (202); nothing is shown if one ever does.
-        Outcome::Accepted(_) => return,
+        Outcome::Accepted(_) => return false,
         Outcome::Refused(refusal) => refusal,
     };
+    let carries_on = refusal.status == CARRIES_ON;
     let shown_elsewhere = if refusal.status == GONE {
         delete::record_deleted_here(&frozen.key, cx);
         delete_notice::publish_environment(asked.host, None, None, cx);
         true
-    } else if refusal.status == CARRIES_ON {
+    } else if carries_on {
         true
     } else if asked.lane == Lane::Session && refusal.has(HelmMarker::EnvironmentUnasked) {
         let whole = Frozen {
@@ -283,4 +326,5 @@ fn settle(frozen: Frozen, asked: Asked, again: Option<AskAgain>, settled: &Settl
             operations.forget(&OpKey::session(&frozen.key), cx)
         });
     }
+    carries_on
 }

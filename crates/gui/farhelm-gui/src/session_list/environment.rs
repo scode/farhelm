@@ -69,7 +69,7 @@
 //! is in progress; try again once it finishes"), since the launcher exposes no predicate for its pending target yet;
 //! meanwhile the helm's lifecycle lock refuses a collision as busy. And Clone's environment wording ("New session in a
 //! new environment, keep this one"), which would describe a Clone into a fresh environment the launcher does not make
-//! yet. The environment Delete is [`super::environment_delete`]'s; the bulk parts come with the bulk environment work.
+//! yet. The environment Delete is [`super::environment_delete`]'s, and its bulk form `super::bulk`'s.
 //!
 //! NOTE: A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while Hosts offers no
 //! Retry yet: it comes with settings-and-hosts' Delete sandbox. Nothing here offers Retry, as the old row did not.

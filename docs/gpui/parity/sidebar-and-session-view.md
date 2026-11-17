@@ -562,8 +562,8 @@ orchestrator), and an app scene, which stands in for one, cannot show the questi
 (`scripts/gui-agent.py`'s `click`, which passes on `gpui-agent`'s) sends no modifier keys, so it cannot mark a row, and
 SPEC.md has no keyboard way to mark. The question's rows and words are
 `a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks`'s. The bridge's protocol does carry modifiers on a
-mouse-down, so a modifier option on its `click` would make a scene and an end-to-end smoke step possible. Waiting for
-bulk environment Delete: sandbox and recipe container rows' environment-wide cases.
+mouse-down, so a modifier option on its `click` would make a scene and an end-to-end smoke step possible. Sandbox and
+recipe container rows' environment-wide cases are under `tests/tensorlake-sandbox-sessions.spec.ts` below.
 
 ### `tests/menu-highlight.spec.ts`
 
@@ -1154,14 +1154,14 @@ not push.
 
 Case: a session of a sandbox being deleted shows why its actions are unavailable.
 
-partly (its row and header half): the row's "Deleting…" or "Deleting failed" in place of the stale cause with the
-provider's reason as its help, and the same in the details bar in the age's place; every command of the row's menu and
-the header refused, Clone's and Delete's descriptions and the header's Stop, Clone and Delete help giving the reason;
-the Delete shortcut refused; nothing sent; and everything back once the host leaves Deleting. Bulk Stop and Delete leave
-such a session out of their question and their batch with "Stop: " or "Delete: " and the reason on its row, as the old
-batch did when it was drawn. Waiting for bulk environment Delete: the marked bar's Stop and Delete drawn unavailable,
-with "The marked sessions' environments are being deleted, so their actions are unavailable", when every mark is such a
-session.
+ported: the row's "Deleting…" or "Deleting failed" in place of the stale cause with the provider's reason as its help,
+and the same in the details bar in the age's place; every command of the row's menu and the header refused, Clone's and
+Delete's descriptions and the header's Stop, Clone and Delete help giving the reason; the Delete shortcut refused;
+nothing sent; and everything back once the host leaves Deleting. Bulk Stop and Delete leave such a session out of their
+question and their batch with "Stop: " or "Delete: " and the reason on its row, as the old batch did when it was drawn,
+and the marked bar's Stop and Delete are drawn unavailable, with "The marked sessions' environments are being deleted,
+so their actions are unavailable", while every mark each would act on is such a session; a click on them then sends
+nothing.
 
 - crates/gui/farhelm-gui/src/session_list/environment_tests.rs
   `a_row_being_deleted_shows_the_phase_in_place_of_its_cause`
@@ -1171,13 +1171,32 @@ session.
   `every_header_action_is_refused_while_the_environment_is_being_deleted`
 - crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `a_bulk_action_leaves_out_a_session_being_deleted_and_says_why`
 - crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `the_bulk_question_leaves_out_a_session_being_deleted`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs
+  `the_bars_stop_and_delete_are_unavailable_while_every_marks_environment_is_being_deleted`
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
 Case: bulk Delete of a connected sandbox's sessions sends one environment Delete each.
 
-waiting for bulk environment Delete, the next environment piece; the single environment Delete it builds on is ported
-(the cases above).
+ported, in-process over the fake helm: with skip on and nothing alive, the bulk question still asks, titled "Delete 2
+sessions?", answered "Delete sessions" and helped by "an environment goes too with its last session"; each row states
+the session lane's consequence; one `?delete_environment_session=true` per marked session, one at a time; and the band's
+count from the first reply retired by the sealing reply, which carries none. Beside it, from the old `list/lifecycle.rs`
+tests: an unconnected sandbox's marked sessions sharing one `?delete_sandbox=true` under "Delete marked sessions and
+whole environments?" with one row; an ordinary session beside them keeping its own Delete; a 404 counted as deleted; an
+"unasked" answer left on its row with nothing opened; a 504 stopping its sandbox's queue (a deviation below); and a bulk
+Stop's row adding the provider's Stop help. The rows leaving the list are the helm's pushed list, which the fake does
+not push.
+
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs
+  `a_connected_environments_marked_sessions_each_get_their_own_delete`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs
+  `an_unconnected_environments_marked_sessions_share_one_whole_delete`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `mixed_marks_keep_each_rows_delete_and_a_404_counts_as_deleted`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs
+  `an_unasked_answer_in_a_batch_stays_on_its_row_and_opens_nothing`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `a_504_settles_its_row_quietly_and_stops_its_environments_queue`
+- crates/gui/farhelm-gui/src/session_list/bulk_tests.rs `a_bulk_stop_of_an_environment_session_says_what_keeps_running`
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
@@ -1256,8 +1275,9 @@ Where the port does not match the old app, and why. Each stays until the work na
   focus. A contain-only press kind would remove it (watch list).
 - Not a deviation from the old app but a gap against SPEC.md that the port keeps from it: a bulk Delete of several
   sessions whose checkouts could not be archived shows only the last of their notices in the Delete notice band, each
-  replacing the one before, where SPEC.md asks that each such outcome be visible. The single sandbox and container
-  Delete kept the old one-notice band, so the bulk environment Delete decides whether one batch's notices are joined.
+  replacing the one before, where SPEC.md asks that each such outcome be visible. The bulk sandbox and container Delete
+  keeps the same one-notice band, as the old one did: each reply goes to the band as it arrives, so a later "stays"
+  count replaces an earlier one and a sealing reply retires its sandbox's.
 - A Replace refused after its source was already removed (the helm's "whether the original … was removed is unknown")
   has no row to show its words on, since they belong to the source; the selection moves on as for any removal. The old
   app showed them only in the header while the source stayed selected, which it does not here once the Replace settles.
@@ -1275,6 +1295,10 @@ Where the port does not match the old app, and why. Each stays until the work na
 - The header's caret menus open below their caret, as every popover of the layer manager does, where the old ones sat
   against the caret's right edge. Tab in one dismisses it as Escape does, so a second Tab at once goes on from the
   caret; a plain close would have swallowed it as a repeat of the closing press.
+- Beside a tunnel pill at narrow widths the session header's tab strip comes out below the old 112-pixel floor, so the
+  header's actions and the pill stay whole: the header's fit decides it (decided by the sidebar area with the terminal
+  area on 2026-11-16). `docs/gpui/parity/terminal.md` has the entry: "Beside a tunnel pill, the tab strip keeps the old
+  112-pixel floor only as far as the top row has room".
 - The old order hold was also kept while a row's notification list was open (`popover-movement.spec.ts`, "a held served
   refusal reorder preserves an open bell"); here only a row's menu or a question one of its commands asked keeps it, as
   SPEC.md names. The pointer on an open notification list is not over the rows, so the order can catch up under it, and
@@ -1550,6 +1574,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   fails after the bound leaves the sandbox listed in its ordinary state with the reason only in the helm's log, where
   the old app showed the reason on the row. Tested by `session_list/environment_delete_tests.rs`
   `a_504_at_the_bound_is_not_a_failure_but_a_refusal_shows`.
+- A bulk Delete whose sandbox or container Delete meets the helm's 504 at its 20-second bound settles that row with no
+  line, the Delete still running, and sends nothing more into that environment: each of its rows still queued says
+  "Delete: not started, an earlier Delete in this environment was still running. Try again once the list shows how that
+  Delete ended." The old app waited for each reply (up to nine minutes) and then sent the next; no retry or wait comes
+  with this (decided by the GPUI migration's orchestrator on 2026-11-16). It is also a gap against SPEC.md, "Sandbox
+  sessions" ("A refusal or a missing answer partway through leaves that row with its reason"): the row that met the 504
+  shows no reason, and SPEC.md does not say that the rest of that environment's rows are not sent. SPEC.md's wording is
+  to be revised to match the orchestrator's decision. Tested by `session_list/bulk_tests.rs`
+  `a_504_settles_its_row_quietly_and_stops_its_environments_queue`.
 - An environment session's "unasked" answer asks the warned whole-sandbox question again only while the user has not
   moved on since answering the first, as every completion that would open a question does here. Otherwise the helm's
   words stay on the row, and the next Delete picks its lane from the hosts read again; the old question waited on the

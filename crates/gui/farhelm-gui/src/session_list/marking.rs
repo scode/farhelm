@@ -44,8 +44,11 @@
 //! An interaction counter ([`Marks::revision`]) moves with every marking choice, so a bulk Stop or Delete accepted
 //! earlier can tell whether the user has made a newer one since, and clears its own targets only if not.
 //!
-//! NOTE: Sandbox and recipe container rows get nothing special here yet: their environment-wide cases come with the
-//! environments work. GPUI cannot report `aria-haspopup`.
+//! The bar's Stop and Delete are drawn unavailable, with "The marked sessions' environments are being deleted, so their
+//! actions are unavailable" as their help, while every mark each would act on is a session whose environment is being
+//! deleted ([`super::bulk::all_being_deleted`]); what a batch does with environment sessions is [`super::bulk`]'s.
+//!
+//! NOTE: GPUI cannot report `aria-haspopup`.
 //!
 //! A change of the Hosts attention list above the heading closes the marked menu, as it closes the rows' menus
 //! ([`super::attention`]).
@@ -587,6 +590,13 @@ impl SessionList {
         // The old `.marked-stop` and `.marked-delete`, with their help. Stop is left out while every mark shown is a
         // retired session, which supports Delete only, as the old bar left it out.
         let offers_stop = self.marking.offers_stop();
+        // Each is drawn unavailable, saying why, while every mark it would act on is a session whose environment is
+        // being deleted, as the old bar's were (its `LifecycleOffer`); a mixed selection keeps it, and the batch leaves
+        // those sessions out with their reason.
+        let shown = self.marking.shown();
+        let app: &App = cx;
+        let unavailable = [bulk::Lifecycle::Stop, bulk::Lifecycle::Delete]
+            .map(|action| bulk::all_being_deleted(action, &shown, app));
         let lifecycle = [
             (
                 bulk::Lifecycle::Stop,
@@ -594,6 +604,7 @@ impl SessionList {
                 "Stop the agents and close terminal tabs in the marked sessions currently shown",
                 Tier::Neutral,
                 &self.marking.stop_focus,
+                unavailable[0],
             ),
             (
                 bulk::Lifecycle::Delete,
@@ -601,15 +612,22 @@ impl SessionList {
                 "Delete the marked sessions currently shown",
                 Tier::Danger,
                 &self.marking.delete_focus,
+                unavailable[1],
             ),
         ]
         .into_iter()
         .filter(|(action, ..)| offers_stop || *action != bulk::Lifecycle::Stop)
-        .map(|(action, id, help, tier, focus)| {
+        .map(|(action, id, help, tier, focus, unavailable)| {
             let list = cx.weak_entity();
+            let help = if unavailable {
+                bulk::ALL_BEING_DELETED
+            } else {
+                help
+            };
             Button::new(id, action.label(), HoverHelp::tooltip(help), Role::Button)
                 .tier(tier)
                 .toolbar()
+                .disabled(unavailable)
                 .focus(focus)
                 .on_click(move |_, window, cx| {
                     let _ = list.update(cx, |list, cx| list.bulk_lifecycle(action, window, cx));

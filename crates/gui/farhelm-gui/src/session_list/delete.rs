@@ -39,7 +39,8 @@
 //! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
 //! with nothing alive, as SPEC.md's header Delete does. A bulk Delete of the marked sessions (`super::bulk`) sends each
-//! of them the request its row would, through [`start`], with its guard and consequence from the same functions.
+//! of them the request its row would, through [`start`], with its guard and consequence from the same functions, and
+//! an environment session's through `super::environment_delete`'s own start.
 //!
 //! **This window's own Delete is evidence.** The selection rules drop a selected session once a complete, unfiltered
 //! listing proves it gone (`session::listing_proves_gone`), or once an available listing without it answers a query
@@ -312,9 +313,8 @@ pub(crate) fn confirming(
 /// Only a guard that asks for something adds its flag, as in the old app's `api::delete_url`.
 ///
 /// The helm refuses this for a session in a disposable environment, whose Delete states what happens to the environment
-/// and asks for it with a flag of its own ([`environment_delete::command`]). The row's, the header's and the
-/// shortcut's Delete send that one instead; the bulk Delete still sends this one, and shows the helm's refusal on such
-/// a row, until the bulk environment work.
+/// and asks for it with a flag of its own ([`environment_delete::command`]). The row's, the header's, the shortcut's
+/// and the bulk Delete send that one instead.
 pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, PathError> {
     let path = ApiPath::api(&["sessions", session])?;
     let flag = match guard {

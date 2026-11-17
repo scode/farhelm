@@ -57,9 +57,10 @@
 //!
 //! NOTE: A bulk Delete of several sessions whose checkouts could not be archived shows only the last notice to arrive:
 //! each replaces the one before, as in the old app, whose per-row completion published each reply in turn. SPEC.md
-//! asks that each such outcome be visible, so this is a known gap. The single environment Delete kept the old
-//! one-notice band, so the bulk environment Delete, the one batch that can return several counts, decides whether one
-//! batch's notices are joined.
+//! asks that each such outcome be visible, so this is a known gap. The bulk environment Delete, the one batch that can
+//! return several counts, keeps the same one-notice band (decided by the GPUI migration's orchestrator on 2026-11-16):
+//! each reply goes through [`publish_environment`] as it arrives, so a later count replaces an earlier one and a
+//! sealing reply retires its host's, as the old per-row completions did.
 
 use farhelm_proto::ui_channel::HostStateView;
 use gpui::{
