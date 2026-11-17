@@ -5492,16 +5492,19 @@ installation it is on, so it follows an open session the sidebar's filter hides
   (the same reason the relative-age column reads an activity stamp rather than a "last seen" timestamp). One caveat
   follows directly: the supervisor quantizes `last_activity_at` at the source, advancing it only when what it observes
   is at least a minute newer than what it already holds, so work landing within that minute after a mark-read does not
-  yet register as unseen — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write with
-  nothing to refuse: `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every
-  lifecycle verb above), so a session on an unreachable host can still be marked read or unread, and the write bumps the
-  fleet-events revision only when the stored value actually changed — a client re-marking the SAME stamp it already
-  recorded — which happens when a session is reopened with no new activity behind it, or when a client retries a PUT
-  whose response it missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a
-  session drops its `session_seen` row explicitly, since the viewer row is independent of the cache. A session that
-  disappears from its host's listing without being deleted through the helm leaves its row behind until its host entry
-  is removed, which is accepted as garbage bounded by the number of sessions that ever existed, at a few dozen bytes
-  each.
+  yet register as unseen — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write:
+  `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every lifecycle verb
+  above), so a session on an unreachable host can still be marked read or unread. Its one refusal of a session it lists
+  is a retired containerized session (SPEC.md, "Retired containerized sessions"): when the helm's cached row for the
+  session holds an agent launch whose selection still names a container, the route refuses it as an invalid request with
+  the retired reason (`refuse_cached_retired` in `crates/farhelm-helm/src/sessions.rs`), before checking the owner or
+  touching the table. The write bumps the fleet-events revision only when the stored value actually changed — a client
+  re-marking the SAME stamp it already recorded — which happens when a session is reopened with no new activity behind
+  it, or when a client retries a PUT whose response it missed — must not wake every other connected client to redraw a
+  dot that has not moved. Deleting a session drops its `session_seen` row explicitly, since the viewer row is
+  independent of the cache. A session that disappears from its host's listing without being deleted through the helm
+  leaves its row behind until its host entry is removed, which is accepted as garbage bounded by the number of sessions
+  that ever existed, at a few dozen bytes each.
 
 - Helm schema 63 re-keys `session_seen`, `session_pins` and `session_notification_marks` from bare IDs to
   `(host_id, session_id)`. Migration retains a legacy row only when exactly one cached host claims its ID; ownerless or

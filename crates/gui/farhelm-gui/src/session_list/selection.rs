@@ -27,15 +27,14 @@
 //!   takes focus only when nothing else holds it, so a session that went away under the user never pulls focus from a
 //!   control they are using.
 //! - **Opening marks the output seen.** While a session is open, its latest activity is recorded as seen whenever the
-//!   session becomes open or its activity advances, unless it is stale (its host is not connected), has ended (SPEC.md,
-//!   "Status", as the old app did), or is a retired containerized session, whose stored metadata the old app left
-//!   unchanged even on selection, since such a session supports Delete only ([`super::retired`]). The memory of what
-//!   was stamped is keyed on the session, its activity and its eligibility, never on the stamp itself:
-//!   that is what makes a manual mark-unread of the open session stick until new output arrives or the user opens
-//!   another session. The open session is read by key, so one the helm carries outside a filtered or cut list is
-//!   marked like a listed one, and a moment with no row for it leaves the memory alone ([`Open::Hidden`]). A failed
-//!   mark is silent (SPEC.md, "Errors and diagnostics"): it costs a dot that is one visit behind, and the next mark
-//!   corrects it.
+//!   session becomes open or its activity advances, a stale or ended one included (SPEC.md, "Status", decided by the
+//!   maintainer on 2026-11-16; the old app skipped both). The one exception is a retired containerized session, which
+//!   supports Delete only ([`super::retired`]) and whose seen write the helm refuses. The memory of what was stamped
+//!   is keyed on the session and its activity, never on the stamp itself: that is what makes a manual mark-unread of
+//!   the open session stick until new output arrives or the user opens another session. The open session is read by
+//!   key, so one the helm carries outside a filtered or cut list is marked like a listed one, and a moment with no row
+//!   for it leaves the memory alone ([`Open::Hidden`]). A failed mark is silent (SPEC.md, "Errors and diagnostics"):
+//!   it costs a dot that is one visit behind, and the next mark corrects it.
 //! - **A Delete holds the automatic choice back.** While any Delete the list sent is in flight, no session is opened
 //!   automatically, and a selection proven gone is cleared rather than replaced ([`hold_for_deletes`]); the choice is
 //!   made once every Delete has settled. SPEC.md: "Automatic selection after Delete waits until every admitted Delete
@@ -227,10 +226,10 @@ pub(crate) fn newest_created<'a>(listed: &[Listed<'a>], excluded: Option<&str>) 
         .map(|session| session.key)
 }
 
-/// What the automatic seen mark last acted on: the open session, its activity, and whether it was eligible. The mark
-/// is due whenever this changes.
+/// What the automatic seen mark last acted on: the open session and its activity. The mark is due whenever this
+/// changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Stamped(Option<(String, i64, bool)>);
+pub(crate) struct Stamped(Option<(String, i64)>);
 
 /// The open session as the automatic seen mark sees it.
 #[derive(Clone, Copy)]
@@ -252,6 +251,12 @@ pub(crate) enum Open<'a> {
 /// session's own, so its reappearance with the same activity marks nothing; any other memory is forgotten, so a session
 /// the user opened while it was hidden is marked once it shows.
 ///
+/// Every shown session is eligible, stale and ended ones included (the maintainer's decision of 2026-11-16, which
+/// reversed the old app's rule of skipping both), except a retired containerized session: the helm's seen route
+/// refuses one, so a mark would only log that refusal. Eligibility is not part of the memory: the old app's stale and
+/// ended conditions could change under an open session and needed it, but the helm never turns an existing session's
+/// launch into the retired container choice, so retirement is fixed for a session.
+///
 /// NOTE: Treating every hidden session as nothing open, or every one as no change, would be wrong though either looks
 /// simpler. Forgetting the open session's own memory makes its reappearance (the filter cleared, the cap no longer
 /// cutting it) mark it seen again, undoing a manual Mark unread of a session the user never left. Keeping a memory of
@@ -263,24 +268,19 @@ pub(crate) fn seen_due(open: Open, stamped: &Stamped) -> Option<(Stamped, Option
             let own = stamped
                 .0
                 .as_ref()
-                .is_some_and(|(stamped, _, _)| stamped == key);
+                .is_some_and(|(stamped, _)| stamped == key);
             let forgotten = Stamped::default();
             return (!own && *stamped != forgotten).then_some((forgotten, None));
         }
         Open::Nothing => None,
         Open::Shown(open) => Some(open),
     };
-    let next = Stamped(open.map(|open| {
-        let row = open.row;
-        let eligible = !row.stale && !row.info.status.has_ended() && !super::retired::is(row);
-        (open.key.to_owned(), row.info.effective_activity(), eligible)
-    }));
+    let next = Stamped(open.map(|open| (open.key.to_owned(), open.row.info.effective_activity())));
     if &next == stamped {
         return None;
     }
-    let eligible = next.0.as_ref().is_some_and(|(_, _, eligible)| *eligible);
     let send = open
-        .filter(|open| eligible && super::status::unseen(open.row))
+        .filter(|open| !super::retired::is(open.row) && super::status::unseen(open.row))
         .map(|open| (open.key.to_owned(), open.row.info.effective_activity()));
     Some((next, send))
 }

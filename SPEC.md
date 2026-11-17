@@ -2736,8 +2736,12 @@ upgrading to this storage, state the helm cannot attribute to one host starts fr
 
 The stamp is set automatically in two moments — opening a session records its current activity as seen, and that
 session's activity advancing while it stays open re-records the new value — with whether the window has focus ignored: a
-session open in a window behind other apps is still recorded as seen the same way one in a focused window is. Neither
-moment records a stale or ended session as seen. It can also be set or cleared by hand: a "Mark unread"/"Mark read"
+session open in a window behind other apps is still recorded as seen the same way one in a focused window is. Both
+moments apply to every session but one, a stale or ended one included: the maintainer decided on 2026-11-16 that opening
+any session marks it seen, reversing the earlier rule that skipped stale and ended sessions. The one exception is a
+retired containerized session (see Retired containerized sessions), which supports Delete only. The helm refuses to
+record such a session as seen, so neither moment marks it; the GUI migration's orchestrator accepted on 2026-11-16 that
+this stays so, with no change to the helm. The stamp can also be set or cleared by hand: a "Mark unread"/"Mark read"
 toggle, reachable from the session's row, sets or clears the stamp directly. A manual mark unread on the session
 currently open STICKS — the automatic rule does not immediately re-record it as seen — until the user leaves and returns
 to it, or new output arrives. A failed automatic mark is logged but silent, the same best-effort exception the

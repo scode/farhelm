@@ -1589,3 +1589,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   row's closed menu and opened with it. A header Delete's second question opens centered, since its Delete button is not
   drawn while the first Delete runs, where the old one hung under the button. Tested by
   `session_list/environment_delete_tests.rs` `an_unasked_answer_after_the_user_moved_on_stays_on_the_row`.
+- Opening a stale or ended session marks it seen, and so does its activity advancing while it is open, where the old
+  app's automatic mark skipped both (`seen_effect_eligible` in its `session_view.rs`) and such a session kept its unread
+  mark when opened. The maintainer decided on 2026-11-16 that opening any session marks it seen, and SPEC.md, "Status",
+  says so. A retired containerized session is still never marked, since the helm refuses its seen write. Tested by
+  `session_list/tests.rs` `opening_an_ended_or_stale_session_marks_it_seen` and
+  `new_output_on_the_open_session_is_marked_seen_but_a_manual_unread_sticks`, and the retired half by
+  `session_list/retired_tests.rs` `opening_a_retired_session_stamps_nothing_and_rename_opens_nothing`.

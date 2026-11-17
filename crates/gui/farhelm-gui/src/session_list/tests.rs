@@ -18,6 +18,8 @@ use farhelm_proto::ui_channel::{
 use gpui::{AppContext as _, DriverNode, Role, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
+use super::menu_tests::ended;
+use super::retired_tests::retired;
 use super::row::{ITEM_ID_PREFIX, ROW_ID_PREFIX, abbreviate_home, host_label};
 use super::selection::{self, Change, Listed, Open, Stamped};
 use super::status::Live;
@@ -561,9 +563,12 @@ fn a_selection_moves_only_once_a_complete_listing_shows_it_gone(cx: &mut TestApp
 
 /// SPEC.md, "Status": the open session's output counts as seen as it arrives, but a manual "mark unread" of the open
 /// session must stick until there is new output (the old app keyed its mark on the activity, never on the stamp, for
-/// exactly this). A stale session's report is last-known, not new, so it is not marked. Specified: new activity on the
-/// open session sends a seen mark at that activity; the helm then clearing the stamp with no new activity sends
-/// nothing; new activity on the session while its host is disconnected sends nothing.
+/// exactly this). A stale or ended session is marked like any other (the maintainer's decision of 2026-11-16, reversing
+/// the old app, which skipped both). A stale row's activity is the helm's last-known report, so it advances only when
+/// one push carries both the host's last output and its disconnection; that is the case pinned here. Specified: new
+/// activity on the open session sends a seen mark at that activity; the helm then clearing the stamp with no new
+/// activity sends nothing; newer activity arriving with the host's disconnection sends a mark at it, and so does newer
+/// activity arriving with the session's exit.
 #[gpui::test]
 fn new_output_on_the_open_session_is_marked_seen_but_a_manual_unread_sticks(
     cx: &mut TestAppContext,
@@ -593,7 +598,57 @@ fn new_output_on_the_open_session_is_marked_seen_but_a_manual_unread_sticks(
         &[],
     ));
     cx.run_until_parked();
-    assert_eq!(sent(&mut fake), [], "a stale session is not marked");
+    assert_eq!(
+        sent(&mut fake),
+        [seen("a", 170)],
+        "a stale session is marked"
+    );
+
+    fake.push(change(meta(), &[ended("a").activity(190).seen(None)], &[]));
+    cx.run_until_parked();
+    assert_eq!(
+        sent(&mut fake),
+        [seen("a", 190)],
+        "an ended session is marked"
+    );
+}
+
+/// Opening a session marks its output seen whatever its state: the maintainer decided on 2026-11-16 that a stale or
+/// ended session is no exception, reversing the old app, which left both unread when opened. A regression here leaves
+/// the session reading unseen after the user has looked at it: a stale row keeps its unseen mark and its Mark read, and
+/// either session shows a blue dot once it is live again with no new output. Specified: with a open, clicking ended b,
+/// whose output is unseen at 250, sends its remembered selection, its session query and a seen mark at 250; clicking
+/// stale c, unseen at 260, sends the same three for c at 260.
+#[gpui::test]
+fn opening_an_ended_or_stale_session_marks_it_seen(cx: &mut TestAppContext) {
+    let unseen = |fixture: Fixture, activity: i64| fixture.activity(activity).seen(Some(100));
+    let rows = [
+        session("a"),
+        unseen(ended("b"), 250),
+        unseen(session("c").stale(), 260),
+    ];
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![listing(&["a", "b", "c"], &rows), preferences(&["a"], None)],
+    );
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    sent(&mut fake);
+
+    test_support::click(cx, "session-row-b");
+    cx.run_until_parked();
+    assert_eq!(selected(cx).as_deref(), Some("b"));
+    assert_eq!(
+        sent(&mut fake),
+        [remembered("b"), named("b"), seen("b", 250)]
+    );
+
+    test_support::click(cx, "session-row-c");
+    cx.run_until_parked();
+    assert_eq!(selected(cx).as_deref(), Some("c"));
+    assert_eq!(
+        sent(&mut fake),
+        [remembered("c"), named("c"), seen("c", 260)]
+    );
 }
 
 /// SPEC.md, "Losing the connection to the helm": after a reset the list is rebuilt from the new snapshot alone, the open
@@ -1108,13 +1163,14 @@ fn a_selection_settles_only_on_evidence() {
     assert_eq!(selection::settle(None, &[], true, None), Change::Keep);
 }
 
-/// The seen mark's memory (the old `mark_key`): due when the open session, its activity or its eligibility changes,
-/// and then sent only for an eligible session with unseen output. Ended and stale sessions are never marked, and the
-/// memory still moves for them, so their recovery is a change of its own. A hidden open session keeps the memory only
-/// when it is its own, so a manual Mark unread survives a cut or filtered listing, and leaving for another hidden session
-/// and coming back is still noticed. Specified: the cases below, each named by its assertion; a hidden open session is
-/// due nothing; with the memory its own it stays, and its return with the same activity is due nothing; another hidden
-/// session forgets the memory and sends nothing, and forgetting a forgotten memory is no change.
+/// The seen mark's memory (the old `mark_key`, without its eligibility): due when the open session or its activity
+/// changes, and then sent only for a session with unseen output that is not a retired containerized one, whose seen
+/// write the helm refuses. Stale and ended sessions are marked (the maintainer's decision of 2026-11-16), and the
+/// memory still moves for a retired one. A hidden open session keeps the memory only when it is its own, so a manual
+/// Mark unread survives a cut or filtered listing, and leaving for another hidden session and coming back is still
+/// noticed. Specified: the cases below, each named by its assertion; a hidden open session is due nothing; with the
+/// memory its own it stays, and its return with the same activity is due nothing; another hidden session forgets the
+/// memory and sends nothing, and forgetting a forgotten memory is no change.
 #[test]
 fn the_seen_mark_is_due_on_a_new_session_or_activity_and_sent_only_when_eligible_and_unseen() {
     let due = |fixture: Fixture, stamped: &Stamped| {
@@ -1138,14 +1194,16 @@ fn the_seen_mark_is_due_on_a_new_session_or_activity_and_sent_only_when_eligible
         None
     );
     let (_, send) = due(session("a").activity(160).stale(), &memory).unwrap();
-    assert_eq!(send, None, "stale");
-    let ended = session("a")
-        .activity(160)
-        .status(json!({"state": "exited", "exit_code": 0}));
+    assert_eq!(send, Some(("a".to_owned(), 160)), "stale");
     assert_eq!(
-        due(ended, &memory).map(|(_, send)| send),
-        Some(None),
+        due(ended("a").activity(160), &memory).map(|(_, send)| send),
+        Some(Some(("a".to_owned(), 160))),
         "ended"
+    );
+    assert_eq!(
+        due(retired("a").activity(150), &Stamped::default()).map(|(_, send)| send),
+        Some(None),
+        "retired and unseen: due, but not sent"
     );
     assert_eq!(
         due(session("b"), &memory).map(|(_, send)| send),
