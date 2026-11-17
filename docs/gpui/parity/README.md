@@ -3,11 +3,10 @@
 One file per area maps the old browser UI's Playwright specs (deleted with that UI; reference commit `24bc0580`) and the
 SPEC.md behavior they covered to their replacements in the GPUI app. Each area's port updates its own file; the
 orchestrator owns this index after M1. The reference commit has 145 Playwright spec files, each assigned to an area (a
-few split between two, below). The files hold `###` entries for 144 of them: `tests/claude-trust.spec.ts`, whose entry
-belongs in the launcher's file, is still missing. The files also hold entries for tests that were not Playwright specs:
-three of the old app's JavaScript unit-test files (`terminal-files.test.js` and `clipboard-name.test.js` in the terminal
-file, `crates/farhelm-ui/js-tests/click-detail.test.js` in the desktop file), and the old native app's tests and smoke
-legs (desktop file).
+few split between two, below). The files hold `###` entries for all 145. The files also hold entries for tests that were
+not Playwright specs: three of the old app's JavaScript unit-test files (`terminal-files.test.js` and
+`clipboard-name.test.js` in the terminal file, `crates/farhelm-ui/js-tests/click-detail.test.js` in the desktop file),
+and the old native app's tests and smoke legs (desktop file).
 
 A spec can have more than one entry, for two reasons, and each entry says which cases are its:
 
@@ -22,7 +21,8 @@ A spec can have more than one entry, for two reasons, and each entry says which 
   cases of specs listed in other areas' files"), or in a later `## <spec>, partly` section that continues an entry
   (Settings and hosts, Other dialogs).
 
-`tests/rail-notices.spec.ts` is the exception: Other dialogs and Sidebar and session view both list it whole.
+`tests/rail-notices.spec.ts` has an entry in both Other dialogs and Sidebar and session view; the sidebar's points to
+Other dialogs, which names the tests.
 
 The area files:
 
@@ -57,8 +57,13 @@ A status is one of:
 - replaced, naming them;
 - superseded: the GPUI design or a later SPEC.md removes the need; the remaining acceptance cases are still ported;
 - dropped, with the reason;
+- deferred, with the reason and where the follow-up is tracked (a TODO.md entry, say): wanted, but not part of the port;
 - test infrastructure: a helper of the old suite, not GUI behavior; nothing to port;
 - docs media: a docs screenshot, README hero or demo video capture, rebuilt on the GPUI tooling at cutover (M4), not as
   part of the GUI port.
 
 The last two are not progress on the port: a spec with either status was never a GUI behavior to replace.
+
+`docs/gpui/screenshot-scenes.json` has no way to mark a reference scene superseded, so the screenshot batch page lists
+such a scene as unported; its disposition lives in the parity entry that covers it (the `build-skew-banner` scene, for
+example, in the foundations file's feed entry).
