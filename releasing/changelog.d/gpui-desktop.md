@@ -21,6 +21,9 @@ text size. The new app keeps them with your other settings in Farhelm itself ins
 The window reopens where you left it. The first launch after the switch ignores the old app's saved window position and
 opens at the default size, centered, and on a Mac a window left on a second display reopens on the main one.
 
+Clone spells out invisible characters copied into Folder and Name, and launches with the original values unless
+you edit those fields.
+
 The number-key, Keyboard shortcuts and text size shortcuts (Cmd+digit, Cmd+/ and Cmd+Shift with = or − on a Mac;
 Ctrl+Shift with the same keys on Linux) now go by the key's position on the keyboard, whatever its layout, and never reach
 the program in a focused terminal. On Linux, Ctrl+Shift+− used to reach the terminal, where it is readline's undo.

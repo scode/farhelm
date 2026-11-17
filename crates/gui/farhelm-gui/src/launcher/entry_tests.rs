@@ -22,12 +22,12 @@ use super::entry::HOST_NOT_CARRIED;
 use super::entry::{new_available, open_clone, open_new, open_new_named, open_replace_with};
 use super::environment_launch_tests::{answer_except, catalog};
 use super::launch_tests::{HostChange, created, creates, start_host_change};
-use super::view_tests::{draft, fixture_hosts, name_of, shown_refusal};
+use super::view_tests::{draft, fixture_hosts, name_of, read, shown_refusal};
 use crate::actions::NewSession;
 use crate::layers;
 use crate::local_state;
 use crate::main_view::MainView;
-use crate::session_list::tests::{listing, preferences_state, session};
+use crate::session_list::tests::{change, listing, listing_meta, preferences_state, session};
 use crate::test_support::{self, any_open, settle, started};
 
 /// The sessions: `a` on host9 as its install `identity9`, with one terminal tab open, `b` on host9's row as the install
@@ -406,6 +406,93 @@ fn clone_prefills_the_sources_host_folder_title_and_launch(cx: &mut TestAppConte
     assert!(
         !draft.folder.is_touched() && !draft.name.is_touched(),
         "prefilled values are seeds, not edits"
+    );
+}
+
+/// A Clone spells out invisible characters in the copied fields, so the user can see what they are about to launch.
+/// The spelling is editable. Leaving it alone sends the source's exact bytes, and a new edit shows its own text.
+#[gpui::test]
+fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    let source = session("e")
+        .host(9)
+        .cwd("/srv/work\u{200b}box")
+        .title("fix\u{202e} login")
+        .unmanaged()
+        .not_launched_as_checkout()
+        .launch(json!({"kind": "command", "command": "true", "yolo": false}));
+    let mut changes = change(
+        listing_meta(&["a", "b", "c", "d"], 5, false),
+        &[source],
+        &[],
+    );
+    changes.upsert[0].value["host_identity"] = json!("identity9");
+    helm.push(changes);
+    settle(cx);
+    assert!(clone(cx, "e"));
+    let shown = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| {
+            (
+                launcher.folder.text(cx).to_string(),
+                launcher.name.text(cx).to_string(),
+            )
+        })
+    };
+    assert_eq!(
+        shown(cx),
+        ("/srv/work<U+200B>box".into(), "fix<U+202E> login".into())
+    );
+
+    test_support::click(cx, "launcher-launch");
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one copy was expected, got {sent:?}")
+    };
+    let body = create.body.as_ref().expect("a create carries its draft");
+    assert_eq!(body["cwd"], json!("/srv/work\u{200b}box"));
+    assert_eq!(body["title"], json!("fix\u{202e} login"));
+    created(&mut helm, cx, create.id, "copy");
+
+    assert!(clone(cx, "e"), "the source can be copied again");
+    test_support::click(cx, "launcher-name-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .name
+        .focus_handle(cx)
+        .is_focused(window)));
+    test_support::keys(cx, "end");
+    cx.simulate_input("\u{200b}");
+    settle(cx);
+    assert_eq!(shown(cx).1, "fix<U+202E> login\u{200b}");
+    assert_eq!(draft(cx).name.value(), "fix<U+202E> login\u{200b}");
+}
+
+/// The managed-checkout name is calculated from the copied title. Its automatic suffix must keep the title's
+/// spelling through draws. The draft's checkout title still has the source's original characters.
+#[gpui::test]
+fn a_managed_clones_numbered_name_spells_out_its_source_title(cx: &mut TestAppContext) {
+    let mut source = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
+        farhelm_proto::CommandLaunch {
+            command: "true".into(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        },
+    ));
+    source.title = "fix\u{202e} login".into();
+    source.github_repo = Some(farhelm_proto::GithubRepo {
+        owner: "acme".into(),
+        name: "project".into(),
+    });
+    let mut start = LaunchDraft::clone_of(&source, Some(1));
+    assert!(
+        start.advance_checkout_name("fix\u{202e} login-clone"),
+        "the copied title seeds a numbered name"
+    );
+    let (_helm, cx) = super::view_tests::launcher_on(cx, start);
+    assert_eq!(draft(cx).checkout_title(), "fix\u{202e} login-clone-2");
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.name.text(cx).to_string()),
+        "fix<U+202E> login-clone-2"
     );
 }
 
