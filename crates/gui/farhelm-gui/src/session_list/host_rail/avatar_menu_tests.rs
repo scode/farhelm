@@ -1,6 +1,6 @@
 //! Tests of an avatar's menu: a secondary click on a host's avatar, or Shift+F10 on a focused one, opens that host's
 //! actions menu beside the avatar's icon box, never choosing the host, and Escape returns focus to the avatar, in the
-//! collapsed and the expanded rail.
+//! collapsed and the expanded rail; and opening it closes a session row's open menu, as opening that one closes it.
 //!
 //! The menu itself (what it offers, what its commands do) is `hosts::menu`'s, tested there from the Hosts panel's row
 //! toggle; these tests pin only the rail's wiring: the gesture, the host, the anchor and the opener. They run the real
@@ -165,4 +165,46 @@ fn a_second_secondary_click_on_the_same_avatar_leaves_one_menu(cx: &mut TestAppC
         "Host actions for dev@build-box.invalid"
     );
     assert_eq!(menu(cx).left(), avatar.left() + px(40. + 10.));
+}
+
+/// A session row's menu and a host's menu are different kinds, opened from different controls, and the old app kept
+/// one open-menu signal per kind, so a regression in either cross-close left two floating menus up at once, a command
+/// looking attached to the wrong owner. The old `sidebar.spec.ts` pinned both directions ("opening one row's menu
+/// closes the other row kind's open one", reference commit `24bc0580`) with the Hosts panel's host rows; here the Hosts
+/// panel replaces the session list, so the pair that can be on screen together is a session row and a rail avatar.
+/// Both menus are the layer manager's popovers, which close on a press outside them, so opening one is a press outside
+/// the other. Specified: with b's session menu open, a secondary click on the SSH host's avatar leaves the host menu,
+/// named for that host, as the only menu drawn; with the host menu open, a click on b's menu button leaves b's menu as
+/// the only menu drawn, with focus on its Rename.
+#[gpui::test]
+fn a_session_menu_and_a_host_menu_each_close_the_other(cx: &mut TestAppContext) {
+    let (_fake, cx) = open(cx, false);
+    test_support::click(cx, "session-menu-b");
+    assert!(
+        node(&frame(cx), "session-menu").is_some(),
+        "the premise: b's menu is open"
+    );
+    let avatar = test_support::bounds(cx, "host-rail-host-2");
+    assert!(
+        !test_support::bounds(cx, "session-menu").intersects(&avatar),
+        "the premise: b's menu leaves the avatar uncovered"
+    );
+
+    secondary_click(cx, avatar.center());
+    let nodes = frame(cx);
+    assert!(node(&nodes, "session-menu").is_none(), "b's menu closed");
+    assert_eq!(
+        label(&nodes, "host-menu-items"),
+        "Host actions for dev@build-box.invalid"
+    );
+    assert!(
+        !menu(cx).intersects(&test_support::bounds(cx, "session-menu-b")),
+        "the premise: the host menu leaves b's button uncovered"
+    );
+
+    test_support::click(cx, "session-menu-b");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-menu").is_none(), "the host menu closed");
+    assert!(node(&nodes, "session-menu").is_some(), "b's menu opened");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
 }

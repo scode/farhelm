@@ -22,7 +22,7 @@ use gpui_component::Root;
 use serde_json::{Value, json};
 
 use super::delete_notice;
-use super::menu_tests::{any_layer, click_at, drawn, ended, entry, label_of, push, snapshot};
+use super::menu_tests::{any_layer, click_at, drawn, ended, entry, label_of, lit, push, snapshot};
 use super::outcome::PROGRESS_SHOWS_AFTER;
 use super::tests::{
     Fixture, change, launcher_drawn, listing_meta, open_main, painted, selected, sent, session,
@@ -451,6 +451,94 @@ fn a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actio
     assert!(
         drawn(cx, "prompt"),
         "a's Replace asks once its Stop settled"
+    );
+}
+
+/// An unavailable command stays focusable (`components/menu_item.rs`), so a menu gone wholly unavailable under a
+/// pending request still takes its keys and Escape, but it must neither run nor wear the highlight's fill ([`lit`]),
+/// which would make it read as ready. The old `sidebar.spec.ts` "a reopened busy menu stays navigable while refusing to
+/// act" and `menu-highlight.spec.ts` "host menu hover transfers focus and disabled actions never fill or run" (reference
+/// commit `24bc0580`); the latter used the host menu's Update, and the item is one component every menu shares. Run
+/// under macOS's click rule, so focus is back on a's button only because the menu returns it there.
+///
+/// Specified, with b open: a's menu opens on Rename, which alone wears the fill (the premise that the fill is read at
+/// all); choosing Stop by a click closes the menu with focus on a's button and sends a's one Stop, left unanswered; a
+/// click opens the menu again on Rename, now with no fill anywhere; Down moves focus through Mark unread, Pin to top,
+/// Clone, Replace with…, Replace and Stop, none of them filled; Enter on Stop leaves the menu open with focus on Stop;
+/// the pointer entering Replace moves focus there, still unfilled, and a click on it leaves the menu open and asks
+/// nothing; Home goes back to Rename; Escape closes the menu with focus on a's button; no other Stop or Replace is sent.
+#[gpui::test]
+fn a_busy_menu_walks_its_unavailable_commands_without_filling_or_running_them(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("b"), 0), (session("a"), 0)], false));
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    pending(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    let none: [&str; 0] = [];
+
+    test_support::click(cx, "session-menu-a");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    assert_eq!(
+        lit(cx, "session-menu"),
+        ["session-menu-rename"],
+        "the premise: an available command's highlight is painted"
+    );
+    test_support::click(cx, "session-menu-stop");
+    let [(_, path, _)] = &pending(&mut fake)[..] else {
+        panic!("one Stop was sent");
+    };
+    assert_eq!(path, "/api/sessions/a/stop");
+    assert!(!any_layer(cx), "choosing Stop closed the menu");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-a"));
+
+    test_support::click(cx, "session-menu-a");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-rename"),
+        "the busy menu still opens on its first command"
+    );
+    assert_eq!(lit(cx, "session-menu"), none, "Rename is unavailable");
+    for next in [
+        "session-menu-seen",
+        "session-menu-pin",
+        "session-menu-clone",
+        "session-menu-replace-with",
+        "session-menu-replace",
+        "session-menu-stop",
+    ] {
+        test_support::keys(cx, "down");
+        assert_eq!(focused_id(cx).as_deref(), Some(next));
+        assert_eq!(lit(cx, "session-menu"), none, "{next} is unavailable");
+    }
+    test_support::keys(cx, "enter");
+    assert!(
+        drawn(cx, "session-menu"),
+        "Enter on Stop left the menu open"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-stop"));
+
+    let replace = test_support::center(cx, "session-menu-replace");
+    cx.simulate_mouse_move(replace, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-replace"),
+        "the pointer moves the highlight onto an unavailable command too"
+    );
+    assert_eq!(lit(cx, "session-menu"), none, "and it stays unfilled");
+    test_support::click(cx, "session-menu-replace");
+    assert!(drawn(cx, "session-menu"), "the click left the menu open");
+    assert!(!drawn(cx, "prompt"), "and asked nothing");
+
+    test_support::keys(cx, "home");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-a"));
+    assert!(
+        fake.commands().iter().all(|command| !is_lifecycle(command)),
+        "no other Stop or Replace was sent"
     );
 }
 
