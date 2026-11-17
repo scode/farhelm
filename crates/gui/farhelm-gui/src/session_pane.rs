@@ -89,6 +89,9 @@
 //!   the pane mounts none for it, ever, and draws the retired card ([`retired`]) where the terminals would be, with the
 //!   card as home, while its host is reachable; the unavailable card stands there alone while it is not. A set made
 //!   before the session's row arrived is dropped once the row says it is retired.
+//! - **Claude's trust hint band** ([`trust_band`]), between the top row's lines and the terminal, taking height from
+//!   it, while Claude asks whether to trust a managed checkout. Its state is an entity the pane keeps for the window's
+//!   life: it reads trust, which the helm does not push, and remembers hidden occurrences across session switches.
 //!
 //! NOTE: The scrim covers whichever terminal is shown, as the old one covered every pane; a Delete holds back the
 //! notices of all of them.
@@ -97,6 +100,7 @@ pub(crate) mod card;
 pub(crate) mod details;
 pub(crate) mod header;
 mod retired;
+pub(crate) mod trust_band;
 pub(crate) mod unavailable;
 
 #[cfg(test)]
@@ -113,6 +117,8 @@ mod header_tests;
 mod retired_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod trust_band_tests;
 #[cfg(test)]
 mod unavailable_tests;
 
@@ -208,7 +214,10 @@ pub struct SessionPane {
     /// container creates) must open its session from that push. Otherwise the reply re-enables New while the fleet
     /// still reads empty, focus rests on New, and the session's later automatic open does not take it from there.
     new: FocusHandle,
-    /// Act on a change of the selection, of the user's choice, of the connection and of the open session's card.
+    /// Claude's trust hint band's state ([`trust_band`]), drawn above the open session's terminal while it applies.
+    trust_band: Entity<trust_band::TrustBand>,
+    /// Act on a change of the selection, of the user's choice, of the connection and of the open session's card, and
+    /// redraw when the trust hint band's state changes.
     _observing: Vec<Subscription>,
 }
 
@@ -346,6 +355,8 @@ impl SessionPane {
         }
         let follow = cx.new(card::Follow::new);
         observing.push(cx.observe_in(&follow, window, |pane, _, window, cx| pane.sync(window, cx)));
+        let trust_band = cx.new(trust_band::TrustBand::new);
+        observing.push(cx.observe(&trust_band, |_, _, cx| cx.notify()));
         // After the window's first frame exists rather than during its construction, as the focus coordinator's own
         // first recovery is: the terminal becomes home, and home takes focus.
         cx.defer_in(window, Self::sync);
@@ -358,6 +369,7 @@ impl SessionPane {
             clock: None,
             _card: follow,
             new,
+            trust_band,
             _observing: observing,
         }
     }
@@ -520,6 +532,8 @@ impl Render for SessionPane {
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
+            self.trust_band
+                .update(cx, |band, cx| band.tick_while(false, cx));
             return empty(cx);
         };
         // Read from the store, not from whether terminals are mounted, so a frame drawn before `sync` has caught up
@@ -595,6 +609,22 @@ impl Render for SessionPane {
         let band = band.map(|band| band.draw(theme::palette(cx)));
         // Whether the unavailable card has no terminal under it, read before the terminals are drawn.
         let alone = terminals.is_none();
+        // Claude's trust hint band, only while the agent terminal is the one drawn and live: no tab chosen, and no card
+        // over the terminals or in their place (`trust_band.rs`). A retired session or an interrupted one has none.
+        let agent_shown = notice.is_none()
+            && !shows_card
+            && !row.as_ref().is_some_and(retired::shows_row)
+            && terminals.as_ref().is_some_and(|set| {
+                let set = set.read(cx);
+                set.shown() == Some(set.agent())
+            });
+        let trust = row
+            .as_ref()
+            .and_then(|row| trust_band::draw(&self.trust_band, &key, row, agent_shown, cx));
+        // The band reads trust on the ticker's clock exactly while it shows.
+        let trust_shown = trust.is_some();
+        self.trust_band
+            .update(cx, |band, cx| band.tick_while(trust_shown, cx));
         let area: Option<AnyElement> = match row.as_ref() {
             Some(row) if shows_card => Some(card::draw(
                 card::Drawn {
@@ -628,18 +658,19 @@ impl Render for SessionPane {
                 cx,
             )
         });
-        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then a stale
-        // session's band, then the terminal (or the interrupted card in its place, or the unavailable card over it),
-        // which takes the rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines
-        // and the band show only while there is something to say), then the details bar. The bar comes last in drawing
-        // order as well as on screen, so its controls follow the top row and the terminal in Tab's order (SPEC.md:
-        // "Keyboard order follows the top row, terminal, then bottom bar").
+        // The top row, then the lines a long Restart or Replace, a refusal and a YOLO question add, then Claude's trust
+        // hint band, then a stale session's band, then the terminal (or the interrupted card in its place, or the
+        // unavailable card over it), which takes the rest of the height (SPEC.md: "The terminal loses no height in the
+        // steady state"; the lines and the bands show only while there is something to say), then the details bar.
+        // The bar comes last in drawing order as well as on screen, so its controls follow the top row and the terminal
+        // in Tab's order (SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar").
         div()
             .flex()
             .flex_col()
             .size_full()
             .child(header)
             .children(lines)
+            .children(trust)
             .children(band)
             .child(
                 div()

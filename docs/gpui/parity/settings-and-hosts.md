@@ -199,9 +199,10 @@ every machine, so it shows the switch.
 
 The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener and
 opens it at Sessions; the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity
-file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). The one entry point still to
-come is the trust hint band, the session view's, which calls the Agent trust entry point
-(`settings::open_at_agent_trust`); until it is built, only tests open Settings at Agent trust that way.
+file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). Claude's trust hint band, the
+session view's, opens it through the Agent trust entry point (`settings::open_at_agent_trust`) and reads Claude's trust
+again whenever a Settings dialog closes (`settings::Closings`); its cases are in the sidebar's parity file, under
+`tests/claude-trust.spec.ts`.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named otherwise:
 
@@ -988,7 +989,8 @@ in `crates/gui/farhelm-gui/src/settings/tests.rs`:
 
 Not ported here: the two hint-band cases ("... trust hint stays scoped to its managed agent terminal and own dismissal",
 "Pi and command launches do not borrow a workspace trust hint") and the rest of `claude-trust.spec.ts` belong to the
-band, which the session view draws.
+bands, which the session view draws. Claude's band is built, with its cases in the sidebar's parity file under
+`tests/claude-trust.spec.ts`; the Codex and Muse band, which these two cases are about, is not built yet.
 
 ## `tests/podman-environments.spec.ts`, partly
 

@@ -213,9 +213,10 @@ impl TrustAgent {
     }
 
     /// Read the trust route; `on_read` gets whether the agent's trust is on, or why the helm did not say
-    /// ([`configured::read_enabled`]). The caller is the dialog's own update, and `on_read` updates the dialog, which
-    /// [`super::choices::read_route`]'s contract makes safe.
-    pub(super) fn read(
+    /// ([`configured::read_enabled`]). The caller is the dialog's own update, or the trust hint band's
+    /// (`crate::session_pane::trust_band`), and `on_read` updates that view, which [`super::choices::read_route`]'s
+    /// contract makes safe.
+    pub(crate) fn read(
         self,
         cx: &mut App,
         on_read: impl FnOnce(Result<bool, HostText>, &mut App) + 'static,
