@@ -891,7 +891,11 @@ impl HostView {
 /// The cache is process-local, so a helm that has not checked the host since
 /// it started reports `checked_at: null` with `usable: false`; that means "not
 /// checked yet", not "refused", and `reason` stays `null` until a check fails.
-/// Reading this never schedules a check (`GET /api/environment-places` does).
+/// Reading this never schedules a check. Asking for one does, as
+/// `POST /api/hosts/{id}/podman-probe` does, and so does work that finds no
+/// fresh check in the cache: a launch or a reconnect to a container session,
+/// a recipe's Rebuild or preparation at the place, and container lifecycle
+/// work.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContainerCheckView {
     /// When the latest finished check for the host's current address ended,

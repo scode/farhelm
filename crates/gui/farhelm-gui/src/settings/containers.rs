@@ -12,11 +12,11 @@
 //!   (`HostView::container_check`), and carries one for exactly the hosts that can hold containers (the helm's
 //!   `can_host_environments`). A host is listed when it can hold containers by the GUI's own rule
 //!   (`HostKind::holds_containers`, which the launcher picks container hosts by too) and carries a check, as Settings →
-//!   Recipes' places use them too. Each row is named by the helm's name for the host, in the registry's order, and reads Ready, the check's
-//!   reason, or "this host needs a Podman check" before any check of the host's current address has passed or failed,
-//!   with "· Refreshing…" while one runs: the words the helm's `GET /api/environment-places` gave the old section for
-//!   the same check. Everything here is drawn from the push, so a check's result, a host added or removed, a rename or a
-//!   retarget shows the moment it is pushed, with nothing read again.
+//!   Recipes' places use them too. Each row is named by the helm's name for the host, in the registry's order, and
+//!   reads Ready, the check's reason, or "this host needs a Podman check" before any check of the host's current
+//!   address has passed or failed, with "· Refreshing…" while one runs: the words the helm's `GET /api/environment-places` (since removed) gave the old
+//!   section for the same check. Everything here is drawn from the push, so a check's result, a host added or removed,
+//!   a rename or a retarget shows the moment it is pushed, with nothing read again.
 //! - **Checked when first shown, on Refresh, and when a host needs it.** As the old section did on opening and on
 //!   Refresh, a round asks the helm to check every container host again in the background ([`check_container_hosts`]);
 //!   the results arrive through the push. The helm checks a host on its own only when a container launch or reconnect

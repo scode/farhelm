@@ -72,8 +72,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod environment;
 pub use environment::{
-    ContainerLeftoverView, EnvironmentHostView, EnvironmentPlaceView, LaunchTarget, Place,
-    ProviderKind, RecipePlaceView, WhenStatusUnanswered,
+    ContainerLeftoverView, EnvironmentHostView, LaunchTarget, Place, ProviderKind, RecipePlaceView,
+    WhenStatusUnanswered,
 };
 
 pub mod tcp_relay;

@@ -1738,8 +1738,7 @@ async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
 /// The recipe catalog is pushed too, so an edit made outside the channel
 /// reaches a connected GUI through the save's feed bump. And re-reading
 /// either recipe collection must start nothing: it runs after every bump,
-/// and the launcher's place list (`/api/environment-places`) is not pushed
-/// precisely because reading it starts Podman checks.
+/// so a read that started a Podman check would start one on every bump.
 ///
 /// Specified: the snapshot holds `dev` with its two packages; a save outside
 /// the channel pushes `dev` with the saved package list; and after the
