@@ -4,5 +4,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 10e439] `gpui-last-mile-fixes.md` — GPUI last mile: suspended-host launch refusal wording, suspended card provider words, Clone copied-text escape, and the launcher's remaining parity tests
 - [pending] `gpui-shared-placement.md` — GPUI last mile: one shared placement picker for the launcher and the template editor (after `gpui-last-mile-fixes.md`)
-- [pending] `gpui-docs-shots-mac.md` — GPUI last mile: capture the docs screenshots on the test Mac, and prove the hero and docs captures there
+- [in-flight 333aa6] `gpui-docs-shots-mac.md` — GPUI last mile: capture the docs screenshots on the test Mac, and prove the hero and docs captures there
 - [pending] `gpui-docs-followups.md` — GPUI last mile: docs for environment recent setups and the suspended-host launch refusal (after `gpui-last-mile-fixes.md`)
