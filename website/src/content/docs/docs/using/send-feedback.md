@@ -15,11 +15,11 @@ or talk it through with the maintainer and other users on [Discord](https://disc
 directly after **Send feedback** in the menu, opens the invite in your browser. The feedback dialog offers the same link
 under its heading, leaving your draft open when you follow it.
 
-Nothing is sent until you select **Send**, and once it has started, closing the window does not stop it. Below your
-message, the dialog shows everything else that goes with it, and nothing else does:
+Nothing is sent until you select **Send**. Below your message, the dialog shows everything else that goes with it, and
+nothing else does:
 
 - the Farhelm version shown at the top of the sidebar;
-- whether you are using the desktop app or the web UI;
+- that you are using the desktop app;
 - your operating system, by name (macOS, Linux, and so on).
 
 No logs, session contents, host names, or paths are included. Your helm, the part of Farhelm that shows you every host's
@@ -29,17 +29,18 @@ files your feedback where only the maintainer can read it. Farhelm gives the age
 feedback.
 
 When you enter how to reach you, **Re-use for future feedback** starts checked. After a successful send, your helm
-remembers that contact for the next feedback dialog, in both the desktop app and the web UI. Uncheck it, or empty a
-prefilled contact field, to forget the contact after sending. If the desktop app or another browser tab is already open,
-it shows the new remembered contact after you reload it.
+remembers that contact for the next feedback dialog. Uncheck it, or empty a prefilled contact field, to forget the
+contact after sending.
 
 If sending fails, the dialog says so and keeps your text, so you can try again or copy it. The remembered contact stays
 as it was.
 
 The same menu's **Documentation** item opens these docs in your browser, **Keyboard shortcuts** shows the
 [keys Farhelm uses](/docs/using/keyboard-shortcuts/), and **Release notes** opens
-[what changed in each release](/docs/release-notes/). **SSH needs 2FA?** shows commands to start connections to
+[what changed in each release](/docs/release-notes/). **Announcements**, after Release notes once Farhelm has shown you
+an announcement, shows past announcements again. **SSH needs 2FA?** shows commands to start connections to
 [hosts that ask for approval on every ssh login](/docs/get-started/add-a-remote-host/). **Welcome** shows the
 introduction again, with a link to [your first session](/docs/get-started/first-session/). In the Farhelm app on your
 Mac its **Check for updates** item looks for a new release and installs it
-([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). On Linux, **Open-Source Notices** at the end shows
+the licenses of the open-source code and fonts the app includes.

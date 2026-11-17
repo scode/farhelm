@@ -102,15 +102,15 @@ An agent on an ordinary host can ask for a session in a new [sandbox](/docs/usin
 
 - `farhelm agent create --recipe dev-box --agent claude` asks for a new Tensorlake sandbox from the `dev-box` recipe.
   Add `--container-host build-box` for a container on that host instead.
-- `farhelm agent create --template <name>` does the same when the template's **Runs on** is a recipe.
+- `farhelm agent create --template <name>` does the same when the template starts its session in a new sandbox or
+  container.
 - `farhelm agent clone --source-session <id>` of a sandbox or container session asks for a new one from the same recipe,
-  with the same agent and repository, like **Clone** in the session menu.
+  with the same agent and repository.
 
 These always show a card, even on a host whose settings let other agent commands through without asking, and the card
 offers only Allow and Deny. It names the recipe and where the new sandbox or container will be, and for Tensorlake says
-that it bills while it runs. Allow is your confirmation: Farhelm then builds it the same way the session launcher does,
-and its progress shows in the sidebar. Deny creates nothing. The new session starts in the sandbox's or container's home
-directory, or in a fresh checkout there with `--gh`.
+that it bills while it runs. Allow is your confirmation, and Farhelm then builds it. Deny creates nothing. The new
+session starts in the sandbox's or container's home directory, or in a fresh checkout there with `--gh`.
 
 ## Host changes
 
@@ -130,13 +130,13 @@ from **Add host**, and use **Delete sandbox** in the host's menu yourself.
 
 For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **Allow** and **Deny**.
 
-An add request waits as a card in every Farhelm window, and never opens anything over what you are doing. Choose **Open
-add dialog** on the card to open the ordinary **Add host** dialog, with the destination and alias filled in and the
-asking session and host shown. You can change either field before choosing **Add** to approve, or **Cancel** to decline.
-Approval starts the ordinary [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm
-needs to be installed on the host, it still asks you to confirm setup, even with **Set up new hosts without asking**
-turned on. The settings that skip setup or removal questions apply to actions you start in the UI; they do not approve
-an agent's request.
+An add request waits as a card and never opens anything over what you are doing. Choose **Open add dialog** on the card
+to open the ordinary **Add host** dialog, with the destination and alias filled in and the asking session and host
+shown. You can change either field before choosing **Add** to approve, or **Cancel** to decline. Approval starts the
+ordinary [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm needs to be
+installed on the host, it still asks you to confirm setup, even with **Set up new hosts without asking** turned on. The
+settings that skip setup or removal questions apply to actions you start in the UI; they do not approve an agent's
+request.
 
 The agent gets `accepted` when you approve and Farhelm starts adding the host. That does not mean Farhelm is installed
 or that the host is ready: adding can still fail, need setup, or be cancelled at the setup question. The agent must run
@@ -146,7 +146,7 @@ or that the host is ready: adding can still fail, need setup, or be cancelled at
 
 The agent waits up to nine minutes for your answer. If nobody answers by then, the card disappears and the agent is told
 so; nothing was changed, and the agent can ask again. If no Farhelm window is open when the agent asks, it is told
-straight away to ask you to open Farhelm. On your Mac, quitting Farhelm or closing its window counts as no window.
+straight away to ask you to open Farhelm. Quitting Farhelm or closing its window counts as no window.
 
 A card stays up even if the agent gives up waiting for it before the nine minutes are over, and allowing it then still
 does what it says. Deny cards you no longer want.
@@ -184,10 +184,9 @@ YOLO setting and both link settings: you have not decided about the new installa
 
 When an agent or a command in a remote session tries to open a web link through `BROWSER`, Farhelm asks to open it on
 your machine. The card names the session and host and shows the site it would open and the full URL. Only HTTP and HTTPS
-links are accepted. **Allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
-**Deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
-session, including ones on your Mac. In a [sandbox or container](#agents-in-sandboxes-and-containers), its own link
-permissions apply.
+links are accepted. **Allow** opens it in your default browser. **Deny** opens nothing. Commands can also ask directly
+with `farhelm agent open-url -- https://example.com`, from any session, including ones on your Mac. In a
+[sandbox or container](#agents-in-sandboxes-and-containers), its own link permissions apply.
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those
@@ -195,9 +194,9 @@ cards explain why they ask separately. **Always allow from** turns on only the p
 command permission above covers links. Farhelm decides which permission a link needs from the address as written,
 without looking up where a name points, so a public-looking name can still lead to your private network.
 
-With the matching permission on, the Mac app opens the link immediately. Farhelm's web UI still shows an **Open** button
-because your browser requires a click; **Dismiss** refuses the request. Turning on the local-network permission lets
-agents on that remote host make your browser load addresses on your machine or network without another approval.
+With the matching permission on, Farhelm opens the link immediately, without a card. Turning on the local-network
+permission lets agents on that remote host make your browser load addresses on your machine or network without another
+approval.
 
 A running agent gets forwarding at its next launch; new terminal tabs get it immediately. Sessions on your Mac open
 links in your browser directly, as they always have. Your own `BROWSER` setting wins, even when empty. If Farhelm is
