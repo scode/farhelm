@@ -1,6 +1,6 @@
 ---
 title: Tensorlake sandboxes
-description: Create a cloud host from a recipe, run sessions there, and suspend or delete it when you are done.
+description: Create a cloud host from a recipe, run sessions there, and delete it when you are done.
 sidebar:
   order: 6.5
 ---
@@ -14,10 +14,11 @@ responsible for making sure your sandboxes are not running, and billing you, whe
 
 A Tensorlake sandbox is a Linux machine in your Tensorlake project that Farhelm creates and uses as a host. You choose
 its size and software in a saved recipe, then start [sessions](/docs/using/start-a-session/) on it like any other host.
-You can suspend it with its processes and sessions intact, then resume where you left off.
+When it is suspended, its processes and sessions stay intact, and you [resume it](#suspend-and-resume) where you left
+off.
 
-You can also [give each session its own sandbox](#give-each-session-its-own-sandbox), created when you launch and
-deleted together with the last session in it.
+An agent can also [give a session its own sandbox](#give-each-session-its-own-sandbox), created when the session starts
+and deleted together with the last session in it.
 
 Sandboxes bill while running, including while their agents are idle. Snapshot storage also costs money, including while
 a sandbox is suspended; see [Tensorlake pricing](https://www.tensorlake.ai/pricing) for current terms. Building a
@@ -127,7 +128,7 @@ connection or when you replace the credential again.
 :::caution[Endpoint tokens after upgrading]
 
 Tokens previously saved inside recipes are removed. Re-enter them in Settings → **Credentials**, then select their names
-in the recipes. Reload Farhelm before editing a recipe form that was open during the upgrade.
+in the recipes.
 
 :::
 
@@ -151,9 +152,9 @@ Each row under **Tunnels to your side** maps a port inside a sandbox or containe
 helm's machine. For example, port `8080` inside → host `127.0.0.1`, port `8080` lets programs there use `127.0.0.1:8080`
 to reach a service on the helm's machine. **Anything in that environment, agents included, can use these tunnels.**
 
-Tunnels run while Farhelm is connected to the host and stop when it disconnects, suspends or deletes the host. Changes
-to recipe tunnels reach existing hosts at their next connection. Host details show each mapping and its status; a failed
-tunnel makes the host's dot amber and shows the reason while Farhelm retries.
+Tunnels run while Farhelm is connected to the host and stop when it disconnects or the host is suspended or deleted.
+Changes to recipe tunnels reach existing hosts at their next connection. Host details show each mapping and its status;
+a failed tunnel makes the host's dot amber and shows the reason while Farhelm retries.
 
 Tunnels use the host's existing connection, including your SSH configuration and **ProxyJump**. They close when the helm
 quits or crashes, and within about two minutes when its machine goes silent. These are separate from
@@ -183,15 +184,13 @@ images still in use must be released first.
 
 ## Give each session its own sandbox
 
-In the session launcher's **Runs on** switch, choose **New sandbox**, then a **Recipe**. The recipe needs a built
-Tensorlake snapshot first. You can also save this destination in a [launch template](/docs/using/launch-templates/).
-Farhelm asks before creating the billed sandbox unless **Create Tensorlake sandboxes without asking** is on.
-
-Choose a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) or start in the sandbox's home
-directory. **Clone** creates another sandbox from the same recipe; it does not copy the original's files. **Restart**
-and **Replace** keep the existing sandbox and its files. Recent setups retain the recipe and home-or-repository choice
-after Delete and create a fresh sandbox when applied. Opening **+** (New session) while one is selected starts from its
-recipe too, ready to create a fresh sandbox.
+A sandbox session runs in a Tensorlake sandbox of its own, created from a recipe when the session starts. An agent
+starts one with `farhelm agent create --recipe <name>`, and Farhelm shows a card for it every time
+([New sandboxes and containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers)). If you type the
+command in a session's terminal yourself, it asks the same way. The recipe needs a built Tensorlake snapshot first. The
+session starts in the sandbox's home directory, or with `--gh` in a fresh
+[managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) there. **Restart** and **Replace** keep
+the existing sandbox and its files.
 
 **Suspend** freezes the entire sandbox with its processes intact; **Resume** continues them. **Stop** ends the agent and
 its terminal tabs while the sandbox keeps running and billing. **Stop and suspend** does both. A session sandbox uses a
@@ -267,21 +266,20 @@ removes Farhelm's token file, leaving any Git authentication you configured your
 
 ## Suspend and resume
 
-Choose **Suspend** in the host's `⋯` menu in **Hosts**. Farhelm asks first if an agent is working or it cannot check
-activity reliably. Suspending keeps processes, files and sessions intact. The host shows **Suspended**, and **Resume**
-on its row or menu continues it. An open session also offers **Resume host** in its suspended banner.
+Suspending keeps a sandbox's processes, files and sessions intact. Farhelm cannot suspend a sandbox host; delete it to
+stop its billing. **Hosts** shows a suspended host as **Suspended**. To continue it, open one of its sessions and choose
+**Resume host**: Farhelm shows **Resuming…**, then **Connecting** until it can reach the host again. A suspended host
+with no sessions cannot be resumed from Farhelm; you can only [delete it](#delete-a-sandbox).
 
-While Tensorlake is suspending the host, Farhelm shows **Suspending…**; **Suspended** means Tensorlake has confirmed it.
-Resuming shows **Resuming…**, then **Connecting…** until Farhelm can reach the host again.
+A [sandbox session](#give-each-session-its-own-sandbox) has its own **Suspend** and **Resume**, and its sandbox shows
+**Suspending…** or **Resuming…** while they run.
 
 On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm, for
 example while the helm's machine is asleep. An idle agent while Farhelm stays connected does not start that countdown.
 Farhelm does not suspend idle hosts itself or resume them without a user action. After Farhelm disconnects, configured
 tunnels leave no separate connection keeping the sandbox awake.
 
-Launching on a suspended host shows progress while it resumes and reconnects, then starts the session automatically. For
-a fresh GitHub checkout, the directory is picked when the host is ready; a supplied session name determines its
-directory name. If that name is taken, the launch is refused so you can choose another.
+You cannot start a session on a suspended host; resume it first.
 
 ## Delete a sandbox
 
