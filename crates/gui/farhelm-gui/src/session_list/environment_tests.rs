@@ -24,7 +24,7 @@ use gpui::{Role, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::environment::needs_confirmation;
-use super::host_rail::tests::{hover_help, texts_within};
+use super::host_rail::tests::{hover_help, texts_within, within};
 use super::lifecycle_tests::node_bounds;
 use super::menu_tests::{any_layer, drawn, label_of, snapshot};
 use super::tests::{Fixture, launcher_drawn, open_main, painted, session};
@@ -568,15 +568,19 @@ fn a_suspend_answered_after_the_phase_changed_still_suspends(cx: &mut TestAppCon
 /// SPEC.md, "Creation": "Suspend and Resume are not changes to the host registry … Launches on other hosts and host
 /// changes elsewhere proceed while one is pending" (the old `tensorlake-sandbox-sessions.spec.ts`, "a held sandbox
 /// Suspend and a launch on another host proceed side by side"). A provider can take a while to freeze a sandbox, and a
-/// Suspend counted as a launch-excluding change would grey New out for all of it. The launcher's Launch refuses on
-/// the same host-change check New does (`hosts::host_change_in_flight`); pressing it here would need the launcher's own
-/// reads answered, which the fake answers only after the Suspend in front of them. Specified: with a's Suspend sent,
-/// unanswered and held in the operation store as a Suspend, New is available, no host change counts as in flight, and
-/// the heading's New opens the launcher.
+/// Suspend counted as a launch-excluding change would block New or Launch for all of it. A typed folder lets this
+/// draft proceed without waiting for the ordinary folder default. The fake answers commands in order, so the test
+/// observes the queued create while Suspend is unanswered. It cannot make the create settle before Suspend.
 #[gpui::test]
 fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
-    let (mut fake, cx) = open(cx, &[(idle("a"), 0)], false, &host);
+    let (mut fake, cx) = open(
+        cx,
+        &[(session("b").host(1), 0), (idle("a"), 0)],
+        false,
+        &host,
+    );
+    assert_eq!(super::tests::selected(cx).as_deref(), Some("b"));
     pending(&mut fake);
     choose(cx, "session-menu-a", "session-menu-suspend");
     let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
@@ -602,6 +606,64 @@ fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
     );
     test_support::click(cx, super::NEW_ID);
     assert!(launcher_drawn(cx), "New opened the launcher");
+    let draft = crate::launcher::view_tests::shown_draft(cx);
+    assert_eq!(
+        draft.host,
+        Some(1),
+        "New is on a different host from the Suspend"
+    );
+    assert_eq!(draft.target, None, "New is on the existing host");
+
+    test_support::click(cx, "launcher-tabs-Command");
+    test_support::click(cx, "launcher-folder-row");
+    assert!(crate::launcher::view_tests::focused(
+        cx,
+        crate::launcher::view_tests::Field::Folder
+    ));
+    let select_all = if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    };
+    test_support::keys(cx, select_all);
+    cx.simulate_input("/tmp");
+    test_support::settle(cx);
+    test_support::keys(cx, "escape");
+    assert!(launcher_drawn(cx), "Escape closed only the folder list");
+    test_support::click(cx, "launcher-command-row");
+    assert!(
+        within(&frame(cx), "launcher-command")
+            .iter()
+            .any(|node| node.flags.focused),
+        "the command field has focus before typing"
+    );
+    cx.simulate_input("true");
+    test_support::settle(cx);
+    test_support::click(cx, "launcher-yolo-No");
+    let draft = crate::launcher::view_tests::shown_draft(cx);
+    assert_eq!(draft.command.command, "true");
+    assert_eq!(
+        draft.command.yolo,
+        Some(false),
+        "the command is ready to launch"
+    );
+    assert_eq!(draft.folder.value(), "/tmp");
+    test_support::click(cx, "launcher-launch");
+    cx.run_until_parked();
+    let sent = fake.commands();
+    let creates: Vec<_> = sent
+        .iter()
+        .filter(|command| command.method == Method::Post && command.path == "/api/sessions")
+        .collect();
+    let [create] = creates.as_slice() else {
+        panic!("expected one create with Suspend still held: {sent:?}");
+    };
+    let body = create.body.as_ref().expect("the create carries its draft");
+    assert_eq!(
+        body["host"], 1,
+        "the create runs on the connected local host"
+    );
+    assert_eq!(body["cwd"], "/tmp");
 }
 
 // ---- Stop and suspend ----------------------------------------------------------------------------------------------

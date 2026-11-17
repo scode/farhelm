@@ -706,16 +706,13 @@ the two histories' merge, the setups' ranking and a search row's placement in
 `launcher::recents_tests::{the_environments_launches_merge_by_each_sources_next_launch, environment_launches_pass_the_folder_and_group_by_their_placement}`
 and `launcher::search_tests::an_environment_setup_names_its_own_placement`; superseded: the rest of "environment recents
 hold focused intent until deliberate promotion" (a re-read on every activity-feed notice, held back from a focused row
-until a deliberate choice), since the launcher reads the environments' history once as it opens; not yet ported:
-"restored container placement displays the recipe and host it submits", a saved container template taken from the
-composer search showing the recipe and container host it then sends in one create (its draft half, entering a new
-container at its home, is `templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`). The spec's
-other cases are other areas': "container template quick launch retains its saved place" is the templates and quick
-launch area's, "a connected container's Delete asks its Farhelm and reports the container that stays" is the session
-view's, and "Containers Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed-probe case are
-in [Settings and hosts](settings-and-hosts.md). Beyond this spec's cases, SPEC.md's carried placements (Container
-sessions follow Sandbox sessions' Clone, and New beside an open environment session preselects its recipe and place,
-never in a quick launch): one seed for both providers in
+until a deliberate choice), since the launcher reads the environments' history once as it opens. The spec's other cases
+are other areas': "container template quick launch retains its saved place" is the templates and quick launch area's, "a
+connected container's Delete asks its Farhelm and reports the container that stays" is the session view's, and
+"Containers Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed-probe case are in
+[Settings and hosts](settings-and-hosts.md). Beyond this spec's cases, SPEC.md's carried placements (Container sessions
+follow Sandbox sessions' Clone, and New beside an open environment session preselects its recipe and place, never in a
+quick launch): one seed for both providers in
 `launcher::environment_tests::a_seeded_environment_has_the_segments_effects_and_chooses_nothing`, driven with a sandbox
 in
 `launcher::entry_tests::{clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe, new_beside_an_open_environment_session_preselects_its_recipe_and_place}`,
@@ -724,6 +721,11 @@ and Replace with keeping the existing environment in
 `launcher::environment_tests::restart_with_and_replace_with_keep_the_existing_environment`, its recent setups of new
 environments refused in the old words in
 `launcher::environment_recents_tests::replace_with_refuses_an_environment_setup`.
+
+- "restored container placement displays the recipe and host it submits": a `tl:` result fills both selects, and Launch
+  sends the shown recipe and host in one environment create, in
+  `launcher::environment_recents_tests::a_container_template_shows_the_recipe_and_host_it_sends`. Its draft half is
+  `templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`.
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts`
 
@@ -748,14 +750,18 @@ sandbox waiting for the account and then coming back to ask rather than create i
 `launcher::sandbox_view_tests::a_hidden_quick_launch_waits_for_the_account_and_comes_back_to_ask`. "A recipe template
 quick launch asks before one recipe request" is ported with the templates area's number key in
 `templates::dispatch_tests::a_sandbox_template_on_a_number_key_comes_back_to_ask_before_creating`. "A held sandbox
-Suspend and a launch on another host proceed side by side": New staying available while a Suspend is out in
-`session_list::environment_tests::a_suspend_in_flight_leaves_new_available` and a launch elsewhere not holding a Resume
-in `hosts::environment_tests::a_launch_elsewhere_does_not_hold_resume`; not yet ported: its create sent while another
-host's Suspend is held. Deferred: resume before create is a near-term TODO item. This covers "an existing-host launch
-stays nonmodal while its Resume is held" and "Hosts refuses a host's Resume and Settings while a launch is waking that
-host". "Template placement keeps Host editable after leaving an environment" is the templates and quick launch area's.
-The registration note shows with no recipe chosen too, as the old launcher's did and SPEC.md says ("whether or not a
-recipe is chosen") (`launcher::sandbox_view_tests::a_new_environment_without_a_recipe_is_named_without_one`).
+Suspend and a launch on another host proceed side by side": New stays available and sends its create while Suspend is
+unanswered, as the test below shows. A launch elsewhere can also proceed without holding a Resume, in
+`hosts::environment_tests::a_launch_elsewhere_does_not_hold_resume`. Deferred: resume before create is a near-term TODO
+item. This covers "an existing-host launch stays nonmodal while its Resume is held" and "Hosts refuses a host's Resume
+and Settings while a launch is waking that host". "Template placement keeps Host editable after leaving an environment"
+is the templates and quick launch area's. The registration note shows with no recipe chosen too, as the old launcher's
+did and SPEC.md says ("whether or not a recipe is chosen")
+(`launcher::sandbox_view_tests::a_new_environment_without_a_recipe_is_named_without_one`).
+
+- The create sent to the connected local host with the sandbox Suspend still unanswered:
+  `session_list::environment_tests::a_suspend_in_flight_leaves_new_available`. The fake helm exposes queued commands and
+  delivers replies in order, so the test observes the create request while Suspend is pending.
 
 ### `tests/github-checkouts.spec.ts`
 
@@ -1228,15 +1234,12 @@ Only the launcher's cases are listed here; the spec's Uninstall, Retry and Adopt
 [Settings and hosts](settings-and-hosts.md), and its stale-session cases are the sidebar and session view's, as the
 terminal area's entry for the spec says.
 
-partly: four cases are named below; superseded: the two intent-key cases, since the GUI sends no create keys (SPEC.md,
+partly: five cases are named below; superseded: the two intent-key cases, since the GUI sends no create keys (SPEC.md,
 "Creation" and "Losing the connection to the helm"), and "clone-cross-host-explicit-edit", whose command was overwritten
 when the old launcher bound a Clone's host after its hosts read: a Clone's host is decided once, as it opens, from the
 hosts the helm has pushed (SPEC_impl.md, "The UI channel"), falling back with a note when the source's host is not among
 them (`launcher::entry_tests::clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so`), and nothing binds it
-later (Deviations, the first bullet); not yet ported: "create-dialog-selector-disappearance", a chosen host leaving the
-registry while New is open (how the launcher answers it is a deviation, in Deviations): the refusal's words are checked
-for an unconnected host in `launcher::request_tests::refusals_name_the_first_thing_to_fix`, but no test removes the
-chosen host
+later (Deviations, the first bullet).
 
 - "create-dialog-host-selector": the pick in
   `launcher::view_tests::{the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one, the_host_picker_browses_with_arrows_and_enter}`,
@@ -1244,6 +1247,8 @@ chosen host
   row's remote mark is the session list's.
 - "clone-cross-host": a Clone opening on its source's host with its command, and its create sent there, in
   `launcher::entry_tests::{clone_prefills_the_sources_host_folder_title_and_launch, a_clone_launch_sends_the_copied_launch}`.
+- "create-dialog-selector-disappearance": removing the picked host in a registry push leaves its id in the draft and
+  refuses a create, in `launcher::view_tests::launch_refuses_after_the_chosen_host_disappears` (see Deviations).
 - "create-dialog-selector-disabled-in-flight": the launcher, its host picker and folder included, hides while its create
   is out (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`; Deviations).
 - "create-on-unreachable-refused": a host that is not connected refuses Launch before anything is sent, in

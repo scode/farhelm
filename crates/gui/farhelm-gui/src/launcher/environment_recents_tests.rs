@@ -166,6 +166,90 @@ fn a_taken_environment_setup_shows_and_sends_its_placement(cx: &mut TestAppConte
     assert_eq!(body["request"]["launch"]["harness"], json!("codex"));
 }
 
+/// A template mounts both placement selects on an ordinary launch. Put its recipe and host after the defaults
+/// so the selects and the create can distinguish the saved placement from both first options.
+#[gpui::test]
+fn a_container_template_shows_the_recipe_and_host_it_sends(cx: &mut TestAppContext) {
+    use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+
+    let mut hosts = fixture_hosts(&[0, 8]);
+    hosts.entries[1].value["container_check"] = hosts.entries[0].value["container_check"].clone();
+    let recipes = CollectionState {
+        collection: Collection::Recipes,
+        meta: meta(&["web", "restored"]),
+        entries: ["web", "restored"]
+            .map(|name| KeyedEntry {
+                key: name.into(),
+                value: recipe_json(name, json!({ "kind": "tensorlake_ubuntu" })),
+            })
+            .into(),
+    };
+    let target = LaunchTarget::Environment {
+        recipe: "restored".into(),
+        place: Place::PodmanHost(9),
+    };
+    let template = LaunchTemplate {
+        name: "saved-box".into(),
+        fields: TemplateFields {
+            target: Some(target.clone()),
+            ..TemplateFields::default()
+        },
+    };
+    let templates = CollectionState {
+        collection: Collection::Templates,
+        meta: meta(&["saved-box"]),
+        entries: vec![KeyedEntry {
+            key: "saved-box".into(),
+            value: serde_json::to_value(template).unwrap(),
+        }],
+    };
+    let (mut helm, cx) = window_with_more(
+        cx,
+        super::launch_tests::command_draft(),
+        hosts,
+        plain_preferences(),
+        vec![recipes, templates],
+    );
+    // Taking a template waits for the launch catalog, even when the template changes only placement.
+    assert!(answer(&mut helm, cx, &[]).is_empty());
+    assert!(draft(cx).target.is_none());
+    assert!(!super::view_tests::has_node(cx, "launcher-recipe"));
+    assert!(!super::view_tests::has_node(cx, "launcher-container-host"));
+    assert!(super::view_tests::search_focused(cx));
+    super::search_view_tests::type_in(cx, "tl:saved-box");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Template: saved-box")
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        draft(cx).target,
+        Some(target),
+        "template application said {:?}",
+        name_of(cx, "launcher-search-refusal")
+    );
+    assert!(value_of(cx, "launcher-recipe").is_some_and(|value| value.starts_with("restored")));
+    assert_eq!(
+        value_of(cx, "launcher-container-host").as_deref(),
+        Some("host9")
+    );
+    assert!(
+        answer(&mut helm, cx, &[]).is_empty(),
+        "a template fills without launching"
+    );
+
+    test_support::click(cx, "launcher-launch");
+    let sent = answer(&mut helm, cx, &[]);
+    let [create] = sent.as_slice() else {
+        panic!("expected one environment create: {sent:?}");
+    };
+    assert_eq!(create.path, "/api/environment-sessions");
+    let body = create.body.as_ref().expect("the create carries its draft");
+    assert_eq!(body["recipe"], json!("restored"));
+    assert_eq!(body["place"], json!({ "kind": "podman_host", "host": 9 }));
+    assert_eq!(body["request"]["cwd"], json!("~"));
+}
+
 /// The old "environment recents stay independent of a held ordinary folder default": a host's history still out must
 /// not take the environments' setups away, and an environment's `~` must never become that host's remembered folder.
 /// Specified: New on host1, then host9 chosen, its history held: the `web` container setup still shows while the folder
