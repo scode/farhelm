@@ -529,7 +529,7 @@ fn a_long_command_wraps_inside_the_dialog(cx: &mut TestAppContext) {
     let (mut helm, cx, _toggle) = open_help_bar(cx);
     open_with_reply(&mut helm, cx, 200, one_host(Some(&sessions), Some(&setup)));
     let dialog = bounds(cx, "ssh-help");
-    let one_line = px(super::COMMAND_TEXT * 1.5);
+    let one_line = px(crate::components::COMMAND_TEXT * 1.5);
     for kind in ["sessions", "setup"] {
         let text = drawn(cx, &format!("ssh-help-host-0-{kind}")).bounds;
         let copy = drawn(cx, &format!("ssh-help-host-0-{kind}-copy")).bounds;

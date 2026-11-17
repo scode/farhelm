@@ -51,14 +51,14 @@ use std::time::Duration;
 
 use super::choices;
 use super::tensorlake_key::{TensorlakeAccount, path};
-use crate::components::{Button, CopyFeedback, HoverHelp, Tier, copy_button_then};
+use crate::components::{Button, CommandWell, CopyFeedback, HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
-use crate::theme::{self, metrics};
+use crate::theme;
 use crate::ticker::{self, Deadline};
 
-/// The group's element id; its controls and lines are `-create`, `-command`, `-copy`, `-copied`, `-unavailable` and
-/// `-error` after it.
+/// The group's element id; its controls and lines are `-create`, `-command` (the command, whose Copy is
+/// `-command-copy`), `-copied`, `-unavailable` and `-error` after it.
 pub(super) const ID: &str = "tensorlake-ssh-key";
 
 /// The lines saying why the group has no key to show, and why Create SSH key failed.
@@ -87,11 +87,6 @@ const NOT_CREATED: &str = "This helm has no SSH key for Tensorlake yet.";
 const UNCHECKED: &str = "Farhelm cannot check that the key is registered, because an API key cannot list SSH keys. An \
                          unregistered key shows up as an error the first time Farhelm sets up a sandbox.";
 
-/// `.tensorlake-settings pre`: the command's size and its well's padding (0.75rem).
-const COMMAND_TEXT: f32 = 11.;
-const COMMAND_PAD: f32 = 12.;
-/// `.tensorlake-command`'s gap between the command and Copy.
-const COMMAND_GAP: f32 = 6.;
 /// The group's gap and the room above its title under the rule, as the section's other parts
 /// (`.host-settings-section`, `.host-settings-section + .host-settings-section`).
 const PART_GAP: f32 = 14.;
@@ -262,42 +257,23 @@ impl SshKey {
         self.schedule_recheck(step + 1, cx);
     }
 
-    /// The registration command in its well with Copy beside it (`.tensorlake-command`).
-    fn command(&self, command: &str, cx: &Context<Self>) -> Div {
-        let palette = theme::palette(cx);
+    /// The registration command in its well with Copy beside it (`.tensorlake-command`), Copy confirming each copy
+    /// through the group's [`CopyFeedback`] and taking the focus a done Create SSH key moves to it.
+    fn command(&self, command: &str) -> CommandWell {
         let text = HostText::from_host(command.to_owned());
-        let well = div()
-            .id(SharedString::from(format!("{ID}-command")))
-            .debug_selector(|| format!("{ID}-command"))
-            .flex_1()
-            .min_w_0()
-            .p(px(COMMAND_PAD))
-            .bg(theme::color(palette.bg_1))
-            .border_1()
-            .border_color(theme::color(palette.border))
-            .rounded(metrics::RADIUS_SM)
-            .text_size(px(COMMAND_TEXT))
-            .line_height(px(COMMAND_TEXT * 1.5))
-            .child(HostSentence::new(SharedString::from(format!("{ID}-command-text"))).mono(&text));
         let copied = self.copied.clone();
         let raw = text.raw().to_owned();
-        let copy = copy_button_then(
-            format!("{ID}-copy"),
+        CommandWell::new(
+            format!("{ID}-command"),
+            text,
             "Copy",
             HoverHelp::tooltip(
                 "Copy: the command that registers Farhelm's SSH key with your Tensorlake account",
             ),
-            raw.clone(),
-            move |cx| copied.update(cx, |copied, cx| copied.confirm(&raw, cx)),
         )
+        .on_copy(move |cx| copied.update(cx, |copied, cx| copied.confirm(&raw, cx)))
         .accessible_name("Copy the registration command")
-        .focus(&self.copy_focus);
-        div()
-            .flex()
-            .items_center()
-            .gap(px(COMMAND_GAP))
-            .child(well)
-            .child(copy)
+        .focus(&self.copy_focus)
     }
 }
 
@@ -337,7 +313,7 @@ impl Render for SshKey {
             }
             Some(SshKeyStatus::Ready {
                 register_command, ..
-            }) => Some(self.command(&register_command, cx)),
+            }) => Some(div().child(self.command(&register_command))),
             Some(SshKeyStatus::Unavailable { reason }) => Some(
                 div().child(choices::host_failure_line(
                     UNAVAILABLE_ID,

@@ -409,7 +409,7 @@ fn create_ssh_key_shows_the_registration_command_and_copy_copies_it(cx: &mut Tes
     assert!(shows_command(cx), "{}", painted(cx));
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("tensorlake-ssh-key-copy"),
+        Some("tensorlake-ssh-key-command-copy"),
         "a done create moves focus to Copy"
     );
 
@@ -586,7 +586,10 @@ fn a_carried_on_create_shows_the_key_where_it_was_pressed(cx: &mut TestAppContex
     settle(cx);
     assert!(shows_command(cx));
     assert!(!drawn(cx, "tensorlake-ssh-key-error"));
-    assert_eq!(focused_id(cx).as_deref(), Some("tensorlake-ssh-key-copy"));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("tensorlake-ssh-key-command-copy")
+    );
     advance(cx, Duration::from_secs(60));
     assert_eq!(sent(&mut helm), [], "the key showed, so the re-reads stop");
 }
@@ -660,7 +663,10 @@ fn a_done_create_after_a_refusal_drops_the_read_on_the_next_showing(cx: &mut Tes
     settle(cx);
     assert!(shows_command(cx));
     assert!(!drawn(cx, "tensorlake-ssh-key-error"));
-    assert_eq!(focused_id(cx).as_deref(), Some("tensorlake-ssh-key-copy"));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("tensorlake-ssh-key-command-copy")
+    );
     show_section(cx, Section::Sessions);
     show_section(cx, Section::Tensorlake);
     assert_eq!(sent(&mut helm), [], "the key is known: nothing to read");
@@ -687,7 +693,7 @@ fn an_unavailable_key_shows_the_helms_reason_and_offers_nothing(cx: &mut TestApp
         Some("Farhelm has no usable SSH key for Tensorlake: the key folder is unreadable")
     );
     assert!(!drawn(cx, "tensorlake-ssh-key-create"));
-    assert!(!drawn(cx, "tensorlake-ssh-key-copy"));
+    assert!(!drawn(cx, "tensorlake-ssh-key-command-copy"));
 }
 
 /// The key can appear by a read rather than by the done answer: a refused create whose generation finished anyway is
@@ -722,7 +728,10 @@ fn a_key_found_by_the_read_after_a_refusal_moves_focus_to_copy(cx: &mut TestAppC
     );
     settle(cx);
     assert!(shows_command(cx));
-    assert_eq!(focused_id(cx).as_deref(), Some("tensorlake-ssh-key-copy"));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("tensorlake-ssh-key-command-copy")
+    );
 }
 
 /// A result must not move focus once the user has moved on since the action (SPEC.md, "Who may move focus"): a user
