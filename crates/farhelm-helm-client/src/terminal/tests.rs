@@ -890,3 +890,253 @@ async fn events_read_before_a_drop_reach_a_caller_that_was_behind_and_the_stream
     .await
     .expect("the stream test finished in time");
 }
+
+// ---- Recovery past the first attach --------------------------------------------------------------------------------
+
+/// The helm's side of one attach that went silent: read `socket` up to the stream's ping, which it sends only once it
+/// serves the socket, so the stream is past connecting and its watchdog is armed. Panics on anything else first.
+async fn read_ping(socket: &mut WebSocketStream<TcpStream>) {
+    match socket.next().await {
+        Some(Ok(Message::Text(text))) if text.as_str() == r#"{"type":"ping"}"# => {}
+        other => panic!("expected the stream's ping, got {other:?}"),
+    }
+}
+
+/// Read `socket`, which the helm side never closes, until it ends: proof that the stream ended it. Panics on input,
+/// which no test here types.
+async fn ended_by_the_stream(socket: &mut WebSocketStream<TcpStream>) {
+    loop {
+        match socket.next().await {
+            None | Some(Ok(Message::Close(_)) | Err(_)) => return,
+            Some(Ok(Message::Text(_))) => {}
+            other => panic!("the stream sent {other:?} on a silent socket"),
+        }
+    }
+}
+
+/// Pings every 20 ms and a 250 ms watchdog, so a silent socket ends well within the test's bound, and three short
+/// retries. The watchdog also bounds opening each socket, so it is kept well above a loopback handshake on a busy host.
+fn quick_watchdog() -> ChannelConfig {
+    ChannelConfig {
+        ping_interval: Duration::from_millis(20),
+        watchdog: Duration::from_millis(250),
+        terminal_ladder: ladder(&[10, 10, 10], 10),
+        ..ChannelConfig::default()
+    }
+}
+
+/// Answer two attaches by accepting their upgrades and then saying nothing, not even a pong, as a helm does while
+/// the supervisor has not answered the attach (it reads nothing from the socket until then). Each must end as a
+/// failed attempt on the ladder: the GUI is shown attempt `first` and then `first + 1`, each wait and each attempt in
+/// flight, with no `Attached` between. The sockets stay open on the helm side, so only the stream's watchdog can have
+/// ended them, which each one shows by closing.
+async fn two_silent_attaches(
+    accepted: &mut mpsc::UnboundedReceiver<Accepted>,
+    events: &mut TerminalEvents,
+    first: u32,
+) {
+    let mut silent = Vec::new();
+    for attempt in first..first + 2 {
+        let mut socket = accepted.recv().await.unwrap();
+        read_ping(&mut socket.socket).await;
+        assert_eq!(
+            next_event(events).await,
+            reconnecting(attempt, 3, ReconnectPhase::Retrying, Some(10)),
+            "a silent attach is a failed attempt"
+        );
+        assert_eq!(
+            next_event(events).await,
+            reconnecting(attempt, 3, ReconnectPhase::Retrying, None)
+        );
+        silent.push(socket);
+    }
+    for socket in &mut silent {
+        ended_by_the_stream(&mut socket.socket).await;
+    }
+}
+
+/// Old `terminal-replay-rename.spec.ts`, case 11, "replay-unconnected: a stalled first mount retries on the reconnect
+/// ladder". Why: a helm can accept a terminal's upgrade and then stall it (the helm reads nothing from the socket until
+/// the supervisor answers the attach), and a terminal that waited on that forever would sit on its first mount with
+/// nothing to say why; the old app learned this from an island-cap burst. The silence is the stream's to notice, since
+/// the helm answers nothing then, not even a ping.
+///
+/// Spec: a stream whose first two attaches are accepted and then silent shows `Attaching`, then attempt 1's wait and
+/// attempt in flight, then attempt 2's, as each attach's unanswered ping times out; each silent socket is closed by
+/// the stream; the third attach replays and is the stream's first attachment (`Attached(1)`), live.
+#[tokio::test]
+async fn a_first_attach_the_helm_accepts_and_never_answers_is_retried_on_the_ladder() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (addr, mut accepted) = server().await;
+        let (_handle, mut events) = open_terminal(
+            HelmEndpoint::new(addr, "test-secret"),
+            attach("s1"),
+            quick_watchdog(),
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attaching)
+        );
+        two_silent_attaches(&mut accepted, &mut events, 1).await;
+
+        let mut answered = accepted.recv().await.unwrap();
+        replay(&mut answered.socket).await;
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attached(Attachment(1)))
+        );
+        until_event(&mut events, TerminalEvent::ReplayComplete).await;
+    })
+    .await
+    .expect("the stream test finished in time");
+}
+
+/// Old `terminal-reconnect.spec.ts`, "silent-attach-is-a-failed-attempt-not-a-recovery". Why: during a recovery, an
+/// attach that the helm accepts but that never replays must not end the outage or start the ladder over, or a helm
+/// that keeps stalling attaches would hold the terminal on attempt 1 behind the card forever, never reaching the probes.
+///
+/// Spec: after a live attachment drops, the GUI is shown attempt 1; two reattaches accepted and then silent (no pong,
+/// no output) each fail by the stream's watchdog, showing attempts 2 and 3 in turn rather than attempt 1 again, and
+/// the stream closes each; the next reattach replays and is the stream's second attachment (`Attached(2)`), live.
+#[tokio::test]
+async fn a_reattach_the_helm_accepts_and_never_answers_is_a_failed_attempt() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (_handle, mut events, mut accepted, first) = attached(quick_watchdog()).await;
+        drop(first);
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 3, ReconnectPhase::Retrying, Some(10))
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 3, ReconnectPhase::Retrying, None)
+        );
+        two_silent_attaches(&mut accepted, &mut events, 2).await;
+
+        let mut answered = accepted.recv().await.unwrap();
+        replay(&mut answered.socket).await;
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attached(Attachment(2)))
+        );
+        until_event(&mut events, TerminalEvent::ReplayComplete).await;
+    })
+    .await
+    .expect("the stream test finished in time");
+}
+
+/// Old `terminal-reconnect.spec.ts`, "background-probes-recover-without-a-click". Why: SPEC.md, "Terminal experience",
+/// has a terminal whose network comes back overnight "simply there again": past the bounded retries, a probe that
+/// finds the helm must attach by itself, with nobody pressing Reconnect now, and the recovered terminal must retry
+/// promptly the next time rather than resume probing every 30 s. The probes past the sixth rung are reached here over
+/// real sockets, each retry failing as a real connection that drops during its handshake.
+///
+/// Spec: on a ladder of six 5 ms retries and a 20 ms probe, after a live attachment drops and six reattaches fail,
+/// the GUI is shown attempt 7 waiting and then in flight as a probe; that probe's attach replays and becomes
+/// `Attached(2)` with no request on the handle; when it drops, the GUI is shown attempt 1 of the retries again.
+#[tokio::test]
+async fn a_probe_past_the_retries_recovers_by_itself_and_starts_the_ladder_over() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let config = ChannelConfig {
+            terminal_ladder: ladder(&[5, 5, 5, 5, 5, 5], 20),
+            ..ChannelConfig::default()
+        };
+        let (addr, mut connections) = listen().await;
+        // Never used: the recovery must need no request.
+        let (_handle, mut events) =
+            open_terminal(HelmEndpoint::new(addr, "test-secret"), attach("s1"), config);
+        let mut first = accept_upgrade(connections.recv().await.unwrap()).await;
+        replay(&mut first.socket).await;
+        until_event(&mut events, TerminalEvent::ReplayComplete).await;
+
+        drop(first);
+        for attempt in 1..=6 {
+            assert_eq!(
+                next_event(&mut events).await,
+                reconnecting(attempt, 6, ReconnectPhase::Retrying, Some(5))
+            );
+            assert_eq!(
+                next_event(&mut events).await,
+                reconnecting(attempt, 6, ReconnectPhase::Retrying, None)
+            );
+            drop(connections.recv().await.unwrap());
+        }
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(7, 6, ReconnectPhase::Probing, Some(20))
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(7, 6, ReconnectPhase::Probing, None)
+        );
+        let mut probe = accept_upgrade(connections.recv().await.unwrap()).await;
+        replay(&mut probe.socket).await;
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attached(Attachment(2)))
+        );
+        until_event(&mut events, TerminalEvent::ReplayComplete).await;
+
+        drop(probe);
+        assert_eq!(
+            next_event(&mut events).await,
+            reconnecting(1, 6, ReconnectPhase::Retrying, Some(5)),
+            "the ladder started over"
+        );
+    })
+    .await
+    .expect("the stream test finished in time");
+}
+
+/// Old `terminal-replay-rename.spec.ts`, case 13, "replay-starved: a watchdog expiry that fires late does not end a
+/// live catch-up". Why: the watchdog measures silence, and a stream whose runtime was held busy heard none. When the
+/// stream next runs, its deadline has passed and the helm's answer is already waiting in the socket; if the expiry
+/// won, a healthy attachment the helm had accepted would be thrown away and replayed again (the old app hit this in
+/// WebKit when one task built 33 terminals).
+///
+/// Spec: with a ping outstanding on the first attach, the helm answers it and sends the replay, and the runtime's only
+/// thread is then blocked for four watchdog periods; afterwards the GUI is shown `Attached(1)`, the replay and its end,
+/// and the stream sends its next ping on that same socket (it pings again only once the last was answered), having
+/// opened no other.
+#[tokio::test]
+async fn a_watchdog_overdue_behind_a_starved_runtime_does_not_end_an_answered_attach() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (addr, mut accepted) = server().await;
+        let (_handle, mut events) = open_terminal(
+            HelmEndpoint::new(addr, "test-secret"),
+            attach("s1"),
+            quick_watchdog(),
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attaching)
+        );
+        let mut socket = accepted.recv().await.unwrap();
+        // The premise: a ping is outstanding, so the watchdog is armed.
+        read_ping(&mut socket.socket).await;
+        socket.socket.send(Message::text(PONG)).await.unwrap();
+        replay(&mut socket.socket).await;
+        // The test runs on a single-threaded runtime, so blocking its thread keeps the stream from running while its
+        // watchdog's deadline passes with the helm's answer already in its socket.
+        // sleep-ok: the starvation under test, four watchdog periods long
+        std::thread::sleep(Duration::from_millis(1_000));
+
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Attached(Attachment(1)))
+        );
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::Output(GridOutput::HistoryReset)
+        );
+        assert_eq!(next_event(&mut events).await, TerminalEvent::ReplayComplete);
+        read_ping(&mut socket.socket).await;
+        // Only a redial that already happened shows here; the events above are what rule out a reconnect.
+        assert!(
+            accepted.try_recv().is_err(),
+            "the stream had already opened another socket"
+        );
+    })
+    .await
+    .expect("the stream test finished in time");
+}

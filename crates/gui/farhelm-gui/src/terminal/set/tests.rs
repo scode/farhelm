@@ -809,6 +809,68 @@ fn choosing_another_session_ends_every_terminal_of_the_open_one(cx: &mut TestApp
     );
 }
 
+/// Old `terminal-reconnect.spec.ts`, "leaving-a-session-cancels-a-pending-reconnect". Why: a wait to reattach that
+/// outlived the view would attach later for a session no longer shown, under a lease nothing on screen uses, and every
+/// attach takes the terminal from whatever holds it. Two waits can be running when the user leaves: a stream's own
+/// reconnect wait, which ends with its stream (helm-client
+/// `letting_go_of_a_stream_during_its_reconnect_wait_cancels_the_reconnect`), and the wait before a stream closed over
+/// a protocol fault is opened again, which is the terminal's own timer and must end with the terminal.
+///
+/// Spec: with session a's agent terminal and its tab t1 live, t1's link drops, so its stream waits to reconnect, and
+/// the agent terminal's stream breaks the grid format, so it is closed and its restart waits; choosing b closes t1's
+/// stream and opens one for b's agent terminal; a minute later, past every wait, no other stream has been opened.
+#[gpui::test]
+fn leaving_a_session_cancels_its_terminals_pending_reconnects(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    window.go_live(agent, "agent");
+    window.go_live(t1, "shell");
+    window.opened.borrow_mut()[t1].0.drop_link();
+    // A second hello on one attachment, which the grid model refuses.
+    let hello: GridOutput =
+        serde_json::from_value(json!({"t":"hello","cols":80,"rows":24,"history_cap":0})).unwrap();
+    window.opened.borrow_mut()[agent].0.output(hello);
+    settle(window.cx);
+    assert_eq!(
+        window.phase(t1),
+        FakePhase::Reconnecting,
+        "the premise: t1's stream waits"
+    );
+    assert_eq!(
+        window.phase(agent),
+        FakePhase::Closed,
+        "the premise: the faulted stream is closed"
+    );
+    {
+        // Scoped: a handle kept on the set would keep its terminals alive past the switch.
+        let set = window.set();
+        assert!(
+            window
+                .cx
+                .update(|_, cx| set.read(cx).agent().read(cx).reconnecting()),
+            "the premise: the agent terminal's restart waits"
+        );
+    }
+
+    click(window.cx, "session-row-b");
+    assert_eq!(window.phase(t1), FakePhase::Closed);
+    test_support::advance(window.cx, std::time::Duration::from_secs(60));
+    let opened: Vec<(String, Option<String>)> = window
+        .opened
+        .borrow()
+        .iter()
+        .map(|(_, attach)| (attach.session.clone(), attach.tab.clone()))
+        .collect();
+    assert_eq!(
+        opened,
+        [
+            ("a".to_owned(), None),
+            ("a".to_owned(), Some("t1".to_owned())),
+            ("b".to_owned(), None)
+        ]
+    );
+}
+
 /// SPEC.md, "Session list": a terminal of an unreachable host "keeps its last screen and tab strip dimmed and inert
 /// beneath the card", and the card covers whichever terminal is shown, so every terminal goes inert, hidden tabs
 /// included, and the strip takes no presses (choosing a tab would show a terminal the card does not explain).
