@@ -20516,3 +20516,54 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: moot and removed in plan `tmux-drop-from-install`, PR `03-release-payloads`: `scripts/devbuild-mac.sh` no
   longer downloads a release's checksum or signature files, and `farhelm internal verify-release-sums`, which read them,
   is removed.
+
+## auth-skew-remount-retains-row-operation-count.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: After a
+  sign-in expiry plus a build-skew remount, an abandoned row-operation count survives in AppBody state and blocks
+  Restart. The trigger is a sign-in-expiry remount of the GUI.
+- Decision: the user picked "Accepted: discard all, and state the principle" (2026-10-26 ten-question triage page, Q3);
+  the spec sentence is carried by `add-host-refusal-bypasses-dialog-admission.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-17 with the end of the GPUI migration, without further triage (maintainer's
+  instruction): This route requires browser tabs sharing sign-in storage and a page remount after build skew.
+
+## browser-menu-focus-retains-evaluator-channels.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  Confirmed. `menu_panel.rs:374` evaluates `return await window.__farhelmMenuFocus(...)`. Pinned dioxus-web 0.7.10's
+  `PROMISE_WRAPPER` appends `dioxus.close()` after the caller's code, so the explicit `return` skips it and the channel
+  stays in `globalThis.__channels`. But the same `return` pattern appears in many other web evals (`approvals.rs:173`,
+  `hosts.rs:3098`, `launch_sequence.rs:428,449`, `modal_isolation.rs:86`, `api.rs:3024`, and others). So the correct
+  scope is a choice: fix this one call site, or add a shared eval helper. The retained size and any real degradation are
+  unmeasured.
+- Decision: the user picked "Discard unless measured" (2026-10-26 ten-question triage page, Q8).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-17 with the end of the GPUI migration, without further triage (maintainer's
+  instruction): The leak is in the Dioxus web JavaScript evaluator and its Rust/WASM channels.
+
+## menu-blur-can-leave-delayed-arrow-current.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Claims
+  a blur-to-body without a following focusin leaves the menu-focus epoch unchanged, so a delayed arrow request can
+  reclaim focus. The finding itself says the native blur/focus sequence is unverified and says to establish real engine
+  behavior before changing cancellation policy.
+- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
+  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-17 with the end of the GPUI migration, without further triage (maintainer's
+  instruction): The reported race depends on the browser blurring to the page body without firing focusin.
+
+## shortcut-armed-state-survives-auth-remount.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: An
+  armed shortcut sequence's indicator survives an auth/skew remount. The route to a harmful launch is unestablished.
+- Decision: the user picked "Accepted: discard all, and state the principle" (2026-10-26 ten-question triage page, Q3);
+  the spec sentence is carried by `add-host-refusal-bypasses-dialog-admission.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-17 with the end of the GPUI migration, without further triage (maintainer's
+  instruction): The stale shortcut state in this report requires browser credential sharing and an auth-skew remount.
