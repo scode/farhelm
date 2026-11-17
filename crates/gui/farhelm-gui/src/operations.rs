@@ -221,8 +221,8 @@ pub enum Work {
 ///
 /// Both matches are exhaustive, so a new [`Work`] variant decides both in the same change that adds it. They keep one
 /// arm per line so that a new variant's arms are pure additions, which the file's `append-only` extension rule admits
-/// (`docs/gpui/foundation-ownership.md`); grouped arms (`A | B => false`) would turn each addition into a changed line
-/// the path check refuses. A PR that adds a variant pins its two answers in its own area's tests:
+/// (`docs/gpui/foundation-ownership.md`); grouped arms (`A | B => false`) would turn each addition into a changed line,
+/// which that rule does not admit. A PR that adds a variant pins its two answers in its own area's tests:
 /// `operations_tests.rs` is not an extension point, and its table covers only the kinds of work that existed when
 /// these methods were added.
 impl Work {

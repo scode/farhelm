@@ -88,8 +88,6 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` (every GUI lint ban fires,
   only its owners switch one off, and no crate switches one off as a whole)
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
-- `python3 -B scripts/test-check-foundation-paths.py` (the GPUI foundation ownership check; the check itself judges one
-  PR's diff in its landing step, so there is nothing to run it on here)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
 - `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` (the desktop archive's
