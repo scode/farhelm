@@ -748,7 +748,7 @@ fn a_launch_that_opens_its_session_reports_nothing(cx: &mut gpui::TestAppContext
 
 /// The node drawn under `id` is a status, which assistive technology announces when it appears (the old pill's
 /// `role="status"`).
-fn is_status(cx: &mut VisualTestContext, id: &str) -> bool {
+pub(crate) fn is_status(cx: &mut VisualTestContext, id: &str) -> bool {
     test_support::frame(cx)
         .iter()
         .any(|node| node.element_id.as_deref() == Some(id) && node.role == Some(gpui::Role::Status))

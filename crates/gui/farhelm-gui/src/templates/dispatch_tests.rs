@@ -30,9 +30,9 @@ use super::save_tests::panel_name_focused;
 use super::sequence::{self, Binding, Refusal};
 use super::shortcuts::Bindings;
 use super::summary::Part;
-use crate::actions::{QUICK_LAUNCH_CHORD, SEQUENCE_PREFIX_CHORD};
+use crate::actions::{QUICK_LAUNCH_CHORD, QUICK_SWITCHER_CHORD, SEQUENCE_PREFIX_CHORD};
 use crate::launcher::environment_launch_tests::{self, answer_except};
-use crate::launcher::launch_tests::{creates_answering, creates_answering_with};
+use crate::launcher::launch_tests::{creates_answering, creates_answering_with, is_status};
 use crate::launcher::request::container_reason;
 use crate::launcher::view::BANNER_SHOWS_FOR;
 use crate::launcher::view_tests::fixture_hosts;
@@ -1306,6 +1306,121 @@ fn a_number_keys_yolo_refusal_reveals_the_ordinary_question_over_its_draft(
     push(&mut helm, cx, with_yolo_go());
     push(&mut helm, cx, bound(None, &[("1", "yolo-go")]));
     a_refused_yolo_quick_launch_asks(&mut helm, cx, |cx| number_key(cx, 1));
+}
+
+/// The template the pill cases launch: [`runs_true`] whose session name is its own name, `named-go`, so that the pill
+/// has a template-supplied name to show.
+const NAMED_GO: &str = "named-go";
+
+/// A held quick launch of [`NAMED_GO`] through `press`, with `bindings` holding the key, followed through its progress
+/// pill, a quick switcher opened and closed meanwhile, and the helm's refusal. The press sends one create titled
+/// `named-go` and opens nothing; nothing shows at 1.9 seconds, and at 2.1 the launcher's own pill is a status named
+/// "Launching “named-go” on host1…" painting "2 s" (`launcher::pill`). The switcher then opens over the hidden launch
+/// and Escape closes it, with the pill up throughout. The refusal takes the pill down and, since those key presses
+/// count as moving on (SPEC.md, "Keyboard focus", "Who may move focus"; the old test, run before that rule, saw the
+/// launcher come back), opens nothing and leaves the notice; its Open launcher brings back the launcher with "Not
+/// launched. hidden launch refused".
+fn a_held_named_quick_launch_shows_its_pill(
+    cx: &mut TestAppContext,
+    bindings: CollectionState,
+    press: impl FnOnce(&mut VisualTestContext),
+) {
+    let (mut helm, cx) = window(cx, None);
+    let named_go = TemplateFields {
+        name: Some(NAMED_GO.into()),
+        ..runs_true()
+    };
+    push(&mut helm, cx, templates_with(template(NAMED_GO, named_go)));
+    push(&mut helm, cx, bindings);
+    let pill = |cx: &mut VisualTestContext| label(cx, "launch-progress");
+    press(cx);
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one press sent one create, not {}", sent.len());
+    };
+    assert_eq!(
+        create.body.clone().unwrap_or_default()["title"],
+        json!(NAMED_GO),
+        "the premise: the template names the session"
+    );
+    assert!(!any_open(cx), "the premise: the launch went out unseen");
+
+    test_support::advance(cx, Duration::from_millis(1_900));
+    assert_eq!(pill(cx), None, "nothing before two seconds");
+    test_support::advance(cx, Duration::from_millis(200));
+    let words = Some("Launching “named-go” on host1…".to_owned());
+    assert_eq!(pill(cx), words, "the pill names the session and its host");
+    assert!(is_status(cx, "launch-progress"), "announced as a status");
+    assert!(
+        painted(&frame(cx)).iter().any(|line| line == "2 s"),
+        "it counts from the press"
+    );
+
+    // SPEC.md, "Desktop window chrome", on the quick switcher: it "works during a pending launch, whose hidden launcher
+    // is no longer modal". The switcher's one read (`/api/sessions?sort=activity`) stays unanswered until the create's
+    // reply: the fake helm answers in command order, as the helm does, and the create went first. The switcher draws
+    // while its read loads, which is all this step needs.
+    keys(cx, QUICK_SWITCHER_CHORD);
+    let reads = helm.commands();
+    let [read] = &reads[..] else {
+        panic!("opening the switcher sent one read, not {reads:?}");
+    };
+    assert!(
+        cx.debug_bounds("quick-switcher").is_some(),
+        "the switcher opened over the hidden launch"
+    );
+    assert_eq!(pill(cx), words, "with the pill still up");
+    keys(cx, "escape");
+    assert!(
+        cx.debug_bounds("quick-switcher").is_none(),
+        "Escape closed it"
+    );
+    assert_eq!(pill(cx), words, "and the pill is still up");
+
+    helm.reply(create.id, 409, Some(json!("hidden launch refused")));
+    // The closed switcher's read, answered now that it is first in line; nothing is left to read it.
+    helm.reply(
+        read.id,
+        200,
+        Some(json!({ "sessions": [], "total": 0, "truncated": false })),
+    );
+    settle(cx);
+    assert_eq!(pill(cx), None, "the refusal took the pill down");
+    assert!(
+        !any_open(cx),
+        "the user moved on, so the launcher did not come back"
+    );
+    assert!(
+        cx.update(|_, cx| notices::posted(cx).contains(&Notice::LaunchNotStarted)),
+        "the notice offers the launcher"
+    );
+    test_support::click(cx, "notice-open-launcher");
+    assert!(any_open(cx), "Open launcher brought it back");
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. hidden launch refused")
+    );
+}
+
+/// The old app's "quick launch shows a named pending pill" (`launch-progress.spec.ts` at the reference commit). A quick
+/// launch is a launch whose launcher was never drawn, so the progress pill is the user's only sign that it is still
+/// out (SPEC.md, "Creation": the pill shows "the captured host's name ... including the session name when supplied"),
+/// and the session name here comes from the template, not from anything the user typed. Specified: with ⚡ on
+/// `named-go`, the walk of [`a_held_named_quick_launch_shows_its_pill`]. Its switcher step stays, as in the old test,
+/// because the switcher opening over a real pending launch is tested nowhere else (the switcher's own test of that uses
+/// a host probe as the stand-in).
+#[gpui::test]
+fn the_chords_held_launch_names_its_session_and_host_in_the_pill(cx: &mut TestAppContext) {
+    a_held_named_quick_launch_shows_its_pill(cx, marked(Some(NAMED_GO)), chord);
+}
+
+/// The number key's twin of the case above (the old spec's "template shortcut shows a named pending pill"): a number
+/// key launches through the same path as ⚡, so a held one must show the same named pill and end the same way.
+/// Specified: with key 1 on `named-go`, the walk of [`a_held_named_quick_launch_shows_its_pill`].
+#[gpui::test]
+fn a_number_keys_held_launch_names_its_session_and_host_in_the_pill(cx: &mut TestAppContext) {
+    let bindings = bound(None, &[("1", NAMED_GO)]);
+    a_held_named_quick_launch_shows_its_pill(cx, bindings, |cx| number_key(cx, 1));
 }
 
 /// The creates the window sent, unanswered, and the launch-history reads it made, every other command answered (the
