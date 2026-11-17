@@ -93,6 +93,13 @@
 //! is not Cut (that is Ctrl+X, which this leaves alone) and Kit binds it to nothing, so the field takes the chord's
 //! key-down instead, again only with nothing selected; with a selection the chord keeps a field's ordinary meaning,
 //! which in Kit's fields is none.
+//!
+//! ## The Edit menu
+//!
+//! The Mac app's Edit menu has one action per item, whatever holds focus ([`EditCommand`]). Its Copy, Paste and Select
+//! All are the terminal's actions, so that they reach a focused terminal, and [`TextInput`] turns those three back into
+//! Kit's own for its field on their way up from it. A field therefore answers the menu as it answers Cmd+C, Cmd+V and
+//! Cmd+A, and no key binding changes on either platform.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -105,9 +112,9 @@ use gpui::{
 };
 use gpui::{KeybindingKeystroke, Keystroke};
 
-use crate::actions::THIS_PLATFORM;
+use crate::actions::{self, THIS_PLATFORM};
 use gpui_component::input::{
-    Cut, Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
+    self, Cut, Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
 };
 
 use super::HoverHelp;
@@ -480,15 +487,22 @@ pub enum Vertical {
     Down,
 }
 
-/// One of a text field's own editing commands, for the Mac app's Edit menu (Undo, Redo, Cut, Copy, Paste, Select All,
-/// as the old app's Edit menu had them).
+/// One of the Mac app's Edit menu commands (Undo, Redo, Cut, Copy, Paste, Select All, as the old app's Edit menu had
+/// them), each with the action the menu dispatches for it to whatever holds focus.
 ///
-/// The menu dispatches Kit's own action for each, so a focused field (of every kind this module draws) does exactly
-/// what its keys do. GPUI enables a menu item only while something on the focused element's path handles its action:
-/// with no text field focused, Undo, Redo, Cut, Paste and Select All are disabled. Copy stays enabled everywhere,
-/// because Kit's window root handles it too (it copies Kit's own selected text, of which Farhelm draws none, so there
-/// it does nothing). This is the one way Kit's editing actions leave this module, boxed, so the menu never names a Kit
-/// type.
+/// Undo, Redo and Cut dispatch Kit's own text-field actions, so only a focused text field handles them. Copy, Paste and
+/// Select All dispatch the terminal's actions ([`actions::CopyTerminalSelection`], [`actions::Paste`],
+/// [`actions::SelectAllInTerminal`]), so they act on a focused terminal as its Cmd+C, Cmd+V and Cmd+A do, and every
+/// [`TextInput`] handles those three too, by handing Kit's own Copy, Paste or Select All to its field. Either way the
+/// item does what the focused element's keys do. GPUI enables a menu item only while something on the focused
+/// element's path handles its action: a focused editable field enables all six, a read-only one only Copy and Select
+/// All (Kit handles its Paste, Cut, Undo and Redo only while the field is editable, and [`TextInput`] hands Paste on
+/// only then too), a focused terminal Copy, Paste and Select All, and anywhere else none.
+///
+/// Beside each item the menu shows its action's first binding with no context, or failing that its first binding of
+/// all. The terminal's three actions have no context-free binding, so on a Mac each shows that fallback, its single row
+/// of [`actions::TERMINAL_KEYS`] (⌘C, ⌘V, ⌘A); a test pins those rows. This is the one way
+/// Kit's editing actions leave this module, boxed, so the menu never names a Kit type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditCommand {
     Undo,
@@ -500,16 +514,16 @@ pub enum EditCommand {
 }
 
 impl EditCommand {
-    /// The action a focused text field handles for this command.
+    /// The action the Edit menu dispatches for this command, which a focused text field handles for every command and
+    /// a focused terminal for Copy, Paste and Select All.
     pub fn action(self) -> Box<dyn gpui::Action> {
-        use gpui_component::input;
         match self {
             Self::Undo => Box::new(input::Undo),
             Self::Redo => Box::new(input::Redo),
             Self::Cut => Box::new(input::Cut),
-            Self::Copy => Box::new(input::Copy),
-            Self::Paste => Box::new(input::Paste),
-            Self::SelectAll => Box::new(input::SelectAll),
+            Self::Copy => Box::new(actions::CopyTerminalSelection),
+            Self::Paste => Box::new(actions::Paste),
+            Self::SelectAll => Box::new(actions::SelectAllInTerminal),
         }
     }
 }
@@ -596,6 +610,20 @@ impl TextInput {
     }
 }
 
+/// Send Kit's `action` to the field behind `handle`, for an Edit menu command that reached the field's wrapper as the
+/// terminal's action ([`EditCommand`]), and end that command there. The stop is explicit because GPUI starts the nested
+/// dispatch with propagation on, so the outer command would otherwise go on up past the field whenever nothing in the
+/// nested one stopped it.
+fn hand_to_field(
+    handle: &FocusHandle,
+    action: &dyn gpui::Action,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    handle.dispatch_action(action, window, cx);
+    cx.stop_propagation();
+}
+
 impl RenderOnce for TextInput {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
@@ -622,6 +650,23 @@ impl RenderOnce for TextInput {
                 held.set(Some(event.is_held));
             }
         });
+        // The Edit menu's Copy, Paste and Select All dispatch the terminal's actions ([`EditCommand`]), which Kit's
+        // field does not handle, so they bubble up to here and go back down to the field as Kit's own. The menu then
+        // does in a field what Cmd+C, Cmd+V and Cmd+A do. Paste is handed on only while the field is editable, because
+        // Kit handles its Paste only then, and a handler here would enable the menu item over a read-only field.
+        let (copy, paste, select_all) = (handle.clone(), handle.clone(), handle.clone());
+        let wrapper = wrapper
+            .on_action(move |_: &actions::CopyTerminalSelection, window, cx| {
+                hand_to_field(&copy, &input::Copy, window, cx)
+            })
+            .on_action(move |_: &actions::SelectAllInTerminal, window, cx| {
+                hand_to_field(&select_all, &input::SelectAll, window, cx)
+            })
+            .when(!self.state.2.get(), |wrapper| {
+                wrapper.on_action(move |_: &actions::Paste, window, cx| {
+                    hand_to_field(&paste, &input::Paste, window, cx)
+                })
+            });
         // The sequence prefix with nothing selected (the module docs, "The sequence prefix"). On a Mac it is Kit's
         // Cut, caught in the capture phase, on its way down to the field, so Kit's own Cut handler never sees one taken
         // here.

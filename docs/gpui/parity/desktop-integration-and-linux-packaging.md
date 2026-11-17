@@ -94,11 +94,12 @@ row, not by element
 ### The old native smoke test's legs
 
 `scripts/desktop-smoke.sh` at the reference commit (`git show 24bc0580:scripts/desktop-smoke.sh`) booted the old
-WebKitGTK app under Xvfb and checked it through its helm API, its state directory and the process table, one leg after
-another in one script. Its default phase is the first rows; the optional appearance, missing-initialize and pixel-driven
-phases are the last three. The Linux GPUI app's lifecycle check, `scripts/gui-lifecycle.py`, replaces the legs about
-launching, quitting and relaunching; its steps are cited by number. The supervisor decisions moved unchanged with their
-unit tests (in `crates/farhelm-desktop` unless another crate is named).
+browser-UI app's WebKitGTK window under Xvfb and checked it through its helm API, its state directory and the process
+table, one leg after another in one script. Its default phase is the first rows; the optional appearance,
+missing-initialize and pixel-driven phases are the last three. The Linux GPUI app's lifecycle check,
+`scripts/gui-lifecycle.py`, replaces the legs about launching, quitting and relaunching; its steps are cited by number.
+The supervisor decisions moved unchanged with their unit tests (in `crates/farhelm-desktop` unless another crate is
+named).
 
 #### "a bootstrap failure exits 1 with a plain message, no panic"
 
@@ -163,8 +164,8 @@ steps 07 and 08; that a created session's agent runs in a terminal host is the e
 
 Tests: 1. Covers: resizing the Xvfb window until it reported a sane size, so the web view would paint.
 
-test infrastructure: a workaround for WebKitGTK under Xvfb; the bridge reports the GPUI window's size and waits for
-drawn text
+test infrastructure: a workaround for the old browser-UI app's WebKitGTK window under Xvfb; the bridge reports the GPUI
+window's size and waits for drawn text
 
 #### "killing the app without Rust cleanup and relaunching it"
 
@@ -264,6 +265,17 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
 
 ## Behavior with no old test
 
+- **The Mac Edit menu's Copy, Paste and Select All reach a focused terminal.** They act as Cmd+C, Cmd+V and Cmd+A do
+  there, and in a focused text field as the field's own keys do; Undo, Redo and Cut act on a text field only and are
+  disabled over a terminal, where the old app's did nothing useful either. With neither focused, all six are disabled.
+  In the old app the menu's Paste reached the terminal, but its Select All most likely did not (the old terminal
+  selected everything only from its Cmd+A key handler), and whether its Copy did without a right-click first is
+  uncertain. Tested by the menu description test (which also pins the chords the three items show to the terminal's key
+  rows), the enabled-state test,
+  `components::tests::text_input::the_edit_menus_copy_paste_and_select_all_act_on_every_kind_of_field` and
+  `terminal::attached::tests::the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`. Pending on the test
+  Mac: the three items over a real terminal, and that Cmd+C on a focused button falls through to the disabled Copy
+  without a beep.
 - **The Open-Source Notices window** (new: the old app had no notices surface; the maintainer decided on 2026-11-13 that
   the notices live in it). Tested by `desktop::tests::the_notices_item_opens_one_window_and_brings_it_forward` (one
   window, the text drawn as a virtualized list, a second choice brings it forward, also when made from the notices
@@ -312,12 +324,6 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
 
 ## Deviations
 
-- **The Edit menu does nothing for a focused terminal.** The Mac app's Edit items (Undo, Redo, Cut, Copy, Paste, Select
-  All) dispatch the text field's own editing actions, so they act on a focused text field and are disabled anywhere
-  else, a focused terminal included, except Copy: GPUI Kit's window root handles it too, so it stays enabled, and
-  outside a text field it copies nothing. In the old app WebKit's own Copy, Paste and Select All items also acted on the
-  terminal. The terminal's keys are unaffected (Cmd+C, Cmd+V and Cmd+A still copy, paste and select all there); only the
-  menu items do not reach it.
 - **macOS adds its own "Enter Full Screen".** The app menu shows macOS's own Enter Full Screen beside the old Toggle
   Full Screen item, and macOS 26's window tiling items (Fill, Center, Move & Resize, Full Screen Tile). The old app's
   toggle used AppKit's own full-screen command, which macOS recognizes, so it added no second item; GPUI's menu items
