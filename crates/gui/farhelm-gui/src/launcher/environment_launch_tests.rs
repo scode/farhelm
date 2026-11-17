@@ -664,3 +664,91 @@ fn the_progress_pill_names_its_steps_explanation(cx: &mut TestAppContext) {
         Some(format!("Preparing web on host1… {EXPLANATION}"))
     );
 }
+
+// ---- A quick launch on a container host with no Podman check result ------------------------------------------------
+
+/// A Podman check with no result yet, as the helm pushes it for every host after it restarts.
+fn unchecked() -> Value {
+    json!({ "checked_at": null, "refreshing": false, "usable": false, "reason": null })
+}
+
+/// Host1 as the fixture has it, with `check` as its Podman check.
+fn host1_with(check: Value) -> KeyedEntry {
+    let mut host = fixture_hosts(&[0]).entries.remove(0);
+    host.value["container_check"] = check;
+    host
+}
+
+/// After a helm restart no host has a Podman check result until something asks, and a template's quick launch prepares
+/// its launcher without showing it, so the launcher's opening never asked for it. Without its own ask it came back with
+/// "this host needs a Podman check" and nothing checked the host until the user opened Settings or a new launcher.
+/// Specified: a launcher prepared out of sight on host1's container draft, with host1 never checked, asks for host1's
+/// check exactly once and sends no create; it comes back shown with that refusal; once host1's result is pushed usable,
+/// Launch sends one environment create.
+#[gpui::test]
+fn a_quick_launch_asks_for_the_checks_and_comes_back_until_one_answers(cx: &mut TestAppContext) {
+    let mut hosts = fixture_hosts(&[0, 1, 2]);
+    hosts.entries[0] = host1_with(unchecked());
+    let (mut helm, cx) = window_with(cx, container_draft(), hosts, plain_preferences());
+    answer_except(&mut helm, cx, |_| false);
+    test_support::click(cx, "launcher-cancel");
+    assert!(!any_open(cx), "the premise: the opened launcher is gone");
+    cx.update(|window, cx| {
+        let finish = |_: &mut LaunchDraft, _: super::draft::Catalog<'_>, _: &gpui::App| {
+            super::view::Prepared::Launch { notice: None }
+        };
+        assert!(super::view::prepare_unseen(
+            container_draft(),
+            Mark::take(cx),
+            finish,
+            window,
+            cx
+        ));
+    });
+    // Taken before anything is answered, so the asks can be counted; the fake helm answers strictly in order, so these
+    // are answered here, in order, as `answer_except` would, before it answers the rest.
+    cx.run_until_parked();
+    let taken = helm.commands();
+    let asks = taken
+        .iter()
+        .filter(|command| command.path == "/api/hosts/1/podman-probe")
+        .count();
+    let paths: Vec<&str> = taken.iter().map(|command| command.path.as_str()).collect();
+    assert_eq!(
+        asks, 1,
+        "the quick launch asked for host1's check once, in {paths:?}"
+    );
+    for command in &taken {
+        let body = command.path.ends_with("launch-catalog").then(|| json!([]));
+        helm.reply(command.id, 200, body);
+    }
+    let sent = answer_except(&mut helm, cx, |command| {
+        command.path == "/api/environment-sessions"
+    });
+    assert_eq!(sent, [], "and sent no create while host1 is unchecked");
+    assert!(any_open(cx), "the refused quick launch came back shown");
+    assert!(
+        shown_refusal(cx).is_some_and(|refusal| refusal.contains("this host needs a Podman check")),
+        "with the unchecked host's refusal, not {:?}",
+        shown_refusal(cx)
+    );
+
+    let usable = host1_with(
+        json!({ "checked_at": 1_700_000_400, "refreshing": false, "usable": true, "reason": null }),
+    );
+    helm.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["1", "2", "3"]),
+        upsert: vec![usable],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    test_support::click(cx, "launcher-launch");
+    let sent = answer_except(&mut helm, cx, |command| {
+        command.path == "/api/environment-sessions"
+    });
+    let [create] = &sent[..] else {
+        panic!("Launch sent one environment create once host1 was usable, not {sent:?}");
+    };
+    assert_eq!(create.path, "/api/environment-sessions");
+}

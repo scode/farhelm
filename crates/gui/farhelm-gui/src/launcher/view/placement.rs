@@ -14,12 +14,13 @@
 //!   `~`) are the draft's.
 //! - **Nothing copied.** The recipes, the recipe places and each host's Podman check are pushed, so the rows read the
 //!   store while they draw. The one thing sent is a background Podman check of every container host as the launcher
-//!   opens ([`check_container_hosts`], SPEC.md: "Opening the launcher refreshes probes in the background"), through
-//!   the GUI's one way of asking for them (`crate::settings::check_container_hosts`), whose outcomes arrive through the
-//!   push. `GET /api/environment-places`, whose read also schedules checks, is not read:
-//!   a host's state is its pushed check, as in Settings → Containers once a host has a result. A host that can hold
-//!   containers but has no result yet is listed, disabled with the helm's "needs a Podman check", until the check its
-//!   opening asked for answers; one the helm cannot route a check to carries none, and says it cannot run containers.
+//!   opens, or as a quick launch prepares one out of sight ([`check_container_hosts`], SPEC.md: "Opening the launcher
+//!   refreshes probes in the background"), through the GUI's one way of asking for them
+//!   (`crate::settings::check_container_hosts`), whose outcomes arrive through the push. `GET /api/environment-places`,
+//!   whose read also schedules checks, is not read: a host's state is its pushed check, as in Settings → Containers
+//!   once a host has a result. A host that can hold containers but has no result yet is listed, disabled with the
+//!   helm's "needs a Podman check", until the check its opening asked for answers; one the helm cannot route a check to
+//!   carries none, and says it cannot run containers.
 //! - **Words per provider** come from [`ProviderUi`], whose methods are exhaustive over providers; nothing here names
 //!   one. A place's own host is found through [`farhelm_proto::Place::container_host`], the place's exhaustive method.
 //! - **Not here yet:** New sandbox's prerequisites and its "Create a sandbox for this session?" question, which come
@@ -44,10 +45,11 @@ use crate::launcher::request::{Recipes, container_reason, is_container_host};
 use crate::session;
 use crate::theme::{self, metrics};
 
-/// Ask the helm to check every host that can hold containers, in the background, as the launcher opens (SPEC.md,
-/// "Container sessions": "Opening the launcher refreshes probes in the background"). Each answer only says the check
-/// was asked for; its outcome reaches the Container host select through the pushed hosts. A refusal is only logged:
-/// the host then keeps the reason of its last check, as Settings → Recipes does.
+/// Ask the helm to check every host that can hold containers, in the background, as the launcher opens or a quick
+/// launch prepares one out of sight (SPEC.md, "Container sessions": "Opening the launcher refreshes probes in the
+/// background"). Each answer only says the check was asked for; its outcome reaches the Container host select through
+/// the pushed hosts. A refusal is only logged: the host then keeps the reason of its last check, as Settings → Recipes
+/// does.
 pub(super) fn check_container_hosts(cx: &mut App) {
     let hosts = container_host_ids(cx);
     crate::settings::check_container_hosts(hosts, cx, |host, reason, _| {
