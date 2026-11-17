@@ -223,6 +223,48 @@ fn the_first_agent_escalates_only_a_deliberate_choice() {
     );
 }
 
+/// Undo of the first agent's warning brings back the deliberate choice itself, not only its look: no agent and Guarded
+/// chosen, so choosing the agent again warns again. With nothing chosen, the displayed default is no choice, and the
+/// first agent warns about nothing. Why: the old `permission-switch` spec switched a second time after Undo because an
+/// Undo that restored only the shown mode would let the next switch reach YOLO silently, and it checked the passive
+/// default beside the passive remembered mode that `the_first_agent_escalates_only_a_deliberate_choice` covers.
+#[test]
+fn undo_of_the_first_agents_warning_keeps_the_choice_deliberate() {
+    let guarded_to_yolo = Some((
+        Some(LaunchPermission::Guarded),
+        Some(LaunchPermission::Yolo),
+    ));
+    let mut draft = new_draft();
+    draft.choose_permissions(Some(LaunchPermission::Guarded));
+    let escalation = draft
+        .choose_harness(LaunchHarness::OpenCode, None, None)
+        .escalation
+        .expect("a deliberate Guarded becomes OpenCode's YOLO");
+    assert_eq!(Some((escalation.before, escalation.after)), guarded_to_yolo);
+    let mut undone = *escalation.undo;
+    assert_eq!(
+        (undone.agent.harness, undone.agent.permissions),
+        (None, Some(LaunchPermission::Guarded))
+    );
+    let again = undone.choose_harness(LaunchHarness::OpenCode, None, None);
+    assert_eq!(
+        again
+            .escalation
+            .map(|escalation| (escalation.before, escalation.after)),
+        guarded_to_yolo,
+        "the second switch warns again"
+    );
+
+    let mut passive = new_draft();
+    let edit = passive.choose_harness(LaunchHarness::OpenCode, None, None);
+    assert_eq!(
+        (passive.agent.harness, passive.agent.permissions),
+        (Some(LaunchHarness::OpenCode), Some(LaunchPermission::Yolo)),
+        "the premise: the switch happened and shows YOLO"
+    );
+    assert_eq!(edit.escalation, None, "a displayed default is no choice");
+}
+
 /// An agent chosen while the Command tab is showing switches to the Agent tab, and raises no banner: the user was not
 /// looking at the permission it changed.
 #[test]
@@ -256,6 +298,122 @@ fn a_switch_clears_what_the_new_agent_cannot_use_and_says_so() {
     unread.choose_effort(Some(LaunchEffort::Low));
     unread.choose_harness(LaunchHarness::Claude, None, None);
     assert_eq!(unread.agent.effort, Some(LaunchEffort::Low));
+}
+
+/// The permission an agent switch lands on, and what it says about it: a mode the new agent lacks becomes its default,
+/// said only when the user chose that mode (the old spec: "normalizing a passive remembered mode must stay silent"),
+/// and a model picked from another agent's list switches agents the same way; a model id both Goose and Pi list stays
+/// the one picked and takes Pi's efforts, which stay across Pi's models that both offer them. Why: the old app's
+/// `goose-pi-composer` spec drove these transitions in the rendered launcher because its handlers once applied the
+/// reconciled model and effort but dropped the reconciled permission, so the launcher showed one mode and sent another.
+#[test]
+fn an_agent_switch_lands_on_a_permission_the_new_agent_offers() {
+    use LaunchHarness::{Goose, Pi};
+    use LaunchPermission::{Approve, Chat, SmartApprove, Yolo};
+    const REPLACED: &str = "The selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default";
+    let pi_model = |id: &str| LaunchCatalogModel {
+        id: id.into(),
+        harness: Pi,
+        efforts: vec![LaunchEffort::Minimal, LaunchEffort::Xhigh],
+    };
+    // Goose lists the same ids first, with an effort Pi's rows lack, so only a lookup by the owning agent finds Pi's.
+    let goose_model = |id: &str| LaunchCatalogModel {
+        id: id.into(),
+        harness: Goose,
+        efforts: vec![LaunchEffort::High],
+    };
+    let catalog = vec![
+        goose_model("x-ai/grok-4.6"),
+        goose_model("z-ai/glm-5.3-flash"),
+        pi_model("x-ai/grok-4.6"),
+        pi_model("z-ai/glm-5.3-flash"),
+    ];
+    // A mode Goose offers and Pi lacks, chosen on Goose, becomes Pi's YOLO and is said, whether Pi is chosen by its
+    // button or by its model picked from the full list.
+    for (chosen, by_model) in [(SmartApprove, false), (Chat, false), (Approve, true)] {
+        let mut draft = new_draft();
+        draft.choose_harness(Goose, Some(&catalog), None);
+        draft.choose_permissions(Some(chosen));
+        let edit = if by_model {
+            draft.choose_catalog_model(Pi, "x-ai/grok-4.6", Some(&catalog), None)
+        } else {
+            draft.choose_harness(Pi, Some(&catalog), None)
+        };
+        let case = format!("{chosen:?}, by model: {by_model}");
+        assert_eq!(
+            (draft.agent.harness, draft.agent.permissions),
+            (Some(Pi), Some(Yolo)),
+            "{case}"
+        );
+        assert_eq!(edit.notice.as_deref(), Some(REPLACED), "{case}");
+        if by_model {
+            assert_eq!(
+                draft.agent.model.as_deref(),
+                Some("x-ai/grok-4.6"),
+                "the id both list stays the one picked, as Pi's"
+            );
+        }
+    }
+
+    // A remembered mode is no choice of the user's, so Pi replaces it silently.
+    let mut remembered = LaunchDraft::new(Some(1), "~".into(), Some(SmartApprove));
+    let edit = remembered.choose_harness(Pi, Some(&catalog), None);
+    assert_eq!(remembered.agent.permissions, Some(Yolo));
+    assert_eq!(edit.notice, None);
+
+    // An effort both Pi models offer stays when the other one is picked: Pi's efforts, not Goose's for the same id.
+    for effort in [LaunchEffort::Minimal, LaunchEffort::Xhigh] {
+        let mut pi = new_draft();
+        pi.choose_harness(Pi, Some(&catalog), None);
+        pi.choose_catalog_model(Pi, "x-ai/grok-4.6", Some(&catalog), None);
+        pi.choose_effort(Some(effort));
+        let edit = pi.choose_catalog_model(Pi, "z-ai/glm-5.3-flash", Some(&catalog), None);
+        assert_eq!(pi.agent.effort, Some(effort));
+        assert_eq!(edit.notice, None);
+    }
+}
+
+/// An agent's default YOLO is the agent's, not the user's: switching from Pi, OpenCode or Goose to Codex, by its button
+/// or by a Codex model picked from the full list, shows Codex's own default, Guarded, and says nothing. Why: the old
+/// app tested both paths (`remembered-permissions`, "default YOLO does not spill into the next harness", and the
+/// sidebar spec's "model picks discard another harness's default YOLO"), since carrying the YOLO over would start the
+/// next agent unguarded without the user choosing that.
+#[test]
+fn a_default_yolo_does_not_follow_to_the_next_agent() {
+    let catalog = catalog();
+    for first in [
+        LaunchHarness::Pi,
+        LaunchHarness::OpenCode,
+        LaunchHarness::Goose,
+    ] {
+        for by_model in [false, true] {
+            let mut draft = new_draft();
+            draft.choose_harness(first, Some(&catalog), None);
+            assert_eq!(
+                draft.agent.permissions,
+                Some(LaunchPermission::Yolo),
+                "the premise: {first:?} shows its default YOLO"
+            );
+            let edit = if by_model {
+                draft.choose_catalog_model(LaunchHarness::Codex, "gpt-6-luna", Some(&catalog), None)
+            } else {
+                draft.choose_harness(LaunchHarness::Codex, Some(&catalog), None)
+            };
+            assert_eq!(
+                (draft.agent.harness, draft.agent.permissions),
+                (Some(LaunchHarness::Codex), Some(LaunchPermission::Guarded)),
+                "from {first:?}, by model: {by_model}"
+            );
+            assert_eq!(edit.notice, None, "from {first:?}, by model: {by_model}");
+            if by_model {
+                assert_eq!(
+                    draft.agent.model.as_deref(),
+                    Some("gpt-6-luna"),
+                    "the pick is kept"
+                );
+            }
+        }
+    }
 }
 
 /// Switching agent types loads the new type's remembered wrapper prefix; choosing the same type again keeps whatever

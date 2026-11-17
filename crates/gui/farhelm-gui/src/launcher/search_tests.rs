@@ -188,7 +188,7 @@ fn only_known_labels_before_the_first_colon_scope_a_query() {
 #[test]
 fn unknown_labels_and_command_words_only_name_the_session() {
     let draft = Draft::agent(Some(LaunchHarness::Codex));
-    for query in ["trust:", "trust:true", "command", "run-this"] {
+    for query in ["trust:", "trust:true", "trust:false", "command", "run-this"] {
         assert_eq!(draft.rows(query), name(query), "{query}");
     }
 }

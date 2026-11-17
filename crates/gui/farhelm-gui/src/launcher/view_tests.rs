@@ -711,7 +711,8 @@ fn custom_opens_its_flags_editor_and_enter_there_only_chooses(cx: &mut TestAppCo
 
 /// Switching to an agent type that cannot keep a deliberate choice says what it cleared, under the agent choices, as
 /// the old launcher's choice error did. Specified: High effort chosen on Codex, then Cursor (which offers no effort):
-/// the effort is cleared and a notice says so; Cursor's note about tracking and Resume shows too.
+/// the effort is cleared and a notice says so; Cursor's note about tracking and Resume shows too, and goes on the
+/// Command tab, which would not launch Cursor (the old `cursor-composer` spec's last step).
 #[gpui::test]
 fn a_switch_that_clears_a_choice_says_so(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
@@ -734,6 +735,22 @@ fn a_switch_that_clears_a_choice_says_so(cx: &mut TestAppContext) {
     );
     assert!(!drawn(cx, "launcher-effort-row"), "Cursor offers no effort");
     assert!(painted(
+        cx,
+        "Cursor session tracking and Resume are not supported."
+    ));
+    // The note is the Agent tab's: the Command tab keeps the Cursor draft but does not launch it.
+    test_support::click(cx, "launcher-tabs-Command");
+    assert_eq!(draft(cx).tab, Tab::Command, "the premise: the Command tab");
+    assert!(
+        drawn(cx, "launcher-command-row"),
+        "the premise: its fields show"
+    );
+    assert_eq!(
+        draft(cx).agent.harness,
+        Some(LaunchHarness::Cursor),
+        "the Agent tab's draft is kept"
+    );
+    assert!(!painted(
         cx,
         "Cursor session tracking and Resume are not supported."
     ));
