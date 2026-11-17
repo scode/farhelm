@@ -17,8 +17,7 @@ specific to Claude.
 - Claude may ask whether you trust a directory the first time it starts there. Answer it in the session's terminal, or
   opt into answering it for future [managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts) under
   **Agent trust** in Settings. That setting is off by default: it edits Claude's own settings file and comes with
-  caveats. A hint above the question opens **Agent trust** at Claude's setting and its explanation. Directories you
-  choose yourself still get Claude's question.
+  caveats. Directories you choose yourself still get Claude's question.
 - If you start Claude through a [wrapper prefix](/docs/agents/agent-wrappers/) or a
   [custom command](/docs/agents/custom-commands/), Farhelm can follow its conversation through multiple wrappers that
   stay running. Each wrapper must pass Claude's arguments and environment through. See
