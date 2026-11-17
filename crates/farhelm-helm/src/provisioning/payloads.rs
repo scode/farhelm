@@ -81,26 +81,23 @@ pub trait PayloadSource: std::fmt::Debug + Send + Sync {
     async fn path(&self, target: PayloadTarget) -> anyhow::Result<PathBuf>;
 }
 
-/// Which payload source `run_with_ready` wires up, resolved from `HelmArgs`
-/// before it reaches [`production_payloads`].
-///
-/// `Directory` outranks `Release` (D18: an explicit, local `--payload-dir`
-/// is unambiguous, so there is never a reason to let a network source win
-/// when both are given) — enforced once, in `HelmArgs::payload_selection`,
-/// so nothing downstream of it has to re-decide the precedence.
+/// Which payload source the serving helm wires up, resolved by
+/// `HelmArgs::payload_selection` before it reaches [`production_payloads`].
 pub enum PayloadSelection {
-    /// Neither flag was given: `production_payloads` picks the default for
-    /// this build (D13 — a release-shaped build downloads, a developer
-    /// build carries nothing, and a release-shaped build of main refuses,
-    /// since no release carries its version; see [`UnreleasedPayloads`]).
+    /// No payload directory was given: `production_payloads` picks the
+    /// default for this build (D13 — a release-shaped build downloads, a
+    /// developer build carries nothing, and a release-shaped build of main
+    /// refuses, since no release carries its version; see
+    /// [`UnreleasedPayloads`]).
     Default,
-    /// `--payload-dir`: read published release files staged in this
+    /// `HelmArgs::payload_dir`: read published release files staged in this
     /// directory, verifying nothing (D3, operator-trusted).
     Directory(PathBuf),
-    /// `--release-base-url`: download from this base URL instead of the
-    /// default, this build's own release on get.farhelm.io. Selectable on
-    /// ANY build (not just a release-shaped one) so tests and air-gapped
-    /// mirrors can point at another server.
+    /// Download from this base URL instead of the default, this build's own
+    /// release on get.farhelm.io, on ANY build (not just a release-shaped
+    /// one). Test-only: it is how provisioning tests drive the real download
+    /// policy against a loopback fixture release.
+    #[cfg(test)]
     Release { base_url: url::Url },
 }
 
@@ -115,9 +112,9 @@ pub(super) struct NoPayloads;
 impl PayloadSource for NoPayloads {
     async fn path(&self, _target: PayloadTarget) -> anyhow::Result<PathBuf> {
         bail!(
-            "this farhelm was built from source and carries no provisioning payloads; pass \
-             --payload-dir <dir> holding the release files, or install a release build (see \
-             README, \"Install\")"
+            "this farhelm was built from source and carries no provisioning payloads; start the \
+             app with FARHELM_HELM_PAYLOAD_DIR naming a directory that holds the release files, \
+             or install a release build (see README, \"Install\")"
         )
     }
 }
@@ -129,7 +126,7 @@ impl PayloadSource for NoPayloads {
 /// default download would only reach a 404 whose message (D17, shared with
 /// `install.sh`) says the release may still be publishing and to retry,
 /// which never helps. This refuses before any request with what does help:
-/// payloads built from the same commit, staged with `--payload-dir`. A
+/// payloads built from the same commit, staged in a payload directory. A
 /// published release's files are not the answer, because they are exactly
 /// the older-protocol payloads the helm would then refuse at the hello
 /// gate. The refusal is lazy, in `path()`, like [`NoPayloads`]: refusing in
@@ -146,8 +143,8 @@ impl PayloadSource for UnreleasedPayloads {
     async fn path(&self, _target: PayloadTarget) -> anyhow::Result<PathBuf> {
         bail!(
             "this farhelm is an unreleased build (version {}), so no published release carries \
-             its provisioning payloads; pass --payload-dir <dir> holding payloads built from the \
-             same commit",
+             its provisioning payloads; start the app with FARHELM_HELM_PAYLOAD_DIR naming a \
+             directory of payloads built from the same commit",
             self.version
         )
     }
@@ -539,8 +536,8 @@ fn require_regular_file(path: &Path, what: &str) -> anyhow::Result<()> {
             path.display()
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => bail!(
-            "{} does not exist; place {what} there, or point --payload-dir at a directory \
-             that holds it",
+            "{} does not exist; place {what} there, or point FARHELM_HELM_PAYLOAD_DIR at a \
+             directory that holds it",
             path.display()
         ),
         Err(error) => Err(error).with_context(|| format!("inspecting {}", path.display())),
@@ -746,9 +743,10 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 /// pure text, like [`normalize_lexical`]: no symlink resolution, no
 /// filesystem access.
 ///
-/// `--payload-dir` is an ordinary clap argument, so an operator can spell
-/// it relative to wherever they happened to invoke `farhelm helm run`
-/// from. [`selected_directory_aliases_legacy_cache`]'s lexical comparison
+/// The payload directory is taken as given (the desktop app passes
+/// `FARHELM_HELM_PAYLOAD_DIR` through unchanged), so an operator can spell
+/// it relative to wherever they started Farhelm from.
+/// [`selected_directory_aliases_legacy_cache`]'s lexical comparison
 /// only means anything once both sides are expressed in the same
 /// coordinate space — the legacy cache path is always already absolute
 /// (built from `helm_state_dir`), so a relative selection has to be
@@ -822,9 +820,8 @@ fn selected_directory_aliases_legacy_cache(
         Ok(selected_canonical) => Ok(selected_canonical == legacy_canonical
             || selected_canonical.starts_with(&legacy_canonical)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => {
-            Err(error).with_context(|| format!("resolving --payload-dir {}", selected.display()))
-        }
+        Err(error) => Err(error)
+            .with_context(|| format!("resolving the payload directory {}", selected.display())),
     }
 }
 
@@ -861,12 +858,12 @@ fn selected_directory_aliases_legacy_cache(
 /// 2. Only once the legacy entry is confirmed to be a plain directory does
 ///    the operator's selection get checked for aliasing
 ///    ([`selected_directory_aliases_legacy_cache`], resolved against `cwd`
-///    so a RELATIVE `--payload-dir` — clap accepts one unchanged — is
-///    compared in the same coordinate space as the always-absolute legacy
-///    path). If it aliases, cleanup is skipped ENTIRELY (nothing is
-///    deleted, not even files that would not have collided) and a `warn!`
-///    tells the operator to move `--payload-dir` elsewhere so the retired
-///    cache can be cleaned up on a later run.
+///    so a RELATIVE payload directory — taken as given — is compared in
+///    the same coordinate space as the always-absolute legacy path). If it
+///    aliases, cleanup is skipped ENTIRELY (nothing is deleted, not even
+///    files that would not have collided) and a `warn!` tells the operator
+///    to point `FARHELM_HELM_PAYLOAD_DIR` elsewhere so the retired cache can
+///    be cleaned up on a later run.
 ///
 /// Every source since D2 materializes below a name of its own instead
 /// ([`DirectoryPayloads`] uses [`DIRECTORY_PAYLOAD_CACHE`] under helm state,
@@ -903,9 +900,10 @@ fn remove_leftover_embedded_payloads(
         warn!(
             payload_dir = %selected.display(),
             legacy_cache = %leftover.display(),
-            "--payload-dir points at (or inside) the retired embedded-payloads cache; leaving \
-             it in place rather than deleting staged release files — move --payload-dir to a \
-             different directory so this leftover cache can be cleaned up"
+            "the payload directory points at (or inside) the retired embedded-payloads cache; \
+             leaving it in place rather than deleting staged release files — point \
+             FARHELM_HELM_PAYLOAD_DIR at a different directory so this leftover cache can be \
+             cleaned up"
         );
         return Ok(());
     }
@@ -987,24 +985,24 @@ pub(super) fn release_client_builder() -> reqwest::ClientBuilder {
 /// - At most five hops. reqwest's default is ten; one hop is the real case,
 ///   and a chain longer than five is a loop or a game, not a CDN.
 /// - No https → http DOWNGRADE. A redirect is chosen by the server, so
-///   without this an operator who carefully typed an `https://` base URL
-///   could be walked onto a plaintext connection where anything on the path
-///   can see and rewrite the response. The signature check would still refuse
+///   without this a download that started at an `https://` base URL could
+///   be walked onto a plaintext connection where anything on the path can
+///   see and rewrite the response. The signature check would still refuse
 ///   the result, but the request has already been made by then, and "we
 ///   refused the answer" is not the same as "we did not ask".
 ///
-/// What is NOT blocked: loopback, private, and link-local destinations. That
-/// is a considered choice rather than an oversight — `--release-base-url`
-/// exists precisely so a helm can be pointed at an internal mirror or a test
-/// fixture on `127.0.0.1`, and a policy that refused those would break the
-/// supported case in order to narrow an unsupported one. The SSRF surface
-/// that remains is a GET whose response can never become a payload: it must
-/// still hash to an entry in a manifest signed for this version.
+/// What is NOT blocked: loopback, private, and link-local destinations. The
+/// provisioning tests point a helm at a fixture release on `127.0.0.1`, which
+/// such a rule would refuse. Production's only base URL is get.farhelm.io,
+/// so there a loopback or private destination can come only from a redirect
+/// the server chose. The SSRF surface that remains is a GET whose response
+/// can never become a payload: it must still hash to an entry in a manifest
+/// signed for this version.
 fn release_redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         // `previous()[0]` is the URL farhelm actually asked for, so the
-        // scheme comparison is against the operator's own base URL rather
-        // than against whatever the previous hop happened to be.
+        // scheme comparison is against the base URL itself rather than
+        // against whatever the previous hop happened to be.
         match release_redirect_decision(
             attempt.previous().first(),
             attempt.url(),
@@ -1066,9 +1064,8 @@ pub(super) fn release_client() -> anyhow::Result<reqwest::Client> {
 /// This function IS the policy (D13): a release-shaped build downloads its
 /// own release by default, unless its version is a development version,
 /// which no release carries ([`UnreleasedPayloads`]); a developer build
-/// refuses by default; while
-/// `--release-base-url` selects a download source on either kind of build
-/// so tests, mirrors, and prerelease checks have a way in that does not
+/// refuses by default; while a test's `Release` selection names a download
+/// source on either kind of build, so tests have a way in that does not
 /// require faking a release build.
 /// Client construction happens only for a download source. If it fails (a
 /// missing CA bundle, for example), the source refuses when provisioning uses
@@ -1150,7 +1147,9 @@ pub(super) fn production_payloads_with_key(
     // files out from under an operator is the failure it exists to prevent.
     let selected_directory = match &selection {
         PayloadSelection::Directory(dir) => Some(dir.as_path()),
-        PayloadSelection::Default | PayloadSelection::Release { .. } => None,
+        PayloadSelection::Default => None,
+        #[cfg(test)]
+        PayloadSelection::Release { .. } => None,
     };
     // Housekeeping only: nothing depends on the retired cache being gone, so
     // a failure to inspect or remove it must not stop the helm, and with it
@@ -1177,11 +1176,12 @@ pub(super) fn production_payloads_with_key(
             )));
         }
         PayloadSelection::Default if !release_build => return Ok(Arc::new(NoPayloads)),
-        // `--release-base-url` is never refused this way (D18: selectable on
-        // any build); only the default, which names this version's release.
+        // A test's explicit base URL is never refused this way; only the
+        // default, which names this version's release.
         PayloadSelection::Default if crate::hosts::is_development_build(&version) => {
             return Ok(Arc::new(UnreleasedPayloads { version }));
         }
+        #[cfg(test)]
         PayloadSelection::Release { base_url } => base_url,
         PayloadSelection::Default => default_release_base_url(&version)?,
     };
@@ -1197,8 +1197,8 @@ pub(super) fn production_payloads_with_key(
         }
     };
     // All release sources share one cache parent; `ReleasePayloadSource`
-    // then keys a directory below it by version and base URL, so a fixture
-    // or mirror URL can never read what a real release wrote.
+    // then keys a directory below it by version and base URL, so a test
+    // fixture's URL can never read what a real release wrote.
     Ok(Arc::new(ReleasePayloadSource::new(
         base_url,
         helm_state_dir.join("payloads"),

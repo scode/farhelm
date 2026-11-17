@@ -2,14 +2,12 @@
 //!
 //! Every protected API method, both WebSocket handshakes included, needs a
 //! device credential. The helm mints those credentials in memory for one
-//! process lifetime and hands them only to callers inside that process: the
-//! desktop app that embeds the helm (one per launch, see
-//! [`crate::EmbeddedReady`]) and a standalone helm started with the hidden
-//! `--test-credential-file` flag, which no test uses any more (the
-//! end-to-end tests run the helm in process through `run_embedded`). Only
-//! each secret's SHA-256 digest
-//! is kept, and nothing is written to `helm.db`, so a credential dies with the
-//! process and no HTTP request can obtain one.
+//! process lifetime and hands them only to the caller inside that process
+//! that embeds the helm: the desktop app (one per launch, see
+//! [`crate::EmbeddedReady`]), or a test that runs the helm in process the
+//! same way. Only each secret's SHA-256 digest is kept, and nothing is
+//! written to `helm.db`, so a credential dies with the process and no HTTP
+//! request can obtain one.
 //!
 //! NOTE: There is no browser sign-in. The browser UI, its bootstrap token and
 //! the device rows a token exchange created were removed when the GUI moved to
@@ -66,9 +64,9 @@ impl AuthState {
 
     /// Mint a device credential for a caller inside this process.
     ///
-    /// The callers are [`crate::run_embedded`] (for the desktop app that owns
-    /// the helm) and a standalone helm given `--test-credential-file`, both
-    /// before the helm announces readiness. There is deliberately no HTTP route
+    /// The production caller is [`crate::run_embedded`], for the desktop app
+    /// that owns the helm, before the helm announces readiness; the crate's
+    /// own tests mint one directly. There is deliberately no HTTP route
     /// to this, and any new caller needs the same scrutiny: no test can catch a
     /// route that leaks a credential.
     pub(crate) fn mint_device(&self) -> anyhow::Result<String> {
