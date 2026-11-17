@@ -753,15 +753,17 @@ systemd or SSH substrate ran.
   and their exact units, against stand-in `podman` and `systemctl`), the payload directory's checks (absolute, and an
   existing directory), the seeding requests (a `--fleet` kind's replay shape, its transcript fitting a narrow terminal,
   and only the waiting kind declaring an agent type; the `spawner` kind's spawn script by its bare name, and the local
-  host's YOLO setting it turns on), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text
-  shows, a helm reply without a body read as none, that a recorded pid whose start time no longer matches is never
-  signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder
-  is stopped, kept by `stop` while part of the run may still be running, given up by a holder whose `start` was killed
-  while it waited, and a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on
-  Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and
-  needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run
-  the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
-  `farhelm-desktop`, or the app's startup changes.
+  host's YOLO setting it turns on), a `--scenario` run (the scenario's checks and refusals, the create requests and
+  replay scripts it makes, and against a stand-in helm the open session created first and the status and shield checks),
+  the wait for a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply without a body
+  read as none, that a recorded pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on
+  macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part
+  of the run may still be running, given up by a holder whose `start` was killed while it waited, and a lock path that
+  cannot be opened failing at once. Seconds; starts and builds nothing; runs on Linux and macOS. The harness itself is a
+  tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and
+  lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the tests when the script changes, and an
+  end-to-end run when the script, the bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup
+  changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits

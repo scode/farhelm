@@ -106,7 +106,8 @@ LINUX_FRAME_BLACK = 8
 
 # The title bar the Linux window draws for itself under Mutter, which draws none (`linux_title_bar::HEIGHT` in the GUI
 # crate), in pixels, inside Kit's frame at the window's top. The old app's pictures have no title bar, so a Linux run
-# asks for a window taller by it too and crops it off with the frame.
+# asks for a window taller by it too and crops it off with the frame. `gui-agent.py start --scenario` reads this and
+# LINUX_FRAME too, to size a scenario's window the same way (`scenario_window_size`).
 LINUX_TITLE_BAR = 34
 
 # Where app runs' directories go. Not the platform's default temporary directory: on a Mac that is under

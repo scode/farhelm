@@ -9,6 +9,8 @@ reaching outside its own directory: a socket path that cannot fit, a display or 
 a state directory that defaults to a real installation's, or a recorded pid that now names someone else's process.
 """
 
+import argparse
+import copy
 import fcntl
 import http.server
 import importlib.util
@@ -25,6 +27,7 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 
 spec = importlib.util.spec_from_file_location("gui_agent", pathlib.Path(__file__).with_name("gui-agent.py"))
 gui_agent = importlib.util.module_from_spec(spec)
@@ -1036,6 +1039,375 @@ class SettleTest(unittest.TestCase):
                                         interval=0.05)
         self.assertIn("a=running", str(raised.exception))
         self.assertIn("b=missing", str(raised.exception))
+
+
+# The checkout's scenario files: the README hero's, which `start --scenario` exists for first, and the two other flows'.
+REPO = pathlib.Path(__file__).resolve().parent.parent
+HERO = REPO / "docs" / "readme-hero" / "scenario.json5"
+SCENARIOS = [HERO, REPO / "docs" / "readme-video" / "scenario.json5", REPO / "docs" / "docs-shots" / "scenario.json5"]
+
+
+def scenario_text(hosts: str, sessions: str) -> str:
+    """A small scenario file's text with the given host and session entries, for the refusal and field tests."""
+    return f"{{ viewport: {{ width: 800, height: 600, scale: 1 }}, hosts: [{hosts}], sessions: [{sessions}] }}"
+
+
+# A one-host scenario whose only session is open and replays `t.txt`; tests swap pieces of it for a mistake.
+LOCAL_HOST = '{ key: "local", alias: "here", kind: "local" }'
+OPEN_SESSION = ('{ title: "a", host: "local", cwd: "~/a", wrapper: "claude", status: "running", age: 0, open: true, '
+                'transcript: "t.txt" }')
+
+
+class ScenarioTest(unittest.TestCase):
+    """`start --scenario FILE` stages a docs-media scenario's fleet: these pin what it reads from the file (which hosts,
+    which sessions with which fields), what it refuses before anything starts, and the requests it turns the scenario
+    into. Each is a picture that would otherwise look plausible and be wrong: a session on the wrong host, a YOLO launch
+    shown as guarded, the account's name in a public file, or the window opening some other session than the
+    scenario's."""
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+        (self.dir / "t.txt").write_text("a line\n")
+
+    def write(self, hosts: str = LOCAL_HOST, sessions: str = OPEN_SESSION, name: str = "scenario") -> pathlib.Path:
+        """Write a scenario named `name` beside `t.txt` and return its path."""
+        path = self.dir / f"{name}.json5"
+        path.write_text(scenario_text(hosts, sessions))
+        return path
+
+    def test_the_hero_scenario_becomes_its_hosts_and_sessions(self):
+        """The README hero is what the option is for. Specified: its three hosts in order with their aliases, the local
+        one and two remotes at `localhost` and `$USER@localhost` with `$USER` expanded to the account given, which are
+        the run's `--remote-host` destinations; its seven sessions in the file's order, each on its host, with its
+        wrapper, YOLO launch, status (and the replay shape that holds it), seen state and transcript resolved beside the
+        file; and exactly one open, created first."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        self.assertEqual(
+            [(host["key"], host["alias"], host["kind"], host.get("ssh")) for host in plan["hosts"]],
+            [("local", "this machine", "local", None), ("build-box", "build-box", "remote", "localhost"),
+             ("gpu-1", "gpu-1", "remote", "someone@localhost")],
+        )
+        self.assertEqual(gui_agent.scenario_remote_hosts(plan), ["localhost", "someone@localhost"])
+        rows = [(s["title"], s["host"], s["wrapper"], s["yolo"], s["status"], s["then"], s.get("seen"), s["open"])
+                for s in plan["sessions"]]
+        self.assertEqual(rows, [
+            ("fix flaky attach test", "build-box", "claude", True, "running", "spin", None, True),
+            ("migrate auth tokens", "local", "codex", False, "waiting", "menu", None, False),
+            ("readme rewrite", "gpu-1", "claude", True, "idle", "quiet", False, False),
+            ("bench tokenizer on H100", "gpu-1", "claude", False, "running", "spin", None, False),
+            ("triage crash reports", "local", "claude", False, "idle", "quiet", True, False),
+            ("release 0.3.1", "build-box", "codex", False, "exited", "exit", None, False),
+            ("port ci to nextest", "build-box", "codex", True, "idle", "quiet", False, False),
+        ])
+        self.assertEqual([s["transcript"].name for s in plan["sessions"]][:2], ["transcript.txt", "filler-codex.txt"])
+        for session in plan["sessions"]:
+            self.assertEqual(session["transcript"].parent, HERO.parent)
+            self.assertTrue(session["transcript"].is_absolute() and session["transcript"].is_file())
+        self.assertEqual(gui_agent.scenario_creation_order(plan), list(range(7)))
+
+    def test_every_committed_scenario_is_accepted(self):
+        """The demo video and the docs screenshots will stage their scenarios the same way, so the checks must accept
+        all three files as they are (they are frozen designs; a check that refused one would be the check's bug)."""
+        for path in SCENARIOS:
+            with self.subTest(path=path.parent.name):
+                plan = gui_agent.load_scenario(path, "someone")
+                self.assertGreater(len(plan["sessions"]), 1)
+                self.assertEqual(sum(session["open"] for session in plan["sessions"]), 1)
+
+    def test_the_open_session_is_created_first(self):
+        """The window opens the first session its list shows and keeps it, so the scenario's open session must be the
+        first created whatever its place in the file. Specified: the open one first, then every other in file order."""
+        sessions = ", ".join([
+            OPEN_SESSION.replace('title: "a"', 'title: "first"').replace(", open: true", ""),
+            OPEN_SESSION.replace('title: "a"', 'title: "second"'),
+            OPEN_SESSION.replace('title: "a"', 'title: "third"').replace(", open: true", ""),
+        ])
+        plan = gui_agent.load_scenario(self.write(sessions=sessions), "someone")
+        self.assertEqual(gui_agent.scenario_creation_order(plan), [1, 0, 2])
+
+    def test_each_session_becomes_a_declared_command_launch_of_its_wrapper(self):
+        """A row shows its agent's mark, its status reading and its shield from the launch itself, with nothing in the
+        listing rewritten. Specified for each hero session: a command launch of the wrapper's bare name, with that
+        harness's YOLO flag only on a `yolo` one, declaring the wrapper's agent type with `{farhelm_args}`, asserting
+        the session's YOLO answer and confirming it only then, titled, on the helm's id of its host, in the given
+        directory."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        host_ids = {"local": 1, "build-box": 2, "gpu-1": 3}
+        commands = []
+        for session in plan["sessions"]:
+            body = gui_agent.scenario_session_body(session, host_ids[session["host"]], pathlib.Path("/w/0"))
+            self.assertEqual((body["title"], body["host"], body["cwd"]),
+                             (session["title"], host_ids[session["host"]], "/w/0"))
+            self.assertEqual(body["command"]["agent"], session["wrapper"])
+            self.assertEqual((body["command"]["yolo"], body["confirm_yolo"]), (session["yolo"], session["yolo"]))
+            self.assertIsNone(body["command"]["resume"])
+            commands.append(body["command"]["command"])
+        self.assertEqual(commands, [
+            "claude --dangerously-skip-permissions {farhelm_args}",
+            "codex {farhelm_args}",
+            "claude --dangerously-skip-permissions {farhelm_args}",
+            "claude {farhelm_args}",
+            "claude {farhelm_args}",
+            "codex {farhelm_args}",
+            "codex --yolo {farhelm_args}",
+        ])
+
+    def test_each_session_replays_its_transcript_through_its_staged_agent_script(self):
+        """Every scenario session is launched as `claude` or `codex`, and the run's wrapper of that name runs the
+        session directory's STAGED_AGENT_SCRIPT, which is how sessions with the same command replay different
+        transcripts. Specified, by running the script with `sh` against a stand-in fake agent that prints its
+        arguments: the replay script in the wrapper's dialect, the session's transcript, the replay shape its status
+        needs (an exit with the scenario's exit code), then every argument the wrapper passed on, also one with a
+        space; a `then` in the scenario replaces the shape its status implies."""
+        fixtures = write_executable(self.dir / "fixture dir" / "farhelm-fixtures", FIXTURES_STANDIN)
+        plan = gui_agent.load_scenario(HERO, "someone")
+        ran = []
+        for session in plan["sessions"]:
+            script = self.dir / gui_agent.STAGED_AGENT_SCRIPT
+            script.write_text(gui_agent.staged_agent_script(session, str(fixtures)))
+            out = subprocess.run(["/bin/sh", str(script), "--settings", "a b"], capture_output=True, text=True,
+                                 check=True).stdout.strip()
+            ran.append(out)
+        transcript = str(HERO.parent / "transcript.txt")
+        self.assertEqual(ran[0], f"fixture: fake-agent --script replay --dialect claude --transcript {transcript} "
+                                 "--then spin --settings a b")
+        self.assertIn("--dialect codex --transcript", ran[1])
+        self.assertTrue(ran[1].endswith("--then menu --settings a b"), ran[1])
+        self.assertTrue(ran[4].endswith("--then quiet --settings a b"), ran[4])
+        self.assertTrue(ran[5].endswith("--then exit --exit-code 0 --settings a b"), ran[5])
+
+        plan = gui_agent.load_scenario(self.write(sessions=OPEN_SESSION.replace(
+            'status: "running"', 'status: "exited", exit_code: 3, then: "quiet"')), "someone")
+        self.assertIn("--then quiet", gui_agent.staged_agent_script(plan["sessions"][0], "/fx"))
+        self.assertNotIn("--exit-code", gui_agent.staged_agent_script(plan["sessions"][0], "/fx"))
+        plan = gui_agent.load_scenario(self.write(sessions=OPEN_SESSION.replace(
+            'status: "running"', 'status: "exited", exit_code: 3')), "someone")
+        self.assertIn("--then exit --exit-code 3", gui_agent.staged_agent_script(plan["sessions"][0], "/fx"))
+
+    def test_the_window_is_the_viewport_plus_the_linux_frame(self):
+        """A scenario's viewport is the size of the app's own drawing, as a capture shows it once the window frame is
+        cropped. Specified: on Linux the window is larger by the frame on every side and the title bar on top, the
+        numbers the screenshot batch crops (21 and 34 pixels); on a Mac it is the viewport. The scale is not applied."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        self.assertEqual(gui_agent.scenario_window_size(plan, "linux"), "1322x876")
+        self.assertEqual(gui_agent.scenario_window_size(plan, "darwin"), "1280x800")
+
+    def test_mistakes_in_a_scenario_are_refused(self):
+        """A scenario is edited by hand, and a mistake must fail `start` naming the file and what is wrong, not stage
+        a fleet that differs from the design. Specified, each by its message: a session on a host the file does not
+        define, a transcript that is not a file beside it, `$USER` with no account to expand it to, and the old
+        loader's other checks on what is staged (a second local host, a duplicated title, no or two open sessions, an
+        idle session without seen state, an unknown wrapper or status)."""
+        remote = '{ key: "r", alias: "r", kind: "remote", ssh: "$USER@localhost" }'
+        second_local = LOCAL_HOST.replace("local", "l2", 1)
+        closed = OPEN_SESSION.replace(", open: true", "")
+        second_open = OPEN_SESSION.replace('title: "a"', 'title: "b"')
+        cases = [
+            ("unknown host 'nowhere'", LOCAL_HOST, OPEN_SESSION.replace('host: "local"', 'host: "nowhere"')),
+            ("transcript 'missing.txt' is not a file", LOCAL_HOST,
+             OPEN_SESSION.replace('transcript: "t.txt"', 'transcript: "missing.txt"')),
+            (r"uses \$USER but USER is not set", f"{LOCAL_HOST}, {remote}", OPEN_SESSION),
+            ("exactly one host must be kind: local", f"{LOCAL_HOST}, {second_local}", OPEN_SESSION),
+            ("duplicate session title", LOCAL_HOST, f"{OPEN_SESSION}, {closed}"),
+            ("exactly one session must carry open", LOCAL_HOST, closed),
+            ("exactly one session must carry open", LOCAL_HOST, f"{OPEN_SESSION}, {second_open}"),
+            ("needs seen", LOCAL_HOST, OPEN_SESSION.replace('"running"', '"idle"')),
+            ("wrapper must be one of", LOCAL_HOST, OPEN_SESSION.replace('"claude"', '"cursor-agent"')),
+            ("status must be one of", LOCAL_HOST, OPEN_SESSION.replace('"running"', '"busy"')),
+        ]
+        for message, hosts, sessions in cases:
+            path = self.write(hosts, sessions)
+            user = None if "USER" in message else "someone"
+            with self.subTest(message=message), self.assertRaisesRegex(gui_agent.UsageError, message) as raised:
+                gui_agent.load_scenario(path, user)
+            self.assertTrue(str(raised.exception).startswith(f"{path}: "), raised.exception)
+
+    def test_a_scenario_run_is_staged(self):
+        """A scenario's sessions are launched as `claude` and `codex` by bare name, which only a staged run's wrappers
+        keep from the vendors' real programs, so a scenario run must be staged even when every host is local.
+        Specified: `staged_start` is true for `--scenario` alone and false for a plain start; and through `start`
+        itself, a scenario run with `--user-session` (refused for staged runs) and one that also names
+        `--remote-host` are both refused before the run is created or any destination dialed."""
+        self.assertTrue(gui_agent.staged_start(argparse.Namespace(remote_host=[], scenario=pathlib.Path("s.json5"))))
+        self.assertFalse(gui_agent.staged_start(argparse.Namespace(remote_host=[], scenario=None)))
+        local_only = self.write()
+        unknown_host = self.write(sessions=OPEN_SESSION.replace('"local"', '"x"'), name="bad")
+        dialed = []
+        real_check = gui_agent.check_ssh
+        gui_agent.check_ssh = dialed.append
+        self.addCleanup(setattr, gui_agent, "check_ssh", real_check)
+        # A Mac refuses --user-session before it asks whether the run is staged.
+        user_session = "does not combine with a staged run" if sys.platform.startswith("linux") else "Linux only"
+        refusals = [
+            (["--user-session", "--scenario", str(local_only)], user_session),
+            (["--scenario", str(HERO), "--remote-host", "localhost"], "does not take --remote-host"),
+            (["--scenario", str(unknown_host)], "unknown host"),
+        ]
+        for args, message in refusals:
+            with self.subTest(args=args), self.assertRaisesRegex(gui_agent.UsageError, message):
+                gui_agent.start(self.dir / "run", args)
+        self.assertEqual(dialed, [])
+        self.assertFalse((self.dir / "run").exists())
+
+    def test_seen_state_is_set_for_idle_sessions_only(self):
+        """An idle row's dot is blue while its output is unseen and grey once seen, and the scenario says which. Only
+        idle sessions are touched, as in the old staging. Specified: a seen idle session is stamped with its row's own
+        activity (its creation time when it has none), an unseen one cleared, and any other status left alone."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        by_title = {session["title"]: session for session in plan["sessions"]}
+        row = {"last_activity_at": 1700000100, "created_at": 1700000000}
+        self.assertEqual(gui_agent.seen_body(by_title["triage crash reports"], row),
+                         {"seen_activity_at": 1700000100})
+        self.assertEqual(gui_agent.seen_body(by_title["triage crash reports"], dict(row, last_activity_at=0)),
+                         {"seen_activity_at": 1700000000})
+        self.assertEqual(gui_agent.seen_body(by_title["readme rewrite"], row), {"seen_activity_at": None})
+        self.assertIsNone(gui_agent.seen_body(by_title["bench tokenizer on H100"], row))
+
+    def test_the_shield_check_tells_the_shields_apart(self):
+        """The old staging's last check: each row shows exactly one permission shield, slashed for a YOLO session and
+        plain for every other. Specified against agent-track names in the window's words: the assertion each shows is
+        read as its shield, a YOLO observation on the status line reads as slashed whatever the launch said, a session
+        whose node is missing or doubled is not drawn yet, and a wrong shield is reported naming the session."""
+        plan = gui_agent.plan_scenario(
+            {"viewport": {"width": 1, "height": 1}, "hosts": [{"key": "l", "alias": "l", "kind": "local"}],
+             "sessions": [{"title": t, "host": "l", "wrapper": "claude", "status": "running", "yolo": yolo,
+                           "open": t == "y"} for t, yolo in (("y", True), ("n", False))]},
+            self.dir, None, "synthetic")
+        said = "as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — x"
+
+        def entry(key: str, name: str) -> dict:
+            return {"name": name, "key": {"path": f"a/session-item-{key}/{gui_agent.agent_track_id(key)}"}}
+
+        ids = {0: "e:y", 1: "e:n"}
+        right = [entry("e:y", f"Claude — YOLO, {said}"), entry("e:n", f"Claude — Not YOLO, {said}")]
+        self.assertEqual(gui_agent.shield_problems(plan, ids, right), ([], []))
+        observed = [right[0], entry("e:n", f"YOLO observed on the agent's status line: x.\n\nLaunched as: Claude — "
+                                           f"Not YOLO, {said}")]
+        self.assertEqual([w[:3] for w in gui_agent.shield_problems(plan, ids, observed)[1]], ["n: "])
+        swapped = [entry("e:y", f"Claude — Not YOLO, {said}"), right[1]]
+        self.assertEqual([w[:3] for w in gui_agent.shield_problems(plan, ids, swapped)[1]], ["y: "])
+        self.assertEqual(gui_agent.shield_problems(plan, ids, [right[0]])[0], ["n (0 shields)"])
+        self.assertEqual(gui_agent.shield_problems(plan, ids, [*right, right[1]])[0], ["n (2 shields)"])
+
+    def stand_in_helm(self, plan: dict):
+        """A stand-in for the run's helm for `stage_scenario`, and what it saw: every request in order (with a
+        ("SELECTED", "", None) marker where it first reports the window's selection), the create bodies, and counts of
+        its host and preference reads. A remote host reads as connecting on the first host read and connected after;
+        the window's selection of the first created session shows on the third preference read; every created session
+        is listed at the status its scenario session names."""
+        sent: list[tuple] = []
+        created: list[dict] = []
+        state = {"host_reads": 0, "preference_reads": 0}
+
+        def helm(_run, method, path, body=None):
+            sent.append((method, path, body))
+            if path == "/api/hosts":
+                state["host_reads"] += 1
+                phase = "connected" if state["host_reads"] > 1 else "connecting"
+                return {"hosts": [{"id": 1, "kind": "local", "state": {"phase": "connected"}},
+                                  {"id": 2, "kind": "ssh", "destination": "localhost", "state": {"phase": phase}},
+                                  {"id": 3, "kind": "ssh", "destination": "someone@localhost",
+                                   "state": {"phase": "connected"}}]}
+            if method == "POST" and path == "/api/sessions":
+                created.append(body)
+                return {"id": f"e:{len(created)}"}
+            if path == "/api/preferences" and method == "GET":
+                state["preference_reads"] += 1
+                if state["preference_reads"] < 3:
+                    return {"last_selected": None}
+                sent.append(("SELECTED", "", None))
+                return {"last_selected": "e:1"}
+            if path == "/api/sessions":
+                by_title = {s["title"]: s for s in plan["sessions"]}
+                return {"sessions": [{"id": f"e:{n}", "status": {"state": by_title[b["title"]]["status"]},
+                                      "last_activity_at": 1700000000 + n} for n, b in enumerate(created, start=1)]}
+            return None
+
+        return helm, sent, created, state
+
+    @staticmethod
+    def window_of(created: list[dict], yolo_of=None) -> list[dict]:
+        """A window snapshot's entries with one agent track per created session, named as the session list names a
+        command launch's (`yolo_of(key, body)` says which assertion it shows; the create body's own by default)."""
+        yolo_of = yolo_of or (lambda _key, body: body["command"]["yolo"])
+        return [{"name": f"Claude — {'YOLO' if yolo_of(key, body) else 'Not YOLO'}, as asserted",
+                 "key": {"path": gui_agent.agent_track_id(key)}}
+                for key, body in ((f"e:{n}", body) for n, body in enumerate(created, start=1))]
+
+    def test_staging_waits_for_the_window_to_open_the_open_session_before_creating_the_rest(self):
+        """The window keeps the first session it opens, so if another session were created before the window had
+        opened the scenario's open one, the window could open that one instead (and mark it seen). Specified against a
+        stand-in helm: every host is waited for until connected and then named by its alias; the list preferences are
+        set; the open session is created first and no other create is sent until the helm reports the window's own
+        selection of it; each session is created on its host in its own scratch directory holding its replay script;
+        only idle sessions get a seen write; and the keys come back by scenario index."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        run = self.dir / "run"
+        run.mkdir()
+        helm, sent, created, state = self.stand_in_helm(plan)
+
+        def window():
+            return self.window_of(created)
+
+        ids = gui_agent.stage_scenario(run, plan, "/fx", window, request=helm, timeout=10, interval=0)
+        self.assertEqual(ids, {index: f"e:{index + 1}" for index in range(7)})
+        creates = [index for index, (method, path, _) in enumerate(sent)
+                   if (method, path) == ("POST", "/api/sessions")]
+        self.assertEqual(state["preference_reads"], 3, "premise: the window's selection came only on the third read")
+        selected = sent.index(("SELECTED", "", None))
+        self.assertLess(creates[0], selected)
+        self.assertLess(selected, creates[1], "no second create before the window's selection was reported")
+        self.assertEqual(created[0]["title"], "fix flaky attach test")
+        self.assertEqual([body["host"] for body in created], [2, 1, 3, 3, 1, 2, 2])
+        aliases = [(path, body) for method, path, body in sent if path.endswith("/alias")]
+        self.assertEqual(aliases, [("/api/hosts/1/alias", {"alias": "this machine"}),
+                                   ("/api/hosts/2/alias", {"alias": "build-box"}),
+                                   ("/api/hosts/3/alias", {"alias": "gpu-1"})])
+        self.assertGreater(state["host_reads"], 1, "premise: the first host read found a host still connecting")
+        self.assertLess(max(i for i, (_, p, _) in enumerate(sent) if p == "/api/hosts"),
+                        min(i for i, (_, p, _) in enumerate(sent) if p.endswith("/alias")))
+        self.assertIn(("PUT", "/api/preferences", gui_agent.SCENARIO_PREFERENCES), sent)
+        for body in created:
+            cwd = pathlib.Path(body["cwd"])
+            self.assertEqual(cwd.parent, run / "work")
+            self.assertIn("fake-agent --script replay", (cwd / gui_agent.STAGED_AGENT_SCRIPT).read_text())
+        seen = {path for method, path, _ in sent if method == "PUT" and path.endswith("/seen")}
+        idle_keys = [ids[i] for i, s in enumerate(plan["sessions"]) if s["status"] == "idle"]
+        self.assertEqual(seen, {f"/api/sessions/{urllib.parse.quote(key, safe='')}/seen" for key in idle_keys})
+
+
+    def test_staging_fails_on_a_wrong_shield_or_status_naming_the_session(self):
+        """A run whose rows show other shields or statuses than the scenario asks for must fail rather than be
+        photographed, naming the session as the scenario does. Specified against the same stand-in helm: a window whose
+        row for one session shows the opposite assertion fails staging naming that session's title, a window that
+        never draws one row's shield fails it once the wait runs out, and so does a session the helm keeps listing at
+        another status, each naming the session's title."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        run = self.dir / "run"
+        run.mkdir()
+        helm, _, created, _ = self.stand_in_helm(plan)
+        flipped = lambda key, body: body["command"]["yolo"] != (key == "e:2")
+        with self.assertRaisesRegex(RuntimeError, "wrong permission shield: migrate auth tokens: .* does not say"):
+            gui_agent.stage_scenario(run, plan, "/fx", lambda: self.window_of(created, flipped), request=helm,
+                                     timeout=10, interval=0)
+
+        run = self.dir / "run2"
+        run.mkdir()
+        helm, _, created, _ = self.stand_in_helm(plan)
+        with self.assertRaisesRegex(RuntimeError, r"no single shield yet for readme rewrite \(0 shields\)"):
+            gui_agent.stage_scenario(run, plan, "/fx", lambda: [e for e in self.window_of(created)
+                                                               if not e["key"]["path"].endswith("e:3-agent")],
+                                     request=helm, timeout=0.2, interval=0)
+
+        unsettled = copy.deepcopy(plan)
+        unsettled["sessions"][2]["status"] = "running"
+        run = self.dir / "run3"
+        run.mkdir()
+        helm, _, created, _ = self.stand_in_helm(unsettled)
+        with self.assertRaisesRegex(RuntimeError, "reach its status: readme rewrite=running$"):
+            gui_agent.stage_scenario(run, plan, "/fx", lambda: self.window_of(created), request=helm, timeout=0.2,
+                                     interval=0)
 
 
 class ProcessIdentityTest(unittest.TestCase):
