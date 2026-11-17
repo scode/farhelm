@@ -91,6 +91,21 @@
 //! look. An anchored question sits where its anchor asks: below it (or above, without room), or beside it for an
 //! anchor made with [`crate::layers::Anchor::beside`], which is where the old row questions sat.
 //!
+//! Wrapping has a cost the old cut did not: a session title can run to tens of thousands of characters, and quoted in
+//! full it wrapped into hundreds of lines and pushed Cancel and Confirm off the window, where a pointer user could not
+//! answer at all. So an anchored question's text, its summary and lines, stops at about twelve lines
+//! ([`ANCHORED_TEXT_MAX_HEIGHT`]), with the answers below it always in view. Only the lines that name a host value give
+//! up height to the cap, each scrolling with the wheel inside what is left; the app's own lines are always drawn
+//! whole, wherever they sit, since they carry the consequences (the Delete question's managed-checkout line follows the
+//! quoted title). This is the old app's own case, terminal.spec's multi-KB unbroken title, whose Delete question "keeps
+//! the consequence text intact and clips only the title". The cap is the prompt's, not the layer manager's: the shared
+//! clamp keeps a popover's corner inside the window's content area but does not bound its height, so a card taller
+//! than the area still ran past its bottom. A fixed cap is enough because the capped card is far shorter than the
+//! shortest content area. The keyboard reaches what the cap hides too, as SPEC.md's "Reaching everything by keyboard"
+//! asks, without a stop of its own: Page Up, Page Down, Home and End from a focused answer scroll the first host-value
+//! line ([`scroll_from_controls`], as a dialog's notices region scrolls around its answers), while the arrows, Enter,
+//! Escape and Tab stay the answers'. Decided by the migration's orchestrator on 2026-11-16.
+//!
 //! [`ask_inline`] hands the question to its owner, which draws it inside its own surface, as the old app drew the
 //! launcher's YOLO question in the launcher's body and the template editor's leave question as a band at the editor's
 //! foot. It is not a layer: no veil, no header Close, no subject (it goes when its owner stops drawing it), and Tab
@@ -136,13 +151,13 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle,
-    FontWeight, InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, WeakEntity, WeakFocusHandle, Window, div,
-    prelude::FluentBuilder as _, px,
+    FontWeight, InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, Styled, WeakEntity, WeakFocusHandle, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use crate::actions::Dismiss;
-use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
+use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier, scroll_from_controls};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::Line;
 use crate::layers::{self, Anchor, AnchoredDialog, Dialog, Dismissal, LayerId, Subject};
@@ -150,6 +165,14 @@ use crate::theme::{self, metrics};
 
 /// How wide an anchored question may grow before its lines wrap: the old row menu panel's `max-width: 288px`.
 const ANCHORED_MAX_WIDTH: f32 = 288.;
+
+/// How tall an anchored question's text (its summary and lines) may grow before its host-value lines scroll, by the
+/// wheel and by Page Up, Page Down, Home and End from an answer: about twelve lines of its 12-pixel text at GPUI's
+/// default line height (the golden ratio, 19.4 pixels a line). The card around it then stays well inside the shortest
+/// content area the app's minimum window leaves ([`crate::bootstrap::MIN_WINDOW_SIZE`]), answers wrapped or not, so
+/// the layer manager's clamp can always put the whole card, answers included, inside the window. See the module docs
+/// for why the cap exists.
+const ANCHORED_TEXT_MAX_HEIGHT: f32 = 233.;
 
 /// The plain inline question's line height: the old `.templates-departure p`, 13-pixel text at `line-height: 1.5`.
 const INLINE_LINE_HEIGHT: f32 = 19.5;
@@ -716,6 +739,9 @@ pub struct Prompt<T: 'static> {
     alternative_focus: Vec<FocusHandle>,
     /// The link's, made whether or not there is one, so an inline question can tell focus is on it ([`Prompt::close`]).
     link_focus: FocusHandle,
+    /// The anchored question's first host-value line's scroll state, which Page Up, Page Down, Home and End move from
+    /// a focused answer. Kept here because the line is rebuilt on every draw.
+    text_scroll: ScrollHandle,
 }
 
 /// How an open question is drawn, which decides its look and, inline, that it returns focus itself.
@@ -1026,8 +1052,36 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         if self.shown == Shown::Anchored {
             // `.session-row-menu-panel.menu-prompt` and `.confirm-consequence`: 8 pixels of padding, 6 between
             // lines, 12-pixel amber prose, and the answers right-aligned 8 pixels apart (`.dialog-actions`).
-            let lines = question.summary.iter().chain(&question.lines).cloned();
-            return layers::surface(cx)
+            let lines: Vec<Line> = question
+                .summary
+                .iter()
+                .chain(&question.lines)
+                .cloned()
+                .collect();
+            let keyed = lines
+                .iter()
+                .position(|line| matches!(line, Line::Sentence(_)));
+            // Capped at `ANCHORED_TEXT_MAX_HEIGHT`: only lines naming a host value give up height, and scroll.
+            let text = div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .max_h(px(ANCHORED_TEXT_MAX_HEIGHT))
+                .children(lines.into_iter().enumerate().map(|(index, line)| {
+                    match line {
+                        Line::App(_) => div().flex_none().child(line).into_any_element(),
+                        Line::Sentence(_) => div()
+                            .id(("prompt-line", index))
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .when(keyed == Some(index), |line| {
+                                line.track_scroll(&self.text_scroll)
+                            })
+                            .child(line)
+                            .into_any_element(),
+                    }
+                }));
+            let card = layers::surface(cx)
                 .id("prompt")
                 .debug_selector(|| "prompt".into())
                 .role(Role::Dialog)
@@ -1039,7 +1093,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
                 .max_w(px(ANCHORED_MAX_WIDTH))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.warn_bright))
-                .children(lines.map(|line| div().child(line)))
+                .child(text)
                 .children(self.link())
                 .child(
                     div()
@@ -1049,8 +1103,8 @@ impl<T: Clone + 'static> Render for Prompt<T> {
                         .justify_end()
                         .gap(px(8.))
                         .children(answers),
-                )
-                .into_any_element();
+                );
+            return scroll_from_controls(card, &self.text_scroll).into_any_element();
         }
         let body = div()
             .flex()
@@ -1615,6 +1669,7 @@ fn build<T: Clone + 'static>(
         cancel_focus,
         alternative_focus,
         link_focus,
+        text_scroll: ScrollHandle::new(),
     });
     (prompt, start)
 }

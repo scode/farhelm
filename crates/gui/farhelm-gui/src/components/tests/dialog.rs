@@ -590,8 +590,8 @@ fn page_keys_scroll_the_notices_from_an_answer_inside_them(cx: &mut TestAppConte
 }
 
 /// Why this matters: taking keys from a control inside a region is the notices' opt-in, not a property of every
-/// notices region (SPEC_impl.md, "The component layer and theme": no other region takes keys from a control inside
-/// it). The launcher's notices, for one, do not opt in.
+/// notices region (SPEC_impl.md, "The component layer and theme": the only other region that takes keys from a control
+/// inside it is an anchored question's capped host-value line). The launcher's notices, for one, do not opt in.
 ///
 /// Specified, in the same overflowing question drawn through plain notices (no `notices_stop`), with Tab on Delete
 /// permanently (which scrolls the notices to show it): Page Up and Home leave the notices where they are, and the

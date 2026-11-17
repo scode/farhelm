@@ -1,11 +1,12 @@
 //! Behavior tests for the prompt, on GPUI's simulated platform: that a confirmation acts only on what it showed, where
 //! a question starts and how it is answered, cancelled and closed, how its summary and its title draw a host value,
-//! the anchored question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
-//! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, the
-//! debug build's refusal of an option the question's presentation ignores, a body the feature draws (the host setup
-//! confirmation's plan) with the dialog frame's tile, note and width, a link that opens without answering (SPEC.md's
-//! sandbox question linking Tensorlake pricing), and the bulk question's three needs: rewording an open question in
-//! place, returning focus to a named control, and a keyboard scroll stop for long text.
+//! the anchored question asked beside its control (with its text capped, so a huge title cannot push the answers off
+//! the window), the inline question drawn inside its owner's dialog (SPEC.md's YOLO confirmation in the launcher), the
+//! answer whose action can fail, which keeps its question up with the reason, the debug build's refusal of an option
+//! the question's presentation ignores, a body the feature draws (the host setup confirmation's plan) with the dialog
+//! frame's tile, note and width, a link that opens without answering (SPEC.md's sandbox question linking Tensorlake
+//! pricing), and the bulk question's three needs: rewording an open question in place, returning focus to a named
+//! control, and a keyboard scroll stop for long text.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -1083,6 +1084,119 @@ fn a_click_on_an_anchored_question_over_a_terminal_stays_with_the_question(
     assert_eq!(sent.get(), 1, "Enter after the click confirmed it");
     assert!(!is_open(cx, layer), "Enter closed it");
     assert!(focused(cx, &page.opener), "and focus went back");
+}
+
+/// The row's Delete question about a running session titled `title` in a managed checkout, in the order
+/// `session_list/delete.rs` builds it: the consequence, the quoted title, then the checkout's line.
+fn delete_question(title: &str) -> Question<String> {
+    let delete = Answer::new(
+        "Confirm delete",
+        HoverHelp::tooltip("Delete it"),
+        Tier::Danger,
+    );
+    let quoted = HostSentence::new("prompt-title")
+        .text("\"")
+        .host(&HostText::from_host(title))
+        .text("\"");
+    Question::new("Delete confirmation", delete, "s1".to_string())
+        .line("Still running \u{2014} deleting kills the agent:")
+        .line(quoted)
+        .line(MANAGED_CHECKOUT)
+        .keeps_focus_on_empty_click()
+}
+
+/// `session_list::delete::MANAGED_CHECKOUT`'s words, which that module keeps to itself.
+const MANAGED_CHECKOUT: &str = "The managed checkout stays while another session uses it. When its last session is \
+                                deleted, its folder moves to the trash; no files are deleted.";
+
+/// The text painted in `nodes` whose words (isolates aside) hold `words`, which must be there.
+fn painted_text(nodes: &[gpui::DriverNode], words: &str) -> gpui::DriverText {
+    let mut texts = nodes.iter().flat_map(|node| node.texts.iter());
+    match texts.find(|painted| painted_words(&painted.text).contains(words)) {
+        Some(painted) => painted.clone(),
+        None => panic!("{words:?} was not painted"),
+    }
+}
+
+/// Why this matters: an anchored question wraps rather than cuts its lines, and a session title may be tens of
+/// thousands of characters. Unbounded, a Delete question quoting one pushed Cancel and Confirm off the window, so a
+/// pointer user could not answer it. The old app's case is terminal.spec's multi-KB unbroken title, which "keeps the
+/// consequence text intact and clips only the title". What the cap hides must stay in keyboard reach too (SPEC.md,
+/// "Reaching everything by keyboard").
+///
+/// Specification, in a window of the app's minimum size, for the row's Delete question about a session in a managed
+/// checkout whose 6,000-character title has no spaces and alone is taller than the window: the card, Cancel and
+/// Confirm lie inside the window; the consequence and the checkout's line, before and after the title, are painted
+/// whole; the wheel over the title scrolls it while Confirm stays put; with focus on Confirm, Page Down scrolls the
+/// title further, focus stays on Confirm and nothing answers; a click on Confirm confirms it once.
+#[gpui::test]
+fn an_anchored_question_quoting_a_huge_title_keeps_its_answers_in_the_window(
+    cx: &mut TestAppContext,
+) {
+    let (cx, row) = open_row(cx);
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    let (title, sent) = ("x".repeat(6_000), Rc::new(Cell::new(0)));
+    let (anchor, record) = (row.anchor.borrow().clone(), sent.clone());
+    let layer = cx.update(|window, cx| {
+        let (question, mark) = (delete_question(&title), Mark::take(cx));
+        let Some(anchor) = anchor else {
+            panic!("the premise: the row's menu button was drawn")
+        };
+        let confirm = move |_, _: &mut _, _: &mut _| record.set(record.get() + 1);
+        prompt::ask_anchored(question, anchor, None, &mark, confirm, window, cx)
+    });
+    settle(cx);
+    let shown = gpui::Bounds::new(point(px(0.), px(0.)), cx.update(|w, _| w.viewport_size()));
+    let nodes = frame(cx);
+    let quoted = painted_text(&nodes, &title);
+    let premise = quoted.bounds.size.height > shown.size.height;
+    assert!(premise, "the premise: the title is taller than the window");
+    for drawn in ["prompt", "prompt-cancel", "prompt-confirm"] {
+        let at = bounds(cx, drawn);
+        assert!(
+            at.is_contained_within(&shown),
+            "{drawn} lies inside the window: {at:?}"
+        );
+    }
+    for whole in [
+        "Still running \u{2014} deleting kills the agent:",
+        MANAGED_CHECKOUT,
+    ] {
+        let painted = painted_text(&nodes, whole);
+        assert_eq!(
+            painted.visible_bounds, painted.bounds,
+            "{whole:?} is painted whole"
+        );
+    }
+
+    let confirm = bounds(cx, "prompt-confirm");
+    cx.simulate_event(gpui::ScrollEvent {
+        position: quoted.visible_bounds.center(),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-200.))),
+        ..Default::default()
+    });
+    check(cx);
+    let scrolled = painted_text(&frame(cx), &title).bounds;
+    assert!(
+        scrolled.top() < quoted.bounds.top(),
+        "the wheel scrolled the title: {scrolled:?}"
+    );
+    assert_eq!(bounds(cx, "prompt-confirm"), confirm, "Confirm stayed put");
+    let on_confirm =
+        |cx: &mut VisualTestContext| focused_id(cx).as_deref() == Some("prompt-confirm");
+    assert!(on_confirm(cx), "the premise: focus starts on Confirm");
+    keys(cx, "pagedown");
+    let paged = painted_text(&frame(cx), &title).bounds;
+    assert!(
+        paged.top() < scrolled.top(),
+        "Page Down scrolled the title: {paged:?}"
+    );
+    assert!(on_confirm(cx), "focus stayed on Confirm");
+    let open = layer.is_some_and(|layer| is_open(cx, layer));
+    assert!(open && sent.get() == 0, "Page Down answered nothing");
+    click(cx, "prompt-confirm");
+    assert_eq!(sent.get(), 1, "the click on Confirm confirmed it once");
 }
 
 /// Why this matters: where focus lands when a question closes decides where the user's next keys go. SPEC.md, "Keyboard
