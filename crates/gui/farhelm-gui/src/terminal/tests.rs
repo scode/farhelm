@@ -915,6 +915,43 @@ fn a_selection_is_trimmed_by_dropped_history_and_cleared_by_a_reset(cx: &mut Tes
     assert_eq!(terminal.read_with(cx, |view, _| view.selected_text()), None);
 }
 
+/// Why: trimming moves only the row a selection starts on, and a linear selection resumes at column 0 there; a column
+/// selection must keep its left edge, or the history dropping its oldest line at the cap silently widens the rectangle
+/// and the next copy carries text the user never selected. Spec (old `grid-terminal.spec.ts`, "a column selection whose
+/// first lines drop at the cap keeps its columns"): over the fixture's history, a column selection of columns 1 to 4
+/// from line 41 (empty) through line 43 copies "\nhre\nour"; one more history line drops line 41 at the 3-line cap,
+/// and the selection then starts on line 42 at column 1 and copies "hre\nour".
+#[gpui::test]
+fn a_column_selection_trimmed_at_the_cap_keeps_its_columns(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let column = Selection::new(
+        Position { line: 41, col: 1 },
+        Position { line: 43, col: 4 },
+        SelectionMode::Column,
+    );
+    terminal.update(cx, |view, cx| view.set_selection(Some(column), cx));
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.selected_text()),
+        Some("\nhre\nour".into()),
+        "the premise: the rectangle covers the empty line and two lines of text"
+    );
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([history_line(44, "five")], cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view
+            .selection()
+            .map(|selection| selection.start)),
+        Some(Position { line: 42, col: 1 }),
+        "line 41 was dropped; the left edge stays"
+    );
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.selected_text()),
+        Some("hre\nour".into())
+    );
+}
+
 /// A hover rests on the text it read: the link under the pointer is underlined on the rows it covers; when the view
 /// scrolls under the still pointer, what is under it now is looked up, and when the program rewrites those rows the
 /// link is looked up again, so a target that moved away or is gone is no longer underlined (or clickable). The
