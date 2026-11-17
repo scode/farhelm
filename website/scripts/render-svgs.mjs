@@ -180,7 +180,7 @@ const pillars = (p) => [
   {
     title: "Sessions outlive everything",
     lines: [
-      "Close the tab. Restart the control plane.",
+      "Quit Farhelm. Restart the control plane.",
       "Reboot the box the agent runs on.",
       "It comes back where it left off.",
     ],

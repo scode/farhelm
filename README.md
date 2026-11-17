@@ -90,9 +90,9 @@
   </picture>
 </p>
 
-Farhelm has two parts. The **helm** is what you look at, usually the Farhelm app on your Mac: it keeps your list of
-hosts and shows every session. A **supervisor** runs on each machine, your Mac included, and keeps that machine's agents
-and their terminals running. The helm reaches remote hosts over SSH. Experimental
+Farhelm has two parts. The **helm** is what you look at, the Farhelm app on your Mac: it keeps your list of hosts and
+shows every session. A **supervisor** runs on each machine, your Mac included, and keeps that machine's agents and their
+terminals running. The helm reaches remote hosts over SSH. Experimental
 [container sessions](https://farhelm.io/docs/agents/containerized-sessions/) run their own supervisor and checkout
 inside rootless Podman on a Linux host, reached through that host. Nothing listens beyond your own machine, nothing goes
 through a relay, and every box in the diagram can restart without losing a session.
