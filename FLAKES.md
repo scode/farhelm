@@ -4965,3 +4965,39 @@ that worker, private, until its `/tmp` ages them out.
 Class: product
 
 Cause: established
+
+## 2026-11-16 — killed app's second-launch socket still accepting at lifecycle step 08 (scripts/gui-lifecycle.py)
+
+`step_08_a_relaunch_after_a_kill_reuses_the_supervisor` in `scripts/gui-lifecycle.py` failed its premise four times out
+of four on the 18-CPU x86_64 shared development host at a load average around 23, running
+`python3 -B scripts/gui-lifecycle.py` through the recorder in its generic mode (one app run, launched again in order).
+Steps 01 to 07 passed each time and step 08 failed fast on its first check, after a run of about 400 s; it failed alone,
+nothing else in the run did. The first failing run is `de9b328b-fe23-49b3-b1a3-15a8e479be05` (clean commit `db02f02d` of
+main, Linux 6.8.0-149, Python 3.15.2, C.UTF-8; the recorder scrubbed ambient `FARHELM_*` names and kept only its own
+`FARHELM_TEST_TRACE_DIR`); the other three were a builder's runs, one with the bridge's host-staging change reverted,
+and their ids are unavailable. What else ran on the host is unavailable beyond the load, and so are the Rust toolchain
+version and the pids of the killed app. The script was added on 2026-11-14 (#3630) and changed since only by the
+bridge's host staging (#3926); this test has no earlier entries. A run on an eight-CPU worker at a load of 1.7 (commit
+`c2a9295c`, main with diagnostics added to the step, not recorded) passed all ten steps. Ruled out: a child process
+inheriting the listening socket (the listener is bound with close-on-exec), and the bridge's host-staging change (a
+failing run had it reverted). The suspected cause is in the step's premise: the step waits for the killed app to exit
+through `gui-agent.py`'s `running()`, which counts the process as gone once its main thread is a zombie, while a
+SIGKILLed multithreaded process can reach that state with other threads still tearing down; its open files, the
+second-launch listener among them, close only when the last thread exits, so under load a single connect right after the
+wait could still succeed. That is a hypothesis from the code and the load correlation: no machine-level reproduction was
+made (a synthetic one was too heavy for a shared host and was stopped). Disposition: fixed in the PR that adds this
+entry, which keeps the file-exists check and waits for the socket to refuse connections instead of checking once, and a
+wait that runs out names the killed process's thread count, which tells this race from a socket held open by something
+else; with it, recorded runs `50e2d086-989e-493e-a550-fb9a21342bb3` (its first version, at a load of 0.4) and
+`0df9d4df-46d0-4f7b-bc7f-d88ee903b8ca` (the script as landed, at a load of 3.7) passed all ten steps on eight-CPU
+workers, which shows the step still holds its premise but says nothing about the old rate under load. The failing run
+stays on the shared host and the passing one on that worker, private, until their `/tmp` ages them out.
+
+```
+gui-lifecycle: step_08_a_relaunch_after_a_kill_reuses_the_supervisor ...
+gui-lifecycle: FAILED: premise: after the kill, the socket file is not there refusing connections
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
