@@ -511,7 +511,7 @@ impl Credentials {
 
     /// The overview: the delivery failures of the last replacement, the help, the warning, the Tensorlake key form and
     /// the three lists.
-    fn overview(&self, cx: &Context<Self>) -> Vec<AnyElement> {
+    fn overview(&self, cx: &Context<Self>) -> AnyElement {
         let palette = theme::palette(cx);
         let mut parts: Vec<AnyElement> = self
             .undelivered
@@ -554,6 +554,8 @@ impl Credentials {
                 choices::help("Loading credentials…", cx)
                     .id("credentials-loading")
                     .role(Role::Status)
+                    // The old line was a bare paragraph whose default margin stood between it and the first rule.
+                    .mb(px(GROUP_GAP))
                     .into_any_element(),
             );
         }
@@ -576,29 +578,40 @@ impl Credentials {
                 retry,
             ));
         }
-        parts.extend(
-            [0, 1, 2]
-                .map(Group)
-                .map(|group| self.group(group, cx).into_any_element()),
-        );
-        parts
+        // The lists stack with no gap, on each other and on whatever precedes them, as the old sections did
+        // (`.host-settings-section + .host-settings-section` adds only the rule and its padding): each list's rule sits
+        // right under the Tensorlake key form's buttons, the list before, or a failed load's Retry loading, and only
+        // the parts above them are spaced by GROUP_GAP.
+        div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(GROUP_GAP))
+                    .min_w_0()
+                    .children(parts),
+            )
+            .children([0, 1, 2].map(Group).map(|group| self.group(group, cx)))
+            .into_any_element()
     }
 }
 
 impl Render for Credentials {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let shown: Vec<AnyElement> = match &self.editor {
-            Some(editor) => vec![editor.clone().into_any_element()],
+        let shown = match &self.editor {
+            Some(editor) => editor.clone().into_any_element(),
             None => self.overview(cx),
         };
         div()
             .id("credentials")
             .flex()
             .flex_col()
-            .gap(px(GROUP_GAP))
             .w_full()
             .min_w_0()
-            .children(shown)
+            .child(shown)
     }
 }
 

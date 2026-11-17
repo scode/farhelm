@@ -182,8 +182,8 @@ linux/settings-checkouts--dark.png ccd1ce76840982a097fda1d0a16912a1fd5b1be0
 linux/settings-checkouts--light.png 2a8eba233c5c9d4a8dc87b947fcdf094ff86e63e
 linux/settings-containers--dark.png 2f941e26a07165c2a4f0561042f967f75ce8469c
 linux/settings-containers--light.png b06c70b4be55fa5fc435aee0c13fb036c9ff753b
-linux/settings-credentials--dark.png b19c3482fa2e4b873b6ef4dea1848261b0b4775a
-linux/settings-credentials--light.png 542203e08dae1ce1d00c539afa62beb0e1d1c450
+linux/settings-credentials--dark.png d62359a787c5563d68df5e85eb8559d304840d5f
+linux/settings-credentials--light.png 5093335b423a9974a579c7f3399f9264a00e5e1f
 linux/settings-hosts--dark.png 63a69b0041651542403f9db1f0bfdc7df610f72c
 linux/settings-hosts--light.png b5f658553f5307d08d3eb64513273a938e2ba12b
 linux/settings-notifications--dark.png 86914898ad27ee523acb3d039eb2ce5f6d6329a8
