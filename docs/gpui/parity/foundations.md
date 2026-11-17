@@ -133,14 +133,25 @@ replaced: component constructors require hover help (a missing one does not comp
 
 ### `tests/popover-movement.spec.ts`
 
-Tests: 8. Covers: Sort dismisses an open ${kind} before Compact moves its anchor.
+Tests: 18. Covers: Sort dismisses an open ${kind} before Compact moves its anchor.
 
 superseded: SPEC.md "Things changing underneath" (an open menu moves with its session); port the remaining cases (a menu
 whose session or anchor is gone closes)
 
+- crates/gui/farhelm-gui/src/session_list/menu_tests.rs `an_open_menu_follows_its_button_through_what_the_helm_pushes`
+  (a keyboard-opened row menu stays open and follows its button through a pushed reorder that moves its row down or up
+  by changing its index, and stays in place through a permutation wholly above it; the two refusal-crossing cases and
+  the prefix-permutation case, for the row menu)
+- crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
+  `an_open_row_menu_stays_open_and_follows_its_button_when_the_band_appears` (the crossing cases' own movement, content
+  above a row that stays at its index growing and moving its button, which an open row menu follows)
+
+The held served reorder with the row's notification list open is a recorded deviation: the list does not keep the order
+hold ([Sidebar and session view](sidebar-and-session-view.md), "Deviations from the old app").
+
 ### `tests/popover-header-movement.spec.ts`
 
-Tests: 5. Covers: a completed Delete notice moves the anchor and closes an open ${kind}.
+Tests: 10. Covers: a completed Delete notice moves the anchor and closes an open ${kind}.
 
 superseded: SPEC.md "Things changing underneath" (an open menu moves with its session); port the remaining cases (a menu
 whose session or anchor is gone closes)
@@ -156,13 +167,20 @@ whose session or anchor is gone closes)
 - crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
   `dismiss_takes_the_band_away_and_focus_goes_home_to_the_open_sessions_terminal` (Dismiss takes the band away; with no
   menu open)
+- crates/gui/farhelm-gui/src/session_list/menu_tests.rs `an_open_menu_follows_its_button_through_what_the_helm_pushes`
+  (another row's removal leaves an open row menu open and in place, the menu part of "a Delete with no notice"; a failed
+  listing keeps the rows and the menu, which follows its button down past the failure line and back up when the next
+  listing is read, inverting "recovering from a failed listing closes an open menu")
 
 ### `tests/popover-host-movement.spec.ts`
 
-Tests: 1. Covers: a concealed same-height host reorder leaves the session ${kind} open.
+Tests: 8. Covers: a concealed same-height host reorder leaves the session ${kind} open.
 
 superseded: SPEC.md "Things changing underneath" (an open menu moves with its session); port the remaining cases (a menu
 whose session or anchor is gone closes)
+
+- crates/gui/farhelm-gui/src/session_list/menu_tests.rs `an_open_menu_follows_its_button_through_what_the_helm_pushes`
+  (a pushed host registry reorder leaves an open session row menu open and in place)
 
 ### `tests/popover-expanded-host-movement.spec.ts`
 
@@ -213,7 +231,12 @@ superseded by the UI channel (SPEC_impl "The UI channel")
 
 Tests: 2. Covers: read ordering and recovery.
 
-superseded by the UI channel's ordered pushes; port remaining acceptance cases
+superseded by the UI channel's ordered pushes; its remaining acceptance case, a failed listing that keeps its rows, says
+so and clears once the next listing is read, is ported
+
+- crates/gui/farhelm-gui/src/session_list/tests.rs `a_failed_listing_keeps_its_rows_and_says_so_until_the_next_listing`
+  ("a failed stop refetch is handed to the reader, which brings the list back"; the handoff itself has no counterpart,
+  since the helm pushes the listing)
 
 ### `tests/listing-mutation-fence.spec.ts`
 

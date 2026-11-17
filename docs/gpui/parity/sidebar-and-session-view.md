@@ -1232,7 +1232,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   `session_list/tests.rs` `the_open_sessions_list_item_says_it_is_selected`.
 - The old app replaced the whole list with "Failed to load sessions: ..." when a read failed. The port keeps the rows it
   has (a failed read is no evidence that anything went) and shows that line above them, in the style of the old app's
-  full-width failure lines (`.restart-error`).
+  full-width failure lines (`.restart-error`), until the next listing the helm reads (`session_list/tests.rs`
+  `a_failed_listing_keeps_its_rows_and_says_so_until_the_next_listing`). Since the rows stay, an open row menu stays
+  too, and follows its button down past the line and back up; the old one closed with its row.
+- An open row menu stays open and moves with its button when a pushed listing moves the row, where the old app closed it
+  whenever its button moved (the old popover-movement specs; SPEC.md, "Things changing underneath", has the menu move
+  with its session). A reorder, another row's removal and a host registry push are tested by
+  `session_list/menu_tests.rs` `an_open_menu_follows_its_button_through_what_the_helm_pushes`, content growing above the
+  rows by `session_list/delete_notice_tests.rs`
+  `an_open_row_menu_stays_open_and_follows_its_button_when_the_band_appears`.
 - The old page put every row in the document, so a screen reader could list all of them. The port draws only the rows in
   view and a few beyond (building every row on every redraw cost about 12% of a core at 200 sessions), so assistive
   technology and the test bridge see only those; the rest are reached by scrolling. This one is meant to stay.
@@ -1267,9 +1275,11 @@ Where the port does not match the old app, and why. Each stays until the work na
 - The header's caret menus open below their caret, as every popover of the layer manager does, where the old ones sat
   against the caret's right edge. Tab in one dismisses it as Escape does, so a second Tab at once goes on from the
   caret; a plain close would have swallowed it as a repeat of the closing press.
-- The old order hold was also kept while a row's notification list was open; here only a row's menu or a question one of
-  its commands asked keeps it, as SPEC.md names. The pointer on an open notification list is not over the rows, so the
-  order can catch up under it; the list is anchored to its row's bell and moves with it.
+- The old order hold was also kept while a row's notification list was open (`popover-movement.spec.ts`, "a held served
+  refusal reorder preserves an open bell"); here only a row's menu or a question one of its commands asked keeps it, as
+  SPEC.md names. The pointer on an open notification list is not over the rows, so the order can catch up under it, and
+  that is harmless: the list is anchored to its row's bell and moves with it, so a reorder cannot put a different
+  session under the pointer. This one is meant to stay.
 - A pinned row's title truncates beside its pin glyph, and the glyph's 16-pixel line box is held to its own size, so a
   pinned row is no taller than an unpinned one. In the old noncompact row the title could wrap under the glyph when the
   sidebar was narrow, and the glyph's taller line could add a few pixels to the row.
