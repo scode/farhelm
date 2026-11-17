@@ -601,9 +601,11 @@ Farhelm are applied separately to each host.
 
 The recipe row shows preparation below its built-snapshot status: **Ready for new hosts and sessions** with age, Farhelm
 version and the 24-hour policy in the positive tone; a pulsing current phase and step count while preparing; the reason
-when stale; and the failed phase or an interrupted attempt with the next-new-host-or-session retry explanation. An idle
-row qualifies readiness as last checked, since age display can advance without a new helm read. The helm always checks
-freshness before reuse.
+when stale; and the failed phase or an interrupted attempt with the next-new-host-or-session retry explanation. A recipe
+whose base Tensorlake cannot run promises nothing there, since no new host or session there can start from it: idle, it
+shows only that it is not prepared, and a failed or interrupted attempt has no retry explanation (decided by the
+migration's orchestrator on 2026-11-17). An idle row qualifies readiness as last checked, since age display can advance
+without a new helm read. The helm always checks freshness before reuse.
 
 A sandbox matching a recipe's build name is recovered only from an outstanding create request; a recorded sandbox ID
 permits cleaning up that sandbox alone. A build start without either record does not establish ownership. An unrelated

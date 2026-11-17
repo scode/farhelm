@@ -24,7 +24,7 @@ use super::recipe_tests::{
     account, answer_account, building, catalog, entry, idle, pressable, push, ticks, view, words,
 };
 use super::recipes::Tone;
-use super::recipes::prepared::{age, prepared_status};
+use super::recipes::prepared::{age, prepared_status, shows_age};
 use super::tests::{
     available, drawn, label_of, open_rail_with, open_settings, section_button, sent,
 };
@@ -98,6 +98,67 @@ fn prepared_status_keeps_readiness_last_checked_and_ages_display_only() {
     }
     assert_eq!(age(i64::MIN, i64::MAX), "0 s");
     assert_eq!(age(i64::MAX, i64::MIN), format!("{} h", i64::MAX / 3600));
+}
+
+/// A recipe whose base the snapshot's place cannot run is never prepared there, so no line may promise that a new host
+/// or session prepares it or tries again; a real container run found that promise on a container-image recipe, under
+/// the row's own "cannot run" warning, which already says why. The helm keeps a prepared snapshot across a base change,
+/// so the stale and ready states reach such a recipe too. Specified: on a container image, a never-prepared, a stale
+/// and a ready recipe each read, muted, "Not prepared", and the ready one shows no age, so the section holds no clock
+/// for it, where a ready managed Ubuntu recipe does; a failed preparation ends at the preparer's words and a stopped
+/// one at "Preparation stopped when the helm stopped.", neither saying it tries again; a never-prepared recipe on
+/// managed Ubuntu keeps the old promise.
+#[test]
+fn a_recipe_the_place_cannot_run_is_never_promised_a_preparation() {
+    let base = RecipeBase::ContainerImage {
+        reference: "example.test/team/dev:latest".into(),
+        user: "dev".into(),
+    };
+    let ready = RecipeView {
+        base: base.clone(),
+        ..prepared_recipe()
+    };
+    let mut stale = ready.clone();
+    if let Some(prepared) = stale.prepared.as_mut() {
+        prepared.stale_reason = Some(PreparedStaleReason::Expired);
+    }
+    assert!(
+        shows_age(&prepared_recipe()),
+        "premise: a ready managed Ubuntu recipe shows its age"
+    );
+    assert!(
+        !shows_age(&ready),
+        "no age to show, so the clock is not held for it"
+    );
+    for recipe in [view(base.clone(), 0), stale, ready] {
+        assert_eq!(
+            prepared(&recipe, Some(100)),
+            (Tone::Muted, "Not prepared".into(), false),
+            "{:?}",
+            recipe.prepared
+        );
+    }
+    let mut failed = view(base.clone(), 0);
+    failed.preparation = PrepareView::Failed {
+        step: PrepareStep::Creating,
+        message: "gateway refused".into(),
+        at: 200,
+    };
+    assert!(
+        prepared(&failed, Some(201))
+            .1
+            .ends_with(": gateway refused.")
+    );
+    let mut stopped = view(base, 0);
+    stopped.preparation = PrepareView::Interrupted { started_at: 100 };
+    assert_eq!(
+        prepared(&stopped, Some(201)).1,
+        "Preparation stopped when the helm stopped."
+    );
+    assert_eq!(
+        prepared(&view(RecipeBase::ManagedUbuntu, 0), Some(100)).1,
+        "Not prepared yet; the first new host or session prepares it (about a minute)."
+    );
 }
 
 /// Every stale reason the helm reports tells the user when the work will happen, and no client time can override it.
