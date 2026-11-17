@@ -23,15 +23,16 @@ absolutely catastrophically major mistake with huge user impact."
 
 ## Concepts
 
-- **Host**: a machine that runs sessions. The local Mac is a host; each remote Linux machine or Mac is a host. Every
-  host runs a supervisor — at most one per user, and Farhelm operates entirely within one user account per host.
+- **Host**: a machine that runs sessions. The machine running the desktop app is a host; each remote Linux machine or
+  Mac is a host. Every host runs a supervisor — at most one per user, and Farhelm operates entirely within one user
+  account per host.
 - **Supervisor**: the per-host service that manages sessions on that host — launching agents, owning their terminals,
   receiving attachments, handling spawn requests — and nothing else. It has no UI and no knowledge of other hosts.
   Supervisors are the authority on their sessions, and sessions outlive supervisors (see Durability). Supervisors
-  themselves outlive clients and the helm: on Linux under systemd, on remote Macs under launchd (see Topology), and on
-  the local Mac because the app starts its supervisor detached, so quitting the app leaves the supervisor running (the
-  helm lives in the app and stops with it). Nothing restarts that local Mac supervisor if it crashes while the app is
-  closed, and nothing starts it at login; opening the app does.
+  themselves outlive clients and the helm: on remote Linux hosts under systemd, on remote Macs under launchd (see
+  Topology), and on the desktop app's own machine, Mac or Linux, because the app starts its supervisor detached, so
+  quitting the app leaves the supervisor running (the helm lives in the app and stops with it). Nothing restarts that
+  local supervisor if it crashes while the app is closed, and nothing starts it at login; opening the app does.
 - **Helm**: the single control-plane process. The user runs exactly one helm, the one the desktop app embeds, on the Mac
   or a Linux desktop; there is no other way to run one (see Topology). It holds the host registry, connects directly to
   each registered supervisor, aggregates their sessions, and serves the UI through its API. The helm holds no
@@ -73,11 +74,11 @@ absolutely catastrophically major mistake with huge user impact."
 ## Topology
 
 One control plane, one face: the **desktop app**, `farhelm-desktop`, a native app for macOS and Linux (Wayland). It
-opens the UI in its own window and runs the helm. On the Mac it also starts a local supervisor beside it, so the Mac
-itself is a host; the NOTE below covers Linux. The helm is embedded in the app and serves only that app's window, on a
-loopback port chosen for that launch. The window still talks to the helm only through the helm's API (its UI channel,
-terminal streams, and plain HTTP for file transfers), never through the helm's internals, even though both run in one
-process. Keeping that split is what leaves a remote helm possible later.
+opens the UI in its own window and runs the helm. It also starts or reuses a local supervisor beside it, so the machine
+it runs on is itself a host. The helm is embedded in the app and serves only that app's window, on a loopback port
+chosen for that launch. The window still talks to the helm only through the helm's API (its UI channel, terminal
+streams, and plain HTTP for file transfers), never through the helm's internals, even though both run in one process.
+Keeping that split is what leaves a remote helm possible later.
 
 There is no web interface: Farhelm serves no browser UI. A remote helm, meaning a desktop app attached to a helm on
 another machine, is not offered now. Decided by the maintainer on 2026-11-12, when the GUI moved to a native app on
@@ -87,8 +88,8 @@ helm, started without the app by `farhelm helm run` or through the systemd units
 machine, served no UI and was removed together with both commands: the maintainer decided on 2026-11-13, and confirmed
 on 2026-11-16, that it should go.
 
-NOTE: The Linux desktop app is new. How it runs and keeps its local supervisor is not specified yet; the Mac desktop
-app's rules below apply to the Mac.
+NOTE: The Linux desktop app is new, and how it is packaged is not specified yet: for now it has no installer and no
+updates and is run from a build (see [Installation and updates](#installation-and-updates)).
 
 The desktop app has the same capabilities on both platforms: terminal, attachments, lifecycle operations, host
 registration, and launch-template management in the helm-owned catalog.
@@ -97,9 +98,9 @@ The Mac is not architecturally special: it runs a normal supervisor that any hel
 one the desktop app embeds on a Linux machine — can register and drive, and the helm that registers it then owns it (see
 the ownership rule below). The supervisor is a plain command-line process on every platform: `farhelm supervisor run` in
 a terminal and you have a working host — that path always exists, on any platform, and is how you try Farhelm without a
-bunch of fuss. System integration is layered on top of that, not baked in. On Linux, v1 ships that layer as user-level
-systemd units (auto-start at boot, which the durability promises assume) — never system units, never root. The Mac
-desktop app starts its local supervisor and leaves it running when it quits; nothing starts that local supervisor at
+bunch of fuss. System integration is layered on top of that, not baked in. On a remote Linux host, v1 ships that layer
+as user-level systemd units (auto-start at boot, which the durability promises assume) — never system units, never root.
+The desktop app starts its local supervisor and leaves it running when it quits; nothing starts that local supervisor at
 login or restarts it after a crash before the app is opened again. A remote Apple-silicon Mac set up over SSH instead
 gets a per-user launchd job, which runs the supervisor right away and restarts it after a crash. After a reboot,
 reconnecting over SSH does not load the job; choosing Update in the host menu starts it. Automatic loading at screen
@@ -250,7 +251,7 @@ machine remains the prerequisite for remote hosts, and the helm handles connecti
 on no network port except IPv4 loopback ports claimed by a helm for an environment host's configured recipe tunnels.
 Those listeners belong to the claiming connection and close when it ends. The helm limits these claims to environment
 hosts. The supervisor's transport-independent protocol does not know the provider or host kind. The helm's own machine
-is a host without registration: its supervisor (on the Mac, the desktop app's managed local one) is reached locally, no
+is a host without registration: its supervisor (the one the desktop app starts or reuses) is reached locally, no
 SSH-to-self involved. The helm manages it through the same discovery-first flow as remote hosts, minus SSH: a supervisor
 that answers is discovered and registered like any other, and the panel never touches the unit file that runs it. What
 the panel does NOT do on the helm's own machine is install one. The desktop app starts that machine's supervisor itself
@@ -2942,33 +2943,33 @@ whatever the agent renders is what you see. There is no composer, no message abs
   long drag once during it and once when it stops, not at every step.
 - A terminal host keeps a bounded amount of the program's output beyond the supervisor's latest checkpoint of the
   terminal: 32 MiB by default, a few minutes of an agent redrawing as fast as it can, hours of a shell. When more than
-  that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; the Mac desktop
-  app's local supervisor returns only when the app or binary is started), the oldest of it is dropped, which leaves a
-  **gap**; the program runs on unhindered. A gap can also happen while a supervisor runs, rarely: a single escape
-  sequence longer than the bound, or output the supervisor cannot checkpoint as fast as it arrives, such as full
-  scrollback colored cell by cell at high sustained rates. At about 11 MiB/s on the measured hardware, encoding one such
-  snapshot alone can fill the remaining journal space; catching up and machine load can make a gap possible at lower
-  rates. The dropped output is everything since the latest checkpoint that no longer fits, so it can include output a
-  supervisor had already shown before it crashed. After a gap the terminal carries on from its state before the lost
-  output (after a supervisor restart, its latest checkpoint) with the output kept after it, the supervisor asks the
-  program to redraw by making its terminal one row smaller and back, and the terminal shows "Some earlier output could
-  not be recovered" above its scrollback until the supervisor next restarts. What a gap cannot bring back: the lines the
-  lost output put into the scrollback; the screen, until the program redraws it (agents and other full-screen programs
-  redraw when their terminal is resized; a shell at its prompt does not, so its screen can show older contents with
-  newer output drawn over them); any mode the lost output changed, such as the alternate screen, mouse reporting,
-  bracketed paste or application cursor keys, and the same for the other terminal settings it made, such as the title,
-  redefined colors, line-drawing characters, the scroll region and the cursor's style. A program sets these again only
-  when it chooses to, and many set their modes only when they start, so such a setting can stay wrong until the program
-  is restarted; meanwhile keys, pastes and mouse input can reach the program encoded for the wrong mode. A multi-line
-  paste into a shell may then run line by line instead of arriving as one block. A query in the lost output that no
-  supervisor had answered before the bytes were lost is never answered (the program waits out its own timeout), and a
-  clipboard write there is not carried out during the recovery; either may already have happened, if a supervisor saw
-  that output before it crashed. A gap never restarts a program or throws away a working terminal. Separately, a
-  checkpoint too large for the terminal host (16 MiB, far more than a full scrollback of ordinary output takes) can
-  leave out old title-stack entries, the oldest scrollback lines and, if that is not enough, the screen's contents. The
-  running terminal is not affected, but a recovery from that checkpoint rebuilds the terminal without them: it shows the
-  same notice when scrollback was left out, which then stays until the program clears its scrollback or the scrollback
-  has turned over, and asks the program to redraw when the screen was left out.
+  that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; the desktop app's
+  local supervisor returns only when the app or binary is started), the oldest of it is dropped, which leaves a **gap**;
+  the program runs on unhindered. A gap can also happen while a supervisor runs, rarely: a single escape sequence longer
+  than the bound, or output the supervisor cannot checkpoint as fast as it arrives, such as full scrollback colored cell
+  by cell at high sustained rates. At about 11 MiB/s on the measured hardware, encoding one such snapshot alone can fill
+  the remaining journal space; catching up and machine load can make a gap possible at lower rates. The dropped output
+  is everything since the latest checkpoint that no longer fits, so it can include output a supervisor had already shown
+  before it crashed. After a gap the terminal carries on from its state before the lost output (after a supervisor
+  restart, its latest checkpoint) with the output kept after it, the supervisor asks the program to redraw by making its
+  terminal one row smaller and back, and the terminal shows "Some earlier output could not be recovered" above its
+  scrollback until the supervisor next restarts. What a gap cannot bring back: the lines the lost output put into the
+  scrollback; the screen, until the program redraws it (agents and other full-screen programs redraw when their terminal
+  is resized; a shell at its prompt does not, so its screen can show older contents with newer output drawn over them);
+  any mode the lost output changed, such as the alternate screen, mouse reporting, bracketed paste or application cursor
+  keys, and the same for the other terminal settings it made, such as the title, redefined colors, line-drawing
+  characters, the scroll region and the cursor's style. A program sets these again only when it chooses to, and many set
+  their modes only when they start, so such a setting can stay wrong until the program is restarted; meanwhile keys,
+  pastes and mouse input can reach the program encoded for the wrong mode. A multi-line paste into a shell may then run
+  line by line instead of arriving as one block. A query in the lost output that no supervisor had answered before the
+  bytes were lost is never answered (the program waits out its own timeout), and a clipboard write there is not carried
+  out during the recovery; either may already have happened, if a supervisor saw that output before it crashed. A gap
+  never restarts a program or throws away a working terminal. Separately, a checkpoint too large for the terminal host
+  (16 MiB, far more than a full scrollback of ordinary output takes) can leave out old title-stack entries, the oldest
+  scrollback lines and, if that is not enough, the screen's contents. The running terminal is not affected, but a
+  recovery from that checkpoint rebuilds the terminal without them: it shows the same notice when scrollback was left
+  out, which then stays until the program clears its scrollback or the scrollback has turned over, and asks the program
+  to redraw when the screen was left out.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
@@ -3501,7 +3502,7 @@ exception below:
   agent processes outlive the supervisor process; only a host reboot takes sessions down. This is what makes updates,
   the desktop app's automatic ones included, routine instead of scary.
 
-Local sessions have full behavioral parity with remote ones; what differs is availability, not behavior. The Mac desktop
+Local sessions have full behavioral parity with remote ones; what differs is availability, not behavior. The desktop
 app's local supervisor is started by the app and keeps running after the app quits (or is started manually — see
 Topology); nothing starts it at login or restarts it after a crash before the app is opened again. A remote Mac set up
 over SSH has its supervisor restarted by launchd after a crash, and an Update replaces only that supervisor: its
@@ -3516,8 +3517,7 @@ Conversation tracking keeps working while a host's supervisor is down: when an a
 Restart uses the conversation Farhelm has recorded, subject to the tracking limits below. Asking Farhelm for something
 from inside a session does not work while the supervisor is down, and that is expected for now: an agent's
 `farhelm spawn` and `farhelm agent` commands fail until the supervisor is running again. They also need the helm, which
-on the Mac lives in the desktop app, so there they fail whenever the app is closed, although the supervisor keeps
-running.
+lives in the desktop app, so they fail whenever the app is closed, although the supervisor keeps running.
 
 Confirmed 2026-10-14: after a session or its conversation is replaced, by clicking, `/clear` in the agent, or similar,
 Restart resuming the previous conversation within a brief window is acceptable, and so is Farhelm then continuing with
@@ -3549,10 +3549,10 @@ functions, which can change its subsequent environment. The shim still supplies 
 directory to Bash. An agent launch without a wrapper and a legacy session keep direct exec.
 
 When a host reboots, its supervisor starts automatically on Linux hosts with the system-integration layer; the desktop
-app's local Mac supervisor returns when the app or binary is next started. A remote Mac's reboot behavior is stated in
-the setup plan (see Topology). Interruption is classified whenever the supervisor comes back. After a boot, sessions
-last known running show as **Interrupted** — explicitly a lost-track state, not a claim about what happened in between:
-the agent may have exited on its own moments before the reboot, the supervisor cannot know, and interrupted says exactly
+app's local supervisor returns when the app or binary is next started. A remote Mac's reboot behavior is stated in the
+setup plan (see Topology). Interruption is classified whenever the supervisor comes back. After a boot, sessions last
+known running show as **Interrupted** — explicitly a lost-track state, not a claim about what happened in between: the
+agent may have exited on its own moments before the reboot, the supervisor cannot know, and interrupted says exactly
 that. Sessions already known exited (including user-stopped ones) keep their status; an exit during supervisor downtime
 with no reboot involved shows as exited — with the true exit code when the surviving terminal still holds it, unknown
 code otherwise (reporting a code the terminal genuinely retains is not guessing; inventing one where nothing retains it
