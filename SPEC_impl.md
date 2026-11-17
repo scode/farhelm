@@ -299,7 +299,13 @@ refused at once from local state, before anything is cancelled; once its cleanup
 at the bound replies that it carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup
 fails, stays listed with the reason only in the helm's log until a second Delete runs the cleanup again and answers it.
 While the deletion runs, the recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then
-lost with the row.
+lost with the row. An Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it
+does not wait (decided by the migration's orchestrator on 2026-11-17): it takes the host's provisioning lock without
+waiting and is refused at once while another operation (such as a Tensorlake host's Suspend, Resume or removal, or a
+destination or alias change) holds it, saying to choose Update again once that finishes, as a sandbox's setup rerun is
+(see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so a failed earlier run and its Re-run
+stay as they were, and carries no busy marker, since its plan is already spent. The automatic update still waits for the
+lock.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
