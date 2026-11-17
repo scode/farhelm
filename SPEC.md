@@ -606,7 +606,7 @@ sandbox at that name and its snapshots are left alone, and a build fails if the 
 hidden from **Sandboxes not on this helm** while the recipe exists; it must finish or be removed in Tensorlake before a
 retry can build. Missing records after an older installation or power loss require the same explicit cleanup.
 
-Upgrading converts recipes that installed packages to the Tensorlake Ubuntu base, keeping their packages and built
+Upgrading converts recipes that installed packages to the Managed Ubuntu base, keeping their packages and built
 snapshot. Recipes that reused an image or snapshot become that base with no packages and no built snapshot. Their rows
 show **No snapshot yet** with **Build snapshot**, unless an earlier build failed or was cut short, which keeps its
 failure and offers **Retry**, the same build; adding a host builds first. Hosts already created from those recipes keep

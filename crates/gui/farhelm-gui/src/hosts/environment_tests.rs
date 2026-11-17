@@ -241,6 +241,29 @@ fn failed_forwards_paint_the_rows_status_amber(cx: &mut TestAppContext) {
     );
 }
 
+// ---- A machine's mark ----------------------------------------------------------------------------------------------
+
+/// Why this matters: "Remote: on another machine, reached over SSH" is false for a container on this machine, and the
+/// session rows in a sandbox or container already name its mark by the provider's word; a real container run found the
+/// Hosts panel calling the same machine "Remote". The help describes the machine, not a session in it, as the session
+/// rows' does. Specified: `gpubox`'s mark in its Hosts row is named "Sandbox" with the help "Sandbox: a Tensorlake
+/// sandbox, reached over SSH", and `crate-1`'s is named "Container" with "Container: a container on one of your
+/// container hosts".
+#[gpui::test]
+fn a_machines_mark_is_named_by_its_provider(cx: &mut TestAppContext) {
+    let (_helm, cx) = panel(cx, connected(), Vec::new());
+    assert_eq!(label(cx, "host-mark-4").as_deref(), Some("Sandbox"));
+    assert_eq!(
+        hover_help(cx, "host-mark-4").as_deref(),
+        Some("Sandbox: a Tensorlake sandbox, reached over SSH")
+    );
+    assert_eq!(label(cx, "host-mark-5").as_deref(), Some("Container"));
+    assert_eq!(
+        hover_help(cx, "host-mark-5").as_deref(),
+        Some("Container: a container on one of your container hosts")
+    );
+}
+
 // ---- Delete sandbox and Delete container ---------------------------------------------------------------------------
 
 /// Why this matters: deleting a sandbox destroys every session, file and snapshot in it and cannot be undone, so it

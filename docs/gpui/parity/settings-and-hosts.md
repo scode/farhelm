@@ -1684,6 +1684,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   Here the build is work on the recipe's own operation key, which keeps a refusal until the next build of that recipe
   starts or the pushed state shows the recipe start building, its snapshot or one of its container places (the old row's
   rule, settled on the start because every push re-checks it), so reopening Settings still shows it.
+- **The managed base reads "Managed Ubuntu" in a recipe's summary**, as the editor's card and SPEC.md name it. The old
+  list said "base: Tensorlake Ubuntu", which reads as Tensorlake-only on a recipe used for containers. The Add
+  Tensorlake host dialog shows the same summary. Covered by `summaries_follow_the_mockup` (`settings/recipe_tests.rs`).
+- **A recipe's built-snapshot and prepared lines start with their place**, "Tensorlake · No snapshot yet" and
+  "Tensorlake · Not prepared yet; …", as a container place's line starts with its host's name. The old row drew them
+  unnamed, so on a recipe used only for containers they read as the whole recipe's state. Build snapshot stays offered.
+  Covered by `the_snapshot_lines_are_named_by_their_place` (`settings/recipe_tests.rs`).
 - **The running dot sits on the build's own line.** The old row drew it before the snapshot status's last line, which a
   pending cleanup or an unsupported-base warning can follow; the dot then marked a line that is not running. Here it
   marks the "Building snapshot" line wherever it falls.
@@ -1975,6 +1982,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   any host, the other is refused in its place, Add host opens or the UI session resets, where the old page showed no
   line at all. A launch is not held back while a Retry request is in flight, where the old page's token held it: the
   helm answers Retry at once, and the connection drops only after that answer.
+- **A machine being deleted, or whose deletion failed, is offered no Update and no rerun.** The old menu offered Update
+  on a sandbox or container in either phase, though its sessions are being deleted with it and Retry is what finishes
+  the deletion; the old row already withheld Suspend and Resume there for that reason. Covered by
+  `a_machine_being_deleted_is_not_offered_update_or_rerun` (`hosts/offers/tests.rs`).
 - **A host that reports no build reads "Farhelm not connected"** in the header. The old header showed the host's
   recorded install path (`remote_farhelm`) in the build's place.
 - **The menu offers Retry, Suspend or Resume, Adopt, Re-run, Update, Settings, Uninstall, and Remove or Delete sandbox
@@ -2217,6 +2228,11 @@ Where the port does not match the old app, and why. Each stays until the work na
   italic Inter face, and the old app drew them in italics.
 - The identity mark's "Local" or "Remote" is its accessible name rather than a visually hidden word after it, with the
   same hover help.
+- **A sandbox's or container's identity mark is named by its provider**, "Sandbox" or "Container", the word its session
+  rows' mark has, with hover help about the machine ("Sandbox: a Tensorlake sandbox, reached over SSH", "Container: a
+  container on one of your container hosts"). The old row called every non-local host "Remote", with "Remote: on another
+  machine, reached over SSH", which is false of a container on the helm's own machine, while its session rows already
+  used the provider's word. Covered by `a_machines_mark_is_named_by_its_provider` (`hosts/environment_tests.rs`).
 - The old app worded its phase status's accessible name only for connected hosts and hosts offering an inline update;
   the port names every status by its phase words. As in the old app, only Too new carries a description (both versions
   and the remedy).

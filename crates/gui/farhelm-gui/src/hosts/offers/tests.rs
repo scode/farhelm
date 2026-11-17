@@ -191,6 +191,39 @@ fn suspend_is_offered_on_a_running_machine_until_its_deletion() {
     }
 }
 
+/// Why this matters: a container or sandbox whose deletion failed has its sessions being deleted with it (their actions
+/// are unavailable), and Retry is what finishes the deletion ("Retry to delete it again"); an Update there would
+/// install Farhelm again on a machine the user chose to delete, and a real container run found the menu offering it.
+/// Specified: a connected container with a failed Update is offered Update and the Update's rerun; the same host being
+/// deleted, or whose deletion failed, is offered neither, and once the deletion failed everything else (Retry, Delete
+/// container, Settings) is as for the connected host, but for Suspend, which a deletion withholds on its own rule
+/// (`suspend_is_offered_on_a_running_machine_until_its_deletion`).
+#[test]
+fn a_machine_being_deleted_is_not_offered_update_or_rerun() {
+    let failed_update = run(5, ProvisioningOperation::Update, RunStatus::Failed);
+    let alive = offers(&host(5, "podman", connected()), Some(&failed_update), false);
+    assert_eq!(alive.update, Some(Update::Available));
+    assert_eq!(alive.rerun, Some((Rerun::Update, true)));
+    let under_way = offers(
+        &host(5, "podman", HostStateView::Deleting { failure: None }),
+        Some(&failed_update),
+        false,
+    );
+    assert_eq!((under_way.update, under_way.rerun), (None, None));
+    let failed = HostStateView::Deleting {
+        failure: Some("container command failed".to_owned()),
+    };
+    assert_eq!(
+        offers(&host(5, "podman", failed), Some(&failed_update), false),
+        Offers {
+            update: None,
+            rerun: None,
+            lifecycle: None,
+            ..alive
+        }
+    );
+}
+
 /// Why this matters: a host takes one request at a time, and while one is out (an Update's plan, a setup probe, a save
 /// of its settings) a second action on it would be refused or would act on a host about to change. This is the half
 /// of the old `only_confirmation_preparation_and_pending_plans_exclude_other_settings` that survives the port: work in
@@ -415,13 +448,13 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
 
 /// Why this matters: a host kind a newer helm adds must not be offered verbs this build cannot vouch for, and each
 /// known kind's decisions are made in one exhaustive place. Specified: an unrecognized kind is offered Settings and
-/// Retry alone (the helm's retry does not depend on the kind, and the old menu offered it on every row),
-/// even with a failed run, draws no locality and has no appearance to choose; SSH, Tensorlake and Podman hosts are
-/// remote and the local host is local; only an SSH host is offered Remove, since only its removal merely forgets it (a
-/// sandbox's or a container's deletes the machine, a different command, and the helm's own machine is never removed);
-/// only an SSH host is offered Uninstall (SPEC.md: the local host is uninstalled with `farhelm uninstall`, and the
-/// panel "offers no Uninstall" for a sandbox); only an SSH host's settings edit its destination; and every known kind's
-/// settings choose its appearance.
+/// Retry alone (the helm's retry does not depend on the kind, and the old menu offered it on every row), even with a
+/// failed run, draws no locality and has no appearance to choose; an SSH host is remote, a Tensorlake or Podman host is
+/// its provider's environment, and the local host is local; only an SSH host is offered Remove, since only its removal
+/// merely forgets it (a sandbox's or a container's deletes the machine, a different command, and the helm's own machine
+/// is never removed); only an SSH host is offered Uninstall (SPEC.md: the local host is uninstalled with `farhelm
+/// uninstall`, and the panel "offers no Uninstall" for a sandbox); only an SSH host's settings edit its destination;
+/// and every known kind's settings choose its appearance.
 #[test]
 fn each_kind_decides_its_own_offers() {
     let failed = run(9, ProvisioningOperation::Add, RunStatus::Failed);
@@ -462,7 +495,7 @@ fn each_kind_decides_its_own_offers() {
             false,
             Some(ProviderKind::Tensorlake),
             Some(SetupRerun::Tensorlake),
-            Locality::Remote,
+            Locality::Environment(ProviderKind::Tensorlake),
             false,
         ),
         (
@@ -470,7 +503,7 @@ fn each_kind_decides_its_own_offers() {
             false,
             Some(ProviderKind::Podman),
             None,
-            Locality::Remote,
+            Locality::Environment(ProviderKind::Podman),
             false,
         ),
     ] {
