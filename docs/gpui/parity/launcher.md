@@ -513,11 +513,43 @@ create keys and retries nothing), and so are the five shorter legs (601 to 480 h
 window below the minimum (Deviations); all six legs are 390 wide, and what the 844-high one checks is ported at the
 sizes the window allows; the plain Replace cases are the sidebar's and the header's, whose YOLO questions are tested,
 and the template cases are the templates area's, except two that the launcher's own rule decides (below); not yet
-ported: a header or sidebar Replace keeping its confirmed nothing-alive answer when the source comes back alive while
-its YOLO question is open, confirmed once or told not to ask again (697, 706, 794, 803; their tests would sit in
-`session_pane::header_tests` and `session_list::lifecycle_tests`), and the question reopened from the notice (in the
-nonblocking-launch row)
+ported: of "don't ask again marks the host safe before launching, and a failed mark launches nothing" (511), a plain
+Launch after the host write fails sending no consent and asking a question without the failure's reason (that case's
+focus going back to Cancel after the failure is superseded: an inline question keeps focus on the answer after a failed
+answer, SPEC_impl.md, "Questions: the prompt", pinned by
+`prompt_tests::a_failing_answer_keeps_its_question_up_with_the_reason`); of "the YOLO question can launch guarded and
+remember that permission" (201), that the guarded answer writes nothing to the host (its test checks the create alone)
 
+- "a YOLO launch asks first and starts only when confirmed" (58), the 844-high leg: the question's heading, what YOLO
+  means and that nothing started are wording, shown in the `app-launcher-yolo-confirmation` scene; why this launch is
+  YOLO in `launcher::yolo_tests::each_yolo_launch_gets_its_own_reason` and
+  `launcher::yolo_tests::a_yolo_refusal_asks_the_question_with_cancel_focused`, and the host named, with the line that
+  nothing has started and without the helm's own sentence, in
+  `session_list::lifecycle_tests::the_question_names_the_sources_host` (the same builder); Cancel focused, Cancel
+  keeping the launcher and the one-off answer's consent in the inline list's tests; an edit retiring the question is the
+  launcher's one edit path, which takes the question down for a template that changes the launch (the template bullet
+  below) and retires its answer for a name edit
+  (`launcher::yolo_tests::the_launcher_holds_still_while_stop_asking_is_out`); a host that allows YOLO without asking
+  admitting the same launch is the helm's
+  (`sessions_tests::a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed`), and the GUI asks only on the helm's
+  refusal marker.
+- "a header replace keeps its confirmed nothing-alive answer" and "a sidebar replace keeps its confirmed nothing-alive
+  answer", each when confirmed once and when told not to ask again (697, 706, 794, 803), one test each over a shared
+  driver (`session_list::lifecycle_tests::nothing_alive_guard_survives`): the source pushed running while its question
+  is open, the answer still sending `only_if_nothing_alive`, and the helm's "both sessions still exist" shown where the
+  Replace was asked, in
+  `session_pane::header_tests::{a_header_replace_keeps_its_confirmed_nothing_alive_answer_when_confirmed_once, a_header_replace_keeps_its_confirmed_nothing_alive_answer_when_told_not_to_ask_again}`
+  and
+  `session_list::lifecycle_tests::{a_sidebar_replace_keeps_its_confirmed_nothing_alive_answer_when_confirmed_once, a_sidebar_replace_keeps_its_confirmed_nothing_alive_answer_when_told_not_to_ask_again}`.
+- "the YOLO question offers no guarded answer for custom permission flags" (360): the custom-flags reason in
+  `launcher::yolo_tests::each_yolo_launch_gets_its_own_reason` (its sentence is wording, not separately tested), no
+  guarded answer in `launcher::yolo_tests::only_an_explicit_yolo_choice_offers_guarded`, and Cancel in the inline list's
+  tests.
+- "don't ask again marks the host safe before launching, and a failed mark launches nothing" (511), beyond the gap named
+  above: the write before the create in `launcher::yolo_tests::the_permanent_answer_stops_asking_then_launches`, and a
+  refused write starting nothing and keeping the question up with its reason in
+  `launcher::yolo_tests::a_failed_stop_asking_starts_nothing_and_keeps_the_question`; the reason's warning ink is
+  layout, not separately tested, since no scene shows a failed write.
 - "template edits retain an unchanged YOLO question and retire a changed one" and "command templates preserve equal YOLO
   questions and retire changed commands" (877 and 1072): a `tl:` template that leaves the launch as it was keeps the
   question, whose one-off answer then sends the same create with consent, one that changes it retires the question, and
@@ -531,10 +563,15 @@ nonblocking-launch row)
 - "cancel and an answer to the launcher's YOLO question in one burst start nothing":
   `prompt_tests::an_inline_question_answers_once_and_returns_focus_inside_its_dialog` (Cancel then Confirm with no draw
   between runs nothing).
-- "the YOLO question can launch guarded and remember that permission": the answers' order in
-  `prompt_tests::extra_answers_sit_in_order_between_cancel_and_confirm_and_never_start`; remembering is the helm's
-  (`sessions_tests::a_successful_structured_launch_remembers_its_permissions_choice`), and New preselects it
-  (`launcher::entry_tests::new_opens_beside_the_open_session`).
+- "the YOLO question can launch guarded and remember that permission" (201): the answers' order in
+  `prompt_tests::extra_answers_sit_in_order_between_cancel_and_confirm_and_never_start`, and their tiers in the
+  `app-launcher-yolo-confirmation` scene; the guarded answer's create in
+  `launcher::yolo_tests::the_guarded_answer_launches_guarded_without_consent`; the old held draft drawn with Guarded
+  pressed is superseded, since the launcher hides while its create is out
+  (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`); its last leg, the next New opening on
+  Guarded, is the helm remembering the permission of a successful launch
+  (`sessions_tests::a_successful_structured_launch_remembers_its_permissions_choice`) and New preselecting the
+  remembered permission (`launcher::entry_tests::new_opens_beside_the_open_session`, with YOLO remembered).
 - The launcher's plain Replace question:
   `launcher::yolo_tests::{the_plain_replace_question_offers_no_guarded_answer_and_retries, the_plain_replace_permanent_answer_writes_then_retries, the_plain_replace_question_leaves_focus_once_the_user_moved_on, the_plain_replace_retry_carries_the_answers_mark}`.
 - "a skipped header replace still asks the YOLO question": a skipped confirmation sends the same Replace
@@ -1049,11 +1086,14 @@ elsewhere while the Replace with was out, and the selection then falling back to
 
 Case: an interrupted legacy session offers Replace with, prefilled with its command.
 
-partly: `launcher::draft_tests::clone_seeds_command_and_legacy_launches_on_the_command_tab` (the prefill, for Clone),
-`launcher::entry::open_replace_with` opens it; the card's offer of Replace with in place of Replace in
-`session_pane::card_tests::a_legacy_sessions_card_offers_replace_with_in_place_of_replace`; not yet ported: the card's
-Replace with opening the launcher in Replace with on the Command tab with the stored command (its test would sit in
-`session_pane::card_tests`)
+replaced: `launcher::draft_tests::clone_seeds_command_and_legacy_launches_on_the_command_tab` (the prefill, for Clone);
+the card's offer of Replace with in place of Replace in
+`session_pane::card_tests::a_legacy_sessions_card_offers_replace_with_in_place_of_replace`
+
+- The card's Replace with opening the launcher in Replace with of its session, on the Command tab with the stored
+  command: `session_pane::card_tests::the_cards_replace_with_opens_the_launcher_on_the_sessions_command`.
+- The card's words naming Replace with and never promising that "Replace starts it over":
+  `session_pane::card::tests::the_cards_words_say_what_ended_and_what_each_choice_does`.
 
 ### `tests/restart-replace-progress.spec.ts` (sidebar)
 

@@ -39,7 +39,8 @@ use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::main_view::MainView;
 use crate::session_list::SessionList;
 use crate::session_list::lifecycle_tests::{
-    consented, drawn_inside, node_bounds, refuse_for_yolo, replace,
+    Consent, ReplaceFrom, consented, drawn_inside, node_bounds, nothing_alive_guard_survives,
+    refuse_for_yolo, replace,
 };
 use crate::session_list::menu_tests::{any_layer, drawn, ended, entry, label_of, lit};
 use crate::session_list::outcome::{self, PROGRESS_SHOWS_AFTER};
@@ -668,6 +669,27 @@ fn a_header_question_shows_at_its_row_while_its_session_is_not_open(cx: &mut Tes
         "below the top row"
     );
     assert_eq!(questions(cx), 1, "one question");
+}
+
+/// The header's half of the old "keeps its confirmed nothing-alive answer" cases: a Replace asked from the header, its
+/// YOLO question answered once after the source came back to life, still carries the guard its Replace question froze
+/// (the old "a header replace keeps its confirmed nothing-alive answer when confirmed once"). The shared driver,
+/// `session_list::lifecycle_tests::nothing_alive_guard_survives`, says why and what is specified.
+#[gpui::test]
+fn a_header_replace_keeps_its_confirmed_nothing_alive_answer_when_confirmed_once(
+    cx: &mut TestAppContext,
+) {
+    nothing_alive_guard_survives(cx, ReplaceFrom::Header, Consent::Once);
+}
+
+/// The same, answered with "Start, and don't ask again on this host", which sends the Replace again from its host
+/// write's reply and must carry the same guard (the old "a header replace keeps its confirmed nothing-alive answer when
+/// told not to ask again").
+#[gpui::test]
+fn a_header_replace_keeps_its_confirmed_nothing_alive_answer_when_told_not_to_ask_again(
+    cx: &mut TestAppContext,
+) {
+    nothing_alive_guard_survives(cx, ReplaceFrom::Header, Consent::StopAsking);
 }
 
 /// In the macOS window the top row is half of the title band, where text keeps its presses (SPEC.md, "Desktop window
