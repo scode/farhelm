@@ -5,10 +5,9 @@ sidebar:
   order: 1
 ---
 
-Farhelm runs as a desktop app on your Mac, and for now that is the one way to run it: the installer supports Macs with
-Apple silicon only. Linux machines and other Apple silicon Macs can still run your sessions, as hosts your Mac reaches
-over ssh; you add those from inside the app once it is running
-([Add a remote host](/docs/get-started/add-a-remote-host/)). Support for running Farhelm itself on Linux is coming.
+Farhelm runs as a desktop app on your Mac. The installer supports Macs with Apple silicon only; there is no installer
+for Linux yet. Linux machines and other Apple silicon Macs can still run your sessions, as hosts your Mac reaches over
+ssh; you add those from inside the app once it is running ([Add a remote host](/docs/get-started/add-a-remote-host/)).
 
 ## Install
 
