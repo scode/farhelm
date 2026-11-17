@@ -1,17 +1,19 @@
-//! The launcher's Runs on switch, and the rows a new environment shows in place of the Host row: Recipe, Container
-//! host, and the note on how the recipe stands there.
+//! Shared placement controls for the launcher and template editor, plus the launcher's readiness checks and notes.
 //!
 //! SPEC.md, "Creation" (the Runs on bullet) and "Container sessions". Ported from the old app's `PlacementPicker` and
 //! `use_environment_places` (`environment_ui.rs`) with their use in `list/create_form.rs`, at reference commit
 //! `24bc0580`. Here's the TLDR:
 //!
-//! - **The switch.** Existing host, then one segment per provider ([`RUNS_ON`]), as the old pressed-button group. A
+//! - **The launch switch.** Existing host, then one segment per provider ([`RUNS_ON`]), as the old pressed-button group. A
 //!   segment with no usable place is hidden, unless it is the one chosen, and the switch is hidden when only Existing
 //!   host remains. Entering a segment chooses the first recipe the provider can start from at its default place
 //!   ([`ProviderUi::launch_place`]: the last container host used while it is usable, else the first usable one); the
 //!   chosen segment changes nothing, so it keeps the user's explicit recipe and place. Each is one of the draft's edits
 //!   ([`crate::launcher::draft::LaunchDraft::choose_runs_on`] and its siblings), so their effects (Folder fixed to
 //!   `~`) are the draft's.
+//! - **Template authoring** names a recipe and place for a future launch. It starts on the first listed container host
+//!   and keeps unusable hosts selectable. It offers New sandbox without an account and checks only recipe base
+//!   compatibility.
 //! - **Nothing copied.** The recipes, the recipe places and each host's Podman check are pushed, so the rows read the
 //!   store while they draw. Besides the account read below, the one thing sent is a background Podman check of every
 //!   container host as the launcher opens, or as a quick launch prepares one out of sight ([`check_container_hosts`],
@@ -34,15 +36,16 @@ use farhelm_helm_client::ApiPath;
 use farhelm_proto::recipes::RecipeView;
 use farhelm_proto::tensorlake::Settings;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView, PREFERENCES_KEY, Preferences};
-use farhelm_proto::{LaunchTarget, ProviderKind, RecipePlaceView};
+use farhelm_proto::{LaunchTarget, RecipePlaceView};
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, div, px,
+    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px,
 };
+use std::rc::Rc;
 
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, after_reads, row};
 use crate::components::{
-    CommandWell, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption,
+    CommandWell, HoverHelp, MainAction, RadioGroup, RadioOption, Role, Select, SelectOption,
 };
 use crate::environment_ui::{ProviderUi, RUNS_ON};
 use crate::host_text::{HostSentence, HostText};
@@ -127,62 +130,236 @@ fn container_host_ids(cx: &App) -> Vec<i64> {
     }
 }
 
-/// A host's name as the selects and the note show it: the registry's display name, escaped, as an option's label takes
-/// it (the template editor's host select does the same).
-fn host_label(host: &HostView) -> String {
-    HostSentence::new("launcher-container-host-option")
-        .host(&display_name(host))
-        .accessible_name()
-        .to_string()
+/// Whether the picker names a future template destination or must offer places ready to launch now.
+pub(crate) enum PlacementMode<'a> {
+    /// The template editor: names a recipe and place for later launches. The Runs on switch is always drawn, only a
+    /// recipe whose base the provider cannot run is unavailable, an unusable container host stays choosable with its
+    /// reason, and Enter does nothing.
+    Authoring,
+    /// The launcher: offers only places a launch can use now, and hides the switch when only Existing host would show.
+    Launch {
+        /// The container host the user last launched a new container on, preferred as New container's default.
+        last_container_host: Option<i64>,
+        /// The Tensorlake account as the launcher read it, or why it could not; whether New sandbox is offered and
+        /// which recipes it refuses depend on it, by [`ProviderUi`]'s rules.
+        account: Result<&'a Settings, &'a str>,
+        /// What Enter on any of the three controls does: the launcher's main action.
+        on_enter: MainAction,
+    },
+}
+
+/// Edits the owning draft applies synchronously so a launch on Enter can read the just-chosen value.
+pub(crate) enum PlacementEdit {
+    /// An existing host has no target. A new segment can also lack a target when its last usable place disappears.
+    RunsOn(RunsOn, Option<LaunchTarget>),
+    Recipe(String),
+    ContainerHost(i64),
+}
+
+/// Draw Runs on, Recipe and Container host in the caller's existing row layout. Ordinary Host and launch-only notes
+/// belong to the caller. The input catalog and hosts are ordered as displayed, with the launch and authoring rules
+/// supplied by the mode. An option already chosen remains visible even if the backing entry disappears.
+///
+/// `edit` can receive `RunsOn(RunsOn::New(_), None)`: a press on a chosen segment whose last usable place has gone.
+/// Each caller decides what that means (the launcher's draft ignores it; the template editor must drop it, or it would
+/// read as Existing host). `wrap`'s first argument is the row's test selector, which a caller may ignore.
+pub(crate) fn build_placement_rows(
+    mode: PlacementMode<'_>,
+    target: Option<&LaunchTarget>,
+    recipes: &[RecipeView],
+    hosts: &[HostView],
+    edit: impl Fn(PlacementEdit, &mut Window, &mut App) + Clone + 'static,
+    wrap: impl Fn(&'static str, &'static str, AnyElement) -> AnyElement,
+) -> Vec<AnyElement> {
+    let authoring = matches!(&mode, PlacementMode::Authoring);
+    let (prefix, help, on_enter) = match &mode {
+        PlacementMode::Authoring => (
+            "templates",
+            "Runs on: an existing host, or a new disposable environment for each session from this template",
+            None,
+        ),
+        PlacementMode::Launch { on_enter, .. } => (
+            "launcher",
+            "Runs on: an existing host, or a new disposable environment for this session",
+            Some(on_enter),
+        ),
+    };
+    let container_hosts: Vec<_> = hosts
+        .iter()
+        .filter(|host| is_container_host(host))
+        .map(|host| (host, container_reason(host)))
+        .collect();
+    let container_ids: Vec<_> = container_hosts
+        .iter()
+        .filter(|(_, reason)| authoring || reason.is_none())
+        .map(|(host, _)| host.id)
+        .collect();
+    let chosen = RunsOn::of(target);
+    let mut group = RadioGroup::new(
+        format!("{prefix}-runs-on"),
+        "Runs on",
+        HoverHelp::tooltip(help),
+        Role::Group,
+    )
+    .option(RadioOption::new(
+        "Existing host",
+        HoverHelp::tooltip("Launch on one of your existing hosts"),
+        RunsOn::ExistingHost,
+    ));
+    let mut entering = Vec::new();
+    for provider in RUNS_ON {
+        let words = ProviderUi(provider);
+        let place = match mode {
+            PlacementMode::Authoring => words.template_place(&container_ids),
+            PlacementMode::Launch {
+                last_container_host,
+                account,
+                ..
+            } => words.launch_place(&container_ids, last_container_host, account.ok()),
+        };
+        let default_target = place.map(|place| LaunchTarget::Environment {
+            recipe: recipes
+                .iter()
+                .find(|recipe| match mode {
+                    PlacementMode::Authoring => words.base_refusal(recipe).is_none(),
+                    PlacementMode::Launch { .. } => words.recipe_pickable(recipe),
+                })
+                .map_or_else(String::new, |recipe| recipe.name.clone()),
+            place,
+        });
+        let segment = RunsOn::New(provider);
+        if default_target.is_some() || chosen == segment {
+            group = group.option(RadioOption::new(
+                words.segment(),
+                HoverHelp::tooltip(words.segment_help()),
+                segment,
+            ));
+            entering.push((segment, default_target));
+        }
+    }
+
+    let mut rows = Vec::new();
+    if authoring || !entering.is_empty() {
+        let edit = edit.clone();
+        group = group
+            .chosen(Some(chosen))
+            .on_change(move |segment, window, cx| {
+                let target = entering
+                    .iter()
+                    .find(|(offered, _)| offered == segment)
+                    .and_then(|(_, target)| target.clone());
+                edit(PlacementEdit::RunsOn(*segment, target), window, cx);
+            });
+        if let Some(on_enter) = on_enter.cloned() {
+            group = group.on_enter(move |window, cx| on_enter(window, cx));
+        }
+        rows.push(wrap(
+            "launcher-runs-on-row",
+            "Runs on",
+            group.into_any_element(),
+        ));
+    }
+    let Some(target) = target else {
+        return rows;
+    };
+    let words = ProviderUi(target.provider());
+    let help = HoverHelp::tooltip("Recipe: the software and credentials for the new environment");
+    let options = recipes.iter().map(|recipe| {
+        let (listing, refusal) = match mode {
+            PlacementMode::Authoring => (None, words.base_refusal(recipe)),
+            PlacementMode::Launch { account, .. } => (
+                words.recipe_listing(recipe),
+                words.recipe_refusal(recipe, account),
+            ),
+        };
+        let mut label = HostSentence::new(format!("{prefix}-recipe-option"))
+            .host(&HostText::from_host(recipe.name.as_str()));
+        if let Some(listing) = &listing {
+            label = label.text(format!(" · {}", listing.size));
+        }
+        let mut option =
+            SelectOption::new(recipe.name.clone(), label.accessible_name(), help.clone());
+        if let Some(listing) = listing {
+            option = option.mark(listing.mark);
+        }
+        match refusal {
+            Some(reason) => option.unavailable(reason),
+            None => option,
+        }
+    });
+    let edit_recipe = edit.clone();
+    let mut recipe = Select::new(
+        format!("{prefix}-recipe"),
+        "Recipe",
+        help.clone(),
+        Role::ComboBox,
+    )
+    .options(options)
+    .placeholder("Choose a recipe")
+    .retained("Unavailable recipe (retained)", help)
+    .on_choose(move |value, window, cx| {
+        edit_recipe(PlacementEdit::Recipe(value.to_string()), window, cx);
+    });
+    if !target.recipe().is_empty() {
+        recipe = recipe.chosen(target.recipe().to_owned());
+    }
+    if let Some(on_enter) = on_enter.cloned() {
+        recipe = recipe.on_enter(move |window, cx| on_enter(window, cx));
+    }
+    rows.push(wrap(
+        "launcher-recipe-row",
+        "Recipe",
+        recipe.into_any_element(),
+    ));
+
+    if let Some(chosen) = target.place().container_host() {
+        let help = HoverHelp::tooltip(
+            "Container host: rootless Podman creates the container on this machine",
+        );
+        let options = container_hosts.into_iter().map(|(host, reason)| {
+            let mut label = HostSentence::new(format!("{prefix}-container-host-option"))
+                .host(&display_name(host));
+            if let (PlacementMode::Authoring, Some(reason)) = (&mode, &reason) {
+                label = label
+                    .text(" · ")
+                    .host(&HostText::from_host(reason.as_str()));
+            }
+            let option =
+                SelectOption::new(host.id.to_string(), label.accessible_name(), help.clone());
+            match (&mode, reason) {
+                (PlacementMode::Launch { .. }, Some(reason)) => option.unavailable(reason),
+                _ => option,
+            }
+        });
+        let mut host = Select::new(
+            format!("{prefix}-container-host"),
+            "Container host",
+            help.clone(),
+            Role::ComboBox,
+        )
+        .options(options)
+        .chosen(chosen.to_string())
+        .retained("Unavailable host (retained)", help)
+        .on_choose(move |value, window, cx| {
+            if let Ok(host) = value.parse() {
+                edit(PlacementEdit::ContainerHost(host), window, cx);
+            }
+        });
+        if let Some(on_enter) = on_enter.cloned() {
+            host = host.on_enter(move |window, cx| on_enter(window, cx));
+        }
+        rows.push(wrap(
+            "launcher-container-host-row",
+            "Container host",
+            host.into_any_element(),
+        ));
+    }
+    rows
 }
 
 impl Launcher {
-    /// The hosts that can hold containers, in the registry's order, with why each cannot now, if it cannot.
-    fn container_hosts(&self, cx: &App) -> Vec<(HostView, Option<String>)> {
-        self.hosts(cx)
-            .into_iter()
-            .filter(is_container_host)
-            .map(|host| {
-                let reason = container_reason(&host);
-                (host, reason)
-            })
-            .collect()
-    }
-
-    /// The target entering `provider`'s segment chooses: the first recipe the provider can start from, whatever its
-    /// account still lacks (none, an empty name, when the catalog lists none: [`ProviderUi::recipe_pickable`]), at the
-    /// provider's default place; `None` when it has no usable place.
-    fn entering(
-        &self,
-        provider: ProviderKind,
-        recipes: &[RecipeView],
-        cx: &App,
-    ) -> Option<LaunchTarget> {
-        let usable: Vec<i64> = self
-            .container_hosts(cx)
-            .into_iter()
-            .filter(|(_, reason)| reason.is_none())
-            .map(|(host, _)| host.id)
-            .collect();
-        let last = self
-            .store
-            .read(cx)
-            .collections()
-            .get::<Preferences>(PREFERENCES_KEY)
-            .and_then(|preferences| preferences.last_container_host);
-        let place =
-            ProviderUi(provider).launch_place(&usable, last, self.account.settings().ok())?;
-        let recipe = recipes
-            .iter()
-            .find(|recipe| ProviderUi(provider).recipe_pickable(recipe))
-            .map(|recipe| recipe.name.clone())
-            .unwrap_or_default();
-        Some(LaunchTarget::Environment { recipe, place })
-    }
-
-    /// The Runs on switch and, while a new environment is chosen, its Recipe and Container host rows and the note, in
-    /// that order, for the destination section above Host (see the module docs). Empty in a mode that holds the host
-    /// (Restart with and Replace with keep the existing environment), and when only Existing host would show.
+    /// Draw the shared placement controls above Host, followed by the launcher's build note. Restart with and
+    /// Replace with hold the destination, so these modes omit the controls entirely.
     pub(super) fn placement_rows(
         &self,
         palette: &theme::Palette,
@@ -191,198 +368,52 @@ impl Launcher {
         if self.draft.holds(Field::Host) {
             return Vec::new();
         }
-        let catalog = Recipes::of(self.store.read(cx).collections());
-        let recipes: &[RecipeView] = match &catalog {
-            Recipes::Listed(recipes) => recipes,
+        let collections = self.store.read(cx).collections();
+        let catalog = Recipes::of(collections);
+        let recipes = match &catalog {
+            Recipes::Listed(recipes) => recipes.as_slice(),
             Recipes::Loading | Recipes::Unreadable(_) => &[],
         };
-        let chosen = RunsOn::of(self.draft.target.as_ref());
-        let offered: Vec<(ProviderKind, Option<LaunchTarget>)> = RUNS_ON
-            .iter()
-            .map(|provider| (*provider, self.entering(*provider, recipes, cx)))
-            .filter(|(provider, entering)| entering.is_some() || chosen == RunsOn::New(*provider))
-            .collect();
-        let mut rows = Vec::new();
-        if !offered.is_empty() {
-            rows.push(self.runs_on_row(offered, chosen, palette, cx));
-        }
-        if let Some(target) = self.draft.target.clone() {
-            rows.push(self.recipe_row(&target, recipes, palette, cx));
-            if let Some(host) = target.place().container_host() {
-                rows.push(self.container_host_row(host, palette, cx));
-            }
-            rows.extend(self.place_note(&target, palette, cx));
+        let last_container_host = collections
+            .get::<Preferences>(PREFERENCES_KEY)
+            .and_then(|preferences| preferences.last_container_host);
+        let (on_edit, on_enter) = (cx.weak_entity(), cx.weak_entity());
+        let target = self.draft.target.as_ref();
+        let mut rows = build_placement_rows(
+            PlacementMode::Launch {
+                last_container_host,
+                account: self.account.settings(),
+                on_enter: Rc::new(move |window, cx| {
+                    let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
+                }),
+            },
+            target,
+            recipes,
+            &self.hosts(cx),
+            move |edit, window, cx| {
+                let _ = on_edit.update(cx, |launcher, cx| {
+                    match edit {
+                        PlacementEdit::RunsOn(segment, target) => {
+                            launcher.draft.choose_runs_on(segment, target);
+                            // The edit sets the folder to the environment's home, and leaving keeps it there, so the
+                            // folder field must follow the draft, or Existing host would show the folder typed
+                            // before while the footer and the launch use `~`.
+                            launcher.sync_fields(window, cx);
+                        }
+                        PlacementEdit::Recipe(recipe) => launcher.draft.choose_recipe(recipe),
+                        PlacementEdit::ContainerHost(host) => {
+                            launcher.draft.choose_container_host(host)
+                        }
+                    }
+                    launcher.changed(cx);
+                });
+            },
+            |selector, label, control| row(selector, label, control, palette).into_any_element(),
+        );
+        if let Some(target) = target {
+            rows.extend(self.place_note(target, palette, cx));
         }
         rows
-    }
-
-    /// The switch itself: Existing host and the `offered` segments, each with the target entering it chooses.
-    fn runs_on_row(
-        &self,
-        offered: Vec<(ProviderKind, Option<LaunchTarget>)>,
-        chosen: RunsOn,
-        palette: &theme::Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut group = RadioGroup::new(
-            "launcher-runs-on",
-            "Runs on",
-            HoverHelp::tooltip(
-                "Runs on: an existing host, or a new disposable environment for this session",
-            ),
-            Role::Group,
-        )
-        .option(RadioOption::new(
-            "Existing host",
-            HoverHelp::tooltip("Launch on one of your existing hosts"),
-            RunsOn::ExistingHost,
-        ));
-        let mut entering = Vec::new();
-        for (provider, target) in offered {
-            let words = ProviderUi(provider);
-            group = group.option(RadioOption::new(
-                words.segment(),
-                HoverHelp::tooltip(words.segment_help()),
-                RunsOn::New(provider),
-            ));
-            entering.push((provider, target));
-        }
-        let (on_change, on_enter) = (cx.weak_entity(), cx.weak_entity());
-        let group = group
-            .chosen(Some(chosen))
-            .on_change(move |segment, window, cx| {
-                let target = match segment {
-                    RunsOn::ExistingHost => None,
-                    RunsOn::New(provider) => entering
-                        .iter()
-                        .find(|(offered, _)| offered == provider)
-                        .and_then(|(_, target)| target.clone()),
-                };
-                let _ = on_change.update(cx, |launcher, cx| {
-                    launcher.draft.choose_runs_on(*segment, target);
-                    // The edit sets the folder to the environment's home, and leaving keeps it there, so the folder
-                    // field must follow the draft, or Existing host would show the folder typed before while the
-                    // footer and the launch use `~`.
-                    launcher.sync_fields(window, cx);
-                    launcher.changed(cx);
-                });
-            })
-            .on_enter(move |window, cx| {
-                let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
-            });
-        row("launcher-runs-on-row", "Runs on", group, palette).into_any_element()
-    }
-
-    /// The Recipe select: every recipe in the catalog, those the provider cannot launch from with the account as read
-    /// unavailable with their reason, and a chosen recipe the catalog no longer lists kept as "Unavailable recipe
-    /// (retained)". A provider that lists a recipe's size and mark (a sandbox's) has each option say "<name> · 2 CPUs ·
-    /// 4 GB memory" after its mark, its reason after that.
-    fn recipe_row(
-        &self,
-        target: &LaunchTarget,
-        recipes: &[RecipeView],
-        palette: &theme::Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let words = ProviderUi(target.provider());
-        let help =
-            HoverHelp::tooltip("Recipe: the software and credentials for the new environment");
-        let account = self.account.settings();
-        let options = recipes.iter().map(|recipe| {
-            let listing = words.recipe_listing(recipe);
-            let mut label = HostSentence::new("launcher-recipe-option")
-                .host(&HostText::from_host(recipe.name.as_str()));
-            if let Some(listing) = &listing {
-                label = label.text(format!(" · {}", listing.size));
-            }
-            let option = SelectOption::new(
-                SharedString::from(recipe.name.clone()),
-                label.accessible_name(),
-                help.clone(),
-            );
-            let option = match listing {
-                Some(listing) => option.mark(listing.mark),
-                None => option,
-            };
-            match words.recipe_refusal(recipe, account) {
-                Some(reason) => option.unavailable(reason),
-                None => option,
-            }
-        });
-        let (on_choose, on_enter) = (cx.weak_entity(), cx.weak_entity());
-        let mut select = Select::new("launcher-recipe", "Recipe", help.clone(), Role::ComboBox)
-            .options(options)
-            .placeholder("Choose a recipe")
-            .retained("Unavailable recipe (retained)", help)
-            .on_choose(move |recipe, _, cx| {
-                let recipe = recipe.to_string();
-                let _ = on_choose.update(cx, |launcher, cx| {
-                    launcher.draft.choose_recipe(recipe);
-                    launcher.changed(cx);
-                });
-            })
-            .on_enter(move |window, cx| {
-                let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
-            });
-        if !target.recipe().is_empty() {
-            select = select.chosen(SharedString::from(target.recipe().to_owned()));
-        }
-        row("launcher-recipe-row", "Recipe", select, palette).into_any_element()
-    }
-
-    /// The Container host select: every host that can hold containers, those whose Podman is unusable now unavailable
-    /// with their reason (SPEC.md: "Hosts with unusable Podman are disabled with their reason"), and a chosen host the
-    /// registry no longer lists kept as "Unavailable host (retained)".
-    fn container_host_row(
-        &self,
-        chosen: i64,
-        palette: &theme::Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let help = HoverHelp::tooltip(
-            "Container host: rootless Podman creates the container on this machine",
-        );
-        let options: Vec<SelectOption> = self
-            .container_hosts(cx)
-            .into_iter()
-            .map(|(host, reason)| {
-                let option =
-                    SelectOption::new(host.id.to_string(), host_label(&host), help.clone());
-                match reason {
-                    Some(reason) => option.unavailable(reason),
-                    None => option,
-                }
-            })
-            .collect();
-        let (on_choose, on_enter) = (cx.weak_entity(), cx.weak_entity());
-        let select = Select::new(
-            "launcher-container-host",
-            "Container host",
-            help.clone(),
-            Role::ComboBox,
-        )
-        .options(options)
-        .chosen(chosen.to_string())
-        .retained("Unavailable host (retained)", help)
-        .on_choose(move |host, _, cx| {
-            let Ok(host) = host.parse::<i64>() else {
-                return;
-            };
-            let _ = on_choose.update(cx, |launcher, cx| {
-                launcher.draft.choose_container_host(host);
-                launcher.changed(cx);
-            });
-        })
-        .on_enter(move |window, cx| {
-            let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
-        });
-        row(
-            "launcher-container-host-row",
-            "Container host",
-            select,
-            palette,
-        )
-        .into_any_element()
     }
 
     /// The note under the selects, for a provider whose places build the recipe (SPEC.md: "the note says whether the
