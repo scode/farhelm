@@ -628,15 +628,20 @@ pub(crate) fn scroll_stop_on(
 /// control inside it holds focus: the browser's scrolling from a focused button, which WebKit applied to the button's
 /// scrolling container. It is the other half of a region that holds controls, where [`scroll_stop`] is no stop (and
 /// would refuse its keys anyway, since they are its own only while it holds focus itself): without it, a question's
-/// text scrolled above view stays there while one of its answers holds focus.
+/// text scrolled above view stays there while one of its answers holds focus, and a long dialog body stays where it
+/// is while a control near its top does. Every dialog's body takes it, as do, among others, the notices given their
+/// stop and an anchored question's card (SPEC_impl.md, "The component layer and theme", has the rule and its
+/// exceptions).
 ///
 /// Only those four keys, and only unmodified: a narrower port than WebKit, which also scrolled on Up and Down from a
 /// focused button. The arrows are left out because some controls pass them on rather than stopping them (a closed
 /// select passes a held Up or Down on), so they would leak into scrolling; Space presses a button. A control that takes
-/// one of the four keeps it: a text field keeps all four, which GPUI Kit binds, because bindings run before any key
-/// listener, and a listener deeper in the tree that takes the key and stops it (a tab strip's Home and End) runs before
-/// this one. A held key keeps scrolling, as the stop's do. It scrolls this region only: at its end the key goes
-/// nowhere, where WebKit went on to scroll the next container out.
+/// one of the four keeps it, because GPUI runs a binding's handler before any key listener, and a listener deeper in
+/// the tree that takes the key and stops it (a tab strip's Home and End) runs before this one. So a text field keeps
+/// Home and End, and a multi-line box Page Up and Page Down too, which GPUI Kit handles there; Kit's single-line field
+/// binds the page keys but handles them only when multi-line, so from a single-line field they scroll the region. A
+/// held key keeps scrolling, as the stop's do. It scrolls the nearest region that takes the keys only: at its end the
+/// key goes nowhere, where WebKit went on to scroll the next container out.
 pub(crate) fn scroll_from_controls(region: Stateful<Div>, scroll: &ScrollHandle) -> Stateful<Div> {
     let keys = scroll.clone();
     region.on_key_down(move |event, window, cx| {

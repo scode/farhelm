@@ -27,10 +27,14 @@
 //! answer has to say ([`DialogFrame::notices`], placed under the row by [`DialogFrame::notices_below`]). Settings pins
 //! the recipe editor's own answers in that region above the row, as a band ruled off from its Close
 //! ([`DialogFrame::notices_rule`]).
-//! A body whose content may hold nothing focusable can have a tab stop of its own that the keys scroll
+//! Every body scrolls on Page Up, Page Down, Home and End from a control inside it that has no use for the key
+//! ([`scroll_from_controls`]), as the old app's browser scrolled the container around a focused control, so a long
+//! body of controls (the Templates editor's) reads to its end from the keyboard without tabbing through all of them.
+//! A body whose content may hold nothing focusable can also have a tab stop of its own that the keys scroll
 //! ([`DialogFrame::scroll_stop`]; `scroll_box.rs` has the full account). So can the notices region, which also scrolls
-//! on Page Up, Page Down, Home and End from a control inside it ([`DialogFrame::notices_stop`]), for a question whose
-//! text outgrows the region while one of its answers holds focus (the old Trash dialog's global confirmation).
+//! on those four keys from a control inside it only once given that stop ([`DialogFrame::notices_stop`]), for a
+//! question whose text outgrows the region while one of its answers holds focus (the old Trash dialog's global
+//! confirmation).
 //!
 //! Two of the old app's small information dialogs, Announcements and the Welcome card, drew their parts tighter than the
 //! ordinary dialog (`.announcements-dialog > .dialog-header` and `.welcome-dialog > .welcome-header` in the old
@@ -404,6 +408,10 @@ impl RenderOnce for DialogFrame {
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_0))
             .child(self.body);
+        // Page Up, Page Down, Home and End from a control in the body scroll it, as WebKit scrolled the container
+        // around a focused control (SPEC_impl.md, "The component layer and theme"). With a scroll stop drawn, the stop
+        // holds focus around the body rather than in it, so this never sees the stop's keys.
+        let body = scroll_from_controls(body, &body_scroll);
         // How the body sits in the card: it gives up height down to its floor, and a fixed-height frame's body takes
         // whatever the header and footer leave. With a scroll stop, that is the stop's place, and the body fills it.
         let fixed = self.fixed_height.is_some();

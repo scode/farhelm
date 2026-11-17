@@ -22,7 +22,8 @@
 //!   stop under the same rule ([`DialogFrame::notices_stop`](super::DialogFrame::notices_stop)), as the old Trash
 //!   dialog's global confirmation was that same `ScrollRegion`. Because that region holds a question's answers, it
 //!   also takes Page Up, Page Down, Home and End from a control inside it
-//!   ([`scroll_from_controls`](super::scroll_from_controls)), which the stop never does.
+//!   ([`scroll_from_controls`](super::scroll_from_controls)), which the stop never does; every dialog body takes those
+//!   keys from its controls the same way, stop or no stop.
 //!
 //! What both share, through [`scroll_stop`](super::scroll_stop), which takes its Tab reach, ring and role from
 //! [`focus_stop`](super::focus_stop), the stop without the keys that a place where focus rests (a session pane's
