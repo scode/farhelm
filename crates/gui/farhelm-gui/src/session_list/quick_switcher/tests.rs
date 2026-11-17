@@ -6,15 +6,20 @@
 //! their ids, `quick-switcher-row-<key>`, and its field by the `quick-switcher-field` selector. Every step ends in one
 //! of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
-//! Later tests pick sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the
-//! session list makes once the pick has opened the session (`filters.rs`). Then come the `tl:` templates section and
-//! the Quick launch row, over a fleet that adds the helm's own host and three templates ([`template_fleet`]); what a
-//! pick then does inside New (the catalog wait, refusals) is the templates area's, tested in `templates::rows_tests`,
-//! so these stop at New opening with the template applied. The last ones pin the host mark a session row draws, over a
-//! registry with a host that chose its own mark ([`marked_hosts`]).
+//! After opening, the read and picking, Tab's walk of the card is tested under the Mac's Tab rules, for the template
+//! list too (the same card in its templates-only mode, otherwise tested in `template_list_tests`). Later tests pick
+//! sessions the sidebar's host and status filters hide, to pin the reset of both filters, which the session list makes
+//! once the pick has opened the session (`filters.rs`). Then come the `tl:` templates section and the Quick launch
+//! row, over a fleet that adds the helm's own host and three templates ([`template_fleet`]); what a pick then does
+//! inside New (the catalog wait, refusals) is the templates area's, tested in `templates::rows_tests`, so these stop at
+//! New opening with the template applied. The last ones pin the host mark a session row draws, over a registry with a
+//! host that chose its own mark ([`marked_hosts`]).
 //!
 //! No test here depends on glyph widths, so the simulated platform's fake text system is enough: the scroll test needs
 //! only the rows' heights, which come from the line height.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeCommand;
@@ -30,7 +35,8 @@ use super::{
     CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QUICK_ROW_HELP, QUICK_ROW_ID, QuickSwitcher, Read,
     Selected, TEMPLATE_ROW_HELP, TEMPLATE_ROW_ID, mark_positions, matching_positions, ranked,
 };
-use crate::actions::QUICK_SWITCHER_CHORD;
+use crate::actions::{QUICK_SWITCHER_CHORD, TEMPLATE_LIST_CHORD};
+use crate::focus::{self, TabReach};
 use crate::launcher::launch_tests::{HostChange, creates_answering, start_host_change};
 use crate::launcher::view_tests::fixture_hosts;
 use crate::layers;
@@ -832,6 +838,75 @@ fn a_press_outside_closes_it_and_returns_focus(cx: &mut TestAppContext) {
         main.cx.update(|_, cx| local_state::selected(cx)).as_deref(),
         Some("a")
     );
+}
+
+// ---- Tab -----------------------------------------------------------------------------------------------------------
+
+/// The old `modal-trap.spec.ts` case "the ${mode} switcher wraps search and close, excluding result options", for the
+/// switcher and the template list, which are one card in two modes. Its rows are chosen with the arrows while focus
+/// stays in the search field, so a row that Tab also reached would take the keyboard away from the field, and Tab must
+/// not leave the card. On macOS, Tab skips buttons unless the system's Keyboard navigation setting is on (SPEC.md:
+/// "keyboard-only users reach buttons with Keyboard navigation or Option-Tab"), so the test runs under both answers of
+/// that setting. Specified, for the switcher (its read answered with a, b and c) and then the
+/// template list, each opened from a's focused terminal with its result rows drawn and focus in its search field: where
+/// Tab reaches every control, Tab moves to Close and Tab again back to the field, as Shift+Tab does; where Tab skips
+/// buttons, Tab and Shift+Tab each leave focus in the field; Escape then closes the card with focus back on the
+/// terminal.
+#[gpui::test]
+fn tab_walks_the_search_field_and_close_and_skips_the_rows_in_either_mode(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, template_fleet(None));
+    let reach = Rc::new(Cell::new(TabReach::EveryControl));
+    let source = reach.clone();
+    main.cx
+        .update(|_, cx| focus::follow_tab_reach(Rc::new(move || source.get()), cx));
+    for template_list in [false, true] {
+        let mode = if template_list {
+            "the template list"
+        } else {
+            "the switcher"
+        };
+        for setting in [TabReach::EveryControl, TabReach::TextFieldsAndPopups] {
+            reach.set(setting);
+            assert!(
+                terminal_focused(main.cx),
+                "the premise: a's terminal has focus"
+            );
+            let rows = if template_list {
+                keys(main.cx, TEMPLATE_LIST_CHORD);
+                drawn_templates(main.cx).0
+            } else {
+                let read = main.open_switcher();
+                main.answer(read, &[session("a"), session("b"), session("c")], false);
+                drawn_rows(&frame(main.cx))
+            };
+            assert!(!rows.is_empty(), "the premise: {mode} draws result rows");
+            assert!(
+                field_focused(main.cx),
+                "the premise: {mode} starts in its field"
+            );
+            for key in ["tab", "shift-tab"] {
+                keys(main.cx, key);
+                if setting == TabReach::EveryControl {
+                    assert_eq!(
+                        focused_id(main.cx).as_deref(),
+                        Some("quick-switcher-close"),
+                        "{key} from {mode}'s field reached Close, past the rows"
+                    );
+                    keys(main.cx, key);
+                }
+                assert!(
+                    field_focused(main.cx),
+                    "{key} in {mode} came back to the field ({setting:?})"
+                );
+            }
+            keys(main.cx, "escape");
+            assert!(!any_open(main.cx), "Escape closed {mode}");
+            assert!(
+                terminal_focused(main.cx),
+                "and gave focus back to the terminal"
+            );
+        }
+    }
 }
 
 // ---- A pick the sidebar's filters hide -----------------------------------------------------------------------------

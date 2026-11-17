@@ -997,11 +997,14 @@ impl RowMenu {
 /// quote a host (a command launch's program), so it is host text. The agent is its display name for an agent Farhelm
 /// knows, and the launched program's name otherwise; a status that draws no badge leaves the agent alone, with no
 /// separator.
+///
+/// The program is drawn in the monospace face and everything else in the interface face, as the old menu set the
+/// command's bytes in `.font-mono` beside its status words: of the line, only the command is a technical value.
 fn summary(key: &str, row: &SessionRow, environment: Option<String>) -> HostSentence {
     let mut summary = HostSentence::new(SharedString::from(format!("session-menu-summary-{key}")));
     summary = match agent_name(row) {
         AgentName::Known(agent) => summary.text(agent),
-        AgentName::Program(program) => summary.host(&program),
+        AgentName::Program(program) => summary.mono(&program),
     };
     if let Some(word) = status::Badge::word(
         status::badge(

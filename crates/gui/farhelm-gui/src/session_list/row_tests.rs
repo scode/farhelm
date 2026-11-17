@@ -1,12 +1,13 @@
 //! Tests of what a session row says beyond its title and status mark: its age and timestamp, its last line (host and
 //! directory), its ended wording, the cause a stale row's status is only last-known, the inks of the selected and stale
-//! rows, and that all of it stays inside the row at the narrowest sidebar.
+//! rows, that all of it stays inside the row at the narrowest sidebar, and which technical values are drawn in the
+//! monospace face: the row's, the details bar's beside it, and the program in the row menu's summary.
 //!
 //! Like the list's other tests, these run the real main view over the helm client's fake and read the frame from GPUI's
 //! driver record, finding a row's parts by their ids (`session-item-<key>` for the row, `session-row-<key>-age` and
 //! `session-row-<key>-cause` for its marks). Ages are counted from GPUI's test clock, which starts at [`TEST_NOW`] and
 //! moves only when a test advances it, so every age a test reads is exact. Rules that are pure functions (the causes,
-//! the inks) are tested as such, and the one test whose outcome is layout uses the real text system.
+//! the inks) are tested as such, and the tests whose outcome is layout or a font face use the real text system.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,12 +17,14 @@ use farhelm_proto::ui_channel::{
     Availability, CollectionState, HostView, Preferences, SIDEBAR_WIDTH_RANGE,
 };
 use gpui::{
-    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Pixels, Point, Role,
-    TestAppContext, VisualTestContext, point, px, size,
+    App, AppContext as _, DriverNode, DriverText, Entity, HeadlessAppContext, Modifiers, Pixels,
+    Point, Role, TestAppContext, TextStyle, VisualTestContext, Window, WindowTextSystem, point, px,
+    size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
 
+use super::SessionList;
 use super::host_rail::tests::{hosts, local, remote};
 use super::row::{
     AGE_ID_SUFFIX, AGE_TRACK_ID_SUFFIX, CAUSE_ID_SUFFIX, ITEM_ID_PREFIX, Inks, ROW_ID_PREFIX,
@@ -32,6 +35,7 @@ use super::tests::{
     TEST_NOW, collections, listing, open_main, painted, preferences_state, session,
 };
 use crate::main_view::MainView;
+use crate::session_pane::details::{AGE_ID as DETAILS_AGE_ID, COMMAND_ID as DETAILS_COMMAND_ID};
 use crate::test_support::{self, frame};
 use crate::{assets, bootstrap, layers, local_time, render_count, theme, ticker};
 
@@ -478,6 +482,23 @@ fn narrowest_layout_choosing(
     extra: Vec<CollectionState>,
     host: Option<i64>,
 ) -> Vec<DriverNode> {
+    narrowest_layout_then(rows, extra, host, None)
+}
+
+/// A step a real-layout test takes on the session list once the first frames are drawn, inside a window update.
+type Step<'a> = &'a dyn Fn(&Entity<SessionList>, &mut Window, &mut App);
+
+/// [`narrowest_layout_choosing`], with `then` taken once its two frames are drawn and the record read from the frame
+/// after it, when the test names one. A step that needs something only a drawn frame records, such as opening a row's
+/// menu ([`SessionList::toggle_menu`], which needs the button's anchor), goes here; so does an empty step, for a test
+/// whose frame must come after the app has run what the first frames asked for (the pane's details bar for the session
+/// the list chose).
+fn narrowest_layout_then(
+    rows: &[super::tests::Fixture],
+    extra: Vec<CollectionState>,
+    host: Option<i64>,
+    then: Option<Step<'_>>,
+) -> Vec<DriverNode> {
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
         assets::UI_FONT,
     ));
@@ -511,13 +532,51 @@ fn narrowest_layout_choosing(
         });
         cx.run_until_parked();
     }
-    cx.update_window(window.into(), |_, window, cx| {
-        window.set_driver_enabled(true);
-        window.draw(cx).clear(cx);
-        window.draw(cx).clear(cx);
-        window.driver_nodes().to_vec()
+    let draw = |cx: &mut HeadlessAppContext| {
+        cx.update_window(window.into(), |_, window, cx| {
+            window.set_driver_enabled(true);
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            window.driver_nodes().to_vec()
+        })
+        .unwrap()
+    };
+    let nodes = draw(&mut cx);
+    let Some(then) = then else {
+        return nodes;
+    };
+    let list = cx.update(|cx| {
+        let main = opened.borrow().clone().expect("the main view was made");
+        main.read(cx).session_list().clone()
+    });
+    cx.update_window(window.into(), |_, window, cx| then(&list, window, cx))
+        .unwrap();
+    cx.run_until_parked();
+    draw(&mut cx)
+}
+
+/// `text`'s width at `size` pixels in the interface face and in the monospace face, in that order, shaped by the real
+/// text system with the bundled fonts. A font-role test's premise is that the two differ for the text it measures,
+/// since a width alone cannot tell the faces apart when they happen to draw a string alike.
+fn face_widths(text: &str, size: f32) -> (f32, f32) {
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx = HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+    cx.update(bootstrap::install).unwrap();
+    cx.update(|cx| {
+        let shaper = WindowTextSystem::new(cx.text_system().clone());
+        let width = |family: &'static str| {
+            let run = TextStyle {
+                font_family: family.into(),
+                ..TextStyle::default()
+            }
+            .to_run(text.len());
+            let line = shaper.shape_line(text.to_owned().into(), px(size), &[run], None);
+            f32::from(line.width)
+        };
+        (width(assets::UI_FONT), width(assets::TERMINAL_FONT))
     })
-    .unwrap()
 }
 
 /// The bounds of the node drawn under `id`; fails if nothing was.
@@ -749,6 +808,105 @@ fn the_directory_is_drawn_in_the_monospace_face() {
             "{key}'s directory is {drawn} wide, not nine monospace advances ({nine})"
         );
     }
+}
+
+/// The old `interface-fonts.spec.ts` case "interface and technical values load their own bundled font roles", for the
+/// values the sidebar and the details bar show beside names: the old stylesheet drew the row's age (`.status-time`) and
+/// the details bar's command line in the monospace face, as technical values. The test text system gives every face
+/// the same widths, so only the real one can tell the faces apart. The old case's pin glyph is not measured: no bundled
+/// face but the monospace one has it, so the text system draws it from that face whichever face asks, and no width can
+/// say which did. Specified, with the real text system, over one running session (open, so the details bar shows it)
+/// last active two minutes ago and launched with `iiiiiiii`: the row's age `2m` and the bar's age `2m`, status marks at
+/// 12 pixels, and the bar's command `iiiiiiii`, a copy field at 13.333 pixels, each paint one line as wide as its text
+/// in the monospace face at that size, where the interface face would draw it at least a pixel wider or narrower (the
+/// premise).
+#[test]
+fn the_ages_and_the_command_line_are_drawn_in_the_monospace_face() {
+    let rows = [session("a").activity(TEST_NOW - 120).invocation("iiiiiiii")];
+    // An empty step, so the frame read comes after the app ran what the first frames asked for (the details bar of the
+    // session the list opened among it).
+    let settle: Step<'_> = &|_: &Entity<SessionList>, _: &mut Window, _: &mut App| {};
+    let nodes = narrowest_layout_then(&rows, Vec::new(), None, Some(settle));
+    // The copy field's text size is its own (`components/copy_field.rs`); a status mark's is the theme's 12 pixels.
+    let parts = [
+        ("the row's age", age_id("a"), "2m", 12.),
+        (
+            "the details bar's age",
+            DETAILS_AGE_ID.to_owned(),
+            "2m",
+            12.,
+        ),
+        (
+            "the details bar's command",
+            DETAILS_COMMAND_ID.to_owned(),
+            "iiiiiiii",
+            13.333,
+        ),
+    ];
+    for (part, id, text, size) in parts {
+        let painted = texts_within(&nodes, &id);
+        let [line] = &painted[..] else {
+            panic!("{part} paints one line: {painted:?}");
+        };
+        assert_eq!(line.text.as_ref(), text, "{part}'s text");
+        let (interface, monospace) = face_widths(text, size);
+        assert!(
+            (interface - monospace).abs() >= 1.,
+            "premise: the two faces draw {text:?} apart ({interface} and {monospace})"
+        );
+        let drawn = f32::from(line.bounds.size.width);
+        assert!(
+            (drawn - monospace).abs() < 0.5,
+            "{part} is {drawn} wide; the monospace face draws it {monospace}, the interface face {interface}"
+        );
+    }
+}
+
+/// The old `interface-fonts.spec.ts` case "interface and technical values load their own bundled font roles", its row
+/// menu half: the line under the menu's title names a command session by the program it runs, and the old menu drew
+/// those command bytes in the monospace face beside status words in the interface face. Only the real text system can
+/// tell the faces apart. Specified, with the real text system, over two running sessions recorded as plain commands
+/// (agent kind `generic`) that run `iiiiiiii` and `MMMMMMMM`: with each one's menu open in turn, its summary paints one
+/// line that names its program, and the two lines are as wide as each other (within half a pixel), where the two
+/// programs differ by more than 10 pixels in the interface face (the premise, at 12 pixels).
+#[test]
+fn the_menu_summary_draws_a_commands_program_in_the_monospace_face() {
+    let rows = [
+        session("narrow")
+            .agent_kind("generic")
+            .invocation("iiiiiiii"),
+        session("wide").agent_kind("generic").invocation("MMMMMMMM"),
+    ];
+    let ((narrow_face, _), (wide_face, _)) =
+        (face_widths("iiiiiiii", 12.), face_widths("MMMMMMMM", 12.));
+    assert!(
+        wide_face - narrow_face > 10.,
+        "premise: the interface face draws the two programs apart ({narrow_face} and {wide_face})"
+    );
+    let summary_width = |key: &'static str, program: &str| {
+        let open: Step<'_> = &|list: &Entity<SessionList>, window: &mut Window, cx: &mut App| {
+            list.update(cx, |list, cx| list.toggle_menu(key, window, cx));
+        };
+        let nodes = narrowest_layout_then(&rows, Vec::new(), None, Some(open));
+        let painted = texts_within(&nodes, &format!("session-menu-summary-{key}"));
+        let [line] = &painted[..] else {
+            panic!("{key}'s summary paints one line: {painted:?}");
+        };
+        assert!(
+            line.text.contains(program),
+            "{key}'s summary names its program: {:?}",
+            line.text
+        );
+        f32::from(line.bounds.size.width)
+    };
+    let (narrow, wide) = (
+        summary_width("narrow", "iiiiiiii"),
+        summary_width("wide", "MMMMMMMM"),
+    );
+    assert!(
+        (wide - narrow).abs() < 0.5,
+        "the summaries are {narrow} and {wide} wide, so the program is not in the monospace face"
+    );
 }
 
 // ---- The menu button's reveal ---------------------------------------------------------------------------------------

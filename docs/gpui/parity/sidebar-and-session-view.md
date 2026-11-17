@@ -115,7 +115,9 @@ compact stale glyph: compact_tests.rs `a_compact_stale_row_draws_a_clock_named_a
 pinned in row_tests.rs `a_rows_age_shows_its_bucket_and_its_timestamp_as_hover_help`,
 `an_age_moves_on_when_the_clock_ticks_even_in_an_inactive_window`,
 `an_exit_without_a_code_says_the_code_is_unknown_on_the_row`, `each_host_state_names_its_cause`,
-`the_selected_and_stale_rows_use_their_own_inks` and crates/gui/farhelm-gui/src/session_list/age.rs's tests.
+`the_selected_and_stale_rows_use_their_own_inks` and crates/gui/farhelm-gui/src/session_list/age.rs's tests, and the
+monospace face the age is drawn in by row_tests.rs `the_ages_and_the_command_line_are_drawn_in_the_monospace_face` (a
+case of `tests/interface-fonts.spec.ts`, whose entry, in [Foundations](foundations.md), names it).
 `a bidi override in the invocation basename renders escaped and isolated` (the agent mark's half, its pinned text:
 row_marks_tests.rs `the_description_escapes_the_command_it_quotes`; the menu header's half, the escaped basename, is not
 covered here). `compact hides the second line and persists across client seeds`: compact_tests.rs
