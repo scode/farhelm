@@ -105,8 +105,9 @@ Tests: 3. Covers: interface and technical values load their own bundled font rol
 
 partly
 
-- crates/gui/farhelm-gui/src/session_list/row_tests.rs `the_directory_is_drawn_in_the_monospace_face` (interface and
-  technical values: a row's directory in the monospace face beside its title in the proportional interface face)
+- crates/gui/farhelm-gui/src/session_list/row_tests.rs
+  `the_directory_is_drawn_in_the_monospace_face_and_the_host_in_the_interface_face` (interface and technical values: a
+  row's directory in the monospace face beside its title and its host's name in the proportional interface face)
 - crates/gui/farhelm-gui/src/session_list/row_tests.rs `the_ages_and_the_command_line_are_drawn_in_the_monospace_face`
   (the same case: a row's age, and the details bar's command line and age)
 - crates/gui/farhelm-gui/src/session_list/row_tests.rs `the_menu_summary_draws_a_commands_program_in_the_monospace_face`
@@ -123,8 +124,6 @@ partly
 
 Not yet ported:
 
-- of the first case, the row's host name and the list heading's New button in the interface face; foundations, in
-  crates/gui/farhelm-gui/src/session_list/row_tests.rs beside `the_directory_is_drawn_in_the_monospace_face`
 - of the first case, the launcher's search field in the interface face, its Folder and Agent command fields in the
   monospace face, and its search's "Use this path" and "Browse this path" rows, words in the interface face and paths in
   the monospace face; belongs to the launcher ([Launcher](launcher.md)), in
@@ -136,6 +135,9 @@ Not yet ported:
   "Archived" label in the interface face beside a known time in the monospace face, and "Archive time unknown" wholly in
   the interface face; belongs to other dialogs ([Other dialogs](other-dialogs.md)), in
   crates/gui/farhelm-gui/src/trash/dialog/tests.rs
+
+The first case's New button in the interface face has no port: the list heading's New is an icon button (SPEC.md,
+"Session list"), whose words are its accessible name and hover help, and it paints no text for a face to draw.
 
 "A bundled face loaded" has no case here, since the fonts are built into the app (`assets.rs`). The row's pin glyph is
 not measured: no bundled face but the monospace one has it, so the text system draws it from that face whichever face

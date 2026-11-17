@@ -96,9 +96,9 @@ them), `a_compact_stale_row_draws_a_clock_named_and_helped_by_its_cause` and
 `compact_hides_the_last_line_and_the_ended_line_and_shortens_the_row` (no ended line, a shorter row); the menu gutter's
 width has no test of its own), `the host/directory line aligns under the title as one continuous string` (row_tests.rs
 `the_last_line_names_the_host_and_directory_without_a_dangling_separator`, `the_last_lines_parts_are_none_when_empty`,
-`the_directory_is_drawn_in_the_monospace_face`; the line starts under the title by construction, with no test of its x),
-`a /home/<user> cwd shows the folded form with the exact path in the card` (the folded half: tests.rs
-`only_a_personal_home_with_a_path_after_it_folds` and row_tests.rs
+`the_directory_is_drawn_in_the_monospace_face_and_the_host_in_the_interface_face`; the line starts under the title by
+construction, with no test of its x), `a /home/<user> cwd shows the folded form with the exact path in the card` (the
+folded half: tests.rs `only_a_personal_home_with_a_path_after_it_folds` and row_tests.rs
 `the_last_line_names_the_host_and_directory_without_a_dangling_separator`; the card:
 crates/gui/farhelm-gui/src/session_list/summary_tests.rs
 `a_running_sessions_card_names_its_agent_host_folder_and_times`, the directory in full),
