@@ -1,9 +1,9 @@
 //! Tests of the open session's details bar: which parts it draws and in what order for each kind of status, what it
 //! leaves out (a stale session's badge and age, a host nobody named, a mark for a host nobody placed), the words it
-//! uses for the local host, how its parts give way in a narrow pane, its age moving on with the shared clock, the
-//! managed-checkout mark, and the directory and command copy fields with their hidden-characters warning. The bar of
-//! an open session the list does not show is `carried_tests.rs`'s. How a copy field confirms a click is its own
-//! component's (`components/tests/copy_field.rs`); here the bar's wiring of it is.
+//! uses for the local host, a host name escaped as host text, how its parts give way in a narrow pane, its age moving
+//! on with the shared clock, the managed-checkout mark, and the directory and command copy fields with their
+//! hidden-characters warning. The bar of an open session the list does not show is `carried_tests.rs`'s. How a copy
+//! field confirms a click is its own component's (`components/tests/copy_field.rs`); here the bar's wiring of it is.
 //!
 //! The decisions are a pure function ([`Details::of`]), tested without a window where only the decision matters.
 //! Everything else runs in a window over the helm client's fake and reads GPUI's driver record of the frame: the bar is
@@ -370,6 +370,65 @@ fn no_host_name_draws_no_host_and_an_unplaced_host_no_mark(cx: &mut TestAppConte
         "no host list read: no mark"
     );
     assert_eq!(painted_within(&nodes, HOST_NAME_ID), ["buildbox"]);
+}
+
+/// A host name the registry does not list is still the helm's to show, and it is host text: a name could carry a
+/// direction override or a newline to pose as another host, and with no registry entry behind it nothing else on
+/// screen says which host it is. The old `terminal.spec.ts` case "details preserve an unknown host" (reference commit
+/// `24bc0580`) pinned that such a session keeps its host; the row's escaping is pinned for titles and directories
+/// alone (`session_list/tests.rs`). Specified, with the host list read and empty, and the session's host named
+/// `evil\u{202E}box\nnext`: the bar draws the Remote host mark and paints and names the name escaped,
+/// `evil<U+202E>box<U+000A>next`; the row's last line paints the same escaped name; and nothing painted holds a
+/// presentation-unsafe character.
+#[gpui::test]
+fn an_unknown_hosts_name_is_drawn_escaped_in_the_bar_and_the_row(cx: &mut TestAppContext) {
+    use crate::host_text::tests::painted_words;
+    use crate::session_list::tests::preferences_state;
+    use farhelm_proto::ui_channel::{Preferences, SIDEBAR_WIDTH_RANGE};
+
+    const SHOWN: &str = "evil<U+202E>box<U+000A>next";
+    let row = active("a", 120).host(9).host_name("evil\u{202E}box\nnext");
+    // At the widest sidebar, so the escaped name fits the row's last line whole: a name cut with an ellipsis would not
+    // read as the whole escaped string.
+    let preferences = preferences_state(Preferences {
+        visit_history: vec!["a".to_owned()],
+        sidebar_width: Some(*SIDEBAR_WIDTH_RANGE.end()),
+        welcome_seen: Some(true),
+        ..Preferences::default()
+    });
+    let (_fake, cx) = open_main(cx, vec![listing(&["a"], &[row]), preferences, hosts(&[])]);
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    let nodes = frame(cx);
+    // A read registry that does not list the host places it remote (`row_marks::locality`).
+    assert_eq!(
+        label(cx, HOST_MARK_ID).as_deref(),
+        Some("Remote"),
+        "an unlisted host's mark"
+    );
+    let words = |id: &str| -> Vec<String> {
+        painted_within(&nodes, id)
+            .iter()
+            .map(|text| painted_words(text))
+            .collect()
+    };
+    assert_eq!(words(HOST_NAME_ID), [SHOWN], "the bar's host name");
+    assert_eq!(
+        label(cx, HOST_NAME_ID).as_deref(),
+        Some(SHOWN),
+        "and named so"
+    );
+    assert!(
+        words("session-item-a").iter().any(|text| text == SHOWN),
+        "the row's host part: {:?}",
+        words("session-item-a")
+    );
+    let painted = crate::session_list::tests::painted(&nodes);
+    assert!(
+        !painted.iter().any(|text| text
+            .chars()
+            .any(farhelm_proto::text::is_presentation_unsafe)),
+        "nothing painted holds a hidden character: {painted:?}"
+    );
 }
 
 /// SPEC.md: the host's "name is the full display name", never the row's short form, and only the local host reads
