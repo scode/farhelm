@@ -290,6 +290,24 @@ never checked is the launcher's: a quick launch made out of sight asks for every
 shown until one answers
 (`launcher::environment_launch_tests::a_quick_launch_asks_for_the_checks_and_comes_back_until_one_answers`).
 
+### `tests/launch-progress.spec.ts`
+
+Its file: launcher.
+
+Case: "quick launch shows a named pending pill" and its twin "template shortcut shows a named pending pill" (one case
+run for ⚡ and for number key 1).
+
+ported, except the reveal after the switcher, which is superseded: one create titled with the template-supplied name, no
+pill at 1.9 seconds, then a status naming the session and its host and counting "2 s", the switcher opening and closing
+over the hidden launch with the pill still up (after the pill shows, where the old test ran it before 1.9 seconds), and
+the refusal taking the pill down
+(`templates::dispatch_tests::the_chords_held_launch_names_its_session_and_host_in_the_pill`,
+`a_number_keys_held_launch_names_its_session_and_host_in_the_pill`). The old test then saw the refusal reveal the
+launcher as a modal again; under today's SPEC.md ("Keyboard focus", "Who may move focus") the switcher's key presses
+count as moving on, so the refusal leaves the "launch not started" notice instead, and the old alert's words come back
+through its Open launcher. The `[inert]` check has no counterpart: the pill is a layer that takes neither focus nor the
+pointer, and there is no inert page
+
 ## Deviations
 
 Differences from the old app at the reference commit, each with its reason, and each also reported to the migration's
