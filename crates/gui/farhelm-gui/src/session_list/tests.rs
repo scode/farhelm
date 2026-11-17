@@ -790,6 +790,58 @@ fn an_empty_fleet_says_so_in_the_list_and_the_pane(cx: &mut TestAppContext) {
     assert_eq!(sent(&mut fake), []);
 }
 
+/// A failed listing is no evidence that any session went, so the rows stay, and the line saying the read failed is the
+/// only sign that they may be out of date; it must go as soon as the helm reads the listing again, or a warning about
+/// a read that has since succeeded stays up for good. The old `readers.spec.ts` case "a failed stop refetch is handed
+/// to the reader, which brings the list back" at reference commit `24bc0580` pinned that second half; its refetch
+/// handoff has no counterpart, since the helm pushes the listing, and the old app replaced the rows with the line,
+/// where the port keeps them (the sidebar parity file's deviations). Specified: with a and b listed, a listing the
+/// helm could not read keeps both rows and names the line "Failed to load sessions: db<U+000A>locked", the helm's
+/// words escaped as host text; the next listing it reads, which renames b, takes the line away and draws b's new
+/// title.
+#[gpui::test]
+fn a_failed_listing_keeps_its_rows_and_says_so_until_the_next_listing(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![
+            listing(&["a", "b"], &[session("a"), session("b")]),
+            preferences(&["a"], None),
+        ],
+    );
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["a", "b"],
+        "the premise: the first listing was read"
+    );
+    assert_eq!(
+        test_support::label(cx, "session-list-error"),
+        None,
+        "no failure line before a failure"
+    );
+
+    let mut failed = listing_meta(&["a", "b"], 2, false);
+    failed.availability = Availability::Unavailable {
+        error: "db\nlocked".into(),
+    };
+    fake.push(change(failed, &[], &[]));
+    test_support::settle(cx);
+    assert_eq!(row_order(&frame(cx)), ["a", "b"]);
+    assert_eq!(
+        test_support::label(cx, "session-list-error").as_deref(),
+        Some("Failed to load sessions: db<U+000A>locked")
+    );
+
+    fake.push(change(
+        listing_meta(&["a", "b"], 2, false),
+        &[session("b").title("b again")],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert_eq!(test_support::label(cx, "session-list-error"), None);
+    assert_eq!(row_order(&frame(cx)), ["a", "b"]);
+    assert!(painted(&frame(cx)).iter().any(|text| text == "b again"));
+}
+
 // ---- The running pulse ---------------------------------------------------------------------------------------------
 
 /// How many times the list rendered while a second passed on the executor's clock: every ticker step in that second,
