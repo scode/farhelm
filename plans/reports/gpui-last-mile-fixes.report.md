@@ -84,3 +84,76 @@ plan's GPT-6.1 Sol reviewer. The refusal now keeps right-to-left host names from
 reviews also caught a second place that could display Clone's copied name raw and tightened the tests for checkout
 discovery, missing-folder retry, keyboard focus and environment selectors. The reviewer follow-ups confirmed the fixes.
 The commit messages and draft titles also passed separate cold reads.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Between the stack's final base and the landing, main gained only plan-queue changes,
+so nothing could interact with it (the report's list of what main gained covers the earlier interval before the
+executor's last rebase). An independent reviewer read the whole stack against main and the specs. It found no launch
+that the stack now refuses wrongly or lets through wrongly, other than the intended change for a suspended or stopped
+sandbox or container. It also confirmed that an untouched Clone still launches with the original characters, since only
+the field shows them spelled out, and that the launcher and quick launch give the same refusal, with the host's name
+kept from reordering the surrounding advice. The fixes below came from that review; I checked each against the code
+before making it, and the checks further down ran after them.
+
+#### Fixes made while landing
+
+- **A stopped container was called "suspended".** The new launch refusal said "<host> is suspended. Resume it in Hosts,
+  then launch." for every sandbox or container Hosts offers Resume for, including a stopped container, which Hosts
+  labels Stopped. The stack had also deleted the spec's rule that Stopped is never labelled Suspended, to make the spec
+  match. A stopped one now says "<host> is stopped. Resume it in Hosts, then launch.", the rule is back in the spec, and
+  the refusal test covers both wordings (#4056). This makes the report's first "things you should know" bullet (Hosts
+  showing "Stopped" while the refusal says "is suspended") out of date.
+- **The spec described launching on a suspended host two ways.** The stack added "for now the desktop app refuses a
+  launch on a suspended host", but three older passages still described the launch resuming the host as current behavior
+  (the launcher showing "Resuming" while it wakes the host, waking a suspended sandbox, and fresh GitHub checkouts on a
+  suspended host). Each now says it applies once launches resume a suspended host. The rule that Farhelm never suspends
+  a host by itself had been left under the future paragraph and is back with the current behavior (#4056).
+- **The changelog's Clone sentence promised too much.** It said Clone keeps the original values for launch; that holds
+  only while the fields are unedited (after an edit, what the field shows is what launches, and a test asserts that). It
+  now says so (#4059).
+- **One entry in the port tracker miscounted its cases** ("four cases are named below" above five) (#4065). The port
+  tracker is `docs/gpui/parity/`, which records, for each test of the old browser app, how the desktop app covers it,
+  under a status such as "partly", "replaced" or "not yet ported".
+
+#### Things you should know that the report does not say
+
+- **Restart with on a suspended or stopped host now reads like a launch refusal**: "Restart error. <host> is suspended.
+  Resume it in Hosts, then launch." (or "is stopped"). It used to say the source host is unavailable and to wait for it
+  to reconnect, which a suspended host never does by itself, so the new advice is the more useful one, but its last word
+  says "launch" rather than "restart". The plan scoped the new refusal to New, Clone and Replace with, and no test
+  covers Restart with's case. I left it; a per-mode wording is a small follow-up if you want one.
+- **A few port tracker entries may understate their status.** The reviewer read the entries for the old launcher's tabs,
+  launch refusal, named conversation and (possibly) Enter key tests as having nothing left to port while still saying
+  "partly", and the entry for the guarded permission choices still lists the "About permission modes" button as "not yet
+  ported" without the one-line reason the plan asked for. I did not change those statuses: that needs each old browser
+  test's cases read against the desktop tests, which this landing did not do. Nothing in the app depends on them; if you
+  want the tracker exact, that is a small documentation follow-up.
+
+#### Checks
+
+The executor ran only focused selections (19 tests on the final stack), so the landing ran the whole test suites of the
+desktop app's GUI crates (the launcher, session list, session pane and the rest of the app's window) and the app's
+end-to-end smoke. Every check below ran on the final stack, landing fixes included. Builds and lints ran locally; the
+test suites ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py`: passed.
+- The check that a GUI change modifies the app's shared foundations only where they allow it
+  (`scripts/check-foundation-paths.py`, from the base revision), on each of the nine PRs: nothing refused; it listed the
+  expected changes to the shared provider wording, launcher view and host identity code.
+- `cargo nextest run -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping` from a locally built archive, split
+  across two cloud VMs: 1571 and 1567 tests passed, none failed, none reported a runtime skip
+  (`4641ef8d-cbc6-4eca-8c1c-e1fd6cabc690`, `0748fc3b-15de-44df-8c64-7a4c9b771515`).
+- The app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py --no-build`, through the recorder) on a cloud VM: 49
+  steps passed, the clipboard paste step skipped as it always is on Linux (`1d005254-01f7-4756-858d-f90e1182e009`).
+- The app's screenshot goldens (`python3 scripts/check-gui-goldens.py`, through the recorder), locally: passed
+  (`9fde380b-4c8b-4605-a228-3d2b10da9494`).
+
+Reused: nothing. Skipped: the rest of the Rust workspace (supervisor, helm, terminal hosts), the desktop process's own
+tests (its startup, updater and window frame), the Linux app lifecycle and the Mac-only checks, since the stack changes
+only the app's launcher, session card and their tests.
