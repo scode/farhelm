@@ -250,6 +250,9 @@ superseded: SPEC.md "Things changing underneath" (an open menu moves with its th
 The remaining case that row names, a menu whose anchor is gone closing, is
 `templates::dialog_tests::the_key_menu_closes_when_its_template_is_gone`; no old case removed the menu's own template
 
+- `templates::dialog_tests::the_key_menu_follows_its_button_through_what_the_helm_pushes` (the six cases, inverted: the
+  menu stays open through each ⚡ transfer and rename, moving with its button)
+
 ### `tests/tooltip-coverage.spec.ts`
 
 Its file: foundations.

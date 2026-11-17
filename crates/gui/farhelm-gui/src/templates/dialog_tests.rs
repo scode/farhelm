@@ -4,6 +4,10 @@
 //! The dialog is opened the way the list header's Templates button will open it: a button in a root view of the test's
 //! own, whose click takes a mark and calls [`super::open`] (or [`super::open_with_hint`], as a shortcut will). Every
 //! step ends in one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
+//! The one test whose outcome is text layout, the number keys' digit widths, uses the real text system instead, since
+//! the test context's gives every character the same width.
+
+use std::sync::Arc;
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::LaunchHarness;
@@ -13,9 +17,11 @@ use farhelm_proto::ui_channel::{
     PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    Context, FocusHandle, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
-    VisualTestContext, Window, div, px, size,
+    AppContext as _, Context, DriverNode, FocusHandle, HeadlessAppContext, IntoElement,
+    ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, px,
+    size,
 };
+use gpui_component::Root;
 
 use super::Hint;
 use super::dispatch_tests::push as push_state;
@@ -23,8 +29,9 @@ use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
 use crate::host_text::tests::painted_words;
 use crate::host_text::{HostSentence, HostText};
-use crate::root;
+use crate::session_list::host_rail::tests::texts_within;
 use crate::test_support::{self, any_open, click, frame, keys, meta, settle, started};
+use crate::{assets, bootstrap, root};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -980,6 +987,123 @@ fn the_key_menu_closes_when_its_template_is_gone(cx: &mut TestAppContext) {
     assert!(any_open(cx), "the dialog stays");
 }
 
+/// The four templates [`the_key_menu_follows_its_button_through_what_the_helm_pushes`] lists, in the helm's order (by
+/// name). A renamed one becomes `z`, which sorts after all of them.
+const MOVING: [&str; 4] = ["a", "b", "c", "d"];
+
+/// What one case of [`the_key_menu_follows_its_button_through_what_the_helm_pushes`] pushes while a key menu is open.
+#[derive(Clone, Copy, Debug)]
+enum Change {
+    /// The ⚡ mark moves to this template, whose row gains the chord line, and off the row that held it.
+    MarkTo(&'static str),
+    /// The first template is renamed the second elsewhere (by an agent, say): its row goes and the new name's appears.
+    Rename(&'static str, &'static str),
+}
+
+/// The helm pushes the templates collection as `names`, in that order, each setting nothing, with `removed` taken out.
+fn push_names(helm: &mut FakeHelm, names: &[&str], removed: &[&str], cx: &mut VisualTestContext) {
+    let list: Vec<LaunchTemplate> = names
+        .iter()
+        .map(|name| template(name, TemplateFields::default()))
+        .collect();
+    let state = templates_state(&list, Availability::Available);
+    helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: removed.iter().map(|name| (*name).to_owned()).collect(),
+    });
+    settle(cx);
+}
+
+/// SPEC.md, "Things changing underneath": "Focus follows the thing, not the position", and "Opening and closing":
+/// "Nothing closes a dialog, menu, popup list or confirmation that it did not open". The old app closed a template's
+/// open number-key menu whenever another change moved its button (`popover-template-movement.spec.ts` at reference
+/// commit `24bc0580`, whose six cases this inverts). Pushes move the button in two ways: the ⚡ mark adds a chord line
+/// to the marked row, growing it (a button is centered in its row, so its own row growing moves it too), and a rename
+/// re-sorts the list by name. Specified: over templates `a` to `d`, in a window tall enough that every key menu opens
+/// below its button, with a key menu opened by a click, each row's push leaves the menu open and moves it by as much
+/// as its button, which moves the way the row's last column says. The window's height is part of the premise: a menu
+/// that fits on neither side of its button is pinned to the window's bottom, and one with no room below opens above
+/// it (`layers::popover_origin`), so in a shorter window a menu can change sides or stay pinned while its button moves,
+/// which is the layer manager's placement rule, not a menu failing to follow.
+#[gpui::test]
+fn the_key_menu_follows_its_button_through_what_the_helm_pushes(cx: &mut TestAppContext) {
+    use Change::{MarkTo, Rename};
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
+    let list: Vec<LaunchTemplate> = MOVING
+        .iter()
+        .map(|name| template(name, TemplateFields::default()))
+        .collect();
+    let (mut helm, cx) = open_header(cx, &list, None);
+    // Tall enough that every key menu opens below its button, which each case checks after opening. The menu, its
+    // header over eleven keys, is roughly 600 pixels tall by its items' sizes; in `open_header`'s 1200-pixel window the
+    // top row's menu fits on neither side of its button and the others' only above.
+    cx.simulate_resize(size(px(1600.), px(2000.)));
+    settle(cx);
+    click(cx, "templates-button");
+    for (marked, key, change, way) in [
+        (Some("c"), "template-key-b", MarkTo("a"), Greater),
+        (Some("c"), "template-key-a", MarkTo("a"), Greater),
+        (Some("c"), "template-key-a", MarkTo("b"), Equal),
+        (Some("c"), "template-key-d", MarkTo("a"), Equal),
+        (None, "template-key-b", Rename("a", "z"), Less),
+        (None, "template-key-a", Rename("c", "z"), Equal),
+    ] {
+        let case = format!("{key} through {change:?}");
+        push_state(&mut helm, cx, preferences_state(marked));
+        assert_eq!(row_names(cx), MOVING, "{case}: the premise: the list");
+        if let Some(marked) = marked {
+            assert_eq!(bolt_lit(cx, marked), Some(true), "{case}: the premise");
+        }
+        click(cx, key);
+        // `any_open_menu` draws a fresh frame, which `bounds` then reads.
+        assert!(any_open_menu(cx), "{case}: the premise: the menu is open");
+        let button = test_support::bounds(cx, key);
+        let menu = test_support::bounds(cx, "templates-key-menu");
+        assert!(
+            (menu.top() - button.bottom() - px(4.)).abs() < px(1.),
+            "{case}: the premise: the menu opened 4 pixels below its button: {menu:?} under {button:?}"
+        );
+        let (button, menu) = (button.top(), menu.top());
+
+        match change {
+            MarkTo(to) => {
+                push_state(&mut helm, cx, preferences_state(Some(to)));
+                assert_eq!(bolt_lit(cx, to), Some(true), "{case}: the premise");
+            }
+            Rename(from, to) => {
+                let mut names: Vec<&str> =
+                    MOVING.into_iter().filter(|name| *name != from).collect();
+                names.push(to);
+                push_names(&mut helm, &names, &[from], cx);
+                assert_eq!(row_names(cx), names, "{case}: the premise: re-sorted");
+            }
+        }
+        assert!(any_open_menu(cx), "{case}: the menu is still open");
+        let moved = test_support::bounds(cx, key).top() - button;
+        let followed = test_support::bounds(cx, "templates-key-menu").top() - menu;
+        assert!(
+            (followed - moved).abs() < px(1.),
+            "{case}: the menu moved {followed:?} with its button's {moved:?}"
+        );
+        // Rounded to a whole pixel, so layout rounding does not read as a move.
+        assert_eq!(
+            f32::from(moved).round().partial_cmp(&0.),
+            Some(way),
+            "{case}: the button moved {moved:?}"
+        );
+
+        // Back to the four templates with no menu open, for the next case.
+        keys(cx, "escape");
+        assert!(!any_open_menu(cx), "{case}: Escape closed the menu");
+        if let Rename(_, to) = change {
+            push_names(&mut helm, &MOVING, &[to], cx);
+        }
+    }
+}
+
 /// The key menu closes back onto its key button (the old menu returned focus there), also on macOS, where the click
 /// that opened it left the button unfocused and returning focus to what held it before would put the user back
 /// elsewhere. Specified: with clicks not focusing controls, the key button opens the menu without holding focus, and
@@ -1003,4 +1127,114 @@ fn escape_from_the_key_menu_returns_focus_to_its_button(cx: &mut TestAppContext)
         test_support::focused_id(cx).as_deref(),
         Some("template-key-my-codex")
     );
+}
+
+// ---- The number keys' digits, with the real text system -------------------------------------------------------------
+
+/// The Templates dialog over [`Header`], over a helm holding `templates` and `preferences`, laid out with the real text
+/// system and the bundled fonts in a headless app (no renderer, which layout does not need) in a 1600-by-1200 window:
+/// the app, for measuring text in its faces, and the driver record of the dialog's second frame. Where closing would
+/// return focus does not matter here, so the dialog is given a fresh handle for it.
+fn laid_out_dialog(
+    templates: &[LaunchTemplate],
+    preferences: Preferences,
+) -> (HeadlessAppContext, Vec<DriverNode>) {
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx = HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+    cx.update(bootstrap::install).unwrap();
+    let (mut fake, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
+    fake.connect(vec![
+        templates_state(templates, Availability::Available),
+        crate::session_list::tests::preferences_state(preferences),
+    ]);
+    cx.run_until_parked();
+    let window = cx
+        .open_window(size(px(1600.), px(1200.)), |window, cx| {
+            let header = cx.new(|cx| Header::new(window, cx));
+            cx.new(|cx| Root::new(header, window, cx))
+        })
+        .unwrap();
+    let opened = cx
+        .update_window(window.into(), |_, window, cx| {
+            let opener = cx.focus_handle();
+            let mark = Mark::take(cx);
+            super::open(&opener, &mark, window, cx)
+        })
+        .unwrap();
+    assert!(opened.is_some(), "the premise: the dialog opened");
+    cx.run_until_parked();
+    let nodes = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.set_driver_enabled(true);
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            window.driver_nodes().to_vec()
+        })
+        .unwrap();
+    (cx, nodes)
+}
+
+/// The old stylesheet drew a key button's chord in the monospace face with tabular figures (`.templates-number-key`),
+/// so the rows' chords line up and a chord's width does not depend on its digit; the interface face's figures are
+/// proportional. The test context's text system gives every character the same width, so only the real one can tell.
+/// Specified, with the real text system: two templates holding the keys 1 and 8, the old case's pair, paint their key
+/// buttons' chords each as many advances of the monospace face, at the button's 10 pixels, as the chord has
+/// characters; and the interface face's 1 and 8 differ in advance at that size by more than a pixel (the premise: in
+/// that face the two chords would differ in width).
+#[test]
+fn the_number_keys_digits_are_drawn_at_equal_widths() {
+    let digits = ["1", "8"];
+    let list: Vec<LaunchTemplate> = digits
+        .iter()
+        .map(|digit| template(&format!("key-{digit}"), TemplateFields::default()))
+        .collect();
+    let preferences = Preferences {
+        template_shortcuts: digits
+            .iter()
+            .map(|digit| ((*digit).to_owned(), format!("key-{digit}")))
+            .collect(),
+        ..Preferences::default()
+    };
+    let (mut cx, nodes) = laid_out_dialog(&list, preferences);
+    // `KEY_TEXT` in `dialog.rs`: the size the key button draws its chord at.
+    let text_size = px(10.);
+    let (mono, one, eight) = cx.update(|cx| {
+        let text_system = cx.text_system();
+        let advance = |family: &'static str, character: char| {
+            let face = text_system.resolve_font(&gpui::font(family));
+            f32::from(
+                text_system
+                    .advance(face, text_size, character)
+                    .unwrap()
+                    .width,
+            )
+        };
+        (
+            advance(assets::TERMINAL_FONT, '0'),
+            advance(assets::UI_FONT, '1'),
+            advance(assets::UI_FONT, '8'),
+        )
+    });
+    assert!(
+        eight - one > 1.,
+        "premise: the interface face's figures are proportional ({one} vs {eight})"
+    );
+    for digit in digits {
+        let chord = super::number_key_name(digit);
+        let id = format!("template-key-key-{digit}");
+        let painted = texts_within(&nodes, &id);
+        let line = painted
+            .iter()
+            .find(|line| line.text.as_ref() == chord.as_str())
+            .unwrap_or_else(|| panic!("{id} paints {chord:?}; it painted {painted:?}"));
+        let drawn = f32::from(line.bounds.size.width);
+        let expected = chord.chars().count() as f32 * mono;
+        assert!(
+            (drawn - expected).abs() < 0.5,
+            "the {digit} chord is {drawn} wide, not {expected} ({mono} per monospace advance)"
+        );
+    }
 }
