@@ -8,6 +8,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use farhelm_input_mapping::Platform;
 use gpui::{Action as _, Keystroke, OsAction, OwnedMenuItem, TestAppContext, div};
 
 use super::{
@@ -15,8 +16,9 @@ use super::{
     title_band, when_closed,
 };
 use crate::actions::{
-    DeleteSession, HideApp, HideOtherApps, MinimizeWindow, OpenSourceNotices, Quit, ShowAllApps,
-    TEXT_INPUT_CONTEXT, ToggleFullScreen, ZoomWindow,
+    CopyTerminalSelection, DeleteSession, HideApp, HideOtherApps, MinimizeWindow,
+    OpenSourceNotices, Paste, Quit, SelectAllInTerminal, ShowAllApps, TERMINAL_CONTEXT,
+    TERMINAL_KEYS, TEXT_INPUT_CONTEXT, ToggleFullScreen, ZoomWindow,
 };
 use crate::test_support;
 
@@ -75,9 +77,17 @@ fn item(name: &str, action: &'static str, os: Option<OsAction>) -> Item {
 /// rest of the menu bar is the old app's (`desktop/menu.rs` at reference commit `24bc0580`, whose own test guarded the
 /// same description). Restoring a close item, or binding Cmd+W to anything but Delete, would let Cmd+W close the only
 /// window, which quits the app. So: the whole bar as installed, in order, with each item's action; no item named Close;
-/// and every binding of Cmd+W in the app's keymap (Kit's and Farhelm's, as at startup) runs Delete. The Edit items
-/// dispatch the text field's own actions, which a focused field binds in its own key context: that is what makes them
-/// act on a field (and Copy, which GPUI Kit's window root also handles, nowhere it could copy anything else).
+/// and every binding of Cmd+W in the app's keymap (Kit's and Farhelm's, as at startup) runs Delete.
+///
+/// The Edit items' actions are pinned too, because they decide what each item reaches and which chord it shows. Undo,
+/// Redo and Cut dispatch the text field's own actions, which a focused field binds in its own key context. Copy, Paste
+/// and Select All dispatch the terminal's, so they reach a focused terminal as well as a field. Beside an item GPUI
+/// shows the first binding of its action that has no context (or matches Zed's default editor context), and failing
+/// that the first binding of all. The terminal's chords are bound in the terminal's context, so they show only as that
+/// fallback: a context-free binding of one of these actions would win over them. So each of the three must have
+/// exactly one Mac chord, its row of the terminal's key table (Cmd+C, Cmd+V, Cmd+A), and no binding outside the
+/// terminal's context; otherwise the menu could show a chord that does something else, or none. The Mac chords are
+/// checked from the table rather than the keymap, since this test does not run on a Mac.
 #[gpui::test]
 fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
     test_support::install(cx);
@@ -109,10 +119,14 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
                     edit("Redo", "input::Redo", OsAction::Redo),
                     Item::Separator,
                     edit("Cut", "input::Cut", OsAction::Cut),
-                    edit("Copy", "input::Copy", OsAction::Copy),
-                    edit("Paste", "input::Paste", OsAction::Paste),
+                    edit("Copy", CopyTerminalSelection.name(), OsAction::Copy),
+                    edit("Paste", Paste.name(), OsAction::Paste),
                     Item::Separator,
-                    edit("Select All", "input::SelectAll", OsAction::SelectAll),
+                    edit(
+                        "Select All",
+                        SelectAllInTerminal.name(),
+                        OsAction::SelectAll
+                    ),
                 ],
             ),
         ]
@@ -150,7 +164,33 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
         if cfg!(target_os = "macos") {
             assert!(cmd_w_bindings > 0, "the premise: Delete is bound to Cmd+W");
         }
-        for action in &edit_actions {
+        let terminals = [
+            (CopyTerminalSelection.name(), "cmd-c"),
+            (Paste.name(), "cmd-v"),
+            (SelectAllInTerminal.name(), "cmd-a"),
+        ];
+        for (action, shown) in terminals {
+            let mac: Vec<&str> = TERMINAL_KEYS
+                .iter()
+                .filter_map(|key| Some((key.chord(Platform::Mac)?, key.bind?)))
+                .filter(|(chord, bind)| bind(chord).action().name() == action)
+                .map(|(chord, _)| chord)
+                .collect();
+            assert_eq!(mac, [shown], "the Edit item for {action} shows {shown}");
+            for binding in keymap.bindings() {
+                if binding.action().name() == action {
+                    assert_eq!(
+                        binding.predicate().map(|predicate| predicate.to_string()),
+                        Some(TERMINAL_CONTEXT.to_string()),
+                        "{action} is bound only in a focused terminal, so no other chord shows beside it"
+                    );
+                }
+            }
+        }
+        let fields = edit_actions
+            .iter()
+            .filter(|action| !terminals.iter().any(|(terminal, _)| terminal == *action));
+        for action in fields {
             assert!(
                 keymap.bindings().any(|binding| {
                     binding.action().name() == *action
@@ -166,9 +206,11 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
 
 /// Every app or window command in the menu has an app-wide handler, so its item is enabled whatever holds focus and a
 /// click on it is never silently dropped. The Edit items are enabled exactly where their action is handled, which is
-/// what GPUI asks before macOS enables an item: all six in a focused text field, and elsewhere only Copy, which GPUI
-/// Kit's window root also handles (copying Kit's own selected text, of which Farhelm draws none). Asked in a real
-/// window wrapped in Kit's root, with the field focused and then a control.
+/// what GPUI asks before macOS enables an item: all six in a focused text field, Copy, Paste and Select All included
+/// although they dispatch the terminal's actions (the field hands them on to its own), and none with a control focused,
+/// where nothing could be edited or copied. Asked in a real window wrapped in Kit's root, with the field focused and
+/// then a control. A focused terminal's Edit items are the terminal tests'
+/// (`the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`).
 #[gpui::test]
 fn the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field(
     cx: &mut TestAppContext,
@@ -255,7 +297,7 @@ fn the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field
         "the premise: the control, not the field, holds focus"
     );
     for (name, on) in available(cx) {
-        let expected = !name.starts_with("Edit") || name == "Edit > Copy";
+        let expected = !name.starts_with("Edit");
         assert_eq!(on, expected, "{name} with a control focused");
     }
 }

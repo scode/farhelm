@@ -1,6 +1,7 @@
 //! Tests of the text input: the events it reports to its owner, the growing box, the field that keeps line breaks,
-//! whether an Enter was a held repeat, the Up and Down keys it hands to the owner of the list beside it, and the
-//! sequence prefix a launcher field takes with nothing selected, by each platform's rule.
+//! whether an Enter was a held repeat, the Up and Down keys it hands to the owner of the list beside it, the Edit menu's
+//! Copy, Paste and Select All reaching each kind of field, and the sequence prefix a launcher field takes with nothing
+//! selected, by each platform's rule.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,7 +11,9 @@ use gpui::{
     Styled as _, Subscription, TestAppContext, VisualTestContext, Window, div, px,
 };
 
-use crate::components::{HoverHelp, TextInput, TextInputEvent, TextInputState, Vertical};
+use crate::components::{
+    EditCommand, HoverHelp, TextInput, TextInputEvent, TextInputState, Vertical,
+};
 use crate::test_support::{bounds, check, click, frame, keys, open, redraw};
 
 /// How a test makes a field's state: [`TextInputState::new`], [`TextInputState::new_keeping_line_breaks`] or a growing
@@ -546,6 +549,125 @@ fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestApp
         cx.update(|window, cx| state.focus_handle(cx).is_focused(window)),
         "the field kept focus"
     );
+}
+
+// ---- The Edit menu -------------------------------------------------------------------------------------------------
+
+/// Dispatch the Edit menu's action for `command` to the focused element, as a click on the Mac menu item does.
+fn from_menu(cx: &mut VisualTestContext, command: EditCommand) {
+    cx.update(|window, cx| window.dispatch_action(command.action(), cx));
+    redraw(cx);
+}
+
+/// The clipboard's text, if it holds text.
+fn clipboard_text(cx: &mut VisualTestContext) -> Option<String> {
+    cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+}
+
+/// Put `text` on the clipboard, as another program would.
+fn set_clipboard(cx: &mut VisualTestContext, text: &str) {
+    cx.update(|_, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.into())));
+}
+
+/// Click the field drawn under `selector` and check that its state took focus: the premise of every menu command sent
+/// after it, so that a field that never took focus fails here rather than as a broken hand-off.
+fn focus_field(cx: &mut VisualTestContext, selector: &'static str, field: &gpui::Entity<Field>) {
+    click(cx, selector);
+    let focused = cx.update(|window, cx| field.read(cx).state.focus_handle(cx).is_focused(window));
+    assert!(focused, "the premise: the click focused {selector}");
+}
+
+/// Whether the menu's item for `command` is enabled where focus is now: the app's question, which macOS asks before it
+/// shows the menu.
+fn enabled(cx: &mut VisualTestContext, command: EditCommand) -> bool {
+    cx.cx
+        .update(|cx| cx.is_action_available(command.action().as_ref()))
+}
+
+/// Why this matters: the Mac Edit menu's Copy, Paste and Select All dispatch the terminal's actions, so that they reach
+/// a focused terminal, and a text field answers them only because its wrapper hands each on to Kit as Kit's own. If
+/// that hand-off broke, the menu would do nothing in any field while the field's Cmd+C, Cmd+V and Cmd+A still worked,
+/// and nothing on screen would say why.
+///
+/// Specification: in each kind of field (the single-line one, the one that keeps line breaks, the growing box), the
+/// menu's Paste inserts the clipboard's text and reports exactly one `Changed`; the menu's Select All and then Copy put
+/// the field's whole text on the clipboard over what another program left there, and report nothing.
+#[gpui::test]
+fn the_edit_menus_copy_paste_and_select_all_act_on_every_kind_of_field(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("line", TextInputState::new),
+            ("row", TextInputState::new_keeping_line_breaks),
+            ("area", growing_box),
+        ],
+    );
+    for (selector, field) in ["line", "row", "area"].into_iter().zip(&fields) {
+        set_clipboard(cx, "from the menu");
+        focus_field(cx, selector, field);
+        from_menu(cx, EditCommand::Paste);
+        assert_eq!(
+            take(cx, field),
+            ("from the menu".into(), vec![TextInputEvent::Changed]),
+            "{selector}: Paste inserted the clipboard's text as one edit"
+        );
+        set_clipboard(cx, "another program's");
+        from_menu(cx, EditCommand::SelectAll);
+        from_menu(cx, EditCommand::Copy);
+        assert_eq!(
+            clipboard_text(cx).as_deref(),
+            Some("from the menu"),
+            "{selector}: Select All and Copy copied the whole text"
+        );
+        assert_eq!(
+            take(cx, field).1,
+            [],
+            "{selector}: selecting and copying are not edits"
+        );
+    }
+}
+
+/// Why this matters: a read-only field (the Rename editor holds its title read-only while its save is out) still lets
+/// the user select and copy its text, but nothing may paste into it. Kit offers its own Paste only while the field is
+/// editable, and the wrapper's hand-off must follow it, or the menu's Paste would look usable over a field that
+/// refuses it.
+///
+/// Specification: in each kind of field, holding text and set read-only, the menu's Paste is disabled, and Select All
+/// and then Copy put the field's whole text on the clipboard.
+#[gpui::test]
+fn a_read_only_field_offers_the_menus_copy_and_select_all_but_not_its_paste(
+    cx: &mut TestAppContext,
+) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("line", TextInputState::new),
+            ("row", TextInputState::new_keeping_line_breaks),
+            ("area", growing_box),
+        ],
+    );
+    for (selector, field) in ["line", "row", "area"].into_iter().zip(&fields) {
+        cx.update(|window, cx| {
+            let state = field.read(cx).state.clone();
+            state.set_text("kept as it is", window, cx);
+            state.set_read_only(true, cx);
+        });
+        // The read-only flag is a plain cell the field's draw reads, so the next frame is what takes Paste away.
+        redraw(cx);
+        focus_field(cx, selector, field);
+        assert!(
+            !enabled(cx, EditCommand::Paste),
+            "{selector}: Paste is disabled over a read-only field"
+        );
+        set_clipboard(cx, "another program's");
+        from_menu(cx, EditCommand::SelectAll);
+        from_menu(cx, EditCommand::Copy);
+        assert_eq!(
+            clipboard_text(cx).as_deref(),
+            Some("kept as it is"),
+            "{selector}: Select All and Copy copied the whole text"
+        );
+    }
 }
 
 // ---- The sequence prefix --------------------------------------------------------------------------------------------

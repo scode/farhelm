@@ -10,11 +10,11 @@
 //!
 //! The arrangement is the old one. Its first submenu, titled "Window", is what macOS shows as the app menu (AppKit
 //! takes the first menu as the application menu whatever its title), and GPUI also makes a menu titled "Window" the
-//! app's windows menu, as the old app did with that same submenu, so AppKit lists the open windows at its foot. Edit
-//! dispatches the text field's own editing actions ([`EditCommand`]), so it acts on a focused text field; elsewhere its
-//! items are disabled, except Copy, which GPUI Kit's window root also handles and which does nothing there. The old
-//! debug-only Help menu held the web view's developer tools and Float on Top, which went with the web view; it is not
-//! ported. The one item the old menu lacked is Open-Source Notices, above Quit, which opens the notices window
+//! app's windows menu, as the old app did with that same submenu, so AppKit lists the open windows at its foot. Edit's
+//! Undo, Redo and Cut dispatch the text field's own editing actions, and its Copy, Paste and Select All the terminal's
+//! ([`EditCommand`]), which a focused text field also handles as its own; [`EditCommand`] says which items each focused
+//! element enables. The old debug-only Help menu held the web view's developer tools and Float on Top, which went with
+//! the web view; it is not ported. The one item the old menu lacked is Open-Source Notices, above Quit, which opens the notices window
 //! (`licenses`; the maintainer decided on 2026-11-13 that the notices live there).
 //!
 //! Every item dispatches a declared action (SPEC_impl.md, "Actions and keymap"): the window and app commands are
@@ -67,8 +67,10 @@ pub(crate) fn menus() -> Vec<Menu> {
     ]
 }
 
-/// An Edit item: the text field's own action, tagged with the matching OS action so AppKit treats it as the standard
-/// editing command (system panels and services see the usual selectors).
+/// An Edit item: the command's action ([`EditCommand::action`]: a text field's, or for Copy, Paste and Select All the
+/// terminal's), tagged with the matching OS action so AppKit treats it as the standard editing command (system panels
+/// and services see the usual selectors). The chord it shows is read once, when the menu is installed: the action's
+/// first binding with no context, or failing that its first binding of all.
 fn edit(name: &'static str, command: EditCommand, os: OsAction) -> MenuItem {
     MenuItem::Action {
         name: name.into(),

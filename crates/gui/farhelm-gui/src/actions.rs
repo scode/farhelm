@@ -298,8 +298,9 @@ actions!(
         /// (`ONCE_PER_PRESS`).
         QuickLaunch,
         /// Paste the clipboard's text into the focused terminal, as a paste its program can tell from typing. The
-        /// terminal handles it; its keys are its rows of [`TERMINAL_KEYS`], and a menu item that dispatches it reaches
-        /// the focused terminal the same way.
+        /// terminal handles it; its keys are its rows of [`TERMINAL_KEYS`]. The Mac Edit menu's Paste dispatches it
+        /// too, which reaches a focused terminal the same way, and a focused text field handles it as its own paste
+        /// (`components::EditCommand`); no key of a text field is bound to it.
         Paste,
         /// Scroll the focused terminal back through its history by a page less a line (SPEC.md, "Reaching everything
         /// by keyboard": Shift+PageUp; the old app's step). The terminal handles it; its key is its row of
@@ -310,10 +311,12 @@ actions!(
         /// [`ScrollTerminalPageUp`]).
         ScrollTerminalPageDown,
         /// Select everything the focused terminal can show, its history included (Cmd+A on a Mac, the old app's
-        /// terminal key). The terminal handles it; selecting does not copy.
+        /// terminal key). The terminal handles it; selecting does not copy. The Mac Edit menu's Select All dispatches
+        /// it too, and a focused text field handles it as its own select all (`components::EditCommand`).
         SelectAllInTerminal,
         /// Copy the focused terminal's selection to the clipboard (Cmd+C on a Mac, WebKit's copy in the old app's
-        /// terminal). The terminal handles it; with nothing selected it does nothing.
+        /// terminal). The terminal handles it; with nothing selected it does nothing. The Mac Edit menu's Copy
+        /// dispatches it too, and a focused text field handles it as its own copy (`components::EditCommand`).
         CopyTerminalSelection,
         /// Open the Keyboard shortcuts dialog (SPEC.md, "Desktop window chrome": Cmd+/ on a Mac, Ctrl+Shift+/ on
         /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`).
@@ -859,6 +862,8 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         what: "scroll the terminal down a page",
         bind: Some(bind_page_down),
     },
+    // The Mac Edit menu dispatches the next three rows' actions and shows their Mac chords beside Copy, Paste and Select
+    // All, since each is its action's only Mac binding (`components::EditCommand`; the desktop tests pin that).
     TerminalKey {
         mac: Some("cmd-a"),
         linux: None,
