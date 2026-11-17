@@ -1236,32 +1236,38 @@ class ScenarioTest(unittest.TestCase):
         plan = gui_agent.load_scenario(self.write(sessions=sessions), "someone")
         self.assertEqual(gui_agent.scenario_creation_order(plan), [1, 0, 2])
 
-    def test_each_session_becomes_a_declared_command_launch_of_its_wrapper(self):
-        """A row shows its agent's mark, its status reading and its shield from the launch itself, with nothing in the
-        listing rewritten. Specified for each hero session: a command launch of the wrapper's bare name, with that
-        harness's YOLO flag only on a `yolo` one, declaring the wrapper's agent type with `{farhelm_args}`, asserting
-        the session's YOLO answer and confirming it only then, titled, on the helm's id of its host, in the given
-        directory."""
+    def test_each_session_becomes_an_agent_launch_of_its_wrappers_harness(self):
+        """The helm records a session as an agent session, and the details bar shows the command it composed rather
+        than a stored command with its `{farhelm_args}` placeholder, only when the create is an agent launch, the one
+        the launcher's Agent tab sends; the migration decided on 2026-11-16 that the staging launches the way a user
+        does. Specified for each hero session: an agent launch (`launch`, no `command`) of the wrapper's harness with
+        no model or effort, YOLO and confirmed only on a `yolo` session and Guarded on every other, titled, on the
+        helm's id of its host, in the given directory, with exactly the fields the helm's create takes."""
         plan = gui_agent.load_scenario(HERO, "someone")
         host_ids = {"local": 1, "build-box": 2, "gpu-1": 3}
-        commands = []
+        launches = []
         for session in plan["sessions"]:
             body = gui_agent.scenario_session_body(session, host_ids[session["host"]], pathlib.Path("/w/0"))
+            self.assertEqual(set(body), {"host", "cwd", "title", "launch", "confirm_yolo"})
             self.assertEqual((body["title"], body["host"], body["cwd"]),
                              (session["title"], host_ids[session["host"]], "/w/0"))
-            self.assertEqual(body["command"]["agent"], session["wrapper"])
-            self.assertEqual((body["command"]["yolo"], body["confirm_yolo"]), (session["yolo"], session["yolo"]))
-            self.assertIsNone(body["command"]["resume"])
-            commands.append(body["command"]["command"])
-        self.assertEqual(commands, [
-            "claude --dangerously-skip-permissions {farhelm_args}",
-            "codex {farhelm_args}",
-            "claude --dangerously-skip-permissions {farhelm_args}",
-            "claude {farhelm_args}",
-            "claude {farhelm_args}",
-            "codex {farhelm_args}",
-            "codex --yolo {farhelm_args}",
+            self.assertEqual(body["confirm_yolo"], session["yolo"])
+            launches.append(body["launch"])
+        self.assertEqual(launches, [
+            {"harness": harness, "model": None, "effort": None, "permissions": permissions}
+            for harness, permissions in (
+                ("claude", "yolo"), ("codex", "guarded"), ("claude", "yolo"), ("claude", "guarded"),
+                ("claude", "guarded"), ("codex", "guarded"), ("codex", "yolo"),
+            )
         ])
+        # The wrapper the session's replay script sits behind must be the program the helm runs for its harness
+        # (`fn program`, keyed here by the harness's snake_case wire name), or the launch would miss the replay.
+        source = (pathlib.Path(__file__).resolve().parent.parent / "crates/farhelm-helm/src/launches.rs").read_text()
+        body = source[source.index("fn program(harness: LaunchHarness)"):]
+        programs = {re.sub(r"(?<!^)([A-Z])", r"_\1", variant).lower(): name
+                    for variant, name in re.findall(r'LaunchHarness::(\w+) => "([^"]+)"', body[: body.index("\n}\n")])}
+        self.assertEqual({wrapper: programs[harness] for wrapper, harness in gui_agent.SCENARIO_HARNESSES.items()},
+                         {wrapper: wrapper for wrapper in gui_agent.SCENARIO_HARNESSES})
 
     def test_each_session_replays_its_transcript_through_its_staged_agent_script(self):
         """Every scenario session is launched as `claude` or `codex`, and the run's wrapper of that name runs the
@@ -1418,26 +1424,28 @@ class ScenarioTest(unittest.TestCase):
 
     def test_the_shield_check_tells_the_shields_apart(self):
         """The old staging's last check: each row shows exactly one permission shield, slashed for a YOLO session and
-        plain for every other. Specified against agent-track names in the window's words: the assertion each shows is
-        read as its shield, a YOLO observation on the status line reads as slashed whatever the launch said, a session
-        whose node is missing or doubled is not drawn yet, and a wrong shield is reported naming the session."""
+        plain for every other. Specified against agent-track names in the window's words for an agent launch: the
+        permission heading each shows is read as its shield (YOLO or Guarded), a YOLO observation on the status line
+        reads as slashed whatever the launch chose, a session whose node is missing or doubled is not drawn yet, and a
+        wrong shield is reported naming the session."""
         plan = gui_agent.plan_scenario(
             {"viewport": {"width": 1, "height": 1}, "hosts": [{"key": "l", "alias": "l", "kind": "local"}],
              "sessions": [{"title": t, "host": "l", "cwd": "~/a", "wrapper": "claude", "status": "running", "age": 0,
                            "yolo": yolo, "open": t == "y"} for t, yolo in (("y", True), ("n", False))]},
             self.dir, None, "synthetic")
-        said = "as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — x"
+        yolo = "YOLO: the agent bypasses its approval and sandbox safety checks\n\nLaunched with: x"
+        guarded = "Guarded · Claude auto mode\nClaude's classifier approves or blocks actions\n\nLaunched with: x"
 
         def entry(key: str, name: str) -> dict:
             return {"name": name, "key": {"path": f"a/session-item-{key}/{gui_agent.agent_track_id(key)}"}}
 
         ids = {0: "e:y", 1: "e:n"}
-        right = [entry("e:y", f"Claude — YOLO, {said}"), entry("e:n", f"Claude — Not YOLO, {said}")]
+        right = [entry("e:y", f"Claude — {yolo}"), entry("e:n", f"Claude — {guarded}")]
         self.assertEqual(gui_agent.shield_problems(plan, ids, right), ([], []))
         observed = [right[0], entry("e:n", f"YOLO observed on the agent's status line: x.\n\nLaunched as: Claude — "
-                                           f"Not YOLO, {said}")]
+                                           f"{guarded}")]
         self.assertEqual([w[:3] for w in gui_agent.shield_problems(plan, ids, observed)[1]], ["n: "])
-        swapped = [entry("e:y", f"Claude — Not YOLO, {said}"), right[1]]
+        swapped = [entry("e:y", f"Claude — {guarded}"), right[1]]
         self.assertEqual([w[:3] for w in gui_agent.shield_problems(plan, ids, swapped)[1]], ["y: "])
         self.assertEqual(gui_agent.shield_problems(plan, ids, [right[0]])[0], ["n (0 shields)"])
         self.assertEqual(gui_agent.shield_problems(plan, ids, [*right, right[1]])[0], ["n (2 shields)"])
@@ -1480,10 +1488,10 @@ class ScenarioTest(unittest.TestCase):
 
     @staticmethod
     def window_of(created: list[dict], yolo_of=None) -> list[dict]:
-        """A window snapshot's entries with one agent track per created session, named as the session list names a
-        command launch's (`yolo_of(key, body)` says which assertion it shows; the create body's own by default)."""
-        yolo_of = yolo_of or (lambda _key, body: body["command"]["yolo"])
-        return [{"name": f"Claude — {'YOLO' if yolo_of(key, body) else 'Not YOLO'}, as asserted",
+        """A window snapshot's entries with one agent track per created session, named as the session list names an
+        agent launch's (`yolo_of(key, body)` says which permission it shows; the create body's own by default)."""
+        yolo_of = yolo_of or (lambda _key, body: body["launch"]["permissions"] == "yolo")
+        return [{"name": f"Claude — {'YOLO: bypasses checks' if yolo_of(key, body) else 'Guarded · auto mode'}",
                  "key": {"path": gui_agent.agent_track_id(key)}}
                 for key, body in ((f"e:{n}", body) for n, body in enumerate(created, start=1))]
 
@@ -1539,7 +1547,7 @@ class ScenarioTest(unittest.TestCase):
         run = self.dir / "run"
         run.mkdir()
         helm, _, created, _ = self.stand_in_helm(plan)
-        flipped = lambda key, body: body["command"]["yolo"] != (key == "e:2")
+        flipped = lambda key, body: (body["launch"]["permissions"] == "yolo") != (key == "e:2")
         with self.assertRaisesRegex(RuntimeError, "wrong permission shield: migrate auth tokens: .* does not say"):
             gui_agent.stage_scenario(run, plan, "/fx", lambda: self.window_of(created, flipped), request=helm,
                                      timeout=10, interval=0)
