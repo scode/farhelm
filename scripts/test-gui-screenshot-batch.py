@@ -4,12 +4,13 @@ never leave the app running.
 
 The page is where the maintainer compares the GPUI app with the old app, so its labels are the claims that matter: a
 reference scene the app does not show yet must say "not yet ported", a picture this batch did not take must say "not
-captured in this batch" rather than "not yet ported", a mockup must say so, a capture must sit next to the reference
-scene it belongs to, and scenes touched since the last batch must come first. The capture step starts and stops real
-app runs, so its tests drive a fake `gui-agent.py` that records every call: `stop` must follow every `start`, also a
-failed or interrupted one, and a failed `start` or `stop` must fail the batch. On Linux a capture is cropped to the
-app's own drawing, so the PNG reading and cropping are tested against every PNG row filter and against a picture
-without the expected frame. Nothing here needs the app, the reference pictures or the real checkout.
+captured in this batch" rather than "not yet ported", a size a scene is deliberately not captured at must say so with
+its reason, a mockup must say so, a capture must sit next to the reference scene it belongs to, and scenes touched
+since the last batch must come first. The capture step starts and stops real app runs, so its tests drive a fake
+`gui-agent.py` that records every call: `stop` must follow every `start`, also a failed or interrupted one, a failed
+`start` or `stop` must fail the batch, and a scene is run only at the sizes it is captured at. On Linux a capture is
+cropped to the app's own drawing, so the PNG reading and cropping are tested against every PNG row filter and against
+a picture without the expected frame. Nothing here needs the app, the reference pictures or the real checkout.
 """
 
 from __future__ import annotations
@@ -183,6 +184,26 @@ class Page(unittest.TestCase):
             self.assertNotIn("not yet ported", cell)
         self.assertIn("unknown (no capture)", text)
 
+    def test_a_size_the_scene_is_not_captured_at_names_its_reason(self) -> None:
+        """A scene limited by `sizes` has no picture at the other sizes on purpose; an empty slot or "not captured in
+        this batch" there would read as a gap to chase. Specified: the GPUI-app cell says "not captured at <size>:
+        <sizes_why>" (escaped) once per skipped size, as a grey note rather than a failure or "not yet ported", beside
+        the sizes it does show; a page made without a capture adds "not captured in this batch" for those."""
+        listed = scenes()
+        listed["app_scenes"][0].update(sizes=["wide"], sizes_why="the <narrow> pane is too small")
+        # Narrow in both themes, so a note per variant rather than per size would show twice.
+        listed["app_variants"].append({"theme": "light", "size": "narrow", "window": [900, 700]})
+        note = '<p class="none">not captured at narrow: the &lt;narrow&gt; pane is too small</p>'
+        cell = self.gpui_cell(self.build(scenes=listed), "app-main-window")
+        self.assertEqual(cell.count(note), 1)
+        self.assertIn("light wide (1600x1000)", cell)
+        for wrong in ("not captured in this batch", "not yet ported", "capture failed", "class=\"missing\""):
+            self.assertNotIn(wrong, cell)
+        uncaptured = self.gpui_cell(self.build(scenes=listed, captures={}), "app-main-window")
+        self.assertIn("not captured in this batch", uncaptured)
+        self.assertIn(note, uncaptured)
+        self.assertNotIn("not captured at", self.gpui_cell(self.build(), "app-main-window"))
+
     def test_a_golden_is_labelled_with_its_platform(self) -> None:
         """Goldens are copies of every platform's, shown wherever the batch ran, so each says whose it is."""
         self.assertIn("golden, linux, light (400x300)", self.gpui_cell(self.build(), "golden-dialog"))
@@ -296,6 +317,36 @@ class SceneList(unittest.TestCase):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
         problems = batch.validate_scenes(scenes(), {"dialog", "buttons"})
         self.assertIn("golden 'buttons' is in the golden manifest but not listed in foundation_goldens", problems)
+
+    def test_each_bad_sizes_or_sizes_why_is_reported(self) -> None:
+        """`sizes` drops a scene from whole variants, so a malformed one would lose captures without a failure to show
+        for it, and a skip without its reason would leave the page with a hole it cannot explain. Specified: `sizes`
+        must be a non-empty list of size names the variants have that leaves at least one size out, and `sizes` and a
+        non-empty one-line `sizes_why` come together; each bad form is its own problem, and a well-formed pair is
+        none."""
+        why = "the narrow window is too small"
+        cases = {
+            "sizes must be a non-empty list of size names": [{"sizes": "wide", "sizes_why": why},
+                                                             {"sizes": [], "sizes_why": why},
+                                                             {"sizes": ["wide", 3], "sizes_why": why}],
+            "sizes names tiny, which no app variant has": [{"sizes": ["wide", "tiny"], "sizes_why": why}],
+            "sizes leaves no size out": [{"sizes": ["wide", "narrow"], "sizes_why": why}],
+            "sizes needs sizes_why": [{"sizes": ["wide"]}],
+            "sizes_why needs sizes": [{"sizes_why": why}],
+            "sizes_why must be a non-empty string of one line": [{"sizes": ["wide"], "sizes_why": " "},
+                                                                 {"sizes": ["wide"], "sizes_why": None},
+                                                                 {"sizes": ["wide"], "sizes_why": "one\ntwo"}],
+        }
+        for expected, keys in cases.items():
+            for extra in keys:
+                listed = scenes()
+                listed["app_scenes"][0].update(extra)
+                problems = batch.validate_scenes(listed, {"dialog"})
+                self.assertEqual(len(problems), 1, (extra, problems))
+                self.assertIn(f"app scene app-main-window: {expected}", problems[0])
+        listed = scenes()
+        listed["app_scenes"][0].update(sizes=["narrow"], sizes_why=why)
+        self.assertEqual(batch.validate_scenes(listed, {"dialog"}), [])
 
 
 class Pictures(unittest.TestCase):
@@ -538,6 +589,30 @@ class Capture(unittest.TestCase):
         self.assertEqual(starts["light-wide"], ["--fleet", "idle"])
         self.assertEqual(starts["light-wide-1"], ["--sessions", "0"])
         self.assertEqual(batch.start_groups([], ["--fleet", "idle"]), [(["--fleet", "idle"], [])])
+
+    def test_a_scene_limited_to_one_size_runs_only_at_that_size(self) -> None:
+        """A scene the narrow window cannot show failed every full batch, which teaches people to ignore failures;
+        `sizes` drops it there instead. Specified: a scene whose `sizes` is ["wide"] runs only in the wide variant's
+        run, between its group's other scenes there, and the narrow variant neither runs it nor records it as failed;
+        a start group left with no scene at a size makes no app run at that size; the batch does not fail."""
+        listed = scenes()
+        first = listed["app_scenes"][0]
+        limit = {"sizes": ["wide"], "sizes_why": "too narrow"}
+        listed["app_scenes"] = [
+            first,
+            dict(first, id="app-wide-only", steps=[["hover", "text:x"]], **limit),
+            dict(first, id="app-wide-alone", start=["--sessions", "1"], steps=[["press", "enter"]], **limit),
+        ]
+        record = self.capture(scenes=listed)
+        self.assertEqual(self.verbs("light-wide"), ["start", "wait", "screenshot", "hover", "screenshot", "stop"])
+        self.assertEqual(self.verbs("light-wide-1"), ["start", "press", "screenshot", "stop"])
+        self.assertEqual(self.verbs("dark-narrow"), ["start", "wait", "screenshot", "stop"])
+        runs = [call[0] for call in self.calls() if call[1] == "start"]
+        self.assertEqual(runs, ["light-wide", "light-wide-1", "dark-narrow"])
+        for scene_id in ("app-wide-only", "app-wide-alone"):
+            self.assertEqual(record["app"][scene_id], {"light": {"wide": f"captures/{scene_id}--light--wide.png"}})
+        self.assertEqual(record["errors"], {})
+        self.assertFalse(batch.capture_failed(record))
 
     def test_a_mac_run_asks_for_the_variants_size_and_crops_nothing(self) -> None:
         """Kit draws no frame on a Mac and the monitor is the real screen, so the start carries the variant's size and
