@@ -60,7 +60,7 @@ conflicted across all of it.
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------- |
 | Bootstrap                       | `crates/gui/farhelm-gui/src/bootstrap.rs`, `crates/gui/farhelm-gui/src/lib.rs`, `crates/gui/farhelm-gui/Cargo.toml`                                                                                                                                                                                                            | [reported](#bootstrap)                   | none                                  |
 | Theme                           | `crates/gui/farhelm-gui/src/theme.rs`                                                                                                                                                                                                                                                                                          | [reported](#theme)                       | 1: `theme::raw`                       |
-| Component layer                 | `crates/gui/farhelm-gui/src/components/`                                                                                                                                                                                                                                                                                       | [reported](#component-layer)             | 1: `components::transition::one_shot` |
+| Component layer                 | `crates/gui/farhelm-gui/src/components/`                                                                                                                                                                                                                                                                                       | [reported](#component-layer)             | 2: `one_shot`, `gpui_keyboard_flag`   |
 | Focus coordinator               | `crates/gui/farhelm-gui/src/focus.rs`, `crates/gui/farhelm-gui/src/focus_tests.rs`                                                                                                                                                                                                                                             | [none](#focus-coordinator)               | 2: `focus::apply`, `focus::track_raw` |
 | Layer manager                   | `crates/gui/farhelm-gui/src/layers.rs`, `crates/gui/farhelm-gui/src/layers_tests.rs`, `crates/gui/farhelm-gui/src/layers/`                                                                                                                                                                                                     | [none](#layer-manager)                   | 1: `layers::overlay`                  |
 | Root view wiring                | `crates/gui/farhelm-gui/src/root.rs`                                                                                                                                                                                                                                                                                           | [none](#root-view-wiring)                | none                                  |
@@ -235,9 +235,12 @@ change to them is a request. An element that fades in as it appears is drawn thr
 area's own code, and `components/transition.rs` (tested in `components/tests/transition.rs`), the one owner of one-shot
 transitions, is a rule too: a change to it, a new transition included, is a request.
 
-Lint exceptions: 1: GPUI's `with_animation` in `components::transition::one_shot`, the one-shot transitions the ticker's
+Lint exceptions: 2: GPUI's `with_animation` in `components::transition::one_shot`, the one-shot transitions the ticker's
 ten ticks a second cannot draw (SPEC_impl.md, "Animation time: the ticker"; the migration's orchestrator approved this
-owner on 2026-11-14).
+owner on 2026-11-14); and GPUI's `Window::last_input_was_keyboard` in the test helper
+`components::tests::list_row::gpui_keyboard_flag`, for one test's premise that a pointer move cleared GPUI's flag while
+the focus coordinator's own flag (`focus::last_input_was_keyboard`) kept the ring; no app code reads GPUI's flag (the
+migration's orchestrator decided the ban and this exception on 2026-11-17).
 
 ### Focus coordinator
 

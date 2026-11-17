@@ -682,9 +682,11 @@ of any mouse button clears it; pointer movement, the wheel and a modifier presse
 through pointer movement. GPUI's own `last_input_was_keyboard` does not decide this, because GPUI clears it on any
 pointer movement, which took the ring from a keyboard user who nudged the mouse while the help their Tab had shown
 stayed up; GPUI's own uses of it (hover styles held back while the keyboard is in use) are unchanged. The migration's
-orchestrator decided this on 2026-11-16. A menu item the pointer highlights after keyboard use keeps the ring, as the
-old scripted focus matched `:focus-visible` then, but its help stays the pointer's (`focus::focus_came_by_keyboard`), as
-the old `tooltip.js` told that focus apart (`menu-focus.js` at `24bc0580`).
+orchestrator decided this on 2026-11-16. Clippy bans GPUI's `Window::last_input_was_keyboard` in the GUI crates, so
+their code reads the coordinator's flag; one test reads GPUI's, to show the two differ. A menu item the pointer
+highlights after keyboard use keeps the ring, as the old scripted focus matched `:focus-visible` then, but its help
+stays the pointer's (`focus::focus_came_by_keyboard`), as the old `tooltip.js` told that focus apart (`menu-focus.js` at
+`24bc0580`).
 
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
