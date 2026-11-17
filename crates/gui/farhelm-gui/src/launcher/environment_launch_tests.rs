@@ -11,6 +11,7 @@
 //! installed) and host3 (no Podman check); the catalog holds `web`, on managed Ubuntu, which a container runs.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::tensorlake::Settings;
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, HostView, KeyedEntry, Preferences,
 };
@@ -118,7 +119,8 @@ pub(super) fn window_with(
 }
 
 /// [`window_with`], with `more` collections in the helm's first snapshot: the store ignores a push to a collection
-/// that snapshot did not install, so a test that pushes one (the recipe places) must list it here first.
+/// that snapshot did not install, so a test that pushes one (the recipe places) must list it here first. A recipe
+/// catalog among them takes the place of [`catalog`] (New sandbox's tests need built recipes).
 pub(super) fn window_with_more(
     cx: &mut TestAppContext,
     draft: LaunchDraft,
@@ -131,9 +133,14 @@ pub(super) fn window_with_more(
         listing(&["a"], &[session("a")]),
         hosts,
         preferences_state(preferences),
-        catalog(),
         no_runs(),
     ];
+    if !more
+        .iter()
+        .any(|state| state.collection == Collection::Recipes)
+    {
+        snapshot.push(catalog());
+    }
     snapshot.extend(more);
     helm.connect(snapshot);
     cx.run_until_parked();
@@ -187,6 +194,17 @@ pub(crate) fn answer_except(
     cx: &mut VisualTestContext,
     keep: impl Fn(&FakeCommand) -> bool,
 ) -> Vec<FakeCommand> {
+    answer_with(helm, cx, None, keep)
+}
+
+/// [`answer_except`], with the Tensorlake account read answered with `account`; with `None` it gets no body, so the
+/// launcher holds the account as unreadable and New sandbox stays hidden, as every container test here expects.
+pub(super) fn answer_with(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    account: Option<&Settings>,
+    keep: impl Fn(&FakeCommand) -> bool,
+) -> Vec<FakeCommand> {
     let mut kept = Vec::new();
     loop {
         cx.run_until_parked();
@@ -196,7 +214,9 @@ pub(crate) fn answer_except(
                 kept.push(command);
                 continue;
             }
-            let body = if command.path.ends_with("launch-catalog") {
+            let body = if command.path == "/api/tensorlake" {
+                account.map(|account| serde_json::to_value(account).unwrap())
+            } else if command.path.ends_with("launch-catalog") {
                 Some(json!([]))
             } else if command.path.starts_with("/api/launch-history") {
                 Some(json!({ "launches": [], "folders": [], "checkout_config_revision": 1 }))

@@ -27,7 +27,8 @@
 //! chosen one and an empty slot of the same size on the others, as the platform's pop-up menu marked the chosen
 //! option, and its label kept to one line and cut with an ellipsis, since the list is exactly as wide as its control
 //! ([`crate::layers::Anchor::matching_width`]) and a native menu never wrapped an option. An unavailable choice says
-//! why after its label ([`MenuItem::suffix`]), as the old app's disabled `<option>`s did (" · " and the reason).
+//! why after its label ([`MenuItem::suffix`]), as the old app's disabled `<option>`s did (" · " and the reason), and
+//! may carry a mark of its own after the tick's slot ([`MenuItem::mark`]), as a select's marked option does.
 //!
 //! A command that is one of a set of choices in force (the session list's orders, a `menuitemradio` in the old app)
 //! says whether it is the one in force with [`MenuItem::checked`]: it keeps its icon and its description, reports
@@ -65,6 +66,8 @@ pub struct MenuItem {
     id: SharedString,
     /// `None` for a choice that is not the chosen one: an empty slot as wide as an icon, so labels line up.
     icon: Option<Icon>,
+    /// A choice's own mark, drawn after the icon's slot ([`MenuItem::mark`]).
+    mark: Option<Icon>,
     label: SharedString,
     description: Option<Line>,
     /// Words drawn after the label on its line ([`MenuItem::suffix`]).
@@ -96,6 +99,7 @@ impl MenuItem {
         MenuItem {
             id: id.into(),
             icon: Some(icon),
+            mark: None,
             label: label.into(),
             description: None,
             suffix: None,
@@ -141,6 +145,13 @@ impl MenuItem {
     /// too, so a screen reader hears the reason; give an item a suffix or a [`MenuItem::description`], not both.
     pub fn suffix(mut self, suffix: impl Into<SharedString>) -> Self {
         self.suffix = Some(suffix.into());
+        self
+    }
+
+    /// Draw `mark` between the icon's slot and the label, in the icon's ink: a select's option that carries a mark of
+    /// its own ([`super::SelectOption::mark`]), whose tick keeps the icon's slot. Decoration only, named by nothing.
+    pub fn mark(mut self, mark: Icon) -> Self {
+        self.mark = Some(mark);
         self
     }
 
@@ -269,6 +280,18 @@ impl RenderOnce for MenuItem {
                     .text_color(theme::color(icon_ink))
                     .into_any_element(),
                 None => div().size(px(14.)).flex_none().into_any_element(),
+            })
+            .when_some(self.mark, |item, mark| {
+                let id = format!("{}-mark", self.id);
+                item.child(
+                    svg()
+                        .path(mark.path())
+                        .size(px(14.))
+                        .flex_none()
+                        .mt(px(1.))
+                        .debug_selector(move || id)
+                        .text_color(theme::color(icon_ink)),
+                )
             })
             .child(copy)
             .when_some(self.chosen, |item, chosen| item.aria_selected(chosen))

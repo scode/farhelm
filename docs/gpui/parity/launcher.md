@@ -607,15 +607,24 @@ Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed
 
 Tests: 16. Covers: recipe placement explains prerequisites and requires billing consent.
 
-not yet ported: New sandbox is the environments work's next piece, and this area's cases below are covered by the New
-sandbox PRs (desktop integration), the citation the migration's orchestrator decided on 2026-11-16 for every
-environments case until those PRs land. Six of the 16 cases are this area's: "recipe placement explains prerequisites
-and requires billing consent", "an existing-host launch stays nonmodal while its Resume is held", "a recipe template
-quick launch asks before one recipe request" (the question comes with New sandbox; the templates area applies the
-template's target), "template placement keeps Host editable after leaving an environment", "a held sandbox Suspend and a
-launch on another host proceed side by side" and "Hosts refuses a host's Resume and Settings while a launch is waking
-that host". The other ten are the session view's and Hosts'; the session view's are recorded in
-[Sidebar and session view](sidebar-and-session-view.md), under its cases of specs listed in other areas' files.
+partly: six of the 16 cases are this area's, and the other ten are the session view's and Hosts'; the session view's are
+recorded in [Sidebar and session view](sidebar-and-session-view.md), under its cases of specs listed in other areas'
+files. Of "recipe placement explains prerequisites and requires billing consent", New sandbox showing once the account
+has an API key, the first recipe with a snapshot chosen on entering it, an unbuilt recipe listed unavailable with "No
+snapshot yet" (and the account's prerequisites before it, in the old order), and the create sent unconfirmed on its own
+route to the Tensorlake account, in
+`launcher::sandbox_view_tests::{new_sandbox_is_hidden_without_an_api_key, entering_new_sandbox_chooses_the_first_built_recipe_and_names_the_missing_key, sandbox_recipes_are_listed_with_their_mark_size_and_refusal, the_registration_note_shows_and_copies_the_command, a_press_sends_the_sandbox_create_unconfirmed_and_its_refusal_comes_back}`
+and
+`launcher::environment_tests::{a_new_sandbox_is_refused_for_each_missing_prerequisite_in_the_old_order, the_registration_note_needs_a_readable_key}`;
+a quick launch of a sandbox waiting for the account before it decides in
+`launcher::sandbox_view_tests::a_hidden_quick_launch_waits_for_the_account_read`. Not yet ported: that case's billing
+question ("Create a sandbox for this session?", its Cancel and "Create and launch", the confirmed create and the refusal
+kept with its draft after it), which comes with the question; until then a press sends the create unconfirmed and the
+helm's refusal comes back as any refused launch does. "A recipe template quick launch asks before one recipe request"
+comes with the question too (the templates area applies the template's target); "an existing-host launch stays nonmodal
+while its Resume is held", "a held sandbox Suspend and a launch on another host proceed side by side" and "Hosts refuses
+a host's Resume and Settings while a launch is waking that host" with resume before create; "template placement keeps
+Host editable after leaving an environment" with templates' placement.
 
 ### `tests/github-checkouts.spec.ts`
 
@@ -1088,6 +1097,12 @@ migration's orchestrator decided on 2026-11-16 for every environments case until
 - While a new environment's recipe is chosen, the recent setups strip is hidden; recent setups of new environments come
   with the environments work's recent setups. The composer search's folder rows and Browse are refused in the old words,
   and so is a `~` path, which the old search took as a choice of the home the folder already was.
+- New sandbox reads the Tensorlake account once as the launcher opens; the old launcher read it again on every fleet
+  notice. Settings, where it changes, opens from the page the launcher covers, so a key saved there shows at the
+  launcher's next opening either way. A failed read is not retried, so it leaves New sandbox hidden until the launcher
+  is reopened.
+- New sandbox's recipes are listed with the cube mark and their CPU and memory ("ready · 2 CPUs · 4 GB memory"), as
+  SPEC.md's "Sandbox sessions" asks; the old select listed names alone, with a refused recipe's reason after its name.
 - New container reads each host's Podman state from its pushed check and asks for a check of every container host as the
   launcher opens; it does not read `GET /api/environment-places`, so a host never checked says "this host needs a Podman
   check" until its check answers, where the old select showed the places read's words.
