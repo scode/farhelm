@@ -151,6 +151,7 @@ use gpui::{
 
 use crate::assets::Icon;
 use crate::components::{Button, Checkbox, HoverHelp, IconButton, StatusMark, Tier, pulse_opacity};
+use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
@@ -1046,11 +1047,18 @@ pub(crate) fn host_change_in_flight(cx: &App) -> bool {
 }
 
 /// A host's identity mark in its row: its chosen shape and color at 12 pixels, a status named "Local" or "Remote" for
-/// assistive technology, with hover help saying what that means. It never gives way to a long name.
+/// assistive technology, or for a sandbox or container its provider's word ("Sandbox", "Container"), with hover help
+/// saying what that means for the machine. The session rows in that environment use the same word, so the panel and
+/// those rows agree on what the machine is; their help describes a session in it instead. It never gives way to a long
+/// name.
 fn identity_mark(host: &HostView, locality: Locality, palette: &Palette) -> AnyElement {
     let (word, help) = match locality {
         Locality::Local => ("Local", "Local: on this machine, where the helm runs"),
         Locality::Remote => ("Remote", "Remote: on another machine, reached over SSH"),
+        Locality::Environment(provider) => {
+            let words = ProviderUi(provider);
+            (words.locality_label(), words.host_mark_help())
+        }
     };
     div()
         .flex_none()

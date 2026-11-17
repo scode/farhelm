@@ -855,7 +855,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-recipes-rows",
-        size: (800., 830.),
+        size: (800., 900.),
         draw: empty,
         setup: settings_recipes_rows_setup,
     },

@@ -225,7 +225,9 @@ pub(super) fn settings_recipe_editor_setup(state: &SceneState, window: &mut Wind
 /// whose stack had none: one built with both agents' versions and changed packages, so it warns, and rebuilding at its
 /// fifth step, its line drawn at the pulse's full brightness and no action offered; one failed at its fourth step with
 /// the build sandbox's reason and Retry; and one on a container image, which Tensorlake cannot run, so it warns and
-/// offers nothing. Three rows, so the last one's warning fits above the footer unscrolled.
+/// offers nothing. Three rows, so the last one's warning fits above the footer unscrolled. The window is 70 pixels
+/// taller than the other Settings scenes' for that: the Tensorlake lines start with the place's name, which wraps two
+/// of them, and at 830 pixels the last warning fell behind the footer.
 pub(super) fn settings_recipes_rows_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let recipe = |name: &str,
                   base: serde_json::Value,

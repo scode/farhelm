@@ -33,7 +33,9 @@
 //!   have moved on since, a running build's step ("step 5 of 9") with the running pulse, a failed build's step and
 //!   reason, an interrupted build, cleanup still pending, and a base the snapshot's provider cannot run
 //!   ([`snapshot_status`]). The agents' versions and a failure's reason come from the build sandbox, so they are drawn
-//!   as host text; the rest is the user's own recipe or the app's words.
+//!   as host text; the rest is the user's own recipe or the app's words. Those lines and the prepared line report the
+//!   Tensorlake account, so each block starts with that place's name ([`at_snapshot_place`]), as a container place's
+//!   line starts with its host's.
 //! - **Builds are accepted work.** Build snapshot, Rebuild snapshot and Retry send the same request, which starts a
 //!   build or joins the running one, through the operation store under the recipe's key ([`OpKey::recipe`]). The helm
 //!   answers 202 once the build runs on its own task, and pushes the recipe building before that reply. A refusal (no
@@ -147,7 +149,9 @@ fn build_command(name: &str) -> Result<Command, PathError> {
 // ---- What a row says -----------------------------------------------------------------------------------------------
 
 /// The one-line summary under a recipe's name: size, base, package count, then the tunnel count only when there are
-/// tunnels, so choosing a recipe shows what its next build will contain. The old `recipe_summary`'s words.
+/// tunnels, so choosing a recipe shows what its next build will contain. The old `recipe_summary`'s words, except that
+/// the managed base is "Managed Ubuntu", as the editor's card and SPEC.md name it: the old "Tensorlake Ubuntu" dated
+/// from before the base ran on Podman too, and read as Tensorlake-only on a recipe used for containers.
 pub(crate) fn summary(view: &RecipeView) -> String {
     let plural = |count: usize, one: &str, many: &str| {
         format!("{count} {}", if count == 1 { one } else { many })
@@ -158,7 +162,7 @@ pub(crate) fn summary(view: &RecipeView) -> String {
         format!("{} GB", view.size.disk_gb),
     ];
     parts.push(match &view.base {
-        RecipeBase::ManagedUbuntu => "base: Tensorlake Ubuntu".into(),
+        RecipeBase::ManagedUbuntu => "base: Managed Ubuntu".into(),
         RecipeBase::TensorlakeImage { image } => format!("base: your image {image}"),
         RecipeBase::TensorlakeSnapshot { snapshot_id } => {
             format!("base: your snapshot {snapshot_id}")
@@ -335,6 +339,16 @@ fn status_line(line: &Line, sentence: HostSentence, pulse: f32, cx: &App) -> Div
                 .opacity(pulse)
         }))
         .child(sentence)
+}
+
+/// Start `line` with the name of the place its words report ([`SNAPSHOT_PLACE`], "Tensorlake · No snapshot yet"), as
+/// every container place's line starts with its host's name. Applied as the row draws, to the first line of the
+/// built-snapshot status and to the prepared line, each the start of its own status region; the lines' own rules
+/// ([`snapshot_status`], [`prepared::prepared_status`]) stay the old ones, and their tests read them without it.
+fn at_snapshot_place(line: &mut Line) {
+    if let Some(place) = ProviderUi(SNAPSHOT_PLACE.provider()).account_place() {
+        line.words.insert(0, Words::App(format!("{place} · ")));
+    }
 }
 
 /// "step 5 of 9".
@@ -757,7 +771,10 @@ impl Recipes {
     ) -> Stateful<Div> {
         let palette = theme::palette(cx);
         let name = view.name.clone();
-        let status = snapshot_status(view, zone);
+        let mut status = snapshot_status(view, zone);
+        if let Some(first) = status.lines.first_mut() {
+            at_snapshot_place(first);
+        }
         let key = OpKey::recipe(&name);
         let (in_flight, refusal) = session::current_operations(cx)
             .map(|operations| {
@@ -801,7 +818,8 @@ impl Recipes {
             .min_w_0()
             .children(lines);
         // `.recipe-row-prepared`: preparation is a status region of its own, apart from the build, as in the old row.
-        let prepared = prepared::prepared_status(view, now, zone);
+        let mut prepared = prepared::prepared_status(view, now, zone);
+        at_snapshot_place(&mut prepared);
         let prepared_sentence = prepared.sentence(format!("recipe-{name}-prepared-line"));
         let prepared = div()
             .id(ElementId::Name(format!("recipe-{name}-prepared").into()))

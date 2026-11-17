@@ -190,10 +190,10 @@ linux/settings-recipe-editor--dark.png 6820e6f6cb15a0a83d9804313398346f444a89a7
 linux/settings-recipe-editor--light.png a3494c5f7f22edac5a85dfbeb1cf63015564155c
 linux/settings-recipes--dark.png 401be0c062497a49ed245fce1d9d5f1730112eaf
 linux/settings-recipes--light.png a86f3a3876a7d3ecf8c9df6b3e8dd2cecbd9b008
-linux/settings-recipes-places--dark.png 88d3a3098645d82830bc1e280e6fb18d91f9cf4f
-linux/settings-recipes-places--light.png e1d2e20742e3de584e7bf6b57ffc1009495dfea8
-linux/settings-recipes-rows--dark.png 9fa620884db56e62d40b693fd2778b0726af0be6
-linux/settings-recipes-rows--light.png 0b7dcf009ba8027c29f7039392dd59c28c75d934
+linux/settings-recipes-places--dark.png ac7a2438f67dbcc83c13f7f6553e399ebeb2ce1b
+linux/settings-recipes-places--light.png 9356fcf6158cd740b02d58faa59768e60a9ba653
+linux/settings-recipes-rows--dark.png 483bfce58eb6467257e67c061d2a4471a1fdbb7e
+linux/settings-recipes-rows--light.png 8eb9c3714aaa647e327e397c0d383fd72a7690be
 linux/settings-sessions--dark.png 1c4b800673bdbf596a8472b688bacf857ee67383
 linux/settings-sessions--light.png 12e0e96c350886a36536c62b62318bc4a3d62991
 linux/settings-tensorlake--dark.png 2b3959b86a6b0d965c3d73e8e947345620c638cf

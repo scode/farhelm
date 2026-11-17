@@ -98,6 +98,29 @@ impl ProviderUi {
         }
     }
 
+    /// The hover help of a sandbox's or container's own mark in its Hosts row, which names the machine itself, not a
+    /// session in it ([`ProviderUi::mark_help`] is the session row's). True for every way such a host comes to be
+    /// listed: a sandbox added from Add host or made for a session is reached over SSH like any remote host, and a
+    /// container Farhelm made for a session runs on one of the user's container hosts, this machine included.
+    pub(crate) fn host_mark_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Sandbox: a Tensorlake sandbox, reached over SSH",
+            ProviderKind::Podman => "Container: a container on one of your container hosts",
+        }
+    }
+
+    /// What a recipe's row in Settings → Recipes calls this provider's place when the place is the provider's account
+    /// rather than a host: the name ahead of the row's built-snapshot and prepared-snapshot lines, which report that
+    /// place, as a container place's line starts with its host's name ("Local (this machine) · Not built"). Without
+    /// it, "No snapshot yet" and Build snapshot read as the whole recipe's state on a recipe used only for containers,
+    /// as a real container run found. `None` for a provider whose places are all hosts, which their lines name.
+    pub(crate) fn account_place(self) -> Option<&'static str> {
+        match self.0 {
+            ProviderKind::Tensorlake => Some("Tensorlake"),
+            ProviderKind::Podman => None,
+        }
+    }
+
     /// The Hosts panel's command that removes a host of this provider, which deletes its machine: the host menu's item
     /// and the label and answer of its question (`hosts::remove`). The old app's `host_delete_label`.
     pub(crate) fn host_delete_label(self) -> &'static str {

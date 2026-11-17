@@ -104,7 +104,8 @@ fn plain(text: &str) -> (Tone, String) {
 /// This one line is how the list tells recipes apart at a glance, and the old app's mockup wording is the contract its
 /// browser spec checked too. Specified (the old `summaries_follow_the_mockup`): the summary reads size, base and
 /// package count, then the tunnel count only when there are tunnels, with singular and plural counts, and each base
-/// named as the old list named it.
+/// named as the old list named it, except the managed base, which is "Managed Ubuntu" as the editor names it (the old
+/// "Tensorlake Ubuntu" read as Tensorlake-only on a recipe used for containers).
 #[test]
 fn summaries_follow_the_mockup() {
     let packages = |n: usize| RecipeView {
@@ -113,13 +114,13 @@ fn summaries_follow_the_mockup() {
     };
     assert_eq!(
         summary(&packages(12)),
-        "4 CPU · 8 GB · 50 GB · base: Tensorlake Ubuntu · 12 packages · 1 tunnel"
+        "4 CPU · 8 GB · 50 GB · base: Managed Ubuntu · 12 packages · 1 tunnel"
     );
     let mut one_package = packages(1);
     one_package.tunnels = view(RecipeBase::ManagedUbuntu, 2).tunnels;
     assert_eq!(
         summary(&one_package),
-        "4 CPU · 8 GB · 50 GB · base: Tensorlake Ubuntu · 1 package · 2 tunnels"
+        "4 CPU · 8 GB · 50 GB · base: Managed Ubuntu · 1 package · 2 tunnels"
     );
     assert_eq!(
         summary(&view(
@@ -614,16 +615,17 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
     let text = words(cx);
     assert!(
         text.contains(
-            "rust-dev 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package Snapshot built 2026-11-03 15:02 · \
-             2.0.1 (Claude Code) · codex-cli 0.40.0 Not prepared yet; the first new host or session prepares it \
-             (about a minute). Rebuild snapshot"
+            "rust-dev 2 CPU · 4 GB · 20 GB · base: Managed Ubuntu · 1 package Tensorlake · Snapshot built \
+             2026-11-03 15:02 · 2.0.1 (Claude Code) · codex-cli 0.40.0 Tensorlake · Not prepared yet; the first new \
+             host or session prepares it (about a minute). Rebuild snapshot"
         ),
         "{text}"
     );
     assert!(
         text.contains(
-            "py-data 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package No snapshot yet Not prepared yet; \
-             the first new host or session prepares it (about a minute). Build snapshot"
+            "py-data 2 CPU · 4 GB · 20 GB · base: Managed Ubuntu · 1 package Tensorlake · No snapshot yet \
+             Tensorlake · Not prepared yet; the first new host or session prepares it (about a minute). Build \
+             snapshot"
         ),
         "{text}"
     );
@@ -655,9 +657,9 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
 /// assistive technology reads which recipe a status is about and reads the build apart from the preparation; the old
 /// spec `tensorlake-recipes.spec.ts`, "a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with
 /// the recipe", found them by those names ("Snapshot of <name>", "Preparation of <name>"). Specified: over a recipe
-/// never built, `py-data`, its snapshot region is a status whose name starts "Snapshot of py-data: No snapshot yet",
-/// and its preparation region a status whose name starts "Preparation of py-data: Not prepared yet; the first new
-/// host or session prepares it".
+/// never built, `py-data`, its snapshot region is a status whose name starts "Snapshot of py-data: Tensorlake · No
+/// snapshot yet", and its preparation region a status whose name starts "Preparation of py-data: Tensorlake · Not
+/// prepared yet; the first new host or session prepares it".
 #[gpui::test]
 fn each_rows_build_and_preparation_are_status_regions_named_for_the_recipe(
     cx: &mut TestAppContext,
@@ -683,7 +685,7 @@ fn each_rows_build_and_preparation_are_status_regions_named_for_the_recipe(
     };
     assert_eq!(role, Some(gpui::Role::Status));
     assert!(
-        name.starts_with("Snapshot of py-data: No snapshot yet"),
+        name.starts_with("Snapshot of py-data: Tensorlake · No snapshot yet"),
         "{name}"
     );
     let Some((role, name)) = region(cx, "recipe-py-data-prepared") else {
@@ -692,9 +694,55 @@ fn each_rows_build_and_preparation_are_status_regions_named_for_the_recipe(
     assert_eq!(role, Some(gpui::Role::Status));
     assert!(
         name.starts_with(
-            "Preparation of py-data: Not prepared yet; the first new host or session prepares it"
+            "Preparation of py-data: Tensorlake · Not prepared yet; the first new host or session prepares it"
         ),
         "{name}"
+    );
+}
+
+/// The built-snapshot and prepared lines report the Tensorlake account's artifacts, and a recipe on Managed Ubuntu also
+/// runs in containers, whose places get lines of their own; unnamed, "No snapshot yet" and Build snapshot read as the
+/// whole recipe's state, which a real container run took them for. The name starts each status region once; a
+/// warning after it belongs to the same place and repeats nothing. Specified: a never-built recipe's snapshot status
+/// reads "Tensorlake · No snapshot yet", its status region is named "Snapshot of py-data: Tensorlake · No snapshot
+/// yet", its prepared line reads "Tensorlake · Not prepared yet; …", and Build snapshot is still offered; a built
+/// recipe whose packages changed since starts with "Tensorlake · Snapshot built", and its second line is the packages
+/// warning alone.
+#[gpui::test]
+fn the_snapshot_lines_are_named_by_their_place(cx: &mut TestAppContext) {
+    let mut changed = entry("rust-dev", idle(), snapshot());
+    changed["packages"] = json!(["jq", "ripgrep"]);
+    let (mut helm, cx) = open_with(cx, vec![entry("py-data", idle(), Value::Null), changed]);
+    open_settings(cx);
+    click(cx, section_button(Section::Recipes));
+    let _ = one_account_read(&mut helm);
+    assert_eq!(
+        label_of(cx, "recipe-py-data-snapshot-0").as_deref(),
+        Some("Tensorlake · No snapshot yet")
+    );
+    assert_eq!(
+        label_of(cx, "recipe-py-data-snapshot").as_deref(),
+        Some("Snapshot of py-data: Tensorlake · No snapshot yet")
+    );
+    assert_eq!(
+        label_of(cx, "recipe-py-data-prepared-line").as_deref(),
+        Some(
+            "Tensorlake · Not prepared yet; the first new host or session prepares it (about a minute)."
+        )
+    );
+    assert_eq!(
+        label_of(cx, "recipe-build-py-data").as_deref(),
+        Some("Build snapshot for py-data")
+    );
+    assert!(
+        label_of(cx, "recipe-rust-dev-snapshot-0")
+            .is_some_and(|line| line.starts_with("Tensorlake · Snapshot built")),
+        "{:?}",
+        label_of(cx, "recipe-rust-dev-snapshot-0")
+    );
+    assert_eq!(
+        label_of(cx, "recipe-rust-dev-snapshot-1").as_deref(),
+        Some("Packages changed since this snapshot was built; rebuild it to apply them")
     );
 }
 
