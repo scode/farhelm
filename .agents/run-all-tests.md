@@ -118,7 +118,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `scripts/publish-docs-shots.sh --self-test`
 - `scripts/publish-readme-hero.sh --self-test` and `shellcheck scripts/publish-readme-hero.sh`, and
   `python3 -I scripts/test-scenario-json5.py` (the scenario loader the hero publisher reads its size through)
-- `bash -n scripts/readme-screenshot.sh && shellcheck scripts/readme-screenshot.sh` (the hero's capture command)
+- `shellcheck -x scripts/readme-screenshot.sh scripts/docs-screenshots.sh scripts/media-mac.sh` and `bash -n` on each of
+  the three scripts (the capture commands and shared Mac shipment)
 - `bash scripts/test-plans-watch.sh` and `python3 scripts/test-plans-queue.py`, with `shellcheck` over
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check` and `deno test -A` on
@@ -152,10 +153,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
   lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
-- `python3 -B scripts/test-docs-shots.py` and `shellcheck scripts/docs-screenshots.sh` (docs page declarations and park
-  targets, crop geometry and capture failures against a stand-in harness); one live
-  `scripts/docs-screenshots.sh --local --only launch-templates` run (on Linux both shots stop at the size check; confirm
-  the harness stopped cleanly)
+- `python3 -B scripts/test-docs-shots.py` (docs page declarations and park targets, crop geometry and capture failures
+  against a stand-in harness); one live `scripts/docs-screenshots.sh --local --only launch-templates` run (on Linux both
+  shots stop at the size check; confirm the harness stopped cleanly)
 - `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class,
   under a number and a name no other step uses)
 - The GPUI app's end-to-end smoke test from `.agents/validation.md` (`scripts/gui-e2e-smoke.py`, through the recorder),

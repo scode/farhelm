@@ -170,6 +170,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--only")
     parser.add_argument("--no-build", action="store_true")
+    parser.add_argument("--lock", type=Path, help="shared GUI lock, held by gui-agent from build through stop")
     options = parser.parse_args()
     pages = load_pages(HERE / "docs-shots", options.only)
     gui, batch = load(HERE / "gui-agent.py"), load(HERE / "gui-screenshot-batch.py")
@@ -182,6 +183,8 @@ def main() -> int:
         start += ["--size", f"{width + batch.MONITOR_MARGIN}x{max(height, 1200)}"]
     if options.no_build:
         start.append("--no-build")
+    if options.lock:
+        start += ["--lock", str(options.lock)]
     failed = True
     try:
         if gui.main([str(run), *start]) == 0:

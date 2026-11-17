@@ -12,9 +12,8 @@ reading list in `website/AGENTS.md`.
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
 > NOTE: The demo video cannot be refreshed until its removed browser capture is rebuilt on the GPUI tooling. Its
-> procedure below is kept for that rebuild. The docs screenshot runner now uses the GPUI harness locally, but no page is
-> published yet and the Mac path is still pending. The README screenshot has been rebuilt on the GPUI tooling. The brand
-> marks and the docs refresh's text work are unaffected; a docs refresh leaves its screenshots as they are.
+> procedure below is kept for that rebuild. The docs screenshot runner uses the GPUI harness locally or on a Mac. No
+> page is published yet. The README screenshot has been rebuilt on the GPUI tooling.
 
 ## Brand marks: the icon and the wordmark
 
@@ -72,11 +71,17 @@ completed full refresh moves that marker; a single-page fix or a screenshot refr
 `scripts/docs-screenshots.sh --local` runs page modules under `scripts/docs-shots/` through `scripts/docs_shots.py` and
 the GPUI test harness, against one staged fleet. `docs/docs-shots/SPEC.md` governs it; read it before changing those
 modules or anything under `docs/docs-shots/`. Only Launch templates has been ported, with two unannotated crops. No page
-is published yet. Capture is local only until the Mac path lands with the first published page; on Linux each shot is
-expected to stop at the size check, since headless Mutter renders at scale 1.
+is published yet. Run `scripts/docs-screenshots.sh --mac <destination>` for a capture at 2x. It shares the README hero's
+SSH transport, preflight and Mac-wide lock. On Linux each shot is expected to stop at the size check since headless
+Mutter renders at scale 1.
+
+> NOTE: The docs scenario's 1600x1000-point window needs a larger Mac display than the README hero's. On the test Mac
+> (2026-11-17) the app fitted it to 1600x972 points, so both Launch templates shots stopped at the size check and no
+> picture came back. When that happens, say so, and do not work around it with window resizing, rescaling or a GPUI
+> patch.
 
 The command keeps its bulk capture record and local preview output, and `--only <page>` remains for drafting. Publishing
-is out of scope until the Mac path lands. Published release material stays frozen, and no page module captures release
-shots yet. The existing publisher carries published release shots over unchanged (`website/.agents/release-notes.md`,
-"Release notes"). `scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it
-by hand or commit a screenshot on main. Changing that script means running its `--self-test`, which needs no network.
+belongs to a docs refresh. Published release material stays frozen, and no page module captures release shots yet. The
+existing publisher carries published release shots over unchanged (`website/.agents/release-notes.md`, "Release notes").
+`scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it by hand or commit a
+screenshot on main. Changing that script means running its `--self-test`, which needs no network.

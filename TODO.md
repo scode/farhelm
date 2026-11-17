@@ -57,10 +57,6 @@ What the GPUI migration left when its area sessions ended on 2026-11-17, planned
   controls (about 130 lines), differing only in authoring rules; the old app had one picker. Share it, with no visible
   change. Plan: `plans/queue/gpui-shared-placement.md`.
 
-- **Docs screenshots on the test Mac.** The docs screenshot runner works locally only; give it the README hero's Mac
-  path and prove both captures fit on the test Mac's 4K display. Mechanism only: shots back in pages are a normal docs
-  refresh. Plan: `plans/queue/gpui-docs-shots-mac.md`.
-
 - **Docs for environment recent setups and the suspended-host launch refusal.** Both landed or change after the docs
   rewrite. Plan: `plans/queue/gpui-docs-followups.md`.
 

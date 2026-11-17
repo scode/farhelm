@@ -4,8 +4,8 @@
 # One command, so that "refresh the docs screenshots" is a thing an agent can
 # be told without it inventing a procedure. Runs the GPUI test harness through
 # scripts/docs_shots.py for every page module (or one page), and prints each
-# PNG's path. Local only for now; the Mac path comes with the first published
-# page. On Linux every shot stops at the size check because it renders at
+# PNG's path. --mac ships the capture through the README hero's Mac transport.
+# On Linux every shot stops at the size check because it renders at
 # scale 1. The PNGs land in the docs website's gitignored
 # website/public/docs-shots-local/, where the local preview shows them at
 # once. It never publishes.
@@ -25,8 +25,11 @@
 # shots are frozen"). Release-shot argument validation is retained, but no
 # page module captures release shots yet, so recapture is refused.
 #
-# Usage: scripts/docs-screenshots.sh --local [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
+# Usage: scripts/docs-screenshots.sh (--local | --mac DEST) [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
 #   --local      capture on this machine through the GPUI test harness
+#   --mac DEST   capture on a Mac over ssh, with the FARHELM_MEDIA_* transport
+#                settings documented in scripts/readme-screenshot.sh, except
+#                FARHELM_MEDIA_MAC: this command always needs --mac DEST
 #   --only PAGE  capture only that page's shots (scripts/docs-shots/PAGE.py)
 #   --no-build   reuse the harness's existing binaries (the
 #                shots can then be previewed but not published)
@@ -46,10 +49,16 @@ output="$repo/website/public/docs-shots-local"
 only=""
 build=true
 local_mode=false
+mac=""
 recapture=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --local) local_mode=true ;;
+    --mac)
+      shift
+      test -n "${1:-}" || { echo "--mac needs an ssh destination" >&2; exit 2; }
+      mac="$1"
+      ;;
     --only)
       shift
       test -n "${1:-}" || { echo "--only needs a page name" >&2; exit 2; }
@@ -71,8 +80,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if [ "$local_mode" != true ]; then
-  echo "pass --local; the Mac path comes with the first published page" >&2
+if { [ "$local_mode" != true ] && [ -z "$mac" ]; } || { [ "$local_mode" = true ] && [ -n "$mac" ]; }; then
+  echo "pass either --local or --mac DEST" >&2
   exit 2
 fi
 
@@ -147,12 +156,46 @@ else
 fi
 mkdir -p "$output" || exit 1
 
-# The harness owns the build directory, fleet and capture checks; pages share
-# one app run at the scenario's viewport.
-engine=(python3 -B "$repo/scripts/docs_shots.py" --out "$output")
-[ -z "$only" ] || engine+=(--only "$only")
-[ "$build" = true ] || engine+=(--no-build)
-"${engine[@]}" || {
+# Ship only the capture. The source checkout owns Git provenance and writes
+# capture.json after fetching the checked PNGs.
+mac_capture_script() {
+  cat <<'EOF'
+src=$1 lock=$2 out=$3 log=$4 build=$5 only=${6:-}
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export USER="${USER:-$(/usr/bin/id -un)}"
+export CARGO_BUILD_JOBS=6
+cd "$HOME/$src" || exit 1
+mkdir -p "$HOME/$out" || exit 1
+set -- --out "$HOME/$out" --lock "$HOME/$lock"
+[ -z "$only" ] || set -- "$@" --only "$only"
+[ "$build" = true ] || set -- "$@" --no-build
+python3 -B scripts/docs_shots.py "$@" </dev/null >"$HOME/$log" 2>&1
+status=$?
+cat "$HOME/$log"
+test "$status" -eq 0
+EOF
+}
+
+fetch_from_mac() {
+  local out="$1"
+  # rsync verifies the transfer even when ssh loses the remote exit status.
+  rsync -a --include='*/' --include='*.png' --exclude='*' -e "${ssh_cmd[*]}" "$mac:$out/" "$output/" || return 1
+  remote "/bin/rm -rf $out" || echo "could not remove the fetched pictures from the Mac" >&2
+}
+
+capture() {
+  if [ -n "$mac" ]; then
+    # shellcheck source=scripts/media-mac.sh
+    source "$repo/scripts/media-mac.sh" || return 1
+    capture_on_mac "$repo" "$mac" "$build" docs "$only"
+  else
+    local engine=(python3 -B "$repo/scripts/docs_shots.py" --out "$output")
+    [ -z "$only" ] || engine+=(--only "$only")
+    [ "$build" = true ] || engine+=(--no-build)
+    "${engine[@]}"
+  fi
+}
+capture || {
   echo "the capture did not complete; see the run directory printed above" >&2
   exit 1
 }

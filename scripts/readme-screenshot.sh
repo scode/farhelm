@@ -169,51 +169,6 @@ capture_here() {
 
 # --- a Mac over ssh -------------------------------------------------------------------------------------------------
 #
-# Four steps. The first three run under the Mac-wide lock (`lockf -k`, the lock every build and window there takes): a
-# preflight that checks the console user, disk and memory; an rsync of the checkout into a directory of its own there;
-# the capture, which runs this script's --local half there (whose `start --lock` holds the lock from before the build
-# until the run stops). The fourth, fetching the picture, needs no lock. The remote halves are bash scripts sent on stdin, and every value they
-# take is checked to be a plain path first. A bash function exported to the locked child is the one portable way to put
-# a block of commands under `lockf`.
-#
-# Each step's status comes back as a line of its output (`checked_script`), never as ssh's exit status: the Tailscale SSH
-# server reported 0 for a remote `exit 3` (2026-11-16), and a step that failed there would otherwise read here as one
-# that worked. rsync's own status is its protocol's, which holds.
-
-# The preflight: refuse a Mac where the window could not open or the build would not fit, failing closed when a figure
-# cannot be read. Argument: the lock, under the Mac's home.
-mac_preflight_script() {
-  cat <<'EOF'
-preflight() {
-  console=$(/usr/bin/stat -f %Su /dev/console) || return 1
-  me=$(/usr/bin/id -un) || return 1
-  free=$(/bin/df -g "$HOME" | /usr/bin/awk 'NR==2 {print $4}')
-  mem=$(/usr/bin/vm_stat | /usr/bin/awk '/page size of/ {ps=$8} /Pages free/ {f=$3} /Pages inactive/ {i=$3} END {printf "%d", (f+i)*ps/1073741824}')
-  for figure in "$free" "$mem"; do
-    case "$figure" in
-      "" | *[!0-9]*) echo "could not read the Mac's free disk ('$free') or memory ('$mem')" >&2; return 1 ;;
-    esac
-  done
-  echo "the Mac: console user $console, $free GB of disk and $mem GB of memory free"
-  if [ "$console" != "$me" ]; then
-    echo "the Mac's console belongs to $console, not $me, so no window of this user can open there" >&2
-    return 1
-  fi
-  if [ "$free" -lt 15 ]; then
-    echo "refusing: the Mac has under 15 GB of free disk" >&2
-    return 1
-  fi
-  if [ "$mem" -lt 4 ]; then
-    echo "refusing: the Mac has under 4 GB of free memory" >&2
-    return 1
-  fi
-}
-export -f preflight
-cd "$HOME" || exit 1
-/usr/bin/lockf -k "$1" /bin/bash -c preflight
-EOF
-}
-
 # The capture: run the --local half with the Mac's toolchain on PATH, its output to a log rather than to ssh, so that
 # a dropped connection (Ctrl-C here, a tool timeout, the network) cannot kill it with SIGPIPE before it reaches its own
 # `stop`, which is what releases the Mac-wide lock. Then show the log. Arguments: the source directory, the lock, the
@@ -237,63 +192,9 @@ test "$status" -eq 0
 EOF
 }
 
-# Whether a value is safe to put on a remote command line unquoted: a relative path of letters, digits, `.`, `_`, `-`
-# and `/`, with no `..` component.
-plain_path() {
-  case "$1" in
-    "" | /* | *[!A-Za-z0-9._/-]* | .. | ../* | */.. | */../*) return 1 ;;
-  esac
-  return 0
-}
-
-capture_on_mac() {
-  local ssh_cmd base lockfile id src out tmp
-  # A picture left from an earlier run must not pass for this one's, whichever step fails.
-  rm -f "$output"
-  case "$mac" in
-    "" | -* | *[[:space:]]*) echo "--mac needs an ssh destination such as user@host, not '$mac'" >&2; exit 2 ;;
-  esac
-  read -r -a ssh_cmd <<<"${FARHELM_MEDIA_SSH:-ssh}"
-  base="${FARHELM_MEDIA_MAC_DIR:-farhelm-media}"
-  lockfile="${FARHELM_MEDIA_MAC_LOCK:-.farhelm-gpui-mac.lock}"
-  plain_path "$base" || { echo "FARHELM_MEDIA_MAC_DIR must be a plain path under the Mac's home" >&2; exit 2; }
-  plain_path "$lockfile" || { echo "FARHELM_MEDIA_MAC_LOCK must be a plain path under the Mac's home" >&2; exit 2; }
-  command -v rsync >/dev/null || { echo "shipping the checkout needs rsync" >&2; exit 1; }
-  # One source directory per checkout on the Mac, named from this checkout's path, so two checkouts never ship over
-  # each other and one checkout's builds there stay incremental.
-  id="$(printf '%s' "$repo" | cksum | cut -d' ' -f1)" || exit 1
-  src="$base/src-$id"
-  out="$base/hero-$id.png"
-  tmp="$(mktemp -d)" || exit 1
-  # shellcheck disable=SC2064 # expand now: the path is this call's own
-  trap "rm -rf '$tmp'" EXIT
-  remote() { "${ssh_cmd[@]}" "$mac" "$@"; }
-  # Run a remote bash script from stdin with a status line added after its last command, show its output, and return
-  # that status (1 when the line never came).
-  checked_script() {
-    local status
-    { cat; printf '\necho "remote-status:$?"\n'; } | remote bash -s -- "$@" | tee "$tmp/remote.log"
-    status="$(sed -n 's/^remote-status:\([0-9][0-9]*\)$/\1/p' "$tmp/remote.log" | tail -n 1)"
-    return "${status:-1}"
-  }
-
-  mac_preflight_script | checked_script "$lockfile" || { echo "the Mac refused the capture (above)" >&2; exit 1; }
-
-  # What git would not ignore, by every .gitignore in the checkout, which the sending rsync reads the way git does; not
-  # git itself, so a jj workspace without a git working tree ships the same files. The Mac's rsync (openrsync) does not
-  # apply those rules to what `--delete` may remove there, so the shipped tree's own build directory is named too, or
-  # every run would delete it and build from nothing.
-  echo "shipping the checkout to $mac:$src"
-  rsync -a --delete --filter=':- .gitignore' --exclude=/.git --exclude=/.jj --exclude=/target \
-    -e "${ssh_cmd[*]}" --rsync-path="/usr/bin/lockf -k $lockfile rsync" "$repo/" "$mac:$src/" || {
-    echo "shipping the checkout to the Mac failed" >&2
-    exit 1
-  }
-
-  mac_capture_script | checked_script "$src" "$lockfile" "$out" "$base/hero-$id.log" "$build" || {
-    echo "no picture from the Mac (the reason is above); its run directory, if one is named, is kept there" >&2
-    exit 1
-  }
+fetch_from_mac() {
+  local out="$1"
+  [ "$2" -eq 0 ] || return 1
   mkdir -p "$(dirname "$output")" || exit 1
   remote "/bin/cat $out" >"$output.partial"
   # cat's status does not come back either, so the bytes have to show it worked: a PNG's signature at the front and its
@@ -305,11 +206,17 @@ capture_on_mac() {
     exit 1
   fi
   mv "$output.partial" "$output" || exit 1
-  remote "/bin/rm -f $out"
+  remote "/bin/rm -f $out" || echo "could not remove the fetched picture from the Mac" >&2
   echo "$output"
 }
 
 case "$mode" in
   local) capture_here || exit 1 ;;
-  mac) capture_on_mac ;;
+  mac)
+    # An old picture must not pass for this run if shipment or capture fails.
+    rm -f "$output" || exit 1
+    # shellcheck source=scripts/media-mac.sh
+    source "$repo/scripts/media-mac.sh" || exit 1
+    capture_on_mac "$repo" "$mac" "$build" hero.png
+    ;;
 esac

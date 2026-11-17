@@ -794,9 +794,10 @@ systemd or SSH substrate ran.
   without SHOTS, with bad or duplicate shot names, or with empty or non-id regions or a non-id park target; crop unions
   padded, clamped and scaled; and against a stand-in harness, failed captures leaving no output while later shots run,
   and layer reset failing after six Escape presses. Seconds, no app or network. Run it when the engine or its page
-  modules change. `shellcheck scripts/docs-screenshots.sh` checks its local command; a live
-  `scripts/docs-screenshots.sh --local --only launch-templates` builds and drives the staged GPUI app. On Linux both
-  shots stop at the size check by design (scale 1); the run's retained messages and clean stop are the evidence.
+  modules change. The shell checks listed with the README hero also cover its capture command. A live
+  `scripts/docs-screenshots.sh --mac <destination> --only launch-templates` drives the staged GPUI app and fetches the
+  shots when the Mac's display fits the scenario's window (the test Mac's did not on 2026-11-17). On Linux `--local`
+  stops at the size check (scale 1); the run's retained messages and clean stop are the evidence.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
   inside a module-level function that way), or while two steps share a number (areas merging steps under one number run
@@ -1049,10 +1050,9 @@ systemd or SSH substrate ran.
   rewritten to the pushed commit together or not at all, that a dry run touches nothing, and that reading the scenario
   through the loader leaves no bytecode in `scripts/`. Run it, with `shellcheck`, when the script or
   `scripts/scenario_json5.py` changes; seconds, no network, needs ImageMagick's `convert` and `identify`.
-- `bash -n scripts/readme-screenshot.sh && shellcheck scripts/readme-screenshot.sh` — the README hero's capture command,
-  which ships the checkout to a Mac and drives `scripts/gui-agent.py` there (`docs/readme-hero/SPEC.md`). Its staging
-  and checks are `gui-agent.py`'s, tested above; the command itself is only checked end to end, by a run (`--local` on
-  Linux stops at the size check by design). Run it when the script changes; seconds, no network.
+- `shellcheck -x scripts/readme-screenshot.sh scripts/docs-screenshots.sh scripts/media-mac.sh` and `bash -n` on each of
+  those files — the two capture commands and their shared Mac shipment. Run these when any of the three changes. To
+  exercise the transport itself, run both commands with `--mac <destination>` on the test Mac.
 - `python3 -I scripts/test-scenario-json5.py` — the docs-media scenario loader (`scripts/scenario_json5.py`), which
   reads the subset of JSON5 the three `scenario.json5` files under `docs/` use: each of them parses into its viewport,
   hosts and sessions; line comments, unquoted keys and trailing commas are translated without touching strings holding
