@@ -14,20 +14,21 @@
   // One supervisor per host. `local` is the helm's own reserved row. Each
   // `remote` is registered over ssh to the capturing machine under the
   // destination spelling given, which is why the spellings must differ: the
-  // helm treats each distinct destination string as its own host. Both
-  // spellings need passwordless ssh on the capturing machine.
+  // helm treats each distinct destination string as its own host. Staged runs
+  // dial a private sshd of their own, so the capturing machine's ssh setup is
+  // not needed.
   hosts: [
     { key: "local", alias: "this machine", kind: "local" },
     { key: "build-box", alias: "build-box", kind: "remote", ssh: "localhost" },
     { key: "gpu-1", alias: "gpu-1", kind: "remote", ssh: "$USER@localhost" },
   ],
 
-  // Rows in the order they should appear; ages must agree with that order
-  // because the list sorts by recent activity. `age` is seconds before the
-  // capture. `wrapper` is the basename the invocation carries and therefore
-  // the badge the row shows. `yolo: true` adds that harness's permission-bypass
-  // flag to the staged invocation so the real UI shows its slashed shield.
-  // Other rows are raw commands too, so they show an amber question mark.
+  // The rows to stage. The list shows them in the app's own order (running and
+  // waiting sessions first), not necessarily the order written here. `age` is
+  // seconds before the capture. `wrapper` is the basename the invocation
+  // carries and therefore the badge the row shows. Rows are staged as agent
+  // launches; `yolo: true` makes one YOLO, so the real UI shows its slashed
+  // shield, and the other rows show the plain shield of a guarded launch.
   // `status` is what the supervisor must actually
   // classify the pane as before the capture fires:
   //   running  the fake agent keeps redrawing a status line
