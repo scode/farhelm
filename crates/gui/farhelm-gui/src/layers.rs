@@ -2256,10 +2256,9 @@ const BESIDE_RISE: Pixels = px(4.);
 /// flips above its anchor when it would run past the area's bottom and fits above it within the area's top. The area,
 /// not the window, because on Linux the window holds GPUI Kit's frame and the window's own title bar, and a popover
 /// clamped to the window could end in the frame, outside the page. SPEC.md refuses a click on a terminal link whose
-/// destination display is not wholly inside the page, and a display ending in Kit's frame is not, though the click
-/// check (`terminal::disclosure`'s `fully_visible`) measures against the whole window and did not refuse it. The layer
-/// manager's owner moved popovers into the area on 2026-11-16. Under a compositor's decorations and on macOS the area is
-/// the whole window.
+/// destination display is not wholly inside the page, and a display ending in Kit's frame is not; the click check
+/// (`terminal::disclosure`'s `fully_visible`) measures against the same area. The layer manager's owner moved popovers
+/// into the area on 2026-11-16. Under a compositor's decorations and on macOS the area is the whole window.
 ///
 /// Crate-visible, and a pure function of its inputs, for `layers_tests.rs`: no test window reports client decorations,
 /// so the tests pass a Linux content area apart from the window themselves.

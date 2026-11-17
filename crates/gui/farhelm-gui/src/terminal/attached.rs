@@ -2302,7 +2302,7 @@ impl Render for AttachedTerminal {
         let body = div()
             .id("terminal-grid")
             // An inert terminal takes no keys and no actions, and its key context goes with them: keys, the menu's
-            // Paste and Select All, and Tab and Escape go on to the window as if the terminal were not focused.
+            // Copy, Paste and Select All, and Tab and Escape go on to the window as if the terminal were not focused.
             .when(!inert, |body| {
                 body.key_context(actions::TERMINAL_CONTEXT)
                     .on_key_down(cx.listener(Self::key))

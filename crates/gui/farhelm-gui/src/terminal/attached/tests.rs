@@ -4152,13 +4152,13 @@ fn a_click_whose_destination_is_not_fully_visible_is_refused(cx: &mut TestAppCon
         (true, false),
         "the premise: the display is shown"
     );
-    // As if the display had run past the window's bottom edge when it was last drawn.
+    // As if the display had run past the bottom edge of the window's content area when it was last drawn.
     h.cx.update(|_, cx| {
         let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
-        let (bounds, window) = shown.get().unwrap();
+        let (bounds, area) = shown.get().unwrap();
         shown.set(Some((
-            Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
-            window,
+            Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
+            area,
         )));
     });
     h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
@@ -4259,10 +4259,10 @@ fn hovering_again_after_a_refusal_shows_the_display_and_a_click_opens(cx: &mut T
     h.rest_on(on);
     h.cx.update(|_, cx| {
         let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
-        let (bounds, window) = shown.get().unwrap();
+        let (bounds, area) = shown.get().unwrap();
         shown.set(Some((
-            Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
-            window,
+            Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
+            area,
         )));
     });
     h.click_at(on);
@@ -4741,10 +4741,10 @@ fn a_hinted_address_whose_display_is_not_fully_visible_is_refused(cx: &mut TestA
         let owner = h.owner.clone();
         h.cx.update(|_, cx| {
             let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
-            let (bounds, window) = shown.get().unwrap();
+            let (bounds, area) = shown.get().unwrap();
             shown.set(Some((
-                Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
-                window,
+                Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
+                area,
             )));
         });
     };

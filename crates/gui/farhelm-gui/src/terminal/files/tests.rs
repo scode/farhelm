@@ -583,10 +583,10 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
     h.cx.update(|_, cx| {
         let files = owner.read(cx).files().read(cx);
         let drawn = files.hover.as_ref().unwrap().drawn.clone();
-        let (bounds, window) = drawn.get().expect("the premise: the display was drawn");
+        let (bounds, area) = drawn.get().expect("the premise: the display was drawn");
         drawn.set(Some((
-            Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
-            window,
+            Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
+            area,
         )));
     });
     h.click(on);
@@ -1200,8 +1200,9 @@ fn both_halves_of_a_cut_path_check_and_save_the_whole_file(cx: &mut TestAppConte
 }
 
 impl Files<'_> {
-    /// As if the destination display the pointer rests on had run past the window's bottom edge when last drawn, so
-    /// the next click on its link is refused. No frame may come before that click, or the display records itself again.
+    /// As if the destination display the pointer rests on had run past the bottom edge of the window's content area
+    /// when last drawn, so the next click on its link is refused. No frame may come before that click, or the display
+    /// records itself again.
     fn stage_off_window(&mut self) {
         let owner = self.owner.clone();
         self.cx.update(|_, cx| {
@@ -1209,10 +1210,10 @@ impl Files<'_> {
                 .read(cx)
                 .disclosure_drawn()
                 .expect("the premise: a display is shown");
-            let (bounds, window) = drawn.get().expect("the premise: the display was drawn");
+            let (bounds, area) = drawn.get().expect("the premise: the display was drawn");
             drawn.set(Some((
-                Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
-                window,
+                Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
+                area,
             )));
         });
     }
