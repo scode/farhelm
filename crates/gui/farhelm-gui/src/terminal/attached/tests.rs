@@ -2318,6 +2318,92 @@ fn reconnect_now_in_the_first_wait_shows_attempt_1_under_way(cx: &mut TestAppCon
     assert_eq!(h.phase_line(), None);
 }
 
+/// Old `terminal-replay-rename.spec.ts`, case 11, "replay-unconnected: a stalled first mount retries on the reconnect
+/// ladder", the pane's half (the stream's is helm-client
+/// `a_first_attach_the_helm_accepts_and_never_answers_is_retried_on_the_ladder`). Why: a first attach that fails has
+/// no screen to keep, and the pane must still say that the terminal is coming back by itself, rather than keep
+/// promising a catch-up ("Connecting…") that is not happening or show the red band, which the old spec ruled out
+/// because the two contradict each other. The old spec also kept focus out of such a terminal; here choosing a session
+/// focuses its terminal whatever its stream is doing (SPEC.md, "Where focus rests"), and keys typed into it go nowhere.
+///
+/// Spec: with the terminal chosen and nothing ever shown, the "Connecting" placeholder is drawn; the first attach's
+/// socket opens and fails, and the card is drawn reading "Reconnecting in 1s (attempt 1 of 6)…", with no placeholder,
+/// no red band and no status line, and a typed key is not sent; the next attempt failing reads attempt 2; the attempt
+/// after that replays "first", which shows live with neither card nor band.
+#[gpui::test]
+fn a_first_attach_that_fails_shows_the_reconnect_card_and_retries(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert!(
+        h.cx.debug_bounds("terminal-connecting").is_some(),
+        "the premise: the first attach is catching up"
+    );
+
+    h.fake().attach();
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(h.card_drawn());
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting in 1s (attempt 1 of 6)…")
+    );
+    assert!(h.cx.debug_bounds("terminal-connecting").is_none());
+    assert!(!h.banner_drawn());
+    assert_eq!(h.status(), None);
+    keys(h.cx, "x");
+    assert_eq!(h.sent(), [], "nothing is sent before a first screen");
+
+    h.fake().end_wait();
+    h.fake().attach();
+    h.fake().drop_link();
+    settle(h.cx);
+    assert_eq!(
+        h.phase_line().as_deref(),
+        Some("Reconnecting in 1s (attempt 2 of 6)…")
+    );
+
+    h.attach_showing("first");
+    assert!(h.read(|owner, _| owner.is_live()));
+    assert_eq!(h.text().as_deref().map(first_line), Some("first"));
+    assert!(!h.card_drawn());
+    assert!(!h.banner_drawn());
+}
+
+/// Old `terminal-replay-rename.spec.ts`, case 12, "replay-unconnected: without recovery the banner reports it instead
+/// of revealing a dead terminal". The app has no switch that turns recovery off; what stops a first mount's stream for
+/// good is an answer that would come back unchanged, a refusal (a 401 credential, a session that is gone). Why: a pane
+/// whose stream stopped before anything was shown must say so, and must not keep promising a catch-up that will
+/// never come, or the user is left to find out by typing.
+///
+/// Spec: with the terminal chosen and nothing ever shown, the first attach is refused with 401: the red band says
+/// "Connection error" and offers Reconnect; neither the "Connecting" placeholder nor the reconnect card is drawn; no
+/// screen is shown, the terminal is not live, and a typed key is not sent.
+#[gpui::test]
+fn a_first_attach_that_is_refused_says_so_instead_of_catching_up(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert!(
+        h.cx.debug_bounds("terminal-connecting").is_some(),
+        "the premise: the first attach is catching up"
+    );
+
+    h.fake().refuse(401);
+    settle(h.cx);
+    assert!(h.banner_drawn());
+    let line = h.status().expect("the stopped stream says why");
+    assert_eq!(line.words, "Connection error");
+    assert!(line.offers_reconnect);
+    assert!(h.cx.debug_bounds(STATUS_RECONNECT_ID).is_some());
+    assert!(h.cx.debug_bounds("terminal-connecting").is_none());
+    assert!(!h.card_drawn());
+    assert_eq!(h.text(), None);
+    assert!(!h.read(|owner, _| owner.is_live()));
+    keys(h.cx, "x");
+    assert_eq!(h.sent(), []);
+}
+
 // ---- Lifetime ------------------------------------------------------------------------------------------------------
 
 /// A reset retires the UI session, and the terminal owner goes with it: its stream is closed (the helm client's

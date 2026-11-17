@@ -542,6 +542,8 @@ impl Stream {
                 }
             };
             tokio::select! {
+                // The socket's frames come before the watchdog: a stream that could not run for a while (a busy runtime)
+                // finds its deadline passed with the helm's answer already waiting, and the answer must win.
                 biased;
                 permit = self.events.reserve(), if waiting_on_caller => match permit {
                     Ok(permit) => {
