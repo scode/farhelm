@@ -13,7 +13,7 @@ you used to [install Farhelm](/docs/get-started/install/). Nothing changes on sc
 sessions keep running.
 
 Only stable releases are installed this way, never a prerelease. This applies to the app installed in `~/Applications`;
-a copy of Farhelm you built yourself never updates itself.
+a copy of Farhelm you built yourself never updates itself. Neither does the Farhelm app on Linux.
 
 ## When an update is ready
 
