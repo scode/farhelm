@@ -68,12 +68,26 @@ pub(super) fn launcher_with_hosts(
     draft: LaunchDraft,
     hosts: CollectionState,
 ) -> (FakeHelm, &mut VisualTestContext) {
+    launcher_over(
+        cx,
+        draft,
+        vec![
+            listing(&["a"], &[session("a")]),
+            hosts,
+            preferences(&[], None),
+        ],
+    )
+}
+
+/// The real main view over the fake helm's first snapshot `state`, with the launcher opened on `draft`, checked once
+/// settled: the window every launcher test opens, over whichever fleet it needs.
+pub(super) fn launcher_over(
+    cx: &mut TestAppContext,
+    draft: LaunchDraft,
+    state: Vec<CollectionState>,
+) -> (FakeHelm, &mut VisualTestContext) {
     let (mut helm, _connection) = started(cx);
-    helm.connect(vec![
-        listing(&["a"], &[session("a")]),
-        hosts,
-        preferences(&[], None),
-    ]);
+    helm.connect(state);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, MainView::new);
     window.update(|window, cx| {

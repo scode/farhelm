@@ -99,7 +99,27 @@ pub(super) fn launched_with(
     cx: &mut gpui::TestAppContext,
     draft: LaunchDraft,
 ) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
-    let (mut helm, cx) = launcher_on(cx, draft);
+    let (helm, cx) = launcher_on(cx, draft);
+    pressed(helm, cx)
+}
+
+/// [`launched_with`] over the fake helm's first snapshot `state` (`view_tests::launcher_over`), for tests that need
+/// another fleet around the launch.
+pub(super) fn launched_over(
+    cx: &mut gpui::TestAppContext,
+    state: Vec<CollectionState>,
+    draft: LaunchDraft,
+) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
+    let (helm, cx) = super::view_tests::launcher_over(cx, draft, state);
+    pressed(helm, cx)
+}
+
+/// Press Launch on the open launcher and return the one create it sent, checking that opening sent none, the press
+/// sent exactly one, and the launcher hid.
+fn pressed(
+    mut helm: FakeHelm,
+    cx: &mut VisualTestContext,
+) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
     assert!(
         creates(&mut helm, cx).is_empty(),
         "the premise: opening sends no create"
@@ -114,18 +134,27 @@ pub(super) fn launched_with(
     (helm, cx, create)
 }
 
-/// The helm lists session `key` (as it does before answering the create that made it) and answers create `id` with that
-/// session, as `POST /api/sessions` does.
+/// The helm lists session `key` beside `a` (as it does before answering the create that made it) and answers create
+/// `id` with that session, as `POST /api/sessions` does.
 pub(super) fn created(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64, key: &'static str) {
-    let state: CollectionState = listing(&["a", key], &[session("a"), session(key)]);
-    helm.push(CollectionChanges {
-        collection: state.collection,
-        meta: state.meta,
-        upsert: state.entries,
-        remove: Vec::new(),
-    });
+    created_as(helm, cx, id, &["a", key], session(key));
+}
+
+/// [`created`] for any fleet: the helm lists `made` among `order`, then answers create `id` with it.
+pub(super) fn created_as(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    id: u64,
+    order: &[&str],
+    made: crate::session_list::tests::Fixture,
+) {
+    helm.push(crate::session_list::tests::change(
+        crate::session_list::tests::listing_meta(order, order.len() as u64, false),
+        std::slice::from_ref(&made),
+        &[],
+    ));
     settle(cx);
-    helm.reply(id, 200, Some(session(key).entry().value));
+    helm.reply(id, 200, Some(made.entry().value));
     settle(cx);
 }
 
@@ -573,9 +602,33 @@ fn launch_does_not_wait_for_a_host_settings_save(cx: &mut gpui::TestAppContext) 
 }
 
 /// The words the helm's bounded create answers with when the host does not answer in time
-/// (`sessions::within_host_reply_bound`).
-const TIMED_OUT: &str = "the host did not answer within 20 seconds; the request is still being carried out, and the \
-                         session list will show its result";
+/// (`sessions::within_host_reply_bound`). Shared with the Restart with and Replace with tests, whose routes are bounded
+/// the same way.
+pub(super) const TIMED_OUT: &str = "the host did not answer within 20 seconds; the request is still being \
+                                   carried out, and the session list will show its result";
+
+/// A Restart with's or Replace with's reply of the host's timeout, after the user moved on, settles as one that may
+/// still happen: answer request `id` with [`TIMED_OUT`] after a key press, then check that no launcher opened, that
+/// `key`'s row holds `work`'s line with those words while it waits, and that the notice brings the launcher back
+/// showing them alone, without a refusal's lead. Shared by the two modes' tests, which differ only in how they press.
+pub(super) fn times_out_after_moving_on(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    id: u64,
+    key: &str,
+    work: crate::operations::Work,
+) {
+    keys(cx, "x");
+    helm.reply(id, 504, Some(json!(TIMED_OUT)));
+    settle(cx);
+    assert!(!any_open(cx), "nothing opened, since the user moved on");
+    let line = cx.update(|_, cx| crate::session_list::outcome::current_line(key, cx));
+    let line = line.expect("the row has a line while the launcher waits");
+    assert_eq!((line.work, line.message.raw()), (work, TIMED_OUT));
+    test_support::click(cx, "notice-open-launcher");
+    assert!(any_open(cx), "the notice brought the launcher back");
+    assert_eq!(shown_refusal(cx).as_deref(), Some(TIMED_OUT));
+}
 
 /// SPEC_impl.md, "The UI channel": a bounded command answers "the host timed out" while the work carries on, so a
 /// timed-out create may still start a session. Calling it "Not launched." would invite a second launch of the same
