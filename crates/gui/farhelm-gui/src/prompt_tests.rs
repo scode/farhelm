@@ -3,8 +3,9 @@
 //! the anchored question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
 //! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, the
 //! debug build's refusal of an option the question's presentation ignores, a body the feature draws (the host setup
-//! confirmation's plan) with the dialog frame's tile, note and width, and the bulk question's three needs: rewording
-//! an open question in place, returning focus to a named control, and a keyboard scroll stop for long text.
+//! confirmation's plan) with the dialog frame's tile, note and width, a link that opens without answering (SPEC.md's
+//! sandbox question linking Tensorlake pricing), and the bulk question's three needs: rewording an open question in
+//! place, returning focus to a named control, and a keyboard scroll stop for long text.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -2724,6 +2725,171 @@ fn a_questions_tile_note_and_width_reach_its_dialog_frame(cx: &mut TestAppContex
     );
     cx.update(|window, cx| asked.cancel(window, cx));
     settle(cx);
+}
+
+// ---- A link ----------------------------------------------------------------------------------------------------------
+
+/// `question` given a link to `url`, as SPEC.md's sandbox question links Tensorlake pricing.
+fn linked<T: Clone + 'static>(question: Question<T>, url: &str) -> Question<T> {
+    question.link(
+        "Pricing",
+        url.to_owned(),
+        HoverHelp::tooltip("Open the pricing page in your browser"),
+    )
+}
+
+/// Assert that the link is drawn below the text painted as `line` and above the answers, in a fresh frame.
+fn assert_link_between(cx: &mut VisualTestContext, line: &str, case: &str) {
+    let line = frame(cx)
+        .iter()
+        .flat_map(|node| node.texts.iter())
+        .find(|text| text.text.as_ref() == line)
+        .map(|text| text.bounds)
+        .expect("the question's line was painted");
+    let (link, answers) = (bounds(cx, "prompt-link"), bounds(cx, "prompt-answers"));
+    assert!(
+        line.bottom() <= link.top() && link.bottom() <= answers.top(),
+        "{case}: the link is drawn between the line and the answers: line {line:?}, link {link:?}, answers {answers:?}"
+    );
+}
+
+/// Why this matters: the link is the one control on a question that is not an answer and still sits among them. If
+/// Enter or a click on it answered the question, or reached the dialog's Enter rule, a user opening the pricing page
+/// would create the sandbox they were reading about. And the link must be a tab stop, or a keyboard user could not
+/// open it at all.
+///
+/// Specified, for the centered and the anchored question with a line and a link: the link is drawn below the line and
+/// above the answers; focus starts on Confirm, as without a link; Tab from Confirm reaches the link, then Cancel. Enter
+/// on the focused link, and in a second question a click on it, opens the link's URL through the app's opener and
+/// leaves the question open with no answer run; Cancel then closes it running nothing.
+///
+/// Inside the layer's trap Tab's order is a cycle, which looks the same whichever stop it starts from, so the walk
+/// shows only that the link is a stop in the trap. Where it sits is pinned by where it is drawn, here, and in Tab's
+/// order by the inline test, whose Shift+Tab leaves the question for the launcher's Reset.
+#[gpui::test]
+fn a_link_sits_between_text_and_answers_and_opens_without_answering(cx: &mut TestAppContext) {
+    let (cx, row) = open_row(cx);
+    for (kind, presentation) in row.presentations() {
+        for way in ["enter", "click"] {
+            let case = format!("{kind}, {way}");
+            let url = format!("https://example.com/pricing/{kind}/{way}");
+            let ran: Ran = Default::default();
+            let confirmed = ran.clone();
+            let shown = presentation.clone();
+            let asked = cx.update(|window, cx| {
+                let mark = Mark::take(cx);
+                prompt::ask_for_test(
+                    shown,
+                    linked(question("alpha"), &url),
+                    None,
+                    &mark,
+                    move |frozen, _, _| confirmed.borrow_mut().push(format!("confirmed {frozen}")),
+                    window,
+                    cx,
+                )
+            });
+            settle(cx);
+            let asked = asked.expect("the question opened");
+            assert_link_between(cx, "Its history is removed.", &case);
+            assert_eq!(
+                focused_id(cx).as_deref(),
+                Some("prompt-confirm"),
+                "{case}: focus starts on Confirm"
+            );
+            for expected in ["prompt-link", "prompt-cancel"] {
+                keys(cx, "tab");
+                assert_eq!(
+                    focused_id(cx).as_deref(),
+                    Some(expected),
+                    "{case}: Tab reaches the link, then the answers"
+                );
+            }
+            // Back onto the link for the Enter case; the click case clicks it wherever focus is.
+            keys(cx, "shift-tab");
+            if way == "enter" {
+                keys(cx, "enter");
+            } else {
+                click(cx, "prompt-link");
+            }
+            assert_eq!(
+                cx.opened_url(),
+                Some(url),
+                "{case}: the link opened its URL"
+            );
+            assert!(is_open(cx, asked.layer), "{case}: the question stayed open");
+            assert!(ran.borrow().is_empty(), "{case}: no answer ran");
+            cx.update(|window, cx| asked.cancel(window, cx));
+            settle(cx);
+            assert!(ran.borrow().is_empty(), "{case}: Cancel ran nothing");
+        }
+    }
+}
+
+/// Why this matters: SPEC.md's sandbox question is asked inline in the launcher, where Tab passes through the question
+/// as through the rest of the dialog, so the link's place in Tab's order is between the launcher's controls above, the
+/// question's text, and its answers. Escape there is the question's Cancel: if focus on the link were not counted as
+/// focus in the question, Cancel would close it and leave focus nowhere in the launcher.
+///
+/// Specified, for the YOLO question given a link, asked inline in the launcher: the link is drawn below the question's
+/// last line and above its answers, with the link role; focus starts on Cancel, as without a link; Shift+Tab from
+/// Cancel reaches the link, then the launcher's Reset above the question. Enter on the focused link opens its URL and
+/// leaves the question open with no answer run and focus on the link. Escape on the link then cancels it, running
+/// nothing, returns focus to Launch, and leaves the launcher open.
+#[gpui::test]
+fn an_inline_questions_link_opens_without_answering_and_escape_on_it_cancels(
+    cx: &mut TestAppContext,
+) {
+    let (cx, launcher) = open_launcher(cx);
+    let url = "https://example.com/pricing/inline";
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let inline = ask_inline_in(cx, &launcher, linked(yolo(&ran, &attempts), url), &ran);
+    assert_link_between(cx, "Nothing has been started.", "inline");
+    let role = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("prompt-link"))
+        .and_then(|node| node.role);
+    assert_eq!(role, Some(Role::Link), "the link is named a link");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-cancel"),
+        "focus starts on Cancel"
+    );
+    for (key, expected) in [
+        ("shift-tab", "prompt-link"),
+        ("shift-tab", "reset"),
+        ("tab", "prompt-link"),
+    ] {
+        keys(cx, key);
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(expected),
+            "{key} goes from the answers to the link to the launcher's Reset, and back"
+        );
+    }
+    keys(cx, "enter");
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some(url),
+        "the link opened its URL"
+    );
+    assert!(
+        cx.update(|_, cx| inline.is_open(cx)),
+        "the question stayed open"
+    );
+    assert!(ran.borrow().is_empty(), "no answer ran");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-link"),
+        "focus stayed on the link"
+    );
+    keys(cx, "escape");
+    assert!(ran.borrow().is_empty(), "Escape ran nothing");
+    assert!(
+        !cx.update(|_, cx| inline.is_open(cx)),
+        "Escape on the link cancelled the question"
+    );
+    assert!(focused(cx, &launcher.launch), "focus went back to Launch");
+    assert!(is_open(cx, launcher.layer), "the launcher stayed open");
 }
 
 // ---- Rewording an open question --------------------------------------------------------------------------------------
