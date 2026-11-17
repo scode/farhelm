@@ -1598,16 +1598,27 @@ impl ProvisioningService {
     /// because no such plan can be minted. If a local plan ever becomes
     /// reachable again, the ownership check has to be repeated HERE, under
     /// the host write claim — planning-time evidence is stale by then.
+    ///
+    /// A host whose provisioning lock another operation holds (a Tensorlake
+    /// host's Suspend, Resume or removal, a destination or alias change)
+    /// refuses at once as busy instead of waiting for it, as a busy sandbox's
+    /// setup rerun does (`start_tensorlake_add`); a running setup or update is
+    /// refused by the busy claim first. The user's confirmation answers now,
+    /// and the lock can be held for minutes. Like the rerun's, the refusal
+    /// comes before the claim, so a failed earlier run's progress (its
+    /// Re-run) and its automatic retry record stay as they were. Only this
+    /// manual confirmation refuses; the automatic update
+    /// ([`Self::start_automatic_update`]) still waits for the lock.
     pub(super) async fn start_update(
         self: &Arc<Self>,
         host: HostId,
         request: ProvisionRequest,
     ) -> anyhow::Result<RunAccepted> {
-        // On a helm-owned task (see `crate::run_owned`): `start_run` marks the
-        // host busy and then waits for its provisioning lock before spawning
-        // the run that clears it, so a request dropped in between (a reload
-        // while an update starts) left the host busy, and refusing every
-        // later update, until the helm restarted.
+        // On a helm-owned task (see `crate::run_owned`): the claim marks the
+        // host busy before the run that clears it is spawned, with awaits
+        // between, so a request dropped in between (a reload while an update
+        // starts) left the host busy, and refusing every later update, until
+        // the helm restarted.
         let service = Arc::clone(self);
         crate::run_owned(async move { service.start_update_owned(host, request).await }).await
     }
@@ -1626,7 +1637,27 @@ impl ProvisioningService {
         ) {
             return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
         }
-        self.start_run(host, pending, false).await
+        // One critical section: a running setup or update still refuses as
+        // `Busy`, then the lock (see `start_update`), then the claim, so a
+        // refusal leaves nothing to withdraw. `try_host_provision_lock` never
+        // waits, so taking it under `memory` cannot invert the
+        // lock-then-memory order runs use (`end_run`).
+        let (run_id, host_write) = {
+            let mut memory = self.memory.lock().await;
+            if memory.busy.contains(&host) {
+                return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
+            }
+            let Some(host_write) = self.manager.try_host_provision_lock(host) else {
+                return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                    "this host is busy with another operation; once it finishes, choose Update again"
+                        .to_string(),
+                )));
+            };
+            let run_id = Self::claim_run(&mut memory, host, &pending, false, false)?;
+            (run_id, host_write)
+        };
+        self.launch_claimed_run(host, pending, run_id, Some(host_write))
+            .await
     }
 
     /// Admit an automatic plan in the same order as durable policy commits.
@@ -1679,7 +1710,7 @@ impl ProvisioningService {
         // adjacent to the synchronous claim so cancellation cannot strand busy.
         crate::run_owned(async move {
             service
-                .launch_claimed_run(host, pending, run_id)
+                .launch_claimed_run(host, pending, run_id, None)
                 .await
                 .map(Some)
         })
@@ -2115,7 +2146,7 @@ impl ProvisioningService {
             let mut memory = self.memory.lock().await;
             Self::claim_run(&mut memory, host, &pending, claimed, false)?
         };
-        self.launch_claimed_run(host, pending, run_id).await
+        self.launch_claimed_run(host, pending, run_id, None).await
     }
 
     /// Publish one admission while the caller holds provisioning memory. This
@@ -2150,17 +2181,23 @@ impl ProvisioningService {
 
     /// Finish an already-published admission on its owned task. Policy changes
     /// do not cancel this run, and its potentially slow host lock cannot delay
-    /// a later opt-out acknowledgement.
+    /// a later opt-out acknowledgement. `host_write` is the host's
+    /// provisioning lock when the caller already took it (a manual Update's
+    /// confirmation, which refuses rather than waits); `None` waits for it.
     async fn launch_claimed_run(
         self: &Arc<Self>,
         host: HostId,
         pending: PendingPlan,
         run_id: String,
+        host_write: Option<ProvisionLockGuard>,
     ) -> anyhow::Result<RunAccepted> {
         // The provisioning lock, not the cache-write lock: the run holds it
         // for minutes, and the host's session list must keep updating
         // meanwhile. See `ActorHandle::provision_lock`.
-        let host_write = self.manager.host_provision_lock(host).await;
+        let host_write = match host_write {
+            Some(host_write) => host_write,
+            None => self.manager.host_provision_lock(host).await,
+        };
         if let Err(error) = self.host_row(host).await {
             {
                 let mut memory = self.memory.lock().await;
