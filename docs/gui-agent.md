@@ -238,16 +238,17 @@ may hold `$USER`, which becomes your account name (the one substitution, so that
 account); each remote becomes a `--remote-host` destination and needs passwordless ssh like any.
 
 Once the app is up, `start` waits until every scenario host is connected and gives each its alias, sets the session list
-to activity order with full rows, and creates the sessions through the helm's API. Each is a command launch of its
-wrapper's bare name (`claude {farhelm_args}`, with the harness's YOLO flag for a `yolo` one) declaring that agent type
-and asserting its YOLO answer, with `confirm_yolo` for a YOLO one, so its row shows the agent's mark and the shield the
-launch earns with nothing rewritten. Each runs in a scratch directory of the run (`work/<index>`, by the session's place
-in the file) holding the `.staged-agent` script that the wrappers run: the fake agent's replay of the session's
-transcript, in its wrapper's dialect, holding the screen its status needs. Then `start` waits up to two minutes until
-the supervisor reads every session as its status, stamps each idle session seen (with its row's own activity) or clears
-it, and checks the window: every row's permission shield must be the slashed one for a `yolo` session and the plain one
-for every other, as the old staging checked before it took the picture. The run records each session's helm key by
-title, and the open one's, in `run.json` under `scenario`.
+to activity order with full rows, and creates the sessions through the helm's API. Each is an agent launch of its
+wrapper's harness, the request the launcher's Agent tab sends: YOLO for a `yolo` one, with `confirm_yolo`, and Guarded,
+the launcher's default, for every other. The helm composes the command and runs the harness's program by its bare name,
+which the run's wrapper answers, so the row shows the agent's mark and the shield the launch earns with nothing
+rewritten, and the details bar the command a user's launch shows. Each runs in a scratch directory of the run
+(`work/<index>`, by the session's place in the file) holding the `.staged-agent` script that the wrappers run: the fake
+agent's replay of the session's transcript, in its wrapper's dialect, holding the screen its status needs. Then `start`
+waits up to two minutes until the supervisor reads every session as its status, stamps each idle session seen (with its
+row's own activity) or clears it, and checks the window: every row's permission shield must be the slashed one for a
+`yolo` session and the plain one for every other, as the old staging checked before it took the picture. The run records
+each session's helm key by title, and the open one's, in `run.json` under `scenario`.
 
 The open session is created first, alone, and `start` waits until the window has opened it (the window writes its choice
 to the helm's `last_selected`) before it creates the rest. The old staging set that preference before the page loaded;
