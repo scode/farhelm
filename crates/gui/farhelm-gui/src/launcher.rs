@@ -65,7 +65,7 @@ mod entry_tests;
 #[cfg(test)]
 pub(crate) mod environment_launch_tests;
 #[cfg(test)]
-mod environment_tests;
+pub(crate) mod environment_tests;
 #[cfg(test)]
 mod environment_view_tests;
 #[cfg(test)]

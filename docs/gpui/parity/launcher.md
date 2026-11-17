@@ -611,20 +611,24 @@ partly: six of the 16 cases are this area's, and the other ten are the session v
 recorded in [Sidebar and session view](sidebar-and-session-view.md), under its cases of specs listed in other areas'
 files. Of "recipe placement explains prerequisites and requires billing consent", New sandbox showing once the account
 has an API key, the first recipe with a snapshot chosen on entering it, an unbuilt recipe listed unavailable with "No
-snapshot yet" (and the account's prerequisites before it, in the old order), and the create sent unconfirmed on its own
-route to the Tensorlake account, in
-`launcher::sandbox_view_tests::{new_sandbox_is_hidden_without_an_api_key, entering_new_sandbox_chooses_the_first_built_recipe_and_names_the_missing_key, sandbox_recipes_are_listed_with_their_mark_size_and_refusal, the_registration_note_shows_and_copies_the_command, a_press_sends_the_sandbox_create_unconfirmed_and_its_refusal_comes_back}`
+snapshot yet" (and the account's prerequisites before it, in the old order), in
+`launcher::sandbox_view_tests::{new_sandbox_is_hidden_without_an_api_key, entering_new_sandbox_chooses_the_first_built_recipe_and_names_the_missing_key, sandbox_recipes_are_listed_with_their_mark_size_and_refusal, the_registration_note_shows_and_copies_the_command}`
 and
 `launcher::environment_tests::{a_new_sandbox_is_refused_for_each_missing_prerequisite_in_the_old_order, the_registration_note_needs_a_readable_key}`;
-a quick launch of a sandbox waiting for the account before it decides in
-`launcher::sandbox_view_tests::a_hidden_quick_launch_waits_for_the_account_read`. Not yet ported: that case's billing
-question ("Create a sandbox for this session?", its Cancel and "Create and launch", the confirmed create and the refusal
-kept with its draft after it), which comes with the question; until then a press sends the create unconfirmed and the
-helm's refusal comes back as any refused launch does. "A recipe template quick launch asks before one recipe request"
-comes with the question too (the templates area applies the template's target); "an existing-host launch stays nonmodal
-while its Resume is held", "a held sandbox Suspend and a launch on another host proceed side by side" and "Hosts refuses
-a host's Resume and Settings while a launch is waking that host" with resume before create; "template placement keeps
-Host editable after leaving an environment" with templates' placement.
+its billing question ("Create a sandbox for this session?" with the recipe, its size, the billing words and the
+"Tensorlake pricing" link, focus on Cancel; Cancel sending nothing and keeping the draft; "Create and launch" sending
+one confirmed create on its own route to the Tensorlake account, whose refusal comes back with its draft and whose
+consent the next press asks for again; an edit retiring the question; "Create Tensorlake sandboxes without asking"
+skipping it with an unconfirmed create, and a press after such a create asking) in
+`launcher::sandbox_view_tests::{a_press_asks_before_creating_a_sandbox_with_cancel_focused, cancel_creates_nothing_and_keeps_the_draft, create_and_launch_sends_one_confirmed_create, an_edit_retires_the_question, the_setting_skips_the_question_with_an_unconfirmed_create, a_press_after_a_create_on_the_skip_setting_asks}`
+and `launcher::environment_tests::only_a_sandbox_asks_before_creating_unless_its_setting_skips_it`; a quick launch of a
+sandbox waiting for the account and then coming back to ask rather than create in
+`launcher::sandbox_view_tests::a_hidden_quick_launch_waits_for_the_account_and_comes_back_to_ask`. "A recipe template
+quick launch asks before one recipe request" is ported with the templates area's number key in
+`templates::dispatch_tests::a_sandbox_template_on_a_number_key_comes_back_to_ask_before_creating`. Not yet ported: "an
+existing-host launch stays nonmodal while its Resume is held", "a held sandbox Suspend and a launch on another host
+proceed side by side" and "Hosts refuses a host's Resume and Settings while a launch is waking that host" with resume
+before create; "template placement keeps Host editable after leaving an environment" with templates' placement.
 
 ### `tests/github-checkouts.spec.ts`
 
@@ -1103,6 +1107,20 @@ migration's orchestrator decided on 2026-11-16 for every environments case until
   is reopened.
 - New sandbox's recipes are listed with the cube mark and their CPU and memory ("ready · 2 CPUs · 4 GB memory"), as
   SPEC.md's "Sandbox sessions" asks; the old select listed names alone, with a refused recipe's reason after its name.
+- "Create a sandbox for this session?" has no sandbox mark before its title: the old question drew the cube mark there,
+  and the prompt's inline question carries no tile. Its focus starts on Cancel, where the old question started on
+  "Create and launch"; that is SPEC.md's rule for a risky answer ("Keyboard focus"), not a deviation.
+- Whether "Create Tensorlake sandboxes without asking" skips the question is read from the account as the launcher read
+  it when it opened; the old launcher read the setting again at each press (the stale value accepted by the launcher
+  area on 2026-11-16). A setting turned off since makes the helm, which checks it again, refuse the unconfirmed create
+  with its own words ("confirm creation of a billed sandbox before launching") rather than the question; the next press
+  in that launcher asks the question, since a launcher that has sent one create on the setting asks from then on. A
+  setting turned on since still asks while the launcher stays open.
+- The question shows the recipe's size as the catalog held it at the press, and the helm creates the sandbox at the
+  recipe's size when it receives the create; a recipe edited while the question is up is not re-asked about.
+- An applied template batch that leaves the launch unchanged keeps an open YOLO question, as the old launcher did, but
+  retires an open "Create a sandbox for this session?", which the next press asks again. Whether the old launcher kept
+  its sandbox question across such a batch was not established.
 - New container reads each host's Podman state from its pushed check and asks for a check of every container host as the
   launcher opens; it does not read `GET /api/environment-places`, so a host never checked says "this host needs a Podman
   check" until its check answers, where the old select showed the places read's words.

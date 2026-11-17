@@ -30,21 +30,22 @@
 //! - **The YOLO question.** A refusal saying the host asks before YOLO launches (`HelmMarker::YoloConfirmation`) is a
 //!   follow-up question, not a failure: the launcher comes back the same way, with the question asked in place
 //!   (`view::yolo_question`).
-//! - **A create in a new environment** (New container, New sandbox) goes to its own route, which the helm accepts (202)
-//!   once it has admitted the launch, naming the run its outcome lands on in the pushed host progress (SPEC_impl.md,
-//!   "The UI channel"). The launcher stays hidden and busy, its progress pill up, until that run ends ([`RunWait`]):
-//!   completed, the new host's session is read and settled exactly as an ordinary create's reply is, so success opens
-//!   it under the same rules; failed, the run's reason comes back in the launcher as a refusal does. It is never
-//!   opened from the 202 itself, which only says the launch began. A completed run whose session read fails or finds
-//!   no session settles as done with nothing to open (logged): the launch succeeded, and its row appears in the list.
-//!   A failed run the helm marks as ending without a known result, or a run that goes away, comes back with words
-//!   saying so, and its notice says to check Hosts rather than that nothing launched
-//!   ([`Notice::EnvironmentLaunchUnknown`]).
+//! - **A create in a new environment** (New container, New sandbox) goes to its own route, after the launcher has asked
+//!   about a billed one (`view::sandbox_question`), and the helm accepts it (202) once it has admitted the launch,
+//!   naming the run its outcome lands on in the pushed host progress (SPEC_impl.md, "The UI channel"). The launcher
+//!   stays hidden and busy, its progress pill up, until that run ends ([`RunWait`]): completed, the new host's session
+//!   is read and settled exactly as an ordinary create's reply is, so success opens it under the same rules; failed,
+//!   the run's reason comes back in the launcher as a refusal does. It is never opened from the 202 itself, which only
+//!   says the launch began. A completed run whose session read fails or finds no session settles as done with nothing
+//!   to open (logged): the launch succeeded, and its row appears in the list. A failed run the helm marks as ending
+//!   without a known result, or a run that goes away, comes back with words saying so, and its notice says to check
+//!   Hosts rather than that nothing launched ([`Notice::EnvironmentLaunchUnknown`]).
 //! - **A quick launch being prepared** (`view::prepare_unseen`): a launcher made out of sight on New's prefill waits
 //!   here while its catalog read is out, before its templates are applied. It counts as busy, as a pending launch does
 //!   ([`busy`]): New, Clone, the template shortcuts and the sequence prefix wait. Then it is started through [`start`]
 //!   like any other, or shown ([`reveal_prepared`]) under the same moved-on rule as a refusal, behind the notice if
-//!   the user moved on. Its progress pill only arms once it is started.
+//!   the user moved on; one that would create a billed sandbox is shown that way to ask about it first. Its progress
+//!   pill only arms once it is started.
 //!
 //! The slot's "waiting for the reply" is the hidden launcher's own lifetime, not a copy of the operation store's busy
 //! state: the store still says whether the create is in flight, and the launcher reads the refusal it shows from the

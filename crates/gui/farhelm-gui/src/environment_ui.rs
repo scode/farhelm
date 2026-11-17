@@ -11,8 +11,9 @@
 //! view's environment session rows, controls and suspended card take theirs from the section on a session's own
 //! environment below. The launcher's Runs on switch, its note and its refusals take their words from here (`segment`,
 //! `launch_help`, `recipe_refusal`, [`target_label`]), and so do New sandbox's account prerequisites, its recipes' mark
-//! and size and its SSH-key registration note (`launch_place`, `recipe_listing`, `registration_note`), and the template
-//! editor's copy of the switch, with its own authoring rules (`template_place`, `base_refusal`).
+//! and size and its SSH-key registration note (`launch_place`, `recipe_listing`, `registration_note`), the question it
+//! asks before creating a billed sandbox (`creation_question`), and the template editor's copy of the switch, with its
+//! own authoring rules (`template_place`, `base_refusal`).
 
 use farhelm_proto::recipes::{RecipeBase, RecipeView};
 use farhelm_proto::tensorlake::{Settings, SshKeyStatus};
@@ -411,6 +412,49 @@ impl ProviderUi {
                 }),
                 SshKeyStatus::NotCreated | SshKeyStatus::Unavailable { .. } => None,
             },
+            ProviderKind::Podman => None,
+        }
+    }
+
+    /// What the launcher asks before it creates this provider's environment from `recipe`, or `None` when it creates
+    /// one without asking. SPEC.md, "Sandbox sessions": launching "asks Create a sandbox for this session?, naming
+    /// recipe, CPU, memory and disk, linking Tensorlake pricing, and explaining suspension, the idle timeout and
+    /// irreversible file deletion", and "Only Create Tensorlake sandboxes without asking skips this question". The
+    /// words are the old launcher's question at the reference commit (`create_form.rs`), sentence for sentence.
+    ///
+    /// A sandbox bills from the moment it exists, so its question is asked unless `account`, as the launcher read it,
+    /// has that setting on. The launcher may have read it a while ago: a setting turned off since is caught by the
+    /// helm, which re-checks it and refuses a create sent without consent. An account the launcher could not read asks,
+    /// since only a setting the user turned on may skip the question. A container bills nothing per create, so it is
+    /// never asked about.
+    pub(crate) fn creation_question(
+        self,
+        recipe: &RecipeView,
+        account: Result<&Settings, &str>,
+    ) -> Option<CreationQuestion> {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                if account.is_ok_and(|account| account.create_without_asking) {
+                    return None;
+                }
+                Some(CreationQuestion {
+                    title: "Create a sandbox for this session?",
+                    size: format!(
+                        "{} CPU · {} GB memory · {} GB disk",
+                        recipe.size.cpus, recipe.size.memory_gb, recipe.size.disk_gb
+                    ),
+                    consequence: "The sandbox bills while running. Suspend preserves its processes and files and \
+                                  stops CPU and memory billing; snapshot storage still bills. Tensorlake suspends it \
+                                  after 30 minutes without a connection from Farhelm. Deleting its last session \
+                                  irreversibly removes the sandbox, every process, its files and snapshots.",
+                    link_label: "Tensorlake pricing",
+                    link_url: "https://www.tensorlake.ai/pricing",
+                    link_help: "Open Tensorlake's pricing page in your browser",
+                    cancel_help: "Cancel: create no sandbox and keep the launcher open",
+                    confirm_label: "Create and launch",
+                    confirm_help: "Create a billed Tensorlake sandbox from this recipe and launch the session in it",
+                })
+            }
             ProviderKind::Podman => None,
         }
     }
@@ -857,6 +901,28 @@ pub(crate) struct RegistrationNote<'a> {
     /// The copy button's label and hover help.
     pub(crate) copy_label: &'static str,
     pub(crate) copy_help: &'static str,
+}
+
+/// The question the launcher asks before creating a billed environment, as [`ProviderUi::creation_question`] words it
+/// for one recipe. All of it is the app's own wording; the recipe's name, which the launcher names in the question too,
+/// is host text and so is not part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CreationQuestion {
+    /// The question's title and accessible name.
+    pub(crate) title: &'static str,
+    /// The recipe's size, "2 CPU · 4 GB memory · 20 GB disk", as the recipe stood when the question was worded.
+    pub(crate) size: String,
+    /// What creating it means: billing, suspension, the idle timeout and what deleting removes.
+    pub(crate) consequence: &'static str,
+    /// The pricing link's label, the page it opens and its hover help.
+    pub(crate) link_label: &'static str,
+    pub(crate) link_url: &'static str,
+    pub(crate) link_help: &'static str,
+    /// Cancel's hover help, saying what Cancel keeps.
+    pub(crate) cancel_help: &'static str,
+    /// The confirming answer's label and hover help.
+    pub(crate) confirm_label: &'static str,
+    pub(crate) confirm_help: &'static str,
 }
 
 /// A provider's words for a recipe's per-place line, as [`ProviderUi::recipe_place`] chooses them.
