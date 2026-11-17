@@ -32,6 +32,13 @@ use crate::test_support::{self, click, keys, settle, started};
 /// Tab t1's element id, as [`tab_element_id`] names it (the click helper takes a static id).
 const T1_TAB: &str = "session-terminal-tab-t1";
 
+/// Kit's select-all in a text field on this platform.
+const SELECT_ALL: &str = if cfg!(target_os = "macos") {
+    "cmd-a"
+} else {
+    "ctrl-a"
+};
+
 /// Every fake terminal the connection handed out, in the order they were opened, with the attach each was for.
 type Opened = Rc<RefCell<Vec<(FakeTerminal, TerminalAttach)>>>;
 
@@ -207,6 +214,26 @@ impl Window<'_> {
             .collect();
         labels.sort_by(|a, b| a.0.total_cmp(&b.0));
         labels.into_iter().map(|(_, label)| label).collect()
+    }
+
+    /// Whether the element holding focus, in a fresh frame, is drawn under the element `ancestor` (or is it), by the
+    /// frame's own parent links. The id the app gives a text field (`rename-title`, say) is on a wrapper `div` that
+    /// tracks no focus handle, with GPUI Kit's input drawn inside it tracking its own (`components/text_input.rs`), so
+    /// a field's focus is looked for under that id rather than only at it.
+    fn focus_inside(&mut self, ancestor: &str) -> bool {
+        let nodes = test_support::frame(self.cx);
+        let Some(mut at) = nodes.iter().position(|node| node.flags.focused) else {
+            return false;
+        };
+        loop {
+            if nodes[at].element_id.as_deref() == Some(ancestor) {
+                return true;
+            }
+            match nodes[at].parent {
+                Some(parent) => at = parent,
+                None => return false,
+            }
+        }
     }
 }
 
@@ -401,6 +428,64 @@ fn a_reaped_tab_leaves_focus_on_an_open_header_question(cx: &mut TestAppContext)
     );
     keys(window.cx, "y");
     assert!(window.typed_into(agent), "focus is on the agent terminal");
+}
+
+/// The old app's settled focus case with Rename open (old `modal-focus.spec.ts`, "rename keeps focus in its field when
+/// the selected tab goes away"). A reaped tab changes the chosen terminal under the dialog without the user doing
+/// anything, and that spec's comment at the reference commit records that before the old terminal's veto covered
+/// every open modal dialog, "the agent terminal took focus here and the rest of the typed title went to the agent".
+/// Rename is about the session, which outlives its tab, so it stays open (SPEC.md, "Opening and closing":
+/// "Nothing closes a dialog ... that it did not open"), and its field keeps focus (SPEC.md, "Where focus rests": the
+/// terminal "never takes focus from a control that holds it").
+/// Specified: with t1 chosen and live and Rename opened from a's row menu with "draft" typed into its title field, t1's
+/// stream detaching as a closed tab and a row listing no tabs choose the agent terminal and leave focus inside the
+/// title field; typing "ok" and Enter then sends one rename of a titled "draftok", and the agent terminal got no key.
+#[gpui::test]
+fn a_reaped_tab_leaves_focus_in_an_open_rename_field(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    window.go_live(agent, "agent");
+    window.go_live(t1, "shell");
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: the tab is chosen"
+    );
+    click(window.cx, "session-menu-a");
+    click(window.cx, "session-menu-rename");
+    assert!(
+        window.focus_inside("rename-title"),
+        "the premise: Rename's title field has focus"
+    );
+    keys(window.cx, SELECT_ALL);
+    keys(window.cx, "d r a f t");
+
+    window.opened.borrow_mut()[t1]
+        .0
+        .detach(Some(DetachCode::TabClosed), "the tab was closed");
+    settle(window.cx);
+    window.push_tabs(&[]);
+    assert_eq!(window.chosen(), None, "the agent terminal is chosen");
+    assert!(
+        window.focus_inside("rename-title"),
+        "the title field kept focus"
+    );
+
+    keys(window.cx, "o k enter");
+    let renames: Vec<_> = window
+        .helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.path == "/api/sessions/a/rename")
+        .collect();
+    assert_eq!(renames.len(), 1, "one rename was sent: {renames:?}");
+    assert_eq!(
+        renames[0].body.as_ref().map(|body| body["title"].clone()),
+        Some(json!("draftok")),
+        "the typing before and after the reap both landed in the field"
+    );
+    assert!(!window.typed_into(agent), "the agent terminal got no key");
 }
 
 // ---- Staged replay -------------------------------------------------------------------------------------------------
