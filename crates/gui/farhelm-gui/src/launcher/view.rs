@@ -113,6 +113,7 @@ mod host_picker;
 mod latest;
 mod model_field;
 mod placement;
+pub(crate) use placement::{PlacementEdit, PlacementMode, build_placement_rows};
 mod recents;
 mod sandbox_question;
 mod save;
