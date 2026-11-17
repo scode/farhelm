@@ -238,7 +238,11 @@ guarded permission waits for remembered choices, and the template cases are the 
 
 Tests: 13. Covers: a structured GUI clone pre-fills without launching, then starts its ready successor.
 
-partly: the prefill, host fallback and its note, and refusals in
+partly: a copied model, Custom flags and command text holding invisible characters spelled out, as the old prefill
+showed them, in
+`launcher::view_tests::{agent_launch_text_holding_invisible_characters_shows_escaped, copied_command_text_holding_invisible_characters_shows_escaped_and_editable}`
+(the first test's read-only prompt half is the old templates spec's "initial prompt launcher template stacking and save
+selection", in the templates area's file); the prefill, host fallback and its note, and refusals in
 `launcher::entry_tests::{clone_prefills_the_sources_host_folder_title_and_launch, clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so, clone_of_a_sandbox_session_falls_back_and_says_so, clone_opens_nothing_over_a_dialog_or_for_an_unknown_session, clone_brings_back_a_refused_launch_waiting_behind_its_notice}`;
 "each clone restores every field after an intervening draft edit" and "closing a clone without submitting, or submitting
 it, both leave the next New Session with fresh defaults" in
@@ -535,10 +539,6 @@ not yet ported (environments, milestone M3)
 - The footer's line of choices is not a live region: a screen reader is not told when it changes, as the old
   `aria-live="polite"` line did. The main action's accessible name carries the target.
 - The permission help "?" is drawn as a neutral button; the old one was the bare `.btn` at 30 by 36 pixels.
-- Custom flags carried from a source session show hidden characters as they are in the flags field; the old launcher
-  showed them escaped in the field, and an edit there replaced them with the edited text. The same goes for a command
-  line and resume command that Clone or Replace with copies from its source; Restart with shows its stored ones escaped
-  and read-only, as the old launcher did.
 - The model list's rows are drawn in the shared option-row style (the quick switcher's, 9 by 10 pixels of padding); the
   old list's buttons were 32 pixels high with a 1.5-pixel edge.
 - The model field does not report the old combobox states to assistive technology (expanded, the highlighted row as its
