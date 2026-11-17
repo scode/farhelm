@@ -10,14 +10,14 @@
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{LaunchEffort, LaunchPermission, SessionInfo};
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
 use serde_json::{Value, json};
 
 use super::draft::{LaunchDraft, Mode};
 use super::entry::{open_restart_with, restart_with_unavailable};
 use super::entry_tests::window_with;
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{draft, name_of, shown_refusal};
+use super::view_tests::{draft, launch_help, name_of, shown_refusal};
 use super::yolo_tests::refuse_for_yolo;
 use crate::layers;
 use crate::local_state;
@@ -58,6 +58,98 @@ fn restarts(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand>
 /// Change the open Restart with's effort to Medium, an edit, so its main action is not inactive.
 fn edit_effort(cx: &mut VisualTestContext) {
     edit_draft(cx, |draft| draft.choose_effort(Some(LaunchEffort::Medium)));
+}
+
+/// A working session whose Restart with draft is ready to send. Move off the action after checking its ordinary
+/// help so the test hovers afresh once the readiness changes. Answer background requests before the test starts
+/// holding an operation, since the fake helm replies in order.
+fn ready_to_restart(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    edit_effort(cx);
+    assert!(restarts(&mut helm, cx).is_empty());
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some(
+            "Stop and restart: stop the working agent, then relaunch this session with these settings"
+        ),
+        "the premise: the edited launch is ready"
+    );
+    cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
+    assert!(restarts(&mut helm, cx).is_empty(), "hover sends no restart");
+    (helm, cx)
+}
+
+/// Check the reason while `path` is unanswered. The window may keep reading in the background, and the fake
+/// cannot answer a read queued behind the held operation. Observe the commands and leave their replies pending.
+fn hover_while_held(helm: &mut FakeHelm, cx: &mut VisualTestContext, path: &str, reason: &str) {
+    let mut sent = helm.commands();
+    assert!(
+        sent.iter().any(|command| command.path == path),
+        "the premise: {path} is out, saw {sent:?}"
+    );
+    assert_eq!(launch_help(cx).as_deref(), Some(reason));
+    sent.extend(helm.commands());
+    assert!(
+        !sent
+            .iter()
+            .any(|command| command.path.ends_with("/restart")),
+        "hover sends no restart: {sent:?}"
+    );
+}
+
+/// A draft based on old launch settings needs to be reopened. Hovering after the helm pushes different source
+/// settings tells the user to close and reopen Restart with before they press Restart.
+#[gpui::test]
+fn restart_with_hover_explains_a_changed_stored_launch(cx: &mut TestAppContext) {
+    let (mut helm, cx) = ready_to_restart(cx);
+    // Keep the source working and on its original install so the stored effort is the only launch change.
+    let a = session("a").host(9).tabs(1);
+    let mut changes = change(listing_meta(&["a", "b", "c", "d"], 5, false), &[a], &[]);
+    let row = &mut changes.upsert[0].value;
+    row["host_identity"] = json!("identity9");
+    assert_eq!(row["launch"]["selection"]["effort"], json!("high"));
+    row["launch"]["selection"]["effort"] = json!("low");
+    helm.push(changes);
+    settle(cx);
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some("This session's launch settings changed; close and reopen restart with")
+    );
+    assert!(restarts(&mut helm, cx).is_empty(), "hover sends no restart");
+}
+
+/// Restart with shares the source session's operation key. While a Stop of that session is unanswered, hover help
+/// tells the user to wait and sends no competing request.
+#[gpui::test]
+fn restart_with_hover_explains_its_sources_other_operation(cx: &mut TestAppContext) {
+    let (mut helm, cx) = ready_to_restart(cx);
+    cx.update(|_, cx| {
+        crate::session_list::stop::send(
+            "a",
+            farhelm_proto::SessionStopRequest {
+                refuse_if_tabs_open: false,
+                refuse_if_agent_running: false,
+            },
+            cx,
+        );
+    });
+    settle(cx);
+    hover_while_held(
+        &mut helm,
+        cx,
+        "/api/sessions/a/stop",
+        "Wait for this session's other operation to finish",
+    );
+}
+
+/// Host-registry changes exclude Restart with as well as New. Hover help tells the user to wait for an unanswered
+/// removal even when it targets a different host, since the window excludes launches during a registry change.
+#[gpui::test]
+fn restart_with_hover_explains_a_host_registry_change(cx: &mut TestAppContext) {
+    let (mut helm, cx) = ready_to_restart(cx);
+    let path = super::launch_tests::start_host_change(cx, super::launch_tests::HostChange::Remove);
+    hover_while_held(&mut helm, cx, path, "Wait for the host change to finish");
 }
 
 /// Press the main action and return the one restart it sent, checking that it sent exactly one and hid.

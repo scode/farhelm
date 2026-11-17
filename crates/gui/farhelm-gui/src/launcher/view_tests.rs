@@ -10,7 +10,7 @@ use farhelm_proto::ui_channel::{Collection, CollectionState, HostView, KeyedEntr
 use farhelm_proto::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionLaunch,
 };
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{Background, Bounds, Modifiers, TestAppContext, VisualTestContext, point, px};
 
 use super::draft::{LaunchDraft, Tab};
 use super::view::{Launcher, open};
@@ -20,6 +20,7 @@ use crate::layers;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences, session};
 use crate::test_support::{self, focused_id, keys, meta, settle, started};
+use crate::theme::{self, Preference};
 
 /// The helm's pinned host-list fixture's first host (id 1, "host1", connected), as the hosts collection.
 fn hosts() -> CollectionState {
@@ -326,6 +327,73 @@ fn the_footer_names_what_launch_would_start(cx: &mut TestAppContext) {
     );
 }
 
+/// An Agent draft ready to launch paints Launch as primary and Reset choices as neutral in both appearances. The
+/// border distinguishes the neutral look from the unavailable look, which uses the same fill.
+#[gpui::test]
+fn the_footer_keeps_launch_primary_and_reset_neutral(cx: &mut TestAppContext) {
+    let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
+    draft.choose_harness(LaunchHarness::Codex, None, None);
+    let (_helm, cx) = launcher_on(cx, draft);
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some("Launch: start the session"),
+        "the premise: Launch is available"
+    );
+    test_support::click(cx, "launcher-folder-row");
+    assert!(
+        folder_focused(cx),
+        "the premise: neither footer button owns focus"
+    );
+    cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
+    for appearance in [Preference::Light, Preference::Dark] {
+        cx.update(|_, cx| theme::set_preference(appearance, cx));
+        settle(cx);
+        let (palette, pointer, quads) = cx.update(|window, cx| {
+            (
+                theme::palette(cx),
+                window.mouse_position(),
+                window.painted_quads(),
+            )
+        });
+        assert_eq!(palette.dark, appearance == Preference::Dark);
+        for (id, fill, border) in [
+            ("launcher-launch", palette.accent_fill, palette.accent_edge),
+            ("launcher-reset", palette.bg_2, palette.border),
+        ] {
+            let bounds = test_support::bounds(cx, id);
+            assert!(!bounds.contains(&pointer), "the premise: {id} is unhovered");
+            // The scene snaps the paint to device pixels. Match the button's own quad, since its parent may
+            // already paint the same color behind the button.
+            let painted_bounds = cx.update(|window, _| {
+                Bounds::from_corners(
+                    window.pixel_snap_point(bounds.origin),
+                    window.pixel_snap_point(bounds.bottom_right()),
+                )
+                .scale(window.scale_factor())
+            });
+            assert!(
+                quads.iter().any(|quad| {
+                    quad.bounds == painted_bounds
+                        && quad.content_mask.bounds.contains(&painted_bounds.center())
+                        && quad.background == Background::from(theme::color(fill))
+                }),
+                "{appearance:?}: {id} paints its tier's resting fill"
+            );
+            // GPUI paints the border separately and clips its quads to strips. Test the top edge away
+            // from the rounded corners, where the mask of the top strip includes the border.
+            let top_edge = painted_bounds.top_center();
+            assert!(
+                quads.iter().any(|quad| {
+                    quad.bounds == painted_bounds
+                        && quad.content_mask.bounds.contains(&top_edge)
+                        && quad.border_color == theme::color(border)
+                }),
+                "{appearance:?}: {id} paints its tier's resting border"
+            );
+        }
+    }
+}
+
 /// A host the store does not list, and no host at all, are "Unavailable host" in the footer, the old footer's words, so
 /// the target never silently loses its host part.
 #[gpui::test]
@@ -432,7 +500,7 @@ fn the_refusal_beside_launch_is_an_alert(cx: &mut TestAppContext) {
 /// refuse is the refusal's reason. The pointer stays on Launch afterwards; a later click elsewhere moves it.
 pub(crate) fn launch_help(cx: &mut VisualTestContext) -> Option<String> {
     let launch = test_support::center(cx, "launcher-launch");
-    cx.simulate_mouse_move(launch, None, gpui::Modifiers::none());
+    cx.simulate_mouse_move(launch, None, Modifiers::none());
     test_support::advance(cx, layers::HOVER_DELAY);
     cx.update(|window, cx| layers::shown_tooltip(window, cx))
         .map(|shown| shown.text.to_string())
