@@ -39,16 +39,18 @@
 //! nothing is started and the confirmation stays up with the reason". The host remove confirmation's Remove is a
 //! confirming one, as the old dialog stayed up through its request and showed the helm's refusal inside it. Such an
 //! answer keeps the question open while its action is in flight, with every answer frozen (drawn busy, doing nothing,
-//! Escape and any other dismissal included), so the first answer still wins. The action settles through the
-//! [`Attempt`] it is handed: success closes the question as any answer does, and failure shows the reason inside the
-//! question and arms the answers again, so the user can pick again. Focus stays on the answer the user pressed while
-//! the attempt runs, since a busy button keeps it, and the question never closes and reopens. After a failure an inline
-//! question leaves focus there. A centered one moves it to Cancel (every question has one), as the old host remove
-//! dialog did after a refusal: Enter or Escape then dismisses the question instead of Enter sending the refused action
-//! again, and a retry is a press on the answer again. An extra answer that can fail
-//! may sit on an inline question or on a centered one built with [`Question::keeps_focus_on_empty_click`]; a confirming
-//! answer that can fail only on the centered one, through [`ask_fallible`] (an inline question's confirming answer runs
-//! once). [`Question::fallible_alternative`] says why.
+//! Escape and any other dismissal included), so the first answer still wins. The action settles through the [`Attempt`]
+//! it is handed: success closes the question as any answer does, and failure shows the reason inside the question and
+//! arms the answers again, so the user can pick again. Focus stays on the answer the user pressed while the attempt
+//! runs, since a busy button keeps it, and the question never closes and reopens. After a failure an inline question
+//! leaves focus there. A centered one moves it to Cancel (every question has one), as the old host remove dialog did
+//! after a refusal: Enter or Escape then dismisses the question instead of Enter sending the refused action again, and
+//! a retry is a press on the answer again. It moves focus only while focus is still on the answer the attempt started
+//! from, so a user who tabbed or clicked elsewhere meanwhile keeps their place (SPEC_impl.md, "Questions: the prompt",
+//! records this narrow departure from SPEC.md's "Who may move focus"). An extra answer that can fail may sit on an
+//! inline question or on a centered one built with [`Question::keeps_focus_on_empty_click`]; a confirming answer that
+//! can fail only on the centered one, through [`ask_fallible`] (an inline question's confirming answer runs once).
+//! [`Question::fallible_alternative`] says why.
 //!
 //! A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy
 //! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
@@ -342,8 +344,9 @@ impl<T: Clone + 'static> Question<T> {
     /// changes the host's setting before it starts anything. Picking it does not close the question. `on_choose` runs
     /// with the frozen value and an [`Attempt`], and the question stays open with every answer frozen until the action
     /// settles that attempt: [`Attempt::succeeded`] closes the question as any answer does, and [`Attempt::failed`]
-    /// shows the reason inside the question and arms the answers again (centered, it also moves focus to Cancel; see
-    /// the module docs). A retry runs `on_choose` again, with a new attempt, which is why it is `Fn`.
+    /// shows the reason inside the question and arms the answers again (centered, it also moves focus to Cancel while
+    /// focus is still on the answer pressed; see the module docs). A retry runs `on_choose` again, with a new attempt,
+    /// which is why it is `Fn`.
     ///
     /// While an inline question's attempt is unsettled ([`Inline::in_flight`]), its owner must not go away under it:
     /// the owner's dismissal hook answers [`Dismissal::Stay`](crate::layers::Dismissal::Stay), as an editor whose save
@@ -623,8 +626,9 @@ impl Attempt {
     }
 
     /// The action failed: the question stays up showing `reason` and arms its answers again, with focus moved to Cancel
-    /// on a centered question (see the module docs). `reason` may quote a host (the helm's refusal): pass it as a
-    /// [`HostSentence`](crate::host_text::HostSentence), never as a string made from the raw value.
+    /// on a centered question while focus is still on the answer pressed (see the module docs). `reason` may quote a
+    /// host (the helm's refusal): pass it as a [`HostSentence`](crate::host_text::HostSentence), never as a string made
+    /// from the raw value.
     pub fn failed(self, reason: impl Into<Line>, cx: &mut App) {
         (self.settle)(Some(reason.into()), cx);
     }
@@ -654,6 +658,12 @@ pub struct Prompt<T: 'static> {
     /// key or the test handle ran it. An inline question returns focus after a click it has not moved on from, as
     /// after an answer that holds focus: on macOS the click leaves focus off the answer ([`Prompt::close`]).
     clicked: Option<Mark>,
+    /// What held focus when the attempt in flight started (usually the answer the user pressed, for a key or a click
+    /// on Linux; a body control, for Enter reaching the main action from it): a refusal moves focus to Cancel only
+    /// while focus is still there ([`Prompt::settle`]). Remembered, not owned, as `opener` is. `None` while no
+    /// attempt runs, or when nothing held focus then, in which case the refusal leaves focus alone; a centered
+    /// question's focus trap keeps focus inside it, so that case does not arise there today.
+    focus_at_attempt: Option<WeakFocusHandle>,
     /// How many times the question has been reworded ([`Open::reword`]), and the count as of the last frame shown on
     /// screen. While the two differ, the user has not yet seen the words the answers would act on, and only Cancel
     /// answers.
@@ -730,6 +740,7 @@ impl<T: Clone + 'static> Prompt<T> {
             let action = action.clone();
             self.in_flight = true;
             self.reason = None;
+            self.focus_at_attempt = window.focused(cx).map(|focused| focused.downgrade());
             cx.notify();
             let attempt = Attempt::new(cx.weak_entity(), window.window_handle());
             action(self.question.frozen.clone(), attempt, window, cx);
@@ -748,22 +759,29 @@ impl<T: Clone + 'static> Prompt<T> {
     }
 
     /// The in-flight attempt settled: closed on success (`reason` is `None`), or open again with the reason shown, and,
-    /// centered, focus on Cancel.
+    /// centered, focus on Cancel if it is still on the answer the attempt started from.
     fn settle(&mut self, reason: Option<Line>, window: &mut Window, cx: &mut Context<Self>) {
         // Only an attempt settles, and only while it is the one in flight: each settles once, and the next can start
         // only after the last has settled.
         self.in_flight = false;
+        let focus_at_attempt = self.focus_at_attempt.take();
         match reason {
             Some(reason) => {
                 self.reason = Some(reason);
                 // The old host remove dialog sent focus to its Cancel after a refusal (`focus_remove_refusal` at
                 // reference commit `24bc0580`), "so the refusal can be dismissed with Enter or Escape" rather than
-                // Enter sending the refused action again; the same for either of its answers, and with no condition,
-                // since its answers were disabled during the request. The mark is taken now, not at the press, on
-                // purpose (SPEC_impl.md, "Questions"): a press on the veil or the empty space, or an Escape, during
-                // the attempt counts as moving on, and would cancel the move. The focus coordinator still keeps it
-                // inside the question's layer. An inline question leaves focus on the pressed answer.
-                if self.shown == Shown::Centered {
+                // Enter sending the refused action again; the same for either of its answers. Only while focus is still
+                // on the answer the attempt started from (SPEC_impl.md, "Questions"): a user who tabbed or clicked
+                // elsewhere meanwhile keeps their place, while a press that acted on the question alone (its veil, its
+                // empty space, an Escape it held) left focus on the re-armed answer, where Enter would resend. The
+                // focus coordinator makes the move and keeps it inside the question's layer. The mark is taken now on
+                // purpose: the focus check stands in for the press's mark, and the coordinator still drops the move on
+                // any press after this. An inline question leaves focus on the pressed answer.
+                let stayed = focus_at_attempt
+                    .as_ref()
+                    .and_then(WeakFocusHandle::upgrade)
+                    .is_some_and(|answer| answer.is_focused(window));
+                if self.shown == Shown::Centered && stayed {
                     let cancel = self.cancel_focus.clone();
                     focus::focus_in_layer(&cancel, &Mark::take(cx), window, cx);
                 }
@@ -1518,6 +1536,7 @@ fn build<T: Clone + 'static>(
         reason: None,
         opener: None,
         clicked: None,
+        focus_at_attempt: None,
         wording: 0,
         drawn_wording: 0,
         confirm_focus,

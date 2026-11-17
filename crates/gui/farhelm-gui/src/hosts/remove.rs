@@ -20,8 +20,9 @@
 //!   as the old dialog stayed up through its request. A success needs nothing here: the pushed host list drops the row
 //!   before the helm's reply arrives, the question closes with its subject, and focus recovers as from any control that
 //!   goes (SPEC.md, "Where focus rests"). A refusal stays inside the question: "Farhelm refused this action:" and the
-//!   helm's words under the body, in the prompt's amber, with focus moved to Cancel, as the old dialog's refusal did,
-//!   and Remove pressed again retries. The question shows it, so it is dropped from the store's record under the host's
+//!   helm's words under the body, in the prompt's amber, with focus moved to Cancel while it is still on the answer
+//!   pressed, as the old dialog's refusal did after every one (the parity file's deviation), and Remove pressed again
+//!   retries. The question shows it, so it is dropped from the store's record under the host's
 //!   key, and the row neither shows it again nor opens for it. A removal without asking has no question, so its refusal
 //!   is the store's record, which the Hosts panel shows under the host's row, opening it.
 //! - **Not started.** A Remove refused before anything is sent says why, naming the host: the host's key already has

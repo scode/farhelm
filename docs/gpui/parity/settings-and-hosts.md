@@ -732,7 +732,9 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
 - A refused removal, which the old dialog showed inside itself:
   `a_refused_removal_keeps_the_question_up_with_the_reason` ("Farhelm refused this action:" and the helm's words in
   amber under the body, focus moved to Cancel as the old `focus_remove_refusal` did, nothing under the row, and a second
-  Remove that succeeds); Cancel after it, `cancel_after_a_refusal_returns_focus_to_the_rows_toggle`;
+  Remove that succeeds); focus left where the user put it once they tabbed or clicked elsewhere while the removal was
+  out, the reason still shown, `a_refusal_after_the_user_moved_on_leaves_focus_where_they_put_it` (see Deviations);
+  Cancel after it, `cancel_after_a_refusal_returns_focus_to_the_rows_toggle`;
   `a_permanent_answer_whose_removal_the_helm_refuses_keeps_the_question_up` (the preference stays on, and pressing the
   answer again saves nothing more); with the preference on,
   `without_asking_a_refused_removal_shows_under_the_hosts_row`. The helm's success closing the question without a host
@@ -1672,8 +1674,12 @@ Where the port does not match the old app, and why. Each stays until the work na
   The old dialog stayed open, every answer disabled, through its request, as the question does now, and on a refusal
   turned its summary into a red "Farhelm refused this action" and drew the helm's words below the explanation in the
   body's ink at 16 pixels. A question's summary is frozen as it opened, so those words lead the reason line, which the
-  prompt draws in its amber (`--warn-bright`) at the dialog frame's 12 pixels. Focus moves to Cancel after the refusal,
-  as the old dialog's did, and the row shows nothing of it.
+  prompt draws in its amber (`--warn-bright`) at the dialog frame's 12 pixels, and the row shows nothing of it.
+- **After a refusal, focus moves to Cancel only while it is still on the answer pressed.** The old dialog moved focus to
+  Cancel after every refusal. Here a user who tabbed or clicked to another control while the removal was out keeps their
+  place (SPEC.md, "Who may move focus"), while a press on the veil or the question's empty space, an Escape the question
+  held, or a click under the macOS click rule, which focuses nothing, leaves focus on the answer the refusal re-arms, so
+  focus still moves to Cancel and Enter cannot send the refused removal again (SPEC_impl.md, "Questions: the prompt").
 - **A Remove refused before anything is sent, answered on the question, says why inside it.** The question stays up with
   the line the Hosts panel would show ("Remove <name>: ..."), focus on Cancel, as for the helm's refusal. The old app
   ignored such a press (its page lock); see the panel-line item below for the menu's Remove.

@@ -976,18 +976,27 @@ the old dialog (`HostRemoveDialog` in `crates/farhelm-ui/src/hosts/settings_dial
 which stayed up through its request with the helm's refusal. Focus stays on that answer while the attempt runs. After a
 failure an inline question leaves it there, while a centered one moves it to Cancel, as the old remove dialog did "so
 the refusal can be dismissed with Enter or Escape", rather than Enter sending the refused action again; a retry is a
-press on the answer again. That move takes its mark when the refusal arrives, not at the press, departing on purpose
-from SPEC.md's "Who may move focus": harmless presses during the attempt (the veil, the empty space, Escape) count as
-moving on and would otherwise cancel it, the old dialog moved focus regardless, and the move stays inside the question.
-An extra answer that can fail may sit on an inline question or a centered one that keeps focus on an empty-space click;
-a confirming answer that can fail only on such a centered question (an inline question's confirming answer runs once).
-Any other question with one refuses to open. An inline question's owner keeps itself open while the attempt is unsettled
-through its dismissal hook, as an editor whose save is in flight stays, so the owner cannot close under the running
-action. A centered question's veil takes a press without dismissing it, the prompt's own dismissal hook holds Escape and
-every other dismissal while the attempt is unsettled, and the empty-click rule keeps focus on the busy answer. An
-anchored question closes on a press outside it or its anchor going, which nothing can veto. A centered question still
-closes when its subject goes or the connection resets, mid-attempt too; for the host remove confirmation the subject
-going is the success. The centered case was added by the migration's orchestrator on 2026-11-14.
+press on the answer again. That move happens only while focus is still on the answer the attempt started from, so a user
+who tabbed or clicked to another control while the attempt ran keeps their place, and the move stays inside the
+question. This departs, narrowly, from SPEC.md's "Who may move focus", which counts any press as moving on: here the
+user counts as moved on only when focus is somewhere else when the refusal arrives. A press on the veil or the
+question's empty space, or an Escape or Close the question held, acts on the question itself and leaves focus on the
+answer pressed, which the refusal re-arms, so leaving focus there would let Enter send the refused action again. Under
+the macOS click rule a click focuses no control, so a click on another control during the attempt also leaves focus on
+the answer pressed, and the refusal still moves focus to Cancel, for the same reason. The move to Cancel came in on
+2026-11-15 as the port of the old dialog's. The maintainer directed on 2026-11-16 that the refusal not take focus back
+from a user who moved on, with presses on the question itself not counting; the migration's settings-and-hosts area
+chose to compare where focus is when the refusal arrives rather than take the press's mark, and the foundations owner
+agreed to the rule on 2026-11-16. An extra answer that can fail may sit on an inline question or a centered one that
+keeps focus on an empty-space click; a confirming answer that can fail only on such a centered question (an inline
+question's confirming answer runs once). Any other question with one refuses to open. An inline question's owner keeps
+itself open while the attempt is unsettled through its dismissal hook, as an editor whose save is in flight stays, so
+the owner cannot close under the running action. A centered question's veil takes a press without dismissing it, the
+prompt's own dismissal hook holds Escape and every other dismissal while the attempt is unsettled, and the empty-click
+rule keeps focus on the busy answer. An anchored question closes on a press outside it or its anchor going, which
+nothing can veto. A centered question still closes when its subject goes or the connection resets, mid-attempt too; for
+the host remove confirmation the subject going is the success. The centered case was added by the migration's
+orchestrator on 2026-11-14.
 
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
 prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an

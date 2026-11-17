@@ -345,6 +345,58 @@ fn a_refused_removal_keeps_the_question_up_with_the_reason(cx: &mut TestAppConte
     assert!(!any_open(cx), "the retry's success closed the question");
 }
 
+/// A press a test makes while the removal is out: a key or a click.
+type Press = fn(&mut VisualTestContext);
+
+/// SPEC.md, "Who may move focus": once the user has moved on, a result may not move focus. A user who tabbed or clicked
+/// to another answer while the removal was out has put focus where they want it, and the refusal arriving later must
+/// not take it back to Cancel; it still shows in the question. Specified: after Remove sends `DELETE /api/hosts/2`,
+/// Shift-Tab to "Remove, don't ask again", and in a second run a click on it, moves focus there while the removal is
+/// out; the helm's 409 then shows "Farhelm refused this action: " and the helm's words inside the still-open question,
+/// and focus stays on "Remove, don't ask again".
+#[gpui::test]
+fn a_refusal_after_the_user_moved_on_leaves_focus_where_they_put_it(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    let moves: [(&str, Press); 2] = [
+        ("Shift-Tab", |cx| keys(cx, "shift-tab")),
+        ("a click", |cx| click(cx, "prompt-alternative-0")),
+    ];
+    for (how, move_on) in moves {
+        press_remove(cx);
+        click(cx, "prompt-confirm");
+        let commands = helm.commands();
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| (command.method, command.path.as_str()))
+                .collect::<Vec<_>>(),
+            [(Method::Delete, "/api/hosts/2")],
+            "{how}, the premise: the removal went out"
+        );
+        move_on(cx);
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("prompt-alternative-0"),
+            "{how}, the premise: the user put focus on the other answer"
+        );
+        helm.reply(commands[0].id, 409, Some(json!(BUSY)));
+        settle(cx);
+        assert!(any_open(cx), "{how}: the question stayed up");
+        assert_eq!(
+            label(cx, "host-remove-refused"),
+            Some(format!("Farhelm refused this action: {BUSY}")),
+            "{how}: the reason shows in the question"
+        );
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("prompt-alternative-0"),
+            "{how}: focus stays where the user put it"
+        );
+        click(cx, "prompt-cancel");
+        assert!(!any_open(cx), "{how}: Cancel closed it for the next run");
+    }
+}
+
 /// After a refusal, focus sits on Cancel so that the refusal is dismissed rather than resent; dismissing it must then
 /// close the question the way Cancel always does, back on the control that opened it, without bringing the refusal
 /// back under the row it was dropped from. Specified: after the helm's 409 to Remove, Cancel closes the question with
