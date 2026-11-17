@@ -39,9 +39,7 @@ reselection retains retries while real scalar changes replace them", "ordinary t
 trimming nonblank names", "valid ${editor} spacing preserves raw text and retry words", "effective Guarded reacceptance
 preserves a template-default request", "one native same-owned ${kind} replacement retains its retry"), since the GUI
 keeps no launch request keys (SPEC.md, "Losing the connection to the helm"); their non-key halves are in the retry-key
-bullet below; not yet ported: a held Enter on the closed host button, which keeps its own copy of the Enter rule
-("launcher repeated Enter never launches"; text fields, buttons, segments, tabs, the search box and a closed select are
-tested)
+bullet below
 
 - "launcher gap keeps focus and container Enter explains an incomplete draft": a click on the empty space of a dialog
   that keeps focus leaves focus on the control in use, in
@@ -86,6 +84,8 @@ tested)
   shared rule (`components::tests::select::enter_on_a_closed_select_with_a_main_action_runs_it_with_the_value_shown`),
   whose held Enter doing nothing is that rule's own test,
   `components::tests::enter_choice::an_areas_own_tab_takes_the_enter_rule_through_the_helper`.
+- "launcher repeated Enter never launches", on the closed host button, which handles Enter itself:
+  `launcher::launch_tests::a_held_enter_on_the_closed_host_button_never_launches`.
 - The retry-key cases' non-key halves: taking a search row only edits
   (`launcher::search_view_tests::a_word_and_enter_choose_it_and_empty_the_box`), a model change clears an effort the
   model does not offer (`launcher::draft_tests::model_choices_follow_their_owning_agent`), a blank name is sent as none
@@ -274,15 +274,23 @@ shown at that press" (976) and the ambiguous-retry variants of 1383), since the 
 Deviations), and the undispatched-preview variants of 1383, a command-line configuration change while New stays open, by
 the launch-history deviation; "managed checkout setup notes use ordinary helper styling" (418) is layout, shown in the
 `app-launcher-managed-checkout` scene: the inline setup field stands in for the note while it shows, drawn as a
-deviation below says; not yet ported: the highlighted suggestion kept in view while the arrows wrap (161; the wrap
-itself is the shared field list's, in `launcher::field_list_tests::arrows_wrap_both_ways_and_start_from_no_highlight`),
-an observed configuration change keeping the setup field's draft, text and focus while it re-checks, and a name edit
-reading no suggestions (212), the "No repository matches; enter owner/repo" row, Enter on it doing nothing, and focusing
-the repository field closing open search results (462; the lifetime explanation under the field is wording, drawn in the
-same scene, and the failed scan note's warning ink is layout, not separately tested, since no scene's host fails its
-repository scan and the note's words are asserted in
-`launcher::checkout_tests::suggestions_are_read_after_typing_and_enter_picks_one`), and a host switch dropping the old
-host's preview and checking the new host's setup (1297)
+deviation below says
+
+- The highlighted suggestion stays in view while the arrows wrap (161).
+  `launcher::checkout_tests::repository_arrows_keep_the_highlight_visible_through_wrapping`.
+- Editing the name refreshes the preview without reading suggestions again (212).
+  `launcher::checkout_tests::editing_the_checkout_name_reads_no_repository_suggestions`.
+- The configuration-change half of 212 is not yet ported. An external configuration change by itself does not make the
+  desktop launcher reread history, so the browser's trigger for rechecking the open setup field is absent.
+- Focusing Repository closes the composer's search. After a failed scan with no matches, Enter on the "No repository
+  matches; enter owner/repo" row leaves the draft unselected, and Enter reopens the dismissed list (462).
+  `launcher::checkout_tests::repository_focus_closes_search_and_enter_on_no_match_chooses_nothing`. The lifetime
+  explanation appears in `app-launcher-managed-checkout`. The failed scan note's words are checked in
+  `launcher::checkout_tests::suggestions_are_read_after_typing_and_enter_picks_one`. Its warning ink has no scene.
+- A host switch drops the old preview and checks setup on the new host while the repository stays selected (1297).
+  `launcher::checkout_tests::switching_hosts_drops_the_old_preview_and_checks_the_new_hosts_setup`. The fake helm
+  answers in command order, so the test checks that the setup field appears independently of the replacement preview.
+  The field's own configuration read must wait behind that preview.
 
 - "manual checkout needs selection and explicit resubmit after a proven refusal" (577), beyond the lost race: no Browse
   in a checkout (`launcher::browse_tests::browse_is_not_offered_where_the_folder_cannot_change`), and an invalid `gh:`
@@ -937,18 +945,21 @@ whose detail is in the templates file's restart-with entry
 
 Tests: 5. Covers: host picker supports mouse, navigation, typeahead, cancellation, and focus.
 
-partly: `launcher::view_tests::the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one`,
+replaced: `launcher::view_tests::the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one`,
 `the_host_picker_browses_with_arrows_and_enter`, `home_end_up_and_space_in_the_host_list`,
 `typeahead_finds_a_host_and_escape_cancels`, `unmatched_typeahead_keeps_the_chosen_host`,
 `a_click_opened_host_list_owns_the_keyboard_on_macos`, `the_host_button_is_empty_before_hosts_arrive`,
-`cancel_and_the_host_button_are_tab_stops`; not yet ported: a press outside closing the list ("host picker opened
-without click focus still owns the keyboard and closes outside"), and browsing the empty list before hosts arrive
-leaving the host unset, then the button naming the host once they do ("host picker retains the empty value until hosts
-arrive"); the picker disabled during a launch's write is superseded: the launcher hides while its create is out
+`cancel_and_the_host_button_are_tab_stops`; superseded: "host picker retains the empty value until hosts arrive", since
+the channel opens with a full snapshot of the pushed collections, including hosts (SPEC_impl.md, "The UI channel"). An
+empty hosts collection still draws an empty Host button
+(`launcher::view_tests::the_host_button_is_empty_before_hosts_arrive`). The picker disabled during a launch's write is
+also superseded: the launcher hides while its create is out
 (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`)
 
 - "host picker opened without click focus still owns the keyboard and closes outside", its keyboard half from the search
   box: `launcher::view_tests::a_mac_click_on_the_host_button_from_the_search_box_opens_the_list_and_focuses_the_button`.
+- The same case's outside press closes the list without picking the highlighted host.
+  `launcher::view_tests::a_press_outside_closes_the_host_list_without_picking`.
 
 The host list keeps its own popover code rather than the shared list the launcher's text fields use
 (`launcher/view/field_list.rs`): it opens from a button that takes focus on a click, and moving it over would risk that

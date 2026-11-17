@@ -2083,6 +2083,57 @@ fn a_mac_click_on_the_host_button_from_the_search_box_opens_the_list_and_focuses
     assert_eq!(draft(cx).host, Some(2), "the button's keys drove the list");
 }
 
+/// A press in the launcher's empty padding dismisses the host list. The padding keeps the current focus, so the test
+/// isolates dismissal by an outside press from closing the list when its button loses focus.
+#[gpui::test]
+fn a_press_outside_closes_the_host_list_without_picking(cx: &mut TestAppContext) {
+    let cx = host_picker_on(cx, "~");
+    test_support::click(cx, "launcher-folder-row");
+    // Browse is between the folder and host button in Tab order. End opens the list with another host highlighted.
+    keys(cx, "shift-tab shift-tab");
+    assert!(
+        host_focused(cx),
+        "the premise: the host button owns the keys"
+    );
+    keys(cx, "end");
+    assert_eq!(selected_state(cx, "launcher-host-option-3"), Some(true));
+    assert_eq!(
+        draft(cx).host,
+        Some(1),
+        "the premise: browsing has picked nothing"
+    );
+
+    let list = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-host-list"))
+        .expect("the premise: the host list is open");
+    let panel = test_support::bounds(cx, "launcher");
+    let padding = gpui::point(panel.left() + gpui::px(4.), panel.top() + gpui::px(4.));
+    assert!(
+        !list.bounds.contains(&padding),
+        "the press must miss the list"
+    );
+    assert!(
+        !test_support::bounds(cx, "launcher-host").contains(&padding),
+        "the press must miss the toggle"
+    );
+    cx.simulate_mouse_move(padding, None, gpui::Modifiers::none());
+    cx.simulate_mouse_down(padding, gpui::MouseButton::Left, gpui::Modifiers::none());
+    settle(cx);
+    assert!(
+        !has_node(cx, "launcher-host-list"),
+        "the press closed the list"
+    );
+    assert!(host_focused(cx), "the press in empty space kept focus");
+    assert_eq!(
+        draft(cx).host,
+        Some(1),
+        "the highlighted host was not picked"
+    );
+    cx.simulate_mouse_up(padding, gpui::MouseButton::Left, gpui::Modifiers::none());
+    settle(cx);
+}
+
 /// While the chosen host is not in the registry the helm pushed (before hosts arrive, or with none registered, which
 /// the button cannot tell apart), the button shows nothing and is named just "Host" (SPEC.md: the host's value is
 /// empty before hosts arrive), rather than naming a host that is not there. Specified with an empty hosts collection.
