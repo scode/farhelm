@@ -6,7 +6,7 @@
 //! drawn as plain words rather than host text, is a real regression.
 
 use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place};
 
 use super::summary::{Part, parts, plain};
 
@@ -101,6 +101,30 @@ fn resets_and_permissions_read_as_the_launch_would_request() {
         ..TemplateFields::default()
     };
     assert_eq!(plain(&yolo), "Approvals YOLO · YOLO");
+}
+
+/// A template's placement is how a user tells a container template from a sandbox one in the list, so it reads as the
+/// environment it makes, in the launcher's words: the old summary's "New " and `target_label` with no hosts, so a
+/// container's place is its host's id ("New web container on host 1") and a sandbox reads "New web sandbox". The
+/// label, which holds the recipe, is drawn as host text.
+#[test]
+fn a_placement_reads_as_the_environment_it_makes() {
+    let placed = |place| TemplateFields {
+        target: Some(LaunchTarget::Environment {
+            recipe: "web".into(),
+            place,
+        }),
+        ..TemplateFields::default()
+    };
+    assert_eq!(
+        plain(&placed(Place::PodmanHost(1))),
+        "New web container on host 1"
+    );
+    assert_eq!(plain(&placed(Place::TensorlakeAccount)), "New web sandbox");
+    assert_eq!(
+        parts(&placed(Place::TensorlakeAccount)),
+        vec![Part::Words("New ".into()), Part::Host("web sandbox".into())]
+    );
 }
 
 /// The retired workspace-trust field is never mentioned, since applying a template ignores it, and a retired container

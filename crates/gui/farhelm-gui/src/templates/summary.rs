@@ -137,13 +137,13 @@ pub fn parts(fields: &TemplateFields) -> Vec<Part> {
         Some(None) => summary.words("Resume default"),
         None => {}
     }
-    // NOTE: The old summary named a recipe-and-place target by the environments code's own label for it ("New " and
-    // the target's label). That label comes with the launcher's environments work; until then the target is named by
-    // its recipe alone.
+    // A recipe-and-place target reads as the environment it makes ("New web container on host 1", "New dev sandbox"),
+    // in the launcher's words for it. The old summary passed no hosts, so a container's place is named by its id rather
+    // than the host's name, and a summary never changes with the host list.
     if let Some(target) = &fields.target {
         summary.field(vec![
             Part::Words("New ".to_owned()),
-            Part::Host(target.recipe().to_owned()),
+            Part::Host(crate::environment_ui::target_label(target, None)),
         ]);
     }
     if let Some(recipe) = &fields.recipe {
