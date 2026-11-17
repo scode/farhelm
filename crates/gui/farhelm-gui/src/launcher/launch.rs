@@ -344,7 +344,9 @@ fn hold(held: Option<Held>, cx: &mut App) {
 /// they show a plain Replace (SPEC.md: Replace with has "exactly Replace's create-then-delete contract and failure
 /// reporting"), or Restart with's restart of its source with the edited launch, through the source's own Restart route
 /// and key for the same reason ("Restart with and Replace with share the sidebar's pending states on the row and
-/// header").
+/// header"). Requests compare equal when they would send the same thing, which is what an open YOLO question answers for
+/// (`view`'s `apply_now`).
+#[derive(PartialEq, Eq)]
 pub(super) enum Request {
     Create(CreateSessionBody),
     /// New or Clone into a new disposable environment (New container, New sandbox): a create like [`Request::Create`]

@@ -448,11 +448,17 @@ burst start nothing" is the prompt's first-answer-wins rule; "after a lost launc
 create keys and retries nothing), and so are the five shorter legs (601 to 480 high), whose stacked-action checks need a
 window below the minimum (Deviations); all six legs are 390 wide, and what the 844-high one checks is ported at the
 sizes the window allows; the plain Replace cases are the sidebar's and the header's, whose YOLO questions are tested,
-and the template cases are the templates area's; not yet ported: a header or sidebar Replace keeping its confirmed
-nothing-alive answer when the source comes back alive while its YOLO question is open, confirmed once or told not to ask
-again (697, 706, 794, 803; their tests would sit in `session_pane::header_tests` and `session_list::lifecycle_tests`),
-and the question reopened from the notice (in the nonblocking-launch row)
+and the template cases are the templates area's, except two that the launcher's own rule decides (below); not yet
+ported: a header or sidebar Replace keeping its confirmed nothing-alive answer when the source comes back alive while
+its YOLO question is open, confirmed once or told not to ask again (697, 706, 794, 803; their tests would sit in
+`session_pane::header_tests` and `session_list::lifecycle_tests`), and the question reopened from the notice (in the
+nonblocking-launch row)
 
+- "template edits retain an unchanged YOLO question and retire a changed one" and "command templates preserve equal YOLO
+  questions and retire changed commands" (877 and 1072): a `tl:` template that leaves the launch as it was keeps the
+  question, whose one-off answer then sends the same create with consent, one that changes it retires the question, and
+  going back does not bring it back, in
+  `launcher::search_view_tests::{an_unchanged_agent_template_keeps_the_yolo_question, an_unchanged_command_template_keeps_the_yolo_question}`.
 - The question's Tab order and its scrolling into view, in a stand-in launcher:
   `prompt_tests::{an_inline_question_answers_once_and_returns_focus_inside_its_dialog, an_inline_question_below_the_fold_is_scrolled_into_view_as_it_takes_focus}`;
   its words naming the host in `session_list::lifecycle_tests::the_question_names_the_sources_host` (the same builder);
